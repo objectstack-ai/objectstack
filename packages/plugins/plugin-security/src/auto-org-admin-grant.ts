@@ -501,6 +501,13 @@ export async function reconcileOrgAdminGrant(
   // second grant of one set to one user in one organization cannot be written
   // (the declared unique index on user, set and organization); one already
   // stored is the v18 ceremony's to report, never deleted here.
+  //
+  // [C7b, seat answers on #15211 Q-S3b (ii)] A pair holding ANY grant that
+  // names nothing in this organization — a 17.x grant the v18 ceremony's
+  // rewrite has not named yet — is written nothing: the rewrite will name
+  // that grant, and a named grant written beside it would hold the very key
+  // the rewrite needs (the unique index would refuse its rename). The unnamed
+  // grant confers nothing meanwhile, as every 17.x grant does until --apply.
   if (shouldGrant) {
     const missing = await orgAdminSetMissingFromCatalog(ql, grantSetName, logger);
     if (missing) return { action: 'skipped', reason: missing };
@@ -512,6 +519,14 @@ export async function reconcileOrgAdminGrant(
       logger,
     );
     if (existingGrants.length > 0) return { action: 'noop' };
+    const unnamed = await tryFind(
+      ql,
+      'sys_user_permission_set',
+      { user_id: userId, organization_id: orgId, [GRANT_SET_NAME_FIELD]: null },
+      1,
+      logger,
+    );
+    if (unnamed.length > 0) return { action: 'skipped', reason: 'unnamed_grant_awaits_ceremony' };
     const created = await tryInsert(
       ql,
       'sys_user_permission_set',

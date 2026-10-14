@@ -60,18 +60,12 @@
  *
  * ## One grant per user, set and organization
  *
- * The declared unique index on (`user_id`, `permission_set`,
- * `organization_id`) refuses a second grant of one set to one user in one
- * organization: a duplicate confers nothing more (the resolver dedupes by
- * name), but a revoke that deletes one row would leave the other granting.
- * SQL keys a NULL apart from every other value, so the index cannot see a
- * duplicate platform-wide grant (organization NULL). These hooks refuse that
- * one at the write door — on an insert, and on an update that changes the
- * key — for EVERY writer, system ones included, as the index does (the
- * catalog check alone stands down for a system writer). They answer with the
- * envelope the index answers in (`DuplicateRecordError`: 409,
- * `UNIQUE_VIOLATION` at the HTTP doors), so an author meets one dialect for
- * "this grant exists".
+ * Not judged here. The declared unique index (`user_id`, `permission_set`,
+ * `organization_id`) is `unique: 'organization'`, whose organization key part
+ * is NULL-safe (ADR-0120 D3), so it refuses a second grant of one set to one
+ * user in one organization AND a second platform-wide grant (organization
+ * NULL), for every writer and every write path: a duplicate confers nothing
+ * more, but a revoke that deletes one row would leave the other granting.
  *
  * ## Hooks, not a middleware
  *
@@ -85,7 +79,6 @@
  */
 
 import { securityCatalogReaderOf } from '@objectstack/core';
-import { DuplicateRecordError } from '@objectstack/objectql';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { isPlainRecord } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
@@ -198,7 +191,6 @@ export function grantOrganizationOf(row: unknown): string | null {
 }
 
 interface GrantNameEngine {
-  find?: (object: string, query: Record<string, unknown>) => Promise<unknown[]>;
   registerHook?: (
     event: string,
     handler: (ctx: any) => void | Promise<void>,
@@ -227,45 +219,14 @@ async function assertNameInCatalog(engine: GrantNameEngine, name: string, logger
   if (!held) throw grantSetNotInCatalogError(name);
 }
 
-/**
- * Refuse a second platform-wide grant (organization NULL) of `name` to
- * `userId`, the one duplicate the unique index cannot see (module note).
- * `except` is the row an update rewrites, which is not its own duplicate.
- */
-async function assertNoPlatformWideDuplicate(
-  engine: GrantNameEngine,
-  userId: unknown,
-  name: string,
-  except?: unknown,
-): Promise<void> {
-  if (typeof engine.find !== 'function' || userId === null || userId === undefined || userId === '') return;
-  const held = await engine.find(GRANT_OBJECT, {
-    where: { user_id: userId, [GRANT_SET_NAME_FIELD]: name, organization_id: null },
-    fields: ['id'],
-    limit: 2,
-    context: { isSystem: true },
-  });
-  if ((held ?? []).some((row) => String((row as { id?: unknown })?.id) !== String(except))) {
-    throw new DuplicateRecordError(GRANT_OBJECT, undefined, GRANT_SET_NAME_FIELD);
-  }
-}
-
 /** `beforeInsert`: one dispatch per row, handed the caller's row as sent. */
 async function onInsert(engine: GrantNameEngine, ctx: any, logger: GrantNameLogger): Promise<void> {
-  if (ctx?.object !== GRANT_OBJECT) return;
+  if (ctx?.object !== GRANT_OBJECT || ctx?.session?.isSystem === true) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
   const name = judgedName(data[GRANT_SET_NAME_FIELD]);
-  if (name === undefined) return;
-  // The catalog check stands down for a system writer (seed ordering, module
-  // note); the duplicate check does not — the index it stands in for refuses
-  // every writer.
-  if (ctx?.session?.isSystem !== true) await assertNameInCatalog(engine, name, logger);
-  if (grantOrganizationOf(data) === null) await assertNoPlatformWideDuplicate(engine, data.user_id, name);
+  if (name !== undefined) await assertNameInCatalog(engine, name, logger);
 }
-
-/** The columns of the unique key; an update touching none of them cannot make a duplicate. */
-const GRANT_KEY_FIELDS = ['user_id', GRANT_SET_NAME_FIELD, 'organization_id', 'organizationId'] as const;
 
 /**
  * `beforeUpdate`: one dispatch per matched row, `previous` bound on both
@@ -273,29 +234,14 @@ const GRANT_KEY_FIELDS = ['user_id', GRANT_SET_NAME_FIELD, 'organization_id', 'o
  * with no stored row the engine answers (not found).
  */
 async function onUpdate(engine: GrantNameEngine, ctx: any, logger: GrantNameLogger): Promise<void> {
-  if (ctx?.object !== GRANT_OBJECT) return;
+  if (ctx?.object !== GRANT_OBJECT || ctx?.session?.isSystem === true) return;
   const data = ctx?.input?.data;
-  if (!isPlainRecord(data)) return;
+  if (!isPlainRecord(data) || !hasOwn(data, GRANT_SET_NAME_FIELD)) return;
+  const name = judgedName(data[GRANT_SET_NAME_FIELD]);
+  if (name === undefined) return;
   const previous = isPlainRecord(ctx?.previous) ? ctx.previous : undefined;
-  if (ctx?.session?.isSystem !== true && hasOwn(data, GRANT_SET_NAME_FIELD)) {
-    const name = judgedName(data[GRANT_SET_NAME_FIELD]);
-    if (name !== undefined && !(previous && judgedName(previous[GRANT_SET_NAME_FIELD]) === name)) {
-      await assertNameInCatalog(engine, name, logger);
-    }
-  }
-  // A platform-wide duplicate is made by any change to the key — the user, the
-  // set, or an organization cleared to NULL — by any writer.
-  if (!GRANT_KEY_FIELDS.some((k) => hasOwn(data, k))) return;
-  const merged = { ...(previous ?? {}), ...data };
-  const name = judgedName(merged[GRANT_SET_NAME_FIELD]);
-  if (name === undefined || grantOrganizationOf(merged) !== null) return;
-  if (
-    previous &&
-    grantOrganizationOf(previous) === null &&
-    String(previous.user_id) === String(merged.user_id) &&
-    judgedName(previous[GRANT_SET_NAME_FIELD]) === name
-  ) return; // the key is unchanged: the row is not its own duplicate
-  await assertNoPlatformWideDuplicate(engine, merged.user_id, name, previous?.id);
+  if (previous && judgedName(previous[GRANT_SET_NAME_FIELD]) === name) return;
+  await assertNameInCatalog(engine, name, logger);
 }
 
 /**

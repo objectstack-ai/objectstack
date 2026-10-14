@@ -15,12 +15,10 @@ import { F, P } from '@objectstack/spec';
  *
  * The same permission set can be granted independently in each org context
  * the user belongs to, and once in each: the declared unique index is
- * (`user_id`, `permission_set`, `organization_id`). SQL keys a NULL
- * organization apart, so the one duplicate the index cannot see — a second
- * platform-wide grant — is refused at the write door
- * (`grant-permission-set-name.ts`), for every writer, against the stored
- * grants and within one batch or multi-row write; two concurrent single
- * writes are the case it cannot see. [ADR-0131 D10, C7b] The legacy
+ * (`user_id`, `permission_set`, `organization_id`), `unique: 'organization'`,
+ * so its organization key part is NULL-safe (ADR-0120 D3) and a second
+ * platform-wide grant (organization NULL) is refused too — by the index, for
+ * every writer and write path. [ADR-0131 D10, C7b] The legacy
  * `permission_set_id` column is retired: the v18 ceremony's verified rewrite
  * names every grant from it, then its column-drops step drops it.
  *
@@ -264,9 +262,9 @@ export const SysUserPermissionSet = ObjectSchema.create({
   ],
 
   indexes: [
-    // One grant of a set to a user per organization (the module note): a
-    // duplicate would keep a revoked grant in force.
-    { fields: ['user_id', 'permission_set', 'organization_id'], unique: 'global' },
+    // One grant of a set to a user per organization, platform-wide (NULL)
+    // included (the module note): a duplicate would keep a revoked grant in force.
+    { fields: ['user_id', 'permission_set', 'organization_id'], unique: 'organization' },
     { fields: ['user_id'] },
     { fields: ['organization_id'] },
   ],

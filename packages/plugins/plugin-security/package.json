@@ -22,7 +22,6 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
-    "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"
@@ -31,6 +30,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/service-i18n": "workspace:*",
     "@types/node": "^26.6.3",
