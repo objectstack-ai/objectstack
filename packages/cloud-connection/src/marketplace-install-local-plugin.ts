@@ -120,6 +120,9 @@ import {
     // [#23455] The auth service's per-user posture computation, bound for the
     // shared key-admission seam.
     userAuthGateSourceOf,
+    // [#23367] The API-key lifecycle policy source, and its branded refusal.
+    apiKeyLifecyclePolicySourceOf,
+    isApiKeyLifecycleRefusalError,
     // [#16013] The ADMISSION seam's posture derivation, in ONE call — the same
     // symbol `packages/rest`'s seam now imports, for the same reason. It reads
     // the posture IN FORCE off the kernel's `tenancy` service and carries
@@ -3366,6 +3369,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 getSession,
                 tenancyPosture,
                 userAuthGates: userAuthGateSourceOf(authService),
+                // [#23367] The API-key lifecycle policy, from the same service.
+                apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
             });
             if (!authz.userId) return null;
             // ADR-0069: the ONE consult of the authentication-policy gate for
@@ -3391,6 +3396,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // [commit 6a180e42d] `null` here means "nobody is authenticated", which is
             // not what a permission-store outage established. Re-raised.
             if (isAuthzStoreUnavailableError(err)) throw err;
+            // [#23367, ruling A] A key its own lifecycle refused (revoked,
+            // expired, inactive) is re-raised too: the five doors mount on the
+            // host's raw app, whose thrown-envelope render answers its declared
+            // `403` and registered code with the located message.
+            if (isApiKeyLifecycleRefusalError(err)) throw err;
             return null;
         }
     };

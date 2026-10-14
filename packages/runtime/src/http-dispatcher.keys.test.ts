@@ -162,12 +162,15 @@ describe('HttpDispatcher.handleKeys (POST /keys — key generation)', () => {
       expires_at: '2000-01-01T00:00:00Z',
     }, { context: { isSystem: true } });
 
-    const resolved = await resolveExecutionContext({
+    // [#23367] An expired key is a real key its own lifecycle refuses: the
+    // shared resolver raises the branded refusal (403 API_KEY_EXPIRED, naming
+    // the date) instead of answering an anonymous context, and whoever catches
+    // the resolution decides how loud it is.
+    await expect(resolveExecutionContext({
       getService: async () => undefined,
       getQl: async () => ql,
       request: { headers: { 'x-api-key': raw } },
-    });
-    expect(resolved.userId).toBeUndefined();
+    })).rejects.toMatchObject({ code: 'API_KEY_EXPIRED', status: 403 });
   });
 });
 

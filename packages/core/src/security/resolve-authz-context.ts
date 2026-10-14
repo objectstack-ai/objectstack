@@ -64,8 +64,8 @@ import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { isValueDomainMember } from '@objectstack/spec/shared';
 
-import { resolveApiKeyAdmission } from './api-key.js';
-import type { ApiKeyRefusalReason } from './api-key.js';
+import { ApiKeyLifecycleRefusalError, resolveApiKeyAdmission } from './api-key.js';
+import type { ApiKeyLifecyclePolicySource, ApiKeyRefusalReason } from './api-key.js';
 import { normalizeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
 import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
@@ -207,6 +207,21 @@ export interface ResolveAuthzInput {
    * could reach one.
    */
   userAuthGates: UserAuthGateSource | undefined;
+  /**
+   * [#23367, ruling A] The auth service's API-key lifecycle policy, bound by
+   * `apiKeyLifecyclePolicySourceOf(authService)`. The key-admission seam reads
+   * it for the inactivity window and for the landing that anchors keys with
+   * no recorded use or no expiry; a key its own state refuses (revoked,
+   * expired, inactive) raises {@link ApiKeyLifecycleRefusalError} out of this
+   * resolver.
+   *
+   * REQUIRED beside {@link userAuthGates}, for the #23455 reason, and with the
+   * same rule for `undefined`: pass the bound source wherever the kernel's
+   * `auth` service is reachable (it answers `undefined` itself for a service
+   * with no policy), and a bare `undefined` only where no auth service exists
+   * at all — ⛔ never to quiet the compiler at a seam that could reach one.
+   */
+  apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined;
 }
 
 /**
@@ -236,9 +251,10 @@ export interface ResolveAuthzInput {
  *
  * ## Volume
  *
- * Bounded by real credentials, not by traffic: an unknown, revoked, expired or
- * absent key resolves to `outcome: 'none'` and is never a refusal, so a key
- * scanner produces no lines here. One line per refused request, deliberately —
+ * Bounded by real credentials, not by traffic: an unknown or absent key
+ * resolves to `outcome: 'none'` and is never a refusal, so a key scanner
+ * produces no lines here (a revoked, expired or inactive key is a real one, and
+ * has its own line, {@link warnApiKeyLifecycleRefusal}). One line per refused request, deliberately —
  * a rate limiter would hide exactly the burst (an automation still running on a
  * key whose membership ended) that the operator most needs to see.
  *
@@ -258,6 +274,21 @@ function warnApiKeyRefusal(details: {
     + `key=${keyId ?? '<unknown>'} principal=${userId ?? '<unknown>'} `
     + `organization=${organizationId ?? '<none>'}. `
     + 'The caller received the generic 401 UNAUTHENTICATED — this reason is server-side only.',
+  );
+}
+
+/**
+ * [#23367, ruling A] The operator's line for an API-key lifecycle refusal —
+ * the sibling of {@link warnApiKeyRefusal}, for the faces whose door answers
+ * the generic 401 instead of relaying the branded refusal: there, this line
+ * is the one place the reason is observable. Same content rules: the row id,
+ * the owner and the code; ⛔ never the raw key or its hash. One line per
+ * refused request, bounded by keys that really existed.
+ */
+function warnApiKeyLifecycleRefusal(code: string, keyId?: string, userId?: string): void {
+  console.warn(
+    `[security] API key refused (${code}): key=${keyId ?? '<unknown>'} principal=${userId ?? '<unknown>'}. `
+    + 'A face that relays the refusal answered 403 with this code; any other face answered its generic 401.',
   );
 }
 
@@ -457,7 +488,18 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     input.nowMs,
     input.tenancyPosture,
     input.userAuthGates,
+    input.apiKeyLifecycle,
   );
+  // [#23367, ruling A] A key its own lifecycle refuses — revoked, expired,
+  // inactive — is RAISED, branded, so a face that relays the brand answers its
+  // `403`, code and located message, and a face that does not catches it as any
+  // other identity fault and answers its generic 401. Either way it never
+  // falls through to the session path (a cookie beside a dead key never
+  // answers for it) and never resolves a principal.
+  if (admission.outcome === 'lifecycle') {
+    warnApiKeyLifecycleRefusal(admission.refusal.code, admission.refusal.keyId, admission.refusal.userId);
+    throw new ApiKeyLifecycleRefusalError(admission.refusal);
+  }
   // [#8287] A REFUSED key stops here and does NOT fall through to the session
   // path. Falling through would be more permissive than the behaviour this
   // replaced (an API key already outranks a session), and a refusal that

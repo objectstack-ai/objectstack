@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext } from '@objectstack/core';
+import { Plugin, PluginContext, stackDeclaresOrganizationRecordPage } from '@objectstack/core';
 import { resolveAllowDegradedTenancy, resolveAllowDevPlugin, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
@@ -715,6 +715,12 @@ export class DevPlugin implements Plugin {
         const authPlugin = new AuthPlugin({
           secret: this.options.authSecret,
           baseUrl: this.options.authBaseUrl,
+          // One default record page per object per deployment (ruling A on
+          // objectstack#23015): when the stack this plugin serves declares its
+          // own `sys_organization` default record page, plugin-auth's is left
+          // out; otherwise it registers as before. The predicate `os serve`
+          // asks too, so the same stack gets the same answer under both roots.
+          registerOrganizationRecordPage: !stackDeclaresOrganizationRecordPage(this.options.stack),
         });
         this.childPlugins.push(authPlugin);
         authMounted = true;

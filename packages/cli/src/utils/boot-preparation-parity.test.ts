@@ -164,6 +164,11 @@ const SERVE_ONLY: Record<string, string> = {
   stackSuppliesAuthPlugin:
     'serve\'s own "is an AuthPlugin already composed" read ahead of its auth block; the auth-family gate '
     + '(resolvePlatformAuthComposition, called by both boots) asks the same predicate first',
+  stackDeclaresOrganizationRecordPage:
+    'decides whether the AuthPlugin serve constructs registers plugin-auth\'s sys_organization default record page '
+    + '(one default record page per object, ruling A on objectstack#23015): the declaration boot composes '
+    + 'plugin-auth\'s objects through createIdentityObjectsPlugin, which registers no page, so it has no '
+    + 'organization page to leave out',
   resolveCapabilityArgument:
     'what serve constructs each capability provider WITH (the app\'s cubes, its mail and SMS configuration, '
     + 'the storage root; [#22301], shared with @objectstack/verify\'s bootStack): the declaration boot constructs '

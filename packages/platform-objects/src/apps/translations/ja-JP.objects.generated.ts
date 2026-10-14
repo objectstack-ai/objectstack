@@ -1003,7 +1003,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       last_used_at: {
         label: "最終使用日時",
-        help: "API 呼び出しのたびに自動更新されます"
+        help: "キーが使われたときに記録されます(最大 1 時間に 1 回)。非アクティブ期間(既定 90 日)内に使用記録のないキーは、新しいキーに置き換えるまで拒否されます"
       },
       revoked: {
         label: "失効済み"

@@ -20,6 +20,13 @@ const boot = vi.hoisted(() => vi.fn(async () => {
   throw new Error('the database was opened');
 }));
 vi.mock('../../utils/schema-migrate.js', () => ({ bootSchemaStack: boot }));
+// The occupancy gate is the siblings' stub: these cases are about the flags,
+// never about whatever database the package's own directory resolves to. The
+// gate itself is pinned in `organization-ownership.occupancy.integration.test.ts`.
+vi.mock('../../utils/migrate-occupancy-gate.js', () => ({
+  OCCUPANCY_STOP_HINT: 'occupancy hint',
+  probeMigrationTarget: vi.fn(async () => ({ status: 'free' })),
+}));
 
 type Command = (typeof import('./organization-ownership.js'))['default'];
 let MigrateOrganizationOwnership: Command;

@@ -389,6 +389,7 @@ const authService = {
 async function resolveFor(credential: string) {
     const authz = await resolveAuthzContext({
         userAuthGates: undefined,
+        apiKeyLifecycle: undefined,
         ql: grantsEngine as any,
         headers: new Headers({ authorization: credential }),
         getSession: async (h: any) => authService.api.getSession({ headers: h }),

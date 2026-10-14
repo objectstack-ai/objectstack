@@ -69,7 +69,11 @@ permission model grants anonymous users. Two ways to authenticate:
   (the key is shown once), or from the **Connect an Agent** page in the Console
   — **Account → Developer** for any signed-in user, **Setup → Connect an Agent**
   for platform admins. Send it as `x-api-key: osk_…` or
-  `Authorization: Bearer osk_…`.
+  `Authorization: Bearer osk_…`. Keys expire (90 days by default, at most a
+  year) and stop working after 90 days without use; a refused key answers
+  `403` with `API_KEY_EXPIRED`, `API_KEY_INACTIVE` or `API_KEY_REVOKED`, and the
+  remedy is a new key — see
+  [key lifetime, inactivity and rotation](/docs/ai/connect-mcp#key-lifetime-inactivity-and-rotation).
 
 See [Authentication](/docs/permissions/authentication) for the full identity
 surface (OAuth flows, sessions, providers) and

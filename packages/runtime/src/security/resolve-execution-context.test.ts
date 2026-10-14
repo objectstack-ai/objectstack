@@ -79,11 +79,14 @@ describe('resolveExecutionContext — API key verify path', () => {
     expect(ctx.userId).toBe('u1');
   });
 
+  // [#23367, ruling A] A revoked or expired key is a REAL key its own
+  // lifecycle refuses: it is refused with its own code (the branded 403
+  // refusal), never resolved as a principal and never read as an unknown key.
   it('rejects a revoked key', async () => {
     const raw = 'osk_revoked';
     const rows = [{ id: 'k1', key: hashApiKey(raw), revoked: true, user_id: 'u1' }];
-    const ctx = await resolveExecutionContext(makeOpts(rows, { 'x-api-key': raw }));
-    expect(ctx.userId).toBeUndefined();
+    await expect(resolveExecutionContext(makeOpts(rows, { 'x-api-key': raw })))
+      .rejects.toMatchObject({ code: 'API_KEY_REVOKED', status: 403 });
   });
 
   it('rejects an expired key', async () => {
@@ -91,8 +94,8 @@ describe('resolveExecutionContext — API key verify path', () => {
     const rows = [
       { id: 'k1', key: hashApiKey(raw), revoked: false, user_id: 'u1', expires_at: PAST },
     ];
-    const ctx = await resolveExecutionContext(makeOpts(rows, { 'x-api-key': raw }));
-    expect(ctx.userId).toBeUndefined();
+    await expect(resolveExecutionContext(makeOpts(rows, { 'x-api-key': raw })))
+      .rejects.toMatchObject({ code: 'API_KEY_EXPIRED', status: 403 });
   });
 
   it('rejects an unknown key', async () => {

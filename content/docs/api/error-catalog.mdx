@@ -4,7 +4,7 @@ navTitle: Error Code Catalog
 description: Complete reference for all ObjectStack error codes with causes, fixes, and retry strategies
 ---
 
-ObjectStack uses a structured error system with **9 error categories** and **52 error codes reachable on the wire**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system with **9 error categories** and **56 error codes reachable on the wire**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
 
 This catalog documents the **wire face** — the codes a client can actually receive. That is not quite the
 `StandardErrorCode` enum: the enum also carries in-process spellings the REST door translates at the
@@ -80,6 +80,11 @@ settings' `max_upload_mb`, and an import over its route's row ceiling, answer `4
   ]
 }
 ```
+
+### `API_KEY_EXPIRY_TOO_LONG`
+**Cause:** `POST /api/v1/keys` asked for an `expires_at` further away than the deployment's maximum key lifetime (`api_key_max_expiry_days`, one year by default). The message names the latest date allowed; exactly the maximum is accepted.  
+**Fix:** Ask for that date or an earlier one, and rotate the key before it expires.  
+**Retry:** `no_retry`
 
 ### `VALIDATION_FAILED`
 **Cause:** Record-level validation refused the write. This is the code a
@@ -428,6 +433,23 @@ result set — a response indistinguishable from a successful query.
 **Cause:** Access is limited to specific time windows and the current time is outside the allowed range.  
 **Fix:** Retry during the allowed time window.  
 **Retry:** `retry_after`
+
+### `API_KEY_EXPIRED`
+**Cause:** The API key is past its `expires_at`, or it was created with no expiry and the one-year grace the API-key lifecycle policy gave it has ended. The message names the key's prefix and the date.  
+**Fix:** Keys do not renew: create a new key and replace this one wherever it is configured. See [key lifetime, inactivity and rotation](/docs/ai/connect-mcp#key-lifetime-inactivity-and-rotation).  
+**Retry:** `no_retry`
+
+### `API_KEY_INACTIVE`
+**Cause:** The API key has no recorded use for longer than the deployment's inactivity window (`api_key_inactivity_days`, 90 by default). The key is not revoked; its own call does not revive it. The message names the date the idle period started.  
+**Fix:** Create a new key and replace this one wherever it is configured.  
+**Retry:** `no_retry`
+
+### `API_KEY_REVOKED`
+**Cause:** The API key was revoked by its owner or an administrator.  
+**Fix:** Create a new key and replace this one wherever it is configured. A revoked key never works again.  
+**Retry:** `no_retry`
+
+These three are answered on every endpoint that accepts an API key: the endpoints the runtime serves (the MCP HTTP endpoint among them), the REST data API, the settings, file-download, datasource admin and share-link routes, the marketplace install routes and the MCP stdio transport. An unknown key is always the generic 401.
 
 ---
 
@@ -942,7 +964,7 @@ async function handleApiCall() {
 |:---:|:---|:---|
 | 400 | `validation` | `VALIDATION_FAILED`, `VALIDATION_ERROR`, `INVALID_FIELD`, `MISSING_REQUIRED_FIELD`, `INVALID_QUERY` |
 | 401 | `authentication` | `UNAUTHENTICATED`, `EXPIRED_TOKEN`, `INVALID_CREDENTIALS` |
-| 403 | `authorization` | `PERMISSION_DENIED`, `FIELD_NOT_ACCESSIBLE`, `LICENSE_REQUIRED` |
+| 403 | `authorization` | `PERMISSION_DENIED`, `FIELD_NOT_ACCESSIBLE`, `LICENSE_REQUIRED`, `API_KEY_EXPIRED`, `API_KEY_INACTIVE`, `API_KEY_REVOKED` |
 | 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
 | 409 | `conflict` | `CONCURRENT_MODIFICATION`, `UNIQUE_VIOLATION`, `DELETE_RESTRICTED` |
 | 413 | `validation` | `PAYLOAD_TOO_LARGE` — an upload over the storage settings' `max_upload_mb`, or an import over its row ceiling (see [above](#payload_too_large)) |

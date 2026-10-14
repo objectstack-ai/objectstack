@@ -29,6 +29,9 @@ import {
   // [#23287, ruling C′ item 3] The auth service's per-user posture
   // computation, handed to the shared key-admission seam.
   userAuthGateSourceOf,
+  // [#23367] The API-key lifecycle policy source, and its branded refusal.
+  apiKeyLifecyclePolicySourceOf,
+  isApiKeyLifecycleRefusalError,
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { ErrorCode } from '@objectstack/spec/api';
@@ -504,6 +507,8 @@ export function registerDatasourceAdminRoutes(
           getSession,
           tenancyPosture,
           userAuthGates: userAuthGateSourceOf(authService),
+          // [#23367] The API-key lifecycle policy, from the same service.
+          apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
         });
         userId = authz.userId;
         gateSubject = authz;
@@ -520,6 +525,11 @@ export function registerDatasourceAdminRoutes(
       // no verdict at all, so the outage is re-raised instead of being answered
       // as a denial. Every other fault still fails closed, unchanged.
       if (isAuthzStoreUnavailableError(err)) throw err;
+      // [#23367, ruling A] A key its own lifecycle refused (revoked, expired,
+      // inactive) is re-raised the same way: it escapes ahead of every route's
+      // `try`, and the host's thrown-envelope render answers its declared `403`
+      // and registered code with the located message.
+      if (isApiKeyLifecycleRefusalError(err)) throw err;
       // Fail closed: an identity that could not be resolved is not an identity.
       userId = undefined;
       systemPermissions = [];

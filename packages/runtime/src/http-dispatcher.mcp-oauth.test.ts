@@ -52,7 +52,7 @@ function makeHarness(opts: HarnessOptions = {}) {
       return { id: 'new1', ...data };
     },
     find: async (object: string, q: any) => {
-      if (object === 'sys_api_key' && q?.where?.key === apiKeyHash && q?.where?.revoked === false) {
+      if (object === 'sys_api_key' && q?.where?.key === apiKeyHash) {
         return [{ id: 'k1', key: apiKeyHash, user_id: 'keyUser', revoked: false }];
       }
       return [];

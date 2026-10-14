@@ -19,6 +19,8 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { OCCUPANCY_STOP_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
+import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { resolvePlannedDriverExec } from '../../utils/unmanaged-tables.js';
 import {
   buildOrganizationOwnershipPlan,
@@ -259,6 +261,35 @@ export default class MigrateOrganizationOwnership extends Command {
         );
         return;
       }
+    }
+
+    // The occupancy gate, BEFORE either arm boots the stack — once it is up,
+    // its own pooled connections are what the probe finds (#3917). Both arms
+    // pass through here. The siblings' probe, and their fields inside this
+    // command's own envelope, with one difference: the ceremony takes no
+    // `--force` (no flag skips its reviewed plan or its backup either), so
+    // `--apply` beside a holder is refused outright and the refusal names the
+    // stop remedy alone. The plan writes nothing and warns, as every sibling's
+    // read-only arm does.
+    const occupancy = await probeMigrationTarget(flags['database-url']);
+    if (occupancy.status === 'busy' && flags.apply) {
+      await refuse(
+        {
+          reason: 'database-busy',
+          database: occupancy.filename,
+          signal: occupancy.signal,
+          detail: occupancy.detail,
+          hint: OCCUPANCY_STOP_HINT,
+        },
+        `${describeOccupancy(occupancy)} ${OCCUPANCY_STOP_HINT}`,
+      );
+      return;
+    }
+    if (occupancy.status === 'busy' && !json) {
+      printWarning(`${describeOccupancy(occupancy)} The plan below writes nothing, but --apply will refuse until the database is free.`);
+    }
+    if (occupancy.status === 'unknown' && !json) {
+      printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
     }
 
     if (flags.apply) {

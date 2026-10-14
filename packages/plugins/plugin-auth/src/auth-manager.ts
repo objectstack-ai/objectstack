@@ -43,9 +43,15 @@ import type { IDataEngine } from '@objectstack/core';
 // `auth-manager` used to re-derive that standing itself, in two spellings
 // that had drifted from the declared authority and from each other; both
 // now ask the authority. Nothing in this file reads the grant tables.
-import { hasPlatformAdminStanding, resolveUserAuthzGrants } from '@objectstack/core';
+import {
+  API_KEY_DEFAULT_EXPIRY_DAYS,
+  API_KEY_INACTIVITY_DAYS,
+  API_KEY_MAX_EXPIRY_DAYS,
+  hasPlatformAdminStanding,
+  resolveUserAuthzGrants,
+} from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
-import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
+import type { ApiKeyLifecyclePolicy, IEmailService, ISmsService } from '@objectstack/spec/contracts';
 import {
   readEnvWithDeprecation,
   resolveTenancyPosture,
@@ -946,6 +952,27 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
 
   /** Days a user may defer MFA enrollment before the hard block. Default 7. */
   mfaGracePeriodDays?: number;
+
+  /**
+   * [#23367, ruling A] The API-key lifecycle policy (`resolveApiKeyLifecyclePolicy`):
+   * the life of a key signed with no `expires_at` (default 90 days), the
+   * ceiling on a signed key's life (default 365), and the inactivity window
+   * after which an unused key is refused (default 90; 0 = off). Bound from the
+   * `auth` settings keys `api_key_*` by `bindAuthSettings`.
+   */
+  apiKeyDefaultExpiryDays?: number;
+  apiKeyMaxExpiryDays?: number;
+  apiKeyInactivityDays?: number;
+
+  /**
+   * [#23367] When this deployment started enforcing the API-key lifecycle
+   * policy (ISO 8601) — the anchor of the inactivity clock for keys with no
+   * recorded use, and of the one-year grace for keys signed with no expiry.
+   * Recorded ONCE, in the `auth` setting `api_key_policy_started_at`, by
+   * `bindAuthSettings` on the first boot that runs the policy, so it survives
+   * restarts and every node reads the same instant. ⛔ Never the process start.
+   */
+  apiKeyPolicyStartedAt?: string;
 
   /**
    * ADR-0069 D4 — session controls. Enforced in `customSession` (idle/absolute)
@@ -8192,6 +8219,33 @@ export class AuthManager {
    * error, answering `[]` — a transient hiccup must never lock a compliant user
    * out, through either credential.
    */
+  /**
+   * [#23367, ruling A] The API-key lifecycle policy in force
+   * (`IAuthService.resolveApiKeyLifecyclePolicy`), every number defaulted to
+   * the ruling's: 90-day default expiry, one-year ceiling, 90-day inactivity.
+   * Read by the signing door (`POST /keys`) and the key-admission seam
+   * (`resolveApiKeyAdmission`) alike, so the two can never disagree.
+   */
+  public resolveApiKeyLifecyclePolicy(): ApiKeyLifecyclePolicy {
+    const days = (value: unknown, fallback: number, min: number): number => {
+      const n = Math.floor(Number(value));
+      return Number.isFinite(n) && n >= min ? n : fallback;
+    };
+    const startedAt = typeof this.config.apiKeyPolicyStartedAt === 'string'
+      && !Number.isNaN(Date.parse(this.config.apiKeyPolicyStartedAt))
+      ? this.config.apiKeyPolicyStartedAt
+      : undefined;
+    const maxExpiryDays = days(this.config.apiKeyMaxExpiryDays, API_KEY_MAX_EXPIRY_DAYS, 1);
+    return {
+      // The ceiling rules the default too: a default longer than the ceiling
+      // would mint the very key the ceiling refuses to sign.
+      defaultExpiryDays: Math.min(maxExpiryDays, days(this.config.apiKeyDefaultExpiryDays, API_KEY_DEFAULT_EXPIRY_DAYS, 1)),
+      maxExpiryDays,
+      inactivityDays: days(this.config.apiKeyInactivityDays, API_KEY_INACTIVITY_DAYS, 0),
+      ...(startedAt ? { startedAt } : {}),
+    };
+  }
+
   public async resolveUserAuthGates(
     userId: string,
     options: { organizationId?: string } = {},
