@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/metadata-protocol': patch
 ---
 
 feat(spec)!: seven overdue ADR-0087 D2 conversions leave the load path at 18 — six flow-node config aliases and a sharing rule's `accessLevel: 'full'` are refused with their rename at every door that judges a flow or a sharing rule
@@ -20,6 +21,8 @@ Migration:
 Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. (`config.filters` belongs to protocol 11, below the migration floor, so `os migrate meta` does not list it: rename that one by hand.)
 
 Stored metadata needs no edit. The automation engine's flow rehydration and stored-row rehydration still replay the whole conversion chain, these seven entries included, so `sys_metadata` flows and sharing-rule rows written under an old spelling keep loading in canonical form. A built artifact whose declared protocol floor is at or below `17.7.0` is also still converted at the artifact-ingestion door.
+
+The metadata save door's flow fallback keeps its verdict: when no automation service is reachable (or its canonicalizer throws), `saveMetaItem` judges a flow body after replaying the same conversion chain the automation engine's canonicalizer replays, retired entries included, so a host's verdict on a saved flow still does not depend on whether it runs an automation service.
 
 Eight more entries below 18 stay on the load path, each with the reason recorded in its docblock: `flow-node-http-callout-rename` and `page-kind-jsx-to-html` (the old value is still accepted by its schema), `view-visibleOn-to-visibleWhen` and `page-component-visibility-to-visibleWhen` (the schema still declares and folds the deprecated key), `flow-node-wait-event-config-lift` and `flow-node-connector-config-lift` (the node's `config` has no contract to refuse the loose keys), `datasource-driver-mongo-to-mongodb` and `retry-policy-converged`.
 
