@@ -46,7 +46,7 @@ describe('ObjectStackProtocolImplementation - getMetaItemLayered', () => {
 
     it('returns both layers when env-wide overlay exists', async () => {
         mockEngine.findOne.mockImplementation((_table: string, opts: any) => {
-            if (opts.where?.organization_id === null) {
+            if (opts.where?.type === 'view' && opts.where?.name === 'my_view' && !('organization_id' in opts.where)) {
                 return Promise.resolve({ metadata: overlayBody });
             }
             return Promise.resolve(null);
@@ -59,13 +59,12 @@ describe('ObjectStackProtocolImplementation - getMetaItemLayered', () => {
         expect(result.effective).toMatchObject({ label: 'Customised Label' });
     });
 
-    it('[ADR-0131 D6] reports the environment overlay even when a legacy organization row exists', async () => {
-        const orgOverlay = { ...overlayBody, label: 'Org-Specific Label' };
+    it('[ADR-0131 D6] a caller naming an organization is reported the environment overlay', async () => {
         mockEngine.findOne.mockImplementation((_table: string, opts: any) => {
-            if (opts.where?.organization_id === 'org_alpha') {
-                return Promise.resolve({ metadata: orgOverlay });
+            if (opts.where && 'organization_id' in opts.where) {
+                throw new Error('a sys_metadata read named the retired organization column');
             }
-            if (opts.where?.organization_id === null) {
+            if (opts.where?.type === 'view' && opts.where?.name === 'my_view') {
                 return Promise.resolve({ metadata: overlayBody });
             }
             return Promise.resolve(null);

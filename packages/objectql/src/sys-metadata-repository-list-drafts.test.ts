@@ -10,11 +10,11 @@ import { SysMetadataRepository } from '@objectstack/metadata-protocol';
  * "pending changes" view and a just-built app package aren't shown as empty.
  */
 const ROWS = [
-  { type: 'object', name: 'course', state: 'draft', package_id: 'app.edu', organization_id: null, updated_at: 't1', updated_by: 'ai' },
-  { type: 'object', name: 'student', state: 'draft', package_id: 'app.edu', organization_id: null, updated_at: 't2', updated_by: 'ai' },
-  { type: 'object', name: 'legacy', state: 'draft', package_id: null, organization_id: null, updated_at: 't3' },
-  { type: 'view', name: 'course_list', state: 'draft', package_id: 'app.edu', organization_id: null, updated_at: 't5', updated_by: 'ai' },
-  { type: 'object', name: 'live', state: 'active', package_id: 'app.edu', organization_id: null, updated_at: 't4' },
+  { type: 'object', name: 'course', state: 'draft', package_id: 'app.edu', updated_at: 't1', updated_by: 'ai' },
+  { type: 'object', name: 'student', state: 'draft', package_id: 'app.edu', updated_at: 't2', updated_by: 'ai' },
+  { type: 'object', name: 'legacy', state: 'draft', package_id: null, updated_at: 't3' },
+  { type: 'view', name: 'course_list', state: 'draft', package_id: 'app.edu', updated_at: 't5', updated_by: 'ai' },
+  { type: 'object', name: 'live', state: 'active', package_id: 'app.edu', updated_at: 't4' },
 ];
 
 const matchesWhere = (r: any, clause: any): boolean =>
@@ -24,7 +24,7 @@ const matchesWhere = (r: any, clause: any): boolean =>
       : (r as any)[k] === v,
   );
 
-function makeRepo(rows = ROWS, organizationId: string | null = null) {
+function makeRepo(rows: Array<Record<string, unknown>> = ROWS) {
   // Minimal engine whose find() does equality WHERE matching, plus `$or`.
   const find = vi.fn(async (_table: string, q: any) => {
     const where = q?.where ?? {};
@@ -57,28 +57,14 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
     expect(out.map((d) => d.name).sort()).toEqual(['course', 'course_list', 'student']);
   });
 
-  it('surfaces env-wide (org IS NULL) drafts even when the repo has a non-null active org', async () => {
-    // Regression (orphaned-draft bug): AI-authored metadata is written env-wide
-    // (organization_id NULL). A non-null active org used a strict equality that
-    // dropped those drafts → they showed in preview but the Publish CTA never
-    // appeared, so the user could not publish them.
-    const { repo } = makeRepo(ROWS, 'org_acme');
+  it('[ADR-0131 D6/D7] lists every draft: the family declares no organization column, so none is filtered on', async () => {
+    const { repo, find } = makeRepo();
     const names = (await repo.listDrafts()).map((d) => d.name).sort();
     expect(names).toEqual(['course', 'course_list', 'legacy', 'student']);
     expect(names).not.toContain('live');
-  });
-
-  it('[ADR-0131 D6] lists the environment\'s drafts only — no organization\'s, whichever repository asks', async () => {
-    const rows = [
-      { type: 'object', name: 'env_wide', state: 'draft', package_id: 'p', organization_id: null, updated_at: 't1', updated_by: 'u' },
-      { type: 'object', name: 'org_scoped', state: 'draft', package_id: 'p', organization_id: 'org_acme', updated_at: 't2', updated_by: 'u' },
-      { type: 'object', name: 'other_org', state: 'draft', package_id: 'p', organization_id: 'org_other', updated_at: 't3', updated_by: 'u' },
-    ];
-    const { repo } = makeRepo(rows, 'org_acme');
-    const out = await repo.listDrafts();
-    expect(out.map((d) => d.name)).toEqual(['env_wide']);
+    for (const [, q] of find.mock.calls) expect(q?.where ?? {}).not.toHaveProperty('organization_id');
     // The header carries no organization: every draft listed is the environment's.
-    expect(Object.keys(out[0]!)).not.toContain('organizationId');
+    expect(Object.keys((await repo.listDrafts())[0]!)).not.toContain('organizationId');
   });
 
   it('filters by type', async () => {
@@ -87,11 +73,11 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
     expect(out.map((d) => d.name)).toEqual(['course_list']);
   });
 
-  it('queries state=draft scoped to org, threading type + packageId into WHERE', async () => {
+  it('queries state=draft, threading type + packageId into WHERE', async () => {
     const { repo, find } = makeRepo();
     await repo.listDrafts({ type: 'object', packageId: 'app.edu' });
     expect(find).toHaveBeenCalledWith('sys_metadata', {
-      where: { organization_id: null, state: 'draft', type: 'object', package_id: 'app.edu' },
+      where: { state: 'draft', type: 'object', package_id: 'app.edu' },
       // [#21911] The platform store read carries the explicit system opt-in.
       context: { isSystem: true },
     });
@@ -148,7 +134,6 @@ describe('SysMetadataRepository.listDrafts (ADR-0033)', () => {
         name: 'account',
         state: 'draft',
         package_id: 'app.hr',
-        organization_id: null,
         updated_at: 't1',
         updated_by: 'ai',
         // The column the repository reads the stored document from today

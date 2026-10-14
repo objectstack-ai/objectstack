@@ -58,6 +58,12 @@
  * env-wide cases green — the env-wide rows are the #4521 read-your-writes
  * behaviour this fix must NOT regress, and they never carry an org to
  * refuse. Measured direction is recorded in the PR body.
+ *
+ * [ADR-0131 D6/D7] The family declares no organization column now, so the
+ * read-side legs that planted a legacy organization row are retired with it:
+ * no stored row carries an organization, and the runtime refuses to boot on a
+ * database still holding one. The write-side legs and the delete-chain legs,
+ * which drive organization-scoped REQUESTS, stay.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -69,7 +75,6 @@ import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
 import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 
 const ORG_A = 'org_a';
-const ORG_B = 'org_b';
 
 /**
  * A `sys_metadata`-shaped fake engine over one row array, so the repository
@@ -146,10 +151,9 @@ const flowBody = (name: string, label: string) => ({
     edges: [{ id: 'e1', source: 'start', target: 'end' }],
 });
 
-const metaRow = (type: string, body: Record<string, unknown>, organizationId: string | null) => ({
+const metaRow = (type: string, body: Record<string, unknown>) => ({
     type,
     name: body.name,
-    organization_id: organizationId,
     package_id: null,
     state: 'active',
     metadata: JSON.stringify(body),
@@ -161,10 +165,6 @@ const namesIn = (items: unknown[]): string[] =>
 
 /** Names visible in a `getMetaItems` result, which answers an `{ items }` envelope. */
 const namesOf = (listed: { items?: unknown[] }): string[] => namesIn(listed?.items ?? []);
-
-/** One item out of a `getMetaItems` result, by name. */
-const itemNamed = (listed: { items?: unknown[] }, name: string): any =>
-    (listed?.items ?? []).find((i) => (i as { name?: string })?.name === name);
 
 describe('#6602 — the premise, read from the registry rather than restated', () => {
     it('view is the specimen: an overlay-enabled type, the tier the per-org leak rode before ADR-0131 D6', () => {
@@ -291,18 +291,8 @@ describe('#6602 — READ seam: getMetaItems hydration refuses org-scoped rows', 
         protocol = new ObjectStackProtocolImplementation(engine);
     });
 
-    it('a listing passing the deleted organization key serves the org row NOWHERE and does not graft it', async () => {
-        engine.plant(metaRow('view', viewBody('org_grid', 'Org A grid'), ORG_A));
-
-        const listed = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_A } as any);
-
-        expect(namesOf(listed as any)).not.toContain('org_grid');
-        // …and the process-wide registry stays clean.
-        expect(registry.getItem('view', 'org_grid')).toBeUndefined();
-    });
-
     it('an ENV-WIDE listing still hydrates — the read side is not narrowed', async () => {
-        engine.plant(metaRow('view', viewBody('env_grid', 'Env grid'), null));
+        engine.plant(metaRow('view', viewBody('env_grid', 'Env grid')));
 
         const listed = await protocol.getMetaItems({ type: 'view' });
 
@@ -310,117 +300,6 @@ describe('#6602 — READ seam: getMetaItems hydration refuses org-scoped rows', 
         expect((registry.getItem('view', 'env_grid') as any)?.label).toBe('Env grid');
     });
 
-    it('a MIXED listing hydrates the env-wide row and only that one', async () => {
-        engine.plant(metaRow('view', viewBody('env_grid', 'Env grid'), null));
-        engine.plant(metaRow('view', viewBody('org_grid', 'Org A grid'), ORG_A));
-
-        const listed = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_A } as any);
-
-        expect(namesOf(listed as any).sort()).toEqual(['env_grid']);
-        expect(registry.getItem('view', 'env_grid')).toBeDefined();
-        expect(registry.getItem('view', 'org_grid')).toBeUndefined();
-    });
-
-    it('an org overlay of an env-wide name does not OVERWRITE the hydrated env-wide entry', async () => {
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Env grid'), null));
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Org A grid'), ORG_A));
-
-        // The env-wide body reaches the registry the way it legitimately does
-        // — an unscoped read (boot's `loadMetaFromDb` is the other one).
-        await protocol.getMetaItems({ type: 'view' });
-        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
-
-        // A listing passing the deleted organization key reads the environment…
-        const listedA = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_A } as any);
-        expect(itemNamed(listedA as any, 'shared_grid')?.label).toBe('Env grid');
-
-        // …and the shared registry still holds the ENV-WIDE one. This is the
-        // collision direction of the leak: pre-fix the org body overwrote the
-        // plain key here, so every reader in the process — the control plane
-        // and org B alike — started serving org A's customization.
-        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
-    });
-
-    it('a listing passing the deleted organization key never hydrates the org body of a name it shares', async () => {
-        // The listing is the environment's, so what it hydrates is the
-        // env-wide body; org A's row is in no set this loop walks.
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Env grid'), null));
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Org A grid'), ORG_A));
-
-        await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_A } as any);
-
-        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
-    });
-});
-
-describe('#6602 — the disclosure shape, end to end', () => {
-    let registry: SchemaRegistry;
-    let engine: any;
-    let protocol: ObjectStackProtocolImplementation;
-
-    beforeEach(() => {
-        registry = new SchemaRegistry({ multiTenant: false });
-        registry.logLevel = 'silent';
-        engine = makeEngine(registry);
-        protocol = new ObjectStackProtocolImplementation(engine);
-    });
-
-    it("org B's listing never contains org A's item — org A LISTS first", async () => {
-        // The seam the write-side fix alone would not have closed: one
-        // org-scoped listing call used to graft org A's body, and every
-        // later reader started from it.
-        engine.plant(metaRow('view', viewBody('org_a_only', 'Org A only'), ORG_A));
-
-        await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_A } as any);
-        const listedB = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_B } as any);
-
-        expect(namesOf(listedB as any)).not.toContain('org_a_only');
-        // The unscoped control-plane listing is a third reader of the same
-        // shared registry, and it must not see org A's item either.
-        const listedControlPlane = await protocol.getMetaItems({ type: 'view' });
-        expect(namesOf(listedControlPlane as any)).not.toContain('org_a_only');
-    });
-
-    it("org B reads the ENV-WIDE body, not org A's, for a colliding name", async () => {
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Env grid'), null));
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Org A grid'), ORG_A));
-
-        await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_A } as any);
-        const listedB = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG_B } as any);
-
-        expect(itemNamed(listedB as any, 'shared_grid')?.label).toBe('Env grid');
-    });
-});
-
-describe('[ADR-0131 D6] the by-name read serves no legacy organization row, and never hydrates one', () => {
-    let registry: SchemaRegistry;
-    let engine: any;
-    let protocol: ObjectStackProtocolImplementation;
-
-    beforeEach(() => {
-        registry = new SchemaRegistry({ multiTenant: false });
-        registry.logLevel = 'silent';
-        engine = makeEngine(registry);
-        protocol = new ObjectStackProtocolImplementation(engine);
-    });
-
-    it('getMetaItem answers nothing for an organization-only row, whoever asks, and grafts nothing', async () => {
-        engine.plant(metaRow('view', viewBody('org_grid', 'Org A grid'), ORG_A));
-
-        const got: any = await protocol.getMetaItem({ type: 'view', name: 'org_grid', organizationId: ORG_A } as { type: string; name: string });
-        expect(got.item).toBeUndefined();
-        expect(registry.getItem('view', 'org_grid')).toBeUndefined();
-    });
-
-    it('getMetaItem serves the env-wide body to every caller for a colliding name', async () => {
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Env grid'), null));
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Org A grid'), ORG_A));
-
-        for (const organizationId of [ORG_A, ORG_B]) {
-            const got: any = await protocol.getMetaItem({ type: 'view', name: 'shared_grid', organizationId } as { type: string; name: string });
-            expect(got.item.label, organizationId).toBe('Env grid');
-        }
-    });
 });
 
 describe('#6602 — the delete chain needs no re-keying under this fix', () => {
@@ -546,22 +425,6 @@ describe('#6780 — the registry heal is org-gated: an org DELETE never evicts t
         protocol = new ObjectStackProtocolImplementation(engine);
     });
 
-    it("org A deleting its OWN overlay leaves the env-wide entry standing (the card's sequence)", async () => {
-        await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Org A grid'), ORG_A));
-        // #6602 holding: the org row never reached the shared registry.
-        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
-
-        // [ADR-0131 D6] An org-scoped delete is now refused before any read.
-        await expect(
-            protocol.deleteMetaItem({ type: 'view', name: 'shared_grid', organizationId: ORG_A } as any),
-        ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-
-        // Pre-fix this read was `undefined` — the whole defect, in one line.
-        expect(registry.getItem('view', 'shared_grid')).toBeDefined();
-        expect((registry.getItem('view', 'shared_grid') as any)?.label).toBe('Env grid');
-    });
-
     it('the SELF-HEAL branch respects the same scope — a no-op org DELETE is inert', async () => {
         // The cheapest eviction door of the three, and the one a gate on the
         // delete-ful branch alone would have left open: org A has no overlay
@@ -620,19 +483,4 @@ describe('#6780 — the registry heal is org-gated: an org DELETE never evicts t
         expect(registry.getItem('view', 'env_grid')).toBeUndefined();
     });
 
-    it('an env-wide delete heals even while an org overlay of the same name exists', async () => {
-        // The direction the gate must NOT over-reach in: the org row is not a
-        // reason to leave the env-wide entry stale. Scope is read from the
-        // DELETE, never from what else happens to be stored.
-        await protocol.saveMetaItem({ type: 'view', name: 'shared_grid', item: viewBody('shared_grid', 'Env grid') });
-        engine.plant(metaRow('view', viewBody('shared_grid', 'Org A grid'), ORG_A));
-
-        await protocol.deleteMetaItem({ type: 'view', name: 'shared_grid' });
-
-        expect(registry.getItem('view', 'shared_grid')).toBeUndefined();
-        // Org A's legacy row is untouched by an env-wide delete: it stays
-        // stored, for the v18 ceremony to promote or report.
-        const legacy = await engine.find('sys_metadata', { where: { organization_id: ORG_A } });
-        expect(legacy.map((r: any) => JSON.parse(r.metadata).label)).toEqual(['Org A grid']);
-    });
 });
