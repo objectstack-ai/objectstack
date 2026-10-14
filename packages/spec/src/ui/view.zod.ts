@@ -2251,219 +2251,39 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *
  * Closed (strict) from the start, and the strictness stands on its own: it does
  * NOT rest on the renderer refusing an undeclared key, because nothing
- * downstream refuses one. Measured at the `.objectui-sha` pin `53ded82b` by
- * EXECUTING the pinned declarations, not by reading them, and RE-READ at pin
- * `87af769e9` on 2026-09-20 — every one of the seven anchors below moved on
- * that hop, one of them lost the symbol it quoted, and the quotes read that
- * tree. RE-READ again at pin `62597c588` on 2026-09-23: that bump redded the
- * two `ObjectMap.tsx` anchors, as designed, and they are re-pointed below —
- * objectui `2252653d0` rewrote the docblock and dev warning ABOVE
- * `getMapConfig` (the remedy for a top-level `style` now names the declared
- * `map: { style }`, which the flatten whitelist carries out as `mapStyle`),
- * while `getMapConfig` itself is byte-identical, so both read points moved 19
- * lines and neither changed what it does; the other five anchors sit in files
- * byte-identical to `87af769e9`. RE-READ again at pin `f8a9d0fb0` on
- * 2026-09-24: that bump redded three anchors, and each MOVED with the block it
- * opens byte-identical — `ObjectView.tsx`'s `case 'map':` `1764` -> `1792`
- * (17 lines), `ObjectMapConfigSchema` `1574` -> `1589` (the whole 47-line
- * declaration) and `LIST_VIEW_LOCAL_OVERRIDES` `734` -> `741` (the whole
- * list, still without `map`); `ObjectMap.tsx` and the `ListView.tsx` anchors
- * did not move. RE-READ again at pin `dd3f7e1be` on 2026-09-28: that bump
- * redded five anchors, and none of them changed what it reads — `case 'map':`
- * `1792` -> `2043`, whose arm gained one comment line (`viewOptions.map` is now
- * described as the host `views` entry merged with the named view's canonical
- * `map` block, objectui#7928) and still flattens through the same whitelist;
- * `ObjectMapConfigSchema` `1589` -> `1835`, its ten-line declaration
- * byte-identical (only docblocks around it were reworded);
- * `LIST_VIEW_LOCAL_OVERRIDES` `741` -> `809`, still without `map`; and the two
- * `getMapConfig` lines `404` -> `409` and `409` -> `414`, byte-identical. The
- * `ListView.tsx` anchors did not move. RE-READ again at pin `db11afd49` on
- * 2026-09-29: that bump redded three anchors, and each MOVED with the block it
- * opens byte-identical — `case 'map':` `2043` -> `2280` (the whole arm),
- * `ObjectMapConfigSchema` `1835` -> `2037` and `LIST_VIEW_LOCAL_OVERRIDES` `809`
- * -> `944` (the whole list, still without `map`); the `ListView.tsx` and
- * `ObjectMap.tsx` anchors did not move. ⚠️ One CONTENT change rides on the
- * `ObjectMapConfigSchema` move, spelled beside it below: objectui#5157 closed
- * that declaration with `.strict()`. RE-READ again at pin `e420df310` on
- * 2026-09-30: that bump redded five anchors, and none of them changed what it
- * reads — `case 'map':` `2280` -> `2293` (the whole arm byte-identical),
- * `ObjectMapConfigSchema` `2037` -> `2056` (its ten-line declaration
- * byte-identical, still closed with `.strict()`), `LIST_VIEW_LOCAL_OVERRIDES`
- * `944` -> `1083` (the whole list byte-identical, still without `map`), and the
- * two `getMapConfig` lines `409` -> `408` and `414` -> `413`, byte-identical:
- * objectui `846cec0ef` (objectui#8348) rewrote the record-source docblock above
- * `getMapConfig` one line shorter and left the function untouched. The
- * `ListView.tsx` anchors did not move. RE-READ again at pin `31971ff1e` on
- * 2026-10-01: that bump redded two anchors, both in `objectql.zod.ts`, which
- * grew above them (objectui#10859 batches 4 to 6 and objectui#11276 moved
- * `object-form`, `object-map`, `object-gantt` and `object-chart` onto the
- * `properties` bag, among others), and neither changed what it reads —
- * `ObjectMapConfigSchema` `2056` -> `2123`, its ten-line declaration
- * byte-identical and still closed with `.strict()`, and
- * `LIST_VIEW_LOCAL_OVERRIDES` `1083` -> `1138`, the whole list byte-identical
- * and still without `map`; `ObjectMap.tsx`, `ObjectView.tsx` and the
- * `ListView.tsx` anchors did not move. RE-READ again at pin `89cad75d5` on
- * 2026-10-02: that bump redded four anchors. Two are in `objectql.zod.ts`,
- * which grew above them again (objectui#11168 slice 3, objectui#11276,
- * objectui#10872 batch 10 and objectui#10993 batch 4 among others), and
- * neither changed what it reads — `ObjectMapConfigSchema` `2123` -> `2145`,
- * its ten-line declaration byte-identical and still closed with `.strict()`,
- * and `LIST_VIEW_LOCAL_OVERRIDES` `1138` -> `1160`, the whole list
- * byte-identical and still without `map`. The other two are the
- * `getMapConfig` lines, `408` -> `415` and `413` -> `420`, and ⚠️ the second
- * one's CONTENT changed: objectui#11168 slice 3 made `mapStyle` outrank
- * `map.style` on the declared-block path too (seven comment lines added
- * above), so the return is now `return { ...config, style };` where it was
- * `return { ...config, style: config.style || style };`. It is still a spread
- * of the AUTHORED block, undeclared key and all, so the reading below holds;
- * only the `style` it writes over the spread changed precedence. The
- * `safeParse` line is byte-identical. `ObjectView.tsx` and `ListView.tsx` are
- * byte-identical, so their anchors did not move. RE-READ again at pin
- * `ab1879721` on 2026-10-03: that bump redded three anchors, and none of them
- * changed what it reads. Two are in `objectql.zod.ts`, which grew above them
- * again (+629/-88: objectui#11533 / objectui#11522's spec `{ condition, style }`
- * rule schemas, objectui#6152 round 6's ten `ObjectGridSchema` members,
- * objectui#11068's `keyboardNavigation` and objectui#11440's seven armed node
- * types among others) — `ObjectMapConfigSchema` `2145` -> `2370`, its ten-line
- * declaration byte-identical and still closed with `.strict()`, and
- * `LIST_VIEW_LOCAL_OVERRIDES` `1160` -> `1419`, the whole list byte-identical
- * and still without `map`. The third is `case 'map':` in `ObjectView.tsx`,
- * `2293` -> `2299`, the whole arm byte-identical: objectui#11445 added six
- * lines above it (the record-count line's i18next count family).
- * `ObjectMap.tsx` is byte-identical and `ListView.tsx` changed only below
- * `:146` and `:85` (objectui#10813, objectui#11445, objectui#11227), so their
- * anchors did not move. The hop onto pin `2e818d0b5` (2026-10-04) redded
- * none of them. RE-READ again at pin `9dfaca654` on 2026-10-05: that bump
- * redded three anchors, and none of them changed what it reads. Two are in
- * `objectql.zod.ts`, which grew above them (+22/-4: objectui#11266's
- * `InlineGridColumnSchema` import and `subforms[].columns` member,
- * objectui#11615's section-entry note and objectui#8347's past-tense notes)
- * — `ObjectMapConfigSchema` `2370` -> `2388`, its ten-line declaration
- * byte-identical and still closed with `.strict()`, and
- * `LIST_VIEW_LOCAL_OVERRIDES` `1419` -> `1437`, the whole list byte-identical
- * and still without `map`. The third is `case 'map':` in `ObjectView.tsx`,
- * `2299` -> `2300`, the whole arm byte-identical: objectui#8347 grew one
- * comment line above it. `ObjectMap.tsx` and `ListView.tsx` are
- * byte-identical, so their anchors did not move. RE-READ again at pin
- * `f0268ad78` on 2026-10-09: that bump redded all seven anchors, and none of
- * them changed what it reads. `ListView.tsx` gained one import line above
- * both of its anchors (objectui#11860), so `resolveListMapConfig` `146` ->
- * `147` and `FLAT_MAP_CONFIG_SPELLING` `85` -> `86`, each byte-identical;
- * `case 'map':` in `ObjectView.tsx` `2300` -> `2340`, the whole arm
- * byte-identical (objectui#11695, objectui#11775, objectui#11880 item 5 and
- * objectui#6152 rounds 8 and 10 changed the file around it); in
- * `objectql.zod.ts`, which grew above them again (+218/-125:
- * objectui#6152 rounds 7 to 12 among others), `ObjectMapConfigSchema` `2388`
- * -> `2513`, its declaration byte-identical and still closed with
- * `.strict()`, and `LIST_VIEW_LOCAL_OVERRIDES` `1437` -> `1506`, the whole
- * list byte-identical and still without `map`; and the two `getMapConfig`
- * lines `415` -> `449` and `420` -> `454`, byte-identical, objectui#11819's
- * WebGL2 probe landing above them. RE-READ again at pin `20c6d351a` on
- * 2026-10-10: that bump redded three anchors, and none of them changed what
- * it reads. `ListView.tsx` (+281/-235: objectui#6152 rounds 14 and 15 among
- * others) grew above `resolveListMapConfig`, `147` -> `200`, byte-identical,
- * while `FLAT_MAP_CONFIG_SPELLING` did not move from `86`; `case 'map':` in
- * `ObjectView.tsx` `2340` -> `2461`, the whole arm byte-identical
- * (objectui#6152 rounds 14 and 15, objectui#5144 and objectui#12053 changed
- * the file around it); in `objectql.zod.ts` (+49/-38: objectui#6152 rounds 14
- * and 15, objectui#12063) `ObjectMapConfigSchema` `2513` -> `2523`, its
- * declaration byte-identical and still closed with `.strict()`, while
- * `LIST_VIEW_LOCAL_OVERRIDES` did not move from `1506`, the whole list
- * byte-identical and still without `map`; `ObjectMap.tsx` is byte-identical,
- * so the two `getMapConfig` lines did not move. RE-READ again at pin
- * `0df67f237` on 2026-10-11: that bump redded three anchors, and none of them
- * changed what it reads. `ListView.tsx` (+229/-57: objectui#12081 item 2,
- * objectui#12086 and objectui#12082) gained nine import lines above both of
- * its anchors, so `resolveListMapConfig` `200` -> `209` and
- * `FLAT_MAP_CONFIG_SPELLING` `86` -> `95`, each byte-identical; `case 'map':`
- * in `ObjectView.tsx` `2461` -> `2479`, the whole arm byte-identical
- * (objectui#12082 and objectui#12085 changed the file around it);
- * `objectql.zod.ts` and `ObjectMap.tsx` are byte-identical, so
- * `ObjectMapConfigSchema` (`2523`, still closed with `.strict()`),
- * `LIST_VIEW_LOCAL_OVERRIDES` (`1506`, still without `map`) and the two
- * `getMapConfig` lines did not move. RE-READ again at pin `7578323a5` on
- * 2026-10-12: `ListView.tsx` (+34/-79: objectui#12217, objectui `f5b66bf97`)
- * gained one import line above both of its anchors, so `resolveListMapConfig`
- * `209` -> `210` and `FLAT_MAP_CONFIG_SPELLING` `95` -> `96`, each
- * byte-identical; `ObjectView.tsx`, `objectql.zod.ts` and `ObjectMap.tsx` are
- * byte-identical (`git diff --quiet`), so `case 'map':` (`2479`),
- * `ObjectMapConfigSchema` (`2523`) and the two `getMapConfig` lines did not
- * move. RE-READ again at pin `b9814b334` on 2026-10-14: that bump redded
- * three anchors, and none of them changed what it reads. `ObjectView.tsx`
- * (+20/-40) and `objectql.zod.ts` (+13/-19), both changed by objectui#12030
- * (objectui `c5406c201`) above the anchors, moved them: `case 'map':`
- * `2479` -> `2460`, the whole arm byte-identical; `ObjectMapConfigSchema`
- * `2523` -> `2520`, its declaration byte-identical and still closed with
- * `.strict()`; and `LIST_VIEW_LOCAL_OVERRIDES` `1506` -> `1503`, the whole
- * list byte-identical and still without `map`. `ListView.tsx` (+23/-3)
- * changed only below both of its anchors, so `resolveListMapConfig` (`210`)
- * and `FLAT_MAP_CONFIG_SPELLING` (`96`) did not move, and `ObjectMap.tsx` is
- * byte-identical, so the two `getMapConfig` lines did not move. Each anchor
- * quotes the line it was read at,
- * so the next pin bump reds instead of rotting
- * (`check:objectui-pin-citations`):
+ * downstream refuses one — measured by EXECUTING the renderer's declarations,
+ * not by reading them (the read points are recorded by symbol in
+ * `packages/spec/liveness/view.json`, row `list.map`):
  *
- * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
- *   (`packages/plugin-list/src/ListView.tsx:210` first line
- *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2460` first line
- *   `case 'map':`) copy it through a HAND-LISTED whitelist
- *   (`packages/plugin-list/src/ListView.tsx:96` first line
- *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
- *   the whitelist was a key LIST named `FLAT_MAP_CONFIG_KEYS` carrying this
- *   block's keys MINUS `style`, and objectui#9950 made it a total map from
- *   every declared key to its flat spelling, `style` delivered as `mapStyle`.
- *   So all eight keys now reach the product — and emit those as flat props. An
- *   undeclared key IS still dropped
- *   there, but by a whitelist and in SILENCE: no parse, no warning, no
- *   diagnostic of any kind.
- * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:2520` first line
- *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object` at `dd3f7e1be`,
- *   NOT strict, so an undeclared key parses clean there: zero issues, no
- *   warning. ⚠️ At `db11afd49` the declaration is closed with `.strict()`
- *   (objectui#5157): the `safeParse` below now FAILS on an undeclared key and
- *   `getMapConfig` `console.warn`s it by name, and `objectui validate` refuses
- *   the node with an `unrecognized_keys` issue at `map` — the flatten whitelist
- *   above still drops the key in silence, and the spread below still returns the
- *   authored block. `getMapConfig` consults that `safeParse`
- *   (`packages/plugin-map/src/ObjectMap.tsx:449` first line
- *   `const result = ObjectMapConfigSchema.safeParse(config);`) only to decide
- *   whether to `console.warn`, then returns a spread of the AUTHORED block
- *   (`:454` first line `return { ...config, style };`),
- *   undeclared key and all. That spread is reached by objectui's own
- *   component-node `map` prop, never by this face's flatten product ("neither
- *   flattener emits a `map` key at all", `getMapConfig`).
+ * - **The block this face feeds is FLATTENED, not forwarded.** The list and
+ *   object views copy it through a HAND-LISTED whitelist, a total map from
+ *   every declared key to its flat spelling (`style` delivered as
+ *   `mapStyle`), so all eight keys reach the product. An undeclared key IS
+ *   dropped there, but by a whitelist and in SILENCE: no parse, no warning,
+ *   no diagnostic of any kind.
+ * - **The renderer's own zod schema does not close the set for the author.**
+ *   It is closed with `.strict()` (objectui#5157), so its `safeParse` fails on
+ *   an undeclared key and the map's config reader `console.warn`s it by name —
+ *   but that reader consults the parse only to decide whether to warn, then
+ *   returns a spread of the AUTHORED block, undeclared key and all. That
+ *   spread is reached by objectui's own component-node `map` prop, never by
+ *   this face's flatten product.
  *
  * ⛔ So relaxing this block to `passthrough` would hand the extra key to no
  * checker at all: it dies in the whitelist without a word, and the one schema
- * that could have reported it was open and warn-only when this was measured (at
- * `db11afd49` it is closed by `.strict()` and still warn-only). And this parse is
- * the only
- * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:1503`
- * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
- * `ListViewSchema` imports THIS block by reference and the document check on
- * that side is this same schema. The two key sets MIRROR each other, key for
- * key. That parity was one key
- * SHORT until the `style` row below landed: the renderer's own
- * `ObjectMapConfigSchema` declares `style` and `getMapConfig` reads it
- * (`schema.map?.style`) while this block did not declare it, so strictness here
- * refused a style URL the renderer honours — an author could not declare a map
- * style through this face at all (#18406, director decision batch #153 item 4).
- * The two key sets match again. Re-read at the `.objectui-sha` pin `62597c588`
- * (2026-09-23: `objectql.zod.ts` and `plugin-map.mdx` are byte-identical to
- * `87af769e9`, and the `ObjectMap.tsx` read MOVED `377` -> `396` with its line
- * byte-identical; at `87af769e9`, 2026-09-20, each of these three had moved
- * and each was re-READ; at `f8a9d0fb0`, 2026-09-24, `ObjectMap.tsx` and
- * `plugin-map.mdx` are byte-identical to `62597c588` and the declaration MOVED
- * `1574` -> `1589` byte-identical):
- * `packages/types/src/zod/objectql.zod.ts:1589` declares the eight keys,
- * `packages/plugin-map/src/ObjectMap.tsx:396` reads
- * `schema.mapStyle || schema.map?.style`, and objectui's own
- * `content/docs/plugins/plugin-map.mdx:143` documents `style` in the block —
- * so the divergence was against the documented surface this docblock cites, not
- * merely against the code. The gantt / tree blocks
+ * that could report it is warn-only. And this parse is the only place an
+ * author is told ANYWHERE: `map` is not among objectui's list-view local
+ * overrides, so objectui's own `ListViewSchema` imports THIS block by
+ * reference and the document check on that side is this same schema. The two
+ * key sets MIRROR each other, key for key. That parity was one key SHORT until
+ * the `style` row below landed: the renderer's own schema declares `style` and
+ * the map reads it (`schema.mapStyle || schema.map?.style`) while this block
+ * did not declare it, so strictness here refused a style URL the renderer
+ * honours — an author could not declare a map style through this face at all
+ * (#18406, director decision batch #153 item 4). The two key sets match again,
+ * and objectui's own plugin-map documentation lists `style` in the block, so
+ * the divergence was against the documented surface, not merely against the
+ * code. The gantt / tree blocks
  * above used to be this file's two `.passthrough()` exceptions (renderer-ahead
  * knobs); #15469 closed both, so every view config block here now refuses an
  * unknown key the same way. Strict means a misspelling is a loud parse error
@@ -2795,10 +2615,9 @@ const LIST_CHART_BINDING_KEYS = ['dataset', 'values'] as const;
  *
  * The effective binding is read the way the renderer reads it: the top-level
  * `chart` block, else the legacy `options.chart` bag, and the block replaces
- * the bag WHOLE — objectui `plugin-list/src/ListView.tsx`
- * `resolveListChartBinding`, `schema.chart || schema.options?.chart || {}`
- * (`:207` at this repo's `.objectui-sha` pin `f0268ad7`, `:260` at objectui
- * `2a48bd40`). So, unlike the merged per-key underlays
+ * the bag WHOLE — `schema.chart || schema.options?.chart || {}` (the read
+ * point is recorded in `packages/spec/liveness/view.json`, row `list.chart`).
+ * So, unlike the merged per-key underlays
  * {@link listViewKindBlocks} describes, the bag is not one layer of the chart
  * block: when no block is declared it is the whole of it, and it owes what
  * the block requires.
@@ -3554,15 +3373,14 @@ const FormFieldBaseSchema = lazySchema(() => {
   precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer; for number/currency)'),
   // #19088 — the UPPER bound is the SAME platform ceiling #18972 landed on the
   // two `scale` declarations in `data/field.zod.ts`. The route from this row,
-  // measured at the `.objectui-sha` pin `53ded82bf7` rather than read off the
-  // comment above: plugin-form copies the key onto the runtime field
-  // (`packages/plugin-form/src/sectionFields.ts:220`) and the number cell
-  // renderer hands that value to `Intl.NumberFormat`
-  // (`packages/fields/src/index.tsx:661-667`, `maximumFractionDigits: scale ??
-  // 20`), which throws above 100. So a declaration past the ceiling was
-  // spec-valid and unrenderable at once. ⛔ The `form-view.ts` mapField bridge
-  // named in the block above is RETIRED at that pin — do not carry that half
-  // of the citation forward; the plugin-form leg carries the premise alone.
+  // measured rather than read off the comment above: plugin-form copies the
+  // key onto the runtime field and the number cell renderer hands that value
+  // to `Intl.NumberFormat` as `maximumFractionDigits`, which throws above 100
+  // (the read points are recorded in `packages/spec/liveness/field.json`, row
+  // `scale`). So a declaration past the ceiling was spec-valid and
+  // unrenderable at once. ⛔ The objectui `form-view.ts` mapField bridge named
+  // in the block above is RETIRED — the plugin-form leg carries the premise
+  // alone.
   // `precision` deliberately keeps no maximum: it is a TOTAL digit count and
   // reaches neither primitive, so this argument does not carry to it (#18972
   // measured the same and left it alone). See {@link MAX_RENDERABLE_SCALE}.
@@ -3583,160 +3401,17 @@ const FormFieldBaseSchema = lazySchema(() => {
   colSpan: z.number().int().min(1).max(4).optional().describe("Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all."),
   /**
    * [#2578] Relative field width. 'full' resolves to the form grid's full
-   * column count (`plugin-form` `resolveColSpan`, `autoLayout.ts:154` at
-   * `62597c588`, one line down from `:153` at `87af769e9` — an import was
-   * added above it, the function is unchanged); which
-   * container-query tiers receive the span class is the form renderer's, not
-   * this key's.
-   * At the `.objectui-sha` pin `87af769e9` the renderer emits one clamped
-   * col-span class per multi-column tier — `spanLadderFor`
-   * (`components/src/renderers/form/form.tsx:204-231`) walks the container
-   * class's tiers and emits a class each time a tier can give more cells than
-   * the field already holds — so 'full' is the whole row at every multi-column
-   * tier. ⚠️ This is the re-read the previous revision of this block asked for:
-   * objectui#9244 / objectui#9253 (objectui `bd09957380`, 2026-09-12) land
-   * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
-   * under-span this block used to record (#17328: one cell of two at
-   * 720px) no longer reproduces at objectui `b9814b334` (re-read there 2026-10-14:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
-   * `1fb1ced36`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
-   * byte-identical to `9646e2ed2` (`git diff --quiet`), so `resolveColSpan`
-   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid` mapping,
-   * `spanLadderFor` `:275-302` and its one call site `:3329` held unmoved, and it
-   * still emits the ladder. At `9646e2ed2`, re-read there 2026-10-12:
-   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
-   * byte-identical to `088e0f705` (`git diff --quiet`), so `resolveColSpan`
-   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid` mapping,
-   * `spanLadderFor` `:275-302` and its one call site `:3329` held unmoved, and it
-   * still emits the ladder. At `088e0f705`, re-read there 2026-10-12:
-   * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
-   * `e5311165a` (`git diff --quiet`), so `resolveColSpan` `:154`,
-   * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
-   * unmoved, and `form.tsx` changed on this hop — 3 insertions: objectui#12175
-   * (objectui `088e0f705`) registers `position-ref` / `permission-ref` among
-   * the widget hints — none of it inside `spanLadderFor`, which held at
-   * `:275-302` byte-identical, and its one call site MOVED `:3326` -> `:3329`
-   * with the call byte-identical, so it still emits the ladder. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
-   * `499799502` (`git diff --quiet`), so `resolveColSpan` `:154`,
-   * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
-   * unmoved, and `form.tsx` changed on this hop — 228 insertions, 79 deletions:
-   * objectui#12110 (objectui `5330038f4`), objectui#12155 (objectui `f3d540814`)
-   * and objectui#12130 (objectui `d2500d8be`), which settle the widget a field
-   * hint renders, the props a built-in branch hands its control, and a field's
-   * `step` and `className` — none of it inside `spanLadderFor`, which MOVED
-   * `:274-301` -> `:275-302` byte-identical under one added import line, and its
-   * one call site MOVED `:3258` -> `:3326` with the call byte-identical, so it
-   * still emits the ladder. At `499799502`, re-read there 2026-10-11:
-   * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
-   * `0df67f237` (`git diff --quiet`), so `resolveColSpan` `:154`,
-   * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
-   * unmoved, and `form.tsx` changed on this hop — 37 insertions, 25 deletions:
-   * objectui#12121 (objectui `c9fc10b1e`), a boolean whose default the server
-   * resolves is left unseeded on create — none of it inside `spanLadderFor`,
-   * which held at `:274-301` byte-identical, and its one call site MOVED
-   * `:3246` -> `:3258` with the call byte-identical, so it still emits the
-   * ladder. At `0df67f237`, re-read there 2026-10-11:
-   * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
-   * `20c6d351a` (`git diff --quiet`), so `resolveColSpan` `:154`,
-   * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
-   * unmoved, and `form.tsx` changed on this hop — 63 insertions, 3 deletions:
-   * objectui#12108 (objectui `b7cd5c891`), a create form says when the server
-   * will fill a field — none of it inside `spanLadderFor`, which held at
-   * `:274-301` byte-identical, and its one call site MOVED `:3202` -> `:3246`
-   * with the call byte-identical, so it still emits the ladder. At
-   * `20c6d351a`, re-read there 2026-10-10:
-   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
-   * byte-identical to `47b1f0bb7` (`git diff --quiet`), so `resolveColSpan`
-   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid`
-   * mapping, `spanLadderFor` `:274-301` and its one call site `:3202` held
-   * unmoved, so it still emits the ladder. At `47b1f0bb7`, re-read there
-   * 2026-10-09:
-   * `autoLayout.ts`, `fields`' `field-type-alias.ts` and `form.tsx` are
-   * byte-identical to `f0268ad78` (`git diff --quiet`), so `resolveColSpan`
-   * `:154`, `WIDE_FIELD_TYPES` `:58-69`, the `repeater` -> `field:grid`
-   * mapping, `spanLadderFor` `:274-301` and its one call site `:3202` held
-   * unmoved, so it still emits the ladder. At `f0268ad78`, re-read there
-   * 2026-10-09:
-   * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
-   * `a58626c88` (`git diff --quiet`), so `resolveColSpan` `:154`,
-   * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
-   * unmoved, and `form.tsx` changed on this hop — 100 insertions, 5 deletions:
-   * objectui#11777, ungrouped fields rendered as their own block rather than
-   * under the last group's heading — none of it inside `spanLadderFor`, which
-   * MOVED `:204-231` -> `:274-301` byte-identical, and its one call site moved
-   * `:3132` -> `:3202` with the call byte-identical, so it still emits the
-   * ladder. At `a58626c88`, re-read there 2026-10-06:
-   * `autoLayout.ts` and `fields`' `field-type-alias.ts` are byte-identical to
-   * `0abd4f9f8` (`git diff --quiet`), so `resolveColSpan` `:154`,
-   * `WIDE_FIELD_TYPES` `:58-69` and the `repeater` -> `field:grid` mapping held
-   * unmoved, and `form.tsx` changed on this hop — 147 insertions, 1 deletion:
-   * objectui#11631, a dependent lookup clearing when its `dependsOn` parent
-   * changes or clears — none of it inside `spanLadderFor`, still `:204-231`
-   * byte-identical, and its one call site moved `:2986` -> `:3132` with the
-   * call byte-identical, so it still emits the ladder.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`, re-read 2026-10-05: `autoLayout.ts`,
-   * `fields`' `field-type-alias.ts` and `form.tsx` are byte-identical to
-   * `2e818d0b5` (`git diff --quiet`), so every anchor held unmoved; at
-   * `2e818d0b5`, re-read 2026-10-04: `autoLayout.ts` and
-   * `form.tsx` are byte-identical to `ab1879721` (`git diff --quiet`), so every
-   * anchor held unmoved; at `ab1879721`, re-read 2026-10-03, they were
-   * byte-identical to `89cad75d5`, so `resolveColSpan` `:154`,
-   * `WIDE_FIELD_TYPES` `:58-69`, `spanLadderFor` `:204-231` and its one call
-   * site `:2986` held unmoved and were re-READ in place, so it still emits the
-   * ladder; `fields`' `field-type-alias.ts` changed one mapping (+6/-1,
-   * objectui#11448: `json` now maps to `field:object` instead of
-   * `field:code`), neither of them a `WIDE_FIELD_TYPES` member, so the wide
-   * set is unchanged, and the `repeater` -> `field:grid` mapping is
-   * byte-identical. At `89cad75d5`, re-read 2026-10-02: `autoLayout.ts`,
-   * `fields`' `field-type-alias.ts` and `form.tsx` are all byte-identical to
-   * `31971ff1e`, so `resolveColSpan` `:154`, `WIDE_FIELD_TYPES` `:58-69`, the
-   * `repeater` -> `field:grid` mapping, `spanLadderFor` `:204-231` and its one
-   * call site `:2986` held unmoved and were re-READ in place, so it still emits
-   * the ladder. At `31971ff1e`, re-read 2026-10-01: `autoLayout.ts` and
-   * `fields`' `field-type-alias.ts` are byte-identical to `e420df310`, so
-   * `resolveColSpan` `:154`, `WIDE_FIELD_TYPES` `:58-69` and the `repeater` ->
-   * `field:grid` mapping held unmoved, and `form.tsx` changed on this hop — 59
-   * insertions, 112 deletions: objectui#11070 round 5, the text family reading
-   * the spec's `minLength` / `maxLength` alone — none of it inside
-   * `spanLadderFor`, still `:204-231` byte-identical, and its one call site
-   * moved `:2985` -> `:2986` with the call byte-identical, so it still emits the
-   * ladder. At `e420df310`, re-read 2026-09-30: `autoLayout.ts` and
-   * `fields`' `field-type-alias.ts` are byte-identical to `db11afd49`, so
-   * `resolveColSpan` `:154`, `WIDE_FIELD_TYPES` `:58-69` and the `repeater` ->
-   * `field:grid` mapping held unmoved, and `form.tsx` changed on this hop — 142
-   * insertions, 5 deletions: objectui#8069's faulted-`visibleWhen` submit
-   * refusal and objectui#11116's multi-value select — none of it inside
-   * `spanLadderFor`, still `:204-231` byte-identical, and its one call site
-   * moved `:2848` -> `:2985` with the call byte-identical, so it still emits the
-   * ladder. At `db11afd49`, re-read 2026-09-29: `form.tsx` changed in
-   * comment citations and one further comment line (`:2454`) and `autoLayout.ts`
-   * in comment citations only, so `spanLadderFor` `:204-231`, its call site
-   * `:2848`, `resolveColSpan` `:154` and `WIDE_FIELD_TYPES` `:58-69` did not move
-   * and read the same. At `dd3f7e1be`, re-read 2026-09-28: `form.tsx` changed on
-   * this hop — 66 insertions, 5 deletions: the named clear-on-hide notice,
-   * objectui#8070, a cascade clear that writes `null`, objectui#10291, and
-   * objectui `1dae95a41` re-citing objectui#9244 as `bd0995738` in two
-   * comments — none of it inside `spanLadderFor`, which is still `:204-231`
-   * byte-identical, and its one call site moved `:2787` -> `:2848` with the
-   * call byte-identical (only the comment over it was re-cited), so it still
-   * emits the ladder; `plugin-form`'s `autoLayout.ts` changed in one docblock
-   * line, the same re-citation, so `resolveColSpan` is still `:154` and
-   * `WIDE_FIELD_TYPES` still `:58-69`, both byte-identical to `f8a9d0fb0` and
-   * `62597c588`. At `f8a9d0fb0` (2026-09-24) `form.tsx`
-   * had changed only in its registration's input list, objectui#9910's
-   * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
+   * column count; which container-query tiers receive the span class is the
+   * form renderer's, not this key's. The renderer emits one clamped col-span
+   * class per multi-column tier — it walks the container class's tiers and
+   * emits a class each time a tier can give more cells than the field already
+   * holds — so 'full' is the whole row at every multi-column tier. The
+   * widest-tier-only under-span this block used to record (#17328: one cell of
+   * two at 720px) no longer reproduces since objectui#9244 / objectui#9253.
+   * The read points (`resolveColSpan`, the wide-type list, the span ladder)
+   * are recorded in `packages/spec/liveness/view.json`, row `form.sections`.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at objectui `b9814b334d8a`, only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
