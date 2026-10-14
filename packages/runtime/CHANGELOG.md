@@ -1,5 +1,280 @@
 # @objectstack/runtime
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 8024e12: fix(runtime)!: the runtime dispatcher's by-name `/meta` doors ask the query decision `RestServer` asks, so `?member=` is honoured on the item read and refused where it is not read, never dropped
+  
+  `@objectstack/rest` exports one portable decision for the query a by-name `/meta` door accepts, `metaItemQueryRefusal(door, query)`, and the bundle member selector's one reading, `metaMemberSelector(query)`. Both transports call them, so a door's closed set, its sentences and their order are one answer. On a host whose `/meta` is answered by the runtime dispatcher alone (the `@objectstack/hono` `createHonoApp` catch-all), the item read, `PUT`, `/layers` and `/published` declared no closed query set: `GET /meta/email_template/x?member=zh-CN` was answered with the canonical member, a misspelling such as `?memeber=` the same, and `PUT ?member=zh-CN` beside an `en-US` body wrote `en-US`.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed. `@objectstack/rest` gains two exports (`metaItemQueryRefusal`, `metaMemberSelector`), and the module constants that moved beside them are still exported, unchanged, from `rest-server.ts`. No stored row or package source changes, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is four runtime doors' query accept sets on the runtime dispatcher (`GET` and `PUT /meta/:type/:name`, `/layers`, `/published`): a query parameter those doors dropped now answers a located `400 VALIDATION_ERROR`, and the remedy is in the request a caller sends to that door, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What each runtime dispatcher door accepts now, and what to do when it refuses. The answers are `RestServer`'s, in the dispatcher's own envelope, `{ success: false, error: { code: 'VALIDATION_ERROR', message } }`, and the message names the refused parameter:
+  
+  - `GET /meta/:type/:name` accepts `layers`, `state`, `preview`, `package`, `locale` and `member`, the six names `RestServer`'s item read accepts. `?member=` now reads that member of a bundled type (an `email_template`'s `zh-CN`); a member the bundle does not hold is `404`, and a selector on a type with no members is the protocol's located `400`. A single-valued name supplied twice is refused, and `?member=` beside `?layers=` is refused (the layered view shows the canonical member's layers). Read one member with `?member=` alone.
+  - `PUT /meta/:type/:name` accepts `package` and `mode`. It takes no `force`: this door never honoured one, and its `409` remedy already says so. Drop `?force=`, and send a body that keeps what the stored item carries. A save is addressed by its body: to save one member of a bundled type, put that member's own discriminator in the body and drop `?member=`.
+  - `GET /meta/:type/:name/layers` accepts `package`. Read one member with `GET /meta/:type/:name?member=…`.
+  - `GET /meta/:type/:name/published` accepts no query parameter. Send none.
+  
+  A request that sends only names the door reads is answered as before, except that `?member=` on the item read is now honoured. `RestServer`'s item read asks the same decision, and its answers are byte for byte what they were. Every name the `@objectstack/client` SDK and the Studio metadata client send to these doors is accepted, except `force` on a save: the SDK sends it only when its caller passes `force: true`, and Studio only to retry a save after a `409 DESTRUCTIVE_CHANGE`. On a dispatcher-only host that retry already failed with the same `409`, and it now answers the located `400` that names `force`.
+- d9d7edd: fix(runtime,rest,cloud-connection)!: the declared-endpoint fallback, REST's direct-mounted publish and federation routes, and cloud-connection's session doors refuse a session the ADR-0069 authentication policy holds
+  
+  Clause-②: no (narrowing) — a session ADR-0069 holds out of protected resources is refused by doors that answered it; core's existing exports only, no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at three groups of doors, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions these doors serve: a session whose user carries the ADR-0069 posture (an expired password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before the door's own logic runs. The other categories are closed on facts: the three packages publish (not unpublished); no ADR-0087 id covers these doors and this diff adds none (not registered / already-registered); and no published interface or type changes, the new fields living on package-internal types only (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate. REST's `enforceAuth` and the runtime dispatcher already refuse such a session. Three groups of doors that resolve a session on their own never asked, so they served it as an ordinary signed-in caller:
+  
+  - **`@objectstack/runtime`**: the declared-endpoint fallback (app-declared `apis:` endpoints, served by the dispatcher plugin's fallback seam). Its policy chain now asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) before `authRequired` and before the endpoint's target runs, on every declared endpoint, an `authRequired: false` one included, because the target runs as the caller. While a gate feature is active the chain reads the session for this, and when an active gate cannot read the session the request is answered `503` (`SERVICE_UNAVAILABLE`), as REST answers it. No declared path is handed to the allow-list, so no endpoint can exempt itself through the prefix it sits under.
+  - **`@objectstack/rest`**: the direct-mounted package publish door (`registerPackageRoutes`) and the external-datasource federation family (`registerExternalDatasourceRoutes`). Each refuses on the `authGate` the REST resolver already puts on the execution context it hands them.
+  - **`@objectstack/cloud-connection`**: `CloudConnectionPlugin`'s seven session doors (bind, poll, unbind, install, and the three installed-state reads) and all five `MarketplaceInstallLocalPlugin` doors (install, list, uninstall, reseed, purge). Each plugin asks the gate once, where it resolves the session, and every door that resolves one refuses on it.
+  
+  - **Refused now:** a held session gets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message`, in each door's declared error envelope, before the door does anything else. This is the answer REST gives the same session.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, an API-key caller is unaffected because it has no session to hold, and an anonymous caller gets the same `401`. `CloudConnectionPlugin`'s status read and `MarketplaceProxyPlugin`'s catalog proxy resolve no session and answer every caller alike, so they are unchanged.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before these doors answer them, as on every other protected route. Nothing needs configuring: the posture comes from the kernel's `auth` service, as it does for REST and the dispatcher.
+- d45d0e9: fix(runtime)!: the runtime dispatcher's read points refuse a repeated single-valued query name as their `RestServer` twins do, instead of reading one value, a joined value or an array
+  
+  The runtime dispatcher's `/meta`, `/ui`, `/i18n`, `/security`, `/packages` and `/data` read points each read a query name as ONE value. None of them guarded against the name arriving twice, because the only door in front of most of them, the `@objectstack/hono` `createHonoApp` catch-all, has always flattened a repeat to its last value. Handed an array, they answered wrongly: `GET /meta/object/:name/state/:field?from=a&from=b` answered a dead end for the joined state `'a,b'`; `_drafts`, `/ui/view` and the `/data` filter slot passed the array into the protocol call; both `/i18n` query-locale arms threw, which surfaced as a `500`; and the `/meta` list, the book tree, `/security/suggested-bindings` and `/packages` answered an empty or unscoped `200`. Each now refuses the repeat before any protocol or service call.
+  
+  `@objectstack/rest` publishes the lists and rules both transports read, so the two cannot drift: `META_QUERY_ARITY_DOORS` (the single-valued names of the `/meta` list, book tree, `_drafts` and state machine doors, which `RestServer`'s twins of those doors now read from), the decision `metaQueryArityRefusal(door, query)`, and `assertFilterParamSuppliedOnce`, the `/data` list's filter-slot rule, on the package entry.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed. `@objectstack/rest` gains three exports (`META_QUERY_ARITY_DOORS` and `metaQueryArityRefusal`, new in `meta-item-read-gate.ts`, and `assertFilterParamSuppliedOnce`, already exported from its module and now on the entry). The four lists `RestServer` spelled inline were never exported, and its answers are byte for byte what they were. No stored row or package source changes, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the query accept set of ten runtime dispatcher routes (seventeen names, the `/data` filter slot counted once): a single-valued name supplied more than once now answers a located `400`, and the remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you: a request that repeats one of the names below to the runtime dispatcher is now refused `400` in the dispatcher's own envelope, `{ success: false, error: { code, message } }`, instead of being answered with one value, a joined value or an array. The `code` is `VALIDATION_ERROR` with the sentence `RestServer` answers ("The "NAME" query parameter was supplied N times…"), except on the `/data` filter slot, which answers `INVALID_FILTER` with `RestServer`'s repeated-filter sentence. Send each name once.
+  
+  - `GET /meta/:type`: `package`, `preview`, `object`, `include`, `id`.
+  - `GET /meta/book/:name/tree`: `package`.
+  - `GET /meta/_drafts`: `packageId`, `type`.
+  - `GET /meta/object/:name/state/:field`: `from`.
+  - `GET /ui/view/:object`: `type`, when the path names no type.
+  - `GET /i18n/translations` and `GET /i18n/labels/:object`: `locale`, when the path names no locale.
+  - `GET /security/suggested-bindings`: `status`, `packageId`. A repeated `status` was already refused `400`, as an unknown status; it now gets the multiplicity sentence.
+  - `GET /packages`: `status`, `type`, beside `enabled`, which was already refused.
+  - `GET /data/:object`: every spelling of the filter slot (`filter`, `where` and their aliases, `filters`, `$filter`). Genuinely multi-valued names such as `select` and `expand` are untouched.
+  
+  A name sent once is answered as before, and one sent once as a one-element array now reads as that one value everywhere. Where a caller meets this today: `GET /packages` through `@objectstack/plugin-hono-server`, whose adapter already keeps repeats as arrays. Every other point is reached on a shipped host only through `createHonoApp`, which still flattens a repeat to its last value, so until that adapter keeps repeats the refusals are visible only to a caller of `HttpDispatcher.dispatch()` that passes an array. The `@objectstack/client` SDK sends each of these names once.
+- 01d5034: fix(runtime)!: the notification inbox, API-key mint and share-link management dispatcher domains decide an anonymous request once, as each domain's first statement, so an anonymous caller is answered 401 whatever the deployment carries
+  
+  ADR-0138 D2 decides that everything off its closed list of six door classes answers 401, and that "the decision is taken once per domain, as the domain's first statement, never surface by surface". Three dispatcher domains decided it per face, below another answer: `/notifications` below its inbox capability probe, `/keys` below its method check, and `/share-links` inside its management faces, below the share-link service probe. Each now opens with the shared `shouldDenyAnonymous` decision, before any service is resolved and before any face is chosen, so a face added to one of them later is refused to an anonymous caller from the day it lands.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the status three runtime dispatcher domains answer an unauthenticated caller with, on compositions where another answer used to come first; that caller was refused before and is refused now, and the remedy is to sign in, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a refusal moved ahead of the answers it used to follow), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What an unauthenticated caller is answered now, on each domain:
+  
+  - `/notifications`: `401 UNAUTHENTICATED` on every face. On a deployment with no inbox (a send-only notification provider, or none) the anonymous answer was the `501` capability answer; it is now the 401, and a signed-in caller there still gets the 501.
+  - `/keys`: `401 UNAUTHENTICATED` for every verb. A verb other than `POST` used to be answered `405` to an anonymous caller; a signed-in caller still gets the 405.
+  - `/share-links`: `401 UNAUTHENTICATED` on the create, list and revoke faces and on every path the domain does not serve. On a deployment without the share-link service the anonymous answer was `501`; a signed-in caller there still gets the 501. The two token faces, `GET /share-links/:token/resolve` and `GET /share-links/:token/messages`, are unchanged: the capability token admits them (ADR-0138 D2 class 2).
+  
+  The refusal is the dispatcher's standard envelope, `{ success: false, error: { code: 'UNAUTHENTICATED', message, httpStatus: 401 } }`, with the shared message every other dispatcher domain answers with, so a client reads one anonymous refusal on all of them. Nothing a signed-in caller is served changes, and on the standalone server the booted showcase already answered 401 on the faces it mounts.
+- f24574a: fix(runtime)!: the `/ui` and `/data` dispatcher domains decide an anonymous request once, as each domain's first statement, so an unauthenticated caller is answered 401 on every face they serve
+  
+  ADR-0138 D2 decides that everything off its closed list of six door classes answers 401, and that "the decision is taken once per domain, as the domain's first statement, never surface by surface". The rendered-view domain `/ui` and the CRUD and query domain `/data` made no anonymous decision of their own: an unauthenticated caller was answered by whichever face it named. Each now opens with the shared `shouldDenyAnonymous` decision, before the path is parsed and before any service is resolved, so a face added to either later is refused to an anonymous caller from the day it lands. No door class D2 lists runs through either domain.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the status two runtime dispatcher domains answer an unauthenticated caller with; the remedy is to sign in, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a refusal moved ahead of the answers it used to follow), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What an unauthenticated caller is answered now, wherever these dispatcher domains serve the request. Where `@objectstack/rest` is mounted it serves the same paths itself and already answered 401, so the standalone server's answers do not move.
+  
+  - `/data`: `401 UNAUTHENTICATED` on every read and write face, and on every path or verb the domain does not serve. The answer used to come from the face: the CRUD gate's `403 PERMISSION_DENIED` for the guest, a `400` for a request naming no object, a `428` for an unresolved environment on a multi-tenant host. A CORS preflight keeps its pass.
+  - `/ui`: `401 UNAUTHENTICATED` on every face, and on every path the domain does not serve.
+  
+  The refusal is the dispatcher's standard envelope, `{ success: false, error: { code: 'UNAUTHENTICATED', message, httpStatus: 401 } }`, with the shared message every other dispatcher domain answers with. Nothing a signed-in caller is served changes. The decision is asked about the caller's user id, as the `/notifications` and `/keys` floors ask it: `dispatch()` resolves identity for every request, so no caller on the wire is a system context, and an in-process call of either handler that passes a system context with no user id is refused too.
+- 430e5f5: fix(security)!: under a walled posture every environment-metadata write is the platform operator's, whatever its type (ADR-0131 D12 items 7–8, D11)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered walled-environment-metadata-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes. ADR-0131 D12 item 7: a walled deployment is "one environment, one schema, one catalog … The metadata-authoring capability (`manage_metadata` / `studio.access`) is what headquarters IT holds and plant admins do not." Item 8: a plant "cannot create a position, a permission set, a capability, a template or any metadata … A plant that needs its own catalog is given its own environment." D11: the rules are identical in every posture; only whether the wall is enforced differs.
+  
+  **Why.** The environment definition ledger carries no organization column, so a write lands for every organization. Measured on booted `isolated` and `group` stacks before this change: an organization owner granted `manage_metadata` inside their own organization created an object, a view and a flow at `/api/v1/meta`, edited, published, rolled back and reset the operator's view, ran `POST /api/v1/meta/_migrate-stored`, passed all thirteen `/api/v1/packages` write doors, installed, upgraded and uninstalled packages through `install-local`, and created a flow at `/api/v1/automation`, each with `2xx`; another organization's owner read every result. The security catalog was refused at these doors already; every other type was not.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `PUT`, `DELETE`, `POST …/publish` and `POST …/rollback` of `/api/v1/meta/:type/:name` on `@objectstack/rest`, and `PUT /meta/:type/:name` on the runtime dispatcher, for a type outside the security catalog (`object`, `view`, `flow`, `app`, `dashboard`, `translation` and every other type): **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` (the dispatcher answers `403 PERMISSION_DENIED`).
+  - Every `/api/v1/packages` write on the runtime dispatcher — create, the manifest `PATCH`, enable, disable, publish, publish-drafts, discard-drafts, revert, rollback, `commits/:commitId/revert`, duplicate, adopt-orphans and delete — for a package carrying no position, permission set or capability: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before anything is read or written. The refusal no longer reads the package's items.
+  - `POST /api/v1/marketplace/install-local` (install and upgrade) and `DELETE /api/v1/marketplace/install-local/:id` (uninstall) on `@objectstack/cloud-connection`, for a package carrying no catalog item: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`. The refusal's `error.details` no longer carries `catalogItems`; it carries `manifestId`.
+  - `POST /api/v1/automation`, `PUT /api/v1/automation/:name`, `DELETE /api/v1/automation/:name` and `POST /api/v1/automation/:name/clone`: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before the automation service is touched.
+  - `POST /api/v1/meta/_migrate-stored`, the install-wide rewrite of the stored metadata, preview and apply alike: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` on `@objectstack/rest` and `403 PERMISSION_DENIED` on the runtime dispatcher, before a row is read.
+  - Every one of these refusals carries one sentence: it names the written type (`a package` at the package doors, `the environment's stored metadata` at the rewrite), the posture and "ADR-0131 D3, D12 items 7–8, D11", and points at an environment of the organization's own. The catalog refusals that shipped before keep their envelopes and now read the same sentence.
+  - The activation refusals under a wall (`POST /api/v1/automation/:name/toggle`, `POST /api/v1/actions/_activation/…`, `POST /api/v1/security/_activation/permission/…`) no longer recommend cloning a flow or a permission set, or authoring a sibling action, since those writes are the operator's under a wall too; they name the platform operator.
+  
+  **Unchanged.** Reads. Assignments: `sys_user_position` and `sys_user_permission_set` rows stay organization rows. The platform operator and the engine's own writes (seeders, installers, migrations) write as before. Under `single` (and with no `tenancy` service), a `manage_metadata` holder writes exactly as before.
+  
+  **The remedy.** The platform operator authors the environment's metadata, in Studio or through a managed package; an organization that needs metadata of its own is given an environment of its own. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-environment-metadata-writes-retired`. `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) now judges every type alike: a custom door that writes environment metadata asks it after its capability gate, with no `isSecurityCatalogType` pre-filter.
+- 5d3018d: fix(runtime)!: the runtime dispatcher's ADR-0069 gate answers `503` when an active gate cannot read the session, as REST does
+  
+  Clause-②: no (narrowing) — an active gate's outage now refuses what it served; core's existing exports only, no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at one seam, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and every request whose session read answers receives the same answer as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is one window: while an ADR-0069 gate feature is active and the dispatcher's gate cannot read the session, the request is now refused with `503 SERVICE_UNAVAILABLE` instead of being served. The other categories are closed on facts: `@objectstack/runtime` publishes (not unpublished); no ADR-0087 id covers this seam and this diff adds none (not registered / already-registered); and no published interface or type changes, the method being private (not runtime-interface-only / type-surface-only / runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled. While a gate feature is active, the runtime dispatcher (`HttpDispatcher`) reads the session again at its own gate to ask that question. When that read failed, because the auth service could not answer, the dispatcher took the failure for "no session" and served the request, so a session the policy holds passed the gate on every dispatcher-served route for as long as the outage lasted. REST, and the dispatcher plugin's declared-endpoint fallback, answer the same window `503`.
+  
+  - **Refused now:** with a gate feature active, a request whose gate read fails (the session read rejects, or the auth service cannot hand back its session API) is answered `503` with the code `SERVICE_UNAVAILABLE`, in the dispatcher's existing error envelope. It is the authorization-store outage (`AuthzStoreUnavailableError`, `@objectstack/core`, read object `auth_gate`) that REST raises for the same window, and the route's own handler does not run.
+  - **Unchanged:** with no gate feature active the gate makes no read at all, and a deployment whose gate probe itself fails is treated as having no active gate, as on REST. Whenever the read answers, the answers are as before: a held session gets the gate's `403` with its own `code`, and a session the policy does not hold, an API-key caller and an anonymous caller are served as before.
+  
+  What changes for you. Only deployments with password expiry or enforced MFA turned on are affected, and only while their auth service cannot answer a session read: requests on routes the runtime dispatcher serves now answer a retriable `503` instead of being served. Retry once the auth service answers. Nothing needs configuring.
+
+### Patch Changes
+
+- d4aaeaf: fix(runtime): cloning a flow, and publishing a package's drafts, no longer fail on a `protection` block left in a row stored before the metadata save door refused it
+  
+  Clause-②: no
+  
+  Two runtime doors re-save a body the server builds from a stored row: the flow clone (`POST /api/v1/automation/:name/clone`), and the visibility flip of `POST /api/v1/packages/:id/publish-drafts`, which re-saves each of the package's apps still stored with `_unpublished: true`. The metadata save door now refuses a `protection` block with `400 VALIDATION_ERROR` (entry `23096-save-door-protection`). A row stored before that refusal can still carry a block, and both doors copied it into the body they saved.
+  
+  **FROM.** A clone of such a flow answered `400 VALIDATION_ERROR` about a block the admin never sent. The flip of such an app was refused the same way: the publish still answered `200`, the app stayed `_unpublished`, and the refusal was reported only under `unhideError`.
+  
+  **TO.** Both doors drop the `protection` block from the body they save, as the permission-set clone already does. The clone and the flip save, and the saved row carries no block. Nothing else in either body changes, and neither door states a `source`, so every other save-door check still applies. The block never bound anything: only a code package's loader translates `protection` into a lock, so dropping it changes no lock and no verdict.
+  
+  **Unchanged.** A flow or an app with no block is saved exactly as before.
+- 917b1a0: fix(plugin-auth)!: IdentityObjectsPlugin keeps the single posture's Default Organization at boot
+  
+  Clause-②: no (narrowing) — it restores ADR-0131 D3's Default Organization boot invariant, which `default-organization-invariant.ts` states as "[ADR-0131 D3] The Default Organization as a BOOT INVARIANT under the single posture", in the kernel that mounts `createIdentityObjectsPlugin()` without `AuthPlugin`; no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A boot-time invariant of a plugin composition, not a metadata change: no spec key, export, option, config field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which compositions boot and which hand-made organization topologies a system write accepts: a kernel that mounts `createIdentityObjectsPlugin()` and publishes its driver only after `bootstrap()` is refused at boot, and a kit that inserts its own organization row next to the Default Organization has its system writes that name no organization refused as ambiguous. The remedy is a kernel composition edit (publish the driver before the boot, read the Default Organization instead of inserting one), which no ledger entry can derive from metadata. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this boot path and this diff adds none (not registered / already-registered); and the one type change is the optional `Plugin.start` lifecycle member made concrete on `IdentityObjectsPlugin`, which narrows nothing a caller types against (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A kernel that mounts `createIdentityObjectsPlugin()` without `AuthPlugin` now holds its Default Organization under the `single` tenancy posture, so its seeds and system writes on tenant-scoped objects are stamped with it instead of refused with "the install holds no organization at all".
+  
+  - **Refused now:** a composition that mounts `createIdentityObjectsPlugin()` and publishes its driver after `bootstrap()` (the identity objects' `start()` reads `sys_organization` under `single`, so the boot fails with `No driver available for object 'sys_organization'`); and a kit that inserts its own organization row after boot, which now holds two organizations under `single`, so every system write that names no organization is refused as ambiguous (ADR-0131 D9).
+  - **Unchanged:** the walled postures (`group`, `isolated`), where `start()` creates nothing; the refusal at `init()` of `createIdentityObjectsPlugin()` mounted beside `AuthPlugin`; every composition that publishes its driver before boot; and a declaration-only boot (`os migrate`), which suppresses `start()`.
+  
+  - **Why.** ADR-0131 D3 makes the Default Organization a boot invariant under `single`: it owns every row. Registering `sys_organization` is what turns the engine's and the seed loader's zero-organization branch from "unstamped" into "refused" (D9). `IdentityObjectsPlugin` registers that object, but only `AuthPlugin.start()` created the organization, so the reduced kernel the plugin exists for (ObjectQL, `createIdentityObjectsPlugin()`, `SecurityPlugin`) refused every seed row of an organization-owned object.
+  - **What changed in `@objectstack/plugin-auth`.** `IdentityObjectsPlugin` gains a `start()` that, under `single`, finds or creates the Default Organization with the same invariant `AuthPlugin.start()` runs. It is idempotent, and a failure fails the boot. The posture is the `tenancy` service's when one is registered, otherwise the requested one (`OS_TENANCY_POSTURE`). Under `group` and `isolated` it does nothing. Nothing new is exported, and the plugin is still refused beside `AuthPlugin`.
+  - **What changed in `@objectstack/runtime`.** `AppPlugin` orders `com.objectstack.auth.identity-objects` ahead of itself, as it already ordered `com.objectstack.auth`, so the organization exists before the inline seed loads, wherever a host lists the two plugins.
+  - **If your test kit mounts `createIdentityObjectsPlugin()`.** Its kernel now reads and writes `sys_organization` during `bootstrap()` under `single`. Publish the driver before the boot (a `driver.default` service, or a datasource plugin), not with `registerDriver()` after it. Otherwise the boot fails with `No driver available for object 'sys_organization'`. A kit that inserted its own organization row to stand in for the missing one now holds two, and a system write that names no organization is refused as ambiguous; drop that insert and read the Default Organization (`slug: 'default'`) the boot created.
+- 37510aa: feat(security): the guest's grants channel — an anonymous request at a guest-entry door holds the sets bound to the `guest` anchor, in the one organization the deployment resolves for it (ADR-0138 E1, D3/D4)
+  
+  ADR-0087 disposition: none. No authorable key, accept set or stored shape moves: no spec schema, metadata type, stored row or published response field is added, removed, renamed or re-shaped. A declared binding that was not enforced becomes enforced (ADR-0090 D9, as ADR-0138 D3 amends it).
+  
+  **The bindings that start granting.** On the reference apps, none: `app-showcase`, `app-crm`, `app-multi-package` and `app-todo` declare no definition of the `guest` anchor that names a set. `app-showcase` ships `showcase_guest_portal` as a capability an administrator may bind and binds it to no anchor (its `client_portal_user` position is an ordinary position), and `app-crm`'s `guest_portal` is the public form doors' set, which keeps its own posture. No reference app declares a permission set named `guest`, so no grant stops either. A set starts granting only where a deployment holds an environment definition of the `guest` position that names it.
+  
+  What changes:
+  
+  - **`@objectstack/core`** — the anonymous branch of `resolveAuthzContext` resolves the guest's grants on a face that takes the explicit guest entry (the new `guestEntry` input). It reads the sets the `guest` position's definition names, through the same position-bound read every position uses, and the activation ledger as for any held set. It resolves them only in the organization the guest entry's organization step derives (`resolveGuestOrganization`), which asks ADR-0131 D9's predicate and no second spelling of it. With nothing bound, the guest holds no set and no read is issued. The predicate itself, `resolveSystemWriteOrganization`, moves to `@objectstack/core` so both of its askers share it. New exports: `resolveGuestOrganization`, `resolveSystemWriteOrganization` (with `SystemWriteOrganizationDecision` and `SystemWriteRefusalReason`), and `GuestOrganizationUnresolvedError` with `isGuestOrganizationUnresolvedError` and its constants.
+  - **`@objectstack/objectql`** — `resolveSystemWriteOrganization` and its two types are re-exported from `@objectstack/core` as the same bindings. Nothing a caller imports changes.
+  - **`@objectstack/plugin-security`** — the set resolution treats the guest's sets as any requested set, and no longer folds the guest's position into the request. A permission set that merely shares the anchor's name no longer reaches an anonymous caller, and the baseline and `everyone` never did. At the CRUD gate, a guest that reaches a data operation acting in no organization, on a deployment where the organization step refuses, is refused before the operation runs.
+  - **`@objectstack/plugin-sharing`** — the read filter answers deny-all for the guest on every object that record sharing scopes, before the sharing-model branch: the guest reaches rows only through share links, never through the object's sharing model (ADR-0138 D3 item 6, as the maintainer's ruling C amends it). `externalSharingModel` is still not read for any caller. Share links are redeemed at their own door and are unchanged.
+  - **`@objectstack/runtime`** — the runtime face, which serves the guest, asks for the guest's grants.
+  
+  What an anonymous caller sees at an `authRequired: false` endpoint of `type: 'object_operation'`:
+  
+  - **One organization, a set bound to `guest`:** the operation runs as the guest, under that set, in that organization. A read the set grants is admitted and returns no row, whatever the object's sharing model (`private`, `public_read`, `public_read_write` or `controlled_by_parent`): the guest reaches a record only through a share link. A create the set grants lands in that organization with no owner.
+  - **Nothing bound:** `403 PERMISSION_DENIED`, as before.
+  - **A walled deployment, several organizations, or none:** `501 NOT_IMPLEMENTED`, naming the missing site binding (ADR-0138 D5), where it used to be `403 PERMISSION_DENIED` with nothing granted. Nothing that was served stops being served. The operator's log names the reason once.
+  
+  Unchanged: share links, which still serve an anonymous caller the one record they name, with `publicSharing.eligibility` checked at the mint and at every redemption; the public form doors, which keep their own posture and organization; the flow door, which runs under the flow's own declared posture; every surface that answers an anonymous request `401`; and every signed-in caller.
+  
+  Level: `minor` for `@objectstack/core`, because new exported symbols widen its published index; `patch` for the other four, whose exports do not move.
+- 28e294f: fix(plugin-sharing, runtime): a share link that has a password and is limited to signed-in users answers an anonymous visitor `401 SIGN_IN_REQUIRED`, whatever password was sent
+  
+  Clause-②: no — every request refused before is still refused; only which refusal code an anonymous caller reads changes.
+  
+  A share link can carry a password and the `signed_in` audience together. For such a link, the share-link resolve door answered an anonymous visitor from the password before the audience: `NEEDS_PASSWORD` with no password, and `WRONG_PASSWORD` with any password, the correct one included. The console's shared-record page then told a visitor who typed the right password "Wrong password.", and never offered sign-in.
+  
+  - **Anonymous caller, `signed_in` link:** `401 SIGN_IN_REQUIRED` with no password, a wrong one or the correct one. The answer is the same for all three, so it never tells an anonymous caller whether a password is right. Once signed in, the visitor is asked for the password as before.
+  - **Signed-in caller:** unchanged. `401 NEEDS_PASSWORD` with no password, `401 WRONG_PASSWORD` with a wrong one, and the record with the correct one.
+  - **Unchanged:** links with any other audience (a `public` link with a password still answers `NEEDS_PASSWORD` / `WRONG_PASSWORD` to an anonymous caller), the expired-or-revoked `410 EXPIRED_OR_REVOKED`, the `404 INVALID_OR_EXPIRED` for an unknown token or an object with public sharing switched off, and every link that resolves.
+  - Both mounts of the resolve door answer alike: plugin-sharing's share-link routes and the runtime dispatcher's share-links domain.
+- Updated dependencies [dac99c2]
+- Updated dependencies [5c9bfb0]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [8024e12]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [c6139f2]
+- Updated dependencies [3490bf5]
+- Updated dependencies [920bc12]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [6f4c518]
+- Updated dependencies [08b38cb]
+- Updated dependencies [917b1a0]
+- Updated dependencies [d9d7edd]
+- Updated dependencies [78c13bd]
+- Updated dependencies [9543e9c]
+- Updated dependencies [d45d0e9]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [e790cfc]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [09ef77c]
+- Updated dependencies [404fc47]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [24e064f]
+- Updated dependencies [2de9c03]
+- Updated dependencies [5b68524]
+- Updated dependencies [5e725b8]
+- Updated dependencies [6d96721]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [02a691a]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [be50633]
+- Updated dependencies [325a92e]
+  - @objectstack/plugin-security@18.0.0-next.1
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/metadata-protocol@18.0.0-next.1
+  - @objectstack/objectql@18.0.0-next.1
+  - @objectstack/rest@18.0.0-next.1
+  - @objectstack/plugin-auth@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/service-i18n@18.0.0-next.1
+  - @objectstack/service-datasource@18.0.0-next.1
+  - @objectstack/metadata@18.0.0-next.1
+  - @objectstack/metadata-core@18.0.0-next.1
+  - @objectstack/driver-memory@18.0.0-next.1
+  - @objectstack/driver-sql@18.0.0-next.1
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.1
+  - @objectstack/driver-turso@18.0.0-next.1
+  - @objectstack/formula@18.0.0-next.1
+  - @objectstack/observability@18.0.0-next.1
+  - @objectstack/service-cluster@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes
