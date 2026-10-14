@@ -1,5 +1,765 @@
 # @objectstack/spec
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 66949b7: feat(plugin-security)!: the four security-catalog row objects are retired — `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` (ADR-0131 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered catalog-row-objects-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Positions, permission sets and capabilities live in the security catalog — the environment registry, fed by package declarations and by environment metadata saved through `/api/v1/meta` (ADR-0131 D3). The four row objects that mirrored them are no longer registered, so their data and REST routes and their Setup object pages are gone. No table is dropped and no row is deleted.
+  
+  FROM → TO:
+  
+  - `GET|POST|PATCH|DELETE /api/v1/data/sys_permission_set` → `GET|PUT|DELETE /api/v1/meta/permission/:name`; to copy a set, `POST /api/v1/security/permission-sets/:name/clone` with `{ name, label }`.
+  - `… /api/v1/data/sys_position` → `/api/v1/meta/position/:name`. A position's permission sets are its definition's `permissionSets`.
+  - `… /api/v1/data/sys_position_permission_set` → the position definition's `permissionSets` (`PUT /api/v1/meta/position/:name`).
+  - `… /api/v1/data/sys_capability` → read-only `GET /api/v1/meta/capability`; a package declares a capability with `defineCapability` (`stack.capabilities`).
+  - Setup → Access Control → Positions / Capabilities / Permission Sets now open Setup's catalog lists (`/apps/setup/metadata/<type>?scope=environment`) instead of the object pages; the `sys_position` record page (`SysPositionDetailPage`) is removed.
+  - An object permission on one of the four names in a permission set grants nothing and can be deleted.
+  
+  What else changes:
+  
+  - `sys_user_permission_set.permission_set_id` is a plain text column now, not a lookup: same column, same stored ids, same indexes. It is not written and grants nothing; a grant names its set by `permission_set`.
+  - A permission set saved through the metadata door is written to no row: the `permission` mutation projector, the `sys_permission_set` and `sys_position` data-door write-throughs and the row-only position backfill are no longer registered.
+  - On a fresh `single`-posture database the first human is promoted to platform administrator without reading any catalog row. An unscoped grant written before `sys_user_permission_set.permission_set` existed (it names no set) still withholds the promotion until the organization-ownership migration names it.
+  - Uninstalling a package still revokes every grant naming a permission set the package declared, by the names the uninstalling door captures before the withdrawal (`declared`, `captureUninstallDeclared`), and now by those names alone: the cleanup reads and removes no `sys_permission_set` or `sys_position_permission_set` row, so the `sets` and `positionBindings` counts on its outcome are always 0. A grant written before `sys_user_permission_set.permission_set` existed names no set and is not reached; the organization-ownership migration names it.
+  - On a `group` or `isolated` deployment the data-door half of the walled catalog refusal goes with the objects: a data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability` answers `404 OBJECT_NOT_FOUND` for every caller instead of `403 PERMISSION_DENIED` below the platform operator. The refusal at the `/meta` write doors, the permission-set clone door and the `/packages` write doors is unchanged.
+  - `capability-reference-unknown` no longer counts a `sys_capability` seed row as a declared capability — no runtime reader consults one. Declare the capability with `defineCapability`.
+  - On an existing database `os migrate plan`'s unmanaged-table sweep now lists the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` tables: they keep their rows and no object declares them any more. The sweep only reports; nothing is dropped, and the tables stay for the organization-ownership migration.
+  
+  Removed exports, no replacement:
+  
+  - `@objectstack/plugin-security`: the object definitions `SysPosition`, `SysPermissionSet`, `SysPositionPermissionSet`, `SysCapability` (from `./objects`); `securityObjects` lists the remaining three.
+  - `@objectstack/platform-objects/pages`: `SysPositionDetailPage`.
+  - `@objectstack/spec`: `SystemObjectName.POSITION`, `SystemObjectName.PERMISSION_SET`; the four names leave `PLATFORM_OBJECTS_BY_PACKAGE['plugin-security']` and `PLATFORM_PROVIDED_OBJECT_NAMES`.
+  - `@objectstack/core`: `isRowActive` and `ActivatableRow` — a catalog row's `active` column decides nothing; deactivation is the activation ledger's (`sys_metadata_activation`).
+  - `@objectstack/objectql`: the published `PLATFORM_OBJECT_TENANCY` record loses its `sys_permission_set` key (the other three names were never in it). A removed key of an exported constant is a narrowing, so `@objectstack/objectql` takes `minor` under the launch-window convention for breaking changes.
+- 5f37d36: feat(spec)!: at most one `isDefault: true` record page per object per deployment — a second is refused at `defineStack` / `os validate`, at package registration and at metadata save, naming both pages (#23015)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered page-default-record-page-one-per-object-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `PageSchema.isDefault` now states the rule (maintainer ruling A on #23015): at most one `isDefault: true` record page may exist for an object in a deployment. The record view opens that page with no tie-break, so with two defaults for one object the page that opened used to be whichever plugin initialised first — an accident no author wrote. A record page is `type: 'record'` (the default when `type` is left out) bound to an `object`; `isDefault` on any other page is outside the rule.
+  
+  **What is refused, and where.** Every door that can add a second default refuses it, naming both pages:
+  
+  - **`defineStack`** (and so `objectstack validate`, `objectstack build` and a source boot) — two default record pages for one object inside one stack, `STACK_CROSS_REFERENCE_INVALID` (422), one finding per object naming the object, every page and its position (`stack.pages[0]`). **`composeStacks`** refuses the pair across the stacks it composes, in the same envelope; under `manifest: 'preserve'` one page name in two stacks is two packages' pages.
+  - **Package registration** (`@objectstack/objectql`'s `SchemaRegistry`, at `installPackage` ahead of every mutation and at the `registerItem` seam) — a package whose default record page meets another package's default for the same object, an environment's stored default, or a second default in its own manifest, `DEFAULT_RECORD_PAGE_CONFLICT` (422, exported as `DEFAULT_RECORD_PAGE_CONFLICT_CODE`). Two packages' pages under one name are two pages and are refused too. `OS_METADATA_COLLISION=warn` does not soften it.
+  - **Metadata save** (`@objectstack/metadata-protocol`'s `saveMetaItem`, so `PUT /api/v1/meta/page/:name`) — a page saved as the default record page of an object a stored page or a packaged page already holds, `DEFAULT_RECORD_PAGE_CONFLICT` (422), in draft and publish mode, before anything is written.
+  
+  **Unchanged.** A save under the existing default's own name is that page (an ADR-0005 overlay by name), not a second default. One default per object, a second record page that is not a default, and two objects with one default each are accepted. The same package registering again — a reload, or an upgrade that moves its default to another of its pages — is one holder. A save under the name of a page a package ships is still answered by the packaged-base refusal (`NOT_OVERRIDABLE`, 403), as before. A stored page reaching the registry from `sys_metadata` (hydration, write-through) is not refused again.
+  
+  ## FROM → TO
+  
+  | door | FROM | TO |
+  |:--|:--|:--|
+  | `defineStack` / `objectstack validate` | `pages: [{ name: 'account_a', type: 'record', object: 'crm_account', isDefault: true }, { name: 'account_b', type: 'record', object: 'crm_account', isDefault: true }]` accepted; the boot kept both and the record view opened whichever registered first | refused, `STACK_CROSS_REFERENCE_INVALID` 422 — set `isDefault: false` on all but one |
+  | `composeStacks` | two stacks each shipping a default record page for one object composed clean | refused in the cross-reference envelope, naming both stacks' pages |
+  | package registration | a second package (or a plugin's `manifest.register`) shipping a default record page for an object another package holds registered; init order decided the page | refused, `DEFAULT_RECORD_PAGE_CONFLICT` 422, naming both pages; keep one default, or compose the deployment without the package that ships the other |
+  | metadata save | `PUT /api/v1/meta/page/my_page` with `isDefault: true` for an object that already has a default record page stored or shipped saved | refused, `DEFAULT_RECORD_PAGE_CONFLICT` 422, naming both pages; save it with `isDefault: false`, or first demote the stored default |
+  
+  **The one-line fix: keep `isDefault: true` on the one record page per object that should open the record view, and set `isDefault: false` on every other.** To replace a page a package ships, compose the deployment without that package's page; shipping a second default is not an override path.
+  
+  No D2 conversion rewrites it: which page stays the default is the author's call. Its D3 record is the semantic entry `page-default-record-page-one-per-object-refused` (protocol 18).
+  
+  **`@objectstack/spec`.** `defaultRecordPageObject(page)` (exported from `@objectstack/spec/ui`) is the one reading of "which object is this page the default record page of" that the three doors share. `PageSchema.isDefault` gains its `.describe()`. `DEFAULT_RECORD_PAGE_CONFLICT` joins the error-code ledger under `@objectstack/objectql` and `@objectstack/metadata-protocol`.
+  
+  **`@objectstack/objectql`.** The registration refusal, `SchemaRegistry.defaultRecordPageHoldersOf(object)` (every page holding the object's default — the reading the save door meets with the stored pages) and the `DEFAULT_RECORD_PAGE_CONFLICT_CODE` constant.
+  
+  **`@objectstack/metadata-protocol`.** The save-door refusal.
+  
+  **`@objectstack/platform-objects`.** The page form's `isDefault` help text, which said "Set as default page for this page type" — a rule nothing enforced — now states the one-default-per-object rule, in all four locales.
+  
+  **Who is affected, measured.** In this repository every object with a default record page has exactly one: `sys_organization` and `sys_user` (`@objectstack/plugin-auth`), `sys_position` (`@objectstack/plugin-security`), `sys_approval_request` (`@objectstack/plugin-approvals`), and `showcase_project`, `showcase_task` and `showcase_preference` (`examples/app-showcase`). A deployment that also composes a package shipping its own default record page for one of those objects is refused at boot until one of the two pages stops being a default.
+- 1912af4: feat(spec)!: retire the view-level `api` data source — a view binds its object or static rows, and a metadata-declared API call is the page element's binding (#23082)
+  
+  **BREAKING** — `provider: 'api'` on a view's `data` (`ViewDataSchema`, with its `read` / `write` request blocks) is now refused at parse. The arm took any `url` and any `headers`, so a credential or a cross-origin call written into a view was stored as metadata, served to every client that read the view and sent by the console as written. The page element's API binding (`ElementApiDataSourceSchema`, `dataSource` on a page component) is the one door for a metadata-declared API call: same-origin, no credential key, read with the console's own signed-in fetch. One operation with two implementations that behave differently keeps the governed one — the view-level source is re-homed on the page element and removed, not aligned.
+  
+  Clause-②: no (narrowing)
+  
+  Measured before removal: no producer wrote `provider: 'api'` on a view outside documentation in objectstack (`bcebd8409`), objectui (`origin/main` `f228d710` — the console's approval-requests source builds `ApiDataSource` in code from an `ApiDataSourceConfig`, never a `ViewData`) or hotcrm (`0f84c9c`), each with a lit `provider: 'object'` control. A renderer reader existed in objectui, measured at `7578323a544e` (`ListView` routed the block to `ApiDataSource`; `ObjectGantt` built one from `read` / `write`), and is now unreachable from authored metadata.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `data: { provider: 'api', read: { url, method?, params?, headers? } }` on a list or form view | `data: { provider: 'object', object: '<object_name>' }` (or `{ provider: 'value', items: [...] }`), and the read as a page component's `dataSource: { provider: 'api', read: { url: '/api/...' }, path? }` |
+  | `data: { provider: 'api', write: { url, method, body? } }` on a form view | nothing — a form submits to its object; a submit-to-endpoint is not a view concern |
+  | `read.headers: { Authorization: '...' }` | nothing — a credential never lives in metadata; the page element binding refuses a credential key and the console sends its signed-in fetch |
+  
+  **The one-line fix:** bind every `provider: 'api'` view to its object or to static rows, and move the endpoint read onto a page component's `dataSource`.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`ViewData` no longer has the arm), and the parse — `defineView()`, `defineStack({ views })`, `os validate`, `PUT /api/v1/meta/view/:name` — refuses it at `data.provider` with the prescription:
+  
+  > `view.data.provider: 'api'` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — a view-level API source took any `url` and any `headers`, so a credential or a cross-origin call written there was stored with the view, served to every client that read it and sent by the console as written; a metadata-declared API call now has one door, the page element's binding, which is same-origin and credential-free. Bind the view to its object — `data: { provider: 'object', object: '<object_name>' }` — or to static rows — `data: { provider: 'value', items: [...] }` — and move the API read onto a page component: `dataSource: { provider: 'api', read: { url: '/api/...' } }` (with an optional `path` into the response) under a page's `regions[].components[]`, which the console reads with its own signed-in fetch.
+  
+  ## The retirement kit
+  
+  - **A value retirement, not a key**: `data` survives one arm lighter, so there is no `retiredKey()` tombstone and no `RETIRED_KEYS_BY_MAJOR` row. The prescription rides the discriminated union's own `error` map, keyed on the input's `provider === 'api'` — the retired bare-string `sort` clause's shape — so every other unknown provider keeps zod's own report, which lists the live arms (`object`, `value`, `schema`).
+  - **No D2 conversion, deliberately.** The replacement lives on a different metadata type (a page element), and the only mechanical edit a conversion could make — deleting the view's `data` so the view falls back to querying its bound object — would change what the view shows without telling anyone. An authored source or a stored `sys_metadata` row still carrying the arm meets the prescription at parse instead.
+  - **The D3 entry `view-data-api-provider-retired`** asks the author, per such view, which page composes the endpoint it read and what the view itself should now bind.
+  - **`HttpRequestSchema` / `HttpMethodSubsetSchema` stay exported** from `@objectstack/spec/shared` and `@objectstack/spec/ui`, unchanged. After this change no schema in the package composes `HttpRequestSchema`; that orphan is recorded, not acted on here.
+  - **Ledger:** `view.list.data` and `view.form.data` stay `live` (their surviving arms are read) and carry the arm's retirement record.
+  - **Docs and the published skill** no longer teach a view-level `api` source; both point at the page element binding.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, and `objectstack-ai/cloud`'s own view metadata was not readable from this change's session; a cloud view carrying an `api` source is refused at parse with the prescription above.
+  
+  <!-- adr-0087: registered view-data-api-provider-retired -->
+- 76815b9: feat(spec)!: a `controlled_by_parent` object derives its master from exactly one required `master_detail` — the parse refuses anything else, and the runtime's two fallback tiers retire (#23100)
+  
+  Clause-②: no (narrowing)
+  
+  ADR-0055 §1 says a `controlled_by_parent` object "must declare exactly one required `master_detail` field … Validation error otherwise (fail closed)". Until now neither the parse nor the runtime kept it. `ObjectSchema` accepted such an object with no master at all. The security runtime derived a master through a three-tier fallback the record never stated: a required `master_detail`, then any `master_detail`, then a required `lookup`, taking the first match by field order within a tier. The maintainer ruling (letter B) enforces the record, under ADR-0049 (enforce-or-remove).
+  
+  **BREAKING — what moves for consumers.**
+  
+  - **`@objectstack/spec`.** `ObjectSchema` (raw `.parse()` / `.safeParse()`, `ObjectSchema.create()`, `defineStack`, `os validate` and the metadata save door) refuses an object declaring `sharingModel: 'controlled_by_parent'` unless exactly one of its fields is a `master_detail` declared `required: true`. With none, the issue sits at `sharingModel` and names each field that relied on a retired tier. With two or more, it sits at `fields` and names them. A plain object literal is judged like a raw parse: an omitted `required` on its `master_detail` is refused, while `ObjectSchema.create()` keeps forcing an omitted `required` to `true`. The step-18 semantic migration entry `cbp-master-relation-tiers-retired` carries the prescription for `os migrate meta`. The step-18 conversion `cbp-master-detail-required-defaulted` covers the one lossless shape: a `controlled_by_parent` object whose one `master_detail` omits `required`, which Studio's field designer writes. It gets `required: true`, exactly what `ObjectSchema.create()` does. It runs on stored rows, built artifacts and `os migrate meta --from 17`. A live authoring parse still refuses the shape and names the fix.
+  - **`@objectstack/plugin-security`.** The relation resolver derives a master from that one field and nothing else. An object that declares a non-required `master_detail` only, a required `lookup` only, or two required `master_detail` fields resolves no master. Every read of it is denied, and every write and insert is refused with `422 INVALID_METADATA`. The plugin reports such an object once per object (`[security/controlled-by-parent] … resolves no master relation`), naming the shape it relied on. The `422` message now says "not exactly one required master_detail field".
+  - **`@objectstack/lint`.** `security-controlled-by-parent-no-relation` now refuses the non-required `master_detail` and required `lookup` shapes as well. `security-controlled-by-parent-ambiguous-relation` reports two or more required `master_detail` fields as "no master is derived", since the runtime no longer picks one by field order. Two required `lookup` fields are now a no-relation object, not a tie. `security-master-detail-ungranted` no longer treats a lookup-bound `controlled_by_parent` object as a detail.
+  
+  **FROM → TO — HotCRM's three objects.** These are the only producers measured on the retired third tier: the read-only HotCRM clone at `0f84c9c`, 8 `controlled_by_parent` objects, 5 of them already on one required `master_detail`. HotCRM's pinned engine is unaffected until it bumps past the release that carries this change.
+  
+  | object | FROM | TO |
+  |---|---|---|
+  | `crm_campaign_member` | `crm_campaign: Field.lookup('crm_campaign', { required: true })` | `crm_campaign: Field.masterDetail('crm_campaign', { required: true, deleteBehavior: 'restrict' })` |
+  | `crm_event_attendee` | `crm_event: Field.lookup('crm_event', { required: true })` | `crm_event: Field.masterDetail('crm_event', { required: true, deleteBehavior: 'restrict' })` |
+  | `crm_article_feedback` | `crm_knowledge_article: Field.lookup('crm_knowledge_article', { required: true, deleteBehavior: 'cascade' })` | `crm_knowledge_article: Field.masterDetail('crm_knowledge_article', { required: true, deleteBehavior: 'cascade' })` |
+  
+  `deleteBehavior: 'restrict'` keeps what the two lookups do today: a campaign or an event with members or attendees cannot be deleted. Without it a `master_detail` cascades, and a detail's rows are deleted with their master. An object whose rows must outlive their parent is not a detail. It leaves `controlled_by_parent` for `private`, `public_read` or `public_read_write`.
+  
+  **Remedy, in one line.** On every object with `sharingModel: 'controlled_by_parent'`, declare exactly one `master_detail` field with `required: true`, pointing at the master. Every other parent is a `lookup`.
+  
+  **Unchanged.**
+  
+  - An object with one required `master_detail` resolves and derives exactly as before, chain walk included. So does a required `master_detail` beside other `lookup` fields, or beside a `master_detail` that is not required. Every in-tree `controlled_by_parent` object is in that set: `examples/app-crm` (1), `examples/app-showcase` (2), the CLI's eval corpus (4) and the dogfood fixtures.
+  - Stored metadata whose one `master_detail` merely omits `required` keeps serving, converted as above. A stored row in any other retired shape is not rewritten: it still registers, under its `[metadata_spec_invalid]` diagnostic, and is denied until it is corrected and saved. Those shapes are an explicit `required: false`, two masters, or a required `lookup`. None of them is converted: turning a `lookup` into a `master_detail` changes what deleting the master does to every row, choosing between two masters is the pick ADR-0055 §1 refuses, and leaving `controlled_by_parent` is the author's decision.
+  - No export, signature or error code is added or removed.
+  
+  <!-- adr-0087: registered cbp-master-detail-required-defaulted, cbp-master-relation-tiers-retired -->
+- 4d1e4a8: feat(spec)!: a page action row's `onSuccess` is `ActionSchema`'s own post-success block, so its `navigate` is judged by the url scheme set, and the row's executor key refuses `'navigation'`, the runner's alias of `'url'`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered ui-page-action-row-on-success-shape-closed, ui-page-action-row-navigation-executor-refused -->
+  
+  **BREAKING**: an accept-set narrowing on two keys of four published page component rows, shipped as `minor` under the launch-window convention for accept-set narrowings.
+  
+  The page action rows are `action:button` and `action:icon` (`properties`), and each member of an `action:group` or `action:menu` (`properties.actions[]`). Each forwards its action keys to the console's action runner. Two of those keys still let a row carry a target the runner refuses at the click:
+  
+  - **`onSuccess`** was any value (`z.unknown()`). The runner reads only `ActionSchema`'s post-success block, `{ navigate, openIn }`, and classifies `navigate` with the url scheme set. So `onSuccess: { navigate: 'javascript:alert(1)' }` parsed clean, and so did a misspelled key or a callback shape, which the runner gives no reading at all. The rows now hold `ActionSchema.onSuccess`'s own block, the same instance by reference, so a row's verdict on any `onSuccess` value is the action's: the scheme set on `navigate`, the rename prescriptions for `url` / `redirectUrl` / `to` / `route` / `path` / `target` / `navigateTo` / `href`, and the closed `openIn` with its `'self'` default.
+  - **The executor key** (`actionType` on a node, `type` on a member) is a free string, and the rows judged a url `target` only when it read `'url'`. The runner also dispatches `'navigation'`, its local alias of `'url'`, to the same navigator, so `actionType: 'navigation'` with `target: 'javascript:…'` parsed clean. The url executor now has one spelling on the rows: `'navigation'` is refused at the executor key, with the rename onto `'url'`. The key otherwise stays open: a handler a host registers under another name (`navigate_create`, `navigate_edit`, …) is still dispatched by name.
+  
+  A page's `properties` bag is outside the stack parse. `os validate` judges it through its props gate, which parses the bag against these same rows, so it reports each refusal at the row's own path with the same text, as a `component-props-invalid` finding (an error, like every finding of that gate). A stored page still saves and loads.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `onSuccess: { navigate: 'javascript:…' }` (or `data:`, `tel:`, any other scheme) | an `https://` page or an in-app route, or drop the `onSuccess` — no hop runs a script or renders content |
+  | `onSuccess: { navigate: '//cdn.example.com/x' }` | `'https://cdn.example.com/x'`, or `'/x'` for an in-app path |
+  | `onSuccess: { navigate: 'tasks/${result.id}' }` (a bare relative template) | the rooted route, `'/tasks/${result.id}'`, or a `./` path |
+  | `onSuccess: { navigate: '' }`, or `onSuccess: {}` | the address the hop was meant to open, or drop the `onSuccess` |
+  | `onSuccess: { url: '/x' }` (or `redirectUrl`, `to`, `route`, `path`, `target`, `navigateTo`, `href`) | `onSuccess: { navigate: '/x' }` |
+  | `onSuccess: { navigate: '/x', openIn: 'new-tab' }` | `openIn: 'newTab'` — the block's spelling, not the top-level url switch's |
+  | `onSuccess: { type: 'notify', … }`, an array of callbacks, or a bare string | drop it: the runner reads only the navigation block, so these never ran |
+  | `actionType: 'navigation'` on an `action:button` / `action:icon` | `actionType: 'url'`, with the same `target` and `openIn` — `os migrate meta --write` rewrites it, and a stored row is rewritten when it is read |
+  | `type: 'navigation'` on an `action:group` / `action:menu` member | `type: 'url'`, with the same `target` and `openIn` — `os migrate meta --write` rewrites it, and a stored row is rewritten when it is read |
+  
+  **The one-line fix: give every page action row's `onSuccess` the action's block, `{ navigate, openIn? }`, with a `navigate` that is an `http(s)://` URL, a `mailto:` address, an in-app path that starts with `/` or `./`, or a template that opens with `${` — and spell the url executor `'url'`.** The rename from `'navigation'` is lossless on a row: the runner sends both spellings to one navigator, and the alias's own keys (`to`, `redirect`, `external`, `newTab`, `replace`) are not row keys. The executor rename is mechanical: `os migrate meta --from 17 --write` performs it through the ADR-0087 D2 conversion `page-action-row-navigation-executor-to-url`, which is retired from the load path, so an author meets the refusal while stored rows and migrated sources are rewritten. It lists the D3 entries `ui-page-action-row-navigation-executor-refused` (which names that conversion) and `ui-page-action-row-on-success-shape-closed`. An `onSuccess` rewrite stays by hand, because which address a refused `navigate` meant is the author's call.
+  
+  **What an author now sees.** `os validate`'s props gate reports a refused `navigate` at `properties.onSuccess.navigate` (or `properties.actions.N.onSuccess.navigate` for a member) with the action's own refusal: ``An action's `onSuccess.navigate` opens with `javascript:`, a scheme a url target never opens.``, followed by the reason and the admitted set. The alias is reported at `properties.actionType` (or `properties.actions.N.type`): ``An `action:button`'s `actionType: 'navigation'` is the console runner's local alias of `'url'`, refused on page action rows since @objectstack/spec 18, and the url executor has one spelling.``, followed by the rename. A row's parsed `onSuccess` now carries `openIn: 'self'` when it was omitted, as an action's does; the runner reads an omitted `openIn` the same way.
+  
+  **Measured producers: none refused.** No page action row in this repository or in objectui (at its pin `1fb1ced3`) writes an `onSuccess` outside the block or the executor `'navigation'`. objectui's row tests write `{ navigate: '/app/records/${result.id}' }`, admitted, and every `type: 'navigation'` there is an `element:button` inline action or a runner test, not a page action row. Host-registered executor names are kept: this package's own released guidance prescribes `actionType: 'navigate_edit'` on an `action:button`.
+- 4cc3ff9: feat(spec): `record:related_list` declares its parent record with a binding of its own, `parentDataSource`, beside the child-row `dataSource` (#23134)
+  
+  Clause-②: yes (widening)
+  
+  - **What is new.** `ComponentPropsMap['record:related_list']` (`RecordRelatedListProps`) accepts `parentDataSource`: the PARENT record the list hangs off, bound by a query. Its shape is the element data-source object binding `{ object, view?, filter?, sort?, limit? }` (`ElementDataSourceSchema`, referenced, not copied), the same binding `dataSource` takes on every page component. A binding the data-source shape refuses (no `object`, an unknown key, the MongoDB-style `filter` record, the `api` arm) is refused here too, at `parentDataSource`.
+  - **The single-record rule.** The parent is the FIRST row of the bound set by the binding's `sort`; declare `limit: 1` to say one row is meant. When no row answers, the block renders a loud absence, never an empty list. `relationshipValueField` is read on that row. This is the rule `record:details`, `record:highlights` and `record:quick_actions` already take for their own `dataSource`.
+  - **The fallback.** Without `parentDataSource`, the record page's record context remains the parent, as before. Every related list that parsed before parses unchanged.
+  - **`dataSource` keeps its meaning.** The node-level `dataSource` on `record:related_list` is still the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`) and is never read as the parent.
+  - **Planned, not yet rendered.** The key's describe opens with `[PLANNED — not yet rendered]`: no objectui renderer reads it yet. objectui reads it once a release carrying this key is installable there; until then a related list on an `app` page still finds no parent.
+  - **Refused elsewhere.** Every other `ComponentPropsMap` row refuses `parentDataSource` as an unknown key, and `os validate` reports it as `component-props-unknown-key`.
+  
+  ```ts
+  {
+    type: 'record:related_list',
+    properties: {
+      objectName: 'contact',
+      relationshipField: 'account_id',
+      parentDataSource: {
+        object: 'account',
+        filter: [{ field: 'is_primary', operator: 'equals', value: true }],
+        limit: 1,
+      },
+    },
+  }
+  ```
+- 107853c: `IAIConversationService.get` / `list` and `IAIService.listPendingActions` take the caller's execution context as an optional trailing parameter (ADR-0096 D5)
+  
+  Clause-②: yes (widening: an optional parameter on three published store-contract methods)
+  
+  - **FROM → TO.**
+    - `get(conversationId)` → `get(conversationId, context?: ExecutionContext)`
+    - `list(options?)` → `list(options?, context?: ExecutionContext)`
+    - `listPendingActions?(filter?)` → `listPendingActions?(filter?, context?: ExecutionContext)`
+  - **What an implementation does with it.** When a caller supplies `context`, the implementation passes it unchanged as the `context` of every engine read the method makes (`BaseEngineOptions.context`), so the read runs as that caller. Under ADR-0096 D5 strict mode an engine read with no principal is refused with 403, so without a caller an implementation can only read as system. The type and the position are the ones `ISharingService`, `IApprovalService`, `IShareLinkService` and `IAnalyticsService` already use.
+  - **Nothing to migrate.** The parameter is optional. A caller that omits it gets the read the implementation made before, and an implementation written against the shorter signatures still satisfies both interfaces. To read as the caller, pass the request's `ExecutionContext` and forward it to your engine reads.
+  - `list`'s `options.userId` stays a filter on the conversation's owner. It is not the caller's identity.
+  - Whether an ordinary member is admitted to their own rows depends on the stored objects' access and sharing, which these contracts do not declare.
+- 543b33d: fix(metadata-protocol)!: a metadata save or delete that names no package addresses the row of the one package the item belongs to, and a name two or more packages hold is refused `409 RESOURCE_CONFLICT`; the delete door can name its package (ADR-0048, ADR-0070)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or deleted, so there is nothing for `objectstack migrate meta` to rewrite. One optional request key is ADDED (`DeleteMetaItemRequestSchema.packageId`, with `?package=` on the REST reset door), a widening that asks nothing of an existing caller. What narrows is two runtime write doors: a save or a delete through the metadata API that names no package, of an item two or more packages hold, is refused, as is a package-less save of an item a read-only package holds; the remedy is in the request a caller sends (name the package), never a rewrite of a package source or a stored row. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A `sys_metadata` row is keyed by its package (ADR-0048), so one item can hold one row per package. A save that names a package (`?package=` on the REST door, `packageId` in process) writes that package's row. A save that named none always wrote the package-unbound row, even for an item a package owns, and a delete named no package at all: it removed whichever row of the item the store returned first. The draft save already resolved this: a draft that names no package is stored in the package of the item's active row.
+  
+  **FROM.** Save an item into a package (`PUT /api/v1/meta/app/my_app?package=com.acme.app`), then save it again without `?package=`: the second save answered `200` "Saved app 'my_app' (env-wide, state=active)" and wrote a second, package-less row beside the package's row. The item read kept serving the package's row, so nothing the save carried took effect, and a console "Disable" reported success while the app stayed enabled. The same held for the API, the CLI and agents, and for an overlay row bound to a code package. A `DELETE /api/v1/meta/app/my_app` of an item two packages hold removed one of the two rows, the other was then served, and the receipt said "it no longer exists". Uninstalling a package, or discarding its drafts, deleted each of its items by name the same way, so it could remove another package's row of the same name and leave its own.
+  
+  **TO.** A direct save, or a delete, that names no package resolves its address from the item's rows (the active rows for a save and a delete, the draft rows for a draft discard):
+  
+  - **Bound to one package.** The save writes that package's row, exactly as a save naming the package does, and the item read serves it next; the delete removes that row. The receipts name the package: "Saved app 'my_app' (env-wide, package=com.acme.app, state=active)" and "Deleted app 'my_app' (package=com.acme.app) — it no longer exists." Every check on the row the save writes reads that package: its stored lock, a stored credential carried forward, the optimistic lock, and the writable-base rule. The item read that names no package serves that row's `version`, so a read followed by a save or a delete with the served `If-Match` is accepted.
+  - **Bound to two or more packages.** The save or delete is refused `409 RESOURCE_CONFLICT` and changes nothing. The message names the packages and the remedy: name one with `?package=`.
+  - **Bound to none.** The save writes, and the delete removes, the package-unbound row, as before, and the receipts read as before.
+  
+  The delete door gains the address a save has: `DELETE /api/v1/meta/:type/:name?package=<id>` (`packageId` in process, `DeleteMetaItemRequestSchema.packageId`) removes that package's row and no other; `all` and an empty value name no package, as on the save door. A repeated `?package=` is refused `400`. A delete receipt now says when another row of the item is still stored, naming it, instead of claiming the item is gone or back at its artifact default. Uninstalling a package and discarding its drafts name the package, so each removes only its own rows.
+  
+  **Also refused now**, each as the same save naming the package is refused: a package-less save of an item held by a read-only package (a code package's runtime-only item, or an installed `system`/`cloud` package's) answers `422 WRITABLE_PACKAGE_REQUIRED`; and a package-less save asserting a create (`If-None-Match: *`) of an item a package holds answers `409 METADATA_CONFLICT`.
+  
+  `packageId: null` in process names no package too, as the request contracts state. The server-side rewrites keep the row they name: `os migrate meta --stored --apply` and the stored flow credential move pass `null` for a package-unbound row they rewrite, and that row is still the one written; package duplication names its target package.
+  
+  **Unchanged.** A save or a delete that names a package exactly. A draft save, which keeps its own inheritance. An item a code package ships with no stored row: the package-less save still writes the package-unbound overlay, and the read serves it. Package-less rows already stored beside a package's row stay as they are; none is converted. A package-less delete of such an item removes the package's row and its receipt says the package-less row remains.
+  
+  **Remedy.** For an item two packages hold, send the save or the delete with `?package=` naming the package whose row it edits or removes. A receipt now names the package when the write addressed a package's row; a client that compares receipt text should expect `, package=<id>` after `env-wide` on a save and ` (package=<id>)` after the item on a delete.
+  
+  `@objectstack/spec`: the `SaveMetaItemRequestSchema.packageId` description now states what an `active` save that names no package writes, where it said the env-local overlay; `DeleteMetaItemRequestSchema` declares the optional `packageId`. `@objectstack/rest`: `package` joins the reset door's closed query set (`META_ITEM_RESET_PARAMS`).
+- b529a5c: feat(spec)!: a page action row's url `target` is judged on the executor the console's action runner actually runs, so a row with no executor key whose `name` is `url` or `navigation` has its `target` judged by the url scheme set
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered ui-page-action-row-name-leg-url-target-judged -->
+  
+  **BREAKING**: an accept-set narrowing on one key of four published page component rows, shipped as `minor` under the launch-window convention for accept-set narrowings.
+  
+  The page action rows are `action:button` and `action:icon` (`properties`), and each member of an `action:group` or `action:menu` (`properties.actions[]`). The console's action runner dispatches a row on `type || actionType || name`, and every row forwards its executor key (`actionType` on a node, `type` on a member) as `type` beside its `name`. So a row with no executor key runs the handler its `name` names, and `name: 'url'` or `name: 'navigation'` runs the url navigator. The rows judged `target` by the url scheme set only when the executor KEY read `'url'`, so such a row parsed with a target the click refuses.
+  
+  The rows now judge `target` against the row's effective executor: the executor key, or, when that key is omitted or empty, the `name`, exactly as the runner resolves it. When it resolves to the url navigator, `target` is judged by the same url scheme set as an `actionType: 'url'` row, with no second grammar. A declared executor key still outranks the `name`. `name` is not refused as an executor spelling, and a row whose `name` names any other handler (`navigate_edit`, `convert_lead`, …) is untouched. An `actionType: 'url'` row's refusal is unchanged.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `{ name: 'url', target: 'javascript:…' }` with no `actionType` (or no `type` on a member), or `data:…`, `tel:…` or any other scheme | an `https://` page, a `mailto:` address, or an in-app path that starts with `/` or `./`; or, for a button meant to run something, the executor that does the work (`actionType: 'script'`, `'flow'`, `'api'`) |
+  | the same with `name: 'navigation'` | the same; the `name` is the runner's url alias, so the target is judged as a url |
+  | `{ name: 'url', target: 'forecast' }`, `'../forecast'`, `'?tab=2'` | the rooted in-app path, `'/forecast'`, or a `./` path; or declare the executor the row was meant to run |
+  | `{ name: 'url', target: '//cdn.example.com/x' }` | `'https://cdn.example.com/x'`, or `'/x'` for an in-app path |
+  | `{ name: 'url', target: '' }` | the address the button was meant to open |
+  
+  **The one-line fix: give every page action row that has no executor key and is named `url` or `navigation` an `http(s)://` URL, a `mailto:` address, an in-app path that starts with `/` or `./`, or a template that opens with `${` as its `target`, or declare the executor key it was meant to run.** `os migrate meta --from 17` lists the D3 entry `ui-page-action-row-name-leg-url-target-judged`; the rewrite is by hand, because which address a refused target meant is the author's call.
+  
+  **What an author now sees.** `os validate`'s props gate reports the refusal at the row's `target` (`properties.target`, or `properties.actions.N.target` for a member). For example, `{ name: 'url', target: 'javascript:alert(1)' }` on an `action:button` gets: ``An `action:button`'s `target` (`name: 'url'` and no `actionType`, so the runner runs the url navigator) opens with `javascript:`, a scheme a url target never opens.``, followed by the reason and the admitted set. Every admitted target parses unchanged.
+  
+  **Measured producers: none.** No page action row in this repository, in objectui (at its pin `1fb1ced36243` and its main `866763bd`) or in hotcrm (at `0f84c9c`) is named `url` or `navigation`.
+- 1623faf: feat(spec)!: a page action row's `onSuccess` is refused beside a console runner built-in other than `api` / `script`, and beside a row with no executor; `ActionSchema`'s `onSuccess` refusal now states its true reason
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered ui-page-action-row-on-success-beside-executor-refused -->
+  
+  **BREAKING**: an accept-set narrowing on one key of four published page component rows, shipped as `minor` under the launch-window convention for accept-set narrowings.
+  
+  The page action rows are `action:button` and `action:icon` (`properties`), and each member of an `action:group` or `action:menu` (`properties.actions[]`). Each forwards `onSuccess` to the console's action runner, which performs the post-success hop after every executor that succeeds. `ActionSchema` refuses `onSuccess` beside any `type` but `api` and `script`; the rows judged it beside no executor at all. They now carry the action's rule on the vocabulary the action's closed `ActionType` can see, read against the row's effective executor (the executor key, or the row's `name` when that key is omitted or empty, as the runner resolves it):
+  
+  - refused beside the runner built-ins `url`, `navigation`, `modal`, `flow` and `form`;
+  - refused on a row with no effective executor (no executor key, or an empty one, and no `name`);
+  - accepted beside `api` and `script`, and beside any other name: that is a handler a host registers, the runner hops after it too, and only the host knows whether its handler navigates.
+  
+  `ActionSchema`'s own reach is unchanged (`url`, `modal`, `flow` and `form` are refused, as before). Its message used to say that on those types the key "would parse clean and never run" and that "no renderer reads a post-success hop today". Both were false: the runner hops after every executor. The action and the rows now print one refusal text with the true reason for each executor.
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `{ actionType: 'url', target: '/tasks', onSuccess: { navigate: '/done' } }` (or `type: 'url'` on a member, or `name: 'url'` with no executor key) | the destination in `target`, the tab in `openIn`, and no `onSuccess`: the url action is itself the navigation, so the hop navigated a second time |
+  | the same with `navigation` | the same, with `actionType: 'url'` (the alias is refused at the executor key as well) |
+  | `{ actionType: 'form', target: 'task_form', onSuccess: … }` | no `onSuccess`; declare where a submitted form goes in the form view's `submitBehavior` |
+  | `{ actionType: 'modal', … , onSuccess: … }` or `{ actionType: 'flow', … , onSuccess: … }` | no `onSuccess`, or move the hop onto an `api` or `script` action, whose result it reads |
+  | `{ label: 'Go', onSuccess: { navigate: '/tasks' } }` (no executor key and no `name`) | declare the executor whose success the hop follows, `actionType: 'api'` or `actionType: 'script'` (`type` on a member), or drop `onSuccess` |
+  
+  **The one-line fix: keep `onSuccess` only on a page action row whose executor is `api`, `script` or a host-registered handler, and declare that executor.** `os migrate meta --from 17` lists the D3 entry `ui-page-action-row-on-success-beside-executor-refused`; the rewrite is by hand, because where the hop belongs is the author's call.
+  
+  **What an author now sees.** `os validate`'s props gate reports the refusal at the row's `onSuccess` (`properties.onSuccess`, or `properties.actions.N.onSuccess` for a member). For example, `{ actionType: 'url', target: '/tasks', onSuccess: { navigate: '/done' } }` on an `action:button` gets: ``An `action:button`'s `onSuccess` (`actionType: 'url'`) would navigate a second time: a `url` action is itself the navigation, and the console's action runner performs the post-success hop after every executor that succeeds.``, followed by what the hop is declared beside and the prescription. The same row without `onSuccess` parses unchanged.
+  
+  **Measured producers.** None in this repository or in hotcrm (at `0f84c9c`). In objectui (at its pin `1fb1ced36243` and its main `72594f29`), one test row with no executor and no `name` carries `onSuccess` and is asserted accepted; its remedy is to declare `actionType: 'api'` on that row. A host-handler row (`actionType: 'run'`) with `onSuccess` stays accepted.
+- c857a93: feat(spec)!: publish refuses an anonymous flow endpoint whose target flow runs as `system`, in both directions, with the prescription (ADR-0138 D2b)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered api-endpoint-anonymous-elevated-flow-refused -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0138 D2b decides that no anonymous door triggers an elevated flow directly. An `authRequired: false` endpoint of `type: 'flow'` whose `target` flow declares `runAs: 'system'` ran every anonymous request's data steps as the system principal, past row-level security, with the endpoint's rate limit as the only brake. The runtime's own elevated-start refusal covers only self-triggered flow types (`autolaunched`, `record_change`, `schedule`), so a `system` flow of type `api` or `screen` behind such an endpoint executed elevated. Publish now refuses the pair, in both directions, because either item can be the last one edited: the endpoint's publish reads its target's `runAs`, and a flow's publish that sets `runAs: 'system'` reads the anonymous endpoints that target it. Each refusal names the endpoint and the flow and carries the prescription.
+  
+  **What is refused, and where.** Every publish door that holds the pair calls one judge, `anonymousElevatedFlowPairs` in `@objectstack/spec/api`:
+  
+  - **The stack parse** (`defineStack`, `objectstack validate`, `objectstack build`, the artifact load): a stack whose anonymous flow endpoint names one of its own flows declaring `runAs: 'system'`. One zod issue per pair, `code: 'custom'` at `apis[i].authRequired`; `defineStack` throws its schema refusal, `STACK_SCHEMA_INVALID` (422), carrying the issue.
+  - **The package publish** (`MetadataManager.publishPackage`, `POST /api/v1/packages/:id/publish`): an `api` item of the package naming a `system` flow anywhere in the manager's index, reported at the endpoint; and a `flow` item of the package declaring `runAs: 'system'` that an anonymous endpoint outside the package names, reported at the flow. The package publishes nothing (`success: false`, the pair in `validationErrors`), and `validate: false` does not turn it off.
+  - **A flow published through the metadata API** (`saveMetaItem` in publish mode, so `PUT /api/v1/meta/flow/:name`; a draft's publish, `POST /api/v1/meta/flow/:name/publish`; and `POST /api/v1/packages/:id/publish-drafts`): a flow going `active` with `runAs: 'system'` while a declared anonymous flow endpoint names it. `INVALID_METADATA` (422), `issues[0].path: 'runAs'`, nothing written; a publish-drafts batch aborts on it. A draft save is not judged (a draft does not execute; its publish is), and neither is a `migrate-stored` re-save of a row that already exists.
+  
+  **Unchanged.** Each item alone publishes as before: an authenticated endpoint on a `system` flow, an anonymous endpoint on a `user` flow (or one that leaves `runAs` at its default), and an anonymous `object_operation` endpoint are all accepted. A stored flow row that already pairs this way keeps its bytes and keeps executing as published; its next publish is refused. A guest-written row that fires a record-change flow is outside the refusal: the record leaves that indirect path undecided, because its trigger is the write, not the door.
+  
+  ## FROM → TO
+  
+  | door | FROM | TO |
+  |:--|:--|:--|
+  | `defineStack` / `objectstack validate` | `apis: [{ name: 'acme_intake_api', type: 'flow', target: 'acme_intake', authRequired: false, rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 }, … }]` beside `flows: [{ name: 'acme_intake', runAs: 'system', … }]` accepted; every anonymous request ran `acme_intake` as the system principal | refused, `STACK_SCHEMA_INVALID` 422, the issue at `apis[0].authRequired` naming both items and the prescription |
+  | package publish | a package carrying either half of the pair, with the other half anywhere in the manager's index, published | refused, `success: false`, the pair reported at the package's own item |
+  | metadata API flow publish | `PUT /api/v1/meta/flow/acme_intake` with `runAs: 'system'` while an anonymous endpoint names it saved and armed it | refused, `INVALID_METADATA` 422, the issue at `runAs`, nothing written |
+  
+  **The one-line fix: serve the caller another way — an authenticated endpoint (`authRequired: true`) for a partner that can hold a credential, the flow's signed inbound hook (ADR-0041: a start node with `triggerType: 'api'`, a `hookId` and a `secret`, which may keep `runAs: 'system'`) for a partner webhook, or a public form (a form view whose `sharing` sets `allowAnonymous: true`) for anonymous intake.** `runAs: 'automation'` joins that list when ADR-0073 M2 adds the value.
+  
+  No D2 conversion rewrites it: which channel replaces the anonymous endpoint depends on who the caller is, and whether the flow needs elevation is a judgment about its data steps, so no conversion can choose a posture for the author. Its D3 record is the semantic entry `api-endpoint-anonymous-elevated-flow-refused` (protocol 18).
+  
+  **`@objectstack/spec`.** The judge and its two refusal sentences join `@objectstack/spec/api`: `anonymousElevatedFlowPairs`, `anonymousFlowDoorTarget`, `anonymousEndpointElevatedFlowMessage` (the endpoint direction), `elevatedFlowAnonymousEndpointsMessage` (the flow direction) and `validateAnonymousElevatedFlows` (the stack's issues), with the types `AnonymousFlowDoorCandidate`, `ElevatedFlowCandidate` and `AnonymousElevatedFlowPair`. `ObjectStackDefinitionSchema` runs the judge beside the per-endpoint gates. The `runAs` description on the flow schema, which prescribed `system` for every user-less trigger, `api` included, now names the exception and what serves that caller.
+  
+  **`@objectstack/metadata`.** `MetadataManager.publishPackage` runs the judge over the package's `api` and `flow` items against the index the endpoint matcher serves from.
+  
+  **`@objectstack/metadata-protocol`.** The flow publish doors run the judge against the declared endpoints: the engine registry's `api` items and the `metadata` service's.
+  
+  **Who is affected, measured.** No in-repository stack pairs an anonymous flow endpoint with a `system` flow: `examples/` declares no `authRequired: false` endpoint, and every anonymous flow endpoint in the test fixtures names a `runAs: 'user'` flow. The partner-webhook example, `showcase_inbound_task_webhook`, takes the signed inbound hook with `runAs: 'system'` and is untouched.
+- 345d1be: fix(spec,plugin-sharing)!: `sys_record_share` no longer offers a `guest` recipient, which no grant ever honoured (ADR-0138 D8)
+  
+  Clause-②: no (narrowing: a declared recipient value no grant honours is refused)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No working use of the value exists to rewrite. `ISharingService.grant` refused every non-`user` recipient before this change, so no grant naming `guest` ever succeeded, and the census pinned in `@objectstack/spec` finds no seed, fixture, example, template, migration or test row in this repository that writes `recipient_type` as `guest`, and no stored metadata surface that carries it. Seed data, the one metadata surface that can carry a row value, targets `sys_record_share` nowhere in the tree (the examples seed `sys_user` and `sys_business_unit`, never a record share). What narrows is a published TypeScript union in `packages/spec/src/contracts/` and the option set of a platform object's select: a caller that still spells the value meets a compile error or a located refusal, and there is nothing for `objectstack migrate meta` to derive from metadata. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers this value and this diff adds none (not registered or already-registered); the union lives under `packages/spec/src/contracts/` and the diff touches `packages/spec` (not runtime-interface-only or type-surface-only); no export is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A record share to the anonymous principal was declared in two places and honoured in none. Both declarations are gone:
+  
+  - `RecordShareRecipientType` (`@objectstack/spec/contracts`) is now `'user' | 'group' | 'position' | 'unit_and_subordinates'`. Passing `recipientType: 'guest'` to `ISharingService.grant`, or typing a `RecordShare.recipient_type` as `'guest'`, is a compile error.
+  - The `recipient_type` select on `sys_record_share` (`@objectstack/plugin-sharing`) offers those same four options, and its `guest` label is gone from the four translation bundles.
+  
+  Why: the grant refused `guest` (ADR-0078), and no gate reads such a row, because the read and write gates match `recipient_type: 'user'` only. ADR-0090 D11 routes guest access through the guest position and share links, so a record share to the guest had nothing to gain. The sharing-rule vocabulary retired the same recipient in v17.
+  
+  What a caller sees now:
+  
+  - **The grant door** (`POST /data/:object/:id/shares`, or `grant()` from untyped code). A body naming `recipientType: 'guest'` is still refused with `VALIDATION_FAILED` (`400`), as before. The sentence now says the value was removed and that guest access flows through the guest position and share links. It used to say that sharing rules deliver non-`user` recipients, which was never true of a guest. To let a guest reach a record, use a public form or a share link.
+  - **The row door** (a system-context engine write: a seed, a plugin, a migration script). A row carrying `recipient_type: 'guest'` is now refused with `VALIDATION_FAILED`, an `invalid_option` error on `recipient_type` that lists the four values a row may carry. Before this change such a write stored a row that looked granted and enforced nothing.
+  - **Unchanged:** every `user` grant, the other three row values, the sharing-rule service, and the gates. A `guest` row that a system write stored before this release is read by no gate, both before and after.
+- 430e5f5: fix(security)!: under a walled posture every environment-metadata write is the platform operator's, whatever its type (ADR-0131 D12 items 7–8, D11)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered walled-environment-metadata-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes. ADR-0131 D12 item 7: a walled deployment is "one environment, one schema, one catalog … The metadata-authoring capability (`manage_metadata` / `studio.access`) is what headquarters IT holds and plant admins do not." Item 8: a plant "cannot create a position, a permission set, a capability, a template or any metadata … A plant that needs its own catalog is given its own environment." D11: the rules are identical in every posture; only whether the wall is enforced differs.
+  
+  **Why.** The environment definition ledger carries no organization column, so a write lands for every organization. Measured on booted `isolated` and `group` stacks before this change: an organization owner granted `manage_metadata` inside their own organization created an object, a view and a flow at `/api/v1/meta`, edited, published, rolled back and reset the operator's view, ran `POST /api/v1/meta/_migrate-stored`, passed all thirteen `/api/v1/packages` write doors, installed, upgraded and uninstalled packages through `install-local`, and created a flow at `/api/v1/automation`, each with `2xx`; another organization's owner read every result. The security catalog was refused at these doors already; every other type was not.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `PUT`, `DELETE`, `POST …/publish` and `POST …/rollback` of `/api/v1/meta/:type/:name` on `@objectstack/rest`, and `PUT /meta/:type/:name` on the runtime dispatcher, for a type outside the security catalog (`object`, `view`, `flow`, `app`, `dashboard`, `translation` and every other type): **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` (the dispatcher answers `403 PERMISSION_DENIED`).
+  - Every `/api/v1/packages` write on the runtime dispatcher — create, the manifest `PATCH`, enable, disable, publish, publish-drafts, discard-drafts, revert, rollback, `commits/:commitId/revert`, duplicate, adopt-orphans and delete — for a package carrying no position, permission set or capability: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before anything is read or written. The refusal no longer reads the package's items.
+  - `POST /api/v1/marketplace/install-local` (install and upgrade) and `DELETE /api/v1/marketplace/install-local/:id` (uninstall) on `@objectstack/cloud-connection`, for a package carrying no catalog item: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`. The refusal's `error.details` no longer carries `catalogItems`; it carries `manifestId`.
+  - `POST /api/v1/automation`, `PUT /api/v1/automation/:name`, `DELETE /api/v1/automation/:name` and `POST /api/v1/automation/:name/clone`: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before the automation service is touched.
+  - `POST /api/v1/meta/_migrate-stored`, the install-wide rewrite of the stored metadata, preview and apply alike: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` on `@objectstack/rest` and `403 PERMISSION_DENIED` on the runtime dispatcher, before a row is read.
+  - Every one of these refusals carries one sentence: it names the written type (`a package` at the package doors, `the environment's stored metadata` at the rewrite), the posture and "ADR-0131 D3, D12 items 7–8, D11", and points at an environment of the organization's own. The catalog refusals that shipped before keep their envelopes and now read the same sentence.
+  - The activation refusals under a wall (`POST /api/v1/automation/:name/toggle`, `POST /api/v1/actions/_activation/…`, `POST /api/v1/security/_activation/permission/…`) no longer recommend cloning a flow or a permission set, or authoring a sibling action, since those writes are the operator's under a wall too; they name the platform operator.
+  
+  **Unchanged.** Reads. Assignments: `sys_user_position` and `sys_user_permission_set` rows stay organization rows. The platform operator and the engine's own writes (seeders, installers, migrations) write as before. Under `single` (and with no `tenancy` service), a `manage_metadata` holder writes exactly as before.
+  
+  **The remedy.** The platform operator authors the environment's metadata, in Studio or through a managed package; an organization that needs metadata of its own is given an environment of its own. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-environment-metadata-writes-retired`. `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) now judges every type alike: a custom door that writes environment metadata asks it after its capability gate, with no `isSecurityCatalogType` pre-filter.
+- 14a13bc: fix(metadata-protocol)!: the metadata save, restore and publish doors refuse a permission set whose body `packageId` disagrees with the package it is saved into, and the audience-binding suggestion reader takes a set's owner from its binding only (ADR-0086 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered permission-set-package-id-binding-mismatch-refused -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0086 D3 declares `PermissionSetSchema.packageId` as the owning package of a package-shipped set, absent for an environment-authored one. The owner every reader uses is the package the set is saved into: the stored row's `package_id`, served as `_packageId`. A body `packageId` that named another package was accepted and then silently overridden, so an author, an AI build above all, never learned that the owner it wrote was not the owner it got.
+  
+  **FROM.** A permission set saved and published into package `app.crm` with `packageId: 'app.other'` in its body answered `200` and `published`, and was owned by `app.crm` everywhere it was read. A set saved into no package with `packageId: 'app.other'` was stored as an environment-authored set, while the audience-binding suggestion reader offered it, accepted it and derived it into `everyone` as `app.other`'s.
+  
+  **TO.**
+  
+  - **`@objectstack/metadata-protocol`.** The save door (`PUT /api/v1/meta/permission/:name`, draft and publish mode, and every in-process caller) the restore doors (`POST /api/v1/meta/permission/:name/rollback` and a commit revert's restore limb) and the draft promotion (`POST /api/v1/meta/permission/:name/publish` and the package publish) refuse a permission set whose body `packageId` is not the package the row is written into, with `400 VALIDATION_ERROR`, the code and status the doors already answer for a body `name` that disagrees with its row. `issues[]` carries the key at `packageId`. A body `packageId` on a set saved into no package is refused too, the empty string included: a present key declares a package-shipped set. The message names both values and both remedies. The package judged is the one the write lands in: a draft saved without naming a package lands in the package of the item's active row, and is judged against it. A package publish that meets such a draft (one stored before this change) aborts the whole batch, `outcome: 'refused'`, with the draft in `failed[]` under `VALIDATION_ERROR`. A rollback to a stored version that carries such a body (one written before this change) is refused, and a commit revert reports it in `failed[]` under the same code; the remedy there is to save the set again with `packageId` dropped or set to its package, instead of restoring that version. Nothing is written, published or restored. Package duplication copies a set whose body names the source package as naming the target package. `os migrate meta --stored --apply` records a stored set it rewrites, and the door refuses, as that row's failure.
+  - **`@objectstack/plugin-security`.** The audience-binding suggestion reader takes a set's owner from its binding only, never from its body's `packageId`. A set bound to no package has no owner there, so no suggestion is created for it. An acceptance recorded under the package its body named is withheld from `everyone` at the next derivation. The withholding is reported at `warn`, naming the set and its reason. Accepting a pending suggestion of that kind is refused.
+  - **`@objectstack/spec`.** The `PermissionSetSchema.packageId` description states the refusal. The step-18 semantic migration entry `permission-set-package-id-binding-mismatch-refused` carries the upgrade sweep.
+  
+  **Unchanged.** A body `packageId` equal to the package the set is saved into is accepted, and an absent one is accepted everywhere. Stored rows are not rewritten. A stored set whose body disagrees with its binding keeps loading and keeps reading as its binding, and is refused on its next save or publish, as is a restore of a stored version that carries one. An installed package's own sets are owned by the package that ships them, as before.
+  
+  **Remedy, in one line.** Drop `packageId` from the permission set's body, or save the set into the package it names (`?package=<id>` on the REST door, `packageId` in process).
+- ca0bdbc: A builtin flow node's `config` value that carries a `{token}` is judged for its type at the build doors like any other value: `get_record` with `limit: '{x}'` is refused at `nodes.N.config.limit` ("expected number, received string") by `FlowSchema.parse`, `defineStack`, `objectstack validate`, `objectstack compile`, the metadata save door and `AutomationEngine.registerFlow`, where it used to register and then fail every run that reached the node.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-builtin-node-config-values-refused) The step-18 D3 entry registered on this line records the build doors refusing a builtin config value its executor contract refuses; this change removes the one class that entry held back, a value carrying a token, and the entry's text now says so. No key is removed and no shape is rewritten, so there is no tombstone and no D2 conversion: the platform cannot know the literal the author meant. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface, shipped as `minor` under the launch-window convention for accept-set narrowings (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** The build doors' value arm (`flowNodeConfigRefusals`) never refused a value carrying a `{token}` for its type, because the flow interpolator decided what the run would parse there. The interpolator and every call site it had are deleted on this line, and every builtin executor parses its config as authored (an `http` node after its credential channel's `signingSecret`), so the run's contract sees the token the build's sees and refuses it at every run. The value arm passed exactly those values.
+  
+  **What is refused now.** A token-carrying value at a builtin key its executor contract refuses it at: a number or boolean key (`get_record` `limit`, `loop` `maxIterations`, `update_record` and `delete_record` `multi`, a screen field's `min`, `max` or `required`, a `try_catch` `retry.maxRetries`), a key with a declared set (`notify` `severity`, `screen` `mode`), a record key written as one token (a CRUD `filter: '{f}'`), and a rule finding the token used to hide (a `notify` `templateData` with no `template`). Each is `node-config-refused-by-contract`, `params: { nodeType, key }`, anchored at the key, in the contract's own words — `defineStack` throws `STACK_SCHEMA_INVALID` (422) at `flows.N.nodes.M.config.<key>`.
+  
+  **What does not change.**
+  
+  - A token at a plain string key (`outputVariable`, `flowName`, `objectName`) parses and registers as before: the contract takes a string there.
+  - A token at a value slot (a CRUD `fields` value, a callee `input`, a screen's `defaults`, `defaultValue` or `recordId`, a `loop` or `map` `collection`, a `notify` `recipients`, `templateData` or `sourceId`, an `http` `body`, a filter operand) or at a text slot (a `notify` `title`, `message` or `actionUrl`, a screen `title` or `description`, an `http` `url` or header value) is refused, as before, by that slot's own judge at `registerFlow` and `objectstack validate`, once, with the slot's label and remedy: the value arm exempts each finding that judge owns, so no token is reported twice.
+  - At a key its executor reads as written (a `notify` `sourceObject`, `actorId` or `payload`; an `http` `method`, `durable`, `timeoutMs` or whole `headers` map) the key is refused once, in the literal's own words, as before.
+  - An `http` `signingSecret` is still never judged at the build doors: the credential channel may supply what the run signs with.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `get_record` `limit: '{page.size}'` | `limit: 25` | refused at `config.limit` at every build door, where it registered and failed every run |
+  | `loop` `maxIterations: '{cap}'` | `maxIterations: 50` | the same, at `config.maxIterations` |
+  | `update_record` `multi: '{bulk}'` | `multi: true` | the same, at `config.multi` |
+  | a screen field `min: '{m}'` | `min: 1` | the same, at `config.fields.N.min` |
+  | `try_catch` `retry: { maxRetries: '{n}' }` | `retry: { maxRetries: 3 }` | the same, at `config.retry.maxRetries` |
+  | `notify` `severity: '{level}'` | `severity: 'warning'` | the same, at `config.severity` |
+  
+  **The one-line fix: write the literal the key declares.** None of these keys is evaluated per run, so no envelope replaces the token there.
+  
+  **Who is affected, measured.** A census of every builtin node literal whose `config` evaluates statically — 1010 nodes, 244 of them carrying a `{…}` token, across `examples/`, `packages/` and `apps/` in this repository at the base and hotcrm at `0f84c9c` — finds no verdict this change moves (a control node with `limit: '{x}'` moves, so the census can see one). No published docs page and no `@objectstack/lint` rule says a token at a typed key passes the build.
+  
+  ### The kit
+  
+  - **The judge.** `flowNodeConfigRefusals`'s builtin value arm (`flow-node-config-refusals.ts`): the token carve-out (`carriesInterpolationToken`) is deleted. In its place the arm asks the value-slot judge (`flowNodeValueTemplateRefusals`) and the text-slot judge (`textSlotTemplateRefusal`) which paths they refuse and exempts those, and reports a key whose contract marks its refusal `READ_AS_WRITTEN_PARAM` in that refusal's words alone.
+  - **ADR-0087.** No new entry: the step-18 D3 entry `flow-builtin-node-config-values-refused` and its rationale fragment now state the class this change judges.
+- 572ecfb: fix: `os migrate meta --stored` lists every stored row that protocol 18 refuses and no conversion rewrites. Before, the preview counted each such row as already on protocol.
+  
+  Clause-②: yes (widening: `IAutomationService.canonicalizeStoredFlow(...).todos?` in `@objectstack/spec`, `AutomationEngine.canonicalizeStoredFlow(...).todos` in `@objectstack/service-automation` and `StoredFlowCanonicalization.todos?` in `@objectstack/metadata-protocol`, each a new output member; nothing narrows, and no door accepts or refuses anything it did not before)
+  
+  Three step-18 retirements refuse a stored shape that has no lossless rewrite. Upgrading a v17 database left those rows refused at load or at boot, and the stored preview read them as `canonical`. Each shape now has exactly one fate: **refused and listed**. The preview and `--apply` print one `TODO` line per site under its row. The line names the step-18 entry that refuses the shape, the site, and the choice the owner has to make. Nothing is rewritten, and the run's verdict does not change, because no run of the pass could clear these rows.
+  
+  **#23269, a flow value slot carrying a `{…}` token, including a `get_record` / `update_record` / `delete_record` filter operand: refuse and list.** A whole-path token maps mechanically to `{ dialect: 'cel', source: '<path>' }`, but the rewrite is not lossless. A token the template resolved to nothing (an erased condition, so the node was refused) is a CEL fault on an absent root, and a flow variable named like a query placeholder used to shadow it. ADR-0087 D2 conversions run on the load path and must be lossless, so this one is not a D2. The chain also has no operator-applied rewrite of stored rows separate from the load path: `--stored` writes back the read path's own pass, and `--from 17` rewrites authored sources, not rows. So the flow is listed by flow, node and path (`flow-value-slot-template-dialect-refused`), and `registerFlow` goes on refusing it until the value is rewritten as its CEL envelope. A flow already in the CEL form, or using a query placeholder such as `{current_user_id}`, is not listed.
+  
+  **#23270, a `controlled_by_parent` object without exactly one required `master_detail`: refuse and list, by object (`cbp-master-relation-tiers-retired`).** No shape here converts losslessly. The upgrade never picks between two masters, either both required or neither. An explicit `required: false` is a contradiction the builder refuses. Turning a required `lookup` into a `master_detail` changes what deleting the master does. An object with no master has nothing to convert. Leaving `controlled_by_parent` changes who can read the rows, so that is the owner's choice and never a silent rewrite. The listing reads the same predicate `ObjectSchema` refuses with, so the preview and the parse refuse one set. The one lossless shape, a single `master_detail` with `required` omitted, is still converted by `cbp-master-detail-required-defaulted` and is not listed.
+  
+  **#23271, a view whose `data` binds the retired view-level API source: refuse and list, by view (`view-data-api-provider-retired`).** There is no mechanical move. The replacement is a page component's `dataSource`, so a page must exist to carry it. Deleting the view's `data` would make the view query its object instead. Views in every stored body spelling are covered, and so are an object's own `listViews`. The line shows the request URL and method and withholds every other request key, so a credential stored in a view's headers never reaches the report. A view on the `object`, `value` or `schema` provider is not listed.
+  
+  How it is wired: `applyConversions` reports these shapes through its existing `onTodo` sink, after the conversions run. Each TODO's `conversionId` is the id of the D3 entry that refuses the shape, so the published `ConversionTodoNotice.conversionId` now names either a conversion or a D3 entry. The published flow-canonicalization result gains one member, a widening in three packages:
+  
+  - `@objectstack/spec`: the contract `IAutomationService.canonicalizeStoredFlow(...)` declares an optional `todos?: ConversionTodoNotice[]` beside `notices` and `conflicts`. An implementation that reports none still conforms.
+  - `@objectstack/service-automation`: `AutomationEngine.canonicalizeStoredFlow(...)` returns `todos`. `registerFlow` ignores them, because its own refusal names the same sites.
+  - `@objectstack/metadata-protocol`: `StoredFlowCanonicalization` gains the matching optional `todos?`, and the stored pass lists a flow row's TODOs the way it lists any other row's.
+  
+  The authoring funnel and the read seams pass no sink, so nothing changes for them.
+- 707b3cd: feat(cli,spec): `os migrate organization-ownership --fate-supplement FILE`. A host declares the ADR-0131 D10 fates of the objects it provides, and the ceremony plans and applies them as it does the platform's own rows
+  
+  Clause-②: yes (widening)
+  
+  The v18 organization-ownership ceremony refuses any platform-prefixed table that carries `organization_id` when its inventory gives that table no fate. That is right for the platform's own objects, but a host's objects have no row in the inventory, so every database a host runs was refused. The host now declares those fates itself, in one JSON file, and passes the file to the command. **Adoption: a host passes its supplement through the flag; with no flag, the ceremony behaves as before.**
+  
+  - **The file is declared in the spec.** `OrganizationOwnershipSupplementSchema` (`@objectstack/spec/system`) is a JSON array of `OrganizationOwnershipSupplementEntrySchema` rows. Each row gives `object`, `fate` (`column-drop`, `mirror-deletion`, `attribution` or `report`), `citation`, and only the fields its fate reads: `anchors` (required for `attribution`), `mirror`, `departures`, `categories`, `notNullExempt` and `note`. Every shape refuses an unknown key, and a key written on the wrong fate is refused rather than ignored.
+  - **Both modes read it.** The plan plans each row on the same terms as a platform row, and `--apply` performs it the same way. A row whose table is not on the database being planned is listed `absent`, so one supplement serves both a control-plane database and a tenant database.
+  - **It is refused, never half-read.** The command refuses a missing file, a file that is not JSON, a row the schema refuses, two rows for one object, or a row naming an object the platform inventory already gives a fate. The refusal comes before the database is opened, inside the `--json` envelope (`plan_refused` / `apply_refused`), and names the file, the row index and the object. A row naming one of the cloud-provided objects that the inventory lists with no fate (`cloudCarried`) replaces that placeholder row.
+  - **Nothing is read without the flag:** no environment variable and no conventional path. A host table with no declared fate is still refused by name, and the refusal now names `--fate-supplement FILE` as the remedy.
+  - The supplement's rows are part of the plan's `inventoryDigest`, so the apply's checkpoint is keyed on the supplement as well.
+  
+  ```bash
+  os migrate organization-ownership --fate-supplement host-fates.json --out plan.json
+  os migrate organization-ownership --fate-supplement host-fates.json --apply --backup-taken
+  ```
+- 5e725b8: A server-side producer can store a file and attach it to a record: `IFileAttachmentService.attachFile`, registered by `StorageServicePlugin` as the kernel service `file-attachments` (`FILE_ATTACHMENT_SERVICE`), writes the bytes, one `sys_file` row and one `sys_attachment` row linking it to the parent, under the checks every other attachment of that parent meets
+  
+  Clause-②: yes (widening: `@objectstack/spec/contracts` gains `IFileAttachmentService`, `AttachFileInput`, `AttachedFile` and `FILE_ATTACHMENT_SERVICE`, and `StorageServicePlugin` registers and declares one more service)
+  
+  - **The call.** `attachFile({ parentObject, parentId, organizationId, filename, mimeType, data })` answers `{ fileId, attachmentId, size }`. `organizationId` is required: the organization the caller acts in, or `null` for none. It acts as the system, for a producer with no browser upload in front of it (inbound mail first). Reach it with `ctx.getService(FILE_ATTACHMENT_SERVICE)` once the kernel has bootstrapped.
+  - **What it runs.** Each check is the one the rest of the platform already runs, not a copy:
+    - The `max_upload_mb` storage setting, through the same verdict the REST upload doors ask. Over it, the call is refused `413 PAYLOAD_TOO_LARGE` before anything is stored.
+    - The parent's organization. A parent walled into another organization than `organizationId` is refused `404 RECORD_NOT_FOUND`, as a missing parent is. Both rows are written in the parent's organization, or in the caller's for a global parent.
+    - Every gate on the `sys_attachment` insert, among them the `enable.files` opt-in: a parent object without it is refused `403 FILES_DISABLED`.
+    - Before the kernel has bootstrapped, or with no data engine, the call is refused `503 SERVICE_UNAVAILABLE`. A malformed input is refused `400 VALIDATION_ERROR`.
+  - **No refusal leaves a committed `sys_file`.** The row is written `pending` before the bytes, and turns `committed` only in the same transaction as the `sys_attachment` insert. A refused call removes the bytes and the row before it throws. If the process dies mid-call, the pending-upload retention reclaims both.
+  - `@objectstack/service-storage`: the upload doors' size refusal moved from the route module into `storage-limits.ts`, beside the limit it enforces, so the doors and the verb read one status, one code and one sentence. The doors answer exactly as before.
+- eeb95f7: fix(spec,objectql)!: a permission set whose body `packageId` disagrees with the package that ships it is refused at `defineStack` / `os validate` / `os build` and at package registration, and every reader takes a set's owner from its binding only (ADR-0086 D3)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered permission-set-package-id-binding-mismatch-refused) this change widens that entry, in this diff, to the build and registration doors: same key, same ruling, same remedy, no stored row rewritten -->
+  
+  **BREAKING** (an accept-set narrowing on a published authoring surface), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0086 D3 declares `PermissionSetSchema.packageId` as the owning package of a package-shipped set, absent for an environment-authored one. The owner every reader uses is the binding: the package that ships the set or that it is saved into, served as `_packageId`. The metadata save, restore and publish doors already refuse a body `packageId` that disagrees with it. Package source and package registration did not: a set whose body named another package was registered under the package that shipped it, with no refusal and no warning, so an author, an AI build above all, never learned that the owner it wrote was not the owner it got.
+  
+  **What is refused, and where.** One judge, `judgePermissionSetOwnerBinding` (new export of `@objectstack/spec/security`), serves every door:
+  
+  - **The stack schema** (`ObjectStackDefinitionSchema`), so `defineStack`, `objectstack validate`, `objectstack build`, the lint scorer and an artifact load all refuse a set whose body `packageId` is not the id of the package that ships it: the stack's `manifest.id`, each `packages[]` body's own `id`, and `manifest.id` for a top-level set no body declares. A stack with no `manifest` ships its sets from no package, so any key there is refused, the empty string included. The issue sits at the set's `packageId` (`permissions.0.packageId`); `defineStack` throws `STACK_SCHEMA_INVALID` (422) carrying it.
+  - **Package registration** (`ObjectQL.registerApp`, the manifest and a nested plugin, for a manifest no schema parse judged) throws `400 VALIDATION_ERROR` with `issues[]` at `packageId` before the set is filed, the envelope the same seam throws for a view container whose `name` disagrees with its key.
+  
+  The message prescribes first, names both values, and offers both remedies: drop the key, or ship the set from the package it names. No error code is minted.
+  
+  **Readers.** `@objectstack/plugin-security`'s packaged-set lock (`classifyPackagedPermissionSet`) and `@objectstack/cli`'s permission-set name-collision report take a set's package from its binding only. A set filed into no package whose body named one is no longer locked as that package's, and a stack with no `manifest` declares no owner for the collision report.
+  
+  **Unchanged.** A body `packageId` equal to the package that ships the set is accepted, and an absent one is accepted everywhere. A top-level copy of a set a `packages[]` body declares (an artifact built with both halves) is judged on its body, not against the artifact's own id. The metadata save, restore and publish doors answer in the same words as before (`@objectstack/metadata-protocol` now calls the shared judge). Stored `sys_metadata` rows are not rewritten.
+  
+  ## FROM → TO
+  
+  | door | FROM | TO |
+  |:--|:--|:--|
+  | `defineStack` / `objectstack validate` / `objectstack build` | `defineStack({ manifest: { id: 'com.acme.crm', … }, permissions: [{ name: 'crm_member', packageId: 'com.acme.other', … }] })` accepted; the set was owned by `com.acme.crm` | refused at `permissions.0.packageId`, `STACK_SCHEMA_INVALID` 422 |
+  | `ObjectQL.registerApp` | the same manifest registered the set under `com.acme.crm`, silently | `400 VALIDATION_ERROR`, `issues[]` at `packageId`, nothing filed |
+  | an artifact built before this change | loaded, the set owned by the shipping package | refused at load; rebuild it without the key |
+  
+  **Remedy, in one line.** Drop `packageId` from the permission set in your stack source (the package that ships a set is its owner), or move the set into the stack of the package it names, then build again.
+- d89f491: A stored flow the automation engine refuses is no longer served as running: the flow meta read serves the engine's verdict beside the item as `registration`, an envelope sibling of `lock`, and the flow list serves it as `registrations` keyed by flow name, so a refused flow reads `{ state: 'refused', reason: { code?, message } }` beside its stored `status`, which stays as authored.
+  
+  Clause-②: yes (widening)
+  
+  - **The shape** (`@objectstack/spec`). `FlowRegistrationSchema` is a closed set: `registered` (the engine holds the flow), `refused` (it refused the stored flow and holds nothing under the name; `reason` carries the engine's own `message` and, when the thrown error set one, its `code`, verbatim), and `unregistered` (it holds nothing and refused nothing: a read during boot, between a save and the engine following it, or after a deliberate unregister). `GetMetaItemResponseSchema` gains `registration` and `GetMetaItemsResponseSchema` gains `registrations`, both optional. New exports: `FlowRegistrationSchema`, `FlowRegistrationRefusalSchema` and the types `FlowRegistration` and `FlowRegistrationRefusal`. `IAutomationService` gains the optional member `getFlowRegistration(name)`.
+  - **Where the verdict comes from** (`@objectstack/service-automation`). The `kernel:ready` cold-boot bind records each flow it refuses, with what the engine threw, after it withdraws the flow; the `metadata:reloaded` re-sync and the metadata-change sync record a refusal that leaves the name unregistered. A later successful registration of the name, or its withdrawal, ends the record. `AutomationEngine` answers `getFlowRegistration(name)` and takes `recordFlowRefusal(name, error)`. The refusal's warn line, its level and the withdrawal are unchanged.
+  - **Where it is served** (`@objectstack/metadata-protocol`). The protocol reads the engine through the kernel's service table by name, as it already reads the engine's stored-flow canonicalizer; it does not import the automation service. The field is absent where no automation service declares the member, on every type other than `flow`, on a draft read and on the execution face the engine binds from: absence means no engine judged the flow, never `registered`. The verdict is the engine of the process that answered the read.
+  - **The default door** (`@objectstack/rest`, `@objectstack/metadata-protocol`, `@objectstack/spec`). `GET /api/v1/meta/flow/:name` on a default deployment (`metadata.enableCache: true`) is answered by the cached item branch, which now carries `registration` too. `getMetaItemCached` returns it beside `data`, read live from its delegate read on every call, and `GetMetaItemCachedResponseSchema` declares it. It is never part of the ETag, so a cached read that carries it is never answered `304 Not Modified`: a judged flow is always served in full. The cached branch's other envelope keys are unchanged.
+- dc39326: fix: `os migrate meta --stored` lists the two families of stored rows it still read as on protocol: a page component whose `data` prop binds the retired view-level API source, and every other site `registerFlow` refuses in a stored flow the parse accepts.
+  
+  Clause-②: yes (widening: `ConversionTodoNotice.conversionId` in `@objectstack/spec` may now name `registerFlow`, the refusing door; `IAutomationService.canonicalizeStoredFlow(...).todos?` in `@objectstack/spec` and `AutomationEngine.canonicalizeStoredFlow(...).todos` in `@objectstack/service-automation` now also carry each site flow registration refuses; the `onTodo` sink of `applyConversions` now also receives a page component bound to the retired API source; nothing narrows, and no door accepts or refuses anything it did not before)
+  
+  **A page component bound to the retired view-level API source: refuse and list, by page and component (`view-data-api-provider-retired`).** `object-grid`, `object-map`, `object-gantt` and `object-tree` take a view data source in their `data` prop, so the step-18 retirement of the `provider: 'api'` arm reaches them through the same schema. The listing judges each stored page component with its own props row, the one the component-props gate parses, and lists it only when that row refuses the binding with the retirement's prescription; a component whose `data` is a row array, a custom type and a component's own `dataSource` binding are not listed. The line names the page, the component and its position, shows the request URL and method, and withholds every other request key. Nothing is rewritten: deleting `data` would make the component query its object instead. Left as stored, the page still loads and saves, because the page parse does not judge a component's properties, while `os validate`, `os build` and `os lint` refuse the binding in source. The D3 entry `view-data-api-provider-retired` now names these components in its scope.
+  
+  **A stored flow refused by `registerFlow` after the parse: refuse and list, by site (`registerFlow`).** The stored pass ran only one of registration's judges, the value-slot one. `canonicalizeStoredFlow` now runs registration's whole validation without registering: every check `registerFlow` runs once the parse has accepted the flow, through the one list `registerFlow` itself throws from. Each refused site is a `TODO registerFlow` line under its row, in the check's own words: a text slot still on the single-brace dialect or with a hole that does not compile, a decision's `mode`, a malformed node or edge predicate, a plugin node's undeclared config key, an `api` flow with no secret. A check added to registration later is listed the same way, with no second change. A site the chain already lists under a step-18 entry is not repeated. What the parse itself refuses, the builtin config contracts' value arm among it, is not a TODO: `canonicalizeStoredFlow` throws it, and the preview reports the row among those that could not be rewritten, in the parse's words.
+  
+  `registerFlow` refuses exactly what it refused before, with the same message: its checks now return their refusal instead of throwing it, and `registerFlow` throws the first one. The doors that canonicalize a flow without registering it (the metadata save door, a package duplication) read no `todos`, and the stored pass's run of the checks logs nothing, so they behave as before.
+- 775ed65: feat(spec)!: a page action row declares `ActionSchema`'s own `operation` enum and refuses `onSuccess` beside `operation: 'update'`, with the action's text
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered ui-page-action-row-operation-declared -->
+  
+  **BREAKING**: an accept-set narrowing on two keys of four published page component rows, shipped as `minor` under the launch-window convention for accept-set narrowings.
+  
+  The page action rows are `action:button` and `action:icon` (`properties`), and each member of an `action:group` or `action:menu` (`properties.actions[]`). Each forwards `operation` to the console's action runner, which reads it before any executor: `operation: 'update'` performs the declarative write through the platform action route and runs no executor of its own. The rows typed `operation` as an open value and never carried `ActionSchema`'s refusal of `onSuccess` beside `operation: 'update'`, so a row with an `api` or `script` executor, the write and a hop parsed while the same action was refused. Now:
+  
+  - a row's `operation` is `ActionSchema`'s own enum (one member, `'update'`); `'delete'` and `'custom'` get the action's "bulk-def operation with no row-level form" refusal, and any other value is refused at `operation`;
+  - a row's `onSuccess` beside `operation: 'update'` is refused whatever executor the row names (or none), with ONE text shared with `ActionSchema`: the hop would follow the write, whose success carries no result `${result.*}` could read.
+  
+  `ActionSchema`'s reach is unchanged. Its message for the pairing used to open "`onSuccess` is not defined for an `operation: 'update'` action yet"; it now states what the runner does (reads `operation` before any executor, writes, then hops) and keeps the prescription "Drop `onSuccess`".
+  
+  ### FROM → TO
+  
+  | before | what to write instead |
+  | --- | --- |
+  | `{ actionType: 'api', operation: 'update', patch: { status: 'done' }, onSuccess: { navigate: '/done' } }` (or `type` on a member, or no executor) | the same row without `onSuccess`: the runner performs the write before any executor, so the hop followed a write whose success declares no result |
+  | `{ operation: 'delete', … }` / `{ operation: 'custom', … }` on a row | no `operation`: a row delete is the object's own delete affordance, and a row is already the action a bulk def's `'custom'` would name |
+  | any other `operation` value | `operation: 'update'` with a `patch`, or no `operation` (the runner ran nothing for it) |
+  
+  **The one-line fix: on a page action row, write `operation` only as `'update'`, and never beside `onSuccess`.** `os migrate meta --from 17` lists the D3 entry `ui-page-action-row-operation-declared`; the rewrite is by hand.
+  
+  **What an author now sees.** `os validate`'s props gate reports the refusal at the row's `operation` or `onSuccess` (`properties.…`, or `properties.actions.N.…` for a member). For example, `{ actionType: 'api', operation: 'update', patch: { status: 'done' }, onSuccess: { navigate: '/done' } }` on an `action:button` gets: ``An `action:button`'s `onSuccess` (`operation: 'update'`) would follow a result the contract does not declare: the console's action runner reads `operation` before any executor, …``. The same row without `onSuccess` parses unchanged.
+  
+  **Measured producers.** None in this repository. In objectui (at its pin `1fb1ced36243` and its main `b9814b3`), the action renderers' own tests carry `operation: 'update'` rows without `onSuccess`, which stay accepted; no row carries another `operation` value or the pairing. objectui's metadata-admin form already clears `onSuccess` when an author switches an action into an update.
+
+### Patch Changes
+
+- dac99c2: feat(plugin-security)!: the permission-set projection, its seed-name lookup and refusal sink are deleted (ADR-0131 D3, C3 stage 7a)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/plugin-security#permissionSetRowFields, @objectstack/plugin-security#permissionSetBodyFromRow, @objectstack/plugin-security#upsertEnvPermissionSet, @objectstack/plugin-security#projectPermissionMutation, @objectstack/plugin-security#registerPermissionSetProjection, @objectstack/plugin-security#createPermissionSetWriteThrough, @objectstack/plugin-security#reconcilePermissionSetProjection, @objectstack/plugin-security#PermissionSeedOutcome, @objectstack/plugin-security#ProjectionDeps, @objectstack/plugin-security#ProjectionReconcileOutcome, @objectstack/plugin-security#WriteThroughDeps) The retired names are runtime functions and types of the projector that mirrored a permission-set definition into a sys_permission_set row. No metadata moves: no spec key, authorable spelling or stored shape changes, and no stored row is rewritten. Stage 8 already stopped registering the projector and the data-door write-through, so nothing in a running deployment called them. -->
+  
+  **BREAKING** (retired exports of `@objectstack/plugin-security`), graded `minor` on the v18 prerelease line.
+  
+  Stage 8 stopped registering the `sys_permission_set` row object, the `permission` mutation projector and the data-door write-through. This change deletes the modules behind them: `permission-set-projection`, `seed-name-lookup` and `seed-refusal-sink`. A permission set is written through the metadata door alone (`PUT /api/v1/meta/permission/:name`), and the security catalog serves it by name.
+  
+  What a consumer sees:
+  
+  - FROM `createPermissionSetWriteThrough(deps)` TO nothing: no `sys_permission_set` data-door write exists to redirect. Write the set through the metadata door. Delete the call.
+  - FROM `registerPermissionSetProjection(protocol, deps)` TO nothing: no row mirrors a definition. Delete the call.
+  - FROM `reconcilePermissionSetProjection(...)` TO nothing: there is no projection to reconcile at boot. Delete the call.
+  - FROM `projectPermissionMutation(...)` TO nothing. Delete the call.
+  - FROM `upsertEnvPermissionSet(...)` TO `PUT /api/v1/meta/permission/:name`, or the metadata protocol's `saveMetaItem({ type: 'permission', name, item })`.
+  - FROM `permissionSetBodyFromRow(row)` TO `permissionSetDefinitionFromRow(row)` from `@objectstack/core`: the same mapping, for converting a stored `sys_permission_set` row into its definition.
+  - FROM `permissionSetRowFields(definition)` TO nothing: no row is written. Delete the call.
+  - FROM the types `PermissionSeedOutcome`, `ProjectionDeps`, `ProjectionReconcileOutcome` and `WriteThroughDeps` TO nothing. Delete the import.
+  
+  Unchanged: the security catalog's echo of a metadata-door permission set or position on an environment kernel, which lives in its own module since #23308. The packaged-permission-set lock still refuses a metadata-door save of a set a code package ships (`403 NOT_OVERRIDABLE`), and the boot still reports environment overlays that shadow such a set. `OverlayDetectionOptions.logger` now asks only for `warn`, the one channel the reading reports on.
+  
+  **`@objectstack/spec`** (patch): the `permission.tabPermissions` liveness entry no longer cites the deleted projection, and the liveness README's registered-but-unbound `permission-set-projection` proof row is retired with the invariant it described (no `@proof` tag carries it any more).
+- 7958bdf: No flow position reads the single-brace `{…}` template dialect any more, and its resolver is deleted (ADR-0032 Sequencing 6: "delete the single-brace resolver"). `AutomationEngine.evaluateCondition` evaluates every condition as CEL: a condition carrying a `{var}` hole is refused as the CEL brace trap, naming its source, and a `template` or `flow` envelope is refused before evaluation, where the deleted path substituted the variables and compared the text. A literal in a value slot is handed on as written: a `Date` in a code-defined flow reaches the write as the `Date`, where the deleted interpolator wrote `{}`.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused) The two step-18 D3 entries, registered on this line before this change, record the retirement of the single-brace dialect from every value and text position; this change deletes the resolver behind those positions and the condition path no registered flow reached. No authorable flow surface changes: registerFlow and objectstack validate already refused a braced condition and a template or flow envelope at every condition slot (ADR-0032 §1a), and the residual calls the resolver kept saw literals only. No new D3 entry and no D2 conversion. -->
+  
+  **BREAKING**: a narrowing of a published runtime method and of published lint exports, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 3 keeps one template delimiter, `{{ }}`, and its Sequencing 6 deletes the single-brace resolver. The earlier changes on this line retired the dialect position by position — every value slot, the text slots, each CRUD filter operand — so the resolver's last readers were two calls that saw literals only and a condition path that only a direct call reached.
+  
+  **What changes.**
+  
+  - **Conditions.** `AutomationEngine.evaluateCondition(condition, variables, context?)` reads every condition as CEL — bare text, an envelope with `dialect: 'cel'`, or one naming no dialect. The template path it kept for a string carrying a `{var}` hole is deleted: such a string is refused as a CEL fault that names its source and says not to wrap field references in `{…}`, and an envelope with `dialect: 'template'` or `dialect: 'flow'` is refused before evaluation. `registerFlow` already refused both at every condition slot (a start node's `condition`, an edge `condition`, a `decision` branch's `expression`, a screen field's `visibleWhen`), so no registered flow changes. What changes is a direct caller: a plugin calling the method, or `@objectstack/verify`'s `stack.automation.evaluateCondition`, which hands the condition over as given.
+  - **Value-slot literals.** A literal in a value slot — a `fields`, `input` or `templateData` value, an `assignment` value in any of its three shapes, a `notify` recipient, an `http` `body`, a screen's `defaults`, `defaultValue` or `recordId` — is handed on as a copy of what was written (arrays and plain objects copied, every other value as it is). The deleted interpolator walked every object's own entries, so a `Date` written in a code-defined flow reached the write as `{}`; it reaches it as the `Date`.
+  - **`@objectstack/lint`.** `validateFlowTemplatePaths` reads the `{{ }}` holes of a node's strings and no single-brace token; a CRUD node's `filter` is not scanned, since each operand is a value slot that renders no template. So `flow-template-unknown-field` and `flow-template-lookup-traversal` report only `warning` now: their `error` at a filter operand, and every finding on a single-brace token, are gone, and the value-slot and text-slot judges refuse those tokens at the same doors as `expression-invalid`. Messages and hints spell a hole `{{ record.x }}`. `flow-double-brace-interpolation` and `flow-bare-dollar-reference`, at a string outside every value slot, text slot and declared literal (a plugin node's own config, a `connector_action` input), say the value is read as written, where they prescribed a `{var}` token nothing reads. The lint's mirror of the retired grammar is removed with its exports.
+  - **`@objectstack/spec`.** The `FlowSchema` example's `connector_action` input holds a literal, since nothing reads a token there. The upgrade guide's step-18 text-slot entry says no other flow string reads the single-brace dialect, where it said every other one kept it, and its value-slot entry names every value slot the retirement reached on this line, where it named only the `assignment` values and the CRUD `fields` map.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `engine.evaluateCondition('{amount} > 100', vars)` | `engine.evaluateCondition('amount > 100', vars)` | the template substituted text and compared it; CEL compares the values and fails the run on an absent variable |
+  | `"{status} == 'open'"`, `'{status} == open'` | `"status == 'open'"` | a string literal is quoted |
+  | `{ dialect: 'template', source: "{flag} == true" }`, `dialect: 'flow'` | `{ dialect: 'cel', source: 'flag == true' }` | — |
+  | `classifyFlowTemplateToken(inner)` (`@objectstack/lint`) | `valueSlotTemplateRefusals(value)` / `textSlotTemplateRefusal(text)` (`@objectstack/spec/automation`), which refuse a token with the spelling that replaces it | the grammar it classified is read by nothing |
+  | `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` | the CEL stdlib: `isoDate(today())`, `isoDatetime(now())`, `round`, `floor`, `ceil`, `abs`, `min`, `max` | — |
+  | `FlowTemplateTokenVerdict` | nothing: the judges' reading of the retired grammar is internal to `@objectstack/spec` | — |
+  
+  **The one-line fix: write a condition as CEL, without `{…}` around a reference.**
+  
+  **Who is affected, measured.** In this repository at the base: no braced condition and no `template` or `flow` condition envelope in `examples/`, the docs or any package source; the deleted path's own pins in `@objectstack/service-automation` (`engine.test.ts`, `nested-region-parity.test.ts`) and `@objectstack/verify`'s door test are re-pinned to the refusal here. No authored `Date` literal in a flow was found; a compiled artifact serialises one to text, so only a flow handed to `registerFlow` in code carried one. Neither repository imports the removed lint exports. hotcrm at `0f84c9c` carries no braced condition and no `connector_action` input; its flows still author the single-brace dialect at value and text positions earlier changes on this line refuse, which its own upgrade migrates.
+  
+  ### The kit
+  
+  - **The engine.** `AutomationEngine.evaluateCondition` (`@objectstack/service-automation`): the template path, its hole discriminator and its text comparison are deleted. The value-slot resolvers' literal arm and the `assignment` executor copy a literal (`copyLiteral`, `builtin/value-slot-map.ts`). The single-brace interpolator (`interpolate`, `interpolateString`, `resolveToken`, its function table and `FlowExpressionFunctionError`), which the package did not export, is deleted with its tests.
+  - **The lint.** `validateFlowTemplatePaths` and the two wrong-syntax hints (`lint-flow-patterns.ts`); `classifyFlowTemplateToken`, `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` and `FlowTemplateTokenVerdict` are removed.
+  - **The verify handle.** `stack.automation.evaluateCondition`'s documentation states the engine's reading: CEL, a `{var}` hole refused.
+  - **ADR-0087.** No new entry: the step-18 D3 entries `flow-value-slot-template-dialect-refused` and `flow-text-slot-single-brace-refused` record the retirement.
+- 777eed2: The `mailAssociation` liveness row is `live`: the mailbox service's matcher reads the key, so authoring `mailAssociation: true` on an email field no longer draws the "no mailbox service reads this yet" author warning
+  
+  Clause-②: no (dropping an author warning widens no accept set and no export: `FieldSchema` accepts `mailAssociation` exactly as before; only the warning the shipped liveness ledger carried is gone)
+  
+  - `liveness/field.json`: the row moves from `planned` with `authorWarn` and `authorHint` to `live`, citing `MailRecordMatcher` in `@objectstack/service-mailbox` as its reader. The `field` state counts move from 94 live and 4 planned to 95 live and 3 planned.
+- c056979: Retirement prescriptions for shapes `@objectstack/spec` 17.7.0 still accepts now name 18 as the release that removed them
+  
+  Clause-②: no
+  
+  17.7.0, the newest 17.x release (npm `latest`), still accepts every shape in the two tables below. No 17.x release removes them: the 18 line does. `18.0.0-next.0` is the first release that refuses the shapes in this first table. Their refusals, and their `[REMOVED]` JSON Schema descriptions, named a different release:
+  
+  | Surface | Was | Now |
+  | --- | --- | --- |
+  | `element:number` `object` / `filter`; `element:record_picker` and `element:repeater` `object` / `filter` / `sort` / `limit` | removed in @objectstack/spec 17 | removed in @objectstack/spec 18 |
+  | `object-grid` `defaultFilters` | removed in @objectstack/spec 17 | removed in @objectstack/spec 18 |
+  | `email_template.category`, `email_template.isSystem` | removed in @objectstack/spec 17 | removed in @objectstack/spec 18 |
+  | a package manifest's `permissions` written as a list of permission strings | removed in @objectstack/spec 17 | removed in @objectstack/spec 18 |
+  | `public` in `StorageScope` | removed in @objectstack/spec 17.8.0 | removed in @objectstack/spec 18 |
+  | `MetadataTypeRegistryEntry.allowOrgOverride` → `allowEnvironmentOverlay` | renamed (no release named) | renamed in @objectstack/spec 18 |
+  
+  The `18.0.0-next.0` release notes quoted the two `email_template` prescriptions with the earlier version, 17; from this release on they name 18.
+  
+  `18.0.0-next.0` still accepts the shapes in this second table, so the first release that refuses them is the one after it. Their refusals named 17, or no release at all:
+  
+  | Surface | Was | Now |
+  | --- | --- | --- |
+  | `view.data.provider: 'api'` | removed in @objectstack/spec 17 | removed in @objectstack/spec 18 |
+  | `'navigation'` as a page action row's executor (`actionType` on `action:button` / `action:icon`, member `type` on `action:group` / `action:menu`) | no release named | refused on page action rows since @objectstack/spec 18 |
+  | a `controlled_by_parent` object with no `master_detail` declared `required: true` | no release named | the one-required-master rule holds since @objectstack/spec 18 |
+  
+  One prescription was wrong the other way. 17.4.0 accepts the sub-day `TimeUpdateInterval` members `second`, `minute` and `hour`, and 17.5.0 refuses them, but the refusal said "retired in protocol 18". It now says "removed in @objectstack/spec 17.5.0".
+  
+  The `os migrate meta --from 17` sentence in each prescription is unchanged and was already right: `--from 17` replays the protocol-18 conversions. A prescription for a key that a 17.x release already refuses keeps naming 17. Text only: no key, value or shape is accepted or refused differently.
+- 4f68ba1: Every finding of the component-props gate is now an error at `objectstack validate`, `objectstack build` and `objectstack lint`. A page component whose `properties` carry a key its `ComponentPropsMap` row does not declare, a value that row rejects, or no `dataSource.object` binding where the element reads only that binding drew a warning: the command printed "✓ Validation passed" and built the artifact, and the renderer ignored the key or drew nothing. Each is now a `component-props-unknown-key` or `component-props-invalid` error, and the stack does not pass until it is fixed. A retired prop was already refused, and still is.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered element-data-source-and-object-block-filter-rule-array, element-flat-data-binding-retired, element-text-variant-heading-subheading-retired, ui-action-group-menu-member-params-array-only, ui-action-group-menu-members-typed, ui-object-block-grouping-config-typed, ui-object-form-custom-fields-typed, ui-object-form-fields-names-typed, ui-object-form-members-typed, ui-object-form-sections-typed, ui-object-gantt-markers-typed, ui-object-grid-columns-typed, ui-object-grid-export-options-closed, ui-object-grid-kanban-calendar-list-members-typed, ui-object-grid-page-size-positive-integer-refused, ui-object-grid-row-members-typed, ui-object-kanban-conditional-formatting-typed, ui-object-map-gantt-tree-navigation-typed, ui-object-master-detail-form-details-closed, ui-object-metric-aggregate-trend-typed, ui-object-metric-compare-to-typed, ui-object-metric-drill-down-report-typed, ui-object-metric-drill-down-typed, ui-object-timeline-items-typed, ui-object-timeline-mapping-typed, ui-record-line-items-props-closed) Every props shape this refuses on was declared, and each narrowing of one recorded in its own D3 entry, before this change; the entries named here are the step's narrowings whose refusal the gate carries, and this diff amends the reason text of each one that called that refusal advisory, to say it is now an error. It moves only the severity of the lint findings, so it adds no entry, and no conversion: nothing on the load path refuses a page's `properties`. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface (the `component-props-invalid` and `component-props-unknown-key` rules of `objectstack validate`, `objectstack build` and `objectstack lint`).
+  
+  **What is refused now.** Every verdict of the gate:
+  
+  - `component-props-unknown-key`: a key the component's props row does not declare, at the bag's own level, on a strict object or union arm below it, or on a strip-mode object below it.
+  - `component-props-invalid`: a value the props row rejects (a wrong type, a missing required prop, a closed-set refusal such as a url action's `target` scheme or a `record:details` section's `count`, a retired enum value), and a missing `dataSource.object` on `element:record_picker`, `element:number` and `element:repeater`.
+  
+  **Not judged here.** The runtime publish door (the Studio, REST `/meta`, MCP) does not run this rule, so a page saved there is not refused for any of these. `defineStack` and the stack schema keep the open `properties` bag as written. A component `type` that `ComponentPropsMap` carries no row for (a `custom.*` or plugin type) is not judged.
+  
+  `ComponentPropsSeverity`, the type `@objectstack/lint` exports for these findings, narrows from `'error' | 'warning'` to `'error'`.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `page:header` `properties: { titel: 'Deals' }` | `properties: { title: 'Deals' }`, the declared spelling the error names |
+  | `record:related_list` `properties: { limit: 'five' }` | `properties: { limit: 5 }`, the type the error names |
+  | `element:number` with no `dataSource` | `dataSource: { object: 'deal' }` on the component node, beside `type` |
+  | a key the component does not read | nothing: delete the key |
+  
+  **The one-line fix: apply what the error names.** An unknown-key error names the declared spelling when one is close, a value error names what the row expects, and the binding error names where the object goes. If the component really does read the key or value, the props row is what is wrong: correct the declaration in `@objectstack/spec`, not the page.
+  
+  The `@objectstack/spec` change is text only: the reason of each D3 migration entry named above said the gate reported its refusal as an advisory finding, and now says it is an error.
+  
+  **Who is affected, measured.** At objectstack `8323cad97`, this rule ran at its own input tier over `examples/app-crm`, `app-todo`, `app-multi-package` and `app-showcase`, and over the eight shipped pages outside them (`@objectstack/platform-objects` ×3, `@objectstack/plugin-approvals`, `packages/qa/downstream-contract`, `@objectstack/cloud-connection` ×2, `@objectstack/mcp`): 37 pages, 177 components judged. It also ran over `objectstack-ai/hotcrm` at `0f84c9c72`: 8 pages, 50 components judged. Result: 0 findings of every class in both. A planted undeclared key and a planted wrong-typed prop each drew one finding on every population. The `create-objectstack` template authors no page. Deployed metadata and other repositories were not measured.
+- b4d573a: fix(spec,core): the rolling `last_7_days`, `last_30_days` and `last_90_days` presets close on today, at the spec's prescription table, the save door's refusal and the analytics preset arm
+  
+  Clause-②: no (no accept set widens: the three rolling windows gain the inclusive `{today}` end every calendar preset already has)
+  
+  The three rolling windows were the open arm of `DATE_RANGE_PRESET_MACRO_WINDOWS`: `['{30_days_ago}', null]`, prescribed as `{ $gte: '{30_days_ago}' }`. A `$gte`-only window has no upper bound, so on a column that carries future dates (a close date, a due date) "last 30 days" also counted every later day. Measured on a `date` field with one row dated today−5 and one dated today+5: that window counted 2, while the console's preset lowering and the analytics preset arm counted 1.
+  
+  - `DATE_RANGE_PRESET_MACRO_WINDOWS` now closes every rolling window on `{today}`: `last_7_days` is `['{7_days_ago}', '{today}']`, and `last_30_days` and `last_90_days` follow the same shape. That is the inclusive last-day end every calendar preset already uses, and the extent the console's lowering already selects. The table's declared type narrows to match, `readonly [start: string, end: string]` (it was `end: string | null`). A reader that compared `end` with `null` still compiles; that branch can no longer be taken.
+  - The save door's refusal of a bare preset comparand (`bareDateRangePresetComparandMessage`, and the `filter-preset-comparand` lint verdict that quotes it) now prescribes the closed window. For `last_30_days` it says: write `{ $between: ['{30_days_ago}', '{today}'] }`, where it used to say `{ $gte: '{30_days_ago}' }`.
+  - `@objectstack/core`'s `resolveAnalyticsDateRangePreset`, the preset arm behind `timeDimensions[].dateRange`, selects the same extent. A rolling window now stops before tomorrow begins in the reference timezone, exactly as `today` does, with `endExclusive: true`. It used to end at the reference instant, so it dropped rows stamped later today. Its ends keep this module's own "the day the window stops before" spelling (`tomorrow`). Every preset this resolver returns is now `endExclusive: true`, and a caller's explicit `[a, b]` window keeps its inclusive reading, as before.
+  - The semantic migration entry `filter-preset-ordering-comparand-refused`, which `spec-changes.json` and `os migrate meta` carry, now names `{ $between: ["{30_days_ago}", "{today}"] }` as the window for `last_30_days` in its replacement, where it named `{ $gte: "{30_days_ago}" }`.
+  
+  If you followed the old refusal and authored `{ $gte: '{N_days_ago}' }` for a rolling preset, add `$lte: '{today}'`, or write the `$between` pair above, to stop counting future-dated rows.
+- 6673c80: feat(cli)!: the v18 upgrade carries stored comment reactions — `os migrate comment-reactions` turns each reaction stored in the retired `sys_comment.reactions` column into a `sys_comment_reaction` record, and `os migrate apply --allow-destructive` refuses to drop that column until the conversion is verified
+  
+  Clause-②: no (narrowing) — `os migrate apply --allow-destructive` now refuses the `sys_comment.reactions` drop it accepted before, until a verified conversion is recorded; the conversion itself only writes records of an existing object, so nothing widens.
+  
+  <!-- adr-0087: not-required (already-registered sys-comment-reactions-column-retired) The narrowed input is the drop of the column that semantic entry retired, and the entry already reaches every upgrading deployment through `os migrate meta` and the upgrade guide. This changeset's prescription (convert, verify, then drop) is carried by that entry: this PR rewrites its replacement, reason and acceptance criteria to name the conversion and order it before the drop, with its id and surface unchanged. No spec key, export or stored shape moves. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **What the upgrade now carries.** A database upgraded from 17.x keeps `sys_comment.reactions` and every emoji reaction stored in it (schema sync is additive). Those reactions are no longer lost. `os migrate comment-reactions` converts them into records:
+  
+  - **One record per stored reaction.** Each (comment, emoji, user) in a stored map becomes one `sys_comment_reaction` row with the same comment, emoji and user, in the comment's organization, owned by the user who reacted. That user can remove it like any reaction made on v18. A user id listed twice under one emoji is one reaction.
+  - **Nothing is guessed.** A stored value that is not JSON or not a map of emoji to user-id lists, an entry that is not a user id, an emoji longer than a reaction record holds, and a user id that names no `sys_user` row are each listed in the report with their comment id. Nothing is written for them. The readable entries of the same comment still convert.
+  - **Idempotent.** A reaction that already has its record is skipped, so a second run writes nothing, and re-running finishes an interrupted run.
+  - **Dry run by default.** `--apply` writes the records, reads the column back, and records the run in `sys_migration`. The run is recorded as verified only when every readable reaction has its record and no stored value is left unreadable. `--json` gives the full report. A run that lists an unreadable value or fails a write exits `1`, and so does an `--apply` run whose read-back finds anything unconverted.
+  
+  **The column drop waits for the conversion (the narrowing).** Until a verified run is recorded, `os migrate apply --allow-destructive` refuses to drop `sys_comment.reactions` and exits `1` (`--json`: `message: "refused_comment_reactions_unconverted"`, with the recorded run under `conversion`). Nothing else is applied on that run. This also covers the boot drift line, which names that command as the remedy for the orphaned column. What to do when it refuses: run the conversion below until it reports the run verified, then re-run the apply.
+  
+  **`os migrate apply --json` exits `1` when the `sys_account.issuer` retirement pre-flight refuses.** Its two refusals, `refused_account_issuer_collisions` and `refused_account_issuer_preflight_unreadable`, emitted their document with exit code `0`, so a caller gating on the status read a refused apply as a successful one. They now exit `1`, as the same refusals do without `--json`. The document is unchanged.
+  
+  **Upgrade order:** take a backup, run `os migrate comment-reactions`, then `os migrate comment-reactions --apply`. If it lists unreadable values, correct each one in the database so it reads as a map of emoji to user ids, or clear it if it holds nothing to keep, and run `--apply` again. Once the run is verified, run `os migrate apply --allow-destructive` to drop the column. Run these with the flags and environment the deployment boots with (an auth secret set), so the audit plugin's objects are composed.
+  
+  This supersedes the "stored reactions are not migrated" sentence in the entry that retired the column. `@objectstack/spec`: the protocol-18 semantic entry `sys-comment-reactions-column-retired` now names the conversion in its replacement, reason and acceptance criteria, and orders it before the drop. `os migrate meta` and the upgrade guide carry that text. Its id and surface are unchanged.
+- e4ec6ec: fix(spec): the two step-18 flow-binding D3 entries name only the reads a renamed variable has on protocol 18, a text-slot hole and a CEL expression
+  
+  Clause-②: no
+  
+  The `replacement` text of two ADR-0087 D3 semantic entries, `flow-binding-name-dollar-refused` and `flow-binding-variable-dollar-name-refused`, listed three ways a flow reads the old variable name, for the author to rename. Protocol 18 has only the first two. The protocol upgrade guide and `spec-changes.json` are generated from these entries, so they now say what the two entries' release notes already say.
+  
+  | FROM | TO |
+  |:--|:--|
+  | Rename every read of the old name with it — a text-slot hole, a CEL expression, a single-brace token in a value position | Rename every read of the old name with it — a text-slot hole, a CEL expression |
+  
+  No protocol-18 value position reads a flow variable through a single-brace `{…}` token. A value slot takes a CEL value envelope or a literal, and a `{…}` token there is refused. The one `{…}` string a value slot hands on is a CRUD `filter` operand's whole-string query placeholder (`{current_user_id}`, `{today}`): the query engine reads it, and it names no flow variable. A text slot reads `{{ }}` holes.
+  
+  Text only. No schema, door, conversion or entry id changes, and each entry keeps its `fromVersion`, `toVersion` and every other field.
+- 325a92e: The spec's objectui citations, and the shipped description text that names the `.objectui-sha` pin (the `FormField.span` describe and six migration-entry descriptions), are re-measured against the new console pin, objectui `b9814b334d8a`. Four descriptions this pin makes true change with it.
+  
+  Clause-②: no
+  
+  The four descriptions, each now read by the console at this pin:
+  
+  - `EmptyStateSchema.link`, the one link an empty state carries, no longer opens with `[PLANNED — not yet rendered]`. The console draws it in a list's empty state (the `grid` and `gallery` visualizations) and in an `object-grid` block's empty state, and follows it through its action runner (objectui#12270).
+  - A list page's own `interfaceConfig.emptyState` no longer opens with `[PLANNED — not yet rendered]`. The console's list page prefers it, whole, over its source view's empty state (objectui#12270).
+  - A `record:details` section's `count` no longer opens with `[EXPERIMENTAL — not enforced]`. The record detail page fills the heading's `{{ count }}` hole (objectui#12192).
+  - The `object-grid` block's `emptyState` description names `link` among the members the grid draws.
+  
+  The two liveness-ledger notes that excluded `emptyState.link` and `interfaceConfig.emptyState` from their rows' `live` verdict now say both are covered.
+  
+  Every asserting citation (55, across 2047 spec sources) was mapped through the objectui diff `1fb1ced36243..b9814b334d8a`: 397 paths over 36 commits. Where a cited file changed, each cited line was re-read and its new number recorded; none changed what it reads. The moved files are `ObjectGrid.tsx`, `data-table.tsx`, `ListView.tsx`, `ObjectCalendar.tsx`, the `en` / `zh` / `de` packs, `record-details.tsx`, `record-highlights.tsx`, `record-quick-actions.tsx`, `data-objectstack/src/index.ts`, `objectql.ts`, `plugin-kanban/src/index.tsx`, `plugin-grid/src/index.tsx`, `plugin-calendar/src/index.tsx` and `block-types.ts`. Every other record cites only files that are byte-identical across the hop, and each gains a hop sentence that says so. Three quoted anchors of the `map` block record moved and were re-pointed; they are `case 'map':` in `ObjectView.tsx`, and `ObjectMapConfigSchema` and `LIST_VIEW_LOCAL_OVERRIDES` in `objectql.zod.ts`.
+  
+  The six migration entries' corpus counts were re-taken with `git grep -o -F`, the method that reproduces every `1fb1ced36243` number. The corpus is now 8743 tracked files. A superset of 98 names reads 0: the 13 lifecycle, 31 metrics and 37 tracing exports, and 17 further names the entries count (their retired key names and the two logging defs). The unrelated `Span` 519 and `SpanSchema` 57 are unchanged. The lit controls moved with the corpus, for example `objectstack` from 18601 to 18854, `timeout` from 1700 to 1750 and `tenant` from 1415 to 1420.
+  
+  No key, default, enum member or export moves.
+
 ## 18.0.0-next.0
 
 ### Major Changes
