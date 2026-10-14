@@ -820,7 +820,7 @@ export function readFailure(label, read, policy = BOARD_READ_RETRY) {
   const tries = `after ${read.attempts} attempt${read.attempts === 1 ? '' : 's'}`;
   const why = {
     answer: 'not retried: only a 5xx or a connection reset is',
-    attempts: `the per-read cap of ${policy.attemptsPerRead} attempts, so not one blip`,
+    attempts: 'every attempt one read is allowed, so not one blip',
     budget: `this run's budget of ${policy.retriesPerRun} retries is spent`,
   }[read.stoppedBy];
   return new Error(`${label} -> ${answer} ${tries} (${why})`, read.cause ? { cause: read.cause } : undefined);
@@ -1728,7 +1728,11 @@ export async function selfTest() {
       next.calls = () => calls;
       return next;
     };
-    const rejection = async (promise) => { try { await promise; return null; } catch (err) { return err; } };
+    /* A case that must RESOLVE settles its promise, so a refusal reds that case BY NAME
+     * instead of escaping as an uncaught throw that names no case at all. */
+    const settle = async (promise) => { try { return { board: await promise, err: null }; } catch (err) { return { board: null, err }; } };
+    const rejection = async (promise) => (await settle(promise)).err;
+    const refused = (err) => (err ? `; it refused instead: ${err.message}` : '');
     const HEAD = { body: [{ number: 500 }] };
     const LIVE_100 = { body: { number: 100 } };
     const probe = (wanted, budget, routes) => probeBoard(wanted, { ownerRepo: OWN, token: '', budget, fetchImpl: stubFetch(routes) });
@@ -1746,35 +1750,35 @@ export async function selfTest() {
     {
       const { slept, budget } = recorder();
       const head = seq({ status: 500 }, HEAD);
-      const board = await probe([100], budget, [[/per_page=1/, head], [/issues\/100$/, LIVE_100]]);
-      check(board.frontier === 500 && board.has(100) && head.calls() === 2 && slept.join() === '500',
-        '⭐ one transient 500 on the HEAD probe, then a 200, RESOLVES: one retry after one 500 ms backoff');
+      const { board, err } = await settle(probe([100], budget, [[/per_page=1/, head], [/issues\/100$/, LIVE_100]]));
+      check(board?.frontier === 500 && board.has(100) && head.calls() === 2 && slept.join() === '500',
+        `⭐ one transient 500 on the HEAD probe, then a 200, RESOLVES: one retry after one 500 ms backoff${refused(err)}`);
     }
     {
       const { slept, budget } = recorder();
       const one = seq({ status: 500 }, LIVE_100);
-      const board = await probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, one]]);
-      check(classifyCitation({ number: 100, qualifier: null }, board, { ownerRepo: OWN }).cause === CAUSE.RESOLVES && one.calls() === 2 && slept.join() === '500',
-        '⭐ one transient 500 on a PER-NUMBER probe, then a 200, RESOLVES the citation: the read the queue ejection died on');
+      const { board, err } = await settle(probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, one]]));
+      check(board !== null && classifyCitation({ number: 100, qualifier: null }, board, { ownerRepo: OWN }).cause === CAUSE.RESOLVES && one.calls() === 2 && slept.join() === '500',
+        `⭐ one transient 500 on a PER-NUMBER probe, then a 200, RESOLVES the citation: the read the queue ejection died on${refused(err)}`);
     }
     {
       const { budget } = recorder();
       const reset = seq({ throws: 'ECONNRESET' }, LIVE_100);
-      const board = await probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, reset]]);
-      check(board.has(100) && reset.calls() === 2, 'a connection reset, then a 200, resolves');
+      const { board, err } = await settle(probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, reset]]));
+      check(board?.has(100) === true && reset.calls() === 2, `a connection reset, then a 200, resolves${refused(err)}`);
     }
     {
       const { budget } = recorder();
       const cut = seq({ ...LIVE_100, bodyThrows: 'UND_ERR_SOCKET' }, LIVE_100);
-      const board = await probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, cut]]);
-      check(board.has(100) && cut.calls() === 2, 'a socket closed while the BODY streams is retried too: the unit retried is the request and its body');
+      const { board, err } = await settle(probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, cut]]));
+      check(board?.has(100) === true && cut.calls() === 2, `a socket closed while the BODY streams is retried too: the unit retried is the request and its body${refused(err)}`);
     }
     {
       const { budget } = recorder();
       const page1 = { body: [{ number: 1 }], headers: { link: '<https://api.github.com/repositories/9/issues?page=2>; rel="next"' } };
       const page2 = seq({ status: 502 }, { body: [{ number: 4, pull_request: {} }] });
-      const board = await enumerateBoard({ ownerRepo: OWN, token: '', budget, fetchImpl: stubFetch([[/page=2/, page2], [/issues\?state=all/, page1]]) });
-      check(board.frontier === 4 && board.isPull(4) && page2.calls() === 2, 'the ENUMERATING strategy shares the retry: a transient 502 on page 2 still yields the whole board');
+      const { board, err } = await settle(enumerateBoard({ ownerRepo: OWN, token: '', budget, fetchImpl: stubFetch([[/page=2/, page2], [/issues\?state=all/, page1]]) }));
+      check(board?.frontier === 4 && board.isPull(4) && page2.calls() === 2, `the ENUMERATING strategy shares the retry: a transient 502 on page 2 still yields the whole board${refused(err)}`);
     }
 
     /* Persistent failure: refused after exactly the ladder, with a refusal that names it. */
@@ -1801,10 +1805,10 @@ export async function selfTest() {
     {
       const { slept, budget } = recorder();
       const gone = seq({ status: 404, body: {} });
-      const board = await probe([150], budget, [[/per_page=1/, HEAD], [/issues\/150$/, gone]]);
-      check(gone.calls() === 1 && slept.length === 0 && !board.has(150)
+      const { board, err } = await settle(probe([150], budget, [[/per_page=1/, HEAD], [/issues\/150$/, gone]]));
+      check(board !== null && gone.calls() === 1 && slept.length === 0 && !board.has(150)
         && classifyCitation({ number: 150, qualifier: null }, board, { ownerRepo: OWN }).cause === CAUSE.ALLOCATED_BUT_ABSENT,
-      '⭐ a 404 keeps its meaning: asked ONCE, never retried, and the citation is still a FINDING');
+      `⭐ a 404 keeps its meaning: asked ONCE, never retried, and the citation is still a FINDING${refused(err)}`);
     }
     for (const status of [401, 403, 429]) {
       const { slept, budget } = recorder();
@@ -1824,9 +1828,9 @@ export async function selfTest() {
     ];
     for (const [label, thrown] of unnamed) {
       const { slept, budget } = recorder();
-      const refused = seq({ throws: thrown });
-      const err = await rejection(probe([100], budget, [[/per_page=1/, refused]]));
-      check(err === thrown && refused.calls() === 1 && slept.length === 0, `${label} is not retried, and is rethrown as the very error it was`);
+      const failing = seq({ throws: thrown });
+      const err = await rejection(probe([100], budget, [[/per_page=1/, failing]]));
+      check(err === thrown && failing.calls() === 1 && slept.length === 0, `${label} is not retried, and is rethrown as the very error it was`);
     }
     {
       const { budget } = recorder();
