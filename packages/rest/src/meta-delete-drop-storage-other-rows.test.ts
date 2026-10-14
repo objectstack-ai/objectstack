@@ -190,7 +190,7 @@ describe('[#23415] DELETE ?package=P&dropStorage=true of an object another row s
 
             const body = refusedConflict(await h.remove({ package: P, dropStorage: 'true' }));
             // The refusal names the row that keeps serving the object.
-            expect(String(body.message)).toContain(Q);
+            expect(String(body.error), JSON.stringify(body)).toContain(Q);
 
             expect(await h.storedPackages()).toEqual([P, Q]);
             expect(await h.hasTable()).toBe(true);
