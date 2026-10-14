@@ -69,7 +69,7 @@ export const entry: SemanticMigration = {
     + 'dark control of 0; inside packages/spec the '
     + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
     + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
-    + 'pinned objectui checkout — `.objectui-sha` = `b9814b334d8aebac43dd2b04a2003963aec3cc6e` — names none of it: all 37 exports of '
+    + 'objectui checkout at `b9814b334d8aebac43dd2b04a2003963aec3cc6e` (the pin when this was measured) names none of it: all 37 exports of '
     + 'tracing.zod.ts and each of the four key names occur 0 times across the 8743 files tracked at that sha (the 519 Span and 57 SpanSchema hits are objectui\'s own HTML '
     + 'text-span component, TextSpanSchema, an unrelated name, plus colSpan and prose), against '
     + 'two lit controls on that same corpus and sha: 18854 hits for the bare token objectstack, and 7819 for the package specifier @objectstack/spec (at 1fb1ced36: 0 across 8642, Span 519, 18601 and 7679; at 7578323a5: 0 across 8600, Span 519, 18552 and 7649; at 9646e2ed2: 0 across 8540, Span 519, 18438 and 7612; at 088e0f705: 0 across 8519, Span 519, 18400 and 7603; at e5311165a: 0 across 8506, Span 519, 18355 and 7599; at 499799502: 0 across 8441, Span 517, '

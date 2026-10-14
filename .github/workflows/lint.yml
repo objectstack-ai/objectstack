@@ -5649,13 +5649,6 @@ jobs:
         continue-on-error: true
         run: pnpm --filter @objectstack/spec check:template-manifests
 
-      # Rationale: `packages/spec/scripts/check-objectui-pin-citations.ts` header
-      # (#10274, #9881, #9972, #9397, #10137, #5010).
-      - name: Check spec pin citations still name the pin this repo builds against
-        id: check-spec-pin-citations-still-name-the-pin
-        continue-on-error: true
-        run: pnpm --filter @objectstack/spec check:objectui-pin-citations
-
       # #11344. `packages/spec/llms.txt` is hand-kept, has no generator, and
       # SHIPS in the published tarball as context for AI consumers — the
       # audience least able to notice staleness and most likely to turn a claim

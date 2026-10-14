@@ -297,8 +297,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   so match the screen by that arm or by `startDateField`, never by the
  *   English sentence. So the loss is total rather than partial — every
  *   record, on every object — and the author is told at render time as well
- *   as here. Both reads hold at the pin this repo builds against
- *   (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ *   as here. Both reads hold at objectui `b9814b334` (re-read there 2026-10-14:
  * on the hop off `1fb1ced36` `ObjectCalendar.tsx` changed (+179/-49:
  * objectui#12291's quick-create hand-off, objectui `ee470719e`, and
  * objectui#12030, objectui `c5406c201`), none of it in `getCalendarConfig` or
@@ -482,8 +481,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   only objectui's head.
  *   This repo already records the same deletion one door over: the #13817
  *   check in `../ui/view.zod.ts` names objectui#7029 as its runtime half.
- * - `gantt`    → NO fallback, and no silence [#19630]. Measured at the pin
- *   this repo builds against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * - `gantt`    → NO fallback, and no silence [#19630]. Measured at objectui `b9814b334` (re-read there 2026-10-14:
  * on the hop off `1fb1ced36` `ObjectGantt.tsx` is byte-identical (`git diff
  * --quiet`), so `getGanttConfig` `:612` and the `if (!ganttConfig)` arm `:2330`
  * did not move, and `ListView.tsx` changed (+23/-3: objectui#12292,
@@ -610,8 +608,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   `endDateField` and `titleField` — the three keys `GanttConfigSchema`
  *   requires. So the view does not draw a blank chart: it refuses, by name.
  * - `timeline` → date axis: NO fallback [#19630]; title: `titleField || 'name'`,
- *   which still stands. Measured at the same pin (`.objectui-sha` =
- * `b9814b334`, re-read there 2026-10-14:
+ *   which still stands. Measured at the same commit, objectui `b9814b334` (re-read there 2026-10-14:
  * on the hop off `1fb1ced36` `ObjectTimeline.tsx` is byte-identical (`git diff
  * --quiet`), so its start-date chain `:589-591` and its `if (!hasAuthoredItems
  * && !startDateField)` refusal arm `:974` did not move, and `ListView.tsx`
@@ -739,8 +736,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   `type: 'timeline'` view carrying a `calendar` block but no `timeline`
  *   block does render; the warning still fires there, because the block the
  *   view TYPE names is the one that is missing. Unchanged by this row.
- * - `map`      → NO fallback, and no silence [#19630]. Measured at the same
- *   pin (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * - `map`      → NO fallback, and no silence [#19630]. Measured at the same commit, objectui `b9814b334` (re-read there 2026-10-14:
  * on the hop off `1fb1ced36` `ObjectMap.tsx` is byte-identical (`git diff
  * --quiet`), so `getMapConfig` `:421`, `hasCoordinateBinding` `:527` and the
  * refusal arm `:1337` did not move; and `ListView.tsx` changed (+23/-3:
