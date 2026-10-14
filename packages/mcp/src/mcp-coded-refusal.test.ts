@@ -27,9 +27,13 @@
  *    byte-identical to `errorResult(messageOf(err))`. That includes the value
  *    the HTTP bridge's exposure gate throws today, `{ statusCode, message }`
  *    with no `code`. Nothing is invented for it.
- *  - The record resource adds `code` / `status` / `details` beside the
- *    unchanged `error` sentence. A code-less throw answers `{ error }`
- *    byte-identically.
+ *  - The data tools and `list_actions` WITHHOLD `details`. Measured on `/mcp`,
+ *    a `PERMISSION_DENIED` carries the caller's `positions` and
+ *    `permissionSets` there, which the runtime dispatcher drops from the wire.
+ *    `errorResultWithCode` says why.
+ *  - The record resource adds `code` / `status` beside the unchanged `error`
+ *    sentence and withholds `details` the same way. A code-less throw answers
+ *    `{ error }` byte-identically.
  *
  * The stdio face's pins live beside the fixtures that already drive it over a
  * real `StdioServerTransport`. `MFA_REQUIRED` is pinned in
@@ -71,6 +75,12 @@ interface Site {
   args: Record<string, unknown>;
   /** The bridge member whose throw this tool's catch renders. */
   member: keyof Bridge;
+  /**
+   * `run_action` / `resume_run` render through `errorResultFromThrown`, which
+   * carries `details`. That is #15942's contract, and it is not this card's to
+   * change. The `details` pin below covers every other row.
+   */
+  actionDoor?: true;
 }
 
 /** Every tool `wireBridgeTools` registers for {@link benignBridge}, each with the member it calls first. */
@@ -89,9 +99,30 @@ const SITES: readonly Site[] = [
   { tool: 'update_record', args: { objectName: 'task', recordId: 't9', data: { title: 'x' } }, member: 'update' },
   { tool: 'delete_record', args: { objectName: 'task', recordId: 't9' }, member: 'remove' },
   { tool: 'list_actions', args: {}, member: 'listActions' },
-  { tool: 'run_action', args: { actionName: 'complete' }, member: 'runAction' },
-  { tool: 'resume_run', args: { runId: 'r1' }, member: 'resumeRun' },
+  { tool: 'run_action', args: { actionName: 'complete' }, member: 'runAction', actionDoor: true },
+  { tool: 'resume_run', args: { runId: 'r1' }, member: 'resumeRun', actionDoor: true },
 ];
+
+/**
+ * The security gate's denial as it reached `/mcp` when measured on the
+ * showcase stack: the caller's authorization topology rides in `details`. The
+ * runtime dispatcher drops these `details` from the wire.
+ */
+function securityGateDenial(): Error {
+  return Object.assign(
+    new Error('You do not have permission to perform this action. Contact your administrator if you need access.'),
+    {
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      details: {
+        operation: 'delete',
+        object: 'showcase_private_note',
+        positions: ['org_member', 'everyone'],
+        permissionSets: ['showcase_member_default', 'member_default'],
+      },
+    },
+  );
+}
 
 function bridgeThrowing(member: keyof Bridge, thrown: unknown): Bridge {
   const bridge = benignBridge();
@@ -144,6 +175,21 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
       const result = await callTool(site, new Error('engine exploded'));
       expect(result).toEqual({ content: [{ type: 'text', text: 'engine exploded' }], isError: true });
     });
+
+    if (!site.actionDoor) {
+      it(`${site.tool}: a PERMISSION_DENIED answers code, message and status, and WITHHOLDS its details`, async () => {
+        const result = await callTool(site, securityGateDenial());
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0].text)).toEqual({
+          error: {
+            code: 'PERMISSION_DENIED',
+            message: 'You do not have permission to perform this action. Contact your administrator if you need access.',
+            status: 403,
+          },
+        });
+        expect(result.content[0].text).not.toContain('permissionSets');
+      });
+    }
   }
 
   // One site is enough below: every catch renders through the one reader.
@@ -168,16 +214,7 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
     }
   });
 
-  it('carries `details` when the envelope has them, and omits a `status` that is not a number', async () => {
-    const withDetails = Object.assign(new Error('Field read denied: salary'), {
-      code: 'PERMISSION_DENIED',
-      status: 403,
-      details: { fields: ['salary'] },
-    });
-    expect(JSON.parse((await callTool(query, withDetails)).content[0].text)).toEqual({
-      error: { code: 'PERMISSION_DENIED', message: 'Field read denied: salary', status: 403, details: { fields: ['salary'] } },
-    });
-
+  it('omits a `status` that is not a number', async () => {
     const statusless = Object.assign(new Error('no status here'), { code: 'PERMISSION_DENIED', status: '403' });
     expect(JSON.parse((await callTool(query, statusless)).content[0].text)).toEqual({
       error: { code: 'PERMISSION_DENIED', message: 'no status here' },
@@ -220,15 +257,20 @@ describe('the record resource: a coded refusal adds its code beside the unchange
     expect(typeof body.error).toBe('string');
   });
 
-  it('carries `details` when the envelope has them, and no `status` when it has none', async () => {
-    const thrown = Object.assign(new Error('Field read denied: salary'), {
+  it('a PERMISSION_DENIED answers code and status and WITHHOLDS its details', async () => {
+    const denial = securityGateDenial();
+    expect(JSON.parse(await readRefused(denial))).toEqual({
+      error: denial.message,
       code: 'PERMISSION_DENIED',
-      details: { fields: ['salary'] },
+      status: 403,
     });
+  });
+
+  it('carries no `status` when the refusal has none', async () => {
+    const thrown = Object.assign(new Error('Field read denied: salary'), { code: 'PERMISSION_DENIED' });
     expect(JSON.parse(await readRefused(thrown))).toEqual({
       error: 'Field read denied: salary',
       code: 'PERMISSION_DENIED',
-      details: { fields: ['salary'] },
     });
   });
 

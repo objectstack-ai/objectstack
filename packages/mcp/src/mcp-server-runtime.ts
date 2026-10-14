@@ -1258,15 +1258,17 @@ export class MCPServerRuntime {
             };
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            // [#23509] A coded refusal carries its ADR-0112 `code` (and the
-            // `status` / `details` the thrown value has) beside the sentence,
-            // so a client reads the code it branches on: a held owner's key is
-            // refused here "with the same code" (ruling C′ item 1) as on REST.
-            // The members are ADDED to the body, in the `{ error, code, status }`
-            // vocabulary the two sibling resources above already answer with
-            // (#6055, #6504): `error` stays the same string, and a client that
-            // tells a refusal from a row by `typeof body.error === 'string'`
-            // still does. A throw with no code answers `{ error }` as before.
+            // [#23509] A coded refusal carries its ADR-0112 `code` (and its
+            // `status`, when it has one) beside the sentence, so a client reads
+            // the code it branches on. A held owner's key is refused here "with
+            // the same code" (ruling C′ item 1) as on REST. The members are
+            // ADDED to the body, in the `{ error, code, status }` vocabulary
+            // the two sibling resources above already answer with (#6055,
+            // #6504). `error` stays the same string, so a client that tells a
+            // refusal from a row by `typeof body.error === 'string'` still
+            // does. A throw with no code answers `{ error }` as before.
+            // `details` is withheld, as on the data tools; `errorResultWithCode`
+            // in mcp-http-tools.ts says why.
             const envelope = thrownRefusalEnvelope(err);
             return {
               contents: [{
@@ -1278,7 +1280,6 @@ export class MCPServerRuntime {
                         error: message,
                         code: envelope.code,
                         ...(envelope.status !== undefined ? { status: envelope.status } : {}),
-                        ...(envelope.details !== undefined ? { details: envelope.details } : {}),
                       }
                     : { error: message },
                 ),
