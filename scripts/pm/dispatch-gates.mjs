@@ -11689,6 +11689,23 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
 export const CONTRACT_REVIEW_TIER_NAME = 'CONTRACT_REVIEW_TIER';
 
 /**
+ * The default judgment tier's NAME — the second token a GitHub artefact may
+ * carry for a tier, and only on a review whose FACE maps to it. The tier of an
+ * owed contract review follows the face that made it owed (ruling record
+ * 6159870311 on #23352, letter B′ with C): a published schema or governed rules
+ * text maps to {@link CONTRACT_REVIEW_TIER_NAME}; a review owed ONLY by a
+ * `Clause-②: yes` declaration maps to this one, run as the lane seat's review
+ * of record. `record-recognisers.mjs` owns that mapping (`reviewFace`) and
+ * accepts exactly the name the face maps to — never a floor, since this file
+ * orders no tiers.
+ *
+ * ⛔ The NAME only. The value stays where it is (`TIER_DEFAULT` in
+ * `dispatch-gates.data.mjs`), and nothing about the contract-review tier's
+ * identity moves: the same ruling retires nothing.
+ */
+export const TIER_DEFAULT_NAME = 'TIER_DEFAULT';
+
+/**
  * The clause-① mandate rows are data: `MANDATORY_TIER_GLOB_ROWS` in `dispatch-gates.data.mjs` carries each
  * glob, the NAME of the tier it mandates, its reason and its one-line-exit switch — with the docblock that
  * governs the table. This binding resolves the tier name to the one value site above, and refuses a name
@@ -11824,7 +11841,9 @@ export function tierLines(result) {
   }
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that WIDENS a published accept set or the public surface owes a' +
-    ' contract-review-tier REVIEW too (owed in the spec and skills lanes, in-seat at tier or by the at-tier subagent;' +
+    ` REVIEW too, at the tier of the face that made it owed — ${CONTRACT_REVIEW_TIER_NAME} for a published schema or` +
+    ` governed rules text, ${TIER_DEFAULT_NAME} for the \`Clause-②: yes\` declaration alone, the lane seat's review` +
+    ' of record (owed in the spec and skills lanes, in-seat at tier or by the at-tier subagent;' +
     ' default-tier build; a hit outside those lanes is spec-lane work and moves there); a card that only NARROWS one is' +
     ' `Clause-②: no`, stays in its lane, and owes one contract-review-tier review before the queue — judged from' +
     ' the card CONTENT. This line is a FLOOR, never a clearance.';

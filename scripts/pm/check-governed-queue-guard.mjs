@@ -732,11 +732,12 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
       deliveredCard: tier?.deliveredCardNumber,
       servedTierStands: tier?.servedTierStands,
       isModelIdentifierToken: tier?.isModelIdentifierToken,
+      reviewFace: tier?.reviewFace,
       threads: tier?.REVIEW_OF_RECORD_THREADS,
       location: tier?.REVIEW_OF_RECORD_LOCATION,
     };
     const missing = [
-      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken'].filter((key) => typeof found[key] !== 'function'),
+      ...['locate', 'deliveredCard', 'servedTierStands', 'isModelIdentifierToken', 'reviewFace'].filter((key) => typeof found[key] !== 'function'),
       ...(Array.isArray(found.threads) && found.threads.length > 0 ? [] : ['threads']),
       ...(typeof found.location === 'string' && found.location.length > 0 ? [] : ['location']),
     ];
@@ -790,11 +791,31 @@ export async function loadRecordRecognisers(load = (specifier) => import(specifi
  * is left here is the TIER gate on top of it, which is this leg's own fact:
  * whether the record's `Served-tier:` stands, and whether its token is a model
  * identifier that ⛔ must never be quoted back (#18060).
+ *
+ * ⭐ WHICH tier it must stand at is the FACE's (ruling record 6159870311 on
+ * #23352, letter B′ with C): `reviewFace`, imported with the rest, reads the
+ * pair's `paths` — the pull request's paths out of the merge group's committed
+ * trees, the list this leg already classified as governed — and the record
+ * stands only at the exact NAME that face maps to. On this leg every entry is
+ * governed, so the face is governed rules text and the name is
+ * `CONTRACT_REVIEW_TIER`; the mapping is read rather than assumed, so the leg
+ * and the rule cannot drift. ⛔ A pair that carries no path list cannot say
+ * which face it is on: UNREADABLE, never the cheaper tier.
  */
 export function recordVerdict({ pair, recognisers, cardNote = null }) {
   if (recognisers?.available !== true) {
     return { state: 'unreadable', reason: recognisers?.reason ?? 'the contract-review recognisers were not loaded', cardNote };
   }
+  if (!Array.isArray(pair?.paths) || pair.paths.length === 0) {
+    return {
+      state: 'unreadable',
+      cardNote,
+      reason:
+        `PR #${pair?.pr}'s file list was not handed to the record reading, so the face that made its review owed — ` +
+        'and with it the one tier the record must stand at — is unknown',
+    };
+  }
+  const face = recognisers.reviewFace(pair.paths, pair.repo);
   const located = recognisers.locate(pair);
   if (located.state === 'unreadable') {
     return {
@@ -823,6 +844,9 @@ export function recordVerdict({ pair, recognisers, cardNote = null }) {
     at: located.at ?? null,
     sha: located.sha,
     served: located.served,
+    // The face this pull request's paths put the review on, and the ONE tier NAME it stands at.
+    face: face.face,
+    tierName: face.tierName,
     cardNote,
     // ⭐ Decided HERE and carried, so the renderer never re-decides it and can
     // never print a token it should not (#18060): the accepted token is the
@@ -837,7 +861,7 @@ export function recordVerdict({ pair, recognisers, cardNote = null }) {
     carriedHops: located.carriedHops ?? 0,
   };
   if (located.state === 'unsigned') return { state: 'unsigned', ...found };
-  if (!recognisers.servedTierStands(located.served)) return { state: 'below-tier', ...found };
+  if (!recognisers.servedTierStands(located.served, face.tierName)) return { state: 'below-tier', ...found };
   return { state: 'stands', ...found };
 }
 
@@ -1285,16 +1309,17 @@ export function renderGuardVerdict(verdict) {
         `        ✅ review of record on this head: comment ${entry.record.id ?? '(no readable id)'} ` +
           `(${entry.record.at ?? 'undated'}) on the ${entry.record.where} thread is a \`## Contract review\` ` +
           `comment naming \`${entry.record.sha}\`,`,
-        '           carrying a `Reviewed-by:` line and a `Served-tier:` naming the tier constant, which STANDS' +
+        `           carrying a \`Reviewed-by:\` line and a \`Served-tier:\` naming \`${entry.record.tierName}\`, the tier its ${entry.record.face} face maps to, which STANDS` +
           (entry.record.served?.stamps
             ? ` on a stamp control of ${entry.record.served.stamps.atTier}/${entry.record.served.stamps.total}.`
             : ' (no stamp control declared, which the rule permits).'),
         ...(entry.record.carriedFrom
           ? [
               `           ⭐ that record names head \`${String(entry.record.carriedFrom).slice(0, 12)}\`, carried forward over ` +
-                `${entry.record.carriedHops} certified PURE-REGENERATION hop(s) —`,
-              '           re-run on the COMMITTED trees by this build (`git diff --name-only`, no `merge=os-regen` path left),',
-              '           ⛔ never on the `Regen-provenance:` line being present (maintainer 2026-09-20).',
+                `${entry.record.carriedHops} certified PURE-REGENERATION or PROSE-ONLY hop(s) —`,
+              '           re-run on the COMMITTED trees by this build (`git diff --name-only`: no path left outside the prose',
+              '           faces, the `merge=os-regen` artefacts and main\'s carry-over),',
+              '           ⛔ never on the `Regen-provenance:` line being present (maintainer 2026-09-20; prose arm: 6159870311).',
             ]
           : []),
         '           ⚠️ EXISTENCE and PROVENANCE, never the verdict: whether that record reads PASS is precondition ①',
@@ -1337,14 +1362,14 @@ export function renderGuardVerdict(verdict) {
                   `        ⛔ the \`## Contract review\` comment on this head (comment ${entry.record.id ?? '(no readable id)'}, ` +
                     `${entry.record.at ?? 'undated'}) does not stand:`,
                   served?.state === 'read' && entry.record.servedIsIdentifier
-                    ? '           its `Served-tier:` token is a MODEL IDENTIFIER rather than the NAME `CONTRACT_REVIEW_TIER` — ' +
+                    ? `           its \`Served-tier:\` token is a MODEL IDENTIFIER rather than the NAME \`${entry.record.tierName}\` — ` +
                       '⛔ not quoted back\n           here, because `AGENTS.md` lets no model identifier land in a comment and a record IS one.'
                     : served?.state === 'read'
                       ? `           it declares the tier \`${served.value}\`` +
                         (served.stamps
                           ? ` on a stamp control of ${served.stamps.atTier}/${served.stamps.total}`
                           : ' with no stamp control') +
-                        ', which is not the NAME `CONTRACT_REVIEW_TIER` on a control that holds.'
+                        `, which is not the NAME \`${entry.record.tierName}\` — the tier its ${entry.record.face} face maps to — on a control that holds.`
                       : served?.state === 'unreadable'
                         ? `           its \`Served-tier:\` line carries no readable tier token (${served.line}).`
                         : '           it carries NO `Served-tier:` line at all, so it declares nothing about what served it.',
@@ -1634,7 +1659,9 @@ export async function runGuard({ event, repo, rows, fetchReviews, fetchPull, fet
       // the base being what separates the merge commit's carry-over from a hand
       // edit. ⛔ Either one absent is a REFUSAL, never a pass: the reader
       // answers `unreadable` and this leg refuses on it.
-      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null, runGit, baseRef };
+      // ⭐ `paths` and `repo` are what the record's tier is read from: the face the governed paths of
+      // this entry put the review on (B′ with C) — the same committed-tree list this leg classified.
+      const pair = { pr: entry.pr, card: card.card, headSha: heads.get(entry.pr) ?? null, runGit, baseRef, paths: entry.paths, repo };
       let unreadable = null;
       for (const thread of recognisers.threads) {
         const number = numbers[thread.number];
@@ -4408,7 +4435,7 @@ export async function selfTest() {
   const gitHand = qgit(qSlipped);
   const carried = await tierRun({ comments: onOldHead, runGit: gitPure, baseRef: QBASE });
   assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-move-is-a-certified-pure-regeneration', carried.exitCode === EXIT_CLEAR && carried.entries[0].record.state === 'stands' && carried.entries[0].record.carriedHops === 1, JSON.stringify(carried.entries[0].record));
-  assert('and-the-CLEAR-names-the-head-actually-reviewed-and-says-it-re-ran-on-the-committed-trees', /carried forward over 1 certified PURE-REGENERATION hop/.test(renderGuardVerdict(carried)) && /COMMITTED trees/.test(renderGuardVerdict(carried)) && /never on the `Regen-provenance:` line being present/.test(renderGuardVerdict(carried)), renderGuardVerdict(carried));
+  assert('and-the-CLEAR-names-the-head-actually-reviewed-and-says-it-re-ran-on-the-committed-trees', /carried forward over 1 certified PURE-REGENERATION or PROSE-ONLY hop/.test(renderGuardVerdict(carried)) && /COMMITTED trees/.test(renderGuardVerdict(carried)) && /never on the `Regen-provenance:` line being present/.test(renderGuardVerdict(carried)), renderGuardVerdict(carried));
   const handMoved = await tierRun({ comments: onOldHead, runGit: gitHand, baseRef: QBASE });
   assert('⛔ (ii) an-EDIT-SLIPPED-IN-beside-the-regeneration-refuses-exactly-as-an-uncarried-old-head-does', handMoved.exitCode === EXIT_REFUSED_UNAPPROVED && handMoved.entries[0].record.state === 'absent');
   // ⭐ WHICH path is named by the reader that owns the reason; at the queue the

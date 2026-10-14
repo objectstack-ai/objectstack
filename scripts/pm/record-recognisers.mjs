@@ -81,10 +81,97 @@ import {
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
 // declared tier and a served one differ unnoticed (#17915).
-import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME } from './dispatch-gates.mjs';
+// The default tier's VALUE is imported on the same rule, for the same refusal; its NAME is the second
+// token a `Served-tier:` line may carry, on the face that maps to it. The published-schema face is the
+// clause-② suspect surface (`SUSPECT_TIER_GLOBS`, test files excepted), applied by `deriveTier`, the one
+// function that applies it — ⛔ never a second spelling of `packages/spec/src/**` here.
+import {
+  CONTRACT_REVIEW_TIER,
+  CONTRACT_REVIEW_TIER_NAME,
+  SUSPECT_TIER_GLOBS,
+  TIER_DEFAULT,
+  TIER_DEFAULT_NAME,
+  deriveTier,
+} from './dispatch-gates.mjs';
+// The governed-rules face is the governed register itself — the same function the queue guard
+// classifies a merge group's paths with. `dispatch-gates.mjs` already imports this module at module
+// scope, so the edge adds no new module to this file's graph and no cycle.
+import { SELF_REPO_ID, governedPathsIn } from './check-governed-merges.mjs';
 // How an unreadable `Served-tier:` line is quoted back — the declaration
 // line's own quoting helper, one spelling for both.
 import { quoteLine } from './clause2-line.mjs';
+
+
+// ── the tier FOLLOWS THE FACE that made the review owed ─────────────────────
+//
+// Ruling record 6159870311 on #23352 (letter B′ with C, maintainer 「同意」):
+// whether an isolated contract review is OWED stays by surface — the three
+// contract faces of `references/contract-review.md` — and ⛔ never by lane; the
+// TIER of that review follows the face that made it owed. A published schema or
+// governed rules text maps to `CONTRACT_REVIEW_TIER`; a review owed ONLY by a
+// `Clause-②: yes` declaration (a widening in application or UI code, a
+// translation key, a version declaration) maps to `TIER_DEFAULT`, run as the
+// lane seat's review of record. Nothing retires: the contract-review tier's
+// identity and value are untouched, and `dispatch-gates.data.mjs` stays the
+// default tier's value site.
+//
+// ⛔ EXACT, never a floor. `servedTierStands` accepts the one NAME the face maps
+// to and nothing else: this regime orders no tiers (`deriveTier` refuses to
+// rank two either), so "at least this tier" is a reading no file here can make.
+
+/**
+ * The three contract faces, in the order a mixed diff is decided in, each with
+ * the NAME of the tier it maps to.
+ *
+ *   `id`        the token `--template --face` takes and `reviewFace` answers with
+ *   `tierName`  the ONE `Served-tier:` token a review owed on this face stands with
+ *   `words`     how the face is named to a human
+ *
+ * ⭐ The face is read off the PULL REQUEST'S FILE LIST — its committed tree, the
+ * way the queue guard already classifies governed paths — and ⛔ never off a
+ * seat's statement. The declaration face is what REMAINS: it is asked only of a
+ * review already owed, and a review owed with no schema and no governed path in
+ * the diff was owed by the `Clause-②: yes` line alone.
+ */
+export const REVIEW_FACES = Object.freeze([
+  Object.freeze({ id: 'schema', tierName: CONTRACT_REVIEW_TIER_NAME, words: 'a published schema (the clause-② suspect surface, test files excepted)' }),
+  Object.freeze({ id: 'rules', tierName: CONTRACT_REVIEW_TIER_NAME, words: 'governed rules text (a path the governed register names)' }),
+  Object.freeze({ id: 'declaration', tierName: TIER_DEFAULT_NAME, words: 'the `Clause-②: yes` declaration alone (no schema and no governed path in the diff)' }),
+]);
+
+/** Every NAME a `Served-tier:` line can stand with — one per tier the faces map to, and nothing else. */
+export const REVIEW_TIER_NAMES = Object.freeze([...new Set(REVIEW_FACES.map((face) => face.tierName))]);
+
+/**
+ * Which face made this review owed, and the NAME of the tier it is therefore
+ * served at. Pure over the path list.
+ *
+ * ⭐ A mixed diff maps to `CONTRACT_REVIEW_TIER` on ONE hit: a schema or governed
+ * path anywhere in the list decides it, the way one governed path governs the
+ * whole pull request. `hits` names the paths that decided, so a reader can see
+ * why.
+ *
+ * `repo` selects the governed register's rows, as `governedPathsIn` requires;
+ * this file runs in `objectstack-ai/objectstack`, so that is the default.
+ *
+ * @param {string[]} paths  the pull request's changed paths (its committed tree)
+ * @returns {{ face: 'schema'|'rules'|'declaration', tierName: string, words: string, hits: { schema: string[], rules: string[] } }}
+ */
+export function reviewFace(paths, repo = SELF_REPO_ID) {
+  const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
+  // ⭐ No mandate rows are passed: the question is the SUSPECT surface alone, and
+  // an empty mandate table cannot make `deriveTier` throw on an ambiguity.
+  const schema = [...new Set(deriveTier(list, [], SUSPECT_TIER_GLOBS).suspects.map((s) => s.path))];
+  const rules = governedPathsIn(list, repo).flatMap((surface) => surface.files);
+  const id = schema.length > 0 ? 'schema' : rules.length > 0 ? 'rules' : 'declaration';
+  const face = REVIEW_FACES.find((f) => f.id === id);
+  return { face: face.id, tierName: face.tierName, words: face.words, hits: { schema, rules } };
+}
+
+/** The face a `--face` argument names, or null — the CLI's half of the same table. */
+export function reviewFaceById(id) {
+  return REVIEW_FACES.find((face) => face.id === id) ?? null;
+}
 
 
 // ── the pure-regeneration carry (maintainer 2026-09-20 「纯重生成提交不需要开达档复核记录」) ──
@@ -103,6 +190,42 @@ import { quoteLine } from './clause2-line.mjs';
 // `Regen-provenance:` line is a POINTER, NEVER the evidence: it names the record
 // and the two commits so a later reader RE-RUNS the test, and a reader that
 // cannot reach both answers with a GAP — UNJUDGED, ⛔ never clean.
+//
+// ⭐ The PROSE arm (ruling record 6159870311 on #23352, letter B′ with C): a head
+// that moves ONLY on faces outside the review surface keeps the record too —
+// the prose faces the ACCEPT reads sentence by sentence, never the reviewer.
+// Decided exactly like the regeneration arm, on the two COMMITTED trees, and
+// pointed at by the SAME `Regen-provenance:` line rather than a second one: the
+// line is a pointer and never the evidence, so a second key would be a second
+// grammar naming the same two commits, and the common move — a merge-forward
+// that also fixes the changeset — is ONE hop that would otherwise need both.
+
+/**
+ * The faces OUTSIDE the review surface — `references/contract-review.md`'s
+ * prose faces, which the ACCEPT reads sentence by sentence against the diff. A
+ * head move that touches only these (and generated artefacts, and main's
+ * carry-over) is no reason to re-review: nothing the reviewer judged moved.
+ *
+ * ⛔ An EXCLUSION table, named as one so the dispatch derivation reads it as a
+ * never-look-here list rather than as files this module opens (it opens none).
+ *
+ *   `prefix`    every path under this directory
+ *   `basename`  every file of this name, at any depth
+ */
+export const REVIEW_SURFACE_EXCLUDED_PROSE_FACES = Object.freeze([
+  Object.freeze({ id: 'changeset', prefix: '.changeset/' }),
+  Object.freeze({ id: 'changelog', basename: 'CHANGELOG.md' }),
+  Object.freeze({ id: 'docs-content', prefix: 'content/docs/' }),
+  Object.freeze({ id: 'docs-app', prefix: 'apps/docs/' }),
+]);
+
+/** Does this path lie on a prose face outside the review surface? Pure. */
+export function isOutsideReviewSurface(path) {
+  const p = String(path ?? '');
+  return REVIEW_SURFACE_EXCLUDED_PROSE_FACES.some((face) =>
+    face.prefix !== undefined ? p.startsWith(face.prefix) : p === face.basename || p.endsWith(`/${face.basename}`),
+  );
+}
 
 /**
  * One hop, as a seat posts it (the retired C3 row's remedy printed this shape):
@@ -158,10 +281,14 @@ export function regenChainToHead(pair) {
 }
 
 /**
- * The ruled test on COMMITTED trees: which moved paths are explained by NEITHER
- * arm of 「every touched path is a generated artefact OR THE MERGE COMMIT'S OWN
- * CARRY-OVER FROM MAIN」. Empty is the whole criterion.
+ * The ruled test on COMMITTED trees: which moved paths are explained by NONE of
+ * the arms of 「every touched path is a generated artefact OR THE MERGE COMMIT'S
+ * OWN CARRY-OVER FROM MAIN」, widened by the prose arm (a path on a face outside
+ * the review surface). Empty is the whole criterion.
  *
+ * ⓪ the prose arm, `isOutsideReviewSurface`, read off the path alone: a moved
+ * prose path is explained whoever moved it, the pull request itself included —
+ * that is the whole of the exemption, and it is why this arm runs FIRST.
  * ① the `merge=os-regen` attribute, read with `--source <to>` so
  * `.gitattributes` itself comes out of that COMMIT rather than out of whatever
  * the working tree holds. ② the carry-over arm: a path this pull request never
@@ -180,7 +307,7 @@ export function regenChainToHead(pair) {
  */
 export function unexplainedPathsBetween(runGit, { from, to, base }) {
   const names = (a, b) => String(runGit(['diff', '-z', '--name-only', a, b])).split('\0').filter((p) => p !== '');
-  const moved = names(from, to);
+  const moved = names(from, to).filter((p) => !isOutsideReviewSurface(p));
   if (moved.length === 0) return [];
   const f = String(runGit(['check-attr', '--source', to, '-z', 'merge', '--stdin'], moved.join('\0'))).split('\0');
   const hand = [];
@@ -237,7 +364,7 @@ function computeRegenCarry(pair) {
       return { state: 'unreadable', gaps: [`the committed trees ${span} against base \`${base}\` (${why}) — fetch both (\`git fetch origin pull/${pair?.pr}/head\`, \`git fetch origin ${hop.from}\`) and re-run`] };
     }
     if (hand.length > 0) {
-      return { state: 'refused', reason: `${span} moved ${hand.length} path(s) that carry no \`merge=os-regen\` attribute and are not what \`${base}\` brought (${hand.slice(0, 4).join(', ')}) — this pull request's own hand-written content moved, so it is no pure regeneration` };
+      return { state: 'refused', reason: `${span} moved ${hand.length} path(s) that lie on no prose face outside the review surface, carry no \`merge=os-regen\` attribute and are not what \`${base}\` brought (${hand.slice(0, 4).join(', ')}) — this pull request's own reviewed content moved, so it is neither a pure regeneration nor a prose-only move` };
     }
   }
   // Expanded through git so the carried head is spelled at least as fully as
@@ -374,8 +501,8 @@ export function servedStampsHold(stamps) {
 }
 
 /**
- * The ONE token a `Served-tier:` line may carry -- the constant's NAME, ⛔ never
- * its VALUE (#18060).
+ * The token a `Served-tier:` line may carry -- a tier constant's NAME, ⛔ never
+ * its VALUE (#18060); ONE name per face, the one `reviewFace` maps it to.
  *
  * ⭐ `AGENTS.md` is unqualified about the surface: 「no model identifier lands in
  * a PR title or body, a comment, a changeset, a doc or a code comment」 -- and a
@@ -391,14 +518,14 @@ export function servedStampsHold(stamps) {
  * produces no repository artifact at all. What the line carries is the
  * DECLARATION plus its `N/N` stamp control, and both survive the rename.
  *
- * ⛔ Still EXACT: this is the one accepted token, no family and no prefix floor.
+ * ⛔ Still EXACT: one accepted token per face, no family and no prefix floor.
  *
- * Declared beside the constant it names, in `dispatch-gates.mjs`, and
- * RE-EXPORTED here: the claim reader there compares a claim's `model:` value
- * against the same token, and two spellings of one name in two files is the
- * drift this file refuses one family over.
+ * Both names are declared beside the constants they name, in
+ * `dispatch-gates.mjs`, and RE-EXPORTED here: the claim reader there compares a
+ * claim's `model:` value against the same token, and two spellings of one name
+ * in two files is the drift this file refuses one family over.
  */
-export { CONTRACT_REVIEW_TIER_NAME };
+export { CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT_NAME };
 
 /**
  * The id form of a model name -- the word claude, a hyphen, a model word.
@@ -415,9 +542,11 @@ const MODEL_IDENTIFIER_FORM = /\bclaude-[a-z]+(?:[-.][a-z0-9]+)*\b/i;
  * Is this token a model identifier -- the thing `AGENTS.md` keeps out of a
  * comment?
  *
- * Two limbs: the constant's own VALUE, which is the token this row used to
- * REQUIRE (so a record written correctly under the old rule is named for what
- * it is, never read as an ordinary off-tier miss), and the id SHAPE.
+ * Two limbs: the VALUE of each tier a record may stand at -- the contract-review
+ * tier's, which is the token this row used to REQUIRE (so a record written
+ * correctly under the old rule is named for what it is, never read as an
+ * ordinary off-tier miss), and the default tier's, the value a seat writing the
+ * declaration face's record reaches for in place of its NAME -- and the id SHAPE.
  *
  * ⛔ A caller must NEVER echo a token this returns true for: quoting it back
  * would put the identifier straight into the artifact the rule is about, which
@@ -425,12 +554,27 @@ const MODEL_IDENTIFIER_FORM = /\bclaude-[a-z]+(?:[-.][a-z0-9]+)*\b/i;
  */
 export function isModelIdentifierToken(value) {
   const text = String(value ?? '');
-  return text === CONTRACT_REVIEW_TIER || MODEL_IDENTIFIER_FORM.test(text);
+  return text === CONTRACT_REVIEW_TIER || text === TIER_DEFAULT || MODEL_IDENTIFIER_FORM.test(text);
 }
 
-/** The whole reading, as one verdict: at tier, on a control that stands. */
-export function servedTierStands(served) {
-  return served?.state === 'read' && served.value === CONTRACT_REVIEW_TIER_NAME && servedStampsHold(served.stamps);
+/**
+ * The whole reading, as one verdict: at the tier the FACE maps to, on a control
+ * that stands.
+ *
+ * `tierName` is the NAME `reviewFace` answered for the pull request the record
+ * sits on; it defaults to `CONTRACT_REVIEW_TIER_NAME`, the tier both path-read
+ * faces map to and the only one a governed pull request can owe. ⛔ EXACT: a
+ * record naming the other tier does not stand on this face, in either
+ * direction, and a `tierName` that is not one of `REVIEW_TIER_NAMES` stands
+ * NOTHING -- a caller that lost the face fails closed, never open.
+ */
+export function servedTierStands(served, tierName = CONTRACT_REVIEW_TIER_NAME) {
+  return (
+    REVIEW_TIER_NAMES.includes(tierName) &&
+    served?.state === 'read' &&
+    served.value === tierName &&
+    servedStampsHold(served.stamps)
+  );
 }
 
 /**
@@ -582,15 +726,25 @@ export const RECORD_TEMPLATE_PLACEHOLDERS = Object.freeze({
  * hex and nothing else — so that spelling names no head, and a record written it
  * is read as a review of nothing. The key stays outside the span here.
  *
- * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string}} values
+ * ⭐ `tierName` is the NAME the face maps to (`reviewFace`, `REVIEW_FACES`), and
+ * defaults to `CONTRACT_REVIEW_TIER_NAME` — the tier of both path-read faces and
+ * the only one a governed pull request can owe. ⛔ A name no face maps to is
+ * REFUSED here rather than printed: the template cannot teach a spelling
+ * `servedTierStands` refuses.
+ *
+ * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string}} values
  * @returns {string[]}
  */
 export function contractReviewRecordLines(values = {}) {
   const { headSha, implementedBy, reviewedBy } = { ...RECORD_TEMPLATE_PLACEHOLDERS, ...values };
+  const tierName = values.tierName ?? CONTRACT_REVIEW_TIER_NAME;
+  if (!REVIEW_TIER_NAMES.includes(tierName)) {
+    throw new Error(`record-recognisers: no face maps to the tier name '${tierName}' — known: ${REVIEW_TIER_NAMES.join(', ')}`);
+  }
   return [
     '## Contract review',
     '',
-    `Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``,
+    `Served-tier: \`${tierName}\``,
     `Head-sha: \`${headSha}\``,
     'Local-runs: none',
     '',
@@ -742,6 +896,15 @@ export function deliveredCardNumber(pr) {
  * wrote a leading word anyway. A template shows it instead of saying it.
  */
 export function contractReviewTemplateLines(values = {}) {
+  const { face: faceId, ...recordValues } = values;
+  const face = faceId === undefined ? null : reviewFaceById(faceId);
+  if (faceId !== undefined && face === null) {
+    throw new Error(`record-recognisers: unknown face '${faceId}' — known: ${REVIEW_FACES.map((f) => f.id).join(', ')}`);
+  }
+  const tierName = face?.tierName ?? CONTRACT_REVIEW_TIER_NAME;
+  const faceLine = face === null
+    ? `                    No face asked: this is ${CONTRACT_REVIEW_TIER_NAME}, the tier of a schema or governed-path face.`
+    : `                    Asked for the ${face.id} face: ${tierName}.`;
   return [
     'record-recognisers --template — the contract-review record of record, copyable. It is',
     `ONE comment on ${REVIEW_OF_RECORD_LOCATION}; the NEWEST one naming this head governs.`,
@@ -752,11 +915,15 @@ export function contractReviewTemplateLines(values = {}) {
     '   and stays silent, so writing one line badly is the only way to be refused.',
     '',
     RECORD_TEMPLATE_FENCE_START,
-    ...contractReviewRecordLines(values),
+    ...contractReviewRecordLines({ ...recordValues, tierName }),
     RECORD_TEMPLATE_FENCE_END,
     '',
-    `  · Served-tier     the constant's NAME, ${CONTRACT_REVIEW_TIER_NAME}, ⛔ never a model id; an`,
-    '                    at-tier/total stamp control may precede it — 75/75, then the constant.',
+    "  · Served-tier     the NAME of the tier the review's FACE maps to, ⛔ never a model id, and EXACT:",
+    "                    the PR's file list decides it. A published schema or a governed path anywhere in it ⇒",
+    `                    ${CONTRACT_REVIEW_TIER_NAME} (--face schema or rules); neither, the review owed by the`,
+    `                    \`Clause-②: yes\` line alone ⇒ ${TIER_DEFAULT_NAME} (--face declaration).`,
+    faceLine,
+    '                    An at-tier/total stamp control may precede it — 75/75, then the constant.',
     '  · Head-sha        the head you reviewed, 7 to 40 hex in a span of ITS OWN; a span holding',
     '                    the key as well is not a sha, and the record then names no head.',
     '  · Local-runs      `none` — the read-only shape held (the diff, the card and the head\'s check-runs;',
@@ -809,6 +976,14 @@ export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
  */
 export function contractReviewBriefLines(values = {}) {
   const { pr, card, headSha, scratchpad } = { ...BRIEF_TEMPLATE_PLACEHOLDERS, ...values };
+  // The brief names the tier its face maps to, and the record command that prints that face's
+  // record — so a brief for a declaration-only review cannot hand its reviewer the other tier.
+  const face = values.face === undefined ? null : reviewFaceById(values.face);
+  if (values.face !== undefined && face === null) {
+    throw new Error(`record-recognisers: unknown face '${values.face}' — known: ${REVIEW_FACES.map((f) => f.id).join(', ')}`);
+  }
+  const tierName = face?.tierName ?? CONTRACT_REVIEW_TIER_NAME;
+  const templateCommand = `node scripts/pm/record-recognisers.mjs --template${face === null ? '' : ` --face ${face.id}`}`;
   return [
     'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
     "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
@@ -816,8 +991,8 @@ export function contractReviewBriefLines(values = {}) {
     BRIEF_TEMPLATE_FENCE_START,
     `## Contract review brief — PR #${pr} @ \`${headSha}\` (card #${card})`,
     '',
-    `You review at \`${CONTRACT_REVIEW_TIER_NAME}\`. Render ONE \`## Contract review\` record on this head — its shape is`,
-    '`node scripts/pm/record-recognisers.mjs --template` — with a PASS or FAIL verdict, and post it as ONE comment',
+    `You review at \`${tierName}\`. Render ONE \`## Contract review\` record on this head — its shape is`,
+    `\`${templateCommand}\` — with a PASS or FAIL verdict, and post it as ONE comment`,
     `on ${REVIEW_OF_RECORD_LOCATION}.`,
     '',
     'Inputs — these and nothing else:',
@@ -1456,10 +1631,12 @@ export async function selfTest() {
  */
 export function usageLines() {
   return [
-    'usage: node scripts/pm/record-recognisers.mjs [--template] [--brief-template] [--self-test] [--help]',
+    'usage: node scripts/pm/record-recognisers.mjs [--template [--face FACE]] [--brief-template [--face FACE]] [--self-test] [--help]',
     '',
     '  --template   print the copyable contract-review record and exit 0 -- no board is read',
     "  --brief-template   print the copyable reviewer's brief, read-only shape built in, and exit 0 -- no board is read",
+    `  --face FACE  the face that made the review owed, one of: ${REVIEW_FACES.map((f) => `${f.id} (${f.tierName})`).join(', ')};`,
+    `               the record's \`Served-tier:\` names that tier. Without it: ${CONTRACT_REVIEW_TIER_NAME}.`,
     "  --self-test  run this file's own battery, offline -- no board is read",
     '  --help, -h   print this text and exit 0',
     '',
@@ -1493,11 +1670,15 @@ if (isEntrypoint(import.meta.url)) {
         process.exit(1);
       },
     );
-  } else if (argv.length === 1 && argv[0] === '--template') {
-    for (const line of contractReviewTemplateLines()) console.log(line);
-    process.exit(0);
-  } else if (argv.length === 1 && argv[0] === '--brief-template') {
-    for (const line of contractReviewBriefLines()) console.log(line);
+  } else if (
+    (argv.length === 1 || (argv.length === 3 && argv[1] === '--face' && reviewFaceById(argv[2]) !== null)) &&
+    (argv[0] === '--template' || argv[0] === '--brief-template')
+  ) {
+    // ⛔ `--face` takes one of the table's ids or the whole line is refused below — a face this file does
+    // not map would print a tier no reader accepts.
+    const asked = argv.length === 3 ? { face: argv[2] } : {};
+    const lines = argv[0] === '--template' ? contractReviewTemplateLines(asked) : contractReviewBriefLines(asked);
+    for (const line of lines) console.log(line);
     process.exit(0);
   } else if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
     for (const line of usageLines()) console.log(line);
