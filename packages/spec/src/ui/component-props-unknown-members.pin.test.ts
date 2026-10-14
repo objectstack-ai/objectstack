@@ -242,8 +242,9 @@ const on = (types: readonly string[], paths: readonly string[], reason: Reason):
 };
 
 // `onSuccess` left this list when the rows took `ActionSchema`'s own
-// post-success block (`component-action-row-on-success-executor.test.ts`).
-const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'operation', 'patch', 'toast', 'resultDialog'];
+// post-success block, and `operation` when they took the action's own
+// `operation` enum (`component-action-row-on-success-executor.test.ts`).
+const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'patch', 'toast', 'resultDialog'];
 const VIEW_DATA_TYPES = ['object-grid', 'object-map', 'object-gantt', 'object-tree'];
 
 // Composition slots.
