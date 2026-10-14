@@ -54,17 +54,17 @@ import {
  *     (`convertPositionBindingRows`). Only under `single` (ADR-0131 D3: a
  *     Setup catalog write is an environment metadata write under `single` and
  *     refused under a wall); under a wall the rows are reported.
- *  2r. `history-renumber` — seat answer Q2 A (6162538253). Once the
- *     organization leaves the key, `sys_metadata_history.event_seq` and each
- *     item's `(type, name, version)` lineage are unique environment-wide; an
- *     organization's history kept its own sequences beside the
- *     environment's. Each organization's `event_seq` range is shifted by ONE
- *     offset, its commit ranges with it; a version lineage is shifted only
- *     where an environment lineage (or an earlier organization's) of the same
- *     `(type, name)` holds those numbers, the organization's `sys_metadata`
- *     row's own `version` with it. Order within an organization and the
- *     version a rollback resolves are unchanged. It writes numbers, never
- *     deletes, and runs while the organization ids still say whose a row is.
+ *  2r. `version-renumber` — seat answer Q2 A (6162538253). Once the
+ *     organization leaves the key, each item's `(type, name, version)`
+ *     lineage is unique environment-wide; an organization's history kept its
+ *     own lineage beside the environment's. Where two lineages of one item
+ *     exist, the organizations' are laid out one above another (the first
+ *     keeps its numbers) and the environment's goes above them all, each
+ *     overlay row's `version` with its own lineage. It runs here, while every
+ *     overlay row still says whose it is, and puts the environment on top so
+ *     that every later environment save (numbered by the door from the
+ *     environment's own history) lands above every organization's numbers.
+ *     The version a rollback resolves is unchanged. Numbers only, no delete.
  *  2a. `metadata-promotion` — rulings A on #22011 and #22008 (records
  *     6020163868, 6020151485): first every public-form withdrawal an
  *     organization saved is carried onto the environment, fail-closed (any
@@ -105,6 +105,13 @@ import {
  *     named categories are deleted. Templates: the promotion runs again first,
  *     and beyond the seeded mirrors only the rows whose environment copy that
  *     pass verified are deleted, by id.
+ *  4s. `sequence-renumber` — seat answer Q2 A: each organization's
+ *     `sys_metadata_history.event_seq` range is shifted above the
+ *     environment's by ONE offset, its commit ranges with it, so order within
+ *     an organization is unchanged. It runs after the last environment save
+ *     the ceremony makes, and on every apply even when checkpointed (it is
+ *     idempotent), so no environment save is ever numbered onto an
+ *     organization's range. Numbers only, no delete.
  *  5. `column-drops` (fate 1) — `organization_id` leaves the D7 objects
  *     through the schema-drift ceremony ({@link ColumnDropPort}), never a hand
  *     `ALTER`.
@@ -135,12 +142,13 @@ export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-owners
 export const CEREMONY_STEPS = [
   'attribution',
   'authored-conversion',
-  'history-renumber',
+  'version-renumber',
   'metadata-promotion',
   'template-promotion',
   'settings-move',
   'rewrite',
   'mirror-deletion',
+  'sequence-renumber',
   'column-drops',
 ] as const;
 export type CeremonyStep = (typeof CEREMONY_STEPS)[number];
@@ -678,7 +686,24 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
   return { step: 'authored-conversion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
 }
 
-// ── Step 2r: history renumbering (seat answer Q2 A) ─────────────────────────
+// ── Steps 2r and 4s: history renumbering (seat answer Q2 A) ─────────────────
+//
+// The metadata door numbers a write from history in its OWN scope
+// (`MAX(event_seq) + 1`, `MAX(version) + 1` where `organization_id` is the
+// writer's), and this ceremony's environment saves (the authored conversion,
+// the form-withdrawal carry, a chosen conflict's carry, the template
+// promotion) are environment-scoped. So each renumbering is placed where no
+// environment save can land on a number it handed an organization:
+//
+// - `version-renumber` runs BEFORE the promotion, while every overlay row
+//   still says whose it is, and puts each item's environment lineage ABOVE
+//   its organization lineages. Every later environment save numbers above
+//   all of them, and a promoted row keeps its own lineage's numbers.
+// - `sequence-renumber` runs AFTER the last environment save, immediately
+//   before the column goes, and moves each organization's `event_seq` range
+//   above the environment's, as the seat answer reads. It runs on every apply,
+//   checkpoint or not: it is idempotent, and a write between two runs is
+//   covered by the second.
 
 const HISTORY = 'sys_metadata_history';
 const COMMITS = 'sys_metadata_commit';
@@ -690,16 +715,15 @@ const num = (value: unknown): number => {
 };
 
 /**
- * One organization's numbers, moved above `base` without a transaction and
- * safely re-runnable. The offset puts the new range wholly ABOVE both `base`
- * and the old range, so a row's own number says whether it moved: the
- * dependents (commit ranges, the overlay row's version) move first, each only
- * where it still lies inside the old range, and the history rows last, in ONE
- * statement. A re-run finds the history above `base` and moves nothing.
- * Returns the new top of the range.
+ * One range of numbers, moved above `base` without a transaction and safely
+ * re-runnable. The offset puts the new range wholly ABOVE both `base` and the
+ * old range, so a row's own number says whether it moved: the dependents
+ * (commit ranges, overlay rows' versions) move first, each only where it still
+ * lies inside the old range, and the history rows last, in ONE statement. A
+ * re-run finds the history above `base` and moves nothing. Returns the new
+ * top of the range.
  */
 async function shiftRange(
-  run: Run,
   range: { min: number; max: number },
   base: number,
   dependents: (offset: number, oldMax: number) => Promise<void>,
@@ -712,32 +736,108 @@ async function shiftRange(
   return { top: range.max + offset, moved: true };
 }
 
-async function runHistoryRenumber(run: Run): Promise<StepReport> {
-  const summary: Record<string, number> = { organizationsShifted: 0, lineagesShifted: 0 };
+/**
+ * Each `(type, name)` lineage unique environment-wide: the organizations'
+ * lineages laid out one above another in organization order (the first keeps
+ * its numbers), then the environment's above them all. Each overlay row's
+ * `version` moves with its own lineage, so the version a rollback resolves is
+ * unchanged. Only where two lineages of one item exist; a lone one keeps its
+ * numbers.
+ */
+async function runVersionRenumber(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { lineagesShifted: 0 };
   const hcols = await columnsOf(run, HISTORY);
-  if (!hcols?.has(ORG) || !hcols.has('event_seq')) {
-    return { step: 'history-renumber', status: 'done', summary, blockers: [], notes: [] };
+  if (!hcols?.has(ORG) || !hcols.has('version')) {
+    return { step: 'version-renumber', status: 'done', summary, blockers: [], notes: [] };
   }
   const sql = run.sql;
   const h = sql.q(HISTORY, HISTORY);
   const o = sql.q(ORG, HISTORY);
-  const ccols = await columnsOf(run, COMMITS);
-  const commitsCarry = !!ccols?.has(ORG) && ccols.has('event_seq_start') && ccols.has('event_seq_end');
+  const v = sql.q('version', HISTORY);
+  const ty = sql.q('type', HISTORY);
+  const nm = sql.q('name', HISTORY);
   const mcols = await columnsOf(run, OVERLAYS);
   const overlaysCarry = !!mcols?.has(ORG) && mcols.has('version');
+  const lineages = await sql.read(
+    HISTORY,
+    `SELECT ${ty} AS t, ${nm} AS n, ${o} AS org, MIN(${v}) AS lo, MAX(${v}) AS hi FROM ${h} ` +
+      `GROUP BY ${ty}, ${nm}, ${o} ORDER BY ${ty}, ${nm}, ${o}`,
+  );
+  const byItem = new Map<string, Array<Record<string, unknown>>>();
+  for (const l of lineages) {
+    const key = `${String(l.t)}\u0000${String(l.n)}`;
+    byItem.set(key, [...(byItem.get(key) ?? []), l]);
+  }
+  const isEnv = (l: Record<string, unknown>): boolean => l.org === null || l.org === undefined || l.org === '';
+  for (const group of byItem.values()) {
+    if (group.length < 2) continue;
+    const env = group.find(isEnv);
+    const ordered = [...group.filter((l) => !isEnv(l)), ...(env ? [env] : [])];
+    // The first organization's lineage keeps its numbers; each later one, and
+    // the environment's last, goes above the ones before it.
+    let vbase = num(ordered[0]!.hi);
+    for (const l of ordered.slice(1)) {
+      const owner = isEnv(l) ? `${sql.q(ORG, OVERLAYS)} IS NULL` : `${sql.q(ORG, OVERLAYS)} = ?`;
+      const ownerH = isEnv(l) ? `${o} IS NULL` : `${o} = ?`;
+      const ownerArgs = isEnv(l) ? [] : [String(l.org)];
+      const shifted = await shiftRange(
+        { min: num(l.lo), max: num(l.hi) },
+        vbase,
+        async (offset, oldMax) => {
+          if (!overlaysCarry) return;
+          const m = sql.q(OVERLAYS, OVERLAYS);
+          const mv = sql.q('version', OVERLAYS);
+          await execute(
+            run,
+            OVERLAYS,
+            `UPDATE ${m} SET ${mv} = ${mv} + ? WHERE ${owner} AND ${sql.q('type', OVERLAYS)} = ? ` +
+              `AND ${sql.q('name', OVERLAYS)} = ? AND ${mv} <= ?`,
+            [offset, ...ownerArgs, l.t, l.n, oldMax],
+          );
+        },
+        async (offset) => {
+          await execute(run, HISTORY, `UPDATE ${h} SET ${v} = ${v} + ? WHERE ${ownerH} AND ${ty} = ? AND ${nm} = ?`, [
+            offset,
+            ...ownerArgs,
+            l.t,
+            l.n,
+          ]);
+        },
+      );
+      vbase = shifted.top;
+      if (shifted.moved) summary.lineagesShifted++;
+    }
+  }
+  if (summary.lineagesShifted) run.opts.onProgress?.(`history renumbered: ${summary.lineagesShifted} version lineage(s)`);
+  return { step: 'version-renumber', status: 'done', summary, blockers: [], notes: [] };
+}
 
-  // ── event_seq: one offset per organization, in organization order ──
-  const envTop = num((await sql.read(HISTORY, `SELECT MAX(${sql.q('event_seq', HISTORY)}) AS m FROM ${h} WHERE ${o} IS NULL`))[0]?.m);
+/**
+ * `event_seq` unique environment-wide: each organization's range moved above
+ * the environment's (and the organizations' before it) by ONE offset, its
+ * commit ranges with it, so order within an organization is unchanged.
+ */
+async function runSequenceRenumber(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { organizationsShifted: 0 };
+  const hcols = await columnsOf(run, HISTORY);
+  if (!hcols?.has(ORG) || !hcols.has('event_seq')) {
+    return { step: 'sequence-renumber', status: 'done', summary, blockers: [], notes: [] };
+  }
+  const sql = run.sql;
+  const h = sql.q(HISTORY, HISTORY);
+  const o = sql.q(ORG, HISTORY);
+  const seq = sql.q('event_seq', HISTORY);
+  const ccols = await columnsOf(run, COMMITS);
+  const commitsCarry = !!ccols?.has(ORG) && ccols.has('event_seq_start') && ccols.has('event_seq_end');
+  const envTop = num((await sql.read(HISTORY, `SELECT MAX(${seq}) AS m FROM ${h} WHERE ${o} IS NULL`))[0]?.m);
   const ranges = await sql.read(
     HISTORY,
-    `SELECT ${o} AS org, MIN(${sql.q('event_seq', HISTORY)}) AS lo, MAX(${sql.q('event_seq', HISTORY)}) AS hi ` +
-      `FROM ${h} WHERE ${o} IS NOT NULL GROUP BY ${o} ORDER BY ${o}`,
+    `SELECT ${o} AS org, MIN(${seq}) AS lo, MAX(${seq}) AS hi FROM ${h} WHERE ${o} IS NOT NULL GROUP BY ${o} ORDER BY ${o}`,
   );
   let base = envTop;
   for (const r of ranges) {
     const org = String(r.org);
     const shifted = await shiftRange(
-      run,
       { min: num(r.lo), max: num(r.hi) },
       base,
       async (offset, oldMax) => {
@@ -753,76 +853,16 @@ async function runHistoryRenumber(run: Run): Promise<StepReport> {
         );
       },
       async (offset) => {
-        await execute(run, HISTORY, `UPDATE ${h} SET ${sql.q('event_seq', HISTORY)} = ${sql.q('event_seq', HISTORY)} + ? WHERE ${o} = ?`, [offset, org]);
+        await execute(run, HISTORY, `UPDATE ${h} SET ${seq} = ${seq} + ? WHERE ${o} = ?`, [offset, org]);
       },
     );
     base = shifted.top;
     if (shifted.moved) summary.organizationsShifted++;
   }
-
-  // ── versions: per (type, name), only where another lineage holds them ──
-  if (hcols.has('version')) {
-    const v = sql.q('version', HISTORY);
-    const ty = sql.q('type', HISTORY);
-    const nm = sql.q('name', HISTORY);
-    const lineages = await sql.read(
-      HISTORY,
-      `SELECT ${ty} AS t, ${nm} AS n, ${o} AS org, MIN(${v}) AS lo, MAX(${v}) AS hi FROM ${h} ` +
-        `GROUP BY ${ty}, ${nm}, ${o} ORDER BY ${ty}, ${nm}, ${o}`,
-    );
-    const byItem = new Map<string, Array<Record<string, unknown>>>();
-    for (const l of lineages) {
-      const key = `${String(l.t)}\u0000${String(l.n)}`;
-      byItem.set(key, [...(byItem.get(key) ?? []), l]);
-    }
-    for (const group of byItem.values()) {
-      const env = group.find((l) => l.org === null || l.org === undefined || l.org === '');
-      const orgs = group.filter((l) => l !== env);
-      if (orgs.length === 0) continue;
-      // With no environment lineage, the first organization keeps its numbers.
-      let vbase = env ? num(env.hi) : Number.NEGATIVE_INFINITY;
-      for (const l of orgs) {
-        const org = String(l.org);
-        if (vbase === Number.NEGATIVE_INFINITY) {
-          vbase = num(l.hi);
-          continue;
-        }
-        const shifted = await shiftRange(
-          run,
-          { min: num(l.lo), max: num(l.hi) },
-          vbase,
-          async (offset, oldMax) => {
-            if (!overlaysCarry) return;
-            const m = sql.q(OVERLAYS, OVERLAYS);
-            const mv = sql.q('version', OVERLAYS);
-            await execute(
-              run,
-              OVERLAYS,
-              `UPDATE ${m} SET ${mv} = ${mv} + ? WHERE ${sql.q(ORG, OVERLAYS)} = ? AND ${sql.q('type', OVERLAYS)} = ? ` +
-                `AND ${sql.q('name', OVERLAYS)} = ? AND ${mv} <= ?`,
-              [offset, org, l.t, l.n, oldMax],
-            );
-          },
-          async (offset) => {
-            await execute(
-              run,
-              HISTORY,
-              `UPDATE ${h} SET ${v} = ${v} + ? WHERE ${o} = ? AND ${ty} = ? AND ${nm} = ?`,
-              [offset, org, l.t, l.n],
-            );
-          },
-        );
-        vbase = shifted.top;
-        if (shifted.moved) summary.lineagesShifted++;
-      }
-    }
+  if (summary.organizationsShifted) {
+    run.opts.onProgress?.(`history renumbered: ${summary.organizationsShifted} organization event range(s)`);
   }
-  if (summary.organizationsShifted || summary.lineagesShifted) {
-    run.opts.onProgress?.(
-      `history renumbered: ${summary.organizationsShifted} organization event range(s), ${summary.lineagesShifted} version lineage(s)`,
-    );
-  }
-  return { step: 'history-renumber', status: 'done', summary, blockers: [], notes: [] };
+  return { step: 'sequence-renumber', status: 'done', summary, blockers: [], notes: [] };
 }
 
 // ── Step 2a: organization customizations and form withdrawals (rulings A) ──
@@ -1630,12 +1670,13 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
 const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   attribution: runAttribution,
   'authored-conversion': runAuthoredConversion,
-  'history-renumber': runHistoryRenumber,
+  'version-renumber': runVersionRenumber,
   'metadata-promotion': runMetadataPromotion,
   'template-promotion': runTemplatePromotion,
   'settings-move': runSettingsMove,
   rewrite: runRewrite,
   'mirror-deletion': runMirrorDeletion,
+  'sequence-renumber': runSequenceRenumber,
   'column-drops': runColumnDrops,
 };
 
@@ -1718,6 +1759,19 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     }
     const done = checkpoint.completed[step];
     if (done) {
+      // `sequence-renumber` runs again even when checkpointed: it is
+      // idempotent, and an environment write made since the earlier run must
+      // not keep a number that run handed an organization.
+      if (step === 'sequence-renumber') {
+        const again = await RUNNERS[step](run);
+        if (Object.values(again.summary).some((n) => n > 0)) {
+          steps.push(again);
+          checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };
+          await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+          run.columns.clear();
+          continue;
+        }
+      }
       steps.push({ step, status: 'checkpointed', summary: done.summary, blockers: [], notes: [] });
       continue;
     }
