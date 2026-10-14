@@ -319,7 +319,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       {
         id: 'environment-overlay-duplicates',
         label: 'active overlays sharing (type, name, package, bundle member) once the organization leaves the key — reported, never dropped',
-        citation: 'triage pointer 6071418113 (the overlay index pre-flight joins the re-key stage); the bundle member is part of the overlay key (#22877)',
+        citation: 'triage pointer 6071418113 (the overlay index pre-flight joins the re-key stage); the bundle member is part of the overlay key (`sys_metadata`\'s overlay index)',
         where: [{ column: 'state', equals: 'active' }],
         conflictBy: { groupBy: ['type', 'name', 'package_id', 'bundle_member'] },
       },
