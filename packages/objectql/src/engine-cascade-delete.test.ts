@@ -787,3 +787,240 @@ describe('cascadeDeleteRelations — [#13644] every reference-cleanup write carr
         expect(seen[0].sessionUserId).toBeUndefined();
     });
 });
+
+// [#23221] The DECLARED cascade-delete marker — `HookContext.
+// referentialCascadeDelete`, the delete twin of the block above. The cascade
+// deletes each child AS THE CALLER (the walk recurses through the public
+// `delete()` with the caller's context), so `ctx.user`, `ctx.session` and
+// `ctx.input` are identical between a child the cascade removes and a hand
+// delete of the same child; this key is the one discriminator. One pin per
+// face: the cascade child (both phases, at any depth), its hand-delete control
+// under the SAME identity, the set_null cleanup that must carry the update twin
+// and not this key, and the writes a cascaded child's hooks issue through
+// `ctx.api`, which must not be marked. The engine keeps no envelope key for
+// this fact; the last pin holds that too.
+describe('cascadeDeleteRelations — [#23221] every cascade-issued child delete carries the declared ctx.referentialCascadeDelete', () => {
+    let engine: ObjectQL;
+
+    const CALLER = { userId: 'u1', isSystem: true };
+
+    // A frozen-lines shape: a master_detail child (cascade by default) and its
+    // own master_detail grandchild, plus an unrelated object a child's hook can
+    // write to through `ctx.api`.
+    const qline = {
+        name: 'qline',
+        label: 'Quote Line',
+        fields: {
+            id: { name: 'id', type: 'text' as const, primaryKey: true },
+            title: { name: 'title', type: 'text' as const },
+            parent: { name: 'parent', type: 'master_detail' as const, reference: 'acct' },
+        },
+    };
+    const qlineNote = {
+        name: 'qline_note',
+        label: 'Line Note',
+        fields: {
+            id: { name: 'id', type: 'text' as const, primaryKey: true },
+            body: { name: 'body', type: 'text' as const },
+            line: { name: 'line', type: 'master_detail' as const, reference: 'qline' },
+        },
+    };
+    const sideLog = {
+        name: 'side_log',
+        label: 'Side Log',
+        fields: {
+            id: { name: 'id', type: 'text' as const, primaryKey: true },
+            body: { name: 'body', type: 'text' as const },
+        },
+    };
+
+    type Cap = {
+        object: unknown; event: unknown; id: unknown;
+        marker: unknown; hasKey: boolean; hasFieldClear: boolean; sessionUserId: unknown;
+    };
+    const capture = (ctx: any): Cap => ({
+        object: ctx.object,
+        event: ctx.event,
+        id: ctx.input?.id,
+        marker: ctx.referentialCascadeDelete,
+        // ABSENT, not present-but-undefined: the contract is "absent unless true".
+        hasKey: 'referentialCascadeDelete' in ctx,
+        hasFieldClear: 'referentialFieldClear' in ctx,
+        sessionUserId: ctx.session?.userId,
+    });
+    const listen = (seen: Cap[], object: string, events: string[]) => {
+        for (const e of events) engine.on(e, object, (ctx: any) => { seen.push(capture(ctx)); });
+    };
+
+    beforeEach(async () => {
+        engine = new ObjectQL();
+        const { driver } = makeStubDriver();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        for (const o of [acct, noteOptional, qline, qlineNote, sideLog]) engine.registry.registerObject(o as any);
+    });
+
+    it('true in BOTH phases of the cascaded child delete, identity inherited; the hand delete of the same child and the root delete carry no key', async () => {
+        const seen: Cap[] = [];
+        listen(seen, 'qline', ['beforeDelete', 'afterDelete']);
+        listen(seen, 'acct', ['beforeDelete', 'afterDelete']);
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const l1 = await engine.insert('qline', { title: 'one', parent: a.id });
+        const l2 = await engine.insert('qline', { title: 'two', parent: a.id });
+
+        // The user's hand delete of a line, under the SAME identity.
+        await engine.delete('qline', { where: { id: l1.id }, context: { ...CALLER } } as any);
+        const hand = seen.splice(0);
+        // The engine's cascade when the parent is deleted.
+        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+        const cascade = seen.splice(0);
+
+        expect(hand.map((o) => o.event)).toEqual(['beforeDelete', 'afterDelete']);
+        for (const o of hand) {
+            expect(o.marker, 'a hand delete must not read as cascade-issued').toBeUndefined();
+            expect(o.hasKey, 'the key must be ABSENT on a hand delete, not present-but-undefined').toBe(false);
+            expect(o.sessionUserId).toBe('u1');
+        }
+
+        const lineDispatches = cascade.filter((o) => o.object === 'qline');
+        expect(lineDispatches.map((o) => o.event)).toEqual(['beforeDelete', 'afterDelete']);
+        for (const o of lineDispatches) {
+            expect(o.id, 'this really is the cascade removing l2').toBe(l2.id);
+            expect(o.marker, 'the cascaded child delete carries the declared marker').toBe(true);
+            // The inherited identity, the thing that erases every other
+            // discriminator, is present alongside the marker.
+            expect(o.sessionUserId).toBe('u1');
+            expect(o.hasFieldClear, 'a cascade child delete is not the update twin').toBe(false);
+        }
+        const rootDispatches = cascade.filter((o) => o.object === 'acct');
+        expect(rootDispatches.map((o) => o.event)).toEqual(['beforeDelete', 'afterDelete']);
+        for (const o of rootDispatches) {
+            expect(o.hasKey, 'the delete the caller asked for is not cascade-issued').toBe(false);
+        }
+        expect(await engine.findOne('qline', { where: { id: l2.id } })).toBeNull();
+    });
+
+    it('a grandchild the child cascade removes is cascade-issued too', async () => {
+        const seen: Cap[] = [];
+        listen(seen, 'qline_note', ['beforeDelete', 'afterDelete']);
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const l = await engine.insert('qline', { title: 'one', parent: a.id });
+        const n = await engine.insert('qline_note', { body: 'hi', line: l.id });
+
+        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+
+        expect(seen.map((o) => o.event)).toEqual(['beforeDelete', 'afterDelete']);
+        for (const o of seen) {
+            expect(o.id).toBe(n.id);
+            expect(o.marker).toBe(true);
+            expect(o.sessionUserId).toBe('u1');
+        }
+        expect(await engine.findOne('qline_note', { where: { id: n.id } })).toBeNull();
+    });
+
+    it('the set_null cleanup in the same cascade carries referentialFieldClear and NOT this key', async () => {
+        const seen: Cap[] = [];
+        listen(seen, 'note', ['beforeUpdate', 'afterUpdate']);
+        listen(seen, 'qline', ['beforeDelete', 'afterDelete']);
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const n = await engine.insert('note', { body: 'hi', account: a.id });
+        await engine.insert('qline', { title: 'one', parent: a.id });
+
+        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+
+        const cleanup = seen.filter((o) => o.object === 'note');
+        expect(cleanup.map((o) => o.event)).toEqual(['beforeUpdate', 'afterUpdate']);
+        for (const o of cleanup) {
+            expect(o.hasFieldClear, 'the cleanup update keeps its own marker').toBe(true);
+            expect(o.hasKey, 'and does not carry the delete twin').toBe(false);
+        }
+        const cascaded = seen.filter((o) => o.object === 'qline');
+        expect(cascaded.map((o) => o.event)).toEqual(['beforeDelete', 'afterDelete']);
+        for (const o of cascaded) {
+            expect(o.marker).toBe(true);
+            expect(o.hasFieldClear).toBe(false);
+        }
+        expect((await engine.findOne('note', { where: { id: n.id } }) as any).account).toBeNull();
+    });
+
+    it("writes a cascaded child's hooks issue through ctx.api are not marked — a delete included, and an update", async () => {
+        const seen: Cap[] = [];
+        listen(seen, 'side_log', ['beforeDelete', 'beforeUpdate']);
+        const lineMarkers: unknown[] = [];
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        await engine.insert('qline', { title: 'one', parent: a.id });
+        const s1 = await engine.insert('side_log', { body: 'keep' });
+        const s2 = await engine.insert('side_log', { body: 'drop' });
+
+        engine.on('beforeDelete', 'qline', async (ctx: any) => {
+            lineMarkers.push(ctx.referentialCascadeDelete);
+            await ctx.api.object('side_log').deleteById(s2.id);
+        });
+        engine.on('afterDelete', 'qline', async (ctx: any) => {
+            lineMarkers.push(ctx.referentialCascadeDelete);
+            await ctx.api.object('side_log').update({ id: s1.id, body: 'touched' });
+        });
+
+        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+
+        expect(lineMarkers, 'the hooks ran on the cascaded child delete').toEqual([true, true]);
+        expect(seen.map((o) => o.event)).toEqual(['beforeDelete', 'beforeUpdate']);
+        for (const o of seen) {
+            expect(o.hasKey, `the hook's own ${String(o.event)} is not one the cascade issued`).toBe(false);
+            // Same identity as the cascade — the hook's writes ride its context.
+            expect(o.sessionUserId).toBe('u1');
+        }
+        expect(await engine.findOne('side_log', { where: { id: s2.id } })).toBeNull();
+        expect((await engine.findOne('side_log', { where: { id: s1.id } }) as any).body).toBe('touched');
+    });
+
+    it('a delete of the very same row from inside the cascaded dispatch finds the token claimed', async () => {
+        const markers: Array<{ depth: number; hasKey: boolean }> = [];
+        let depth = 0;
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const l = await engine.insert('qline', { title: 'one', parent: a.id });
+
+        engine.on('beforeDelete', 'qline', async (ctx: any) => {
+            depth += 1;
+            markers.push({ depth, hasKey: 'referentialCascadeDelete' in ctx });
+            // Once: the hook's own delete of the row it is being asked about.
+            if (depth === 1) await ctx.api.object('qline').deleteById(l.id);
+        });
+
+        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+
+        expect(markers).toEqual([
+            { depth: 1, hasKey: true },
+            { depth: 2, hasKey: false },
+        ]);
+    });
+
+    it('an identity-LESS cascade still marks its child, and puts no operation-private key on the envelope', async () => {
+        const seen: Cap[] = [];
+        listen(seen, 'qline', ['beforeDelete']);
+        const childEnvelopeKeys: string[][] = [];
+        engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+            if (opCtx.operation === 'delete' && opCtx.object === 'qline') {
+                childEnvelopeKeys.push(Object.keys(opCtx.context ?? {}));
+            }
+            await next();
+        });
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        await engine.insert('qline', { title: 'one', parent: a.id });
+        await engine.delete('acct', { where: { id: a.id } } as any);
+
+        expect(seen.length).toBe(1);
+        expect(seen[0].marker).toBe(true);
+        expect(seen[0].sessionUserId).toBeUndefined();
+        // The fact rides no `__` key: there is nothing on the envelope for an
+        // app to sniff instead of the declared key.
+        expect(childEnvelopeKeys.length).toBe(1);
+        expect(childEnvelopeKeys[0].filter((k) => k.startsWith('__'))).toEqual([]);
+    });
+});
