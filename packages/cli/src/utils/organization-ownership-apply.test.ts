@@ -756,6 +756,7 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     db.exec(`
       CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT, package_id TEXT);
       INSERT INTO sys_metadata VALUES ('md_1', 'org_b', 'object', 'deal', 'active', NULL);
+      ALTER TABLE sys_metadata ADD COLUMN bundle_member TEXT;
     `);
     const report = await apply(catalog(), ledger());
 
