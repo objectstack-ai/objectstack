@@ -59,11 +59,8 @@ import { AggregationFunction } from '../data/query.zod';
 import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { ActionSchema, ActionType, InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
-import {
-  ON_SUCCESS_EXECUTORS,
-  onSuccessBesideExecutorRefusal,
-  onSuccessBesideUpdateOperationRefusal,
-} from './action-on-success-executor';
+import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
+import { refuseDeclarativeUpdateContradictions } from './action-declarative-update';
 import { navigationTargetRefusal } from './navigation-target';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
@@ -4143,12 +4140,18 @@ const ROW_URL_NAVIGATOR_EXECUTORS: ReadonlySet<string> = new Set(['url', 'naviga
  * the spelling that resolved the executor, so an `actionType: 'url'` row reads
  * as it always has, and a name-leg row learns that declaring the executor key
  * is how a `name` stops choosing the url navigator.
+ *
+ * Beside `operation: 'update'` the runner runs no executor, so no url
+ * navigator reads `target`: the declarative-update judge
+ * ({@link rowDeclarativeUpdate}) refuses `target` there whole, and this
+ * judgment stands down rather than prescribe a scheme for a key to be dropped.
  */
 function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', owner: string) {
   return (
-    row: { actionType?: string; type?: string; name?: string; target?: string },
+    row: { actionType?: string; type?: string; name?: string; target?: string; operation?: unknown },
     ctx: z.RefinementCtx,
   ): void => {
+    if (row.operation === 'update') return;
     const executor = effectiveRowExecutor(row, executorKey);
     if (executor === undefined || !ROW_URL_NAVIGATOR_EXECUTORS.has(executor) || typeof row.target !== 'string') return;
     const spelled = row[executorKey]
@@ -4184,10 +4187,15 @@ function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', owner:
  * refusal. The `element:button` inline action keeps its own declared fold of
  * `type: 'navigation'` onto `'url'` (`normalizeInlineAction`, `action.zod.ts`),
  * a bridge for its measured producers.
+ *
+ * Beside `operation: 'update'` the declarative-update judge
+ * ({@link rowDeclarativeUpdate}) refuses every executor but `'script'`, the
+ * alias included, with "leave it off"; this rename onto `'url'` stands down
+ * there, so the row is never told both to write `'url'` and to drop the key.
  */
 function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: string) {
-  return (row: { actionType?: string; type?: string }, ctx: z.RefinementCtx): void => {
-    if (row[executorKey] !== 'navigation') return;
+  return (row: { actionType?: string; type?: string; operation?: unknown }, ctx: z.RefinementCtx): void => {
+    if (row.operation === 'update' || row[executorKey] !== 'navigation') return;
     ctx.addIssue({
       code: 'custom',
       path: [executorKey],
@@ -4248,10 +4256,25 @@ const actionOnSuccessBlock = () => ActionSchema.in.shape.onSuccess.unwrap();
  * value parsed clean.
  *
  * What the enum does not bring: `ActionSchema`'s rules ABOUT `operation` are
- * refinements of the action. The one about `onSuccess` is carried to the rows
- * ({@link refuseRowOnSuccessBesideExecutor}), with the action's own text.
+ * refinements of the action. They are carried to the rows whole, by the one
+ * judge both read ({@link rowDeclarativeUpdate}), with the action's own texts.
  */
 const actionOperation = () => ActionSchema.in.shape.operation.unwrap();
+
+/**
+ * A page action row's `patch`: `ActionSchema`'s own record of static field
+ * values, by reference, read off the object half of the action's pipe as
+ * {@link actionOperation} reads `operation`. ⛔ No second shape.
+ *
+ * Every row forwards `patch` to the runner beside `operation`, and the runner's
+ * update merges it only when it is a plain object (`executeUpdateOperation`,
+ * `ActionRunner.ts` at the pin: anything else becomes `{}`), as the platform
+ * route's write bag does (`declarativeUpdateWrite`). Until this, the rows
+ * declared `z.unknown()`, so a string, array or number `patch` parsed clean and
+ * was dropped before the write; and the declarative-update judge reads a
+ * present `patch` as something to write, which holds only for a record.
+ */
+const actionPatch = () => ActionSchema.in.shape.patch.unwrap();
 
 /**
  * The console runner's built-in executors: `ActionType`'s six, the members its
@@ -4290,27 +4313,22 @@ function rowOnSuccessRefused(executor: string | undefined): boolean {
  * with the subject naming the row and the spelling that resolved its executor,
  * as {@link refuseUnopenableRowUrlTarget} names it. Beside `operation:
  * 'update'` it is refused whatever the executor, as `ActionSchema` refuses it
- * on every `type`, with that refusal's text. The issue lands at
- * `onSuccess`, so `os validate`'s props gate reports it at `properties.onSuccess`
- * or `properties.actions.N.onSuccess`.
+ * on every `type`, with that refusal's text — by the declarative-update judge
+ * ({@link rowDeclarativeUpdate}), whose refused-key table carries the pairing
+ * for the action and the rows alike, so this executor half stands down there.
+ * The issue lands at `onSuccess`, so `os validate`'s props gate reports it at
+ * `properties.onSuccess` or `properties.actions.N.onSuccess`.
  */
 function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', owner: string) {
   return (
     row: { actionType?: string; type?: string; name?: string; operation?: unknown; onSuccess?: unknown },
     ctx: z.RefinementCtx,
   ): void => {
-    if (row.onSuccess === undefined) return;
     // `operation: 'update'` first, as the runner reads it: the write runs
     // before any executor, and the row's executor key is never consulted.
-    // ONE issue, `ActionSchema`'s text for the same pairing.
-    if (row.operation === 'update') {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['onSuccess'],
-        message: onSuccessBesideUpdateOperationRefusal(`${owner} \`onSuccess\` (\`operation: 'update'\`)`),
-      });
-      return;
-    }
+    // The pairing is the declarative-update judge's (ONE issue, the action's
+    // text), so nothing is judged here beside it.
+    if (row.onSuccess === undefined || row.operation === 'update') return;
     const executor = effectiveRowExecutor(row, executorKey);
     if (!rowOnSuccessRefused(executor)) return;
     const key = row[executorKey] === '' ? `an empty \`${executorKey}\`` : `no \`${executorKey}\``;
@@ -4325,6 +4343,48 @@ function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', ow
       message: onSuccessBesideExecutorRefusal(`${owner} \`onSuccess\` (${spelled})`, executor, executorKey),
     });
   };
+}
+
+/**
+ * `ActionSchema`'s declarative-update rules on a page action row: the one judge
+ * both read (`action-declarative-update.ts`), on the row's surface. ⛔ No
+ * second copy of a rule or a text. Every row forwards `operation`, `patch`,
+ * `params`, `target`, `method`, `bodyExtra`, `bodyShape`, `locations` and
+ * `onSuccess` to the console's action runner (and `action:button` its
+ * `recordIdField`), and the runner reads `operation` before any executor: the
+ * write is posted through its `script` dispatch, so beside it the row's
+ * executor and the keys that bind one are never read. So each rule lands on the
+ * row at the same path, with the action's text:
+ *
+ * - `patch` without `operation: 'update'` — refused at `patch`;
+ * - beside it, an executor key other than `'script'` — refused at that key
+ *   (`actionType` on a node, `type` on a member). The row's key has no default,
+ *   so the text says it names that route or nothing; an empty key names
+ *   nothing, as {@link effectiveRowExecutor} reads it;
+ * - beside it, `target`, `method`, `bodyExtra`, `bodyShape`, `onSuccess` and
+ *   (`action:button` only) `recordIdField` — each refused at its own path. The
+ *   table's other keys are not row keys, so the strict row refuses them as
+ *   unknown before this runs;
+ * - beside it, nothing to write — refused at `patch`. A node's non-empty
+ *   OBJECT `params` counts: on `action:button` / `action:icon` it IS
+ *   `properties.params`, whose static values the runner's update merges over
+ *   `patch`. A member's does not (refused off `api` by
+ *   {@link actionContainerMemberParamsFitType}, and never forwarded);
+ * - beside it, a `list_toolbar` location — refused at `locations.N`.
+ *
+ * Applied first on each row, as the runner reads `operation` first: the row's
+ * url-target, executor-alias and `onSuccess`-executor judgments stand down
+ * beside the operation, since each key they judge is refused here whole.
+ * `os validate`'s props gate parses `properties` against these same rows, so
+ * it reports each refusal at `properties.KEY` or `properties.actions.N.KEY`.
+ */
+function rowDeclarativeUpdate(executorKey: 'actionType' | 'type', owner: string) {
+  return refuseDeclarativeUpdateContradictions({
+    executorKey,
+    executorDefaultsToScript: false,
+    onSuccessSubject: `${owner} \`onSuccess\` (\`operation: 'update'\`)`,
+    staticParams: executorKey === 'actionType',
+  });
 }
 
 /**
@@ -4440,8 +4500,8 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
-  patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
+  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
+  patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
   confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
   successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
   errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
@@ -4456,7 +4516,8 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
     .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: \'update\'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s"))
+}).superRefine(rowDeclarativeUpdate('actionType', "An `action:button`'s"))
+  .superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s"))
   .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:button`'s `actionType: 'navigation'`"))
   .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:button`'s")));
 /** Author state (ADR-0122: the bare name is the author state). */
@@ -4541,8 +4602,8 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
-  patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
+  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
+  patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
   confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
   successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
   errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
@@ -4555,7 +4616,8 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
     .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: \'update\'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s"))
+}).superRefine(rowDeclarativeUpdate('actionType', "An `action:icon`'s"))
+  .superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s"))
   .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:icon`'s `actionType: 'navigation'`"))
   .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:icon`'s")));
 /** Author state (ADR-0122: the bare name is the author state). */
@@ -4734,8 +4796,8 @@ function actionContainerMemberShape() {
     method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
     bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-    operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
-    patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
+    operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
+    patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
     confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
     successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
     errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
@@ -4832,7 +4894,8 @@ function buildActionGroupMember() {
     ...actionContainerMemberShape(),
     size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
       .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
-  }).superRefine(actionContainerMemberParamsFitType('action:group'))
+  }).superRefine(rowDeclarativeUpdate('type', "An `action:group` member's"))
+    .superRefine(actionContainerMemberParamsFitType('action:group'))
     .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's"))
     .superRefine(refuseRowUrlExecutorAlias('type', "An `action:group` member's `type: 'navigation'`"))
     .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:group` member's"));
@@ -4854,7 +4917,8 @@ function buildActionMenuMember() {
         + 'button (the menu\'s own `size`). Remove it, or put the action in an `action:group`, whose inline buttons '
         + 'read a member\'s `size`.',
     },
-  }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'))
+  }, actionContainerMemberShape()).superRefine(rowDeclarativeUpdate('type', "An `action:menu` member's"))
+    .superRefine(actionContainerMemberParamsFitType('action:menu'))
     .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's"))
     .superRefine(refuseRowUrlExecutorAlias('type', "An `action:menu` member's `type: 'navigation'`"))
     .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:menu` member's"));

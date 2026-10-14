@@ -390,8 +390,13 @@ describe("a page action row's `operation` is `ActionSchema`'s own enum", () => {
 });
 
 describe("a page action row's `onSuccess` is refused beside `operation: 'update'`, as `ActionSchema` refuses it", () => {
-  /** No executor, the two the hop is declared beside, and a host handler: the write runs first on each. */
-  const BESIDE = [undefined, 'api', 'script', 'run'] as const;
+  /**
+   * The two executors a row may name beside `operation: 'update'`: none, and
+   * `'script'`, the route the write is posted to. Every other executor beside
+   * it is refused at the executor key by the declarative-update judge, pinned
+   * in `component-action-row-declarative-update.test.ts`.
+   */
+  const BESIDE = [undefined, 'script'] as const;
   const updateRow = (row: Row, executor: string | undefined, extra: Record<string, unknown> = {}) =>
     row.parse({ ...(executor === undefined ? {} : { [row.executorKey]: executor }), ...UPDATE, ...extra });
   const updateSubject = (row: Row) => onSuccessSubject(row, "`operation: 'update'`");
@@ -419,7 +424,7 @@ describe("a page action row's `onSuccess` is refused beside `operation: 'update'
   );
 
   it.each(ROWS)("ONE TEXT: $name gives `ActionSchema`'s own refusal of the pairing, after the subject", (row) => {
-    const rowMessage = issuesOf(updateRow(row, 'api', { onSuccess: HOP }))[0].message;
+    const rowMessage = issuesOf(updateRow(row, 'script', { onSuccess: HOP }))[0].message;
     expect(rowMessage.slice(updateSubject(row).length))
       .toBe(actionUpdateOnSuccessMessage().slice(ACTION_UPDATE_SUBJECT.length));
   });
