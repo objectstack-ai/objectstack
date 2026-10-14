@@ -622,9 +622,12 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
         const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
         checkRefs(split.related, strName(dataSource?.object) ?? split.relatedObject, where);
         // `relationshipValueField` names a field on the PARENT — the record the
-        // list hangs off, i.e. the object the list INHERITS (its container's
-        // binding, else the page object), never its own child `dataSource`.
-        checkRefs(split.parent, inheritedObject, where);
+        // list hangs off, never its own child `dataSource`. The parent is the
+        // list's own `parentDataSource.object` when it declares one (ruling B on
+        // objectui#12296, the parent binding #23134 added), else the object the
+        // list INHERITS: its container's binding, else the page object.
+        const parentDataSource = isRec(props.parentDataSource) ? props.parentDataSource : undefined;
+        checkRefs(split.parent, strName(parentDataSource?.object) ?? inheritedObject, where);
         // The add-picker resolves against its own object.
         checkRefs(split.picker, split.pickerObject, where);
         continue;

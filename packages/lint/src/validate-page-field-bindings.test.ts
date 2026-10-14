@@ -447,6 +447,50 @@ describe('validatePageFieldBindings — a related list splits its child and pare
     ]]);
   });
 
+  // The parent binding `parentDataSource` (ruling B on objectui#12296): when the
+  // list declares it, the parent ref resolves on ITS object, not the page's.
+  it('a list with parentDataSource resolves relationshipValueField on that object: no finding', () => {
+    // `ext_key` is on crm_par (the declared parent) only: not on crm_lead (the
+    // page) and not on crm_account (the child rows).
+    const stack = baseStack();
+    const findings = validatePageFieldBindings({
+      objects: [...stack.objects, { name: 'crm_par', fields: { ext_key: { type: 'text' } } }],
+      pages: [pageWith([{
+        type: 'record:related_list',
+        dataSource: { object: 'crm_account' },
+        properties: { relationshipField: 'region', relationshipValueField: 'ext_key', parentDataSource: { object: 'crm_par' } },
+      }])],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('a properties.objectName list with parentDataSource also resolves its parent ref on that object', () => {
+    // The same reading without a node-level `dataSource`: `ext_key` is on crm_par only.
+    const stack = baseStack();
+    const findings = validatePageFieldBindings({
+      objects: [...stack.objects, { name: 'crm_par', fields: { ext_key: { type: 'text' } } }],
+      pages: [pageWith([{
+        type: 'record:related_list',
+        properties: { objectName: 'crm_account', relationshipField: 'region', relationshipValueField: 'ext_key', parentDataSource: { object: 'crm_par' } },
+      }])],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('a list with parentDataSource reports a parent ref its declared parent lacks, against that parent', () => {
+    // `amount` is a crm_lead (page) field; the declared parent crm_account lacks
+    // it, and the child rows (crm_account too) must not be what answers.
+    expect(findingsOf({
+      dataSource: { object: 'crm_account' },
+      properties: { relationshipField: 'region', relationshipValueField: 'amount', parentDataSource: { object: 'crm_account' } },
+    })).toEqual([[
+      PAGE_FIELD_UNKNOWN,
+      'warning',
+      `${LIST}.relationshipValueField`,
+      expect.stringContaining('field "amount" is not a field on object "crm_account"'),
+    ]]);
+  });
+
   it('a list nested in a dataSource-bound container resolves its parent ref on the container object', () => {
     const findings = validatePageFieldBindings({
       ...baseStack(),
