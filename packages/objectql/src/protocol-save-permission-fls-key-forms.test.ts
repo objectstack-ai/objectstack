@@ -187,6 +187,28 @@ describe('the save door judges a permission set\'s FLS key forms as `os validate
         expect(storedSet('flskey_empty_object')).toBeUndefined();
     });
 
+    it('the publish of a DRAFT carrying \'.full_name\' is refused the same way; the draft itself still saves', async () => {
+        // Drafts are never gated (a draft cannot execute), so the draft lands;
+        // its promotion is the publish verb, and it is judged by the same rules.
+        const draft = await protocol.saveMetaItem({
+            type: 'permission', name: 'flskey_draft', packageId: P, item: setWith('flskey_draft', '.full_name'), mode: 'draft',
+        });
+        expect(draft.success).toBe(true);
+
+        const err = await protocol
+            .publishMetaItem({ type: 'permission', name: 'flskey_draft', packageId: P })
+            .then(() => undefined, (e: unknown) => e);
+
+        expect(err, 'the publish must be refused').toBeDefined();
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        expect(err.issues.map((i: any) => i.rule)).toEqual([UNQUALIFIED_KEY]);
+        // NEGATIVE CONTROL on the store: no ACTIVE row was written, the draft stays.
+        const rows = Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.type === 'permission' && r.name === 'flskey_draft');
+        expect(rows.map((r) => r.state)).toEqual(['draft']);
+    });
+
     it('CONTROL: a bare key is refused as before, under the same rule', async () => {
         const err = await refusalOf('flskey_bare', 'full_name');
 
