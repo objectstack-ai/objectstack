@@ -28,6 +28,48 @@
  * `AutomationEngine.registerFlow`, `objectstack validate` and the executors
  * call it — ⛔ never a second reading of the dialect anywhere.
  *
+ * ## The doors that run it — and why `FlowSchema.parse` is not one (#23320)
+ *
+ * The judge runs at every door that reports a flow's refusals per slot:
+ * `AutomationEngine.registerFlow`, after its parse; the `validateStackExpressions`
+ * rule (`expression-invalid` at `error`), which `objectstack validate`,
+ * `objectstack compile` and the runtime publish gate of an `active` metadata
+ * save run; and every run, through the node contracts that compose
+ * `FlowValueSlotSchema`. The flow parse does NOT run it: `FlowSchema.parse`,
+ * and so `defineStack`, `ObjectStackDefinitionSchema`, the `flow` metadata
+ * type's schema and an artifact's parse, accept a value-slot token. The parse
+ * parses the node contracts too (`flowNodeConfigRefusals`' value arm), and
+ * that arm stands aside at exactly the paths this judge refuses
+ * (`slotJudgeRefusedPaths`, #23260), so the parse leaves the token to the
+ * doors above, on purpose. Two measured reasons, taken by running this judge
+ * and the text-slot judge in `FlowSchema`'s refinement and reverting it:
+ *
+ *  - **The located refusal.** `registerFlow` parses first, and a parse
+ *    refusal reaches its caller as the parse's own issue list. A token
+ *    refused at the parse would replace `registerFlow`'s located line — the
+ *    node's id and type, the slot's label, the config path, the remedy and the
+ *    `source:` — at registration and in the boot's log, and `objectstack
+ *    validate` and `objectstack compile`, which parse the stack before their
+ *    rules run, would stop at the parse before the `expression-invalid`
+ *    finding. Every pin of either located refusal went red.
+ *  - **The stored pass.** The parse is also the stored-flow canonicalization
+ *    (`AutomationEngine.canonicalizeStoredFlow`) that `os migrate meta
+ *    --stored` runs on each flow row, and a parse refusal reports the row
+ *    `failed`, which flips `storedMigrationClean`: a non-zero exit that no run
+ *    of the command can clear, because no conversion rewrites the token (the
+ *    next section). A refusal after the parse is listed instead, as a TODO
+ *    under the step-18 D3 entry `flow-value-slot-template-dialect-refused`
+ *    (`conversions/refused-shapes.ts`), and the verdict does not move. The
+ *    pin that a braced filter operand parses and is listed went red.
+ *
+ * What this leaves: a stack built by `defineStack` and handed to none of those
+ * doors — `os dev` and `os serve` load it and boot — reaches `registerFlow` at
+ * boot, which refuses the flow with its located line and does not register it.
+ * The judge can join the parse once `registerFlow` reports a parse refusal as
+ * located as its own and the stored pass lists a slot the parse refuses
+ * rather than failing its row; the contract arm's exemption then keeps each
+ * token reported once.
+ *
  * ## Refused, not converted (ADR-0087 D2)
  *
  * D2 lets a conversion rewrite only what maps LOSSLESSLY. Every token spelling
