@@ -605,7 +605,7 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
       );
     };
 
-    for (const { component, path, objectName } of walkPageComponents(page, `pages[${pi}]`)) {
+    for (const { component, path, objectName, inheritedObject } of walkPageComponents(page, `pages[${pi}]`)) {
       const type = strName(component.type);
       const props = isRec(component.properties) ? component.properties : undefined;
       if (!type || !props) continue;
@@ -613,10 +613,18 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
       const base = `${path}.properties`;
 
       if (type === RELATED_LIST_TYPE) {
+        // [#23207] A related list carries TWO object bindings, and each batch
+        // is judged against its own. The node-level `dataSource` is the CHILD
+        // rows (its published meaning: the renderer maps `dataSource.object`
+        // onto `objectName`), so it binds the child-side refs and never the
+        // parent; without it, `properties.objectName` names the child.
         const split = relatedListFieldRefs(props, base);
-        checkRefs(split.related, split.relatedObject, where);
-        // `relationshipValueField` names a field on the PARENT (page) object.
-        checkRefs(split.parent, objectName, where);
+        const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
+        checkRefs(split.related, strName(dataSource?.object) ?? split.relatedObject, where);
+        // `relationshipValueField` names a field on the PARENT — the record the
+        // list hangs off, i.e. the object the list INHERITS (its container's
+        // binding, else the page object), never its own child `dataSource`.
+        checkRefs(split.parent, inheritedObject, where);
         // The add-picker resolves against its own object.
         checkRefs(split.picker, split.pickerObject, where);
         continue;
