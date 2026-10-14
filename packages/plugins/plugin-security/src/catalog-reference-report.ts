@@ -27,7 +27,18 @@
  *    resolve (a row-only set) — stay unnamed, and an unnamed grant confers
  *    nothing.
  *
- * It reads no `sys_position` row. The catalog row objects are retired (C3
+ * And it lists PER POSITION, since a definition belongs to the environment and
+ * to no organization:
+ *
+ * 4. **Positions naming no permission set** — position definitions in the
+ *    catalog whose `permissionSets` name a set the catalog does not resolve.
+ *    The authorization resolver reads a position's sets from its definition,
+ *    so a holder of the position is granted nothing through such a name. The
+ *    usual cause is a package that declared the set and is now uninstalled or
+ *    disabled while a position still binds it; reinstalling the package clears
+ *    the line at the next boot, with nothing else to do.
+ *
+ * It reads no `sys_position` row: positions are read from the catalog. The catalog row objects are retired (C3
  * stage 8), so no composition provisions that table, and a Setup-authored
  * position row with no definition — or a name several such rows carry — is
  * the upgrade ceremony's to convert or report (ADR-0131 D10, C7), never a boot
@@ -49,7 +60,8 @@
  * report: it says which store could not be read and reports no finding past
  * that point, because an unread answer is never taken for an absent name. A
  * composition without one of the two objects reads the other and names the
- * absent one in the result.
+ * absent one in the result; the position definitions are read from the catalog
+ * in every composition.
  *
  * ## When it runs
  *
@@ -63,7 +75,7 @@
  * ADR anchors: ADR-0131 D3 (one catalog home), D4 (references by name).
  */
 
-import type { SecurityCatalogReader, SecurityCatalogType } from '@objectstack/core';
+import type { SecurityCatalogEntry, SecurityCatalogReader, SecurityCatalogType } from '@objectstack/core';
 import { GRANT_OBJECT, GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
 
 /** The user ↔ position assignment object (ADR-0057 D4). */
@@ -122,6 +134,16 @@ export interface OrganizationCatalogReferences {
   unnamedGrants: UnnamedGrant[];
 }
 
+/** One position definition that names permission sets the catalog does not resolve. */
+export interface PositionNamingUnresolvedSets {
+  /** The position's name. */
+  position: string;
+  /** The package the definition names as its owner, or `null` for a stack or environment definition. */
+  packageId: string | null;
+  /** The names in its `permissionSets` the catalog does not resolve, in declared order. */
+  permissionSets: string[];
+}
+
 /** Why the report stopped before it judged every reference. */
 export type CatalogReferenceReportStop =
   | 'scan-unreadable'
@@ -130,6 +152,8 @@ export type CatalogReferenceReportStop =
 /** What one report found. Only organizations with a finding are listed, the organization-less bucket first. */
 export interface CatalogReferenceReport {
   organizations: OrganizationCatalogReferences[];
+  /** Position definitions naming a permission set the catalog does not resolve, by position name. */
+  positions: PositionNamingUnresolvedSets[];
   /** The objects this composition does not provision; their part of the report was not read. */
   absent: string[];
   /** Set when a read did not happen; no finding is reported past it. */
@@ -203,6 +227,20 @@ async function scanAll(
   return out;
 }
 
+/** Every position definition in the catalog; a read that fails, or answers no list, stops the report. */
+async function listPositions(catalog: SecurityCatalogReader): Promise<SecurityCatalogEntry[]> {
+  let entries: unknown;
+  try {
+    entries = await catalog.list('position');
+  } catch (e) {
+    throw new ReportStop('catalog-unreadable', 'the security catalog', e);
+  }
+  if (!Array.isArray(entries)) {
+    throw new ReportStop('catalog-unreadable', 'the security catalog', new Error('the position list answered no list'));
+  }
+  return entries as SecurityCatalogEntry[];
+}
+
 /** The catalog's answer per name, each name asked once. */
 function catalogResolver(catalog: SecurityCatalogReader): (type: SecurityCatalogType, name: string) => Promise<boolean> {
   const memo = new Map<string, boolean>();
@@ -233,6 +271,7 @@ export async function collectCatalogReferences(
 ): Promise<CatalogReferenceReport> {
   const report: CatalogReferenceReport = {
     organizations: [],
+    positions: [],
     absent: [],
   };
   const has = (object: string): boolean => {
@@ -290,16 +329,30 @@ export async function collectCatalogReferences(
       }
     }
 
+    for (const entry of await listPositions(deps.catalog)) {
+      const declared = entry?.definition?.permissionSets;
+      if (!Array.isArray(declared)) continue;
+      const unresolved: string[] = [];
+      for (const value of declared) {
+        const name = nameOf(value);
+        if (name === undefined || unresolved.includes(name) || (await resolves('permission', name))) continue;
+        unresolved.push(name);
+      }
+      if (unresolved.length === 0) continue;
+      report.positions.push({ position: entry.name, packageId: entry.packageId ?? null, permissionSets: unresolved });
+    }
   } catch (e) {
     if (!(e instanceof ReportStop)) throw e;
     report.stopped = e.stop;
     report.stoppedReading = e.reading;
     report.stoppedError = errorText(e.reason);
     report.organizations = [];
+    report.positions = [];
     return report;
   }
 
   report.organizations = [...byOrganization.values()].sort((a, b) => compareKeys(a.organizationId, b.organizationId));
+  report.positions.sort((a, b) => compareKeys(a.position, b.position));
   return report;
 }
 
@@ -395,12 +448,31 @@ function logReport(report: CatalogReferenceReport, logger?: CatalogReferenceRepo
     );
   }
 
-  const clean = report.organizations.length === 0;
-  // A composition with neither object has nothing to report on.
+  if (report.positions.length > 0) {
+    const sets = new Set(report.positions.flatMap((p) => p.permissionSets));
+    logError(
+      logger,
+      `[security] ${report.positions.length} position definition(s) name a permission set the security catalog ` +
+        'does not resolve at this boot (ADR-0131 D4), so a holder of the position is granted nothing through that ' +
+        'name. Nothing was changed. Fix: install or enable again the package that declared the permission set (the ' +
+        'next boot then clears this line by itself), declare the set again, or remove the name from the ' +
+        "position's permissionSets.",
+      {
+        count: report.positions.length,
+        permissionSets: [...sets].sort(),
+        positions: listed(report.positions.map((p) => ({
+          position: p.position, packageId: p.packageId, permissionSets: p.permissionSets,
+        }))),
+      },
+    );
+  }
+
+  const clean = report.organizations.length === 0 && report.positions.length === 0;
+  // A composition with neither object has no assignment or grant to report on.
   if (clean && report.absent.length < 2) {
     logger?.info?.(
-      '[security] catalog reference report: every position assignment and permission-set grant names an item ' +
-        'the security catalog resolves at this boot',
+      '[security] catalog reference report: every position assignment, permission-set grant and position ' +
+        "definition's permission set names an item the security catalog resolves at this boot",
       { absent: report.absent },
     );
   }
