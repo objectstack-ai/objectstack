@@ -70,8 +70,12 @@ function makeQl(keyRow: Record<string, unknown> = {}) {
       async find(object: string, opts: any) {
         const where = opts?.where ?? {};
         const rows = (tables[object] ?? []).filter((r) =>
-          Object.entries(where).every(([k, v]) =>
-            v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v),
+          Object.entries(where).every(([k, v]) => {
+            // A combinator this double does not implement is refused, never
+            // read as a field name.
+            if (k.startsWith('$')) throw new Error(`fake engine: unsupported combinator ${k}`);
+            return v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v;
+          }),
         );
         return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
       },
