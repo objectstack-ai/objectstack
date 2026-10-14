@@ -9,7 +9,7 @@ import type { SemanticMigration } from '../../types.js';
 // the record page in silence. The three rows now take that schema by reference,
 // the carrier `object-grid`, `object-kanban`, `object-calendar` and
 // `object-timeline` already take. D3 only: page-component `properties` is not
-// parsed on the metadata save or load path, so a stored page is never refused;
+// parsed on the metadata save or load path, so a stored page is never refused at load;
 // an off-shape value has no rewrite that says what the author meant; and the
 // authored census found nothing in either repository's corpora to respell.
 export const entry: SemanticMigration = {
@@ -29,8 +29,8 @@ export const entry: SemanticMigration = {
     + 'every door that carries it. It is read where every page component\'s props are: the '
     + 'component-props gate reports a refused value as a `component-props-invalid` / '
     + '`component-props-unknown-key` error on `objectstack validate`, `objectstack build` and '
-    + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s '
-    + '`properties` is not parsed on the metadata save or load path. No conversion is registered: '
+    + '`objectstack lint`, and a stored page still loads, because a page component\'s '
+    + '`properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is registered: '
     + 'nothing on the load path refuses the shape, and an off-shape value has no rewrite that both keeps '
     + 'what the block shows today (the record page) and honours what the author wrote — which is the '
     + 'judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',

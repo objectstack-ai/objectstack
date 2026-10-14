@@ -9,7 +9,7 @@ import type { SemanticMigration } from '../../types.js';
 // with the rows' prescriptions; `outcomeMessages`, a member `className` and
 // `properties.params` refused; `outcomeMessages` undeclared on all four action
 // blocks. D3 only: page-component `properties` is not parsed on the metadata
-// save or load path, so a stored page is never refused; and the authored census
+// save or load path, so a stored page is never refused at load; and the authored census
 // found no working member to respell — the refused values are objectui's probes
 // of the very reads the ruling refuses (a member `className`, `outcomeMessages`,
 // `properties.params`) and of the host's `autoTrigger` flag.
@@ -34,8 +34,7 @@ export const entry: SemanticMigration = {
     + '`className`, a member `properties.params` — are refused, and `outcomeMessages` stays undeclared on all four '
     + 'action blocks as one decision. It is read where every page component\'s props are: the component-props '
     + 'gate reports a refused value as a `component-props-invalid` / `component-props-unknown-key` '
-    + 'error on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves '
-    + 'and loads, because a page component\'s `properties` is not parsed on the metadata save or load path. No '
+    + 'error on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still loads, because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No '
     + 'conversion is registered: nothing on the load path refuses the shape, and the authored census found no '
     + 'working member to respell. Deployed metadata NOT MEASURED.',
   acceptanceCriteria: 'Every `action:group` and `action:menu` node validates: `objectstack validate` reports no '

@@ -10,7 +10,7 @@ import type { SemanticMigration } from '../../types.js';
 // declares the fifteen keys objectui's `LineItemsPanel` reads, and its
 // `columns` REFERENCES `InlineGridColumnSchema`. D3 only: page-component
 // `properties` is not parsed on the metadata save or load path, so a stored
-// page is never refused and there is no load-path refusal for a conversion to
+// page is never refused at load and there is no load-path refusal for a conversion to
 // pre-empt; the one `field`-keyed producer the census found is respelled in the
 // same change.
 export const entry: SemanticMigration = {
@@ -41,8 +41,8 @@ export const entry: SemanticMigration = {
     + 'too, with its own prescription. It is read where every page component\'s props are: the '
     + 'component-props gate reports a failing key or column as a '
     + '`component-props-unknown-key` / `component-props-invalid` error on `objectstack validate`, '
-    + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a '
-    + 'page component\'s `properties` is not parsed on the metadata save or load path. `defineStack`\'s '
+    + '`objectstack build` and `objectstack lint`, and a stored page still loads, because a '
+    + 'page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. `defineStack`\'s '
     + 'identity-only column check does not reach this block: the panel hands its columns to the grid '
     + 'as authored, so there is no hydrated type to judge. No conversion is registered: nothing on the '
     + 'load path refuses the shape, and the one `field`-keyed producer was respelled in the same '
