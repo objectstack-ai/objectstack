@@ -55,6 +55,15 @@ import {
   validateApiEndpointDeclarations,
   type ApiEndpoint,
 } from '@objectstack/spec/api';
+// [ADR-0138 D2b] The cross-item judge beside them, and the refusal it words for
+// each direction — see `gateAnonymousElevatedFlowsForPublish`.
+import {
+  anonymousElevatedFlowPairs,
+  anonymousEndpointElevatedFlowMessage,
+  elevatedFlowAnonymousEndpointsMessage,
+  type AnonymousFlowDoorCandidate,
+  type ElevatedFlowCandidate,
+} from '@objectstack/spec/api';
 import {
   assertMetadataRegisterContract,
   canonicalMetadataServiceType,
@@ -215,6 +224,22 @@ const PUBLISH_NAMESPACE_REMEDY =
  * environments without WebCrypto working while still satisfying
  * `MetadataEventSchema`'s `z.string().uuid()`.
  */
+/**
+ * [ADR-0138 D2b] The names a package item answers to in the anonymous-flow
+ * pair gate: its registry key, and the `name` its peeled body declares (the
+ * name the judge reports a pair under). The two agree for every item the
+ * register contract admits; both are kept so a disagreement cannot hide the
+ * item from its own package.
+ */
+function packageNamesOf(item: { name: string; data: unknown }): string[] {
+  const names = [item.name];
+  const body = peelStoredEnvelope(item.data).body as { name?: unknown } | null | undefined;
+  if (body && typeof body === 'object' && typeof body.name === 'string' && body.name !== '' && body.name !== item.name) {
+    names.push(body.name);
+  }
+  return names;
+}
+
 function generateEventUuid(): string {
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') {
@@ -533,6 +558,8 @@ export class MetadataManager implements IMetadataService {
   // which registers with `notify:false`, and — since #5109 — cluster peer
   // replay) and the `subscribe('api', …)` registration below.
   private static readonly ENDPOINT_METADATA_TYPE = 'api';
+  /** [ADR-0138 D2b] The type an endpoint of `type: 'flow'` names in its `target`. */
+  private static readonly FLOW_METADATA_TYPE = 'flow';
   private readonly endpointMatcher: EndpointMatcher;
 
   constructor(config: MetadataManagerOptions) {
@@ -1899,6 +1926,11 @@ export class MetadataManager implements IMetadataService {
     // slips through. A flag that turns them off would be exactly the bypass
     // #5189 filed.
     validationErrors.push(...this.gateApiItemsForPublish(packageItems, options?.namespace));
+    // [ADR-0138 D2b] …and the one cross-item gate, ALWAYS for the same reason:
+    // an anonymous endpoint of `type: 'flow'` that names a `runAs: 'system'`
+    // flow is refused, in both directions, whichever of the two this package
+    // carries. See `gateAnonymousElevatedFlowsForPublish`.
+    validationErrors.push(...await this.gateAnonymousElevatedFlowsForPublish(packageItems));
 
     // Validation pass
     if (shouldValidate) {
@@ -2087,6 +2119,83 @@ export class MetadataManager implements IMetadataService {
       });
     }
 
+    return errors;
+  }
+
+  /**
+   * [ADR-0138 D2b] The anonymous door × elevated flow refusal, on the package
+   * publish — the metadata layer's door for both of its items.
+   *
+   * The record refuses an `authRequired: false` endpoint of `type: 'flow'`
+   * whose target flow declares `runAs: 'system'`, "in both directions, because
+   * either item can be the last one edited". This door publishes both kinds of
+   * item, so it holds both directions:
+   *
+   *  - an `api` item of the package that names such a flow — wherever the flow
+   *    is, in this package or anywhere else in the index — is refused with the
+   *    endpoint's message;
+   *  - a `flow` item of the package declaring `runAs: 'system'` that an
+   *    anonymous endpoint OUTSIDE the package names is refused with the flow's
+   *    message (a pair inside the package is reported once, at the endpoint).
+   *
+   * The other item is read from the index the endpoint matcher serves from
+   * ({@link listForIndex}: the registry and every loader), so the pair is
+   * judged against what is declared, not only against this package. Bodies
+   * are peeled ({@link peelStoredEnvelope}) as the endpoint gate above peels
+   * them, and read structurally by the one judge in `@objectstack/spec/api`:
+   * the stack parse and the metadata protocol's flow publish call the same
+   * function, so the three doors cannot disagree about the pair. A read that
+   * fails propagates (`listForIndex` rethrows), so the publish fails instead
+   * of answering "nothing names it" from a read that never happened.
+   *
+   * Not governed by `options.validate`, like the endpoint gates: a security
+   * refusal with an opt-out flag is no refusal.
+   */
+  private async gateAnonymousElevatedFlowsForPublish(
+    packageItems: Array<{ type: string; name: string; data: any }>,
+  ): Promise<Array<{ type: string; name: string; message: string }>> {
+    /** The package's own `api` and `flow` names: the registry key, and the body's `name`. */
+    const packageEndpointNames = new Set<string>();
+    const packageFlowNames = new Set<string>();
+    for (const item of packageItems) {
+      const names = packageNamesOf(item);
+      if (item.type === MetadataManager.ENDPOINT_METADATA_TYPE) names.forEach((n) => packageEndpointNames.add(n));
+      else if (item.type === MetadataManager.FLOW_METADATA_TYPE) names.forEach((n) => packageFlowNames.add(n));
+    }
+    if (packageEndpointNames.size === 0 && packageFlowNames.size === 0) return [];
+
+    const bodies = (items: unknown[]) => items.map((item) => peelStoredEnvelope(item).body);
+    const endpoints = bodies(await this.listForIndex(MetadataManager.ENDPOINT_METADATA_TYPE)) as AnonymousFlowDoorCandidate[];
+    const flows = bodies(await this.listForIndex(MetadataManager.FLOW_METADATA_TYPE)) as ElevatedFlowCandidate[];
+
+    const errors: Array<{ type: string; name: string; message: string }> = [];
+    /** flow name → the outside endpoints that name it, for the flow-direction message. */
+    const outsideEndpointsByFlow = new Map<string, Set<string>>();
+    const reportedEndpoints = new Set<string>();
+    for (const pair of anonymousElevatedFlowPairs(endpoints, flows)) {
+      if (packageEndpointNames.has(pair.endpoint)) {
+        const key = `${pair.endpoint} -> ${pair.flow}`;
+        if (reportedEndpoints.has(key)) continue;
+        reportedEndpoints.add(key);
+        errors.push({
+          type: MetadataManager.ENDPOINT_METADATA_TYPE,
+          name: pair.endpoint,
+          message: anonymousEndpointElevatedFlowMessage(pair.endpoint, pair.flow),
+        });
+        continue;
+      }
+      if (!packageFlowNames.has(pair.flow)) continue;
+      const named = outsideEndpointsByFlow.get(pair.flow) ?? new Set<string>();
+      named.add(pair.endpoint);
+      outsideEndpointsByFlow.set(pair.flow, named);
+    }
+    for (const [flow, named] of outsideEndpointsByFlow) {
+      errors.push({
+        type: MetadataManager.FLOW_METADATA_TYPE,
+        name: flow,
+        message: elevatedFlowAnonymousEndpointsMessage(flow, [...named]),
+      });
+    }
     return errors;
   }
 

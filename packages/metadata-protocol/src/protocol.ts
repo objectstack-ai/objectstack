@@ -3,6 +3,14 @@
 import type {
     DataProtocol, FlowRegistration, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
+// [ADR-0138 D2b] The one cross-item judge of the anonymous flow endpoint ×
+// `runAs: 'system'` flow pair, and the flow-direction refusal it words — see
+// `anonymousElevatedFlowRefusal`.
+import {
+    anonymousElevatedFlowPairs,
+    elevatedFlowAnonymousEndpointsMessage,
+    type AnonymousFlowDoorCandidate,
+} from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
 import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
@@ -20983,6 +20991,93 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [ADR-0138 D2b] The flow half of the anonymous door × elevated flow
+     * refusal: a flow published with `runAs: 'system'` while an
+     * `authRequired: false` endpoint of `type: 'flow'` names it.
+     *
+     * The record refuses the pair "in both directions, because either item can
+     * be the last one edited". An endpoint is code-only (`api` is
+     * `allowRuntimeCreate: false`; the code-only inlet refuses its write), so its
+     * own publish is the stack parse and the metadata layer's package publish,
+     * where the judge runs over both items. A flow is authorable here, so this
+     * door is where the OTHER direction is read: the flow is the item being
+     * published, and the endpoints that name it are read from what declares
+     * them on this host. Both judges are the one in
+     * `@objectstack/spec/api` (`anonymousElevatedFlowPairs`), so the stack and
+     * this door cannot grow two opinions of the pair.
+     *
+     * Asked at every door a flow body reaches `active` through: the save in
+     * publish mode ({@link saveMetaItem}) and the draft promotion
+     * ({@link promoteDraftForPublish}) the per-item publish and
+     * `publishPackageDrafts` share. A draft save is let through: a draft does
+     * not execute, and its publish is judged here. `migrate-stored` re-saves
+     * (the credential move, `os migrate meta --stored`) are not judged: they
+     * rewrite a row that already exists, and refusing one would leave a
+     * credential the move exists to take out of the row in cleartext. Such a
+     * row keeps executing as published until its next publish, which this
+     * refuses (the semantic entry `api-endpoint-anonymous-elevated-flow-refused`
+     * says so to an upgrading author).
+     *
+     * Where the endpoints are read, both, because each is a home a code
+     * stack's `apis` has on a real boot: the engine registry's `api` items
+     * (`registerApp` files every stack's `apis` there) and the `metadata`
+     * service's `list('api')`, the manager whose index the endpoint matcher
+     * serves from. Their items are read as bodies, as {@link getMetaItems}
+     * reads the same two sources. ⛔ `sys_metadata` is not read: an `api` row
+     * there is never served (the matcher does not read the store) and none can
+     * be written any more. A read that fails propagates: answering "no
+     * endpoint names it" from a read that never happened would publish the
+     * very pair this refuses.
+     *
+     * `INVALID_METADATA` / 422 with `issues[]` at `runAs` — the envelope this
+     * door's other publish-time contract refusals carry (the schema gate and
+     * the runtime authoring gate), so Studio highlights the key the refusal is
+     * about. ⛔ No new code. The message prescribes before it explains (a 4xx
+     * message crosses the REST boundary with its tail truncated) and carries no
+     * tracker number.
+     */
+    private async anonymousElevatedFlowRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        if (singularType !== 'flow') return undefined;
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+        if ((item as { runAs?: unknown }).runAs !== 'system') return undefined;
+
+        const endpoints: unknown[] = [];
+        const registry = this.engine.registry;
+        if (typeof registry?.listItems === 'function') {
+            endpoints.push(...registry.listItems('api'));
+        }
+        const metadataService = this.getServicesRegistry?.()?.get('metadata');
+        if (metadataService && typeof metadataService.list === 'function') {
+            const listed = await metadataService.list('api');
+            if (Array.isArray(listed)) endpoints.push(...listed);
+        }
+
+        const pairs = anonymousElevatedFlowPairs(
+            endpoints as AnonymousFlowDoorCandidate[],
+            [{ name, runAs: 'system' }],
+        );
+        if (pairs.length === 0) return undefined;
+
+        const names = [...new Set(pairs.map((pair) => pair.endpoint))];
+        const err = new Error(elevatedFlowAnonymousEndpointsMessage(name, names)) as Error & {
+            code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[];
+        };
+        err.code = 'INVALID_METADATA';
+        err.status = 422;
+        err.issues = [{
+            path: 'runAs',
+            message: `An anonymous endpoint (\`authRequired: false\`) triggers this flow: ${names.map((n) => `'${n}'`).join(', ')}. `
+                + "No anonymous door may start a `runAs: 'system'` flow (ADR-0138 D2b).",
+            code: 'custom',
+        }];
+        return err;
+    }
+
+    /**
      * [#21639] The save door's ONE collision predicate for a view container:
      * a container is refused when its save name, or any name its expansion
      * produces, is a name already served from elsewhere — the family's rule,
@@ -22231,6 +22326,17 @@ export class ObjectStackProtocolImplementation implements
         {
             const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, request.item, request.name);
             if (defaultPageRefusal) throw defaultPageRefusal;
+        }
+
+        // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
+        // anonymous endpoint of `type: 'flow'` names it is refused, in publish
+        // mode only (a draft does not execute; its publish is judged at the
+        // promotion), before the authoring gate and every write. A
+        // `migrate-stored` re-save rewrites an existing row and is not judged.
+        // See {@link anonymousElevatedFlowRefusal}.
+        if (mode !== 'draft' && writeSource !== 'migrate-stored') {
+            const elevatedRefusal = await this.anonymousElevatedFlowRefusal(singularType, request.item, request.name);
+            if (elevatedRefusal) throw elevatedRefusal;
         }
 
         // The #4463 runtime authoring gate — the shared author-time rule
@@ -23853,6 +23959,17 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, draftForGate.body, request.name, 'published');
             if (defaultPageRefusal) throw defaultPageRefusal;
+        }
+        // [ADR-0138 D2b] …and a flow draft that would go `active` with
+        // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
+        // it: the draft save let it through (a draft does not execute), so its
+        // publish is where the pair is judged — on the draft body, with the
+        // save door's predicate and envelope, before `repo.promoteDraft` writes,
+        // so a batch publish aborts on it too. See
+        // {@link anonymousElevatedFlowRefusal}.
+        if (draftForGate) {
+            const elevatedRefusal = await this.anonymousElevatedFlowRefusal(singularType, draftForGate.body, request.name);
+            if (elevatedRefusal) throw elevatedRefusal;
         }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
