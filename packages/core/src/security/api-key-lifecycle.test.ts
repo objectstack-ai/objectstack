@@ -60,7 +60,10 @@ function makeQl(row: Record<string, unknown>, opts: { failUpdate?: boolean } = {
     find: async (object: string, findOpts: any) => {
       if (object !== 'sys_api_key') return [];
       const where = findOpts?.where ?? {};
-      const matched = rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      const matched = rows.filter((r) => Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+        return r[k] === v;
+      }));
       return typeof findOpts?.limit === 'number' ? matched.slice(0, findOpts.limit) : matched;
     },
     update: async (object: string, data: Record<string, unknown>, options?: any) => {

@@ -44,6 +44,23 @@ function serverWith(authService: any, ql: any): RestServer {
   );
 }
 
+/** Equality and `$in` — the two shapes the resolver's reads use here; any other operator is refused, never matched. */
+function matchesWhere(row: any, where: any): boolean {
+  for (const [field, cond] of Object.entries(where ?? {})) {
+    if (field.startsWith('$')) throw new Error(`fixture where-matcher: unsupported combinator '${field}'`);
+    if (cond !== null && typeof cond === 'object') {
+      const ops = Object.keys(cond as object);
+      if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray((cond as any).$in)) {
+        throw new Error(`fixture where-matcher: unsupported operator shape on '${field}'`);
+      }
+      if (!(cond as any).$in.includes(row[field])) return false;
+      continue;
+    }
+    if (row[field] !== cond) return false;
+  }
+  return true;
+}
+
 function qlWithKey(row: Record<string, unknown>) {
   const tables: Record<string, any[]> = {
     sys_api_key: [{ id: 'key_1', key: hashApiKey(KEY), prefix: 'osk_rest_lif', user_id: OWNER, revoked: false, scopes: '[]', ...row }],
@@ -54,8 +71,7 @@ function qlWithKey(row: Record<string, unknown>) {
   };
   return {
     find: async (object: string, q: any = {}) => {
-      const rows = (tables[object] ?? []).filter((r: any) =>
-        Object.entries(q?.where ?? {}).every(([k, v]) => (v !== null && typeof v === 'object' ? true : r[k] === v)));
+      const rows = (tables[object] ?? []).filter((r: any) => matchesWhere(r, q?.where));
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     update: async () => ({}),
