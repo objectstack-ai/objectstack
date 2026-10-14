@@ -283,6 +283,22 @@ const PROBES: readonly Probe[] = [
     re: /shouldDenyAnonymous\s*\(/g,
     key: () => 'share-links:domains/share-links.ts:anonymous-gate',
   },
+  // ADR-0138 D2 (card E2), the second slice — the two domains that made no
+  // anonymous decision of their own until it became their first statement.
+  // Same GATE-pin shape: delete a floor and its key vanishes → the covering
+  // `anonymous-deny-ui` / `anonymous-deny-data` row goes STALE → red CI.
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/ui.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'ui:domains/ui.ts:anonymous-gate',
+  },
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/data.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'data:domains/data.ts:anonymous-gate',
+  },
 
   // ── a probe whose POPULATION WAS DELETED, re-declared for what it is ────
   //
@@ -1031,6 +1047,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       // [#22576] classified by `approval-action-token`.
       'dispatcher-domain:route-ledger.ts:/approvals/act',
       'dispatcher-domain:route-ledger.ts:/automation',
+      // [ADR-0138 D2, second slice] classified by `anonymous-deny-data`.
+      'dispatcher-domain:route-ledger.ts:/data',
       // [#22432] classified by `anonymous-deny-i18n`.
       'dispatcher-domain:route-ledger.ts:/i18n',
       // [ADR-0138 D2] classified by `anonymous-deny-keys`.
@@ -1042,6 +1060,8 @@ describe('the ledger-sourced population and its baseline bite', () => {
       'dispatcher-domain:route-ledger.ts:/packages',
       // [ADR-0138 D2] classified by `anonymous-deny-share-links`.
       'dispatcher-domain:route-ledger.ts:/share-links',
+      // [ADR-0138 D2, second slice] classified by `anonymous-deny-ui`.
+      'dispatcher-domain:route-ledger.ts:/ui',
       // [#22755] classified by `webhook-redeliver-session`.
       'dispatcher-domain:route-ledger.ts:/webhooks/redeliver',
       // [ADR-0138 D2] classified by `anonymous-door-public-form` (class 1).
@@ -1289,6 +1309,8 @@ const DOMAIN_FLOOR_GATE_KEYS = [
   'notifications:domains/notifications.ts:anonymous-gate',
   'keys:domains/keys.ts:anonymous-gate',
   'share-links:domains/share-links.ts:anonymous-gate',
+  'ui:domains/ui.ts:anonymous-gate',
+  'data:domains/data.ts:anonymous-gate',
 ] as const;
 
 /** Every row recording a door class carries this id prefix, and no other row may. */
