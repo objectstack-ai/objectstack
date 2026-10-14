@@ -35,7 +35,7 @@
  * the store and the table to show the refused delete changed nothing.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -169,13 +169,8 @@ async function twoPackageObject(environmentId?: string) {
     const h = await boot(environmentId);
     // The registry holds one owner per object name, so the second package's
     // write-through is refused (and logged) at save time; the row is stored.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-        ok(await h.save(P));
-        ok(await h.save(Q));
-    } finally {
-        warn.mockRestore();
-    }
+    ok(await h.save(P));
+    ok(await h.save(Q));
     await h.insertRecord('kept');
     expect(await h.storedPackages()).toEqual([P, Q]);
     expect(await h.hasTable()).toBe(true);
