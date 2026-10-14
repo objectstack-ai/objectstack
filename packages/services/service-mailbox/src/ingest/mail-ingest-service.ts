@@ -610,7 +610,7 @@ export class MailIngestService {
         `[mailbox] a message for mailbox '${mailboxId}' quotes a forward inline, but the identity objects ` +
           `'${USER_OBJECT}' and '${MEMBER_OBJECT}' are not registered, so no sender can be recognised as a user of ` +
           "the mailbox's organization and no inline forward is read; such messages are matched on their other " +
-          'participants. Compose the auth plugin, which registers both, to read inline forwards.',
+          'participants. Compose the auth plugin (`@objectstack/plugin-auth`), which registers both, to read inline forwards.',
       );
     }
     return false;
