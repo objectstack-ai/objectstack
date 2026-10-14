@@ -29,6 +29,12 @@ import {
   type TablePlan,
   type UnattributableRow,
 } from './organization-ownership-plan.js';
+import {
+  grantCollisionBlocker,
+  planGrantRewrite,
+  type LegacySetRow,
+  type UnnamedReason,
+} from './organization-ownership-grants.js';
 
 /**
  * The ADR-0131 D10 ceremony's apply step — ceremony items 2 to 4: the backup
@@ -133,10 +139,18 @@ export interface TemplatePort {
   find(name: string, locale: string): Promise<{ definition: Readonly<Record<string, unknown>>; environment: boolean } | undefined>;
 }
 
+/** An index a retired column keyed, named by its declaration (the driver derives the physical name). */
+export interface RetiredIndex {
+  columns: readonly string[];
+  unique: boolean;
+}
+
 /** One column drop: `organization_id` of a fate-1 table, or a retired column the ceremony owns. */
 export interface ColumnDrop {
   table: string;
   column: string;
+  /** Indexes the column keyed, dropped before it: the port drops them in an earlier, separate apply. */
+  retiredIndexes?: readonly RetiredIndex[];
 }
 
 /**
@@ -910,61 +924,72 @@ async function verifyReferences(run: Run): Promise<Verification> {
 }
 
 async function runRewrite(run: Run): Promise<StepReport> {
-  const summary: Record<string, number> = { named: 0, grants: 0, verified: 0 };
+  const summary: Record<string, number> = { named: 0, grants: 0, verified: 0, collisions: 0 };
   const notes: string[] = [];
+  const blockers: string[] = [];
   const cols = await columnsOf(run, GRANTS);
   if (cols?.has('permission_set') && cols.has('permission_set_id')) {
-    const sets = new Map<string, { name: string | null; organization: string | null }>();
+    const sets = new Map<string, LegacySetRow>();
     if (await columnsOf(run, SETS)) {
       const setCols = (await columnsOf(run, SETS))!;
       for (const row of await readAll(run, SETS, ['name', ...(setCols.has(ORG) ? [ORG] : [])])) {
-        sets.set(String(row.id), { name: text(row.name), organization: text(row[ORG]) });
+        sets.set(String(row.id), { name: text(row.name), organizationId: text(row[ORG]) });
       }
     }
     const t = run.sql.q(GRANTS, GRANTS);
     const nameCol = run.sql.q('permission_set', GRANTS);
-    const unnamed = await readAll(run, GRANTS, ['permission_set_id', ...(cols.has(ORG) ? [ORG] : [])], {
-      text: `${nameCol} IS NULL OR ${nameCol} = ''`,
+    const keyCols = ['user_id', ...(cols.has(ORG) ? [ORG] : [])];
+    const unnamedWhere = { text: `${nameCol} IS NULL OR ${nameCol} = ''`, params: [] };
+    const legacy = (await readAll(run, GRANTS, ['permission_set_id', ...keyCols], unnamedWhere)).map((g) => ({
+      id: String(g.id),
+      userId: text(g.user_id),
+      organizationId: text(g[ORG]),
+      setId: text(g.permission_set_id),
+    }));
+    const named = (await readAll(run, GRANTS, ['permission_set', ...keyCols], {
+      text: `${nameCol} IS NOT NULL AND ${nameCol} <> ''`,
       params: [],
-    });
-    const reasons = { noId: [] as string[], dangling: [] as string[], crossOrganization: [] as string[], unresolved: [] as string[] };
-    for (const grant of unnamed) {
-      const gid = String(grant.id);
-      const setId = text(grant.permission_set_id);
-      if (!setId) { reasons.noId.push(gid); continue; }
-      const set = sets.get(setId);
-      if (!set?.name) { reasons.dangling.push(gid); continue; }
-      // A name carries no organization: an organization's set row may be named
-      // only by that organization's grants (the grant rule the resolver applies).
-      if (set.organization !== null && set.organization !== text(grant[ORG])) { reasons.crossOrganization.push(gid); continue; }
-      if (!(await resolveName(run, 'permission', set.name))) { reasons.unresolved.push(gid); continue; }
+    })).map((g) => ({ id: String(g.id), userId: text(g.user_id), organizationId: text(g[ORG]), name: String(g.permission_set) }));
+    const resolvable = new Map<string, boolean>();
+    for (const legacyGrant of legacy) {
+      const name = legacyGrant.setId ? sets.get(legacyGrant.setId)?.name : null;
+      if (name && !resolvable.has(name)) resolvable.set(name, (await resolveName(run, 'permission', name)) !== undefined);
+    }
+    // A legacy grant whose name the user already holds in its organization is
+    // never named: the unique index would refuse it (organization-ownership-grants.ts).
+    const decided = planGrantRewrite(legacy, named, sets, (name) => resolvable.get(name) === true);
+    for (const { id, name } of decided.name) {
       await execute(
         run,
         GRANTS,
         `UPDATE ${t} SET ${nameCol} = ? WHERE ${run.sql.q('id', GRANTS)} = ? AND (${nameCol} IS NULL OR ${nameCol} = '')`,
-        [set.name, gid],
+        [name, id],
       );
       summary.named++;
     }
-    const describe: Record<keyof typeof reasons, string> = {
+    summary.collisions = decided.collisions.length;
+    if (decided.collisions.length) blockers.push(grantCollisionBlocker(GRANTS, decided.collisions));
+    const describe: Record<UnnamedReason, string> = {
       noId: 'carry neither a name nor a permission_set_id',
       dangling: 'point at a set row that does not exist',
       crossOrganization: 'point at another organization\'s set row — a name carries no organization, so it is never written',
       unresolved: 'point at a set row whose name the security catalog does not resolve',
     };
-    for (const key of Object.keys(reasons) as (keyof typeof reasons)[]) {
-      if (reasons[key].length) notes.push(`${reasons[key].length} unnamed grant(s) ${describe[key]}: ${reasons[key].slice(0, 20).join(', ')}.`);
+    for (const key of Object.keys(decided.reasons) as UnnamedReason[]) {
+      const ids = decided.reasons[key];
+      if (ids.length) notes.push(`${ids.length} unnamed grant(s) ${describe[key]}: ${ids.slice(0, 20).join(', ')}.`);
     }
     if (summary.named) run.opts.onProgress?.(`rewrite: ${summary.named} grant(s) now name their permission set`);
   }
   const verification = await verifyReferences(run);
   summary.grants = verification.grants;
   summary.verified = verification.verified;
+  blockers.push(...verification.blockers);
   return {
     step: 'rewrite',
-    status: verification.blockers.length ? 'blocked' : 'done',
+    status: blockers.length ? 'blocked' : 'done',
     summary,
-    blockers: verification.blockers,
+    blockers,
     notes: [...notes, ...verification.notes],
   };
 }
@@ -1103,8 +1128,16 @@ async function deletePromotedTemplates(run: Run, tables: readonly string[]): Pro
 
 /** The retired id column of a grant (ADR-0131 D4, C7b), which the rewrite reads before column-drops drops it. */
 const GRANT_SET_ID_COLUMN = 'permission_set_id';
-/** The inventory category that counts the grants the unique index on (user, set, organization) would refuse. */
-export const DUPLICATE_GRANTS_CATEGORY = 'duplicate-grants';
+/**
+ * The two indexes the retired column keyed (C7b). Schema sync is additive, so
+ * they outlive their declaration, and they go BEFORE the column: MySQL refuses
+ * to drop a column a key still uses, or keeps the key minus that column — a
+ * unique (user_id, organization_id) that would refuse any second grant.
+ */
+const GRANT_SET_ID_INDEXES: readonly RetiredIndex[] = [
+  { columns: ['user_id', 'permission_set_id', 'organization_id'], unique: true },
+  { columns: ['permission_set_id'], unique: false },
+];
 
 async function runColumnDrops(run: Run): Promise<StepReport> {
   const plan = await planFor(run);
@@ -1127,16 +1160,16 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
   // one user in one organization — the unique index that replaces the old one
   // refuses them, and which to keep is the operator's call, never the ceremony's.
   if ((await columnsOf(run, GRANTS))?.has(GRANT_SET_ID_COLUMN)) {
-    const duplicates = plan.tables.find((t) => t.object === GRANTS)?.categories.find((c) => c.id === DUPLICATE_GRANTS_CATEGORY);
+    const duplicates = plan.tables.find((t) => t.object === GRANTS)?.grants?.duplicates;
     if (duplicates && duplicates.rows > 0) {
       blockers.push(
-        `${GRANTS}.${GRANT_SET_ID_COLUMN} is not dropped: ${duplicates.rows} grant(s) in ${duplicates.groups ?? 0} group(s) ` +
+        `${GRANTS}.${GRANT_SET_ID_COLUMN} is not dropped: ${duplicates.rows} grant(s) in ${duplicates.groups} group(s) ` +
           'hold one permission set for one user in one organization, which the unique index on (user_id, ' +
           'permission_set, organization_id) refuses, and a revoke of one of them would leave the other in force. ' +
           'Which grant stays is never guessed and none is deleted here: remove all but one grant per group, then re-run.',
       );
     } else {
-      due.push({ table: GRANTS, column: GRANT_SET_ID_COLUMN });
+      due.push({ table: GRANTS, column: GRANT_SET_ID_COLUMN, retiredIndexes: GRANT_SET_ID_INDEXES });
     }
   }
   let dropped = 0;

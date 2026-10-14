@@ -500,25 +500,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     anchors: [parent('business_unit_id', 'sys_business_unit')],
   },
   { object: 'sys_user_position', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS} (assignments are organization rows); the business unit carries the organization`, anchors: [parent('business_unit_id', 'sys_business_unit')] },
-  {
-    object: 'sys_user_permission_set',
-    census: P1,
-    fate: 'attribution',
-    citation: `${D3_ORG_ROWS} (assignments are organization rows); ${D10_SINGLE}`,
-    anchors: [],
-    categories: [
-      {
-        id: 'duplicate-grants',
-        label:
-          'grants holding one permission set for one user in one organization — the unique index on (user_id, permission_set, ' +
-          'organization_id) refuses them, and a revoke of one leaves the other in force; reported, never deleted, and the ' +
-          'legacy permission_set_id column waits for them',
-        citation: 'seat answers 6162538253, Q5 A (a duplicate grant keeps a revoked grant in force)',
-        where: [{ column: 'permission_set', isNull: false }],
-        conflictBy: { groupBy: ['user_id', 'permission_set', 'organization_id'] },
-      },
-    ],
-  },
+  { object: 'sys_user_permission_set', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS} (assignments are organization rows); ${D10_SINGLE}`, anchors: [] },
   {
     object: 'sys_audience_binding_suggestion',
     census: P1,

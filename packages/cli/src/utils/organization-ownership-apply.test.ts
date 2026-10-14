@@ -34,6 +34,7 @@ import {
   type OrganizationOwnershipApplyReport,
   type TemplatePort,
 } from './organization-ownership-apply.js';
+import { buildOrganizationOwnershipPlan } from './organization-ownership-plan.js';
 
 let dir: string;
 let file: string;
@@ -751,24 +752,58 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
 });
 
 describe('ADR-0131 D10 --apply — the grant\'s retired id column (C7b, seat answers 6162538253 Q5 A)', () => {
-  it('two grants of one set to one user in one organization block the id column\'s drop; neither is deleted', async () => {
-    // usr_2's grant is attributed to the Default Organization, beside a second one already there.
-    db.exec(`INSERT INTO sys_user_permission_set VALUES ('grant_dup', 'org_default', 'usr_2', NULL, 'member_default')`);
+  const plan = () => buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+  const grantsPlan = async () => (await plan()).tables.find((t) => t.object === 'sys_user_permission_set')!.grants!;
+  const idColumn = () => rows(`SELECT name FROM pragma_table_info('sys_user_permission_set') WHERE name = 'permission_set_id'`);
+
+  it('a legacy grant whose name its user already holds in its organization is not named, on a database carrying the declared index: --plan counts the pair, --apply blocks the rewrite naming both ids, deletes neither, and finishes once the operator removes one', async () => {
+    // The first v18 boot creates the declared unique index, and its
+    // organization-administrator sweep writes a NAMED grant beside the pair's
+    // legacy one; this row stands for the sweep's write (usr_1 holds grant_1,
+    // whose ps_org names member_default, in org_default).
+    db.exec(`
+      CREATE UNIQUE INDEX uniq_grant_key ON sys_user_permission_set (user_id, permission_set, organization_id);
+      INSERT INTO sys_user_permission_set VALUES ('grant_sweep', 'org_default', 'usr_1', NULL, 'member_default');
+    `);
+    expect((await grantsPlan()).rewriteCollisions).toEqual([{ id: 'grant_1', name: 'member_default', heldBy: 'grant_sweep' }]);
 
     const report = await apply(catalog(), ledger());
+    const rewrite = report.steps.find((s) => s.step === 'rewrite')!;
+    expect(rewrite.status).toBe('blocked');
+    expect(rewrite.summary.collisions).toBe(1);
+    expect(rewrite.blockers.join('\n')).toMatch(/1 legacy grant\(s\) would name a permission set their user already holds in the same organization \(grant_1 \(member_default, held by grant_sweep\)\)/);
+    expect(rows(`SELECT id, permission_set FROM sys_user_permission_set WHERE user_id = 'usr_1' ORDER BY id`))
+      .toEqual([{ id: 'grant_1', permission_set: null }, { id: 'grant_sweep', permission_set: 'member_default' }]);
+    expect(writes.some((w) => /DELETE FROM "sys_user_permission_set"/.test(w))).toBe(false);
+    expect(idColumn()).toHaveLength(1);
 
+    // The operator keeps the sweep's grant; the re-run names the rest and drops the column.
+    db.exec(`DELETE FROM sys_user_permission_set WHERE id = 'grant_1'`);
+    const again = await apply(catalog(), ledger());
+    expect(again.steps.find((s) => s.step === 'rewrite')!.status).toBe('done');
+    expect(again.steps.find((s) => s.step === 'column-drops')!.status).toBe('done');
+    expect(idColumn()).toEqual([]);
+  });
+
+  it('two NAMED grants of one set to one user in one organization (an index that never built) block the id column\'s drop; neither is deleted', async () => {
+    db.exec(`INSERT INTO sys_user_permission_set VALUES
+      ('grant_d1', 'org_default', 'usr_7', NULL, 'member_default'),
+      ('grant_d2', 'org_default', 'usr_7', NULL, 'member_default')`);
+    expect((await grantsPlan()).duplicates).toEqual({ groups: 1, rows: 2 });
+
+    const report = await apply(catalog(), ledger());
+    expect(report.steps.find((s) => s.step === 'rewrite')!.status).toBe('done');
     const drops = report.steps.find((s) => s.step === 'column-drops')!;
     expect(drops.status).toBe('blocked');
     expect(drops.blockers.join('\n')).toMatch(/sys_user_permission_set\.permission_set_id is not dropped: 2 grant\(s\) in 1 group\(s\)/);
-    expect(rows(`SELECT id FROM sys_user_permission_set WHERE user_id = 'usr_2' ORDER BY id`)).toEqual([{ id: 'grant_2' }, { id: 'grant_dup' }]);
-    expect(rows(`SELECT name FROM pragma_table_info('sys_user_permission_set') WHERE name = 'permission_set_id'`)).toHaveLength(1);
+    expect(rows(`SELECT id FROM sys_user_permission_set WHERE user_id = 'usr_7' ORDER BY id`)).toEqual([{ id: 'grant_d1' }, { id: 'grant_d2' }]);
+    expect(idColumn()).toHaveLength(1);
     expect(writes.some((w) => /DELETE FROM "sys_user_permission_set"/.test(w))).toBe(false);
 
-    // The operator removes one; the re-run drops the column.
-    db.exec(`DELETE FROM sys_user_permission_set WHERE id = 'grant_dup'`);
+    db.exec(`DELETE FROM sys_user_permission_set WHERE id = 'grant_d2'`);
     const again = await apply(catalog(), ledger());
     expect(again.steps.find((s) => s.step === 'column-drops')!.status).toBe('done');
-    expect(rows(`SELECT name FROM pragma_table_info('sys_user_permission_set') WHERE name = 'permission_set_id'`)).toEqual([]);
+    expect(idColumn()).toEqual([]);
   });
 
   it('a second platform-wide grant (organization NULL) is a duplicate too: GROUP BY keys NULLs together, unlike the index', async () => {
@@ -783,6 +818,23 @@ describe('ADR-0131 D10 --apply — the grant\'s retired id column (C7b, seat ans
       const report = await apply(catalog(), ledger(), { posture: 'isolated' });
       const drops = report.steps.find((s) => s.step === 'column-drops')!;
       expect(drops.blockers.join('\n')).toMatch(/permission_set_id is not dropped: 2 grant\(s\) in 1 group\(s\)/);
+    });
+  });
+
+  it('a 17.x database this release has not booted against (no permission_set column): --plan counts zero and names the boot, --apply blocks the rewrite with the same remedy', async () => {
+    await onlyTemplates(`('tpl_none', NULL, 'crm.none', 'en-US', 'x', 0, 'package')`, async () => {
+      db.exec(`
+        CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT, permission_set_id TEXT);
+        INSERT INTO sys_user_permission_set VALUES ('g1', NULL, 'usr_p', 'ps_x');
+      `);
+      const grants = await grantsPlan();
+      expect(grants).toMatchObject({ nameColumn: 'absent', duplicates: { groups: 0, rows: 0 }, rewriteCollisions: [] });
+      expect(grants.note).toMatch(/Boot this release once against the database/);
+
+      const report = await apply(catalog(), ledger(), { posture: 'isolated' });
+      const rewrite = report.steps.find((s) => s.step === 'rewrite')!;
+      expect(rewrite.status).toBe('blocked');
+      expect(rewrite.blockers.join('\n')).toMatch(/has no permission_set column.*Boot this release once against the database/);
     });
   });
 });
