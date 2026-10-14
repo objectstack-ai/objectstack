@@ -63,6 +63,12 @@ seeders, `bootstrap-platform-admin.ts`, `permission-set-projection.ts`), `plugin
 `plugin-audit`, `service-storage`, `plugin-approvals`, `service-automation`, `objectui` (Setup /
 Studio / pickers — D7), and in their own repository `cloud`'s control plane and `objectos-ee`.
 
+> **Note (2026-10-14) — C3 retired the `plugin-security` consumers it names.** The five bootstrap
+> seeders went with #15204 stages 6a and 6b (ADR-0131 D2), and `permission-set-projection.ts` with
+> stage 7a (#23368), after stage 8 (`66949b7729`) unwired it. `tenant-layer.ts`,
+> `per-organization-catalog.ts` and `bootstrap-platform-admin.ts` remain. The list above is the
+> consumer set as this record was written.
+
 ---
 
 ## TL;DR
@@ -999,6 +1005,10 @@ fate 2 after a verified rewrite; no surface builds a merged server-paged list of
   `packages/plugins/plugin-email/src/template-loader.ts`;
   `packages/metadata-core/src/meta-write-org-scope.ts`;
   `packages/spec/src/data/injected-system-columns.ts`; `scripts/check-tenant-chokepoint.mjs`.
+  *Note (2026-10-14):* of the `plugin-security` files above, `bootstrap-declared-permissions.ts`,
+  `bootstrap-declared-positions.ts`, `bootstrap-builtin-positions.ts` and
+  `bootstrap-system-capabilities.ts` were deleted by #15204 stages 6a and 6b, and
+  `permission-set-projection.ts` by stage 7a (#23368). The list is kept as measured at `2514d49f3`.
 - Code (cloud, `main` `3856fbf7`): `packages/service-cloud/src/control-plane-platform-global.ts`;
   `packages/service-cloud/src/control-plane-org-scope-plugin.ts`;
   `packages/service-cloud/src/migrations/org-id-backfill.ts`;
