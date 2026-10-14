@@ -253,6 +253,22 @@ export interface ScriptContext {
    */
   referentialFieldClear?: boolean;
   /**
+   * The engine's cascade-delete marker, marshalled for the HOOK face (#23221)
+   * — the delete twin of {@link referentialFieldClear}: `true` exactly when
+   * this delete is the child delete the engine's cascade issued for a row that
+   * references a record being deleted through a `cascade` relation, at any
+   * depth, in both phases of that delete. Mirrors the declared
+   * `HookContextSchema.referentialCascadeDelete` (`@objectstack/spec/data`),
+   * which objectql's `delete()` assembly sets.
+   *
+   * Marshalled EXPLICITLY, and here more than anywhere: the engine keeps no
+   * envelope key for this fact, so there is nothing on `ctx.api` a body could
+   * read instead — this member is the body's only channel. Absent (never
+   * `false`) on every other dispatch and on the action face; read it as
+   * `ctx.referentialCascadeDelete === true`.
+   */
+  referentialCascadeDelete?: boolean;
+  /**
    * The caller's options bag, PROJECTED to the two members ADR-0058's D2
    * declares visible to the `before*` phase — `multi` and `where` — for the
    * HOOK face (#11552). `installCtx` grafts it onto the VM's `ctx.input` as a

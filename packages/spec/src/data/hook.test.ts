@@ -553,6 +553,58 @@ describe('HookContextSchema', () => {
     });
   });
 
+  // [#23221] The declared cascade-delete marker, the delete twin of the block
+  // above. Same reason for the parse legs: an undeclared key is stripped by
+  // `.parse()`, so the declaration is what lets a parsed context keep it. The
+  // populate half is pinned in objectql's cascade suite, the sandbox half in
+  // runtime's QuickJS integration pin.
+  describe('Cascade-Delete Marker — declared, and true only on a delete the engine cascade issued', () => {
+    it('keeps referentialCascadeDelete through a parse, typed — the guard idiom evaluates on the parsed value', () => {
+      const context = HookContextSchema.parse({
+        object: 'quote_line',
+        event: 'beforeDelete',
+        input: { id: 'l1', options: {} },
+        referentialCascadeDelete: true,
+        ql: {},
+      });
+
+      // Typed read, no cast — the declaration is what makes this compile.
+      expect(context.referentialCascadeDelete === true).toBe(true);
+    });
+
+    it('is ABSENT — never false — on a context that does not carry it', () => {
+      const context = HookContextSchema.parse({
+        object: 'quote_line',
+        event: 'beforeDelete',
+        input: { id: 'l1', options: {} },
+        ql: {},
+      });
+
+      expect(context.referentialCascadeDelete).toBeUndefined();
+      expect('referentialCascadeDelete' in context).toBe(false);
+    });
+
+    it('is a key of its own, not a spelling of the update twin: either parses without the other', () => {
+      const cascade = HookContextSchema.parse({
+        object: 'quote_line',
+        event: 'beforeDelete',
+        input: { id: 'l1', options: {} },
+        referentialCascadeDelete: true,
+        ql: {},
+      });
+      const cleanup = HookContextSchema.parse({
+        object: 'note',
+        event: 'beforeUpdate',
+        input: { id: 'n1', data: { account: null }, options: {} },
+        referentialFieldClear: true,
+        ql: {},
+      });
+
+      expect('referentialFieldClear' in cascade).toBe(false);
+      expect('referentialCascadeDelete' in cleanup).toBe(false);
+    });
+  });
+
   describe('Input Parameters', () => {
     it('should accept find input', () => {
       const context = HookContextSchema.parse({

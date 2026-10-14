@@ -35,6 +35,7 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
+import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
 import { InlineGridColumnSchema } from './data/field.zod';
 import { SeedSchema } from './data/seed.zod';
 
@@ -63,7 +64,11 @@ import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
 
 import { ApiEndpointSchema, type ApiEndpoint } from './api/endpoint.zod';
-import { validateApiEndpointDeclarations } from './api/endpoint-publish-gate';
+import {
+  validateApiEndpointDeclarations,
+  validateAnonymousElevatedFlows,
+  type ElevatedFlowCandidate,
+} from './api/endpoint-publish-gate';
 import { retiredKey } from './shared/retired-key';
 
 // AI Protocol
@@ -167,11 +172,27 @@ export type DatasourceMappingRule = z.input<typeof DatasourceMappingRuleSchema>;
  * unavoidable: `defineStack`, `os validate`, the lint scorer, the metadata
  * plugin's artifact ingestion and `EnvironmentArtifactSchema.metadata` all run
  * through this one parse, so no publish path can forget to check.
+ *
+ * [ADR-0138 D2b] The same parse also runs the one cross-item gate: an
+ * `authRequired: false` endpoint of `type: 'flow'` whose `target` names a flow
+ * of this stack declaring `runAs: 'system'` is refused, located at the
+ * endpoint's `authRequired`, with the record's prescription. Both items are in
+ * this one input, so the refusal holds whichever of the two was edited last. A
+ * target flow outside the stack is not readable here; the metadata layer's
+ * doors read it there (`validateAnonymousElevatedFlows`' module notes).
  */
 function applyApiEndpointGates(
-  config: { manifest?: { namespace?: string | undefined } | undefined; apis?: ApiEndpoint[] | undefined },
+  config: {
+    manifest?: { namespace?: string | undefined } | undefined;
+    apis?: ApiEndpoint[] | undefined;
+    flows?: readonly ElevatedFlowCandidate[] | undefined;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  for (const issue of validateAnonymousElevatedFlows(config.apis, config.flows)) {
+    ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+  }
+
   for (const issue of validateApiEndpointDeclarations(config.apis, {
     namespace: config.manifest?.namespace,
   })) {
@@ -238,6 +259,192 @@ function applyPermissionSetOwnerBindingGate(
     if (typeof name === 'string' && claimed.has(name)) return;
     judge(set, config.manifest?.id, ['permissions', i]);
   });
+}
+
+/** One `objectExtensions` entry as the registry registers it, with where it sits in the stack. */
+interface VisibleObjectExtension {
+  /** The position of the package that ships it: registration order across packages. */
+  readonly carrier: number;
+  /** The entry's path in the stack, e.g. `['objectExtensions', 0]`. */
+  readonly path: readonly (string | number)[];
+  /** `ext.priority ?? 200`, the registry's own default (`engine.ts`, the `objectExtensions` loop). */
+  readonly priority: number;
+  readonly fields: Record<string, unknown>;
+}
+
+/**
+ * [#23210 · ADR-0055 §1] The controlled-by-parent master rule, judged on the
+ * MERGED field set of an object that an `objectExtensions` entry of this stack
+ * extends — the BUILD door of the rule the per-object refinement
+ * (`refuseControlledByParentWithoutOneMaster`, `data/object.zod.ts`) applies
+ * to an object as it is declared.
+ *
+ * ## Why the per-object refinement is not enough
+ *
+ * The registry folds every extension onto its target at boot
+ * (`SchemaRegistry.resolveObject`, `objectql/src/registry.ts`), so an object
+ * that passes as declared can run with two required `master_detail` fields —
+ * or none — once an extension in the same stack is merged. The runtime then
+ * derives no master and fails closed (every read denied, every write refused),
+ * while `defineStack` and `os validate` had said nothing. The same merged
+ * object declared directly is refused here, with this message; so is the
+ * extension that produces it.
+ *
+ * ## The merge, read exactly as the registry computes it
+ *
+ * - The base is the target's own declaration; an extension carries no
+ *   `sharingModel` (`ObjectExtensionSchema` is closed and the merge copies
+ *   `fields`, `validations`, `indexes` and three labels only), so the merged
+ *   object's `sharingModel` is the target's.
+ * - `fields` merge BY NAME, a later writer replacing the whole field
+ *   (`mergeObjectDefinitions`: `{ ...base.fields, ...extension.fields }`). An
+ *   extension can therefore demote the one master (`required: false`, another
+ *   type) as well as add a second.
+ * - Extensions apply in ascending `priority`, equal priorities in
+ *   registration order (a stable sort), and a package registers one extension
+ *   per target: a later entry of the same package replaces an earlier one.
+ *
+ * ## Which targets this door can see — and the ones it leaves unjudged
+ *
+ * The registry keys an extension by its `extend` string verbatim
+ * (`computeFQN` is the identity), so an extension merges into the object whose
+ * `name` is exactly that string, and only that one. A target is visible when
+ * the stack declares it:
+ *
+ * - **no `packages[]`**: the stack is its one package — its top-level
+ *   `objects`, extended by its top-level `objectExtensions`;
+ * - **`packages[]`** (ADR-0130 D4): the artifact is the co-ownership
+ *   boundary, so an extension in any body judges a target declared in any
+ *   body, or a top-level object no body declares (the residual the engine
+ *   registers too). The top-level `objectExtensions` are not read there: the
+ *   engine registers a multi-package stack's bodies and the residual's
+ *   objects, never its top-level extensions.
+ *
+ * Left unjudged, on purpose, so that nothing here guesses at an object the
+ * stack cannot see: an `extend` naming no object of the stack (another
+ * package's, the platform's); a target two bodies declare (the registry
+ * refuses that ownership conflict on its own); a target whose own declaration
+ * already breaks the rule (the per-object refinement reports it there); and a
+ * target on which two packages write one field key at the `priority` that
+ * decides it, whose winner is the registration order the artifact loader
+ * computes (`resolveArtifactPackageOrder`, dependency-topological), not this
+ * parse.
+ *
+ * ## Where the issue sits
+ *
+ * At the `fields` of each extension that wrote the field that decides the
+ * verdict: the last writer of every key that is a `master_detail` in the
+ * target's declaration or in the merged set. That is the line that introduced
+ * the second master, or that demoted the one. The message is the per-object
+ * refinement's own ({@link controlledByParentMasterRefusal}), naming the
+ * target and the merged fields — one rule, one wording.
+ *
+ * On the SCHEMA, for the reason {@link applyApiEndpointGates} gives:
+ * `defineStack`, `os validate`, `os build`, the lint scorer and an artifact
+ * load all run this parse.
+ */
+function applyControlledByParentExtensionGate(
+  config: { objects?: unknown; objectExtensions?: unknown; packages?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+
+  const bodies = Array.isArray(config.packages)
+    ? config.packages.map((entry: unknown) => asRecord(asRecord(entry)?.manifest) ?? {})
+    : undefined;
+
+  // Target name → its declaration, or `null` when two packages claim it.
+  const targets = new Map<string, Record<string, unknown> | null>();
+  const declare = (objects: unknown, carrier: number, owners: Map<string, number>): void => {
+    if (!Array.isArray(objects)) return;
+    for (const obj of objects) {
+      const record = asRecord(obj);
+      const name = record?.name;
+      if (!record || typeof name !== 'string' || name.length === 0) continue;
+      const owner = owners.get(name);
+      if (targets.get(name) === null) continue;
+      if (owner !== undefined && owner !== carrier) {
+        targets.set(name, null);
+        continue;
+      }
+      owners.set(name, carrier);
+      // The same package declaring one name twice re-registers it: the last wins.
+      targets.set(name, record);
+    }
+  };
+  const owners = new Map<string, number>();
+  if (bodies === undefined) {
+    declare(config.objects, 0, owners);
+  } else {
+    bodies.forEach((body, j) => declare(body.objects, j, owners));
+    // The residual: a top-level object no body declares.
+    const residual = Array.isArray(config.objects)
+      ? config.objects.filter((obj: unknown) => {
+        const name = asRecord(obj)?.name;
+        return typeof name === 'string' && !owners.has(name);
+      })
+      : [];
+    declare(residual, bodies.length, owners);
+  }
+
+  // Target name → its extensions, one per package (the last entry wins).
+  const extensions = new Map<string, Map<number, VisibleObjectExtension>>();
+  const collect = (entries: unknown, carrier: number, at: readonly (string | number)[]): void => {
+    if (!Array.isArray(entries)) return;
+    entries.forEach((entry: unknown, i: number) => {
+      const record = asRecord(entry);
+      const target = record?.extend;
+      if (!record || typeof target !== 'string' || !targets.get(target)) return;
+      const byCarrier = extensions.get(target) ?? new Map<number, VisibleObjectExtension>();
+      byCarrier.set(carrier, {
+        carrier,
+        path: [...at, 'objectExtensions', i],
+        priority: typeof record.priority === 'number' ? record.priority : 200,
+        fields: asRecord(record.fields) ?? {},
+      });
+      extensions.set(target, byCarrier);
+    });
+  };
+  if (bodies === undefined) collect(config.objectExtensions, 0, []);
+  else bodies.forEach((body, j) => collect(body.objectExtensions, j, ['packages', j, 'manifest']));
+
+  for (const [target, byCarrier] of extensions) {
+    const base = targets.get(target);
+    const baseFields = asRecord(base?.fields);
+    if (!base || !baseFields || base.sharingModel !== 'controlled_by_parent') continue;
+    if (controlledByParentMasterRefusal(target, base.sharingModel, baseFields) !== undefined) continue;
+
+    const ordered = [...byCarrier.values()].sort((a, b) => a.priority - b.priority || a.carrier - b.carrier);
+    const writers = new Map<string, VisibleObjectExtension>();
+    // Per key, how many packages wrote it at the priority of its last writer.
+    // Above one, the winner is registration order, which this parse does not compute.
+    const tiedWriters = new Map<string, number>();
+    const merged: Record<string, unknown> = { ...baseFields };
+    for (const extension of ordered) {
+      for (const [key, field] of Object.entries(extension.fields)) {
+        const previous = writers.get(key);
+        tiedWriters.set(key, previous?.priority === extension.priority ? (tiedWriters.get(key) ?? 1) + 1 : 1);
+        writers.set(key, extension);
+        merged[key] = field;
+      }
+    }
+    if ([...tiedWriters.values()].some((count) => count > 1)) continue;
+
+    const refusal = controlledByParentMasterRefusal(target, base.sharingModel, merged);
+    if (refusal === undefined) continue;
+    const isMaster = (field: unknown): boolean => asRecord(field)?.type === 'master_detail';
+    const blamed = new Set<VisibleObjectExtension>();
+    for (const [key, extension] of writers) {
+      if (isMaster(merged[key]) || isMaster(baseFields[key])) blamed.add(extension);
+    }
+    for (const extension of ordered) {
+      if (!blamed.has(extension)) continue;
+      ctx.addIssue({ code: 'custom', path: [...extension.path, 'fields'], message: refusal.message });
+    }
+  }
 }
 
 /**
@@ -1830,7 +2037,9 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     .describe('Assembled package bodies carried by this release artifact (ADR-0130 D4)'),
 
   ...STACK_DEFINITION_COLLECTIONS_SHAPE,
-}).superRefine(applyApiEndpointGates).superRefine(applyPermissionSetOwnerBindingGate));
+}).superRefine(applyApiEndpointGates)
+  .superRefine(applyPermissionSetOwnerBindingGate)
+  .superRefine(applyControlledByParentExtensionGate));
 
 export type ObjectStackDefinition = z.input<typeof ObjectStackDefinitionSchema>;
 /** Post-parse shape of {@link ObjectStackDefinition} — defaults applied, transforms run (ADR-0122). */

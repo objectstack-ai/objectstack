@@ -387,8 +387,8 @@ describe('what `normalized` DOES buy: findings survive a schema error that stops
 // ───────────────────────────────────────────────────────────────────────────
 // #16109 — `security-owd-alias` reaches the rule ONLY through the unparsed doors.
 //
-// `ObjectSchema.sharingModel` / `externalSharingModel` are closed enums
-// (ADR-0090 D4 / D11): every alias the rule names is refused with
+// `ObjectSchema.sharingModel` is a closed enum (ADR-0090 D4; its external twin
+// is a retired tombstone since #23268): every alias the rule names is refused with
 // `invalid_value` on any door that parses before the registry runs, so on a
 // `defineStack`-authored app the rule is dead by construction — the card's own
 // hotcrm measurement. It is NOT dead: `os lint` never parses, `loadConfig`

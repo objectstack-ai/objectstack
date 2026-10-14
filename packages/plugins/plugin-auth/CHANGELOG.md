@@ -1,5 +1,126 @@
 # Changelog
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 3490bf5: The identity import's automatic invitation email links to the Console's set-password page, no longer to an `INVALID_TOKEN` error
+  
+  Clause-②: yes (widening)
+  
+  - **Before.** For every row an admin imported under the Automatic (or Invite) password policy with email delivery, `POST /api/v1/auth/admin/import-users` requested the password reset with no `redirectTo`. better-auth then emailed a link ending in an empty `callbackURL=`, and its `GET /reset-password/:token` refused that link with a redirect to `?error=INVALID_TOKEN`, which the Console shows on its sign-in page. The token in the link was still valid, but the invited user had no page to use it on.
+  - **Now.** The reset request carries `redirectTo` set to the Console's set-password page (`${origin}${uiBasePath}/reset-password`, by default `/_console/reset-password`), the page the Console's own forgot-password flow lands on. The emailed link opens `/_console/reset-password?token=…`, and better-auth's origin check accepts it because it is the deployment's own origin.
+  - **The two new members.** Both are additions; nothing existing changes shape.
+    - `AuthManager.getConsoleUrl(path)` is a public reader of the absolute URL of a Console page. It returns what the class already composes for every email and SMS link it sends.
+    - `IdentityImportDeps.consoleResetPasswordUrl?()` is optional. `AuthPlugin` wires it to `getConsoleUrl('/reset-password')`. A host that calls `runAdminImportUsers` itself should pass it to get a working invitation link. A caller that omits it sends the request exactly as before (`{ email }`), so the link keeps the empty `callbackURL`.
+  - **Unchanged.** The SMS invitation, the temporary-password policy, and the email copy (the invitation still uses the password-reset template).
+- 917b1a0: fix(plugin-auth)!: IdentityObjectsPlugin keeps the single posture's Default Organization at boot
+  
+  Clause-②: no (narrowing) — it restores ADR-0131 D3's Default Organization boot invariant, which `default-organization-invariant.ts` states as "[ADR-0131 D3] The Default Organization as a BOOT INVARIANT under the single posture", in the kernel that mounts `createIdentityObjectsPlugin()` without `AuthPlugin`; no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A boot-time invariant of a plugin composition, not a metadata change: no spec key, export, option, config field or stored shape is removed, renamed or re-shaped, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which compositions boot and which hand-made organization topologies a system write accepts: a kernel that mounts `createIdentityObjectsPlugin()` and publishes its driver only after `bootstrap()` is refused at boot, and a kit that inserts its own organization row next to the Default Organization has its system writes that name no organization refused as ambiguous. The remedy is a kernel composition edit (publish the driver before the boot, read the Default Organization instead of inserting one), which no ledger entry can derive from metadata. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this boot path and this diff adds none (not registered / already-registered); and the one type change is the optional `Plugin.start` lifecycle member made concrete on `IdentityObjectsPlugin`, which narrows nothing a caller types against (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A kernel that mounts `createIdentityObjectsPlugin()` without `AuthPlugin` now holds its Default Organization under the `single` tenancy posture, so its seeds and system writes on tenant-scoped objects are stamped with it instead of refused with "the install holds no organization at all".
+  
+  - **Refused now:** a composition that mounts `createIdentityObjectsPlugin()` and publishes its driver after `bootstrap()` (the identity objects' `start()` reads `sys_organization` under `single`, so the boot fails with `No driver available for object 'sys_organization'`); and a kit that inserts its own organization row after boot, which now holds two organizations under `single`, so every system write that names no organization is refused as ambiguous (ADR-0131 D9).
+  - **Unchanged:** the walled postures (`group`, `isolated`), where `start()` creates nothing; the refusal at `init()` of `createIdentityObjectsPlugin()` mounted beside `AuthPlugin`; every composition that publishes its driver before boot; and a declaration-only boot (`os migrate`), which suppresses `start()`.
+  
+  - **Why.** ADR-0131 D3 makes the Default Organization a boot invariant under `single`: it owns every row. Registering `sys_organization` is what turns the engine's and the seed loader's zero-organization branch from "unstamped" into "refused" (D9). `IdentityObjectsPlugin` registers that object, but only `AuthPlugin.start()` created the organization, so the reduced kernel the plugin exists for (ObjectQL, `createIdentityObjectsPlugin()`, `SecurityPlugin`) refused every seed row of an organization-owned object.
+  - **What changed in `@objectstack/plugin-auth`.** `IdentityObjectsPlugin` gains a `start()` that, under `single`, finds or creates the Default Organization with the same invariant `AuthPlugin.start()` runs. It is idempotent, and a failure fails the boot. The posture is the `tenancy` service's when one is registered, otherwise the requested one (`OS_TENANCY_POSTURE`). Under `group` and `isolated` it does nothing. Nothing new is exported, and the plugin is still refused beside `AuthPlugin`.
+  - **What changed in `@objectstack/runtime`.** `AppPlugin` orders `com.objectstack.auth.identity-objects` ahead of itself, as it already ordered `com.objectstack.auth`, so the organization exists before the inline seed loads, wherever a host lists the two plugins.
+  - **If your test kit mounts `createIdentityObjectsPlugin()`.** Its kernel now reads and writes `sys_organization` during `bootstrap()` under `single`. Publish the driver before the boot (a `driver.default` service, or a datasource plugin), not with `registerDriver()` after it. Otherwise the boot fails with `No driver available for object 'sys_organization'`. A kit that inserted its own organization row to stand in for the missing one now holds two, and a system write that names no organization is refused as ambiguous; drop that insert and read the Default Organization (`slug: 'default'`) the boot created.
+- 404fc47: feat(plugin-auth): `registerOrganizationRecordPage: false` leaves out the platform's `sys_organization` default record page, so a host that ships its own page is the only default
+  
+  Clause-②: yes (widening)
+  
+  A deployment holds at most one `isDefault: true` record page per object, and a second one is refused at registration with `DEFAULT_RECORD_PAGE_CONFLICT`. `AuthPlugin` always registered `sys_organization_detail` (the Members / Invitations / Teams tab strip) as the default record page of `sys_organization`, so a deployment composing `AuthPlugin` beside a host that ships its own default page for that object was refused at boot.
+  
+  - **New option.** `AuthPluginOptions.registerOrganizationRecordPage` defaults to `true`. Only an explicit `false` leaves out `sys_organization_detail`, so the host's page is the only default whichever plugin starts first. Plugin order and precedence rules play no part.
+  - **Nothing else moves.** With `false`, `AuthPlugin` still registers the identity objects, the `sys_user_detail` record page, the System Overview dashboard, and the auth routes and services. It logs one `info` line at boot naming the option.
+  - **The default is unchanged.** A deployment that does not set the option registers `sys_organization_detail` as before. A host page beside it, with no option set, is still refused with `DEFAULT_RECORD_PAGE_CONFLICT`.
+  - **To adopt it:** construct `new AuthPlugin({ …, registerOrganizationRecordPage: false })` in the host that registers its own `isDefault: true` record page for `sys_organization`. With the option set and no default page of the host's own, the organization record view opens the synthesized default layout, without the Members / Invitations / Teams tabs.
+- 02a691a: fix(plugin-auth)!: the platform-admin actions refuse a session the ADR-0069 authentication policy holds, a platform administrator's included
+  
+  Clause-②: no (narrowing: a held session is refused on the platform-admin surface, which ADR-0069 D3 already declares gated)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at one family of routes plugin-auth mounts directly on the host server, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions the family serves: a session whose user carries the ADR-0069 posture (an expired or administrator-forced password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before any of the family's logic runs. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only / runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 D3 holds a signed-in user out of every protected resource while their password has expired (or an administrator has forced a change) or while enforced MFA is not yet enrolled, until they remediate. REST and the runtime dispatcher already refuse such a session. The platform-admin actions plugin-auth mounts on the host server (user creation, password, ban, removal, unlock, manager, import, membership, OAuth-client and SSO administration) are judged by one shared judge, `judgePlatformAdmin`, which read the session and the admin rung but never the posture, so a held platform administrator could still administer the platform.
+  
+  - **Refused now:** a held session meets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message` on every platform-admin action that judge guards, in the family's declared envelope, before the action runs. The judge asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) without a request path, so these actions never inherit the exemption that keeps the auth endpoints reachable.
+  - **Order:** an anonymous caller still meets `401 UNAUTHENTICATED` first. A held signed-in caller who is not a platform administrator now meets the posture's `403` code instead of `403 PERMISSION_DENIED`: same status, the remedy named.
+  - **Unchanged:** a session the policy does not hold is served exactly as before. Sign-in, change-password, two-factor enrollment and sign-out still answer a held session, so remediation works as before.
+  
+  What changes for you. A platform administrator the policy holds must remediate (change the password, or enroll an authenticator) before the platform-admin actions answer them, as on every other protected route.
+
+### Patch Changes
+
+- 6f4c518: fix(plugin-auth): a fresh `os dev` database opens on the console shell, not on the "Set the workspace timezone" dialog — the dev seed gives the workspace it lands its admin in the host's time zone
+  
+  Clause-②: no
+  
+  **FROM.** The dev admin seed (`NODE_ENV=development`, on unless `OS_SEED_ADMIN=0`) created its admin and left the admin's workspace with `localization.timezone` unset. The console asks an administrator for a zone while that key still resolves from the manifest default, so every fresh `os dev` database (each `--fresh` run, each new database file) opened on the dialog. The console's own workspace-creation paths already send the creator's browser zone; the seed did not go through them.
+  
+  **TO.** On the boot that seeds the admin, the seed writes the host's resolved zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`, so `TZ` chooses it) to `localization.timezone` for each organization the admin is a member of. Under the default `single` posture that is the Default Organization. The write goes through the settings service, the same door the dialog's confirm uses. It is one `tenant` row per organization, with the key's IANA zone check applied there.
+  
+  **Unchanged.**
+  - A zone already set on any rung (the organization's, the global one, an `OS_LOCALIZATION_TIMEZONE` override) is never overwritten.
+  - A host that reports no zone, or reports one the settings door refuses, gets nothing written. The workspace keeps the default and the dialog still asks.
+  - Boots after the seeding one write nothing, so a database that already exists is not touched.
+  - Production is not affected: the seed stays gated to `NODE_ENV=development`.
+  - `sys_organization.timezone` is a separate key, which the dialog does not read. It is not written.
+  
+  **Note for in-process test boots.** `@objectstack/verify`'s harness forces `NODE_ENV=development` to get the seeded admin, so its boots now give that admin's workspace the host's zone too. On a host in `UTC` the resolved value is the same as before. On a host in another zone, a suite that relies on the default `UTC` can set `TZ=UTC`, or set the zone through `PUT /api/settings/localization` as it would for any workspace.
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [8024e12]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [d9d7edd]
+- Updated dependencies [d45d0e9]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [24e064f]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/rest@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/service-messaging@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes

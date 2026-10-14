@@ -238,6 +238,14 @@
  * accepted and the run may exist, so go READ the workflow's runs, ⛔ never
  * dispatch again blind.
  *
+ * The Version Packages refresh is such a stroke — an actions file of
+ * `[{ "op": "workflow_dispatch", "workflow": "release.yml", "ref": "main",
+ * "inputs": { "refresh_version_pr": true } }]`, the one inputs object the op
+ * table admits for that file (`WORKFLOW_DISPATCH_INPUTS`, `ops.mjs`): it
+ * starts the bookkeeping lane alone, and its run is read back from
+ * `release.yml`'s own run list the same way. Any other inputs are refused here
+ * before anything is sent.
+ *
  * ## The no-run conformance — every sender, one answer
  *
  * The rule above lives in each caller's own control flow, where a later edit
@@ -1277,8 +1285,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses': 11,
   'the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen': 27,
   "the started run: an action naming a workflow is read back as the newest workflow_dispatch run of that file created since the dispatch — the target repo's run list, read after the relay run completed and re-read within a bounded window; found is success naming id, url and actor; none in the window or an unreadable list is UNCONFIRMED (6) after ONE dispatch; a stroke naming no workflow reads none": 11,
+  "the release.yml refresh at the seat: the stroke packs with inputs refresh_version_pr true and travels in ONE dispatch; its started run is read back from release.yml's own run list; force, false, absent or any other input is refused before anything is sent, exit 2": 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 19;
+const SELF_TEST_BATTERY_FLOOR = 20;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1906,6 +1915,62 @@ export async function selfTest() {
       t("the CLI: --json carries runs with the started run's id and url, exit 0", [cliFound.code, cliFound.json?.runs?.[0]?.run?.id, cliFound.json?.runs?.[0]?.run?.url, cliFound.json?.runs?.[0]?.verdict], [EXIT_OK, 9003, `https://github.test/${REPO}/actions/runs/9003`, 'landed']);
       const cliNone = await cliStart({ [WF_RUNS]: { status: 200, json: { total_count: 0, workflow_runs: [] } } });
       t('…and a start whose run never lists exits 6 with runs unfound', [cliNone.code, cliNone.json?.state, cliNone.json?.runs?.[0]?.class], [EXIT_UNCONFIRMED, 'unverified', 'unfound']);
+    }
+
+    // ── the release.yml refresh at the seat ─────────────────────────────────
+    battery("the release.yml refresh at the seat: the stroke packs with inputs refresh_version_pr true and travels in ONE dispatch; its started run is read back from release.yml's own run list; force, false, absent or any other input is refused before anything is sent, exit 2");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const FILE = 'release.yml';
+      const WF_RUNS = `GET /repos/${REPO}/actions/workflows/${FILE}/runs`;
+      const OK_RUN = { runs: () => [RUN('completed', 'success')] };
+      const REFRESH = { op: 'workflow_dispatch', workflow: FILE, ref: 'main', inputs: { refresh_version_pr: true } };
+      const packed = packRequest({ repo: REPO, session: SESSION, actions: [REFRESH], requestId: 'fw-test-1' });
+      t('the refresh packs: one action, its inputs exactly refresh_version_pr true', [packed.ok, packed.payload?.actions], [true, [REFRESH]], packed.errors.join(' | '));
+      const wfRun = (id, ms) => ({ id, html_url: `https://github.test/${REPO}/actions/runs/${id}`, status: 'queued', conclusion: null, event: 'workflow_dispatch', head_branch: 'main', created_at: at(ms), actor: { login: 'objectstack-fleet[bot]' } });
+      const found = await drive({ ...OK_RUN, store: { [WF_RUNS]: { status: 200, json: { total_count: 1, workflow_runs: [wfRun(9101, 11_000)] } } } }, { stroke: packed.payload });
+      const sent = found.seen.filter((s) => s.call === DISPATCH);
+      t('ONE dispatch leaves, its client_payload carrying the refresh with its inputs as judged', [sent.length, sent[0]?.body?.client_payload?.actions], [1, [REFRESH]]);
+      t("the started run is read back from release.yml's run list, filtered to workflow_dispatch on main, and the stroke is success naming the run, exit 0", [found.state, found.runs?.rows?.[0]?.workflow, found.runs?.rows?.[0]?.run?.id, found.seen.find((s) => s.call === WF_RUNS)?.query.includes('event=workflow_dispatch') && found.seen.find((s) => s.call === WF_RUNS)?.query.includes('branch=main'), exitForResult(found)], ['success', FILE, 9101, true, EXIT_OK], found.logs.join(' | '));
+      // The CLI refuses an off-table stroke before anything leaves: zero requests of any kind, exit 2, the reason on stderr.
+      const cliRefused = async (inputs) => {
+        writeFileSync(join(dir, 'refresh.json'), JSON.stringify([{ op: 'workflow_dispatch', workflow: FILE, ref: 'main', ...(inputs === undefined ? {} : { inputs }) }]), 'utf8');
+        const seen = [];
+        const errs = [];
+        const [log, err] = [console.log, console.error];
+        console.log = () => {};
+        console.error = (l) => errs.push(String(l));
+        try {
+          const code = await main(['--repo', REPO, '--actions-file', join(dir, 'refresh.json'), '--request-id', 'fw-test-1'], {
+            env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+            send: { fetch: platform(OK_RUN, seen, { now: () => T0, elapsed: () => 0 }), pace: paceFor(join(dir, `pace-cli-refresh-${paceCase++}.jsonl`)), now: () => T0, sleep: async () => {}, log: () => {}, ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+          });
+          return [code, seen.length, errs.some((l) => l.includes('REFUSED')) && errs.some((l) => l.includes('nothing was sent'))];
+        } finally {
+          [console.log, console.error] = [log, err];
+        }
+      };
+      t('⛔ the CLI refuses absent inputs — the publish-repair lane — and refresh_version_pr false before anything is sent: exit 2, zero requests', [await cliRefused(undefined), await cliRefused({ refresh_version_pr: false })], [[EXIT_USAGE, 0, true], [EXIT_USAGE, 0, true]]);
+      t('⛔ …and force (beside the refresh or alone) or any other input, the same way', [await cliRefused({ refresh_version_pr: true, force: false }), await cliRefused({ force: true }), await cliRefused({ refresh_version_pr: true, version: true })], [[EXIT_USAGE, 0, true], [EXIT_USAGE, 0, true], [EXIT_USAGE, 0, true]]);
+      // --dry-run: the way to see the stroke without starting the run — it prints the request and sends nothing.
+      const dry = await (async () => {
+        writeFileSync(join(dir, 'refresh.json'), JSON.stringify([REFRESH]), 'utf8');
+        const seen = [];
+        const out = [];
+        const [log, err] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = () => {};
+        try {
+          const code = await main(['--repo', REPO, '--actions-file', join(dir, 'refresh.json'), '--request-id', 'fw-test-1', '--dry-run'], {
+            env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+            send: { fetch: platform(OK_RUN, seen, { now: () => T0, elapsed: () => 0 }), pace: paceFor(join(dir, `pace-cli-refresh-${paceCase++}.jsonl`)), now: () => T0, sleep: async () => {}, log: () => {}, ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+          });
+          return { code, seen, json: out.length ? JSON.parse(out.join('\n')) : null };
+        } finally {
+          [console.log, console.error] = [log, err];
+        }
+      })();
+      t('--dry-run prints the relay request carrying the refresh with its inputs and sends nothing, exit 0', [dry.code, dry.seen.length, dry.json?.event_type, dry.json?.client_payload?.actions], [EXIT_OK, 0, RELAY_EVENT_TYPE, [REFRESH]]);
     }
 
     // ── the issue_create re-list ────────────────────────────────────────────

@@ -144,10 +144,17 @@ export interface TemplatePort {
   find(name: string, locale: string): Promise<{ definition: Readonly<Record<string, unknown>>; environment: boolean } | undefined>;
 }
 
-/** One table's column drop, as the schema-drift ceremony answered it. */
+/**
+ * One table's column drop, as the schema-drift ceremony answered it.
+ *
+ * `not-declared`: the composition this run booted declares no object for the
+ * table, so the ceremony has no declaration to drop the column against. That
+ * is a fact about the composition the ceremony was run in, never about the
+ * release. `not-proposed` is only for a table it DOES declare.
+ */
 export interface ColumnDropOutcome {
   table: string;
-  outcome: 'dropped' | 'not-proposed' | 'failed';
+  outcome: 'dropped' | 'not-proposed' | 'not-declared' | 'failed';
   detail?: string;
 }
 
@@ -1196,10 +1203,22 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
     due.push(...table.tables);
   }
   let dropped = 0;
+  let notDeclared = 0;
   if (due.length) {
     for (const outcome of await run.opts.columnDrops.drop(due)) {
       if (outcome.outcome === 'dropped') {
         dropped++;
+        continue;
+      }
+      if (outcome.outcome === 'not-declared') {
+        notDeclared++;
+        blockers.push(
+          `${outcome.table}.${ORG} was not dropped: the composition this run booted declares no object for ` +
+            `${outcome.table}, so the schema-drift ceremony has no declaration to drop it against, and no release ` +
+            'changes that. Re-run the ceremony where the deployment\'s composition is declared: its project directory ' +
+            'and environment (the requires capability whose provider declares this object; OS_AUTH_SECRET for the ' +
+            'objects the auth family declares).',
+        );
         continue;
       }
       blockers.push(
@@ -1211,7 +1230,13 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
       );
     }
   }
-  return { step: 'column-drops', status: blockers.length ? 'blocked' : 'done', summary: { dropped, due: due.length }, blockers, notes: [] };
+  return {
+    step: 'column-drops',
+    status: blockers.length ? 'blocked' : 'done',
+    summary: { dropped, due: due.length, notDeclared },
+    blockers,
+    notes: [],
+  };
 }
 
 // ── The run ──────────────────────────────────────────────────────────────────
