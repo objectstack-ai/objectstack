@@ -11,8 +11,9 @@
 // Half 3 (#22998) is the READER the full battery gained when PR and queue runs
 // became the fast set: release.yml's `full-battery` job runs `--release-gate`
 // before the `release` environment approval, and the publish lane refuses
-// unless the newest full-battery runs of `CI` and `Lint & Type Check` at or
-// before the version commit concluded `success`. See HALF 3 below.
+// unless the newest full-battery runs of `CI`, `Lint & Type Check` and
+// `Spec Shape Gate` at or before the version commit concluded `success`. See
+// HALF 3 below.
 //
 // ## Why one file holds the first two halves
 //
@@ -45,7 +46,7 @@
 // makes two groups compare equal or unequal for a reason nobody wrote down.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -388,7 +389,8 @@ export function renderBody({
 // release.yml's `full-battery` job, which `publish` needs, so a refusal here
 // means no deployment is queued at the `release` environment at all.
 //
-// THE SELECTION RULE, per workflow (`CI`, `Lint & Type Check`), pinned below:
+// THE SELECTION RULE, per workflow (`CI`, `Lint & Type Check`, `Spec Shape
+// Gate`), pinned below:
 //
 //   1. candidates are runs whose event is `schedule` or `push`, on `main`,
 //      `completed`, whose head is the release commit or one of its first-parent
@@ -402,7 +404,7 @@ export function renderBody({
 //      newest run (`run_started_at`, which a re-run moves) -- so an older
 //      green never outvotes a newer red, and a re-run that went green after a
 //      flake does count;
-//   4. the release passes only when BOTH workflows' chosen runs concluded
+//   4. the release passes only when EVERY workflow's chosen run concluded
 //      `success`; every other conclusion, and no candidate at all, refuses.
 //
 // ⛔ It never waits and never reads a run AFTER the release commit: a run on a
@@ -416,6 +418,12 @@ export function renderBody({
 export const RELEASE_GATE_WORKFLOWS = Object.freeze([
   Object.freeze({ file: 'ci.yml', name: 'CI' }),
   Object.freeze({ file: 'lint.yml', name: 'Lint & Type Check' }),
+  // The spec shape gate (ruling B, comment 6145029395 on #23238): objectui
+  // `main` compiled against the spec built from the commit, hourly on `main`.
+  // It has no `push` trigger, so only its `schedule` runs qualify here; a run
+  // whose every diagnostic is a registered retirement concluded `success` and
+  // counts as green, an unregistered break concluded `failure` and refuses.
+  Object.freeze({ file: 'spec-shape-gate.yml', name: 'Spec Shape Gate' }),
 ]);
 
 // The events that carry the full battery on `main`, and the one conclusion that
@@ -609,7 +617,7 @@ async function releaseGate(argv) {
   const verdict = releaseGateVerdict({ history, runsByWorkflow });
   for (const line of verdict.lines) console.log(`scheduled-full-run --release-gate: ${line}`);
   if (verdict.ok) {
-    console.log(`scheduled-full-run --release-gate: PASS -- the full battery at or before ${releaseCommit.slice(0, 10)} is green in both workflows.`);
+    console.log(`scheduled-full-run --release-gate: PASS -- the full battery at or before ${releaseCommit.slice(0, 10)} is green in every workflow (${RELEASE_GATE_WORKFLOWS.map((w) => w.name).join(', ')}).`);
   } else {
     for (const refusal of verdict.refusals) console.log(`::error::release refused -- ${refusal}`);
   }
@@ -625,9 +633,9 @@ async function releaseGate(argv) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'scheduled-full-run concurrency isolation': 20,
   'scheduled-full-run card identity and de-dup': 23,
-  'release gate: the selection rule on the recorded 2026-10-12 listing': 6,
-  'release gate: the selection rule on synthetic runs': 14,
-  'release gate: release.yml wiring': 5,
+  'release gate: the selection rule on the recorded 2026-10-12 listing': 8,
+  'release gate: the selection rule on synthetic runs': 17,
+  'release gate: release.yml wiring': 6,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
@@ -1002,8 +1010,27 @@ async function selfTest() {
   const recorded = JSON.parse(
     readFileSync(fileURLToPath(new URL('../fixtures/release-full-battery/runs-2026-10-12.json', import.meta.url)), 'utf8')
   );
+  // The recording predates the Spec Shape Gate and holds runs of exactly the
+  // two workflows it names. The cases below judge those two, EXPLICITLY -- the
+  // roster, not the fixture, decides what a release reads -- and the two cases
+  // after them pin that the default roster now reads the third.
+  const recordedWorkflows = RELEASE_GATE_WORKFLOWS.filter(({ file }) => Object.hasOwn(recorded.runs, file));
   const recordedVerdict = (fromIndex) =>
-    releaseGateVerdict({ history: recorded.firstParent.slice(fromIndex), runsByWorkflow: recorded.runs });
+    releaseGateVerdict({ history: recorded.firstParent.slice(fromIndex), runsByWorkflow: recorded.runs, workflows: recordedWorkflows });
+  await check(() => {
+    if (recordedWorkflows.map((w) => w.file).join(',') !== 'ci.yml,lint.yml') {
+      throw new Error(`recorded: the fixture names ${Object.keys(recorded.runs).join(', ')}; the recorded cases below judge ci.yml and lint.yml`);
+    }
+  });
+  await check(() => {
+    // FIRING CONTROL for the registration: over the SAME recording, the full
+    // roster refuses release commit 0524c1619b naming Spec Shape Gate alone --
+    // the third workflow is read, and a workflow with no run is a refusal.
+    const v = releaseGateVerdict({ history: recorded.firstParent, runsByWorkflow: recorded.runs });
+    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Spec Shape Gate: no completed')) {
+      throw new Error(`recorded: the default roster must refuse for Spec Shape Gate alone, got ${v.refusals.join(' | ')}`);
+    }
+  });
   await check(() => {
     // Release commit 0524c1619b: both workflows' nearest verdict is green.
     const v = recordedVerdict(0);
@@ -1046,8 +1073,8 @@ async function selfTest() {
   });
   await check(() => {
     // A release commit outside the recorded window: nothing to place, refused.
-    const v = releaseGateVerdict({ history: ['f'.repeat(40)], runsByWorkflow: recorded.runs });
-    if (v.ok || v.refusals.length !== 2) throw new Error(`recorded: an unplaced commit should refuse for both workflows, got ${JSON.stringify(v)}`);
+    const v = releaseGateVerdict({ history: ['f'.repeat(40)], runsByWorkflow: recorded.runs, workflows: recordedWorkflows });
+    if (v.ok || v.refusals.length !== 2) throw new Error(`recorded: an unplaced commit should refuse for both recorded workflows, got ${JSON.stringify(v)}`);
   });
 
   battery('release gate: the selection rule on synthetic runs');
@@ -1066,10 +1093,15 @@ async function selfTest() {
     ...extra,
   });
   const pick = (runs) => selectFullBatteryRun({ history: H, runs, workflowFile: 'ci.yml' })?.run.id ?? null;
-  const both = (ciRuns, lintRuns) =>
+  const shapeGreen = [run(8, 0, 'success')];
+  const both = (ciRuns, lintRuns, shapeRuns = shapeGreen) =>
     releaseGateVerdict({
       history: H,
-      runsByWorkflow: { 'ci.yml': ciRuns, 'lint.yml': lintRuns.map((r) => ({ ...r, path: '.github/workflows/lint.yml' })) },
+      runsByWorkflow: {
+        'ci.yml': ciRuns,
+        'lint.yml': lintRuns.map((r) => ({ ...r, path: '.github/workflows/lint.yml' })),
+        'spec-shape-gate.yml': shapeRuns.map((r) => ({ ...r, path: '.github/workflows/spec-shape-gate.yml' })),
+      },
     });
   await check(() => {
     if (pick([run(1, 0, 'cancelled'), run(2, 1, 'cancelled')]) !== null) throw new Error('synthetic: cancelled-only was given a verdict');
@@ -1132,9 +1164,34 @@ async function selfTest() {
   await check(() => {
     if (releaseGateVerdict({ history: [], runsByWorkflow: {} }).ok) throw new Error('synthetic: an empty history passed');
   });
+  await check(() => {
+    // The third workflow: a red Spec Shape Gate refuses alone, with CI and Lint green.
+    const v = both([run(1, 0, 'success')], [run(2, 0, 'success')], [run(3, 0, 'failure')]);
+    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Spec Shape Gate:') || !v.refusals[0].includes('failure')) {
+      throw new Error(`synthetic: a red Spec Shape Gate did not refuse alone (${v.refusals.join(' | ')})`);
+    }
+  });
+  await check(() => {
+    // ...and no Spec Shape Gate run at all refuses too: an unread gate is not a green one.
+    const v = both([run(1, 0, 'success')], [run(2, 0, 'success')], []);
+    if (v.ok || v.refusals.length !== 1 || !v.refusals[0].startsWith('Spec Shape Gate: no completed')) {
+      throw new Error(`synthetic: a missing Spec Shape Gate run did not refuse naming it (${v.refusals.join(' | ')})`);
+    }
+  });
+  await check(() => {
+    // ...while a `workflow_dispatch` run of it is not a full-battery run (same rule as the other two).
+    const v = both([run(1, 0, 'success')], [run(2, 0, 'success')], [run(3, 0, 'failure', { event: 'workflow_dispatch' }), run(4, 1, 'success')]);
+    if (!v.ok) throw new Error(`synthetic: a dispatch run of Spec Shape Gate was read as full battery (${v.refusals.join(' | ')})`);
+  });
 
   battery('release gate: release.yml wiring');
   const releaseYml = readFileSync(fileURLToPath(new URL('../../.github/workflows/release.yml', import.meta.url)), 'utf8');
+  await check(() => {
+    // Every workflow the release reads exists as a file, so a rename or a
+    // deletion cannot leave the gate reading a workflow that no longer runs.
+    const missing = RELEASE_GATE_WORKFLOWS.filter(({ file }) => !existsSync(fileURLToPath(new URL(`../../.github/workflows/${file}`, import.meta.url))));
+    if (missing.length > 0) throw new Error(`wiring: RELEASE_GATE_WORKFLOWS names ${missing.map((w) => w.file).join(', ')}, which do not exist under .github/workflows/`);
+  });
   await check(() => {
     const findings = releaseGateWiring(releaseYml);
     if (findings.length > 0) throw new Error(`wiring: the checked-in release.yml: ${findings.join(' | ')}`);

@@ -411,7 +411,12 @@ describe('#16702 criterion 5 — mergeArtifactProtection precedence is unchanged
         const hydrated = engine.registry.getItem<Record<string, unknown>>('app', 'pet_hospital');
         expect(hydrated?._provenance).toBe('org');
         expect(hydrated?._lock).toBe('none');
-        expect(hydrated?._packageId).toBeUndefined();
+        // [#23233] The row's OWN package binding (its `package_id` column), as a
+        // list read always stamped it — read from the row, not invented and not
+        // grafted: no artifact exists, so `_provenance` stays `org`, `_lock`
+        // stays the row's own and no `_packageVersion` appears.
+        expect(hydrated?._packageId).toBe(PKG);
+        expect(hydrated?._packageVersion).toBeUndefined();
     });
 });
 
