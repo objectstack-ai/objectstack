@@ -6,6 +6,7 @@
  * this exits 0 (#23396, ruling 6162084315, letter A).
  *
  *   node scripts/pm/check-handover.mjs --session=session_01… --account=LOGIN [--since=ISO] [--repo=OWNER/NAME]
+ *                                      [--stay-behind=#N[,#N…] --body-file=PATH]
  *   node scripts/pm/check-handover.mjs --probe        # can the live read run HERE? (no board read)
  *   node scripts/pm/check-handover.mjs --self-test    # offline, no network, no token
  *
@@ -67,10 +68,26 @@
  *
  * ## What it cannot see, stated
  *
- * (b) keys on the facet marker, as ruled. The two decision analyses the card measured carried no marker, so (b)
- * would not have fired on them: its recall is the four-facet filing duty's (`decision-analysis.md`). And a seat
- * that stays behind for a named tail (`seat-post-protocol.md`, 留守) still holds that card at `pm:dispatched`;
- * (a) refuses it until the tail lands or is released.
+ * (b) keys on the facet marker, as ruled — and the round-2 ruling kept it so (Q2 → A): the two decision analyses the
+ * card measured carried no marker, so (b) would not have fired on them; its recall is the four-facet filing duty's
+ * (`decision-analysis.md`), and making the marker mandatory on a comment-anchored analysis is the director's card.
+ *
+ * ## A declared stay-behind is REPORTED, never refused (round 2, Q1 → B)
+ *
+ * A seat that stays behind for a named tail (`seat-post-protocol.md`, 留守) still holds that card at
+ * `pm:dispatched` under its own claim. (a) reports it — one `[stay-behind] #N` line — instead of refusing it, and only
+ * when the tail is declared TWICE: on the command line (`--stay-behind=#N[,#N…]`) and on the `Stay-behind:` line of
+ * the vacant body about to be written (`--body-file=PATH`). Listed but undeclared, or declared but unlisted, it stays
+ * `[claim-unreleased]`; the measured half-state (#23193, never a declared tail) is refused exactly as before.
+ *
+ *   - The body comes from `--body-file`, ⛔ not from the live seat post (`--seat=#N` was the other offer): step 5 of the
+ *     checklist runs this BEFORE the vacant body is written, so at that moment the live post is still the seated body
+ *     and carries no stay-behind line to read. The file is also the smaller of the two — no request.
+ *   - The body must itself be VACANT (`seatPostVacancy`, imported from `post-stamped.mjs`, the one reading of it).
+ *   - The stay-behind line is `STAY_BEHIND_LINE`: a line whose text, list marker and emphasis stripped, opens with
+ *     `Stay-behind` or the protocol's `留守` / `留守登记` and a colon — measured `- **Stay-behind:** none.` on two live
+ *     vacant bodies (#21118, #6024). Its cards are the `#N` (or `owner/name#N` naming the swept board) outside code
+ *     on that line.
  *
  * Exit: 0 handover clear · 1 usage · 2 REFUSED (a finding) · 3 PREREQUISITE NOT MET (no route; nothing read) ·
  * 4 the read failed or was truncated (no verdict).
@@ -98,8 +115,10 @@ import {
   pmLabelListingPath,
   proxyRearmPlan,
   resolveSweepRepo,
+  stripMarkdownCode,
 } from './check-half-states.mjs';
 import { classifyRulingComment } from './check-prior-rulings.mjs';
+import { seatPostVacancy } from './post-stamped.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const API = 'https://api.github.com';
@@ -206,16 +225,84 @@ export function decisionCandidates(byCard) {
   return out.sort((a, b) => a - b);
 }
 
+/** A stay-behind registration line (`seat-post-protocol.md`: 留守登记 = one line), read after its list marker and emphasis. */
+export const STAY_BEHIND_LINE = /^(?:stay-behind|留守(?:登记)?)[ \t]*[:：]/iu;
+
+const STAY_BEHIND_CARD = /(?:^|[^\w&#/])#(\d+)(?!\w)|([\w.-]+\/[\w.-]+)#(\d+)(?!\w)/gu;
+
+/**
+ * What the vacant body about to be written declares as its stay-behind tails.
+ * @returns {{ vacant: boolean, cards: Set<number>, lines: string[] }} — `cards` from every stay-behind line, code blanked.
+ */
+export function stayBehindDeclared(body, repo) {
+  const raw = String(body ?? '');
+  const cards = new Set();
+  const lines = [];
+  for (const line of stripMarkdownCode(raw).split('\n')) {
+    const text = line.replace(/^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?/u, '').replace(/^[*_]+/u, '');
+    if (!STAY_BEHIND_LINE.test(text)) continue;
+    lines.push(line.trim());
+    for (const m of text.matchAll(STAY_BEHIND_CARD)) {
+      if (m[1] !== undefined) cards.add(Number(m[1]));
+      else if (String(m[2]).toLowerCase() === String(repo ?? '').toLowerCase()) cards.add(Number(m[3]));
+    }
+  }
+  return { vacant: seatPostVacancy(raw).vacant, cards, lines };
+}
+
+/** `--stay-behind=#N[,#N…]` → card numbers, or the usage error. */
+export function parseStayBehind(value) {
+  const parts = String(value ?? '').split(',').map((p) => p.trim()).filter((p) => p !== '');
+  const cards = [];
+  for (const part of parts) {
+    const m = /^#?(\d+)$/u.exec(part);
+    if (!m) return { ok: false, error: `--stay-behind takes card numbers, \`#N[,#N…]\`; ${JSON.stringify(part)} is not one` };
+    cards.push(Number(m[1]));
+  }
+  if (cards.length === 0) return { ok: false, error: '--stay-behind names no card' };
+  return { ok: true, cards };
+}
+
+/**
+ * The verdict over what the live read found — pure, so both stay-behind arms are pinned offline. A held card is
+ * REPORTED only when it is listed on the command line AND declared on the vacant body's stay-behind line; every other
+ * held card, and every decision outside the inbox, is refused.
+ */
+export function handoverVerdict({ held = [], decisions = [], stayBehind = [], declared = new Set() } = {}) {
+  const listed = new Set(stayBehind);
+  const refused = [];
+  const reported = [];
+  for (const h of held) {
+    const n = h.issue.number;
+    if (listed.has(n) && declared.has(n)) reported.push(h);
+    else refused.push({ kind: 'held', ...h, stayBehind: listed.has(n) ? 'listed-undeclared' : declared.has(n) ? 'declared-unlisted' : null });
+  }
+  for (const row of decisions) refused.push({ kind: 'decision', row });
+  const heldNumbers = new Set(held.map((h) => h.issue.number));
+  return { exit: refused.length > 0 ? EXIT_REFUSED : EXIT_OK, refused, reported, notHeld: [...listed].filter((n) => !heldNumbers.has(n)) };
+}
+
+/** The `[stay-behind]` lines — printed on a clear run and beside a refusal alike. */
+export function stayBehindText(reported) {
+  return reported
+    .map(
+      (h) =>
+        `  [stay-behind] #${h.issue.number} ${JSON.stringify(h.issue.title ?? '')} — held under this session's claim and declared on the ` +
+        'vacant body\'s `Stay-behind:` line: reported, not refused. The tail stays this session\'s to land.',
+    )
+    .join('\n');
+}
+
 export function parseArgs(argv) {
-  const options = { session: null, account: null, since: null, repo: null, selfTest: false, probe: false };
+  const options = { session: null, account: null, since: null, repo: null, stayBehind: null, bodyFile: null, selfTest: false, probe: false };
   for (const arg of argv) {
     if (arg === '--self-test') options.selfTest = true;
     else if (arg === '--probe') options.probe = true;
     else if (arg === '--help' || arg === '-h') return { ok: false, help: true };
     else {
-      const m = /^--(session|account|since|repo)=(.*)$/u.exec(arg);
+      const m = /^--(session|account|since|repo|stay-behind|body-file)=(.*)$/u.exec(arg);
       if (!m) return { ok: false, error: `unknown argument ${JSON.stringify(arg)} (spell options as --key=value)` };
-      options[m[1]] = m[2].trim();
+      options[{ 'stay-behind': 'stayBehind', 'body-file': 'bodyFile' }[m[1]] ?? m[1]] = m[2].trim();
     }
   }
   if (options.selfTest || options.probe) return { ok: true, options };
@@ -231,6 +318,14 @@ export function parseArgs(argv) {
   if (options.repo !== null && !/^[^/\s]+\/[^/\s]+$/u.test(options.repo)) {
     return { ok: false, error: `--repo=${JSON.stringify(options.repo)} is not \`owner/name\`` };
   }
+  if (options.stayBehind !== null) {
+    const sb = parseStayBehind(options.stayBehind);
+    if (!sb.ok) return { ok: false, error: sb.error };
+    if (!options.bodyFile) {
+      return { ok: false, error: '--stay-behind needs --body-file=PATH: a tail is declared on the `Stay-behind:` line of the vacant body about to be written, and read there' };
+    }
+    options.stayBehindCards = sb.cards;
+  }
   return { ok: true, options };
 }
 
@@ -240,7 +335,13 @@ export function refusalText(findings, { session, account, repo }) {
     f.kind === 'held'
       ? `  ${i + 1}. [claim-unreleased] #${f.issue.number} ${JSON.stringify(f.issue.title ?? '')} — \`pm:dispatched\`, assignee ` +
         `\`${account}\`, newest \`Claim:\` (comment ${f.claim?.id}) carries this session, and no \`Release:\` from this session follows it.\n` +
-        '     Land it, or write `Release:` (session · reason · next) and clear the assignee in ONE write, then move it to its real state.'
+        '     Land it, or write `Release:` (session · reason · next) and clear the assignee in ONE write, then move it to its real state;\n' +
+        '     or, staying behind on it, declare it on the vacant body\'s `Stay-behind:` line and pass `--stay-behind=#N --body-file=PATH`.' +
+        (f.stayBehind === 'listed-undeclared'
+          ? '\n     It is listed in --stay-behind, but the vacant body\'s `Stay-behind:` line does not declare it.'
+          : f.stayBehind === 'declared-unlisted'
+            ? '\n     The vacant body\'s `Stay-behind:` line declares it, but --stay-behind does not list it.'
+            : '')
       : `  ${i + 1}. [decision-outside-inbox] #${f.row.number} ${JSON.stringify(f.row.title)} — this session's latest comment ` +
         `(${f.row.comment?.id}) carries the four-facet block and no ruling follows it, but the card's states are ` +
         `${f.row.states.length === 0 ? 'none' : f.row.states.map((s) => `\`${s}\``).join(' + ')}.\n` +
@@ -318,6 +419,24 @@ async function run(options) {
     return EXIT_USAGE;
   }
   const repo = repoRes.repo;
+  let declared = { vacant: false, cards: new Set(), lines: [] };
+  if (options.bodyFile) {
+    let body;
+    try {
+      body = readFileSync(options.bodyFile, 'utf8');
+    } catch (err) {
+      console.error(`check-handover: could not read --body-file (${err.message}).`);
+      return EXIT_USAGE;
+    }
+    declared = stayBehindDeclared(body, repo);
+    if (!declared.vacant) {
+      console.error(
+        `check-handover: --body-file=${JSON.stringify(options.bodyFile)} is not a VACANT seat post — its Current-PM section's first status ` +
+          'token is not `⏳ vacant`. A stay-behind tail is declared on the vacant body about to be written, so that is the body this reads.',
+      );
+      return EXIT_USAGE;
+    }
+  }
   const probe = await probeTransport(repo);
   if (probe?.kind !== 'reachable') {
     console.error(prerequisiteText(probe));
@@ -343,11 +462,12 @@ async function run(options) {
     if (!exhausted) throw Object.assign(new Error(`the \`pm:dispatched\` listing filled its ${OPEN_LISTING_PAGE_CEILING}-page ceiling`), { truncated: true });
     const login = options.account.toLowerCase();
     const mine = dispatched.filter((i) => (i.assignees ?? []).some((a) => String(a?.login ?? '').toLowerCase() === login));
-    const findings = [];
+    const held = [];
+    const decisions = [];
     for (const issue of mine) {
-      const held = claimHolding(issue, await readThread(repo, issue.number), options);
-      if (held.verdict === 'held') findings.push({ kind: 'held', issue, claim: held.claim });
-      else if (held.verdict === 'other-session' || held.verdict === 'unclaimed') listed.push(`#${issue.number} (${held.verdict === 'unclaimed' ? 'no `Claim:` at all' : 'held by another session'})`);
+      const holding = claimHolding(issue, await readThread(repo, issue.number), options);
+      if (holding.verdict === 'held') held.push({ issue, claim: holding.claim });
+      else if (holding.verdict === 'other-session' || holding.verdict === 'unclaimed') listed.push(`#${issue.number} (${holding.verdict === 'unclaimed' ? 'no `Claim:` at all' : 'held by another session'})`);
     }
     coverage.push(`(a) ${dispatched.length} open \`pm:dispatched\` card(s), ${mine.length} assigned to \`${options.account}\`, every one of their threads read`);
 
@@ -372,7 +492,7 @@ async function run(options) {
       const issue = await rest(`/repos/${repo}/issues/${number}`);
       const entry = byCard.get(number);
       const row = decisionOutsideInbox(issue, entry.session, entry.all);
-      if (row !== null) findings.push({ kind: 'decision', row });
+      if (row !== null) decisions.push(row);
     }
     coverage.push(
       `(b) ${streamPages} page(s) of the comment stream since ${since} — ${stream.length} comment(s), ${sessionCount} by the fleet ` +
@@ -380,12 +500,17 @@ async function run(options) {
         `four-facet block; a session comment older than the window is UNREAD (widen with --since)`,
     );
     const context = { session: options.session, account: options.account, repo };
-    const tail = `  Read: ${coverage.join('; ')}.` + (listed.length > 0 ? `\n  Listed, not refused: ${listed.join(', ')}.` : '');
-    if (findings.length > 0) {
-      console.error(`${refusalText(findings, context)}\n${tail}`);
-      return EXIT_REFUSED;
+    const verdict = handoverVerdict({ held, decisions, stayBehind: options.stayBehindCards ?? [], declared: declared.cards });
+    const tail =
+      `  Read: ${coverage.join('; ')}.` +
+      (listed.length > 0 ? `\n  Listed, not refused: ${listed.join(', ')}.` : '') +
+      (verdict.notHeld.length > 0 ? `\n  In --stay-behind but not held under this session's claim: ${verdict.notHeld.map((n) => `#${n}`).join(', ')}.` : '');
+    const stayed = verdict.reported.length > 0 ? `\n${stayBehindText(verdict.reported)}` : '';
+    if (verdict.exit !== EXIT_OK) {
+      console.error(`${refusalText(verdict.refused, context)}${stayed}\n${tail}`);
+      return verdict.exit;
     }
-    console.log(`✓ check-handover: clear — no unreleased claim and no decision outside the inbox for ${options.session} on ${repo}.\n${tail}`);
+    console.log(`✓ check-handover: clear — no unreleased claim and no decision outside the inbox for ${options.session} on ${repo}.${stayed}\n${tail}`);
     return EXIT_OK;
   } catch (err) {
     console.error(
@@ -414,6 +539,7 @@ const USAGE = [
   'check-handover — refuse a seat handover while the departing session still holds a claim or a decision outside the inbox.',
   '',
   '  node scripts/pm/check-handover.mjs --session=session_01… --account=LOGIN [--since=ISO] [--repo=OWNER/NAME]',
+  '    [--stay-behind=#N[,#N…] --body-file=PATH]   a tail this seat stays behind on, declared on the vacant body\'s Stay-behind: line',
   '  node scripts/pm/check-handover.mjs --probe | --self-test',
   '',
   `  Exit: ${EXIT_OK} clear · ${EXIT_USAGE} usage · ${EXIT_REFUSED} REFUSED · ${EXIT_PREREQUISITE_NOT_MET} prerequisite not met (nothing read) · ${EXIT_UNREAD} no verdict (a read failed or was truncated).`,
@@ -466,6 +592,32 @@ export function selfTest() {
   const grouped = groupStream(STREAM, S);
   t('the stream groups by card, every comment kept, the session\'s fleet comments apart', grouped.get(23169).all.length === 2 && grouped.get(23169).session.length === 1 && grouped.get(23193).session.length === 1);
   t('…and a candidate is a card whose LATEST session comment carries the block — the non-fleet author buys no read', decisionCandidates(grouped).join() === '23193');
+
+  // the declared stay-behind (round 2, Q1 → B)
+  const VACANT_BODY = (stay) => ['## 1. Current PM — ⏳ vacant', '', '- **Previous holder:** `session_x`.', ...(stay === null ? [] : [stay]), '', '## 2. Ledger', '', '- #24001 → the next reading.'].join('\n');
+  const declaredOf = (stay) => stayBehindDeclared(VACANT_BODY(stay), 'o/r');
+  const HELD = { issue: card(['pm:dispatched']), claim: CLAIM };
+  const RCTX = { session: S, account: 'zhuangjianguo', repo: 'o/r' };
+  t('stay-behind: the measured spelling `- **Stay-behind:** none.` is a stay-behind line declaring nothing', declaredOf('- **Stay-behind:** none.').lines.length === 1 && declaredOf('- **Stay-behind:** none.').cards.size === 0);
+  t('stay-behind: tails are read off that line — `#N`, and `owner/name#N` only when it names the swept board', [...declaredOf('- **Stay-behind:** #23193 (ACCEPTed, queued); o/r#23209; other/repo#99').cards].sort().join() === '23193,23209');
+  t('stay-behind: the protocol word reads too (`留守登记:`), while a `#N` inside a code span does not', declaredOf('留守登记:#23193').cards.has(23193) && declaredOf('- **Stay-behind:** `#23193`').cards.size === 0);
+  t('⛔ stay-behind: "no stay-behind items" mid-sentence is no stay-behind line', declaredOf('- Seat 1 signed off with no stay-behind items, #23193 closed.').lines.length === 0);
+  t('⛔ stay-behind: a seated body is not the vacant body about to be written', stayBehindDeclared('## Current PM\n\n🟢 **x**\n\n- **Stay-behind:** #23193', 'o/r').vacant === false && declaredOf(null).vacant === true);
+  const both = handoverVerdict({ held: [HELD], stayBehind: [23193], declared: declaredOf('- **Stay-behind:** #23193').cards });
+  t('⭐ ARM 1 — listed AND declared: the held card is REPORTED as `[stay-behind] #N`, never refused, and the handover exits 0', both.exit === EXIT_OK && both.refused.length === 0 && both.reported.length === 1 && stayBehindText(both.reported).includes('[stay-behind] #23193'));
+  const undeclared = handoverVerdict({ held: [HELD], stayBehind: [23193], declared: declaredOf('- **Stay-behind:** none.').cards });
+  t('⭐ ARM 2 — listed but NOT declared on the body: still `[claim-unreleased]`, exit 2, saying why', undeclared.exit === EXIT_REFUSED && undeclared.refused[0]?.stayBehind === 'listed-undeclared' && refusalText(undeclared.refused, RCTX).includes('[claim-unreleased] #23193') && refusalText(undeclared.refused, RCTX).includes('does not declare it'));
+  const unlisted = handoverVerdict({ held: [HELD], stayBehind: [], declared: declaredOf('- **Stay-behind:** #23193').cards });
+  t('⛔ declared on the body but not listed: still refused, exit 2 — the flag is the explicit act', unlisted.exit === EXIT_REFUSED && unlisted.refused[0]?.stayBehind === 'declared-unlisted' && refusalText(unlisted.refused, RCTX).includes('does not list it'));
+  t('⭐ the measured half-state — no stay-behind at all — is refused as before, and its remedy names the two flags', handoverVerdict({ held: [HELD] }).exit === EXIT_REFUSED && refusalText(handoverVerdict({ held: [HELD] }).refused, RCTX).includes('--stay-behind=#N --body-file=PATH'));
+  t('⛔ a declared stay-behind does not excuse a decision outside the inbox', handoverVerdict({ held: [HELD], decisions: [{ number: 23169, title: 't', states: ['pm:queue'], comment: { id: 5 } }], stayBehind: [23193], declared: new Set([23193]) }).exit === EXIT_REFUSED);
+  t('a listed card this session does not hold is named apart, and refuses nothing', handoverVerdict({ held: [], stayBehind: [24009] }).notHeld.join() === '24009' && handoverVerdict({ held: [], stayBehind: [24009] }).exit === EXIT_OK);
+  t('arguments: --stay-behind needs --body-file, takes `#N[,#N…]`, and refuses anything else', parseArgs([`--session=${S}`, '--account=x', '--stay-behind=#23193']).ok === false && parseArgs([`--session=${S}`, '--account=x', '--stay-behind=#23193,24001', '--body-file=b.md']).options?.stayBehindCards.join() === '23193,24001' && parseArgs([`--session=${S}`, '--account=x', '--stay-behind=pr-5', '--body-file=b.md']).ok === false);
+  {
+    const ownSource = readFileSync(SELF_PATH, 'utf8');
+    t('structural: the vacancy reading is IMPORTED from post-stamped, ⛔ never restated here', ownSource.includes("import { seatPostVacancy } from './post-stamped.mjs';") && !/function\s+seatPostVacancy\b/u.test(ownSource));
+    t('structural: the body file is read BEFORE the transport probe — a usage error costs no request', ownSource.indexOf('readFileSync(options.bodyFile') > 0 && ownSource.indexOf('readFileSync(options.bodyFile') < ownSource.indexOf('const probe = await probeTransport(repo);'));
+  }
 
   // the CLI and the contract
   t('arguments: a session id and an account are required, each validated', parseArgs([`--session=${S}`, '--account=zhuangjianguo']).ok === true && parseArgs(['--account=x']).ok === false && parseArgs([`--session=${S}`]).ok === false && parseArgs(['--session=session_x', '--account=x']).ok === false);
