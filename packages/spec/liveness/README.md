@@ -528,7 +528,6 @@ still registered — otherwise its `@proof:` tag reads as an orphan — and reco
 | Proof | Why unbound |
 |---|---|
 | `form-widget-resolution` | no proof written yet (ADR-0054 Phase 2); `view.form.*` is governed and can carry it |
-| `permission-set-projection` | a storage invariant (ADR-0094), not an authorable property |
 | `flow-runas-schedule` | guards `flow.runAs`, already bound to `flow-runas-identity` — one entry carries one `proof` |
 | `showcase-scope-depth-fallback` | guards `permission.objects.readScope`, already bound — this is the CLI-wiring sibling |
 | `showcase-agent-intersection` | a runtime principal-resolution invariant (`onBehalfOf`), not authorable |

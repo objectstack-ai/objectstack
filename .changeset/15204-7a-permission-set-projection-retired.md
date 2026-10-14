@@ -24,6 +24,6 @@ What a consumer sees:
 - FROM `permissionSetRowFields(definition)` TO nothing: no row is written. Delete the call.
 - FROM the types `PermissionSeedOutcome`, `ProjectionDeps`, `ProjectionReconcileOutcome` and `WriteThroughDeps` TO nothing. Delete the import.
 
-Unchanged: the packaged-permission-set lock still refuses a metadata-door save of a set a code package ships (`403 NOT_OVERRIDABLE`), and the boot still reports environment overlays that shadow such a set. `OverlayDetectionOptions.logger` now asks only for `warn`, the one channel the reading reports on.
+Unchanged: the security catalog's echo of a metadata-door permission set or position on an environment kernel, which lives in its own module since #23308. The packaged-permission-set lock still refuses a metadata-door save of a set a code package ships (`403 NOT_OVERRIDABLE`), and the boot still reports environment overlays that shadow such a set. `OverlayDetectionOptions.logger` now asks only for `warn`, the one channel the reading reports on.
 
-**`@objectstack/spec`** (patch): the `permission.tabPermissions` liveness entry no longer cites the deleted projection.
+**`@objectstack/spec`** (patch): the `permission.tabPermissions` liveness entry no longer cites the deleted projection, and the liveness README's registered-but-unbound `permission-set-projection` proof row is retired with the invariant it described (no `@proof` tag carries it any more).
