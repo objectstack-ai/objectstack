@@ -291,7 +291,7 @@ describe('reconcileOrgAdminGrant', () => {
         id: 'ups1',
         user_id: 'u1',
         organization_id: 'o1',
-        permission_set_id: 'ps_org_admin',
+        permission_set: 'organization_admin',
       },
     ];
     const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
@@ -305,7 +305,7 @@ describe('reconcileOrgAdminGrant', () => {
         id: 'ups1',
         user_id: 'u1',
         organization_id: 'o1',
-        permission_set_id: 'ps_org_admin',
+        permission_set: 'organization_admin',
       },
     ];
     const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
@@ -365,7 +365,7 @@ describe('backfillOrgAdminGrants', () => {
           id: 'ups_orphan',
           user_id: 'u4',
           organization_id: 'o2',
-          permission_set_id: 'ps_org_admin_o2',
+          permission_set: 'organization_admin',
         },
       ],
     });
@@ -458,8 +458,8 @@ describe('[ADR-0105 D4] posture selects the org-admin variant', () => {
       ],
       // Pre-existing unbounded grants from a previously-walled boot.
       sys_user_permission_set: [
-        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
-        { id: 'ups2', user_id: 'u2', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set: 'organization_admin' },
+        { id: 'ups2', user_id: 'u2', organization_id: 'o1', permission_set: 'organization_admin' },
       ],
     });
 
@@ -553,9 +553,9 @@ describe('[#12699] suppressUnboundedOrgAdminGrant', () => {
       // match every copy of the name. (⛔ Nothing re-points them — a row still
       // held by someone who qualifies is left exactly as it is.)
       sys_user_permission_set: [
-        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
-        { id: 'ups2', user_id: 'u2', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
-        { id: 'ups3', user_id: 'u9', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set: 'organization_admin' },
+        { id: 'ups2', user_id: 'u2', organization_id: 'o1', permission_set: 'organization_admin' },
+        { id: 'ups3', user_id: 'u9', organization_id: 'o1', permission_set: 'organization_admin' },
       ],
     });
 
@@ -683,7 +683,7 @@ describe('[#4640] revoke speaks the engine\'s delete signature', () => {
       sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'member' }],
       sys_user_permission_set: [
-        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set: 'organization_admin' },
       ],
     });
 
@@ -752,7 +752,7 @@ describe('[#4640] revoke speaks the engine\'s delete signature', () => {
       sys_permission_set: catalogFor('o1'),
       sys_member: [],
       sys_user_permission_set: [
-        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
+        { id: 'ups1', user_id: 'u1', organization_id: 'o1', permission_set: 'organization_admin' },
       ],
     });
     const res = await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED);
@@ -763,67 +763,37 @@ describe('[#4640] revoke speaks the engine\'s delete signature', () => {
 });
 
 // ---------------------------------------------------------------------------
-// [ADR-0131 D4] The grant names its set; legacy row ids only ever REVOKE.
+// [ADR-0131 D4/D10] Grants are read and written by name alone.
 //
 // A grant is written by name with no `sys_permission_set` read, in every
-// posture. The catalog rows' ids are read only to reach a grant written before
-// the name column existed (it names nothing until the one-time backfill), and
-// only to take it away — wide across every organization's copy (#11670), so a
-// demotion or a posture flip never leaves such a grant in force.
+// posture, and no catalog row id reaches a grant any more: the legacy
+// `permission_set_id` is retired (C7b). A grant written before the name column
+// existed names nothing until the v18 ceremony's verified rewrite names it;
+// until then it confers nothing and no reconcile reaches it, and once named,
+// the boot sweep revokes it by name where its pair no longer qualifies.
 // ---------------------------------------------------------------------------
-describe('[ADR-0131 D4] by-name grants; the legacy id reach restricts only', () => {
-  it('a legacy unnamed grant pointing at ANY organization’s copy is still revoked on demotion', async () => {
+describe('[ADR-0131 D4/D10] by-name grants; no id reaches a grant', () => {
+  it('an unnamed legacy grant is reached by neither a demotion nor the sweep: it confers nothing, and it is the ceremony\'s to name', async () => {
     const stub = makeStub({
       sys_permission_set: [...PLATFORM_BUCKET],
       sys_member: [],
-      sys_user_permission_set: [
-        { id: 'ups_old', user_id: 'u1', organization_id: 'o3', permission_set_id: 'ps_org_admin' },
-      ],
+      sys_user_permission_set: [{ id: 'ups_old', user_id: 'u1', organization_id: 'o3' }],
     });
-    const res = await reconcileOrgAdminGrant(stub, 'u1', 'o3', WALLED);
-    expect(res.action).toBe('revoked');
-    expect(stub.tables.sys_user_permission_set).toHaveLength(0);
+    expect((await reconcileOrgAdminGrant(stub, 'u1', 'o3', WALLED)).action).toBe('noop');
+    expect((await backfillOrgAdminGrants(stub, WALLED)).revoked).toBe(0);
+    expect(stub.tables.sys_user_permission_set.map((r) => r.id)).toEqual(['ups_old']);
   });
 
-  it('a legacy unnamed grant the backfill will name stands for the pair: no duplicate is written', async () => {
-    const stub = makeStub({
-      sys_permission_set: catalogFor('o1'),
-      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
-      sys_user_permission_set: [
-        { id: 'ups_pre', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin' },
-      ],
-    });
-    expect(await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED)).toEqual({ action: 'noop' });
-    expect(stub.tables.sys_user_permission_set.map((r) => r.id)).toEqual(['ups_pre']);
-  });
-
-  it('a legacy unnamed grant on ANOTHER organization’s copy confers nothing and does not stand for the pair: it is left, and the pair is granted by name', async () => {
+  it('an unnamed legacy grant does not stand for the pair: it is left, and the pair is granted by name', async () => {
     const stub = makeStub({
       sys_permission_set: catalogFor('o1', 'o2'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
-      sys_user_permission_set: [
-        { id: 'ups_cross', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin_o2' },
-      ],
+      sys_user_permission_set: [{ id: 'ups_pre', user_id: 'u1', organization_id: 'o1' }],
     });
     expect((await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED)).action).toBe('granted');
     const rows = stub.tables.sys_user_permission_set;
-    expect(rows.find((r) => r.id === 'ups_cross')).toEqual({
-      id: 'ups_cross', user_id: 'u1', organization_id: 'o1', permission_set_id: 'ps_org_admin_o2',
-    });
+    expect(rows.find((r) => r.id === 'ups_pre')).toEqual({ id: 'ups_pre', user_id: 'u1', organization_id: 'o1' });
     expect(rows.filter((r) => r.permission_set === 'organization_admin')).toHaveLength(1);
-  });
-
-  it('the backfill sweep reaches an orphan grant pointing at ANY organization’s copy', async () => {
-    const stub = makeStub({
-      sys_permission_set: catalogFor('o1', 'o2'),
-      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
-      sys_user_permission_set: [
-        { id: 'ups_o2', user_id: 'u9', organization_id: 'o2', permission_set_id: 'ps_org_admin_o2' },
-      ],
-    });
-    const summary = await backfillOrgAdminGrants(stub, WALLED);
-    expect(summary.revoked).toBe(1);
-    expect(stub.tables.sys_user_permission_set.map((g) => g.user_id)).toEqual(['u1']);
   });
 
   it('the backfill grants with ZERO sys_permission_set rows, and an orphan by name is swept', async () => {
@@ -853,7 +823,7 @@ describe('[ADR-0131 D4] by-name grants; the legacy id reach restricts only', () 
     }
   });
 
-  it('the read ORDER of a grant: catalog rows are read only for the legacy reach, never to write it', async () => {
+  it('the read ORDER of a grant: no catalog row is read, to revoke or to write', async () => {
     const stub = makeStub({
       sys_permission_set: catalogFor('o1'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
@@ -861,18 +831,13 @@ describe('[ADR-0131 D4] by-name grants; the legacy id reach restricts only', () 
     await reconcileOrgAdminGrant(stub, 'u1', 'o1', { posture: 'single' });
     expect(stub.findCalls.map((c) => c.object)).toEqual([
       'sys_member', // does the pair qualify
-      'sys_permission_set', // superseded-variant legacy ids (revoke reach)
       'sys_user_permission_set', // superseded grants for the pair, by name
-      'sys_user_permission_set', // …and the pair's unnamed legacy ones, by every copy's id
-      'sys_permission_set', // legacy ids a grant of this organization may name (duplicate check)
       'sys_user_permission_set', // does the grant already exist, by name
-      'sys_user_permission_set', // …or as a legacy unnamed grant the backfill will name
     ]);
     const grantReads = stub.findCalls.filter((c) => c.object === 'sys_user_permission_set');
     expect(grantReads.map((c) => c.where?.permission_set ?? null)).toEqual([
-      'organization_admin', null, 'organization_admin_no_bypass', null,
+      'organization_admin', 'organization_admin_no_bypass',
     ]);
-    expect(grantReads[1].where.permission_set_id).toEqual({ $in: ['ps_org_admin', 'ps_org_admin_o1'] });
-    expect(grantReads[3].where.permission_set_id).toEqual({ $in: ['ps_org_admin_nb', 'ps_org_admin_nb_o1'] });
+    expect(grantReads.every((c) => !('permission_set_id' in (c.where ?? {})))).toBe(true);
   });
 });
