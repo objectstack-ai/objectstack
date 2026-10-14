@@ -3,7 +3,7 @@
 /**
  * [ADR-0131 D6, C5 stage S3] The dispatcher threads NO organization into a
  * metadata write: every type, one of the five overlay-enabled types included, lands
- * environment-wide (`organization_id` NULL) whatever the session's active
+ * environment-wide (no organization column since ADR-0131 D7) whatever the session's active
  * organization. The per-organization overlay axis is retired; the CONTROL cases
  * that used to pin `view` landing org-scoped are the stage's pins now, and they
  * read the stored ROW through the real stack.
@@ -377,7 +377,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         // `loadMetaFromDb` walks past and the `kernel:ready` flow binder
         // (`getMetaItems({type:'flow'})`, no org) never sees, so the automation
         // fires until the next restart and then silently stops.
-        expect(row!.organization_id).toBeNull();
+        expect('organization_id' in row!).toBe(false);
     });
 
     it('the same is true for `object`, whose org-scoped rows 404 every record after a restart', async () => {
@@ -393,7 +393,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         const res = responseOf(await dispatcher.handleMetadata(`/object/${OBJECT.name}`, ctx(ACTIVE_ORG), 'PUT', OBJECT));
 
         expect(res.status).toBe(200);
-        expect(metaRow(engine, 'object', OBJECT.name)!.organization_id).toBeNull();
+        expect('organization_id' in metaRow(engine, 'object', OBJECT.name)!).toBe(false);
     });
 
     it('the receipt an org session gets back is the one a no-org session gets', async () => {
@@ -421,7 +421,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         expect(res.status).toBe(200);
         // The per-organization overlay axis is retired: the Studio save of a
         // view belongs to the whole deployment.
-        expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBeNull();
+        expect('organization_id' in metaRow(engine, 'view', VIEW.name)!).toBe(false);
         const read = responseOf(await dispatcher.handleMetadata(`/view/${VIEW.name}`, ctx(ACTIVE_ORG), 'GET'));
         expect(read.status).toBe(200);
     });
@@ -432,7 +432,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         const res = responseOf(await dispatcher.handleMetadata(`/views/${VIEW.name}`, ctx(ACTIVE_ORG), 'PUT', VIEW));
 
         expect(res.status).toBe(200);
-        expect(metaRow(engine, 'view', VIEW.name)!.organization_id).toBeNull();
+        expect('organization_id' in metaRow(engine, 'view', VIEW.name)!).toBe(false);
     });
 
     // ── POST /packages/:id/publish-drafts — the ADR-0045 visibility flip ──
@@ -448,7 +448,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
             item: { ...APP, _unpublished: true },
             packageId: 'crm_pkg',
         });
-        expect(metaRow(engine, 'app', APP.name)!.organization_id).toBeNull();
+        expect('organization_id' in metaRow(engine, 'app', APP.name)!).toBe(false);
 
         // `publishPackageDrafts` is stubbed to "nothing to promote" — the
         // materialized regime has no drafts left, which is exactly the branch
@@ -467,7 +467,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         // One row, still env-wide — not a second, org-scoped row shadowing it.
         const appRows = engine.metaRows().filter((r: any) => r.type === 'app' && r.state === 'active');
         expect(appRows).toHaveLength(1);
-        expect(appRows[0].organization_id).toBeNull();
+        expect('organization_id' in appRows[0]).toBe(false);
 
         // And the flip is real where it counts: the env-wide read — the one
         // cold boot and the App Switcher do — now sees a published app. An
@@ -615,7 +615,7 @@ describe('#10503 · ADR-0131 D6 no spelling carries an organization through the 
             expect(resPlural.status).toBe(200);
             const pluralRow = metaRow(viaPlural.engine, singular, item.name);
             expect(pluralRow).toBeDefined();
-            expect(pluralRow!.organization_id).toBeNull();
+            expect('organization_id' in pluralRow!).toBe(false);
 
             // The live control, in the same file and the same direction: the
             // singular twin's scoping is what the plural must equal, and it
@@ -626,7 +626,7 @@ describe('#10503 · ADR-0131 D6 no spelling carries an organization through the 
             );
             expect(resSingular.status).toBe(200);
             const singularRow = metaRow(viaSingular.engine, singular, item.name);
-            expect(singularRow!.organization_id).toBeNull();
+            expect('organization_id' in singularRow!).toBe(false);
             expect(pluralRow!.organization_id).toBe(singularRow!.organization_id);
         });
 
@@ -648,7 +648,7 @@ describe('#10503 · ADR-0131 D6 no spelling carries an organization through the 
                 (r: any) => r.type === singular && r.name === item.name && r.state === 'active',
             );
             expect(rows).toHaveLength(1);
-            expect(rows[0].organization_id).toBeNull();
+            expect('organization_id' in rows[0]).toBe(false);
         });
 
         it(`CONTROL — with NO active org, /${plural} still lands env-wide`, async () => {
@@ -659,7 +659,7 @@ describe('#10503 · ADR-0131 D6 no spelling carries an organization through the 
             expect(responseOf(
                 await dispatcher.handleMetadata(`/${plural}/${item.name}`, ctx(), 'PUT', item),
             ).status).toBe(200);
-            expect(metaRow(engine, singular, item.name)!.organization_id).toBeNull();
+            expect('organization_id' in metaRow(engine, singular, item.name)!).toBe(false);
         });
     }
 
@@ -682,7 +682,7 @@ describe('#10503 · ADR-0131 D6 no spelling carries an organization through the 
         const res = responseOf(await dispatcher.handleMetadata(`/objects/${OBJECT.name}`, ctx(ACTIVE_ORG), 'PUT', OBJECT));
 
         expect(res.status).toBe(200);
-        expect(metaRow(engine, 'object', OBJECT.name)!.organization_id).toBeNull();
+        expect('organization_id' in metaRow(engine, 'object', OBJECT.name)!).toBe(false);
     });
 
     // ── the class, not the two specimens ──────────────────────────────────

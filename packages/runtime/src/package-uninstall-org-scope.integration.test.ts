@@ -94,7 +94,6 @@ const PKG = 'com.repro.b';
 const OTHER_PKG = 'com.other';
 const PLATFORM_PKG = '@objectstack/platform-objects';
 const ACTIVE_ORG = 'org_active';
-const OTHER_ORG = 'org_other';
 
 let cleanup: Array<() => void> = [];
 afterEach(() => {
@@ -150,9 +149,9 @@ const viewBody = (name: string) => ({
  * stay on row survival rather than on physical-table teardown, which
  * `deleteMetaItem` handles separately and which #7705 is not about.
  *
- * [ADR-0131 D6] The protocol refuses every organization-scoped write, so the
- * legacy organization rows are planted AT REST, the way an older release left
- * them.
+ * [ADR-0131 D6/D7] The protocol refuses every organization-scoped write, and
+ * the table declares no organization column, so every row is the
+ * environment's: the uninstall's reach is the package, nothing narrower.
  */
 async function seed(protocol: any, engine: any) {
   const save = (name: string, packageId: string) =>
@@ -162,19 +161,10 @@ async function seed(protocol: any, engine: any) {
       item: viewBody(name),
       packageId,
     });
-  const plantLegacy = (name: string, organizationId: string) =>
-    engine.insert('sys_metadata', {
-      type: 'view', name, organization_id: organizationId, package_id: PKG, state: 'active',
-      metadata: JSON.stringify(viewBody(name)), checksum: 'sha256:legacy', version: 1,
-    });
-
-  // The suspected — and confirmed — miss: env-wide rows, `organization_id IS NULL`.
+  // The suspected — and confirmed — miss: env-wide rows.
   await save('reprob_a', PKG);
   await save('reprob_b', PKG);
   await save('reprob_v', PKG);
-  // Same package, legacy organization rows.
-  await plantLegacy('reprob_own', ACTIVE_ORG);
-  await plantLegacy('reprob_foreign', OTHER_ORG);
   // Negative — ANOTHER package, env-wide. Must survive.
   await save('other_a', OTHER_PKG);
 }
@@ -182,7 +172,7 @@ async function seed(protocol: any, engine: any) {
 /** Every surviving row, as `name[pkg,org]`, read straight back out of SQLite. */
 async function survivors(engine: any): Promise<string[]> {
   const rows = (await engine.find('sys_metadata', { where: {} })) as any[];
-  return rows.map((r) => `${r.name}[${r.package_id},${r.organization_id ?? 'ENV'}]`).sort();
+  return rows.map((r) => `${r.name}[${r.package_id},${'organization_id' in r ? 'ORG-COLUMN' : 'ENV'}]`).sort();
 }
 
 const namesFor = async (engine: any, packageId: string): Promise<string[]> => {
@@ -194,13 +184,11 @@ const SEEDED = [
   `other_a[${OTHER_PKG},ENV]`,
   `reprob_a[${PKG},ENV]`,
   `reprob_b[${PKG},ENV]`,
-  `reprob_foreign[${PKG},${OTHER_ORG}]`,
-  `reprob_own[${PKG},${ACTIVE_ORG}]`,
   `reprob_v[${PKG},ENV]`,
 ];
 
 describe('#7705 · ADR-0131 D6 — an uninstall is package-wide and orphans no sys_metadata row', () => {
-  it('removes the env-wide rows AND the legacy organization rows, counts them, and leaves another package alone', async () => {
+  it('removes every row of the package, counts them, and leaves another package alone', async () => {
     const { engine, protocol } = await boot();
     await seed(protocol, engine);
 
@@ -211,11 +199,11 @@ describe('#7705 · ADR-0131 D6 — an uninstall is package-wide and orphans no s
     const res: any = await (protocol as any).deletePackage({ packageId: PKG });
 
     expect(await namesFor(engine, PKG)).toEqual([]);
-    expect(res.deletedCount).toBe(5);
+    expect(res.deletedCount).toBe(3);
     expect(res.failedCount).toBe(0);
     expect(res.success).toBe(true);
     expect(res.deleted.map((d: any) => d.name).sort()).toEqual(
-      ['reprob_a', 'reprob_b', 'reprob_foreign', 'reprob_own', 'reprob_v'],
+      ['reprob_a', 'reprob_b', 'reprob_v'],
     );
     expect(await survivors(engine)).toEqual([`other_a[${OTHER_PKG},ENV]`]);
   });
