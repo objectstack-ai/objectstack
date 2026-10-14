@@ -227,26 +227,59 @@ async function assertNameInCatalog(engine: GrantNameEngine, name: string, logger
   if (!held) throw grantSetNotInCatalogError(name);
 }
 
+/** The `dispatch.scope` key the platform-wide keys of one caller write are kept under. */
+const PLATFORM_WIDE_KEYS_SCOPE = 'plugin-security.grant-platform-wide-keys';
+
 /**
  * Refuse a second platform-wide grant (organization NULL) of `name` to
  * `userId`, the one duplicate the unique index cannot see (module note).
  * `except` is the row an update rewrites, which is not its own duplicate.
+ *
+ * Two sources: the STORED grants, and the rows earlier in the SAME caller
+ * write — a batch insert or a multi-row update runs every row's `before*`
+ * hook before any row is written, so the stored read alone would admit two
+ * identical rows of one call. Those are kept in the write's `dispatch.scope`,
+ * the scratch every dispatch of one caller write shares.
  */
 async function assertNoPlatformWideDuplicate(
   engine: GrantNameEngine,
+  ctx: any,
   userId: unknown,
   name: string,
   except?: unknown,
 ): Promise<void> {
-  if (typeof engine.find !== 'function' || userId === null || userId === undefined || userId === '') return;
+  if (userId === null || userId === undefined || userId === '') return;
+  const scope = ctx?.dispatch?.scope as Record<string, unknown> | undefined;
+  const key = JSON.stringify([String(userId), name]);
+  if (scope) {
+    if (!(scope[PLATFORM_WIDE_KEYS_SCOPE] instanceof Set)) scope[PLATFORM_WIDE_KEYS_SCOPE] = new Set<string>();
+    const seen = scope[PLATFORM_WIDE_KEYS_SCOPE] as Set<string>;
+    if (seen.has(key)) {
+      throw new DuplicateRecordError(
+        GRANT_OBJECT,
+        new Error(`the write repeats the platform-wide grant of ${name} to ${String(userId)} (organization NULL) within one call`),
+        GRANT_SET_NAME_FIELD,
+      );
+    }
+    seen.add(key);
+  }
+  if (typeof engine.find !== 'function') return;
   const held = await engine.find(GRANT_OBJECT, {
     where: { user_id: userId, [GRANT_SET_NAME_FIELD]: name, organization_id: null },
     fields: ['id'],
     limit: 2,
     context: { isSystem: true },
   });
-  if ((held ?? []).some((row) => String((row as { id?: unknown })?.id) !== String(except))) {
-    throw new DuplicateRecordError(GRANT_OBJECT, undefined, GRANT_SET_NAME_FIELD);
+  const holder = (held ?? []).find((row) => String((row as { id?: unknown })?.id) !== String(except));
+  if (holder) {
+    throw new DuplicateRecordError(
+      GRANT_OBJECT,
+      new Error(
+        `grant ${String((holder as { id?: unknown }).id)} already holds ${name} for ${String(userId)} platform-wide ` +
+          '(organization NULL), which the unique index keys apart; the write door refuses it instead',
+      ),
+      GRANT_SET_NAME_FIELD,
+    );
   }
 }
 
@@ -261,7 +294,7 @@ async function onInsert(engine: GrantNameEngine, ctx: any, logger: GrantNameLogg
   // note); the duplicate check does not — the index it stands in for refuses
   // every writer.
   if (ctx?.session?.isSystem !== true) await assertNameInCatalog(engine, name, logger);
-  if (grantOrganizationOf(data) === null) await assertNoPlatformWideDuplicate(engine, data.user_id, name);
+  if (grantOrganizationOf(data) === null) await assertNoPlatformWideDuplicate(engine, ctx, data.user_id, name);
 }
 
 /** The columns of the unique key; an update touching none of them cannot make a duplicate. */
@@ -295,7 +328,7 @@ async function onUpdate(engine: GrantNameEngine, ctx: any, logger: GrantNameLogg
     String(previous.user_id) === String(merged.user_id) &&
     judgedName(previous[GRANT_SET_NAME_FIELD]) === name
   ) return; // the key is unchanged: the row is not its own duplicate
-  await assertNoPlatformWideDuplicate(engine, merged.user_id, name, previous?.id);
+  await assertNoPlatformWideDuplicate(engine, ctx, merged.user_id, name, previous?.id);
 }
 
 /**
