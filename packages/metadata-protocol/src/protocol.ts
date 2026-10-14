@@ -20338,7 +20338,7 @@ export class ObjectStackProtocolImplementation implements
             try {
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 storedRows = await this.engine.find('sys_metadata', {
-                    where: { type: canonical, name, state: 'active', organization_id: null, ...overlayMemberWhere(canonical, member) },
+                    where: { type: canonical, name, state: 'active', ...overlayMemberWhere(canonical, member) },
                     context: { isSystem: true },
                 });
             } catch (error) {
@@ -27951,8 +27951,6 @@ export class ObjectStackProtocolImplementation implements
         if (expandedFrom !== undefined) {
             return this.diffMetaItem({ ...request, name: expandedFrom.container.name });
         }
-        // [ADR-0131 D6] The environment's versions only.
-        const orgId = null;
         // [#8798] Read the history rows DIRECTLY, once. `historyMetaItem`
         // cannot serve this function: its `MetadataEvent` shape doesn't carry
         // the per-(type,name) `version` a diff selects versions by, so its
@@ -27979,8 +27977,8 @@ export class ObjectStackProtocolImplementation implements
         try {
             const engineAny = this.engine as any;
             // [#21908, ADR-0096 D5] The explicit system opt-in: the history
-            // lineage is a platform store the diff door already authorized;
-            // the protocol scopes it by organization itself. Principal-less,
+            // lineage is a platform store the diff door already authorized.
+            // Principal-less,
             // the engine refuses it, and the `catch` below would have answered
             // an empty diff for an item that has history.
             // [#22877] The canonical member's lineage only — a by-name diff of a
