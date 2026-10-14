@@ -2002,6 +2002,82 @@ export class ObjectOwnershipConflictError extends Error {
   }
 }
 
+/** One object {@link PackageUninstallExtendedError} names, with the packages extending it. */
+interface ExtendedObjectOfUninstall {
+  /** The object's fully-qualified name, as the registry keys it. */
+  readonly objectName: string;
+  /** Every OTHER package contributing an `extend` to it, in registration order. */
+  readonly extenders: readonly string[];
+}
+
+/** How many extended objects the refusal spells out before it counts the rest. */
+const EXTENDED_OBJECTS_LISTED = 5;
+
+/**
+ * [#23505] The uninstall refusal of ADR-0029: a package cannot leave while
+ * another package `extend`s an object it owns (a manifest's
+ * `objectExtensions`, registered by `ObjectQL.registerApp`). Raised by
+ * {@link SchemaRegistry.assertPackageUninstallable}, and so by
+ * {@link SchemaRegistry.unregisterObjectsByPackage} and
+ * {@link SchemaRegistry.uninstallPackage}, which ask it.
+ *
+ * Carries the ADR-0112 envelope (`code` + `status`), like the registry's other
+ * refusals above. Before it carried one, this was a bare `Error`, and
+ * `DELETE /api/v1/packages/:id` — which reaches it through `deletePackage`'s
+ * pre-flight, or through `uninstallPackage` on a host with no persisted half —
+ * fell through `resolveThrownHttpError` to the door's `500` fallback: measured
+ * on the real stack as `500 INTERNAL_ERROR`, which tells a client, an AI author
+ * or an operator that the server failed, invites a retry, and changes nothing.
+ * The state is the caller's to change: uninstall the extending packages first.
+ *
+ * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member for
+ * a refusal that comes from environment state rather than the request (the
+ * same uninstall is accepted once the extenders are gone), as the uninstall
+ * verb's sibling refusals in `@objectstack/metadata-protocol` answer. The
+ * prescription comes first, because a 4xx message can be truncated at a REST
+ * boundary; the diagnostic sentence the refusal always carried follows it.
+ *
+ * Every extended object is named (the first {@link EXTENDED_OBJECTS_LISTED},
+ * then a count), in the order the registry walks them, each with its extenders
+ * in registration order — and the prescription names every extending package,
+ * so one answer is the whole way out rather than the first step of several.
+ *
+ * ⛔ Unexported, like its siblings: a consumer compares `code`, never
+ * `instanceof` (see the note over the `*_CODE` constants).
+ */
+class PackageUninstallExtendedError extends Error {
+  readonly code = 'RESOURCE_CONFLICT';
+  readonly status = 409;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 409;
+  /** The package whose uninstall this refusal stopped. */
+  readonly packageId: string;
+  /** Every object of `packageId` another package extends, in walk order. */
+  readonly extendedObjects: readonly ExtendedObjectOfUninstall[];
+  /** Every extending package, once each, in the order the objects name them. */
+  readonly extenders: readonly string[];
+
+  constructor(packageId: string, extendedObjects: readonly ExtendedObjectOfUninstall[]) {
+    const extenders = [...new Set(extendedObjects.flatMap((o) => o.extenders))];
+    const listed = extendedObjects
+      .slice(0, EXTENDED_OBJECTS_LISTED)
+      .map((o) => `object "${o.objectName}" is extended by ${o.extenders.join(', ')}`);
+    const more = extendedObjects.length - listed.length;
+    super(
+      `Uninstall the ${extenders.length === 1 ? 'package that extends' : 'packages that extend'} ` +
+        `${extendedObjects.length === 1 ? 'an object' : 'objects'} of "${packageId}" first ` +
+        `(${extenders.join(', ')}), then uninstall "${packageId}" again: a package cannot be ` +
+        `uninstalled while another package extends an object it owns (objectExtensions, ADR-0029). ` +
+        `Cannot uninstall package "${packageId}": ${listed.join('; ')}` +
+        `${more > 0 ? `; and ${more} more extended object${more === 1 ? '' : 's'}` : ''}.`,
+    );
+    this.name = 'PackageUninstallExtendedError';
+    this.packageId = packageId;
+    this.extendedObjects = extendedObjects;
+    this.extenders = extenders;
+  }
+}
+
 // [commit fa5d137ab] `isTenantAuthored` and `isCodeArtifactBody` used to be defined here.
 // They now live in `@objectstack/metadata-core`
 // (`code-artifact-provenance.ts`), imported at the top of this file and
@@ -4244,16 +4320,25 @@ export class SchemaRegistry {
    * that exists to keep a registry whole was itself reached through a
    * mutation, and nothing rolled it back. Same predicate and same iteration
    * order as the inline check it replaced, so the same object still refuses
-   * with the same message.
+   * first.
+   *
+   * [#23505] The refusal is a {@link PackageUninstallExtendedError} —
+   * `RESOURCE_CONFLICT` / 409, so the uninstall door answers a located client
+   * refusal instead of its `500` fallback — and it names EVERY extended object
+   * and every extending package, not only the first object the walk meets, so
+   * its prescription is the whole way out. The decision is unchanged: the
+   * package is refused exactly when the first such object exists.
    *
    * ⛔ ONE predicate: {@link unregisterObjectsByPackage} calls this method
    * rather than keeping its own copy, so the question asked ahead and the
    * refusal raised by the uninstall cannot disagree. `force` is not a
    * parameter here: forcing means not asking, and stays the caller's choice.
    *
-   * @throws Error if the package owns an object another package extends (ADR-0029)
+   * @throws PackageUninstallExtendedError (`RESOURCE_CONFLICT` / 409) if the
+   *   package owns an object another package extends (ADR-0029)
    */
   assertPackageUninstallable(packageId: string): void {
+    const extended: ExtendedObjectOfUninstall[] = [];
     for (const [fqn, contributors] of this.objectContributors.entries()) {
       const ownedHere = contributors.some(
         c => c.packageId === packageId && c.ownership === 'own'
@@ -4264,12 +4349,10 @@ export class SchemaRegistry {
         c => c.packageId !== packageId && c.ownership === 'extend'
       );
       if (otherExtenders.length > 0) {
-        throw new Error(
-          `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
-          `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
-        );
+        extended.push({ objectName: fqn, extenders: otherExtenders.map(c => String(c.packageId)) });
       }
     }
+    if (extended.length > 0) throw new PackageUninstallExtendedError(packageId, extended);
   }
 
   /**
@@ -4282,7 +4365,8 @@ export class SchemaRegistry {
    * a no-op, which is what lets {@link uninstallPackage} run this verb ahead of
    * its own mutations.
    *
-   * @throws Error if trying to uninstall an owner that has extenders
+   * @throws PackageUninstallExtendedError (`RESOURCE_CONFLICT` / 409) if trying
+   *   to uninstall an owner that has extenders — {@link assertPackageUninstallable}'s
    */
   unregisterObjectsByPackage(packageId: string, force: boolean = false): void {
     // [#7970] REFUSAL PASS — see {@link assertPackageUninstallable}, which holds
