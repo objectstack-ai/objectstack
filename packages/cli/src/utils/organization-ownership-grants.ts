@@ -8,14 +8,15 @@
  * ## Why a legacy grant can collide
  *
  * The grant's unique index is (`user_id`, `permission_set`,
- * `organization_id`) (C7b). A 17.x database's first v18 boot creates it, and
- * that same boot's organization-administrator sweep writes a NAMED grant for
- * every qualifying pair, beside the pair's legacy grant, which names nothing
- * and confers nothing. Naming the legacy grant then writes a second row of one
- * key: the index refuses it. So the rewrite names a legacy grant only when no
+ * `organization_id`), NULL-safe on the organization (C7b), and a 17.x
+ * database's first v18 boot creates it. A NAMED grant written beside a legacy
+ * one of the same user and organization — by Setup, a seed, or any writer
+ * other than the organization-administrator sweep, which writes nothing beside
+ * an unnamed grant — holds the key the legacy grant's rename needs, and the
+ * index refuses that rename. So the rewrite names a legacy grant only when no
  * stored named grant, and no grant it names earlier in the same run, already
  * holds that user, set and organization (a NULL organization keyed with NULL,
- * as the write door keys it). The others are listed, both ids named, and kept:
+ * as the index keys it). The others are listed, both ids named, and kept:
  * which grant stays is the operator's call, and the ceremony deletes no grant.
  */
 
