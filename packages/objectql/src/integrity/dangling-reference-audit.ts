@@ -371,9 +371,9 @@ export const DEFAULT_MAX_ROWS = 5_000;
 /**
  * Objects scanned FIRST when the budget is finite (#4551): the ADR-0090
  * permission model's own tables. A dangling row there is not untidy, it is a
- * **security-surface record that resolves to nothing** — and the
- * audience-anchor gate has to resolve exactly that permission set to evaluate
- * the grant, so the binding is an unevaluable gate input.
+ * **security-surface record that resolves to nothing**: a grant that names a
+ * permission set nothing serves. (The audience-anchor gate that once had to
+ * resolve such a set retired with `sys_position_permission_set`, C3 stage 8.)
  *
  * Derived from `PLATFORM_OBJECTS_BY_PACKAGE` rather than hand-listed, so a
  * table added to plugin-security is prioritised without anyone remembering to

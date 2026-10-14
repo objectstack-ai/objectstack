@@ -20,11 +20,13 @@
  *
  *   locateReviewOfRecord     the record on this head, on the PR thread or its card
  *   deliveredCardNumber      which card thread a pull request's record may sit on
- *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it
+ *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it — at the tier its face maps to
+ *   reviewFace / REVIEW_FACES which face made the review owed, and the ONE tier NAME it stands at
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
- *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs
+ *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs, prose arm included
+ *   isOutsideReviewSurface   the prose faces a head may move on and keep its record
  *   contractReviewTemplateLines / contractReviewRecordLines   what `--template` prints
  *   contractReviewBriefLines what `--brief-template` prints — the brief a seat hands its reviewer
  *
@@ -81,10 +83,97 @@ import {
 // `dispatch-gates.mjs` is the one line in `scripts/pm/**` where the model id is
 // spelled as a value, and a second value site here is the drift that let a
 // declared tier and a served one differ unnoticed (#17915).
-import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME } from './dispatch-gates.mjs';
+// The default tier's VALUE is imported on the same rule, for the same refusal; its NAME is the second
+// token a `Served-tier:` line may carry, on the face that maps to it. The published-schema face is the
+// clause-② suspect surface (`SUSPECT_TIER_GLOBS`, test files excepted), applied by `deriveTier`, the one
+// function that applies it — ⛔ never a second spelling of `packages/spec/src/**` here.
+import {
+  CONTRACT_REVIEW_TIER,
+  CONTRACT_REVIEW_TIER_NAME,
+  SUSPECT_TIER_GLOBS,
+  TIER_DEFAULT,
+  TIER_DEFAULT_NAME,
+  deriveTier,
+} from './dispatch-gates.mjs';
+// The governed-rules face is the governed register itself — the same function the queue guard
+// classifies a merge group's paths with. `dispatch-gates.mjs` already imports this module at module
+// scope, so the edge adds no new module to this file's graph and no cycle.
+import { SELF_REPO_ID, governedPathsIn } from './check-governed-merges.mjs';
 // How an unreadable `Served-tier:` line is quoted back — the declaration
 // line's own quoting helper, one spelling for both.
 import { quoteLine } from './clause2-line.mjs';
+
+
+// ── the tier FOLLOWS THE FACE that made the review owed ─────────────────────
+//
+// Ruling record 6159870311 on #23352 (letter B′ with C, maintainer 「同意」):
+// whether an isolated contract review is OWED stays by surface — the three
+// contract faces of `references/contract-review.md` — and ⛔ never by lane; the
+// TIER of that review follows the face that made it owed. A published schema or
+// governed rules text maps to `CONTRACT_REVIEW_TIER`; a review owed ONLY by a
+// `Clause-②: yes` declaration (a widening in application or UI code, a
+// translation key, a version declaration) maps to `TIER_DEFAULT`, run as the
+// lane seat's review of record. Nothing retires: the contract-review tier's
+// identity and value are untouched, and `dispatch-gates.data.mjs` stays the
+// default tier's value site.
+//
+// ⛔ EXACT, never a floor. `servedTierStands` accepts the one NAME the face maps
+// to and nothing else: this regime orders no tiers (`deriveTier` refuses to
+// rank two either), so "at least this tier" is a reading no file here can make.
+
+/**
+ * The three contract faces, in the order a mixed diff is decided in, each with
+ * the NAME of the tier it maps to.
+ *
+ *   `id`        the token `--template --face` takes and `reviewFace` answers with
+ *   `tierName`  the ONE `Served-tier:` token a review owed on this face stands with
+ *   `words`     how the face is named to a human
+ *
+ * ⭐ The face is read off the PULL REQUEST'S FILE LIST — its committed tree, the
+ * way the queue guard already classifies governed paths — and ⛔ never off a
+ * seat's statement. The declaration face is what REMAINS: it is asked only of a
+ * review already owed, and a review owed with no schema and no governed path in
+ * the diff was owed by the `Clause-②: yes` line alone.
+ */
+export const REVIEW_FACES = Object.freeze([
+  Object.freeze({ id: 'schema', tierName: CONTRACT_REVIEW_TIER_NAME, words: 'a published schema (the clause-② suspect surface, test files excepted)' }),
+  Object.freeze({ id: 'rules', tierName: CONTRACT_REVIEW_TIER_NAME, words: 'governed rules text (a path the governed register names)' }),
+  Object.freeze({ id: 'declaration', tierName: TIER_DEFAULT_NAME, words: 'the `Clause-②: yes` declaration alone (no schema and no governed path in the diff)' }),
+]);
+
+/** Every NAME a `Served-tier:` line can stand with — one per tier the faces map to, and nothing else. */
+export const REVIEW_TIER_NAMES = Object.freeze([...new Set(REVIEW_FACES.map((face) => face.tierName))]);
+
+/**
+ * Which face made this review owed, and the NAME of the tier it is therefore
+ * served at. Pure over the path list.
+ *
+ * ⭐ A mixed diff maps to `CONTRACT_REVIEW_TIER` on ONE hit: a schema or governed
+ * path anywhere in the list decides it, the way one governed path governs the
+ * whole pull request. `hits` names the paths that decided, so a reader can see
+ * why.
+ *
+ * `repo` selects the governed register's rows, as `governedPathsIn` requires;
+ * this file runs in `objectstack-ai/objectstack`, so that is the default.
+ *
+ * @param {string[]} paths  the pull request's changed paths (its committed tree)
+ * @returns {{ face: 'schema'|'rules'|'declaration', tierName: string, words: string, hits: { schema: string[], rules: string[] } }}
+ */
+export function reviewFace(paths, repo = SELF_REPO_ID) {
+  const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
+  // ⭐ No mandate rows are passed: the question is the SUSPECT surface alone, and
+  // an empty mandate table cannot make `deriveTier` throw on an ambiguity.
+  const schema = [...new Set(deriveTier(list, [], SUSPECT_TIER_GLOBS).suspects.map((s) => s.path))];
+  const rules = governedPathsIn(list, repo).flatMap((surface) => surface.files);
+  const id = schema.length > 0 ? 'schema' : rules.length > 0 ? 'rules' : 'declaration';
+  const face = REVIEW_FACES.find((f) => f.id === id);
+  return { face: face.id, tierName: face.tierName, words: face.words, hits: { schema, rules } };
+}
+
+/** The face a `--face` argument names, or null — the CLI's half of the same table. */
+export function reviewFaceById(id) {
+  return REVIEW_FACES.find((face) => face.id === id) ?? null;
+}
 
 
 // ── the pure-regeneration carry (maintainer 2026-09-20 「纯重生成提交不需要开达档复核记录」) ──
@@ -103,6 +192,42 @@ import { quoteLine } from './clause2-line.mjs';
 // `Regen-provenance:` line is a POINTER, NEVER the evidence: it names the record
 // and the two commits so a later reader RE-RUNS the test, and a reader that
 // cannot reach both answers with a GAP — UNJUDGED, ⛔ never clean.
+//
+// ⭐ The PROSE arm (ruling record 6159870311 on #23352, letter B′ with C): a head
+// that moves ONLY on faces outside the review surface keeps the record too —
+// the prose faces the ACCEPT reads sentence by sentence, never the reviewer.
+// Decided exactly like the regeneration arm, on the two COMMITTED trees, and
+// pointed at by the SAME `Regen-provenance:` line rather than a second one: the
+// line is a pointer and never the evidence, so a second key would be a second
+// grammar naming the same two commits, and the common move — a merge-forward
+// that also fixes the changeset — is ONE hop that would otherwise need both.
+
+/**
+ * The faces OUTSIDE the review surface — `references/contract-review.md`'s
+ * prose faces, which the ACCEPT reads sentence by sentence against the diff. A
+ * head move that touches only these (and generated artefacts, and main's
+ * carry-over) is no reason to re-review: nothing the reviewer judged moved.
+ *
+ * ⛔ An EXCLUSION table, named as one so the dispatch derivation reads it as a
+ * never-look-here list rather than as files this module opens (it opens none).
+ *
+ *   `prefix`    every path under this directory
+ *   `basename`  every file of this name, at any depth
+ */
+export const REVIEW_SURFACE_EXCLUDED_PROSE_FACES = Object.freeze([
+  Object.freeze({ id: 'changeset', prefix: '.changeset/' }),
+  Object.freeze({ id: 'changelog', basename: 'CHANGELOG.md' }),
+  Object.freeze({ id: 'docs-content', prefix: 'content/docs/' }),
+  Object.freeze({ id: 'docs-app', prefix: 'apps/docs/' }),
+]);
+
+/** Does this path lie on a prose face outside the review surface? Pure. */
+export function isOutsideReviewSurface(path) {
+  const p = String(path ?? '');
+  return REVIEW_SURFACE_EXCLUDED_PROSE_FACES.some((face) =>
+    face.prefix !== undefined ? p.startsWith(face.prefix) : p === face.basename || p.endsWith(`/${face.basename}`),
+  );
+}
 
 /**
  * One hop, as a seat posts it (the retired C3 row's remedy printed this shape):
@@ -158,10 +283,14 @@ export function regenChainToHead(pair) {
 }
 
 /**
- * The ruled test on COMMITTED trees: which moved paths are explained by NEITHER
- * arm of 「every touched path is a generated artefact OR THE MERGE COMMIT'S OWN
- * CARRY-OVER FROM MAIN」. Empty is the whole criterion.
+ * The ruled test on COMMITTED trees: which moved paths are explained by NONE of
+ * the arms of 「every touched path is a generated artefact OR THE MERGE COMMIT'S
+ * OWN CARRY-OVER FROM MAIN」, widened by the prose arm (a path on a face outside
+ * the review surface). Empty is the whole criterion.
  *
+ * ⓪ the prose arm, `isOutsideReviewSurface`, read off the path alone: a moved
+ * prose path is explained whoever moved it, the pull request itself included —
+ * that is the whole of the exemption, and it is why this arm runs FIRST.
  * ① the `merge=os-regen` attribute, read with `--source <to>` so
  * `.gitattributes` itself comes out of that COMMIT rather than out of whatever
  * the working tree holds. ② the carry-over arm: a path this pull request never
@@ -180,7 +309,7 @@ export function regenChainToHead(pair) {
  */
 export function unexplainedPathsBetween(runGit, { from, to, base }) {
   const names = (a, b) => String(runGit(['diff', '-z', '--name-only', a, b])).split('\0').filter((p) => p !== '');
-  const moved = names(from, to);
+  const moved = names(from, to).filter((p) => !isOutsideReviewSurface(p));
   if (moved.length === 0) return [];
   const f = String(runGit(['check-attr', '--source', to, '-z', 'merge', '--stdin'], moved.join('\0'))).split('\0');
   const hand = [];
@@ -237,7 +366,7 @@ function computeRegenCarry(pair) {
       return { state: 'unreadable', gaps: [`the committed trees ${span} against base \`${base}\` (${why}) — fetch both (\`git fetch origin pull/${pair?.pr}/head\`, \`git fetch origin ${hop.from}\`) and re-run`] };
     }
     if (hand.length > 0) {
-      return { state: 'refused', reason: `${span} moved ${hand.length} path(s) that carry no \`merge=os-regen\` attribute and are not what \`${base}\` brought (${hand.slice(0, 4).join(', ')}) — this pull request's own hand-written content moved, so it is no pure regeneration` };
+      return { state: 'refused', reason: `${span} moved ${hand.length} path(s) that lie on no prose face outside the review surface, carry no \`merge=os-regen\` attribute and are not what \`${base}\` brought (${hand.slice(0, 4).join(', ')}) — this pull request's own reviewed content moved, so it is neither a pure regeneration nor a prose-only move` };
     }
   }
   // Expanded through git so the carried head is spelled at least as fully as
@@ -374,8 +503,8 @@ export function servedStampsHold(stamps) {
 }
 
 /**
- * The ONE token a `Served-tier:` line may carry -- the constant's NAME, ⛔ never
- * its VALUE (#18060).
+ * The token a `Served-tier:` line may carry -- a tier constant's NAME, ⛔ never
+ * its VALUE (#18060); ONE name per face, the one `reviewFace` maps it to.
  *
  * ⭐ `AGENTS.md` is unqualified about the surface: 「no model identifier lands in
  * a PR title or body, a comment, a changeset, a doc or a code comment」 -- and a
@@ -391,14 +520,14 @@ export function servedStampsHold(stamps) {
  * produces no repository artifact at all. What the line carries is the
  * DECLARATION plus its `N/N` stamp control, and both survive the rename.
  *
- * ⛔ Still EXACT: this is the one accepted token, no family and no prefix floor.
+ * ⛔ Still EXACT: one accepted token per face, no family and no prefix floor.
  *
- * Declared beside the constant it names, in `dispatch-gates.mjs`, and
- * RE-EXPORTED here: the claim reader there compares a claim's `model:` value
- * against the same token, and two spellings of one name in two files is the
- * drift this file refuses one family over.
+ * Both names are declared beside the constants they name, in
+ * `dispatch-gates.mjs`, and RE-EXPORTED here: the claim reader there compares a
+ * claim's `model:` value against the same token, and two spellings of one name
+ * in two files is the drift this file refuses one family over.
  */
-export { CONTRACT_REVIEW_TIER_NAME };
+export { CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT_NAME };
 
 /**
  * The id form of a model name -- the word claude, a hyphen, a model word.
@@ -415,9 +544,11 @@ const MODEL_IDENTIFIER_FORM = /\bclaude-[a-z]+(?:[-.][a-z0-9]+)*\b/i;
  * Is this token a model identifier -- the thing `AGENTS.md` keeps out of a
  * comment?
  *
- * Two limbs: the constant's own VALUE, which is the token this row used to
- * REQUIRE (so a record written correctly under the old rule is named for what
- * it is, never read as an ordinary off-tier miss), and the id SHAPE.
+ * Two limbs: the VALUE of each tier a record may stand at -- the contract-review
+ * tier's, which is the token this row used to REQUIRE (so a record written
+ * correctly under the old rule is named for what it is, never read as an
+ * ordinary off-tier miss), and the default tier's, the value a seat writing the
+ * declaration face's record reaches for in place of its NAME -- and the id SHAPE.
  *
  * ⛔ A caller must NEVER echo a token this returns true for: quoting it back
  * would put the identifier straight into the artifact the rule is about, which
@@ -425,12 +556,27 @@ const MODEL_IDENTIFIER_FORM = /\bclaude-[a-z]+(?:[-.][a-z0-9]+)*\b/i;
  */
 export function isModelIdentifierToken(value) {
   const text = String(value ?? '');
-  return text === CONTRACT_REVIEW_TIER || MODEL_IDENTIFIER_FORM.test(text);
+  return text === CONTRACT_REVIEW_TIER || text === TIER_DEFAULT || MODEL_IDENTIFIER_FORM.test(text);
 }
 
-/** The whole reading, as one verdict: at tier, on a control that stands. */
-export function servedTierStands(served) {
-  return served?.state === 'read' && served.value === CONTRACT_REVIEW_TIER_NAME && servedStampsHold(served.stamps);
+/**
+ * The whole reading, as one verdict: at the tier the FACE maps to, on a control
+ * that stands.
+ *
+ * `tierName` is the NAME `reviewFace` answered for the pull request the record
+ * sits on; it defaults to `CONTRACT_REVIEW_TIER_NAME`, the tier both path-read
+ * faces map to and the only one a governed pull request can owe. ⛔ EXACT: a
+ * record naming the other tier does not stand on this face, in either
+ * direction, and a `tierName` that is not one of `REVIEW_TIER_NAMES` stands
+ * NOTHING -- a caller that lost the face fails closed, never open.
+ */
+export function servedTierStands(served, tierName = CONTRACT_REVIEW_TIER_NAME) {
+  return (
+    REVIEW_TIER_NAMES.includes(tierName) &&
+    served?.state === 'read' &&
+    served.value === tierName &&
+    servedStampsHold(served.stamps)
+  );
 }
 
 /**
@@ -582,15 +728,25 @@ export const RECORD_TEMPLATE_PLACEHOLDERS = Object.freeze({
  * hex and nothing else — so that spelling names no head, and a record written it
  * is read as a review of nothing. The key stays outside the span here.
  *
- * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string}} values
+ * ⭐ `tierName` is the NAME the face maps to (`reviewFace`, `REVIEW_FACES`), and
+ * defaults to `CONTRACT_REVIEW_TIER_NAME` — the tier of both path-read faces and
+ * the only one a governed pull request can owe. ⛔ A name no face maps to is
+ * REFUSED here rather than printed: the template cannot teach a spelling
+ * `servedTierStands` refuses.
+ *
+ * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string}} values
  * @returns {string[]}
  */
 export function contractReviewRecordLines(values = {}) {
   const { headSha, implementedBy, reviewedBy } = { ...RECORD_TEMPLATE_PLACEHOLDERS, ...values };
+  const tierName = values.tierName ?? CONTRACT_REVIEW_TIER_NAME;
+  if (!REVIEW_TIER_NAMES.includes(tierName)) {
+    throw new Error(`record-recognisers: no face maps to the tier name '${tierName}' — known: ${REVIEW_TIER_NAMES.join(', ')}`);
+  }
   return [
     '## Contract review',
     '',
-    `Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``,
+    `Served-tier: \`${tierName}\``,
     `Head-sha: \`${headSha}\``,
     'Local-runs: none',
     '',
@@ -742,6 +898,15 @@ export function deliveredCardNumber(pr) {
  * wrote a leading word anyway. A template shows it instead of saying it.
  */
 export function contractReviewTemplateLines(values = {}) {
+  const { face: faceId, ...recordValues } = values;
+  const face = faceId === undefined ? null : reviewFaceById(faceId);
+  if (faceId !== undefined && face === null) {
+    throw new Error(`record-recognisers: unknown face '${faceId}' — known: ${REVIEW_FACES.map((f) => f.id).join(', ')}`);
+  }
+  const tierName = face?.tierName ?? CONTRACT_REVIEW_TIER_NAME;
+  const faceLine = face === null
+    ? `                    No face asked: this is ${CONTRACT_REVIEW_TIER_NAME}, the tier of a schema or governed-path face.`
+    : `                    Asked for the ${face.id} face: ${tierName}.`;
   return [
     'record-recognisers --template — the contract-review record of record, copyable. It is',
     `ONE comment on ${REVIEW_OF_RECORD_LOCATION}; the NEWEST one naming this head governs.`,
@@ -752,11 +917,15 @@ export function contractReviewTemplateLines(values = {}) {
     '   and stays silent, so writing one line badly is the only way to be refused.',
     '',
     RECORD_TEMPLATE_FENCE_START,
-    ...contractReviewRecordLines(values),
+    ...contractReviewRecordLines({ ...recordValues, tierName }),
     RECORD_TEMPLATE_FENCE_END,
     '',
-    `  · Served-tier     the constant's NAME, ${CONTRACT_REVIEW_TIER_NAME}, ⛔ never a model id; an`,
-    '                    at-tier/total stamp control may precede it — 75/75, then the constant.',
+    "  · Served-tier     the NAME of the tier the review's FACE maps to, ⛔ never a model id, and EXACT:",
+    "                    the PR's file list decides it. A published schema or a governed path anywhere in it ⇒",
+    `                    ${CONTRACT_REVIEW_TIER_NAME} (--face schema or rules); neither, the review owed by the`,
+    `                    \`Clause-②: yes\` line alone ⇒ ${TIER_DEFAULT_NAME} (--face declaration).`,
+    faceLine,
+    '                    An at-tier/total stamp control may precede it — 75/75, then the constant.',
     '  · Head-sha        the head you reviewed, 7 to 40 hex in a span of ITS OWN; a span holding',
     '                    the key as well is not a sha, and the record then names no head.',
     '  · Local-runs      `none` — the read-only shape held (the diff, the card and the head\'s check-runs;',
@@ -809,6 +978,14 @@ export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
  */
 export function contractReviewBriefLines(values = {}) {
   const { pr, card, headSha, scratchpad } = { ...BRIEF_TEMPLATE_PLACEHOLDERS, ...values };
+  // The brief names the tier its face maps to, and the record command that prints that face's
+  // record — so a brief for a declaration-only review cannot hand its reviewer the other tier.
+  const face = values.face === undefined ? null : reviewFaceById(values.face);
+  if (values.face !== undefined && face === null) {
+    throw new Error(`record-recognisers: unknown face '${values.face}' — known: ${REVIEW_FACES.map((f) => f.id).join(', ')}`);
+  }
+  const tierName = face?.tierName ?? CONTRACT_REVIEW_TIER_NAME;
+  const templateCommand = `node scripts/pm/record-recognisers.mjs --template${face === null ? '' : ` --face ${face.id}`}`;
   return [
     'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
     "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
@@ -816,8 +993,8 @@ export function contractReviewBriefLines(values = {}) {
     BRIEF_TEMPLATE_FENCE_START,
     `## Contract review brief — PR #${pr} @ \`${headSha}\` (card #${card})`,
     '',
-    `You review at \`${CONTRACT_REVIEW_TIER_NAME}\`. Render ONE \`## Contract review\` record on this head — its shape is`,
-    '`node scripts/pm/record-recognisers.mjs --template` — with a PASS or FAIL verdict, and post it as ONE comment',
+    `You review at \`${tierName}\`. Render ONE \`## Contract review\` record on this head — its shape is`,
+    `\`${templateCommand}\` — with a PASS or FAIL verdict, and post it as ONE comment`,
     `on ${REVIEW_OF_RECORD_LOCATION}.`,
     '',
     'Inputs — these and nothing else:',
@@ -983,11 +1160,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 10,
+  '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
+  '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+// Raised 8 → 10 with the two B′-with-C batteries (ruling record 6159870311): two batteries, two rows.
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1150,6 +1330,43 @@ export async function selfTest() {
   t('⭐ THE MEASURED SPELLING — a continuation after the stamp control reads `unreadable`', readServedTier(`Served-tier: ${MEASURED_SPELLING}`).state === 'unreadable');
   t('…and does not stand, on whatever record carries it', !servedTierStands(servedOn([SERVED(MEASURED_SPELLING, '2026-09-14T08:17:29Z', 3501)])));
 
+  // -- B′ with C: the review TIER follows the FACE that made it owed ----------
+  //
+  // Ruling record 6159870311 on #23352. ⛔ No specimen spells a tier VALUE: the
+  // names are the constants', and the values are read from `dispatch-gates.mjs`.
+  battery('⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor');
+  const SCHEMA_PATH = ['packages', 'spec', 'src', 'data', 'field.zod.ts'].join('/');
+  const SCHEMA_TEST_PATH = ['packages', 'spec', 'src', 'data', 'field.test.ts'].join('/');
+  const RULES_PATH = '.claude/skills/pm-dispatch/references/contract-review.md';
+  const DECL_PATHS = [['packages', 'rest', 'src', 'routes.ts'].join('/'), ['apps', 'console', 'src', 'i18n.ts'].join('/')];
+  const AT = (name) => readServedTier(`Served-tier: 12/12 \`${name}\``);
+  t('⭐ a published schema maps to CONTRACT_REVIEW_TIER', (() => { const f = reviewFace([SCHEMA_PATH]); return f.face === 'schema' && f.tierName === CONTRACT_REVIEW_TIER_NAME && f.hits.schema.join() === SCHEMA_PATH; })());
+  t('⭐ governed rules text maps to CONTRACT_REVIEW_TIER — the register decides, every governed surface alike', ['AGENTS.md', RULES_PATH, ['skills', 'x', 'SKILL.md'].join('/'), ['.github', 'workflows', 'lint.yml'].join('/'), ['docs', 'adr', '0001-x.md'].join('/')].every((p) => { const f = reviewFace([p]); return f.face === 'rules' && f.tierName === CONTRACT_REVIEW_TIER_NAME && f.hits.rules.join() === p; }));
+  t('⭐ a diff with NEITHER — the review owed by the `Clause-②: yes` line alone — maps to TIER_DEFAULT', (() => { const f = reviewFace(DECL_PATHS); return f.face === 'declaration' && f.tierName === TIER_DEFAULT_NAME && f.hits.schema.length === 0 && f.hits.rules.length === 0; })());
+  t('⭐ a MIXED diff maps to CONTRACT_REVIEW_TIER on ONE hit, and names the path that decided', reviewFace([...DECL_PATHS, SCHEMA_PATH]).tierName === CONTRACT_REVIEW_TIER_NAME && reviewFace([...DECL_PATHS, 'AGENTS.md']).tierName === CONTRACT_REVIEW_TIER_NAME && reviewFace([...DECL_PATHS, 'AGENTS.md']).hits.rules.join() === 'AGENTS.md');
+  t('…a schema hit outranks a governed one in the NAMING only — both faces map to the same tier', reviewFace([SCHEMA_PATH, 'AGENTS.md']).face === 'schema' && reviewFace([SCHEMA_PATH, 'AGENTS.md']).tierName === reviewFace(['AGENTS.md']).tierName);
+  t('⛔ a spec TEST file is not a published schema — the suspect surface\'s own exception, imported, not respelled', reviewFace([SCHEMA_TEST_PATH]).face === 'declaration');
+  t('the faces are the closed set of three, and they map to exactly two NAMES', REVIEW_FACES.map((f) => f.id).join() === 'schema,rules,declaration' && REVIEW_TIER_NAMES.join() === `${CONTRACT_REVIEW_TIER_NAME},${TIER_DEFAULT_NAME}`);
+  t('⭐ a TIER_DEFAULT record STANDS on a declaration-only pull request', servedTierStands(AT(TIER_DEFAULT_NAME), reviewFace(DECL_PATHS).tierName));
+  t('⛔ …and does NOT stand on a schema pull request, nor on a governed one', !servedTierStands(AT(TIER_DEFAULT_NAME), reviewFace([SCHEMA_PATH]).tierName) && !servedTierStands(AT(TIER_DEFAULT_NAME), reviewFace([RULES_PATH]).tierName));
+  t('⭐ a CONTRACT_REVIEW_TIER record stands on the schema and governed faces', servedTierStands(AT(CONTRACT_REVIEW_TIER_NAME), reviewFace([SCHEMA_PATH]).tierName) && servedTierStands(AT(CONTRACT_REVIEW_TIER_NAME), reviewFace([RULES_PATH]).tierName));
+  t('⛔ EXACT, never a floor, in BOTH directions — the contract-review NAME does not stand on the declaration face', !servedTierStands(AT(CONTRACT_REVIEW_TIER_NAME), reviewFace(DECL_PATHS).tierName));
+  t('⛔ a tier name no face maps to stands NOTHING — a caller that lost the face fails closed', !servedTierStands(AT('TIER_FLOOR'), 'TIER_FLOOR') && !servedTierStands(AT(TIER_DEFAULT_NAME), null) && !servedTierStands(AT(TIER_DEFAULT_NAME), 'TIER_DEFAULT_X'));
+  t('the one-argument call is unchanged — the contract-review face, as every governed reading always was', servedTierStands(AT(CONTRACT_REVIEW_TIER_NAME)) && !servedTierStands(AT(TIER_DEFAULT_NAME)));
+  t('⭐ the default tier\'s VALUE is refused as an identifier and stands nowhere, while its NAME is no identifier', isModelIdentifierToken(TIER_DEFAULT) && !isModelIdentifierToken(TIER_DEFAULT_NAME) && !servedTierStands(AT(TIER_DEFAULT), reviewFace(DECL_PATHS).tierName));
+  const DECL_TPL = contractReviewTemplateLines({ face: 'declaration' }).join('\n');
+  const declOn = (body, headSha = RECORD_TEMPLATE_PLACEHOLDERS.headSha) => locateReviewOfRecord(pairOf({ headSha, prComments: [{ id: 3701, created_at: '2026-10-14T03:00:00Z', body }] }));
+  t('⭐ `--face declaration`\'s template carries TIER_DEFAULT, round-trips through the locator and STANDS on that face', (() => { const r = declOn(DECL_TPL); return readServedTier(DECL_TPL).value === TIER_DEFAULT_NAME && r.state === 'found' && servedTierStands(r.served, reviewFace(DECL_PATHS).tierName); })());
+  t('⛔ …and the same printed record does NOT stand on a governed face — the template cannot teach the wrong face', !servedTierStands(declOn(DECL_TPL).served, reviewFace([RULES_PATH]).tierName));
+  t('the schema and rules faces print the contract-review NAME, byte-identical to the bare template\'s record', ['schema', 'rules'].every((id) => contractReviewTemplateLines({ face: id }).join('\n').includes(`Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``)) && contractReviewRecordLines().join('\n') === contractReviewRecordLines({ tierName: CONTRACT_REVIEW_TIER_NAME }).join('\n'));
+  t('⛔ no template spells a tier VALUE — neither the identifier shape nor the default tier\'s word', ['schema', 'rules', 'declaration', undefined].every((id) => { const text = contractReviewTemplateLines(id === undefined ? {} : { face: id }).join('\n'); return !isModelIdentifierToken(text) && !new RegExp(`\\b${TIER_DEFAULT}\\b`).test(text) && !text.includes(CONTRACT_REVIEW_TIER); }));
+  t('⛔ a tier name or a face no table maps is REFUSED, never printed', (() => { try { contractReviewRecordLines({ tierName: 'TIER_FLOOR' }); return false; } catch { /* refused */ } try { contractReviewTemplateLines({ face: 'lane' }); return false; } catch { return true; } })());
+  t('the brief names the face\'s tier and the face\'s record command', (() => { const b = contractReviewBriefLines({ face: 'declaration' }).join('\n'); return b.includes(`You review at \`${TIER_DEFAULT_NAME}\``) && b.includes('--template --face declaration') && !isModelIdentifierToken(b) && !new RegExp(`\\b${TIER_DEFAULT}\\b`).test(b); })());
+  const faceCli = (args) => spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...args], { encoding: 'utf8', timeout: 60_000 });
+  t('⭐ `--template --face declaration` prints exactly that face\'s template and exits 0', (() => { const r = faceCli(['--template', '--face', 'declaration']); return r.status === 0 && r.stdout === `${DECL_TPL}\n`; })());
+  t('⛔ `--face` naming no face is REFUSED with the usage, exit 1', (() => { const r = faceCli(['--template', '--face', 'lane']); return r.status === 1 && says(r.stderr, 'usage:'); })() && faceCli(['--template', '--face']).status === 1);
+  t('`--brief-template --face declaration` prints exactly that face\'s brief', (() => { const r = faceCli(['--brief-template', '--face', 'declaration']); return r.status === 0 && r.stdout === `${contractReviewBriefLines({ face: 'declaration' }).join('\n')}\n`; })());
+
   // -- the 2026-09-20 ruling: a PURE REGENERATION keeps the record -----------
   battery('⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees');
   const NEW_HEAD = 'e1ae0257'; // the head a whole-tree regeneration produced, as the board abbreviated it.
@@ -1209,6 +1426,18 @@ export async function selfTest() {
   t('⇒ the DELTA decides, ⛔ never the path name: one path, two specimens, two verdicts', unexplainedPathsBetween(GIT(CARRY_OVER), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).length === 0 && unexplainedPathsBetween(GIT(HAND_RESOLVED), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).join() === 'AGENTS.md');
   t('…and the delta is read ONCE PER HEAD against `merge-base BASE head`, ⛔ never once per path', GIT_SEEN.includes(`merge-base ${BASE} ${HEAD_9AF9}`) && GIT_SEEN.includes(`diff -z --name-only mb-${NEW_HEAD} ${NEW_HEAD}`), GIT_SEEN.slice(-4).join(' | '));
   t('⛔ (iv) a run naming NO base ref cannot tell main\'s carry-over from a hand edit — UNREADABLE, ⛔ never clean', (() => { const r = regenCarry(withGit(GIT(CARRY_OVER), { baseRef: null })); return r.state === 'unreadable' && r.gaps.some((g) => g.includes('base ref')); })());
+
+  // ⭐ the PROSE arm (B′ with C, ruling record 6159870311): a head that moves only on faces outside the
+  // review surface keeps the record — decided on the same committed trees, by the same line.
+  battery('⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration');
+  const PROSE_MOVE = { moved: '.changeset/brave-owls.md\0content/docs/guides/x.mdx\0packages/core/CHANGELOG.md\0', attrs: '', own: { [NEW_HEAD]: '.changeset/brave-owls.md\0content/docs/guides/x.mdx\0' } };
+  const PROSE_AND_CODE = { moved: '.changeset/brave-owls.md\0packages/core/src/kernel.ts\0', attrs: 'packages/core/src/kernel.ts\0merge\0unspecified\0', own: { [NEW_HEAD]: '.changeset/brave-owls.md\0packages/core/src/kernel.ts\0' } };
+  t('⭐ a head that moved ONLY prose faces — the pull request\'s OWN changeset and docs edit — CARRIES the record', regenCarry(withGit(GIT(PROSE_MOVE))).state === 'carried' && locateReviewOfRecord(withGit(GIT(PROSE_MOVE))).state === 'found');
+  t('…and nothing about it was read off the attribute: a prose path is explained by its face before `check-attr` runs', unexplainedPathsBetween(GIT(PROSE_MOVE), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).length === 0);
+  t('⛔ a CODE path moved beside the prose — refused, and the reason names the code path, never the changeset', (() => { const r = regenCarry(withGit(GIT(PROSE_AND_CODE))); return r.state === 'refused' && says(r.reason, 'packages/core/src/kernel.ts') && !says(r.reason, '.changeset/') && says(r.reason, 'prose-only'); })() && locateReviewOfRecord(withGit(GIT(PROSE_AND_CODE))).state === 'absent');
+  t('the prose faces are the four the charter names: `.changeset/**`, any CHANGELOG.md, `content/docs/**`, `apps/docs/**`', ['.changeset/x.md', 'CHANGELOG.md', 'packages/spec/CHANGELOG.md', 'content/docs/a/b.mdx', 'apps/docs/app/page.tsx'].every((p) => isOutsideReviewSurface(p)));
+  t('⛔ and nothing beside them: near-miss names, schema paths and governed rules text stay ON the review surface', ['.changesets/x.md', 'CHANGELOG.md.bak', 'docs/CHANGELOG.txt', 'content/docs-old/x.mdx', 'apps/docsite/x.ts', 'packages/spec/src/data/field.zod.ts', '.claude/skills/pm-dispatch/references/contract-review.md', 'AGENTS.md'].every((p) => !isOutsideReviewSurface(p)));
+  t('⛔ a prose-only move with NO `Regen-provenance:` line carries nothing — the line still points the reader at the trees', regenCarry(moved([RECORD_ON_9AF9], GIT(PROSE_MOVE))).state === 'none' && locateReviewOfRecord(moved([RECORD_ON_9AF9], GIT(PROSE_MOVE))).state === 'absent');
 
   // -- the `Local-runs:` reading ---------------------------------------------
   //
@@ -1434,8 +1663,9 @@ export async function selfTest() {
     `✓ record-recognisers self-test: ${cases.length} cases pass (the locator on either thread with its `
       + 'recognition dialects, the unsigned and newest-governs readings and the two gaps; the head sha in a span '
       + 'of its own; the `Served-tier:` reading — at tier, below, missing, unreadable, the identifier refused by '
-      + 'value and by shape, the stamp control and the measured continuation spelling; the pure-regeneration '
-      + 'carry decided on committed trees in every direction; the copyable template driven back through the '
+      + 'value and by shape, the stamp control and the measured continuation spelling; the review tier read off '
+      + 'the face — schema, governed rules text, the declaration alone — exact in both directions; the pure-regeneration carry and the prose-only carry decided on committed trees in '
+      + 'every direction; the copyable template, per face, driven back through the '
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; and the ONE '
       + 'thread set, driven through the queue guard itself).',
@@ -1456,10 +1686,12 @@ export async function selfTest() {
  */
 export function usageLines() {
   return [
-    'usage: node scripts/pm/record-recognisers.mjs [--template] [--brief-template] [--self-test] [--help]',
+    'usage: node scripts/pm/record-recognisers.mjs [--template [--face FACE]] [--brief-template [--face FACE]] [--self-test] [--help]',
     '',
     '  --template   print the copyable contract-review record and exit 0 -- no board is read',
     "  --brief-template   print the copyable reviewer's brief, read-only shape built in, and exit 0 -- no board is read",
+    `  --face FACE  the face that made the review owed, one of: ${REVIEW_FACES.map((f) => `${f.id} (${f.tierName})`).join(', ')};`,
+    `               the record's \`Served-tier:\` names that tier. Without it: ${CONTRACT_REVIEW_TIER_NAME}.`,
     "  --self-test  run this file's own battery, offline -- no board is read",
     '  --help, -h   print this text and exit 0',
     '',
@@ -1493,11 +1725,15 @@ if (isEntrypoint(import.meta.url)) {
         process.exit(1);
       },
     );
-  } else if (argv.length === 1 && argv[0] === '--template') {
-    for (const line of contractReviewTemplateLines()) console.log(line);
-    process.exit(0);
-  } else if (argv.length === 1 && argv[0] === '--brief-template') {
-    for (const line of contractReviewBriefLines()) console.log(line);
+  } else if (
+    (argv.length === 1 || (argv.length === 3 && argv[1] === '--face' && reviewFaceById(argv[2]) !== null)) &&
+    (argv[0] === '--template' || argv[0] === '--brief-template')
+  ) {
+    // ⛔ `--face` takes one of the table's ids or the whole line is refused below — a face this file does
+    // not map would print a tier no reader accepts.
+    const asked = argv.length === 3 ? { face: argv[2] } : {};
+    const lines = argv[0] === '--template' ? contractReviewTemplateLines(asked) : contractReviewBriefLines(asked);
+    for (const line of lines) console.log(line);
     process.exit(0);
   } else if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
     for (const line of usageLines()) console.log(line);

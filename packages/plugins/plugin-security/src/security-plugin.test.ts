@@ -4694,41 +4694,4 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
       expect(bindings).toEqual([]);
     }
   });
-
-  // ── The engine-side write gate (`sys_position_permission_set` insert) ──
-  //
-  // Same three cases at the door an ADMIN comes through. It must agree with the
-  // boot binding above and with `confirmAudienceBindingSuggestion`'s early
-  // rendition — all three now read one source, so a set that binds at boot
-  // cannot be refused when an admin re-binds it by hand.
-  const anchorInsert = {
-    object: 'sys_position_permission_set',
-    operation: 'insert',
-    data: { position_id: 'pos_everyone', permission_set_id: 'ps_app' },
-  };
-
-  it('write gate: admits a binding whose token the stack declares', async () => {
-    const { plugin } = await boot('crm.export_pipeline', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
-    await expect((plugin as any).assertAudienceAnchorBindingGate(anchorInsert)).resolves.toBeUndefined();
-  });
-
-  it('write gate: still refuses an undeclared token, with the ADR-0112 envelope', async () => {
-    const { plugin } = await boot('crm.settle_ledger', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
-    const err = await (plugin as any)
-      .assertAudienceAnchorBindingGate(anchorInsert)
-      .then(() => null, (e: any) => e);
-    expect(err).toBeTruthy();
-    expect(err.code).toBe('PERMISSION_DENIED');
-    expect(err.statusCode).toBe(403);
-    expect(err.message).toContain('system permissions');
-  });
-
-  it('write gate: still refuses a platform capability of that name', async () => {
-    const { plugin } = await boot('manage_users', [{ name: 'manage_users', label: 'Not Yours' }]);
-    const err = await (plugin as any)
-      .assertAudienceAnchorBindingGate(anchorInsert)
-      .then(() => null, (e: any) => e);
-    expect(err?.code).toBe('PERMISSION_DENIED');
-    expect(err?.statusCode).toBe(403);
-  });
 });
