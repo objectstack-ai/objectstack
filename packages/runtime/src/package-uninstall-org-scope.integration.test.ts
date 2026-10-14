@@ -153,7 +153,7 @@ const viewBody = (name: string) => ({
  * the table declares no organization column, so every row is the
  * environment's: the uninstall's reach is the package, nothing narrower.
  */
-async function seed(protocol: any, engine: any) {
+async function seed(protocol: any, _engine: any) {
   const save = (name: string, packageId: string) =>
     protocol.saveMetaItem({
       type: 'view',
