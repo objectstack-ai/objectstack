@@ -1115,10 +1115,11 @@ const VIEW_DATA_SOURCE_COMPONENT_TYPES: ReadonlySet<string> = new Set([
  * read and boot diagnostics), and nothing else about the bag.
  *
  * The judge is the retirement's own. `ViewDataSchema` parses the component's
- * `data`, and the issue it raises at `provider` — `invalid_union`, carrying
- * the retirement's prescription — is raised here unchanged, located at the
- * component's `properties.data.provider`. Nothing is copied, so a page and a
- * view refuse with one code and one text.
+ * `data`, and the prescription its issue at `provider` carries is raised
+ * here, located at the component's `properties.data.provider`. Nothing is
+ * copied, so a page and a view refuse with one text. The code is `custom`,
+ * the code of every object-level check on this schema (the view's own
+ * `invalid_union` is the discriminated union's).
  *
  * Reach: every component node under `regions` and `slots`, at any depth — a
  * node nested in another component's `properties` (a `page:tabs` item's
@@ -1166,7 +1167,11 @@ export function checkPageComponentViewData(
           ? undefined
           : verdict.error.issues.find((issue) => issue.path.length === 1 && issue.path[0] === 'provider');
         if (retirement !== undefined) {
-          ctx.addIssue({ ...retirement, path: [...path, 'properties', 'data', ...retirement.path] });
+          ctx.addIssue({
+            code: 'custom',
+            message: retirement.message,
+            path: [...path, 'properties', 'data', ...retirement.path],
+          });
         }
       }
     }
