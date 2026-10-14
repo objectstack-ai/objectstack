@@ -11,54 +11,8 @@
  * The SELECTION (`outcomeMessages[result.outcome]` → `successMessage` → the
  * runner default) and the `${result.*}` INTERPOLATION are the console's — the
  * reader is objectstack-ai/objectui#11344, a later link of the same ruling,
- * carried from objectui `b9814b334` (re-read there 2026-10-14:
- * every objectui file this record cites is byte-identical across the hop from
- * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
- * `1fb1ced36`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
- * `7578323a5`, re-read there 2026-10-12:
- * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
- * byte-identical in body to `9646e2ed2` and MOVED down by 11, `1498` -> `1509`
- * (objectui#12191, objectui `334f0cff9`: the runner admits `mailto:` through one
- * navigation-target answer, its eleven import lines added above it; every other
- * hunk lies below the reader). At `9646e2ed2`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
- * `088e0f705`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
- * `e5311165a`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
- * `499799502`, re-read there 2026-10-11:
- * every objectui file this record cites is byte-identical across the hop from
- * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
- * `0df67f237`, re-read there 2026-10-11:
- * every objectui file this record cites is byte-identical across the hop from
- * `20c6d351a` (`git diff --quiet`), so every anchor held unmoved. At
- * `20c6d351a`, re-read there 2026-10-10:
- * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
- * byte-identical in body to `47b1f0bb7` and MOVED up by 6, `1504` -> `1498`
- * (objectui#6349 batch 4, objectui `d32869883`: `ActionContext` and
- * `ActionResult` declared once, in the import block and declarations above it).
- * At `47b1f0bb7`, re-read there 2026-10-09:
- * every objectui file this record cites is byte-identical across the hop from
- * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
- * `f0268ad78`, re-read there 2026-10-09:
- * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
- * byte-identical in body to `a58626c88` and MOVED by 7 (objectui#11695 added the
- * confirmation handler's `destructive` option above it). At `a58626c88`, re-read
- * there 2026-10-06:
- * every objectui file this record cites is byte-identical across the hop from
- * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
- * At `0abd4f9f8`, re-read there 2026-10-05:
- * every objectui file this record cites is byte-identical across the hop from
- * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
- * At `9dfaca654`; `ActionRunner.composeSuccessMessage`, in
- * `core/src/actions/ActionRunner.ts`, byte-identical to `2e818d0b5`, re-read
- * 2026-10-05, and to `ab1879721` before it), where the ledger row
- * turned `live`. Its behaviour is pinned on objectui's side, so the "a handler returning
+ * whose read point is recorded by symbol in `packages/spec/liveness/action.json`
+ * (row `outcomeMessages`, now `live`). Its behaviour is pinned on objectui's side, so the "a handler returning
  * `{ outcome: 'archived', … }` resolves to the archived copy, interpolated"
  * acceptance splits in two. HERE: the key is accepted on exactly the two types
  * that have a success payload, refused loudly everywhere it would be inert or
