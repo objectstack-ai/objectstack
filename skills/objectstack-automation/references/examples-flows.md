@@ -38,7 +38,7 @@ export const EscalateOverdueCasesFlow = defineFlow({
         objectName: 'support_case',
         filter: {
           status: { $in: ['new', 'open'] },
-          due_date: { $lt: '{TODAY()}' },   // template token → today's date at run time
+          due_date: { $lt: '{today}' },   // query placeholder → today's date at run time
         },
         // what to write — `fields`, not `values`
         fields: { status: 'escalated' },
@@ -76,7 +76,7 @@ record *happens to change*, so unattended it almost never fires. Use a
 **declarative time-relative trigger**: a `schedule`-type flow whose `start` node
 carries a **`timeRelative`** descriptor is swept on a schedule (daily by default)
 and launched **once per record** whose date field falls in the window. The record
-is on the context, so the start `condition` and `{record.*}` interpolation work
+is on the context, so the start `condition` and a `record.*` CEL value envelope work
 exactly as for a record-change flow — and because the window is evaluated every
 day, a threshold is never missed.
 
@@ -94,7 +94,7 @@ day, a threshold is never missed.
           object: 'contracts',
           dateField: 'end_date',
           offsetDays: [60, 30, 7],   // fire exactly at T-60 / T-30 / T-7
-          // — or — withinDays: 30    // "expiring within 30 days" (negative = overdue lookback)
+          // — or (exactly one) — withinDays: 30   // "expiring within 30 days" (negative = overdue lookback)
           filter: { status: 'active' },  // optional, ANDed with the date window
           // maxRecords: 1000            // optional per-sweep cap (default 1000)
         },
@@ -116,20 +116,19 @@ one-day **window** (`$gte`/`$lt`):
 
 ```ts
 filter: { status: 'active', $or: [
-  { end_date: { $gte: '{TODAY() + 7}',  $lt: '{TODAY() + 8}'  } },
-  { end_date: { $gte: '{TODAY() + 30}', $lt: '{TODAY() + 31}' } },
-  { end_date: { $gte: '{TODAY() + 60}', $lt: '{TODAY() + 61}' } },
+  { end_date: { $gte: { dialect: 'cel', source: 'isoDate(daysFromNow(7))' },
+                $lt:  { dialect: 'cel', source: 'isoDate(daysFromNow(8))' } } },
+  // …and the same one-day window at 30 / 31 and at 60 / 61
 ] }
 ```
 
 Abutting windows tile the timeline, so each record matches exactly one tier —
-fires once, idempotent, no guard field. Use `{TODAY() + N}` template tokens in
-CRUD-node filter values; a `cel\`…\`` envelope is not evaluated there and would be
-compared as a literal object. For "days remaining" in a message, use
-`daysBetween(today(), record.end_date)`.
+fires once, idempotent, no guard field. Each bound is a CEL value envelope
+(`isoDate(daysFromNow(N))`), evaluated before the query; any `{…}` token but a
+query placeholder such as `{today}` is refused there (`expression-invalid`).
+For "days remaining" in a message, use `daysBetween(today(), record.end_date)`.
 
-Exactly one of `offsetDays` (discrete T-minus days) or `withinDays` (a range;
-negative = overdue) is required. Ships in `@objectstack/trigger-schedule` —
-needs `requires: ['automation', 'triggers']` **plus `'job'`** (the sweep cadence
+`timeRelative` ships in `@objectstack/trigger-schedule` — needs
+`requires: ['automation', 'triggers']` **plus `'job'`** (the sweep cadence
 runs on the job service). Full descriptor schema:
 `node_modules/@objectstack/spec/src/automation/time-relative-trigger.zod.ts`.
