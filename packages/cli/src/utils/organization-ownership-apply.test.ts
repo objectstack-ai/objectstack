@@ -23,11 +23,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { permissionSetDefinitionFromRow } from '@objectstack/core';
 import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn } from '@objectstack/metadata-core';
-import { inventoryDigest } from './organization-ownership-plan.js';
+import { buildOrganizationOwnershipPlan, inventoryDigest } from './organization-ownership-plan.js';
 import {
   applyOrganizationOwnership,
   MetadataChoiceRefusal,
   ReviewedPlanRefusal,
+  reviewedConflictsOf,
   reviewedPlanFromFile,
   TemplateChoiceRefusal,
   type ApplyExecutor,
@@ -37,6 +38,7 @@ import {
   type ColumnDropPort,
   type MetadataDoorPort,
   type OrganizationOwnershipApplyReport,
+  type ReviewedConflict,
   type ReviewedPlan,
   type ServedViewsPort,
   type TemplatePort,
@@ -419,15 +421,17 @@ const apply = (
   } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
-  return applyOrganizationOwnership({
+  return reviewedConflictsNow(opts.posture ?? 'single').then((conflicts) => applyOrganizationOwnership({
     views: opts.views ?? servedViews(c),
-    // The plan the operator reviewed: by default, the one this run computes.
+    // The plan the operator reviewed: by default, the one a plan run computes
+    // over the database as it stands, conflict groups included.
     reviewedPlan: {
       file: 'plan.json',
       generatedAt: '2026-10-11T00:00:00Z',
       database: file,
       inventoryDigest: inventoryDigest(),
       posture: opts.posture ?? 'single',
+      conflicts,
       ...opts.reviewed,
     },
     executor: opts.executor ?? executor(),
@@ -441,8 +445,17 @@ const apply = (
     columnDrops: opts.columnDrops ?? columnDrops,
     ledger: l,
     now: () => new Date('2026-10-12T00:00:00Z'),
-  });
+  }));
 };
+
+/** The conflict groups a plan run lists over the database as it stands (none when the plan itself refuses). */
+async function reviewedConflictsNow(posture: string): Promise<ReviewedConflict[]> {
+  try {
+    return reviewedConflictsOf(await buildOrganizationOwnershipPlan({ reader: executor(), posture, database: file }));
+  } catch {
+    return [];
+  }
+}
 
 /** Run `body` against a database holding nothing but the given templates, so every step can finish under any posture. */
 async function onlyTemplates(values: string, body: () => Promise<void>): Promise<void> {
@@ -672,8 +685,22 @@ describe('reviewedPlanFromFile', () => {
 
   it('reads the compared fields of a plan file', () => {
     expect(reviewedPlanFromFile('p.json', JSON.stringify({ ...plan, tables: [] }))).toEqual({
-      file: 'p.json', generatedAt: 'g', database: 'd', inventoryDigest: 'x', posture: 'single',
+      file: 'p.json', generatedAt: 'g', database: 'd', inventoryDigest: 'x', posture: 'single', conflicts: [],
     });
+  });
+
+  it('reads both conflict lists the plan file records, keyed and sorted', () => {
+    const tables = [
+      {
+        object: 'sys_metadata',
+        metadataConflicts: [{ type: 'view', name: 'deal_list', packageId: 'pkg_a', bundleMember: null, candidates: [{ id: 'md_b' }, { id: 'md_a' }] }],
+      },
+      { object: 'sys_email_template', templateConflicts: [{ name: 'crm.note', locale: 'en-US', candidates: [{ id: 'tpl_b' }, { id: 'tpl_a' }] }] },
+    ];
+    expect(reviewedPlanFromFile('p.json', JSON.stringify({ ...plan, tables })).conflicts).toEqual([
+      { kind: 'metadata', key: 'view deal_list (package pkg_a)', candidates: ['md_a', 'md_b'] },
+      { kind: 'template', key: 'crm.note (en-US)', candidates: ['tpl_a', 'tpl_b'] },
+    ]);
   });
 
   it.each([
@@ -970,7 +997,9 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     // The control: the same table on the resumed run, answered `not-proposed`
     // (a declared object the differ proposed no drop for).
     const notProposed = await answering('not-proposed');
-    expect(notProposed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion']);
+    expect(notProposed.resumedFrom).toEqual([
+      'attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion', 'history-renumber',
+    ]);
     const control = notProposed.steps.find((s) => s.step === 'column-drops')!;
     expect(control.status).toBe('blocked');
     expect(control.summary).toEqual({ dropped: 0, due: 1, notDeclared: 0 });
@@ -1300,6 +1329,95 @@ describe('ADR-0131 D10 --apply — a customization conflict resolved by --metada
       /md_org and md_env both choose for view deal_list/,
     );
     expect(writes).toEqual([]);
+  });
+});
+
+describe('ADR-0131 D10 --apply — a choice deletes only rows the reviewed plan listed (plan-conflict-mismatch)', () => {
+  const metadataConflict = (extra = ''): void => {
+    db.exec(`
+      CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT,
+        package_id TEXT, bundle_member TEXT, metadata TEXT);
+      INSERT INTO sys_metadata VALUES
+        ('md_org', 'org_default', 'view', 'deal_list', 'active', NULL, NULL, '{"name":"deal_list","label":"Org"}'),
+        ('md_env', NULL, 'view', 'deal_list', 'active', NULL, NULL, '{"name":"deal_list","label":"Env"}')${extra};
+    `);
+  };
+  const reviewedMetadata = (candidates: string[]): Partial<ReviewedPlan> => ({
+    conflicts: [{ kind: 'metadata', key: 'view deal_list', candidates }],
+  });
+  const refusalOf = async (run: Promise<unknown>): Promise<ReviewedPlanRefusal> => {
+    try {
+      await run;
+    } catch (error) {
+      return error as ReviewedPlanRefusal;
+    }
+    throw new Error('expected the apply to be refused');
+  };
+
+  it('⭐ --metadata-choice: a row that joined the conflict since the review refuses the apply, naming it; nothing is written', async () => {
+    metadataConflict(`, ('md_new', 'org_b', 'view', 'deal_list', 'active', NULL, NULL, '{"name":"deal_list","label":"New"}')`);
+    const err = await refusalOf(apply(storingDoor(catalog()), ledger(), { metadataChoices: ['md_org'], reviewed: reviewedMetadata(['md_env', 'md_org']) }));
+    expect(err).toBeInstanceOf(ReviewedPlanRefusal);
+    expect(err).toMatchObject({
+      reason: 'plan-conflict-mismatch',
+      detail: { flag: '--metadata-choice', choice: 'md_org', conflict: 'view deal_list', reviewed: 'md_env,md_org', current: 'md_env,md_new,md_org' },
+    });
+    expect(err.message).toMatch(/added since: md_new.*Nothing was written/s);
+    expect(writes).toEqual([]);
+    expect(rows('SELECT id FROM sys_metadata ORDER BY id').map((r) => r.id)).toEqual(['md_env', 'md_new', 'md_org']);
+  });
+
+  it('--metadata-choice: a reviewed row gone since refuses too, and a plan file that lists no such conflict', async () => {
+    metadataConflict();
+    const gone = await refusalOf(apply(storingDoor(catalog()), ledger(), { metadataChoices: ['md_org'], reviewed: reviewedMetadata(['md_env', 'md_old', 'md_org']) }));
+    expect(gone).toMatchObject({ reason: 'plan-conflict-mismatch' });
+    expect(gone.message).toMatch(/gone since: md_old/);
+    const unlisted = await refusalOf(apply(storingDoor(catalog()), ledger(), { metadataChoices: ['md_org'], reviewed: { conflicts: [] } }));
+    expect(unlisted.message).toMatch(/lists no such conflict/);
+    expect(writes).toEqual([]);
+  });
+
+  it('--metadata-choice: the reviewed group, unchanged, resolves as reviewed', async () => {
+    metadataConflict();
+    const report = await apply(storingDoor(catalog()), ledger(), { metadataChoices: ['md_org'], reviewed: reviewedMetadata(['md_env', 'md_org']) });
+    expect(report.steps.find((s) => s.step === 'metadata-promotion')!.summary).toMatchObject({ chosen: 1, organizationRowsDeleted: 1 });
+  });
+
+  it('⭐ --template-choice: a row that joined the conflict since the review refuses the apply, naming it; nothing is written', async () => {
+    await onlyTemplates(
+      `('tpl_a', 'org_a', 'crm.note', 'en-US', 'From A', 1, 'platform'), ('tpl_b', 'org_b', 'crm.note', 'en-US', 'From B', 1, 'platform'),
+       ('tpl_c', 'org_c', 'crm.note', 'en-US', 'From C', 1, 'platform')`,
+      async () => {
+        const c = catalog();
+        const err = await refusalOf(apply(c, ledger(), {
+          posture: 'isolated',
+          templateChoices: ['tpl_b'],
+          reviewed: { conflicts: [{ kind: 'template', key: 'crm.note (en-US)', candidates: ['tpl_a', 'tpl_b'] }] },
+        }));
+        expect(err).toMatchObject({
+          reason: 'plan-conflict-mismatch',
+          detail: { flag: '--template-choice', choice: 'tpl_b', conflict: 'crm.note (en-US)', current: 'tpl_a,tpl_b,tpl_c' },
+        });
+        expect(err.message).toMatch(/added since: tpl_c/);
+        expect(writes).toEqual([]);
+        expect(c.templates.size).toBe(0);
+        expect(rows('SELECT id FROM sys_email_template ORDER BY id').map((r) => r.id)).toEqual(['tpl_a', 'tpl_b', 'tpl_c']);
+      },
+    );
+  });
+
+  it('--template-choice: the reviewed group, unchanged, resolves as reviewed', async () => {
+    await onlyTemplates(
+      `('tpl_a', 'org_a', 'crm.note', 'en-US', 'From A', 1, 'platform'), ('tpl_b', 'org_b', 'crm.note', 'en-US', 'From B', 1, 'platform')`,
+      async () => {
+        const report = await apply(catalog(), ledger(), {
+          posture: 'isolated',
+          templateChoices: ['tpl_b'],
+          reviewed: { conflicts: [{ kind: 'template', key: 'crm.note (en-US)', candidates: ['tpl_a', 'tpl_b'] }] },
+        });
+        expect(report.complete).toBe(true);
+      },
+    );
   });
 });
 

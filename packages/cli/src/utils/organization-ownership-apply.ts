@@ -241,6 +241,48 @@ export interface ReviewedPlan {
   inventoryDigest: string;
   /** The tenancy posture the plan was computed under. */
   posture: string;
+  /**
+   * The conflict groups the plan listed, by key: the only rows a
+   * `--metadata-choice` or `--template-choice` may delete. Absent means the
+   * file listed none.
+   */
+  conflicts?: ReviewedConflict[];
+}
+
+/** One conflict group a plan lists: the rows a choice there resolves. */
+export interface ReviewedConflict {
+  kind: 'metadata' | 'template';
+  /** The group's key as the operator reads it: `view deal_list (package p)`, `crm.note (en-US)`. */
+  key: string;
+  /** Its rows, by id, sorted. */
+  candidates: string[];
+}
+
+/**
+ * The conflict groups of a plan, from the plan the apply computes or from the
+ * kept file (both carry `tables[].metadataConflicts` and
+ * `tables[].templateConflicts`), normalized so the two compare.
+ */
+export function reviewedConflictsOf(plan: unknown): ReviewedConflict[] {
+  const tables = (plan as { tables?: unknown } | null)?.tables;
+  if (!Array.isArray(tables)) return [];
+  const ids = (candidates: unknown): string[] =>
+    Array.isArray(candidates) ? candidates.map((c) => String((c as { id?: unknown })?.id)).sort() : [];
+  const out: ReviewedConflict[] = [];
+  for (const table of tables as Array<Record<string, unknown>>) {
+    for (const c of Array.isArray(table?.metadataConflicts) ? (table.metadataConflicts as Array<Record<string, unknown>>) : []) {
+      out.push({
+        kind: 'metadata',
+        key: `${String(c.type)} ${String(c.name)}${c.packageId ? ` (package ${String(c.packageId)})` : ''}` +
+          `${c.bundleMember ? ` [${String(c.bundleMember)}]` : ''}`,
+        candidates: ids(c.candidates),
+      });
+    }
+    for (const c of Array.isArray(table?.templateConflicts) ? (table.templateConflicts as Array<Record<string, unknown>>) : []) {
+      out.push({ kind: 'template', key: `${String(c.name)} (${String(c.locale)})`, candidates: ids(c.candidates) });
+    }
+  }
+  return out;
 }
 
 /**
@@ -250,7 +292,12 @@ export interface ReviewedPlan {
  */
 export class ReviewedPlanRefusal extends Error {
   constructor(
-    readonly reason: 'plan-file-unusable' | 'plan-digest-mismatch' | 'plan-posture-mismatch' | 'plan-database-mismatch',
+    readonly reason:
+      | 'plan-file-unusable'
+      | 'plan-digest-mismatch'
+      | 'plan-posture-mismatch'
+      | 'plan-database-mismatch'
+      | 'plan-conflict-mismatch',
     message: string,
     readonly detail: Readonly<Record<string, string>> = {},
   ) {
@@ -296,7 +343,14 @@ export function reviewedPlanFromFile(file: string, text: string): ReviewedPlan {
       { file },
     );
   }
-  return { file, generatedAt: p.generatedAt, database: p.database, inventoryDigest: p.inventoryDigest, posture: p.posture };
+  return {
+    file,
+    generatedAt: p.generatedAt,
+    database: p.database,
+    inventoryDigest: p.inventoryDigest,
+    posture: p.posture,
+    conflicts: reviewedConflictsOf(p),
+  };
 }
 
 export interface StepReport {
@@ -2041,6 +2095,51 @@ function refuseUnreviewedPlan(plan: OrganizationOwnershipPlan, reviewed: Reviewe
 }
 
 /**
+ * Refuse, before anything is written, a choice whose conflict group is not the
+ * one the reviewed plan listed. A `--metadata-choice` or `--template-choice`
+ * deletes the other rows of its group, so the apply deletes only within a group
+ * the operator reviewed, and only while it holds exactly the reviewed rows: a
+ * row that joined the group since, or one gone from it, refuses the apply with
+ * the group, the rows added and the rows gone. A choice in no group (a lone
+ * row, or a conflict an earlier run resolved) deletes nothing and is not judged.
+ */
+function refuseUnreviewedChoices(plan: OrganizationOwnershipPlan, opts: ApplyOptions): void {
+  const current = reviewedConflictsOf(plan);
+  const reviewed = opts.reviewedPlan.conflicts ?? [];
+  const flagOf = { metadata: '--metadata-choice', template: '--template-choice' } as const;
+  for (const [kind, choices] of [['metadata', opts.metadataChoices ?? []], ['template', opts.templateChoices ?? []]] as const) {
+    for (const choice of choices) {
+      const group = current.find((g) => g.kind === kind && g.candidates.includes(choice));
+      if (!group) continue;
+      const listed = reviewed.find((g) => g.kind === kind && g.key === group.key);
+      const was = new Set(listed?.candidates ?? []);
+      const added = group.candidates.filter((id) => !was.has(id));
+      const gone = [...was].filter((id) => !group.candidates.includes(id));
+      if (listed && added.length === 0 && gone.length === 0) continue;
+      throw new ReviewedPlanRefusal(
+        'plan-conflict-mismatch',
+        `${flagOf[kind]} ${choice} resolves the ${kind === 'metadata' ? 'customization' : 'template'} conflict ` +
+          `${group.key}, which now holds ${group.candidates.join(', ')}` +
+          (listed
+            ? `, while the plan file ${opts.reviewedPlan.file} reviewed ${listed.candidates.join(', ')}` +
+              `${added.length ? ` (added since: ${added.join(', ')})` : ''}${gone.length ? ` (gone since: ${gone.join(', ')})` : ''}`
+            : `, and the plan file ${opts.reviewedPlan.file} lists no such conflict`) +
+          '. A choice deletes the other rows of its conflict, so it deletes only rows the reviewed plan listed. ' +
+          'Nothing was written. Run the plan again, review the conflict, and pass the new file with --plan-file.',
+        {
+          file: opts.reviewedPlan.file,
+          flag: flagOf[kind],
+          choice,
+          conflict: group.key,
+          reviewed: listed ? listed.candidates.join(',') : '',
+          current: group.candidates.join(','),
+        },
+      );
+    }
+  }
+}
+
+/**
  * Run the ceremony's apply: the fates in order, resuming from the checkpoint,
  * then the post-check. Throws only for a failure mid-write (the checkpoint
  * holds every step finished before it) or a plan refusal; every blocker is in
@@ -2075,6 +2174,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       ? { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, completed: { ...stored.completed }, ...applied }
       : { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, completed: {}, ...applied };
   await validateMetadataChoices(run, new Set(checkpoint.metadataChoicesApplied ?? []));
+  refuseUnreviewedChoices(run.plan, opts);
   run.checkpoint = checkpoint;
   const resumedFrom = CEREMONY_STEPS.filter((s) => checkpoint.completed[s]);
   const steps: StepReport[] = [];

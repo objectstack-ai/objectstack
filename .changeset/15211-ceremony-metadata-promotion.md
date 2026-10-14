@@ -21,6 +21,8 @@ The plan of `os migrate organization-ownership` gains a key, `metadataConflicts`
   - A rerun after an interruption accepts the same `--metadata-choice` and finishes.
 - **Under a wall (`isolated`, `group`), nothing is promoted unless the operator names the row, and nothing is ever deleted.** A named row becomes the environment's as above. The other organization rows stay where they are, reported, and they keep the column from being dropped.
 
+**A choice deletes only rows the reviewed plan listed.** `--metadata-choice` and `--template-choice` delete the other rows of their conflict. So the apply reads the conflict groups the plan file records (`metadataConflicts` and `templateConflicts`). It refuses, before anything is written, a choice whose conflict now holds other rows than the reviewed plan listed, with a new reason, `plan-conflict-mismatch`. The refusal names the conflict, the rows added and the rows gone. Plan again, review, and pass the new file.
+
 `event_seq` and every `(type, name, version)` of `sys_metadata_history` become unique environment-wide. The metadata door numbers a save from history in its own scope, so each lineage is placed where no environment save can land on it:
 
 - **A promoted row takes its history with it.** Before the row leaves its organization, that organization's lineage of the item is moved above the environment's numbers and becomes environment history. Every later environment save of the item numbers above it, and the row's version still names its own snapshot.
