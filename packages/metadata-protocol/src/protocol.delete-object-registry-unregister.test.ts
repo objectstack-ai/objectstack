@@ -45,6 +45,7 @@ interface Row {
     name: string;
     organization_id: string | null;
     state: string;
+    package_id: string | null;
     checksum: string;
     metadata: string;
 }
@@ -56,6 +57,9 @@ const overlayRow = (type: string, name: string): Row => ({
     type,
     name,
     organization_id: null,
+    // [#23165] Stored as the store holds an unbound row: the column is there,
+    // NULL. The delete now addresses its row by package (ADR-0048).
+    package_id: null,
     state: 'active',
     checksum: 'sha256:stored-head',
     metadata: JSON.stringify({ name, label: 'Stored' }),
@@ -133,7 +137,13 @@ function makeHarness(opts: {
             if (table !== 'sys_metadata') return null;
             return rows.find((r) => matches(r, query.where)) ?? null;
         },
-        async find() { return []; },
+        // [#23165] `sys_metadata` answers from the rows: the delete reads the
+        // item's rows to resolve its address. Every other table is empty.
+        async find(table: string, query: { where?: Record<string, unknown>; limit?: number } = {}) {
+            if (table !== 'sys_metadata') return [];
+            const hit = rows.filter((r) => matches(r, query.where));
+            return typeof query.limit === 'number' ? hit.slice(0, query.limit) : hit;
+        },
         async insert(_table: string, data: Record<string, unknown>) { return { id: 'inserted', ...data }; },
         async update(_table: string, data: Record<string, unknown>, options?: Record<string, unknown>) {
             assertEngineUpdateDispatch(data, options);

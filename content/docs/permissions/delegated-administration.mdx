@@ -26,16 +26,12 @@ export const FieldOpsDelegate = definePermissionSet({
     businessUnit: 'Field Operations',   // WHERE: this sys_business_unit subtree
     includeSubtree: true,               // default true
     manageAssignments: true,            // user ↔ position rows (sys_user_position)
-    manageBindings: false,              // position ↔ set rows (sys_position_permission_set)
-    authorEnvironmentSets: false,       // may they author environment-owned sets?
     assignablePermissionSets: ['showcase_contributor', 'showcase_manager'],
   },
   // …and plain CRUD on the RBAC link tables lets the requests through at all.
   // Both are required: table CRUD with NO scope is refused outright.
   objects: {
     sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
-    sys_position: { allowRead: true },
-    sys_permission_set: { allowRead: true },
     sys_business_unit: { allowRead: true },
     sys_business_unit_member: { allowRead: true },
     sys_user: { allowRead: true },
@@ -49,16 +45,18 @@ misconfigured name resolves to an empty subtree and **approves nothing**
 
 ## What the runtime gate enforces
 
-Writes to the governed tables (`sys_user_position`,
-`sys_position_permission_set`, `sys_user_permission_set`,
-`sys_permission_set`, `sys_member`) pass through the `DelegatedAdminGate`:
+Writes to the governed tables (`sys_user_position`, `sys_user_permission_set`,
+`sys_member`) pass through the `DelegatedAdminGate`. Positions and permission
+sets themselves are catalog definitions, not rows (ADR-0131 D3), so the set
+above grants no object permission for them: an assignment names a position or
+set, and the gate resolves the name in the security catalog. The gate's rules:
 
 | Rule | Effect |
 |---|---|
 | Tenant admins pass through | The superuser wildcard reaches the ordinary CRUD/RLS checks — delegation constrains *delegates*, not HQ |
 | Subtree anchoring | Assignments a delegate creates must be anchored (`sys_user_position.business_unit_id`) inside their subtree, and the target user must sit inside it |
 | Allowlist, no self-escalation | Every set reached by the write — bound to the assigned position, or granted directly — must be on `assignablePermissionSets`. Granting an un-allowlisted set is refused **for anyone, including the delegate themselves** |
-| Action flags | `manageAssignments` / `manageBindings` / `authorEnvironmentSets` gate their table classes independently; re-composing a position (`manageBindings`) additionally requires every current holder to sit inside the subtree. Under a `group` or `isolated` tenancy posture `authorEnvironmentSets` admits nothing at the data door: the platform operator authors the security catalog there (ADR-0131 D3). It still applies under `single` |
+| Action flags | `manageAssignments` gates the assignment rows — `sys_user_position`, and direct `sys_user_permission_set` grants. `manageBindings` and `authorEnvironmentSets` gated writes to the binding rows and set rows of the retired `sys_position_permission_set` and `sys_permission_set` objects; neither object is registered any more, so neither flag admits a write. A position's sets are part of its definition and a permission set is a definition: both are written through the metadata door, which admits a `manage_metadata` holder (the platform operator under `group` or `isolated`) and reads no `adminScope` (ADR-0131 D3). The two flags still count in the strict-containment comparison below |
 | Strict containment | Granting or authoring a set that itself carries an `adminScope` requires a held scope that **strictly contains** it — handing your own exact scope to a peer is refused (no lateral propagation) |
 | Single-row writes | Delegates write single rows by id only — a broad filter-write cannot be boundary-checked |
 | Audit stamp | Every assignment a delegate creates is `granted_by`-stamped automatically |
@@ -66,11 +64,11 @@ Writes to the governed tables (`sys_user_position`,
 | Membership is not delegable | `sys_member` writes are tenant-admin-only: no `adminScope` axis expresses org membership, and an admin-grade membership row is auto-elevated to `organization_admin` — writing one would mint a tenant admin. Adding people *is* delegable, through an [invitation](#letting-a-delegate-invite-delegated_admin) |
 | No scope, no admin | Holders of plain CRUD on the RBAC tables with **no** scope are refused: administration is a scoped capability now, not a side effect of table access |
 
-Every rule above is exercised end-to-end by the showcase permission zoo
+The showcase permission zoo exercises the gate end-to-end
 (`packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts`): the
 in-subtree allowlisted assignment passes with a `granted_by` stamp; the
-out-of-subtree anchor, the off-allowlist grant (to self), and the
-`manageBindings: false` binding write are each refused.
+out-of-subtree anchor and the off-allowlist grant (to self) are each
+refused.
 
 ## The assignment anchor
 
@@ -183,9 +181,12 @@ issuance:
 
 Without the cap the role would be a ladder: invite an `admin`, and acceptance
 auto-elevates that membership to `organization_admin` → tenant admin — the
-grade the delegation exists to withhold. `sys_member` is not one of the gate's
-governed objects and the acceptance write runs outside the issuer's context, so
-the cap is the defense on that path.
+grade the delegation exists to withhold. `sys_member` *is* one of the gate's
+governed objects (the "Membership is not delegable" rule above), but the
+acceptance write never reaches the gate: better-auth writes the membership row
+as the system (`isSystem`), and the security middleware passes a system write
+through before the gate runs. So the cap — judged at issuance, while the
+inviter is still the actor — is the defense on that path.
 
 Both halves are pinned end-to-end over the real HTTP route by
 `packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts`: a

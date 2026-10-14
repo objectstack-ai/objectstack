@@ -1,18 +1,22 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0131 D3] The dispatcher's `PUT /meta/:type/:name` asks the walled
- * catalog refusal (`walledCatalogWriteVerdict`, `@objectstack/metadata-core`)
- * right after its capability gate: under `isolated` / `group` a position, a
- * permission set or a capability is saved only by the platform operator rung
- * or the engine itself. `RestServer`'s four write doors ask the same predicate;
- * the booted proof of both transports' shared behaviour, including the
- * cross-organization read-back, is `wall-catalog-refusal.dogfood.test.ts`.
+ * [ADR-0131 D3 · D12 items 7–8] The dispatcher's `PUT /meta/:type/:name` asks
+ * the walled refusal (`walledCatalogWriteVerdict`, `@objectstack/metadata-core`)
+ * right after its capability gate: under `isolated` / `group` an item of ANY
+ * type is saved only by the platform operator rung or the engine itself (ruling
+ * A on #23231: the security catalog is no longer a special case).
+ * `RestServer`'s four write doors ask the same predicate; the booted proof of
+ * the shared behaviour, including the cross-organization read-back, is
+ * `wall-environment-metadata-refusal.dogfood.test.ts` (and, for the catalog,
+ * `wall-catalog-refusal.dogfood.test.ts`).
  *
  * Pinned here, on this transport: the refusal's envelope
  * (`403 PERMISSION_DENIED`, this transport's spelling), that nothing reaches
- * `saveMetaItem`, and the controls (the operator, `single`, no `tenancy`
- * service, and a type outside the catalog).
+ * `saveMetaItem`, and the controls (the operator, `isSystem`, `single`, no
+ * `tenancy` service). The same holds for `POST /meta/_migrate-stored`, the
+ * install-wide stored-metadata rewrite: nothing reaches
+ * `migrateStoredMetadata`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -21,7 +25,8 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 function boot(posture: 'single' | 'isolated' | 'group' | null) {
     const saveMetaItem = vi.fn(async ({ type, name }: any) => ({ success: true, type, name }));
     const getMetaItem = vi.fn(async () => null);
-    const protocol = { saveMetaItem, getMetaItem };
+    const migrateStoredMetadata = vi.fn(async () => ({ apply: false, scanned: 0, canonical: 0, pending: 0, rewritten: 0, skipped: 0, failed: 0, rows: [] }));
+    const protocol = { saveMetaItem, getMetaItem, migrateStoredMetadata };
     const services: Record<string, unknown> = { protocol };
     if (posture) services.tenancy = { posture };
     const resolve = (name: string): unknown => services[name] ?? null;
@@ -30,7 +35,7 @@ function boot(posture: 'single' | 'isolated' | 'group' | null) {
         getServiceAsync: async (name: string) => resolve(name),
         context: { getService: resolve },
     };
-    return { dispatcher: new HttpDispatcher(kernel as never), saveMetaItem };
+    return { dispatcher: new HttpDispatcher(kernel as never), saveMetaItem, migrateStoredMetadata };
 }
 
 const ctx = (executionContext: any): any => ({ request: {}, environmentId: 'platform', executionContext });
@@ -43,11 +48,14 @@ const BODIES: Record<string, Record<string, unknown>> = {
     position: { name: 'plant_lead', label: 'Plant lead' },
     permission: { name: 'plant_set', label: 'Plant set', objects: {} },
     capability: { name: 'plant.cap', label: 'Plant cap', scope: 'org' },
+    object: { name: 'plant_widget', label: 'Plant widget', fields: {} },
+    view: { name: 'plant_widget.all', label: 'Plant view' },
+    flow: { name: 'plant_flow', label: 'Plant flow', type: 'autolaunched', nodes: [], edges: [] },
 };
 
-describe('[ADR-0131 D3] dispatcher PUT /meta — the walled catalog refusal', () => {
+describe('[ADR-0131 D12 items 7–8] dispatcher PUT /meta — the walled refusal, for every type', () => {
     for (const posture of ['isolated', 'group'] as const) {
-        it(`${posture}: a tenant's save of each catalog type is refused 403 PERMISSION_DENIED, and nothing is saved`, async () => {
+        it(`${posture}: a tenant's save of each type, catalog or not, is refused 403 PERMISSION_DENIED, and nothing is saved`, async () => {
             for (const [type, body] of Object.entries(BODIES)) {
                 const stack = boot(posture);
                 const res = await stack.dispatcher.handleMetadata(`/${type}/${body.name}`, ctx(TENANT_AUTHOR), 'PUT', body);
@@ -71,17 +79,27 @@ describe('[ADR-0131 D3] dispatcher PUT /meta — the walled catalog refusal', ()
             expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
         });
 
-        it(`${posture}: CONTROL — a type outside the catalog is not judged`, async () => {
+        it(`${posture}: CONTROL — the engine itself (\`isSystem\`) saves any type`, async () => {
+            for (const [type, body] of Object.entries(BODIES)) {
+                const stack = boot(posture);
+                await stack.dispatcher.handleMetadata(`/${type}/${body.name}`, ctx({ userId: 'u_system', isSystem: true }), 'PUT', body);
+                expect(stack.saveMetaItem, type).toHaveBeenCalledTimes(1);
+            }
+        });
+
+        it(`${posture}: CONTROL — the platform operator rung saves a non-catalog type`, async () => {
             const stack = boot(posture);
-            await stack.dispatcher.handleMetadata('/view/plant_view', ctx(TENANT_AUTHOR), 'PUT', { name: 'plant_view', label: 'Plant view' });
+            await stack.dispatcher.handleMetadata('/view/plant_widget.all', ctx(OPERATOR), 'PUT', BODIES.view);
             expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
         });
     }
 
-    it('single: CONTROL — the same `manage_metadata` holder saves a position, unchanged', async () => {
-        const stack = boot('single');
-        await stack.dispatcher.handleMetadata('/position/plant_lead', ctx(TENANT_AUTHOR), 'PUT', BODIES.position);
-        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
+    it('single: CONTROL — the same `manage_metadata` holder saves every type, unchanged', async () => {
+        for (const [type, body] of Object.entries(BODIES)) {
+            const stack = boot('single');
+            await stack.dispatcher.handleMetadata(`/${type}/${body.name}`, ctx(TENANT_AUTHOR), 'PUT', body);
+            expect(stack.saveMetaItem, type).toHaveBeenCalledTimes(1);
+        }
     });
 
     it('no `tenancy` service behaves like `single` (ADR-0093 D4/D5)', async () => {
@@ -96,5 +114,48 @@ describe('[ADR-0131 D3] dispatcher PUT /meta — the walled catalog refusal', ()
         expect(res.response?.status).toBe(403);
         expect(String(res.response?.body?.error?.message)).toContain('requires the `manage_metadata` capability');
         expect(stack.saveMetaItem).not.toHaveBeenCalled();
+    });
+});
+
+describe('[ADR-0131 D12 items 7–8] dispatcher POST /meta/_migrate-stored — the walled refusal', () => {
+    for (const posture of ['isolated', 'group'] as const) {
+        it(`${posture}: a tenant's install-wide rewrite is refused 403 PERMISSION_DENIED naming the posture, preview and apply alike, and nothing is read`, async () => {
+            for (const body of [{}, { apply: true }]) {
+                const stack = boot(posture);
+                const res = await stack.dispatcher.handleMetadata('/_migrate-stored', ctx(TENANT_AUTHOR), 'POST', body);
+                expect(res.response?.status).toBe(403);
+                expect(res.response?.body?.error?.code).toBe('PERMISSION_DENIED');
+                const message = String(res.response?.body?.error?.message);
+                expect(message).toContain(`'${posture}' tenancy posture`);
+                expect(message).toContain("the environment's stored metadata");
+                expect(stack.migrateStoredMetadata).not.toHaveBeenCalled();
+            }
+        });
+
+        it(`${posture}: CONTROL — the platform operator rung and the engine itself run it`, async () => {
+            for (const caller of [OPERATOR, { userId: 'u_system', isSystem: true }]) {
+                const stack = boot(posture);
+                const res = await stack.dispatcher.handleMetadata('/_migrate-stored', ctx(caller), 'POST', { apply: true });
+                expect(res.response?.status, caller.userId).toBe(200);
+                expect(stack.migrateStoredMetadata, caller.userId).toHaveBeenCalledTimes(1);
+            }
+        });
+    }
+
+    it('CONTROL — under `single` and with no `tenancy` service the same tenant holder runs it, unchanged', async () => {
+        for (const posture of ['single', null] as const) {
+            const stack = boot(posture);
+            const res = await stack.dispatcher.handleMetadata('/_migrate-stored', ctx(TENANT_AUTHOR), 'POST', {});
+            expect(res.response?.status, String(posture)).toBe(200);
+            expect(stack.migrateStoredMetadata, String(posture)).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('the capability gate still answers first: a caller without `manage_metadata` gets its sentence, not the posture one', async () => {
+        const stack = boot('isolated');
+        const res = await stack.dispatcher.handleMetadata('/_migrate-stored', ctx({ userId: 'u_x', systemPermissions: [] }), 'POST', {});
+        expect(res.response?.status).toBe(403);
+        expect(String(res.response?.body?.error?.message)).toContain('requires the `manage_metadata` capability');
+        expect(stack.migrateStoredMetadata).not.toHaveBeenCalled();
     });
 });

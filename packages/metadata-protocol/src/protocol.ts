@@ -938,6 +938,104 @@ function runtimeHookWithoutBodyRefusal(
     return err;
 }
 
+/**
+ * [ADR-0086 D3] The refusal of a permission set whose body `packageId`
+ * disagrees with the package binding of the row a write door writes it into.
+ *
+ * D3 declares the key as "the owning package for a package-shipped set
+ * (absent ⇒ env-authored)", and every reader of a set's owner reads the
+ * binding: the row's `package_id`, served as `_packageId`. A body that
+ * declared another owner was accepted and its declaration silently
+ * overridden, so an author (an AI build above all) was never told the owner it
+ * wrote is not the owner it got. Refused instead, at every door a body reaches
+ * `active` through: the save ({@link ObjectStackProtocolImplementation.saveMetaItem},
+ * draft and publish mode), the restore of a stored version
+ * ({@link ObjectStackProtocolImplementation.rollbackMetaItem} and
+ * `revertCommit`'s restore limb, through `restoredBodyWriter`) and the draft
+ * promotion that the per-item publish and
+ * {@link ObjectStackProtocolImplementation.publishPackageDrafts} share — the
+ * three doors `savedItemNameRefusal` judges a body's `name` at.
+ *
+ * What disagrees, judged on the body as authored:
+ *
+ * | body `packageId` | the row's binding | verdict |
+ * |:--|:--|:--|
+ * | absent | anything | accepted: an absent key declares nothing |
+ * | `'P'` | `'P'` | accepted, as before |
+ * | `'Q'` | `'P'` | refused |
+ * | any string, `''` included | none | refused: a present key declares a package-shipped set, and the set is environment-authored |
+ *
+ * A value that is not a string is the schema's to refuse (`z.string()`), with
+ * its own located `422`. `binding` is the RESOLVED binding of the row the
+ * write lands in, never the request's spelling: a draft save that names no
+ * package lands in the package of the item's active row (#11087), a direct
+ * save that names none lands in the row its address resolves, and a restore
+ * writes into the item's active row, whose binding `put` keeps. An empty-string
+ * binding is no package, the normalisation both hydration seams apply.
+ *
+ * `VALIDATION_ERROR` / 400, the envelope of the door's other body-against-
+ * address refusal: `savedItemNameRefusal`, which judges the body's `name`
+ * against the name the row is written under, at the same doors. No code is
+ * minted. The message prescribes first, because a 4xx message crosses the REST
+ * boundary bounded at 500 characters with its TAIL truncated, names both
+ * values, and offers the two remedies the ruling names: drop the key, or write
+ * the set into the package it declares. A restore writes a stored version its
+ * caller cannot edit in place, so its remedy is the save that fixes it: the
+ * item saved again with the key dropped or set to the binding, instead of
+ * restoring the version (the name judge's restore wording). `issues[]` locates
+ * the key, the shape the Studio designer keys on.
+ *
+ * Every writer through the save door is judged, the two server-stated
+ * re-savers included (`migrateStoredMetadata`, which records the refusal as
+ * the row's failure, and `duplicatePackage`, which rewrites a body naming its
+ * source package to the target first). A row stored before this rule keeps its
+ * bytes and keeps reading by its binding; it is refused on its next write.
+ */
+function permissionSetOwnerBindingRefusal(
+    singularType: string,
+    item: unknown,
+    name: string,
+    binding: string | null | undefined,
+    door: 'save' | 'restore' | 'publish',
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] }) | undefined {
+    if (singularType !== 'permission') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const declared = (item as { packageId?: unknown }).packageId;
+    if (typeof declared !== 'string') return undefined;
+    const bound = typeof binding === 'string' && binding !== '' ? binding : null;
+    if (declared === bound) return undefined;
+    const into = (pkg: string | null) => (pkg === null ? 'into no package' : `into package '${pkg}'`);
+    const intoDeclared = declared === ''
+        ? ''
+        : `, or ${door === 'save' ? 'save the set' : 'save it'} into package '${declared}' `
+            + `(?package=${declared} on the REST door, packageId in process)`;
+    const owner = bound === null
+        ? 'a set written into no package is authored in this environment, which an absent `packageId` states'
+        : 'the package a set is written into is its owner';
+    const tail = `and ${owner} (ADR-0086 D3): a \`packageId\` that disagrees is refused, never silently overridden.`;
+    const message = door === 'save'
+        ? `Drop \`packageId\` from permission set '${name}'${intoDeclared}, then send it again. Nothing was written. `
+            + `Its body declares \`packageId\` '${declared}', but this save writes it ${into(bound)}, ${tail}`
+        : door === 'restore'
+        ? `Save permission set '${name}' again with \`packageId\` ${bound === null ? 'dropped' : `dropped or set to '${bound}'`}, `
+            + 'instead of restoring this version. Nothing was restored. '
+            + `The version's body declares \`packageId\` '${declared}', but it is restored ${into(bound)}, ${tail}`
+        : `Save the draft of permission set '${name}' again with \`packageId\` dropped${intoDeclared}, then publish it. `
+            + `Nothing was published. Its body declares \`packageId\` '${declared}', but it is published ${into(bound)}, ${tail}`;
+    const err = new Error(message) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.issues = [{
+        path: 'packageId',
+        message: `Disagrees with the package the set is written into (${bound === null ? 'none' : `'${bound}'`}): `
+            + (door === 'restore'
+                ? `drop it${bound === null ? '' : `, or set it to '${bound}'`}.`
+                : `drop it${declared === '' ? '' : `, or write the set into package '${declared}'`}.`),
+        code: 'custom',
+    }];
+    return err;
+}
+
 /** The author-facing lock block (ADR-0010 Phase 4.3), as the spec mounts it on a metadata item. */
 const PROTECTION_BLOCK_KEY = 'protection';
 
@@ -1121,6 +1219,72 @@ function authoredLockFamilyRefusal(
         code: 'custom',
     }));
     return err;
+}
+
+/**
+ * [#23165, ADR-0048] The refusal of a direct save, or a delete, that names no
+ * package, of an item whose rows at the address are bound to two or more
+ * packages ({@link ObjectStackProtocolImplementation.packagelessAddress}).
+ *
+ * A `sys_metadata` row is keyed `(org, type, name, package_id)`, so such a
+ * write has no one row to write or remove. Before this refusal the save wrote
+ * a package-less row beside the packages' rows and answered `200`, for a row
+ * the item read does not serve, and the delete removed whichever row the
+ * package-agnostic `findOne` met first and answered "it no longer exists"
+ * while another package's row stayed served. Choosing one of the packages is
+ * that driver-order coin toss (#8907). The remedy is the request's: name the
+ * package, which is the address every door of the item takes (`?package=`,
+ * ADR-0048).
+ *
+ * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member for
+ * a refusal that comes from environment state rather than the body (the same
+ * request is accepted once it names its package), and the code this
+ * package already answers when a name is held by more than one owner
+ * (`importUnmanagedPackage`). The prescription first, because a 4xx message
+ * crosses the REST boundary bounded at 500 characters with its tail
+ * truncated; the candidates follow, sorted, so the message is the same on
+ * every driver.
+ */
+function packagelessAddressAmbiguityRefusal(
+    verb: 'save' | 'delete',
+    type: string,
+    name: string,
+    packageIds: readonly string[],
+): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+    const shown = packageIds.slice(0, 5).map((id) => `'${id}'`).join(', ');
+    const more = packageIds.length > 5 ? ` and ${packageIds.length - 5} more` : '';
+    const [nothing, single] = verb === 'save'
+        ? ['Nothing was written.', 'no single row to write']
+        : ['Nothing was deleted.', 'no single row to remove'];
+    const err = new Error(
+        `Name the package this ${verb} is for, then send it again: on the REST door add ?package= with the package id, `
+        + `in process pass packageId. ${nothing} ${type} '${name}' belongs to ${packageIds.length} packages `
+        + `(${shown}${more}), and a ${verb} that names none has ${single}.`,
+    ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+    err.code = 'RESOURCE_CONFLICT';
+    err.status = 409;
+    return err;
+}
+
+/**
+ * [#23165] The rows of an item a delete leaves stored at its address, in
+ * words, for the delete receipt: its rows bound to other packages (sorted, as
+ * {@link ObjectStackProtocolImplementation.packagelessAddress} answers them,
+ * at most five named) and its package-less row. The receipt names them
+ * instead of claiming the item gone or back at its artifact default.
+ */
+function remainingRowsPhrase(packageIds: readonly string[], unbound: boolean, noun: 'row' | 'draft'): string {
+    const parts: string[] = [];
+    if (packageIds.length > 0) {
+        const shown = packageIds.slice(0, 5).map((id) => `'${id}'`).join(', ');
+        const more = packageIds.length > 5 ? ` and ${packageIds.length - 5} more` : '';
+        parts.push(packageIds.length === 1
+            ? `its ${noun} bound to package ${shown}`
+            : `its ${noun}s bound to packages ${shown}${more}`);
+    }
+    if (unbound) parts.push(`its package-less ${noun}`);
+    const count = packageIds.length + (unbound ? 1 : 0);
+    return `${parts.join(' and ')} ${count === 1 ? 'remains' : 'remain'}`;
 }
 
 /**
@@ -6596,14 +6760,26 @@ export class ObjectStackProtocolImplementation implements
      * `failed[]`. A body that passes comes out of the strip, or byte for byte
      * where the type has no credential channel.
      *
+     * [ADR-0086 D3] …and, second, the permission set's owner judge
+     * ({@link permissionSetOwnerBindingRefusal}), with the same envelope: a
+     * version stored before the save door judged `packageId` can carry one that
+     * disagrees with the row it is restored into, and restoring it would make it
+     * active with an owner nobody reads. `binding` is the active row's
+     * `package_id`, which both callers read before the restore and which
+     * `restoreVersion` → `put` keeps on the row it writes, so the judge and the
+     * write read one binding.
+     *
      * @param type The canonical (singular) type the row is restored under.
      * @param name The name the row is restored under.
+     * @param binding The package binding of the active row the version is restored into (`null`: none).
      */
-    private restoredBodyWriter(type: string, name: string): (historyBody: unknown) => unknown {
+    private restoredBodyWriter(type: string, name: string, binding: string | null): (historyBody: unknown) => unknown {
         const derive = this.restoredBodyDerivation(type);
         return (historyBody) => {
             const nameRefusal = savedItemNameRefusal(type, historyBody, name, 'restore');
             if (nameRefusal) throw nameRefusal;
+            const ownerRefusal = permissionSetOwnerBindingRefusal(type, historyBody, name, binding, 'restore');
+            if (ownerRefusal) throw ownerRefusal;
             return derive ? derive(historyBody) : historyBody;
         };
     }
@@ -18542,6 +18718,11 @@ export class ObjectStackProtocolImplementation implements
      * token of the draft a package-less draft save overwrites, which is the
      * draft bound to the package of the item's active row when there is one
      * (#11087) — the address the save resolves, not the key it was handed.
+     * [#23165] The active read that names no package likewise serves the token
+     * of the row a direct save (or a delete) naming none writes: the one
+     * package's row the item is bound to ({@link packagelessAddress}). For an
+     * item several packages hold, that save and that delete are refused
+     * whatever they carry, and the token stays the package-unbound row's.
      */
     private async readVersionToken(
         /** [#22877] `member` — the bundle member the read addressed; omitted, the canonical one. */
@@ -18554,8 +18735,89 @@ export class ObjectStackProtocolImplementation implements
             name: request.name,
             org: 'env',
         } as Parameters<typeof repo.headAt>[0];
-        const stored = await this.storedHeadAt(repo, ref, state, request.packageId ?? null, request.member);
+        const packageId = request.packageId == null && state === 'active'
+            ? (await this.packagelessAddress(ref.type, ref.name, request.member)).packageId
+            : request.packageId ?? null;
+        const stored = await this.storedHeadAt(repo, ref, state, packageId, request.member);
         return stored === null ? null : this.receiptVersion(stored);
+    }
+
+    /**
+     * [#23165, ADR-0048] THE package-less write address: which row of an item a
+     * write that names no package addresses, read from the item's stored rows
+     * at `state`. The item's own package when those rows are bound to exactly
+     * one, else the package-unbound row. `candidates` is every distinct
+     * binding, sorted; two or more is a name several packages hold, which the
+     * doors refuse ({@link packagelessAddressAmbiguityRefusal}) and for which
+     * `packageId` is `null`. `unbound` says whether a package-unbound row sits
+     * beside them, which is what a delete of a package's row leaves served.
+     *
+     * The one resolution its three readers take, so they cannot disagree:
+     * {@link saveMetaItem}'s direct (active) save, which then writes as a save
+     * naming that package does; {@link deleteMetaItem}, which then removes as a
+     * delete naming that package does, its draft discard reading the draft
+     * rows; and {@link readVersionToken}, whose `version` a save or a delete at
+     * the same address accepts.
+     *
+     * Why the package's row: a write addresses exactly one
+     * `(org, type, name, package_id)` row, and the item read that names no
+     * package serves the package's row whenever it is the item's only row. A
+     * save that wrote the package-unbound row instead minted a second row
+     * beside it and answered `200` for a write that read never served; a
+     * delete that took the first row a package-agnostic `findOne` met removed
+     * one package's row of an item two packages hold, or the package-less row
+     * beside a package's, and claimed the item gone. The draft save has
+     * resolved its address from the item's active row since #11087
+     * (`SysMetadataRepository.resolveWriteHead`, unchanged); the direct save
+     * and the delete did not, and this is that half.
+     *
+     * The rows are the ones the item read chooses among
+     * ({@link findServedOverlayRow}): the environment's (ADR-0131 D6), the
+     * state the write addresses, the canonical type, the bundle member
+     * (#22877), and no package predicate. They are read in full, never
+     * sampled: with two packages' rows at one address a package-agnostic
+     * `findOne` is a driver-order coin toss (#8907). A package-less row beside
+     * the package's row is not a second package, and stays as it is (no
+     * conversion: the card's existing-rows line). An item with no binding
+     * keeps the package-unbound row, as before. An unprovisioned store holds
+     * no row; any other failed read propagates (#5532), because guessing the
+     * binding would choose the row the write lands in.
+     *
+     * ⛔ Not the repository's write-address default: `put`, `headAt` and
+     * `delete` keep their documented ones (omitted = the package-unbound row
+     * for `put`/`headAt`, any row for `delete`), because the callers that reach
+     * them with no package (`promoteDraft` and `restoreVersion` of a
+     * package-less row) mean that row, as do the server-stated rewrites the
+     * save door does not resolve for. The doors resolve, then name the
+     * package.
+     */
+    private async packagelessAddress(
+        type: string,
+        name: string,
+        /** [#22877] The bundle member the write addresses (a save's body's, a delete's selector); omitted, the canonical one. */
+        member?: string,
+        state: 'active' | 'draft' = 'active',
+    ): Promise<{ packageId: string | null; candidates: readonly string[]; unbound: boolean }> {
+        let rows: Array<{ package_id?: unknown }> | null | undefined;
+        try {
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
+            rows = await this.engine.find('sys_metadata', {
+                where: { type, name, state, organization_id: null, ...overlayMemberWhere(type, member) },
+                context: { isSystem: true },
+            });
+        } catch (error) {
+            // [#5532] An unprovisioned store holds no row, so no binding; any
+            // other failure is a read that did not happen, never "no binding".
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const bindings = new Set<string>();
+        let unbound = false;
+        for (const row of rows ?? []) {
+            if (typeof row?.package_id === 'string' && row.package_id !== '') bindings.add(row.package_id);
+            else unbound = true;
+        }
+        const candidates = [...bindings].sort();
+        return { packageId: candidates.length === 1 ? candidates[0] ?? null : null, candidates, unbound };
     }
 
     /**
@@ -20895,6 +21157,50 @@ export class ObjectStackProtocolImplementation implements
         return withLockFamily(body, stored);
     }
 
+    /**
+     * [ADR-0086 D3] The package binding of the row a save writes, as
+     * {@link permissionSetOwnerBindingRefusal} compares a body's `packageId`
+     * against it: the binding the write RESOLVES, never the request's spelling.
+     *
+     * - A save that names a package writes that package's row (ADR-0048).
+     * - A draft save that names none writes into the package of the item's
+     *   active row when it has one (#11087): the repository's own write-address
+     *   resolution answers it ({@link SysMetadataRepository.headAt}, the binding
+     *   `put` stamps), so the judge and the write read one answer.
+     * - A direct save that names none writes the row its address resolved
+     *   before this is asked, which names no package here.
+     *
+     * The store is read only when the judge has something to compare: a
+     * permission set whose body carries a string `packageId`, saved as a draft
+     * that names no package. Every other save answers from the request. An
+     * unprovisioned store holds no row and so no binding; any other failed read
+     * propagates (#5532), because a guessed binding would judge a row the write
+     * does not land in.
+     */
+    private async saveWriteBinding(
+        singularType: string,
+        request: { name: string; item?: unknown; packageId?: string | null },
+        mode: 'draft' | 'publish',
+    ): Promise<string | null> {
+        if (typeof request.packageId === 'string' && request.packageId !== '') return request.packageId;
+        if (singularType !== 'permission' || mode !== 'draft') return null;
+        const body = request.item;
+        if (!body || typeof body !== 'object' || typeof (body as { packageId?: unknown }).packageId !== 'string') return null;
+        try {
+            const repo = this.getOverlayRepo();
+            const ref = { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
+            const target = await repo.headAt(ref, {
+                state: 'draft',
+                packageId: null,
+                member: itemDiscriminator(singularType, body),
+            });
+            return target.packageId;
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            return null;
+        }
+    }
+
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
     // receipt served — and is compared in that form (`storedParentForToken`).
     // `storedParentVersion` is the in-process twin for a caller that read the
@@ -21224,6 +21530,56 @@ export class ObjectStackProtocolImplementation implements
             if (lockErr) throw lockErr;
         }
 
+        // [#23165, ADR-0048] THE WRITE ADDRESS of a direct save that names no
+        // package: the item's own package when its active rows are bound to
+        // exactly one ({@link packagelessAddress}). It used to be the
+        // package-unbound row, always, so a save of a package's item minted a
+        // second row beside the package's and answered `200` while the item
+        // read kept serving the package's row. The draft save already resolved
+        // its address this way (#11087, `SysMetadataRepository.resolveWriteHead`).
+        //
+        // Resolved ONCE, here, and from here on the save IS a save naming that
+        // package: every gate below that asks about the row this save writes
+        // (the D9.9 object check, the stored lock family, the runtime
+        // authoring gate, ADR-0070 D1's writable-base check, the lock parent,
+        // the credential carry-forward, `repo.put`, the registry write-through
+        // and the receipt) reads the same `packageId`, so no two of them can
+        // judge different rows. A package that is read-only answers here what
+        // `?package=` naming it answers.
+        //
+        // Below the authorization refusals on purpose: the code-only refusal,
+        // the package door and the `_lock` gate judge the item, not its row,
+        // and they answer before this store read, as #22220 ordered.
+        //
+        // Asked of a publish-mode AUTHORING save whose `packageId` is absent or
+        // `null`, the two spellings of "no package" the request contract
+        // states. Not asked of: a save that names a package (ADR-0048, its
+        // address is its own); a draft save, whose binding the repository
+        // resolves (#11087); the server-stated rewrites of a row this store
+        // already holds (`source` set: the stored-metadata migration and the
+        // stored flow-credential move, which pass `null` for the
+        // package-unbound row they read and rewrite; `package-duplicate`,
+        // which always names its target), the same two the authoring rules
+        // above exempt.
+        //
+        // Several bindings is a name more than one package holds, and a save
+        // naming none of them is refused, not guessed.
+        if (
+            mode === 'publish'
+            && request.packageId == null
+            && request.source === undefined
+            && request.writeFace !== 'package-duplicate'
+        ) {
+            const writeType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+            const address = await this.packagelessAddress(
+                writeType, request.name, itemDiscriminator(writeType, request.item),
+            );
+            if (address.candidates.length > 1) {
+                throw packagelessAddressAmbiguityRefusal('save', request.type, request.name, address.candidates);
+            }
+            if (address.packageId !== null) request = { ...request, packageId: address.packageId };
+        }
+
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
 
         // [ADR-0029 D9.9 / #6995] The refusal that is about REPRESENTABILITY
@@ -21458,6 +21814,21 @@ export class ObjectStackProtocolImplementation implements
             {
                 const nameRefusal = savedItemNameRefusal(singularType, request.item, request.name, 'save');
                 if (nameRefusal) throw nameRefusal;
+            }
+            // [ADR-0086 D3] …and a permission set whose body `packageId`
+            // disagrees with the package the row is written into, with the
+            // same envelope: the body against its address, the second half.
+            // Judged against the binding this save RESOLVES, never the
+            // request's spelling — see {@link saveWriteBinding}. Asked of every
+            // writer, as the name judge is. See
+            // {@link permissionSetOwnerBindingRefusal}.
+            {
+                const ownerRefusal = permissionSetOwnerBindingRefusal(
+                    singularType, request.item, request.name,
+                    await this.saveWriteBinding(singularType, request, mode),
+                    'save',
+                );
+                if (ownerRefusal) throw ownerRefusal;
             }
             // [#21639] …and a view container whose save name, or any name its
             // expansion produces, is a name already served from elsewhere —
@@ -22109,6 +22480,9 @@ export class ObjectStackProtocolImplementation implements
                 // [#22877] The saved body's member — the row this save wrote.
                 ...mutationEventMemberOfBody(singularTypeForRepo, request.item),
             });
+            const receiptPackage = typeof request.packageId === 'string' && request.packageId !== ''
+                ? `, package=${request.packageId}`
+                : '';
             return {
                 success: true,
                 // [#21207] The version token: the keyed form of the stored
@@ -22164,9 +22538,15 @@ export class ObjectStackProtocolImplementation implements
                 // claim for another. Distinguishing it honestly needs a read
                 // this path does not already make, and a receipt is not worth
                 // a query — so the verb stays the neutral, true "Saved".
+                //
+                // [#23165] …and it names the package whose row this save wrote,
+                // when the save's address names one: the package the caller
+                // named, or the one a direct save naming none resolved to
+                // ({@link packagelessAddress}). A save into the
+                // package-unbound row reads exactly as it did.
                 message: artifactBacked
-                    ? `Saved customization overlay (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
-                    : `Saved ${singularTypeForRepo} '${request.name}' (env-wide, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`,
+                    ? `Saved customization overlay (env-wide${receiptPackage}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
+                    : `Saved ${singularTypeForRepo} '${request.name}' (env-wide${receiptPackage}, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`,
             };
         } catch (err: any) {
             if (err instanceof ConflictError) throw await this.saveConflict(err, request, writeSource);
@@ -22325,6 +22705,12 @@ export class ObjectStackProtocolImplementation implements
      *   a pre-protocol shape it cannot rewrite without changing what it means
      *   — a page filter carrying `$or`, which a flat rule list cannot spell —
      *   leaves the site byte-identical and reports a TODO instead of a notice.
+     *   The same list carries the shapes protocol 18 refuses that no
+     *   conversion covers (#23269, #23270, #23271: a `controlled_by_parent`
+     *   object without exactly one required `master_detail`, a view bound to
+     *   the retired view-level API source, a flow value slot carrying a `{…}`
+     *   token), each TODO naming the D3 entry that refuses it. A flow row's
+     *   TODOs come back from the flow canonicalizer.
      *   Every such site is listed under its row (`rows[].todos`) with the
      *   block and the reason, whatever the row's outcome; a row whose ONLY
      *   finding is TODOs has nothing to persist and is reported `skipped`,
@@ -22611,8 +22997,14 @@ export class ObjectStackProtocolImplementation implements
             // still changing the body. Both passes are copy-on-write, so
             // identity is the precise test there: `storable === body` exactly
             // when nothing was rewritten at all.
+            //
+            // [#23269] A flow's TODOs come back from the canonicalizer, which
+            // runs the same chain with the same sink: until they did, a stored
+            // flow carrying a `{…}` token at a value slot — a CRUD filter
+            // operand among them — parsed, rewrote nothing and was counted
+            // `canonical`, while `registerFlow` refused it at boot.
             const { item, notices, todos } = flowResult
-                ? { item: flowResult.storable, notices: flowResult.notices, todos: [] as ConversionTodoNotice[] }
+                ? { item: flowResult.storable, notices: flowResult.notices, todos: flowResult.todos ?? [] }
                 : this.convertStoredItemDetailed(singular, body);
             const changed = flowResult ? item !== body : notices.length > 0;
             // [#17321] A site the chain left as stored — no lossless rewrite
@@ -22645,8 +23037,8 @@ export class ObjectStackProtocolImplementation implements
                     outcome: 'skipped',
                     reason: `the conversion chain rewrites nothing here: it left ${flattenedTodos.length} `
                         + 'site(s) of this row as stored, because no lossless rewrite exists for them — '
-                        + 'each TODO below names the site and why. The row keeps loading unchanged; '
-                        + 'rewrite each site by hand.',
+                        + 'each TODO below names the site and why. The row is read as stored, unchanged, '
+                        + 'and each TODO says what that leaves it doing; rewrite each site by hand.',
                 });
                 continue;
             }
@@ -23294,6 +23686,19 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
             if (nameRefusal) throw nameRefusal;
+        }
+        // [ADR-0086 D3] …and a permission-set draft whose body `packageId`
+        // disagrees with the package it is promoted into: the key resolved
+        // above, the one `repo.promoteDraft` writes under. A draft stored
+        // before the save door judged the key can carry one, and promoting it
+        // would make it active with an owner nobody reads. Refused with the
+        // save door's judge and envelope, so a batch publish aborts on it as
+        // on the name refusal. See {@link permissionSetOwnerBindingRefusal}.
+        if (draftForGate) {
+            const ownerRefusal = permissionSetOwnerBindingRefusal(
+                singularType, draftForGate.body, request.name, draftKey ?? null, 'publish',
+            );
+            if (ownerRefusal) throw ownerRefusal;
         }
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet
@@ -24895,7 +25300,7 @@ export class ObjectStackProtocolImplementation implements
          * canonical member's was addressed for every draft of the name, so a
          * second locale's draft answered "no pending draft" and stayed.
          */
-        draft: { type: string; name: string; member?: string },
+        draft: { type: string; name: string; member?: string; packageId?: string | null },
         actor: string | undefined,
     ): Promise<void> {
         await this.deleteMetaItem({
@@ -24904,6 +25309,10 @@ export class ObjectStackProtocolImplementation implements
             state: 'draft',
             ...(actor ? { actor } : {}),
             ...(draft.member !== undefined ? { member: draft.member } : {}),
+            // [#23165, ADR-0048] The package the draft was listed under: the
+            // discard removes THAT package's draft, never another package's
+            // draft of the same name.
+            ...(draft.packageId !== undefined ? { packageId: draft.packageId } : {}),
         });
     }
 
@@ -25175,6 +25584,12 @@ export class ObjectStackProtocolImplementation implements
                         type: row.type,
                         name: row.name,
                         state,
+                        // [#23165, ADR-0048] The package being uninstalled
+                        // owns this row, so the delete names it. Named no
+                        // package, the delete of a name a second package also
+                        // holds was a driver-order pick between the two rows
+                        // (and is now refused).
+                        packageId: request.packageId,
                         ...(request.actor ? { actor: request.actor } : {}),
                         ...(dropStorage ? { dropStorage: true } : {}),
                     });
@@ -25592,7 +26007,20 @@ export class ObjectStackProtocolImplementation implements
                 }
             }
             const rewritten = deepRewrite(item);
-            if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) rewritten.name = newName;
+            if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) {
+                rewritten.name = newName;
+                // [ADR-0086 D3] A permission set that declares its SOURCE
+                // package as its owner is copied declaring the target, the
+                // package the copy is saved into: the save door refuses a
+                // `packageId` that disagrees with that binding
+                // ({@link permissionSetOwnerBindingRefusal}), and the copy's
+                // owner is the target. Any other declared value is left as
+                // stored, so a source row that already disagreed with its own
+                // binding is reported in `failed[]` with the door's remedy.
+                if (singular === 'permission' && rewritten.packageId === request.sourcePackageId) {
+                    rewritten.packageId = request.targetPackageId;
+                }
+            }
             try {
                 await this.saveMetaItem({
                     type: row.type,
@@ -26811,12 +27239,14 @@ export class ObjectStackProtocolImplementation implements
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
                         intent,
-                        // [#21470] The divergent `name` refusal, then [#20790]
-                        // R2's credential-channel strip. A refused version lands
+                        // [#21470] The divergent `name` refusal, [ADR-0086 D3]
+                        // the permission set's owner judge against the binding
+                        // read above, then [#20790] R2's credential-channel
+                        // strip. A refused version lands
                         // in `failed[]` below, with nothing written. Judged under
                         // the SINGULAR type, the spelling the write-through
                         // registers under. See {@link restoredBodyWriter}.
-                        deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name),
+                        deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name, restorePackageId),
                         ...memberOption(member),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
@@ -27172,11 +27602,12 @@ export class ObjectStackProtocolImplementation implements
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
-                // [#21470] The divergent `name` refusal, rethrown below with
-                // nothing written; then [#20790] R2 — a rollback past the
+                // [#21470] The divergent `name` refusal and [ADR-0086 D3] the
+                // permission set's owner judge against the binding read above,
+                // rethrown below with nothing written; then [#20790] R2 — a rollback past the
                 // credential move keeps the write-only channel's current
                 // credential and stores none. See {@link restoredBodyWriter}.
-                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name),
+                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name, rollbackPackageId),
                 // [#22877] The member whose lineage `toVersion` is taken from.
                 ...memberOption(member),
             });
@@ -27632,6 +28063,16 @@ export class ObjectStackProtocolImplementation implements
         dropStorage?: boolean;
         /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
+        /**
+         * [#23165, ADR-0048] The package whose row this delete removes, as a
+         * save names the row it writes (`?package=` on the REST door). Named,
+         * the delete removes that package's row and no other. Absent or `null`
+         * names no package: the delete removes the row of the one package the
+         * item's rows at its state are bound to, is refused `409
+         * RESOURCE_CONFLICT` when they are bound to two or more, and with none
+         * removes the package-unbound row ({@link packagelessAddress}).
+         */
+        packageId?: string | null;
     }): Promise<{
         success: boolean;
         message?: string;
@@ -27805,18 +28246,70 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
                 org: orgId ?? 'env',
             } as Parameters<typeof repo.delete>[0];
+            // [#23165] The refusal of a package-less delete of an item two or
+            // more packages hold: the door's own verdict, rethrown as it is by
+            // the `catch` below, never re-wrapped as a delete that failed.
+            let addressRefusal: Error | undefined;
 
             try {
                 const targetState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
+                // [#23165, ADR-0048] THE ADDRESS of the row this delete removes.
+                // It used to be no address at all: `repo.get` and `repo.delete`
+                // were handed no package, so each took the first row a
+                // package-agnostic `findOne` met — one package's row of an item
+                // two packages hold (the other package's row then served, and
+                // the receipt said "it no longer exists"), or the package's row
+                // when a package-less row sat beside it.
+                //
+                // Named, the delete removes that package's row and no other.
+                // Naming none, it takes the save door's resolution
+                // ({@link packagelessAddress}), read from the rows at the state
+                // it removes: the one package those rows are bound to, the
+                // package-unbound row when they are bound to none, and a
+                // refusal when they are bound to two or more. A draft discard
+                // reads the draft rows, so it removes the draft that exists,
+                // wherever the draft save put it (#11087).
+                //
+                // Resolved here, below every door that judges the item rather
+                // than its row (the organization refusal, the packaged-base
+                // door, the creatable check and the `_lock` gate), as the save
+                // door orders it. The rows read here are also what the receipt
+                // below tells the truth about: what is still stored, and so
+                // still served, once this row is gone.
+                const rowsAtAddress = await this.packagelessAddress(
+                    singularTypeForRepo, request.name, member, targetState,
+                );
+                if (request.packageId == null && rowsAtAddress.candidates.length > 1) {
+                    addressRefusal = packagelessAddressAmbiguityRefusal(
+                        'delete', request.type, request.name, rowsAtAddress.candidates,
+                    );
+                    throw addressRefusal;
+                }
+                const packageId: string | null = request.packageId ?? rowsAtAddress.packageId;
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
-                const current = await repo.get(ref, { state: targetState, ...memberOption(member) });
+                const current = await repo.get(ref, { state: targetState, packageId, ...memberOption(member) });
                 // [#21899] An origin-gated code-defined item with NO stored row:
                 // the delete would remove nothing, and the item itself is not
                 // removable at runtime — refused with the package door's own
                 // verdict, the one its save gets. Rethrown as it is by the
                 // `catch` below.
                 if (!current && originGatedRefusal !== null) throw originGatedRefusal;
+                // [#23165] A delete NAMING a package that holds no row here, of
+                // an item whose other rows are stored: nothing is removed and
+                // those rows are still served, so neither the registry heal
+                // below nor its "already at artifact default" / "nothing to
+                // delete" claim holds. A delete naming none never lands here:
+                // it addresses a row the read above found.
+                if (!current && request.packageId != null && (rowsAtAddress.candidates.length > 0 || rowsAtAddress.unbound)) {
+                    return {
+                        success: true,
+                        reset: false,
+                        message: targetState === 'draft'
+                            ? `No pending draft of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
+                            : `No row of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
+                    };
+                }
                 if (!current) {
                     // Self-heal: even with no overlay row, a stale runtime
                     // shadow may linger in the registry (e.g. pollution from
@@ -27877,6 +28370,10 @@ export class ObjectStackProtocolImplementation implements
                         ? 'override-artifact'
                         : 'runtime-only',
                     state: targetState,
+                    // [#23165] The row the probe read, by its key — never the
+                    // repository's "any package" match, which takes the first
+                    // row it meets.
+                    packageId,
                     ...memberOption(member),
                 });
 
@@ -27933,6 +28430,12 @@ export class ObjectStackProtocolImplementation implements
                     organizationId: orgId,
                     ...mutationEventMember(singularTypeForRepo, member),
                 });
+                // [#23165] What is still stored at this address once this row
+                // is gone, from the rows the address read already holds.
+                const remainingPackages = rowsAtAddress.candidates.filter((id) => id !== packageId);
+                const unboundRemains = rowsAtAddress.unbound && packageId !== null;
+                const remains = remainingPackages.length > 0 || unboundRemains;
+                const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
                 return {
                     success: true,
                     reset: true,
@@ -27957,17 +28460,31 @@ export class ObjectStackProtocolImplementation implements
                     // The draft leg discards a pending draft and never claimed
                     // a reset, so it is unchanged. `[seq=…]` stays on every
                     // branch — HMR cursors read it.
+                    //
+                    // [#23165] Both active sentences claim what is left once
+                    // this row is gone, and that is true only when no other row
+                    // of the item is stored at this address: a delete of one
+                    // package's row leaves another package's row, or the
+                    // package-less row beside it, stored and served. Then the
+                    // receipt names what remains instead. A delete of a
+                    // package's row names the package, as the save receipt
+                    // does; a delete of the package-unbound row with nothing
+                    // left reads byte for byte as before.
                     message: (request.state === 'draft')
                         ? `Draft discarded — ${request.type}/${request.name}. [seq=${result.seq}]`
                         : artifactBacked
-                            ? `Customization overlay deleted — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`
-                            : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists. [seq=${result.seq}]`,
+                            ? (remains
+                                ? `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} still carries another overlay: ${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}. [seq=${result.seq}]`
+                                : `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`)
+                            : (remains
+                                ? `Deleted ${singularTypeForRepo} '${request.name}'${deletedPackage}, and it still exists: ${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}. [seq=${result.seq}]`
+                                : `Deleted ${singularTypeForRepo} '${request.name}'${deletedPackage} — it no longer exists. [seq=${result.seq}]`),
                 };
             } catch (err: any) {
                 // [#21899] The door's own verdict, not a store failure: it
                 // leaves with its envelope and sentence, never re-wrapped as an
                 // overlay delete that failed.
-                if (err === originGatedRefusal) throw err;
+                if (err === originGatedRefusal || (addressRefusal !== undefined && err === addressRefusal)) throw err;
                 if (err instanceof ConflictError) {
                     // [#21207] Keyed values or none in the text and attributes.
                     const conflict = await this.metadataConflictRefusal(

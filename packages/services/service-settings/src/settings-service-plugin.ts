@@ -4,6 +4,10 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import {
   resolveAuthzContext,
   isAuthzStoreUnavailableError,
+  // [ADR-0069] The ONE reader of the session's policy posture, so this
+  // resolver puts on the context exactly what the other transports carry
+  // (`ExecutionContext.authGate`).
+  normalizeAuthGate,
   // [#16013] The posture derivation, in ONE call. It reads the posture IN
   // FORCE off the `tenancy` service (never the REQUESTED one an env var asks
   // for) and carries decision-1-option-A's classification (#13906) for every
@@ -285,6 +289,10 @@ export class SettingsServicePlugin implements Plugin {
       // service apply the manifest read/write permission gates. An unresolvable
       // request fails CLOSED (anonymous + enforced → denied).
       const verifiedContextFromRequest = async (req: IHttpRequest): Promise<SettingsContext> => {
+        // ADR-0069 — the user of the session the resolver below reads, kept so
+        // the context carries THAT session's policy posture: one read, the
+        // identity and the posture both off it.
+        let sessionUser: unknown;
         try {
           const ql: any = ctx.getService('objectql');
           const headers = new Headers();
@@ -297,7 +305,9 @@ export class SettingsServicePlugin implements Plugin {
               const authService: any = ctx.getService('auth');
               let api: any = authService?.api;
               if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
-              return await api?.getSession?.(inProcessSessionReadInput(h));
+              const session = await api?.getSession?.(inProcessSessionReadInput(h));
+              sessionUser = session?.user;
+              return session;
             } catch {
               return undefined;
             }
@@ -310,6 +320,18 @@ export class SettingsServicePlugin implements Plugin {
           // unvetted claim became a verdict a consumer acts on.
           const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
           const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
+          // [ADR-0069] The session's policy posture, normalized by the shared
+          // reader exactly as REST's `computeExecCtx` lifts it, and read by the
+          // family's door (`registerSettingsRoutes`), which refuses a held
+          // session with the gate's `403`. Absent for every healthy session and
+          // for an API-key caller (the resolver reads no session for one).
+          //
+          // No second read and no outage arm: the posture comes off the same
+          // read that resolved the caller, so a read that fails resolved no
+          // caller either, and the anonymous floor refuses it. The `503` REST
+          // and storage answer belongs to a SEPARATE gate re-read that fails
+          // after the caller was resolved, a state this resolver never enters.
+          const authGate = normalizeAuthGate(sessionUser) ?? undefined;
           return {
             userId: authz.userId,
             tenantId: authz.tenantId,
@@ -318,6 +340,7 @@ export class SettingsServicePlugin implements Plugin {
             // both aggregates so either kind of declared gate resolves.
             permissions: [...(authz.systemPermissions ?? []), ...(authz.permissions ?? [])],
             enforced: true,
+            ...(authGate ? { authGate } : {}),
           };
         } catch (err) {
           // [commit 6a180e42d] An unreachable permission store is an outage, not a

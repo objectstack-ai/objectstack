@@ -59,6 +59,7 @@ import { applyManagedWriteDenies } from './managed-object-write-denies.js';
 import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
+import { registerSecurityCatalogEcho, echoStoredSecurityCatalogOverlays } from './security-catalog-echo.js';
 import {
   reconcileAudienceBindingSuggestions,
   listAudienceBindingSuggestions,
@@ -138,6 +139,9 @@ import {
   MasterReferenceMissingError,
   MaskedValueWriteError,
 } from './errors.js';
+// [ADR-0138 D4] The guest entry's organization step, and the located refusal
+// the CRUD gate raises where it refuses.
+import { GuestOrganizationUnresolvedError, resolveGuestOrganization } from '@objectstack/core';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
@@ -1453,6 +1457,14 @@ export class SecurityPlugin implements Plugin {
    * saying is worth saying again on the next boot.
    */
   private readonly nameFoldWarned = new Set<string>();
+
+  /**
+   * [ADR-0138 D4] The refusal reasons {@link refuseGuestWithoutOrganization}
+   * has already reported to the operator — once per reason per instance, for
+   * the reason {@link nameFoldWarned} gives: the condition is a deployment
+   * fact, and a per-request line is a filtered one.
+   */
+  private readonly guestOrganizationRefusalWarned = new Set<string>();
 
   /**
    * [#21729] Alternate matches other plugins contributed to the platform's
@@ -4321,8 +4333,9 @@ export class SecurityPlugin implements Plugin {
     // retired, so no `sys_position`, `sys_permission_set` or `sys_capability`
     // write reaches the engine at all. A position, permission set or
     // capability is written through the metadata door alone, which registers
-    // it in the security catalog itself and, under a wall, refuses a tenant
-    // with the same verdict (`walledCatalogWriteVerdict`).
+    // it in the security catalog (on an environment kernel through the echo
+    // `runBootstrap` wires, `security-catalog-echo.ts`) and, under a wall,
+    // refuses a tenant with the same verdict (`walledCatalogWriteVerdict`).
 
     // Defer platform admin bootstrap until all plugins finish starting —
     // sys_user / sys_user_permission_set objects must be registered (by
@@ -4334,6 +4347,11 @@ export class SecurityPlugin implements Plugin {
     // [#22801 → A] Same once-guard for the `permission` mutation listener
     // that re-derives `everyone` (registered in `runBootstrap`).
     let everyoneMutationWired = false;
+    // The security catalog's echo is wired once and its boot pass runs once,
+    // though runBootstrap re-runs (e.g. after the first user insert): the
+    // projector replaces idempotently, and the pass would only repeat work.
+    let catalogEchoWired = false;
+    let catalogEchoBooted = false;
     // [#3325 / ADR-0092] Union the better-auth managed-object write denies into
     // the default sets from the LIVE registry, replacing the hand-maintained
     // baseline as the source of truth (a newly-declared identity table is then
@@ -4418,9 +4436,30 @@ export class SecurityPlugin implements Plugin {
               },
             );
           }
-          // [ADR-0131 D3, C3 stage 8] No `permission` mutation projector: the
-          // metadata door's own registry write-through puts a saved set in the
-          // security catalog, and no row mirrors it.
+          // [ADR-0131 D3] The security catalog's echo: the awaited mutation
+          // projector for `permission` and `position`, then one pass over the
+          // stored env-wide overlays. On an ENVIRONMENT kernel the metadata
+          // door registers no stored row in the engine registry, so the
+          // catalog finds a metadata-door set or position only in the
+          // metadata service, and this is what puts it there. It writes no
+          // row (C3 stage 8 retired them) and decides nothing. Before the
+          // suggestion reconcile below, which reads the catalog. See
+          // `security-catalog-echo.ts`.
+          if (!catalogEchoWired) {
+            catalogEchoWired = registerSecurityCatalogEcho(protocol, {
+              ql, metadata: this.metadata, logger: ctx.logger,
+            });
+          }
+          if (catalogEchoWired && !catalogEchoBooted) {
+            catalogEchoBooted = true;
+            try {
+              await echoStoredSecurityCatalogOverlays(protocol, {
+                ql, metadata: this.metadata, logger: ctx.logger,
+              });
+            } catch (e) {
+              ctx.logger.warn('[security] the security-catalog echo of stored overlays failed at boot', { error: (e as Error).message });
+            }
+          }
           // [#3050] OWD posture authoring gate — pre-persistence veto on
           // runtime-authored `object` bodies: env-tighten-only over packaged
           // declarations (ADR-0086 D1) + external ≤ internal (ADR-0090 D11).
@@ -4512,19 +4551,16 @@ export class SecurityPlugin implements Plugin {
 
     // [ADR-0131 D3/D4] The catalog reference report: per organization, every
     // assignment and grant whose name the security catalog does not resolve,
-    // every grant that names nothing, every position row with no definition
-    // (by name and organization), and under `single` every position name more
-    // than one row carries. A reference that resolves nowhere confers nothing;
-    // this is what makes that loud. Registered AFTER the two backfills above,
-    // so it runs after them (handlers run in registration order) and does not
-    // report a name either one resolved this boot. It writes nothing. Only at
-    // `kernel:bootstrapped`: run any earlier, it would judge a catalog that is
-    // still being filled. See `catalog-reference-report.ts`.
+    // and every grant that names nothing. A reference that resolves nowhere
+    // confers nothing; this is what makes that loud. Registered AFTER the
+    // grant-name backfill above, so it runs after it (handlers run in
+    // registration order) and does not report a name it resolved this boot.
+    // It writes nothing. Only at `kernel:bootstrapped`: run any earlier, it
+    // would judge a catalog that is still being filled. See `catalog-reference-report.ts`.
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
         try {
           await reportCatalogReferences(ql as any, {
-            posture: this.tenancyPosture,
             catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
             logger: ctx.logger,
           });
@@ -6438,7 +6474,17 @@ export class SecurityPlugin implements Plugin {
   private async resolvePermissionSetsForContextUnmemoized(
     context: any,
   ): Promise<PermissionSet[]> {
-    const positions = context?.positions ?? [];
+    // [ADR-0138 D3] The GUEST requests exactly the sets its envelope carries —
+    // the `guest` anchor's bindings, which `resolveAuthzContext` resolved in
+    // the organization D4 derived — and they are treated as any requested set
+    // below. Its position is NOT folded into the request: the position-name
+    // fold (#13419's ruling retires it) would hand an anonymous caller any set
+    // that merely shares the anchor's name, the one channel D3 item 3 says
+    // never reaches the guest. The baseline does not reach it either (applied
+    // only to a caller with a user id, below), and `everyone` is never among
+    // its positions.
+    const isGuest = context?.principalKind === 'guest' && !context?.userId;
+    const positions = isGuest ? [] : (context?.positions ?? []);
     const explicitPermissionSets = context?.permissions ?? [];
     const requested = [...positions, ...explicitPermissionSets];
     // [ADR-0090 D10] An AGENT principal's grants are EXACTLY its scope-derived
@@ -8654,6 +8700,7 @@ export class SecurityPlugin implements Plugin {
     if (isPrincipalLessContext(context)) {
       throw principalLessDenial(operation, object);
     }
+    await this.refuseGuestWithoutOrganization(context, operation, object);
 
     let permissionSets: PermissionSet[] = [];
     try {
@@ -8688,6 +8735,56 @@ export class SecurityPlugin implements Plugin {
       }
     }
     return { permissionSets, delegatorSets, delegatorContext };
+  }
+
+  /**
+   * [ADR-0138 D4] The located refusal: a GUEST that reaches a data operation
+   * acting in no organization, on a deployment where the guest entry's
+   * organization step refuses — a wall, several organizations, or none.
+   *
+   * Raised HERE, at the CRUD gate, because this is where the guest's
+   * organization matters (D4 item 3: to resolve its grants and to scope its
+   * data operation). The guest entry cannot raise it: the runtime face
+   * assembles the guest envelope for every sessionless request before any
+   * route is matched, so a refusal there would replace every anonymous 401 and
+   * reach the flow door D4 leaves alone. The entry instead records nothing it
+   * cannot use — no organization and no set (`resolveAuthzContext`) — and this
+   * gate asks the SAME step (`resolveGuestOrganization`, one step, two askers)
+   * for a guest that carries no organization. Before any set is resolved: where
+   * D4 refuses, D3 is never reached (D3 item 7). And ahead of the prologue's
+   * fail-closed `catch` on purpose: that net turns every throw of the set
+   * resolution into a generic `PERMISSION_DENIED`, which is the disguise the
+   * located refusal removes.
+   *
+   * A guest that carries an organization was derived one by the entry, and a
+   * decision other than `refuse` (`derived`, or a composition with no
+   * organization object) leaves the guest to the gate as it is — denied while
+   * it holds no set (D3 item 2).
+   */
+  private async refuseGuestWithoutOrganization(context: any, operation: string, object: string): Promise<void> {
+    // A system context never reaches here: both callers of
+    // {@link resolveOperationPrincipals} return before it for one (the
+    // middleware's system short-circuit, and `checkControlledByParentWrite`'s
+    // first exit), so this rule reads no elevation of its own.
+    if (context?.principalKind !== 'guest' || context?.userId) return;
+    const tenantId = context?.tenantId;
+    if (typeof tenantId === 'string' && tenantId !== '') return;
+    const decision = await resolveGuestOrganization(this.ql, this.tenancyPosture);
+    if (decision.kind !== 'refuse') return;
+    if (!this.guestOrganizationRefusalWarned.has(decision.reason)) {
+      this.guestOrganizationRefusalWarned.add(decision.reason);
+      this.logger.warn?.(
+        `[security] an anonymous request reached '${operation}' on '${object}' and was refused: this deployment ` +
+          `resolves no organization for the guest (${decision.reason}, tenancy posture '${this.tenancyPosture}'` +
+          `${decision.organizationCount !== undefined ? `, ${decision.organizationCount} organization(s)` : ''}). ` +
+          `ADR-0138 D4 derives the guest's organization only on a single-organization deployment, and no site ` +
+          `binding (D5) exists yet to name one per request, so every anonymous data operation here answers ` +
+          `501 NOT_IMPLEMENTED. Serve the endpoint to signed-in callers (authRequired: true), or run it on a ` +
+          `single-organization deployment. Reported once per reason.`,
+        { operation, object, reason: decision.reason },
+      );
+    }
+    throw new GuestOrganizationUnresolvedError(decision.reason);
   }
 
   /**

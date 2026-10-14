@@ -2,6 +2,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { resolveTenancyPosture } from '@objectstack/types';
@@ -24,6 +25,30 @@ import {
   OrganizationOwnershipPlanRefusal,
   type OrganizationOwnershipPlan,
 } from '../../utils/organization-ownership-plan.js';
+import {
+  applyOrganizationOwnership,
+  checkpointFromDetails,
+  ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+  TemplateChoiceRefusal,
+  type ApplyExecutor,
+  type CeremonyLedgerPort,
+  type ColumnDropOutcome,
+  type OrganizationOwnershipApplyReport,
+} from '../../utils/organization-ownership-apply.js';
+
+/** Who the ceremony's metadata saves name as their actor. */
+const CEREMONY_ACTOR = 'os migrate organization-ownership';
+
+async function confirm(question: string): Promise<boolean> {
+  if (!process.stdin.isTTY) return false; // non-interactive → require --backup-taken
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer: string = await new Promise((resolve) => rl.question(question, resolve));
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
 
 /**
  * `os migrate organization-ownership` — the v18 organization-ownership
@@ -53,20 +78,45 @@ import {
  * Bare `os migrate` is the schema-drift plan (#2186) and stays exactly that.
  * Every data step in this family is a named subcommand whose bare run is the
  * read-only preview and whose `--apply` is the only writing mode; the ADR's
- * `--plan` names this mode. C7b adds `--apply` (fate order: attribution, the
- * verified id-to-name rewrite, mirror deletion, column drops) and the
- * post-check to THIS command; until then it has no writing mode at all.
+ * `--plan` names this mode.
+ *
+ * ## `--apply` (ADR-0131 D10 ceremony items 2 to 4)
+ *
+ * The writing mode. It asks about the backup first — the operator's act and
+ * the precondition (D10 item 2): `--backup-taken`, or a yes at the prompt; a
+ * non-interactive run without the flag is refused before the boot. It then
+ * performs the fates in order — attribution, the authored catalog conversion,
+ * the template promotion, the settings global-rung move, the verified id→name
+ * rewrite, mirror deletion, column drops — through `../../utils/organization-ownership-apply.ts`,
+ * checkpointing each finished step in the deployment ledger (`sys_migration`,
+ * row {@link ORGANIZATION_OWNERSHIP_MIGRATION_ID}) so an interrupted run
+ * resumes where it stopped, and ends with the post-check. The ledger row is
+ * the ceremony's marker: `applied_at` once every step has finished,
+ * `verified_at` when the post-check also reads zero discrepancies. A report
+ * file is written beside the plan's, never over an existing one.
+ *
+ * The apply boot composes the deployment's served object set
+ * (`composeHostStack`, with the auth-gated security declarations and the
+ * served platform) so the security catalog it verifies names against is the
+ * one the deployment serves, and the schema-drift ceremony proposes the
+ * column drops of exactly the objects this release declares without the
+ * column. It still holds the boot's own DDL back (`deferSchemaDdl`): the only
+ * schema change the ceremony makes is the drops it asked for.
  */
 export default class MigrateOrganizationOwnership extends Command {
   static override description =
-    'The v18 organization-ownership ceremony\'s read-only plan (ADR-0131 D10): per table, the fate, the row counts, the ' +
-    'rows whose owner cannot be derived (by id), and which tables will receive NOT NULL. Writes the plan to a file; ' +
-    'never changes a row or a column. Refuses — naming it — any table it cannot enumerate.';
+    'The v18 organization-ownership ceremony (ADR-0131 D10). Without --apply, the read-only plan: per table, the fate, ' +
+    'the row counts, the rows whose owner cannot be derived (by id), and which tables will receive NOT NULL, written ' +
+    'to a file — never a row or a column changed; it refuses, naming it, any table it cannot enumerate. With --apply ' +
+    '(and a backup): attribution, the authored catalog conversion, the template promotion, the settings move, the ' +
+    'verified id-to-name rewrite, mirror deletion and column drops, in that order, ' +
+    'resumable from a recorded checkpoint, then the post-check.';
 
   static override examples = [
     '$ os migrate organization-ownership',
     '$ os migrate organization-ownership --out plans/v18-ownership.json',
     '$ os migrate organization-ownership --database-url postgres://… --json',
+    '$ os migrate organization-ownership --apply --backup-taken',
   ];
 
   static override flags = {
@@ -76,10 +126,30 @@ export default class MigrateOrganizationOwnership extends Command {
     }),
     out: Flags.string({
       description:
-        'Where to write the plan (default: organization-ownership-plan-TIMESTAMP.json in the current directory). ' +
+        'Where to write the plan, or with --apply the apply report (default: organization-ownership-plan-TIMESTAMP.json, ' +
+        'or organization-ownership-apply-TIMESTAMP.json, in the current directory). ' +
         'An existing file is never overwritten',
     }),
-    json: Flags.boolean({ description: 'Also print the plan document on stdout' }),
+    json: Flags.boolean({ description: 'Also print the plan (or, with --apply, the apply report) on stdout' }),
+    apply: Flags.boolean({
+      description:
+        'Perform the ceremony: attribution, the verified id-to-name rewrite, mirror deletion, column drops, then the ' +
+        'post-check. Idempotent; an interrupted run resumes from its recorded checkpoint. Requires a backup',
+      default: false,
+    }),
+    'backup-taken': Flags.boolean({
+      description:
+        'With --apply: state that a backup of this database has been taken. The platform takes none and assumes ' +
+        'none; without this flag the run asks, and a non-interactive run is refused',
+      default: false,
+    }),
+    'template-choice': Flags.string({
+      description:
+        'With --apply: the sys_email_template row id the environment keeps for a listed template conflict ' +
+        '(rows of one name and locale that differ). Repeat once per conflict; the other rows of that conflict are ' +
+        'deleted only after the chosen body is promoted and verified',
+      multiple: true,
+    }),
   };
 
   async run(): Promise<void> {
@@ -88,7 +158,12 @@ export default class MigrateOrganizationOwnership extends Command {
     const json = Boolean(flags.json);
     const refuse = async (payload: Record<string, unknown>, message: string): Promise<void> => {
       if (json) {
-        await emitJson({ error: payload.reason === 'boot-failed' ? 'boot_failed' : 'plan_refused', ...payload }, 1, { compact: true });
+        const error = payload.reason === 'boot-failed'
+          ? 'boot_failed'
+          : payload.reason === 'apply-failed'
+            ? 'apply_failed'
+            : flags.apply ? 'apply_refused' : 'plan_refused';
+        await emitJson({ error, ...payload }, 1, { compact: true });
         return;
       }
       printError(message);
@@ -100,6 +175,19 @@ export default class MigrateOrganizationOwnership extends Command {
       posture = resolveTenancyPosture();
     } catch (error) {
       await refuse({ reason: 'posture-unresolved', detail: String((error as Error).message) }, (error as Error).message);
+      return;
+    }
+
+    if (flags.apply) {
+      await this.runApply(flags, posture, refuse);
+      return;
+    }
+    if (flags['template-choice']?.length) {
+      await refuse({ reason: 'flag-without-apply', detail: '--template-choice is only meaningful with --apply' }, '--template-choice is only meaningful with --apply.');
+      return;
+    }
+    if (flags['backup-taken']) {
+      await refuse({ reason: 'flag-without-apply', detail: '--backup-taken is only meaningful with --apply' }, '--backup-taken is only meaningful with --apply.');
       return;
     }
 
@@ -187,6 +275,15 @@ export default class MigrateOrganizationOwnership extends Command {
           `${table.notNull.willReceive ? chalk.green(' NOT NULL') : ''}`,
       );
     }
+    for (const table of plan.tables) {
+      for (const conflict of table.templateConflicts ?? []) {
+        printWarning(
+          `Template conflict ${conflict.name} (${conflict.locale}): ` +
+            conflict.candidates.map((c) => `${c.id} (organization ${c.organizationId ?? 'none'})`).join(', ') +
+            ' differ. --apply blocks on it until one row is chosen with --template-choice ROW_ID.',
+        );
+      }
+    }
     console.log('');
     const { summary } = plan;
     printInfo(
@@ -198,5 +295,251 @@ export default class MigrateOrganizationOwnership extends Command {
     }
     printSuccess(`Plan written to ${target} — nothing in the database was changed.`);
     console.log(chalk.dim(`  ${timer.display()}`));
+  }
+
+  /** `--apply`: the backup precondition, the boot, the ceremony, the report file. */
+  private async runApply(
+    flags: { 'database-url'?: string; out?: string; json?: boolean; 'backup-taken'?: boolean; 'template-choice'?: string[] },
+    posture: string,
+    refuse: (payload: Record<string, unknown>, message: string) => Promise<void>,
+  ): Promise<void> {
+    const json = Boolean(flags.json);
+    const timer = createTimer();
+    if (!flags['backup-taken']) {
+      const target = flags['database-url'] ?? process.env.OS_DATABASE_URL ?? 'the project database';
+      const yes = !json && (await confirm(
+        `${chalk.yellow('Backup')}: this run rewrites ownership, deletes mirror rows and drops columns in ${target}. ` +
+          'Has a backup of it been taken? [y/N] ',
+      ));
+      if (!yes) {
+        await refuse(
+          { reason: 'backup-unacknowledged', detail: 'pass --backup-taken once a backup of this database exists' },
+          'Refused: --apply needs a backup of this database first. Take one, then re-run with --backup-taken ' +
+            '(or answer yes at the prompt). The platform takes no backup and assumes none.',
+        );
+        return;
+      }
+    }
+
+    if (!json) {
+      printHeader('Migrate · organization-ownership (apply)');
+      printStep('Booting the deployment\'s served stack (schema DDL held back)…');
+    }
+    let stack;
+    try {
+      stack = await bootSchemaStack({
+        jsonOutput: json,
+        ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
+        deferSchemaDdl: true,
+        composeHostStack: true,
+        composeServedPlatform: true,
+        composeAuthGatedSecurity: true,
+      });
+    } catch (error: unknown) {
+      await refuse({ reason: 'boot-failed', detail: String((error as Error)?.message ?? error) }, String((error as Error)?.message ?? error));
+      return;
+    }
+
+    let report: OrganizationOwnershipApplyReport;
+    try {
+      const exec = resolvePlannedDriverExec(stack.driver);
+      if (!stack.driver || !exec) {
+        await refuse(
+          { reason: 'driver-unsupported', detail: 'no SQL driver with a raw-SQL seam is active' },
+          'No SQL driver with a raw-SQL seam is active. The ceremony supports SQLite, PostgreSQL and MySQL.',
+        );
+        return;
+      }
+      if (stack.tableAbsent('sys_migration')) {
+        await refuse(
+          { reason: 'ledger-absent', table: 'sys_migration', detail: 'the deployment ledger the ceremony checkpoints into does not exist' },
+          'Refused: this database has no sys_migration table, where the ceremony records its checkpoint. Boot this ' +
+            'release against it once (its schema sync creates the table), then re-run.',
+        );
+        return;
+      }
+      const { normalizeRows } = await import('@objectstack/metadata-protocol');
+      const { createSecurityCatalogReader } = await import('@objectstack/core');
+      const { readDataMigrationFlag, recordDataMigrationRun } = await import('@objectstack/platform-objects/system');
+      const kernel = stack.kernel as { getService(name: string): unknown };
+      const engine = kernel.getService('objectql') as Parameters<typeof recordDataMigrationRun>[0] & { registry?: unknown };
+      const protocol = kernel.getService('protocol') as {
+        saveMetaItem?: (request: Record<string, unknown>) => Promise<unknown>;
+        getMetaItemsForExecution?: (request: { type: string }) => Promise<{ items?: unknown[] }>;
+      } | undefined;
+      const catalog = createSecurityCatalogReader({
+        registry: engine.registry as never,
+        metadata: kernel.getService('metadata') as never,
+      });
+      const client = (stack.driver.config as { client?: unknown } | undefined)?.client;
+      const executor: ApplyExecutor = {
+        client: client === undefined ? undefined : String(client),
+        query: async (sql, params) => normalizeRows(await exec(sql, params ? [...params] : [])),
+        execute: async (sql, params) => {
+          await exec(sql, params ? [...params] : []);
+        },
+      };
+      const ledger: CeremonyLedgerPort = {
+        read: async () => checkpointFromDetails((await readDataMigrationFlag(engine, ORGANIZATION_OWNERSHIP_MIGRATION_ID))?.details),
+        write: async (checkpoint, verdict) => {
+          await recordDataMigrationRun(engine, {
+            migrationId: ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+            passed: verdict.complete && verdict.blocking === 0,
+            applied: verdict.complete,
+            blocking: verdict.blocking,
+            advisory: verdict.advisory,
+            details: { checkpoint },
+          });
+        },
+      };
+      const liveStack = stack;
+      report = await applyOrganizationOwnership({
+        executor,
+        ...(flags['template-choice']?.length ? { templateChoices: flags['template-choice'] } : {}),
+        posture,
+        database: stack.dbLabel,
+        catalog,
+        door: {
+          save: async (type, name, body) => {
+            if (typeof protocol?.saveMetaItem !== 'function') {
+              throw new Error('no metadata protocol is composed on this stack');
+            }
+            await protocol.saveMetaItem({ type, name, item: body, actor: CEREMONY_ACTOR });
+          },
+        },
+        templates: {
+          // The environment's own row first (it is what a promotion must never
+          // overwrite), then what the registry serves for the bundle member.
+          find: async (name, locale) => {
+            const stored = await executor.query(
+              'SELECT metadata FROM sys_metadata WHERE type = ? AND name = ? AND state = ? AND organization_id IS NULL ' +
+                'AND (bundle_member = ? OR (bundle_member IS NULL AND ? = ?))',
+              ['email_template', name, 'active', locale, locale, 'en-US'],
+            );
+            if (stored.length > 0) {
+              const raw = stored[0]!.metadata;
+              const definition = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>;
+              return { definition, environment: true };
+            }
+            if (typeof protocol?.getMetaItemsForExecution !== 'function') return undefined;
+            const listed = await protocol.getMetaItemsForExecution({ type: 'email_template' });
+            const served = (listed?.items ?? []).find((item) => {
+              const i = item as Record<string, unknown> | null;
+              return !!i && i.name === name && (typeof i.locale === 'string' && i.locale ? i.locale : 'en-US') === locale;
+            }) as Record<string, unknown> | undefined;
+            return served ? { definition: served, environment: false } : undefined;
+          },
+        },
+        columnDrops: {
+          drop: async (tables) => {
+            const drift = await liveStack.detectManagedDrift();
+            const wanted = new Set(tables);
+            const entries = drift.filter((d) => {
+              const op = (d as { op?: { type?: string; column?: string } }).op;
+              return op?.type === 'drop_column' && op.column === 'organization_id' && wanted.has(String(d.table));
+            });
+            const outcomes: ColumnDropOutcome[] = [];
+            const proposed = new Set(entries.map((d) => String(d.table)));
+            for (const table of tables) {
+              if (!proposed.has(table)) {
+                outcomes.push({ table, outcome: 'not-proposed', detail: 'the drift differ proposed no drop for it' });
+              }
+            }
+            if (entries.length === 0) return outcomes;
+            const { applied, skipped } = await liveStack.applyMigrationEntries(entries, { allowDestructive: true });
+            for (const d of applied) outcomes.push({ table: String(d.table), outcome: 'dropped' });
+            for (const d of skipped) {
+              outcomes.push({ table: String(d.table), outcome: 'failed', detail: String((d as { message?: unknown }).message ?? 'skipped by the schema-drift ceremony') });
+            }
+            return outcomes;
+          },
+        },
+        ledger,
+        ...(json ? {} : { onProgress: (message: string) => printStep(message) }),
+      });
+    } catch (error: unknown) {
+      if (isExitSignal(error)) throw error;
+      if (error instanceof TemplateChoiceRefusal) {
+        await refuse({ reason: 'template-choice-refused', detail: error.message }, `Refused: ${error.message}`);
+        return;
+      }
+      if (error instanceof OrganizationOwnershipPlanRefusal) {
+        await refuse(
+          { reason: error.reason, ...(error.table ? { table: error.table } : {}), detail: error.message },
+          `Refused${error.table ? ` (${error.table})` : ''}: ${error.message}`,
+        );
+        return;
+      }
+      await refuse(
+        { reason: 'apply-failed', detail: String((error as Error)?.message ?? error), ...errorCodeFields(error) },
+        `${String((error as Error)?.message ?? error)} — every step finished before this one is checkpointed; ` +
+          're-run --apply to resume.',
+      );
+      return;
+    } finally {
+      await stack.shutdown();
+    }
+
+    const target = resolve(flags.out ?? `organization-ownership-apply-${report.generatedAt.replace(/[:.]/g, '-')}.json`);
+    try {
+      await writeFile(target, `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx' });
+    } catch (error) {
+      await refuse(
+        { reason: 'report-file-unwritable', file: target, detail: String((error as Error).message) },
+        `The ceremony ran, and its report could not be written to ${target}: ${(error as Error).message}. ` +
+          'An existing file is never overwritten; re-run --apply (it resumes, writing nothing new) with --out.',
+      );
+      return;
+    }
+    const verdictCode = report.complete && report.blocking === 0 ? 0 : 1;
+    if (json) {
+      await emitJson({ file: target, report }, verdictCode);
+      return;
+    }
+    console.log('');
+    for (const step of report.steps) {
+      const mark = step.status === 'done' || step.status === 'checkpointed' ? chalk.green('✓') : step.status === 'blocked' ? chalk.red('✗') : chalk.dim('·');
+      console.log(`  ${mark} ${step.step.padEnd(22)} ${step.status.padEnd(12)} ${chalk.dim(JSON.stringify(step.summary))}`);
+      for (const blocker of step.blockers) console.log(`      ${chalk.red(blocker)}`);
+      for (const note of step.notes) console.log(`      ${chalk.dim(note)}`);
+    }
+    console.log('');
+    for (const table of report.tables) {
+      if (!table.before) continue;
+      if (table.attributed + table.deleted + table.movedOut + table.movedIn + table.unattributable.length + table.remaining + table.departures.length === 0 && !table.columnDropped) continue;
+      console.log(
+        `  ${chalk.white(table.object.padEnd(34))} ${table.fate.padEnd(16)} attributed ${String(table.attributed).padStart(6)}  ` +
+          `deleted ${String(table.deleted).padStart(6)}  ` +
+          `${table.movedOut ? `moved out ${table.movedOut}  ` : ''}${table.movedIn ? `moved in ${table.movedIn}  ` : ''}` +
+          `${table.columnDropped ? chalk.green('column dropped  ') : ''}` +
+          `${table.unattributable.length ? chalk.yellow(`reported ${table.unattributable.length}  `) : ''}` +
+          `${table.remaining ? chalk.red(`remaining ${table.remaining}`) : ''}`,
+      );
+      for (const departure of table.departures) {
+        console.log(chalk.yellow(`      ${departure.rows} row(s) still to leave by a step not yet run — ${departure.label}`));
+      }
+      for (const conflict of table.templateConflicts ?? []) {
+        console.log(chalk.yellow(
+          `      template conflict ${conflict.name} (${conflict.locale}): ` +
+            conflict.candidates.map((c) => `${c.id} (organization ${c.organizationId ?? 'none'})`).join(', ') +
+            ' — choose one with --template-choice ROW_ID',
+        ));
+      }
+    }
+    console.log('');
+    if (report.advisory > 0) {
+      printWarning(`${report.advisory} row(s) whose owner cannot be derived stay NULL; they are listed by id in the report file.`);
+    }
+    if (verdictCode === 0) {
+      printSuccess(`The ceremony is complete; recorded as ${ORGANIZATION_OWNERSHIP_MIGRATION_ID}. Report: ${target}`);
+    } else {
+      printError(
+        report.complete
+          ? `The post-check found ${report.blocking} discrepancy(ies). Report: ${target}`
+          : `The ceremony stopped at a blocker (above). Resolve it and re-run --apply; finished steps are not repeated. Report: ${target}`,
+      );
+    }
+    console.log(chalk.dim(`  ${timer.display()}`));
+    if (verdictCode !== 0) this.exit(1);
   }
 }

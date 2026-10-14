@@ -180,6 +180,28 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       '`recordOrgResolver.organizationOf(...)` and stamps it (`suspended-run-store.ts`); unattributed run ' +
       'history was the measured symptom, and the same 2026-08-23 order covers its backfill.',
   },
+  // #23284 (writer) + the 2026-08-24 #11303 ruling, verbatim:
+  // 「11303 sys_inbox_message/sys_notification/sys_email 应该写 organization_id。」
+  // The table is NAMED by the ruling, and this card made every producer fill
+  // it: the `notify` node threads the run's organization, else the organization
+  // of the record the notification is about; the approvals service threads the
+  // request's. Admitting it is what hands a notification no producer could
+  // attribute to ADR-0131 D9 — the sole organization under `single`, a refusal
+  // where none is derivable — instead of the NULL row the HotCRM v18 pass
+  // measured on every system-context emit. Only the event row: its delivery
+  // was admitted already (below), and `emit()` threads the event row's stored
+  // organization onto the delivery, the inbox row and the receipt, so the
+  // family follows its notification on both the inline and the outbox path.
+  sys_notification: {
+    tenancy: 'tenant-scoped',
+    evidence:
+      '`MessagingService.writeEvent` (`messaging-service.ts`) stamps `organization_id` from the organization ' +
+      'its producer threads: the flow `notify` node passes the run\'s organization, else the organization of ' +
+      'the record the notification is about (`notify-node.ts`), and the approvals service passes the ' +
+      'request\'s (`approval-service.ts`). The maintainer ruled on 2026-08-24 that this table must carry ' +
+      '`organization_id`. An org-less row here is invisible to every report and cleanup that filters by ' +
+      'organization, so it is a defect, not a design.',
+  },
   // #11698
   sys_notification_delivery: {
     tenancy: 'tenant-scoped',

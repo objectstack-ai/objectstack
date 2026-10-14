@@ -69,7 +69,10 @@ const STORED_ONLY_COLLECTIONS: Readonly<Record<string, string>> = {
  *
  * `onTodo` rides along unchanged: the stored-metadata migration pass passes it
  * to list the sites a conversion left as stored for want of a lossless rewrite
- * (ADR-0087 D3), which emit no notice and would otherwise read as canonical.
+ * (ADR-0087 D3), which emit no notice and would otherwise read as canonical —
+ * and, with it, every shape protocol 18 refuses that no conversion covers
+ * (`refused-shapes.ts`: a `controlled_by_parent` object without exactly one
+ * required master, a view bound to the retired view-level API source).
  */
 export type StoredConversionOptions = Omit<ApplyConversionsOptions, 'includeRetired'>;
 

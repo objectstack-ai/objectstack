@@ -464,7 +464,7 @@
   
   **The expression remedy.** A refused `{…}` arithmetic token's CEL spelling now reads every variable path in it the way a lone path token's does — `{int * 2}` is `vars["int"] * 2`, `{items.0 * 2}` is `items[0] * 2` — instead of rewriting only its divisors, which printed envelopes that did not evaluate.
   
-  **Still accepted, unchanged.** A CEL value envelope and every literal. `{$User.*}` keeps resolving where the single-brace dialect still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
   
   ## FROM → TO
   
@@ -472,7 +472,7 @@
   |:--|:--|:--|
   | `'{$User.Id}'` | `{ dialect: 'cel', source: 'current_user.id' }` | nothing when the run has a user |
   | `'{$User.Id}'`, in a flow that can run without a user | `{ dialect: 'cel', source: 'current_user != null ? current_user.id : null' }` — or skip the node with `current_user != null` as a start condition or a `decision` | the guarded form writes `null` where the template wrote nothing, so on `update_record` it clears a stored value the template left alone |
-  | `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | an `assignment` of `uid: { dialect: 'cel', source: 'current_user.id' }`, a `get_record` on `sys_user` with `filter: { id: '{uid}' }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
+  | `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | a `get_record` on `sys_user` with `filter: { id: { dialect: 'cel', source: 'current_user.id' } }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
   | `'Owner: {$User.Id}'` | `{ dialect: 'cel', source: "'Owner: ' + current_user.id" }` | in a user-less run, write the hole as `(current_user != null ? current_user.id : '')` |
   | a text slot's `assignments: { by: '{$User.Id}' }`, then `'By {{ by }}'` | `assignments: { by: { dialect: 'cel', source: 'current_user.id' } }`, then `'By {{ by }}'` | nothing when the run has a user; where the flow can run without one, compute `current_user != null ? current_user.id : null`, which renders nothing where the template did |
   

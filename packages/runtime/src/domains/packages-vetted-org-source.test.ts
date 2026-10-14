@@ -53,6 +53,13 @@
  * [ADR-0131 D6] The doors now thread NO organization into any protocol verb,
  * vetted or not, so every caller — current member, ex-member, switched
  * ex-member — reaches the env-wide partition and never an organization's.
+ *
+ * [ADR-0131 D12 items 7–8] Under this rig's `isolated` posture every package
+ * WRITE is the platform operator's, so the three members are refused at the
+ * write doors before any protocol call, and reach no partition at all; the
+ * read doors serve them the env-wide partition. The operator (an unscoped
+ * `admin_full_access` grant, its session naming `org_alpha`) is the admitted
+ * writer, and it reaches the env-wide partition too.
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -179,17 +186,21 @@ function makeQl() {
         sys_member: [
             { user_id: 'u_member', organization_id: ALPHA, role: 'member' },
             { user_id: 'u_exmember', organization_id: BETA, role: 'member' },
+            { user_id: 'u_admin', organization_id: ALPHA, role: 'owner' },
         ],
         sys_user: [
             { id: 'u_member', email: 'u_member@example.com' },
             { id: 'u_exmember', email: 'u_exmember@example.com' },
+            { id: 'u_admin', email: 'u_admin@example.com' },
         ],
         sys_user_permission_set: [
             { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
             { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
+            { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
         ],
         sys_permission_set: [
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
+            { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },
         ],
     };
     /** Equality plus `$in`, and a loud refusal of every other shape. */
@@ -231,6 +242,8 @@ const SESSIONS: Record<string, SessionRow> = {
     sid_exmember: { id: 'ses_exmember', token: 'tok_exmember', userId: 'u_exmember', activeOrganizationId: ALPHA },
     // The same person, switched to an organization they ARE in.
     sid_exmember_beta: { id: 'ses_exmember_beta', token: 'tok_exmember_beta', userId: 'u_exmember', activeOrganizationId: BETA },
+    // The platform operator, with `org_alpha` selected.
+    sid_admin: { id: 'ses_admin', token: 'tok_admin', userId: 'u_admin', activeOrganizationId: ALPHA },
 };
 
 function authService() {
@@ -256,9 +269,9 @@ function services(): Record<string, unknown> {
 
 // ── The two HTTP entries into the domain ──────────────────────────────────────
 
-type Who = 'member' | 'exmember' | 'exmember_beta' | 'anonymous';
+type Who = 'member' | 'exmember' | 'exmember_beta' | 'admin' | 'anonymous';
 const SID: Record<Who, string | undefined> = {
-    member: 'sid_member', exmember: 'sid_exmember', exmember_beta: 'sid_exmember_beta', anonymous: undefined,
+    member: 'sid_member', exmember: 'sid_exmember', exmember_beta: 'sid_exmember_beta', admin: 'sid_admin', anonymous: undefined,
 };
 
 interface Answer { status: number; code?: string; body: any }
@@ -388,8 +401,25 @@ describe('[#20477] controls: the rig can tell the organizations apart', () => {
 
 describe('[#20477][ADR-0131 D6] no session claim reaches an organization on any /packages door', () => {
     for (const [transport, entry] of TRANSPORTS) {
-        for (const who of ['member', 'exmember', 'exmember_beta'] as const) {
+        for (const who of ['member', 'exmember', 'exmember_beta', 'admin'] as const) {
             for (const door of DOORS) {
+                // [ADR-0131 D12 items 7–8] Under the wall a write door admits only
+                // the operator: a member is refused before any protocol call.
+                if (door.method !== 'GET' && who !== 'admin') {
+                    it(`${transport} · ${who} · ${door.name}: refused 403 PERMISSION_DENIED before any protocol call, and no organization's rows are read or written`, async () => {
+                        const answer = await entry()(door.method, who, door.path, door.body);
+                        expect({ status: answer.status, code: answer.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+                        expect(String(answer.body?.error?.message)).toContain("'isolated' tenancy posture");
+                        // No protocol call means no partition was read; the
+                        // refusal names the caller's own URL segment (the
+                        // commit id `cmt_alpha`), so the answer's text is not
+                        // a read of anything.
+                        expect(state.calls).toEqual([]);
+                        expect(touched(ALPHA, 'alpha', answer).wrote).toBe(false);
+                        expect(touched(BETA, 'beta', answer).wrote).toBe(false);
+                    });
+                    continue;
+                }
                 it(`${transport} · ${who} · ${door.name}: the protocol is handed no organization, and no organization's rows are read or written`, async () => {
                     const answer = await entry()(door.method, who, door.path, door.body);
                     expect(state.calls.map((c) => c.verb)).toContain(door.verb);

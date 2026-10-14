@@ -37,6 +37,7 @@ fallback **input** to posture resolution. See
 | Enterprise `@objectstack/organizations` | not needed | **required** | **required** |
 | Default organization | one bootstrapped "Default Organization" | owned by the enterprise runtime | owned by the enterprise runtime |
 | Org-management UI (create / switch org) | hidden | shown | shown |
+| Who writes the environment's metadata | any `manage_metadata` holder | the platform operator only | the platform operator only |
 
 Only the wall's **predicate** differs between `group` and `isolated`. Everything
 about how it composes is identical: Layer 0 is AND-composed ahead of, and
@@ -45,6 +46,33 @@ or `viewAllRecords` / `modifyAllRecords` superuser bit can widen it (ADR-0095
 W1/W2, ADR-0105 D2/D4). A walled posture with no resolvable scope — no active
 organization under `isolated`, an empty membership set under `group` — fails
 closed to zero rows rather than falling through.
+
+### Under a wall, the environment's metadata is the platform operator's
+
+A walled deployment is one environment with one schema and one catalog
+(ADR-0131 D12 items 7–8, D11). Its metadata (objects, fields, views, flows,
+apps, dashboards, translations, packages, positions, permission sets,
+capabilities, every type) carries no organization, so a write lands for every
+organization at once. Under `group` and `isolated` only the platform operator
+(the `PLATFORM_ADMIN` rung: an address declared in `OS_PLATFORM_OWNER_EMAIL`)
+and the engine's own writes (seeders, installers, migrations) write it. Holding
+`manage_metadata` inside an organization does not admit a write: the `/meta`
+write doors (save, reset, publish, rollback), the install-wide stored rewrite
+(`POST /meta/_migrate-stored`), every `/packages` write,
+`install-local` install, upgrade and uninstall, and the `/automation`
+definition writes refuse such a caller `403`, naming the posture.
+
+- **Headquarters IT** authors the environment's metadata as the platform
+  operator: declare its administrators in `OS_PLATFORM_OWNER_EMAIL`. A
+  `manage_metadata` grant scoped to an organization authors nothing under a wall.
+- **An organization's administrators assign**: they place their own members in
+  the catalog's positions and permission sets, and manage their organization's
+  data. They define nothing.
+- **An organization that needs metadata of its own** is given an environment of
+  its own.
+
+Under `single` the organization is the environment, and every `manage_metadata`
+holder writes as before.
 
 `single` is not "multi-org with the walls left standing": Layer 0 contributes no
 filter at all, and the platform's own tenant-scoped RLS policies are stripped.

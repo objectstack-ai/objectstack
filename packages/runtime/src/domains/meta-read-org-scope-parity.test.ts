@@ -146,17 +146,23 @@ function makeQl() {
         sys_member: [
             { user_id: 'u_member', organization_id: 'org_alpha', role: 'member' },
             { user_id: 'u_exmember', organization_id: 'org_beta', role: 'member' },
+            { user_id: 'u_admin', organization_id: 'org_alpha', role: 'owner' },
         ],
         sys_user: [
             { id: 'u_member', email: 'u_member@example.com' },
             { id: 'u_exmember', email: 'u_exmember@example.com' },
+            { id: 'u_admin', email: 'u_admin@example.com' },
         ],
         sys_user_permission_set: [
             { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
             { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
+            // [ADR-0131 D12 items 7–8] The platform operator: under the wall
+            // the one caller the `/meta` write doors admit.
+            { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
         ],
         sys_permission_set: [
             { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
+            { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },
         ],
     };
     /**
@@ -192,6 +198,7 @@ function makeSessions(): Record<string, SessionRow> {
         sid_member: { id: 'ses_member', token: 'tok_member', userId: 'u_member', activeOrganizationId: 'org_alpha' },
         // ⭐ THE SUBJECT: the claim outlived the membership.
         sid_exmember: { id: 'ses_exmember', token: 'tok_exmember', userId: 'u_exmember', activeOrganizationId: 'org_alpha' },
+        sid_admin: { id: 'ses_admin', token: 'tok_admin', userId: 'u_admin', activeOrganizationId: 'org_alpha' },
     };
 }
 
@@ -211,7 +218,7 @@ function authService(sessions: Record<string, SessionRow>) {
 
 const TENANCY = { posture: 'isolated' };
 
-const COOKIE = { member: 'os_session=sid_member', exmember: 'os_session=sid_exmember' } as const;
+const COOKIE = { member: 'os_session=sid_member', exmember: 'os_session=sid_exmember', admin: 'os_session=sid_admin' } as const;
 type Who = keyof typeof COOKIE;
 
 // ── The two transports, over the same services ────────────────────────────────
@@ -364,12 +371,26 @@ describe('[#20408] a session claim the resolver DROPPED scopes nothing, on eithe
         expect(itemsOf(dispatcher.data).map((d: any) => d.name)).toEqual(itemsOf(rest.data).map((d: any) => d.name));
     });
 
-    it('PUT /meta/view/lead_all: the dispatcher lands the write where RestServer lands it — env-wide, never in the left organization', async () => {
+    it('PUT /meta/view/lead_all: [ADR-0131 D12 items 7–8] both transports refuse the ex-member under the wall, and neither saves anything', async () => {
         const body = { name: 'lead_all', label: 'Rewritten', object: 'lead', viewKind: 'list' };
         const d = bootDispatcher();
         const r = bootRest();
         const dispatcher = await d.call('PUT', 'exmember', '/meta/view/lead_all', {}, body);
         const rest = await r.call('PUT', 'exmember', '/meta/view/lead_all', {}, body);
+        // Each transport's own 403 spelling: REST `FORBIDDEN`, the dispatcher
+        // `PERMISSION_DENIED`.
+        expect({ status: rest.status, code: rest.code }).toEqual({ status: 403, code: 'FORBIDDEN' });
+        expect({ status: dispatcher.status, code: dispatcher.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(r.protocol.saveMetaItem).not.toHaveBeenCalled();
+        expect(d.protocol.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('PUT /meta/view/lead_all: the dispatcher lands the operator\'s write where RestServer lands it — env-wide, never in the organization its session names', async () => {
+        const body = { name: 'lead_all', label: 'Rewritten', object: 'lead', viewKind: 'list' };
+        const d = bootDispatcher();
+        const r = bootRest();
+        const dispatcher = await d.call('PUT', 'admin', '/meta/view/lead_all', {}, body);
+        const rest = await r.call('PUT', 'admin', '/meta/view/lead_all', {}, body);
         expect(rest.status).toBe(200);
         expect(dispatcher.status).toBe(rest.status);
         const landed = (p: ReturnType<typeof protocolDouble>) => p.saveMetaItem.mock.calls.map(([req]: any[]) => req.organizationId);

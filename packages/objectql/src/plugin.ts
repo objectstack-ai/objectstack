@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ObjectQL } from './engine.js';
+import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
@@ -599,6 +599,17 @@ export class ObjectQLPlugin implements Plugin {
     // [#22984] Publish the resolved opt-out where boot-time provisioning
     // plugins read it — see SKIP_SCHEMA_SYNC_ENGINE_KEY.
     (this.ql as unknown as Record<string, unknown>)[SKIP_SCHEMA_SYNC_ENGINE_KEY] = this.skipSchemaSync;
+
+    // [ADR-0139 D2] The engine composes a `ReadableIds` leaf from the
+    // registered `security` service. Handed over as a SOURCE in the engine's
+    // slot (`SECURITY_SERVICE_SOURCE_SLOT`, not public surface), read at use and
+    // never here: at this plugin's init the service is not registered yet on
+    // any composition that ships it (plugin-security registers it in its own
+    // start()), so a lookup here would record a verdict the same boot
+    // contradicts. The engine answers every state but a usable service
+    // `$in: []` (fail closed); a throw — the in-repo kernels' answer for a
+    // name nothing registered — is one of them.
+    (this.ql as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT] = () => ctx.getService('security');
 
     // Register as provider for Core Kernel Services
     ctx.registerService('objectql', this.ql);

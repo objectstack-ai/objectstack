@@ -681,7 +681,10 @@ export async function bootSchemaStack(
      * Compose the SAME object set this deployment's `os serve` boot registers —
      * its `objectstack.config.ts` and the platform floor `serve` composes
      * unconditionally (#12938). Set by the two SCHEMA commands, `os migrate
-     * plan` and `os migrate apply`, and by nothing else.
+     * plan` and `os migrate apply`; by the commands whose subject is that same
+     * set (`unmapped-columns`, `security-catalog-overlays`); and by `os migrate
+     * organization-ownership --apply`, whose column drops are that set's drift
+     * and whose security catalog is the one the deployment serves.
      *
      * Off by default and opted into at the call site rather than deduced here:
      * the DATA subcommands declare their own, narrower set through
@@ -777,7 +780,8 @@ export async function bootSchemaStack(
      *
      * Off by default and opted into at the call site, like `composeHostStack`:
      * `os migrate plan` / `apply` compose no tier-gated plugin, and this does
-     * not change that. See `buildSchemaMigrationPlugins`'s `authGatedSecurity`.
+     * not change that. `os migrate organization-ownership --apply` sets it so
+     * the platform's shipped permission sets are names its catalog resolves. See `buildSchemaMigrationPlugins`'s `authGatedSecurity`.
      */
     composeAuthGatedSecurity?: boolean;
     /**
@@ -797,9 +801,10 @@ export async function bootSchemaStack(
      * family behind its auth gate, the provider of every capability its
      * resolver mounts (the stack's `requires` and the always-on slate), and
      * the REST API plugin. Set by `os migrate plan` and `os migrate apply`,
-     * whose subject is the deployment's whole object set, and by `os migrate
-     * unmapped-columns`, which reads the plan's own findings over that set —
-     * and by nothing else.
+     * whose subject is the deployment's whole object set, by `os migrate
+     * unmapped-columns`, which reads the plan's own findings over that set,
+     * and by `os migrate organization-ownership --apply`, which drops the
+     * ceremony's columns through that set's drift — and by nothing else.
      * See `buildSchemaMigrationPlugins`'s `servedPlatform`.
      */
     composeServedPlatform?: boolean;

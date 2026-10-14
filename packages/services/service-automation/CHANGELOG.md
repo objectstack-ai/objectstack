@@ -30,7 +30,7 @@
   
   **Who is affected, measured.** In this repository: 5 values in 3 nodes of the showcase example (`showcase_task_completed`'s `script`, and the `subflow` nodes of `showcase_task_done_notify_owner` and `showcase_project_closure`), 3 values in the todo example's `task_completion` `script`, 2 docs pages, the service-automation README, 2 dogfood fixtures and the test fixtures; all are migrated in this change. hotcrm's sites at these positions were not measured.
   
-  **Still accepted, unchanged.** A CEL value envelope and every literal. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
   
   ### The kit
   
@@ -69,7 +69,7 @@
   
   **Newly accepted.** A CEL value envelope at `loop.collection` and `map.collection`: the published JSON Schema for both gains the envelope arm (a list, or the envelope object), and so do the inferred `LoopConfig['collection']` and `MapConfig['collection']`, which lose `string`. `FlowCollectionSlotSchema` (`@objectstack/spec/automation`) is the contract both take.
   
-  **Still accepted, unchanged.** An inline array at both, and on a body-less `loop` any `collection` its legacy form reads. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** An inline array at both, and on a body-less `loop` any `collection` its legacy form reads.
   
   ### The kit
   
@@ -114,7 +114,7 @@
   
   **The one-line fix: write each filter operand the flow computes as a CEL value envelope, and keep the query placeholders as they are.**
   
-  **Who is affected, measured.** In this repository, at the base: seven flow tokens at a filter operand in the shipped examples (`app-crm` 2, `app-showcase` 3, `app-todo` 2 — `app-todo`'s two query placeholders stay), five in the docs (`getting-started/common-patterns`, `kernel/runtime-services/examples` 2, the `service-automation` README 2), the flows guide's and the spec's own remedy texts (a `$User.Email` read named `filter: { id: '{uid}' }`; a `recordId` refusal named `filter: { id: '{record.id}' }`) and the `FlowSchema` example; all are migrated in this change. The value-slot retirement's run-user changeset on this line names `filter: { id: '{uid}' }` for a `$User.Email` read; this one supersedes that line: read the user record with `filter: { id: { dialect: 'cel', source: 'current_user.id' } }`. hotcrm was not measured.
+  **Who is affected, measured.** In this repository, at the base: seven flow tokens at a filter operand in the shipped examples (`app-crm` 2, `app-showcase` 3, `app-todo` 2 — `app-todo`'s two query placeholders stay), five in the docs (`getting-started/common-patterns`, `kernel/runtime-services/examples` 2, the `service-automation` README 2), the flows guide's and the spec's own remedy texts (a `$User.Email` read named `filter: { id: '{uid}' }`; a `recordId` refusal named `filter: { id: '{record.id}' }`) and the `FlowSchema` example; all are migrated in this change. hotcrm was not measured.
   
   **Still accepted, unchanged.** Every literal operand, every query placeholder, a filter's keys, operators and combinators, an empty filter, and a filter on `create_record`, which has none. The `filters` alias still converts to `filter` at load.
   
@@ -162,7 +162,7 @@
   
   **Newly refused in the body.** An object naming a `dialect` was data before and was sent as written; it is an expression now, evaluated per run, and a malformed one is refused. An envelope nested inside a literal body is still data, sent as written.
   
-  **Still accepted, unchanged.** Every literal at these keys, and the published shapes of `url` (a string), `headers` (a map of strings), `method`, `durable`, `timeoutMs` and `signingSecret`. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** Every literal at these keys, and the published shapes of `url` (a string), `headers` (a map of strings), `method`, `durable`, `timeoutMs` and `signingSecret`.
   
   ### The kit
   
@@ -208,7 +208,7 @@
   
   **Newly refused at the literals.** A `{…}` token in `sourceObject`, in `actorId` or in any string of a `payload` value, and a CEL value envelope written as a `payload` value, which was handed on as the object it spells.
   
-  **Still accepted, unchanged.** Every literal at these positions. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** Every literal at these positions.
   
   ### The kit
   
@@ -252,7 +252,7 @@
   
   **Newly accepted.** A CEL value envelope at `recordId`, which `z.string()` refused before this change: the published JSON Schema for `recordId` gains the envelope arm (a string, or the envelope object), and so does the inferred `ScreenConfig['recordId']`.
   
-  **Still accepted, unchanged.** A CEL value envelope at `defaults` and at a field's `defaultValue`, and every literal at all three, a string `recordId` included. The single-brace dialect keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** A CEL value envelope at `defaults` and at a field's `defaultValue`, and every literal at all three, a string `recordId` included.
   
   ### The kit
   
@@ -300,7 +300,7 @@
   
   **Who is affected, measured.** This repository's examples carry no date macro in a value slot; its own test fixtures and docs that did are migrated in this change. The census taken for this retirement's first change measured 15 date-macro value-slot sites in hotcrm at `c529de2` (8 `{NOW()}`, 3 `{TODAY()}`, 3 `{TODAY() + N}`, 1 `{TODAY() + var}`); they migrate there. Deployed metadata and other repositories were not measured here.
   
-  **Still accepted, unchanged.** A CEL value envelope and every literal. The single-brace dialect, date macros included, keeps resolving where it still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
   
   ### The kit
   
@@ -322,7 +322,7 @@
   
   **The expression remedy.** A refused `{…}` arithmetic token's CEL spelling now reads every variable path in it the way a lone path token's does — `{int * 2}` is `vars["int"] * 2`, `{items.0 * 2}` is `items[0] * 2` — instead of rewriting only its divisors, which printed envelopes that did not evaluate.
   
-  **Still accepted, unchanged.** A CEL value envelope and every literal. `{$User.*}` keeps resolving where the single-brace dialect still lives, a CRUD `filter` value.
+  **Still accepted, unchanged.** A CEL value envelope and every literal.
   
   ## FROM → TO
   
@@ -330,7 +330,7 @@
   |:--|:--|:--|
   | `'{$User.Id}'` | `{ dialect: 'cel', source: 'current_user.id' }` | nothing when the run has a user |
   | `'{$User.Id}'`, in a flow that can run without a user | `{ dialect: 'cel', source: 'current_user != null ? current_user.id : null' }` — or skip the node with `current_user != null` as a start condition or a `decision` | the guarded form writes `null` where the template wrote nothing, so on `update_record` it clears a stored value the template left alone |
-  | `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | an `assignment` of `uid: { dialect: 'cel', source: 'current_user.id' }`, a `get_record` on `sys_user` with `filter: { id: '{uid}' }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
+  | `'{$User.Email}'`, `'{$User.Name}'`, any other `$User` path | a `get_record` on `sys_user` with `filter: { id: { dialect: 'cel', source: 'current_user.id' } }` and `outputVariable: 'me'`, then `{ dialect: 'cel', source: 'me.email' }` | these never resolved in any shipped run: they wrote nothing |
   | `'Owner: {$User.Id}'` | `{ dialect: 'cel', source: "'Owner: ' + current_user.id" }` | in a user-less run, write the hole as `(current_user != null ? current_user.id : '')` |
   | a text slot's `assignments: { by: '{$User.Id}' }`, then `'By {{ by }}'` | `assignments: { by: { dialect: 'cel', source: 'current_user.id' } }`, then `'By {{ by }}'` | nothing when the run has a user; where the flow can run without one, compute `current_user != null ? current_user.id : null`, which renders nothing where the template did |
   
@@ -360,7 +360,7 @@
   
   **Not converted.** No D2 conversion rewrites any spelling: every token spelling authored in flows answers differently under CEL for some input (measured through both engines over the same variables, 13 of 25 probes the same, 12 different), so a rewrite would change what some flow writes. Where a value may be absent, whether the field should take nothing, `null` or a default was decided silently by the template; it is now the author's decision.
   
-  **What is still accepted, unchanged.** A CEL value envelope and every literal (a token-free string, numbers, booleans, `null`, arrays, objects). A `filter` value keeps the template dialect; a text slot (`notify` `title` / `message`, a screen `description`, …) reads `{{ }}` holes and refuses a single-brace token.
+  **What is still accepted, unchanged.** A CEL value envelope and every literal (a token-free string, numbers, booleans, `null`, arrays, objects). A text slot (`notify` `title` / `message`, a screen `description`, …) reads `{{ }}` holes and refuses a single-brace token.
   
   ## FROM → TO
   
@@ -398,7 +398,7 @@
   - **The refusal.** One judge in `@objectstack/spec/automation` (`textSlotTemplateRefusal`, `flowNodeTextSlotSources`, `FLOW_NODE_TEXT_SLOTS`, `TEXT_SLOT_TEMPLATE_REFUSAL`): `NotifyConfigSchema`, `ScreenConfigSchema` and `EndConfigSchema` refuse a single-brace token at the slot's key; `registerFlow` and `objectstack validate` (`expression-invalid`, `error`) refuse it with the same words and also compile every slot's holes, so `{{ a + b }}` or an unknown formatter is refused before a run. A stored flow carrying one is skipped at boot with a warn naming it. Past the doors, a hole that does not compile fails the node with a guard refusal, which a `fault` edge does not route.
   - **`@objectstack/formula`.** A template hole's path may contain `$` (`{{ $error.message }}`): a widening of the hole grammar, so a host scope's `$`-named variable has a template spelling. An unbound one renders nothing, like any unknown path.
   - **`flow-double-brace-interpolation`** no longer flags `{{ }}` on the text slots, and its hint names them as the only `{{ }}` positions; a bare `$ref.x` outside the holes of a text slot is flagged with the hole spelling.
-  - **Unchanged:** a CRUD `filter` value keeps the single-brace dialect, and the value slots are CEL's.
+  - **Unchanged:** the value slots are CEL's.
   
   **Not converted.** No ADR-0087 D2 conversion rewrites `{x}` to `{{ x }}`. The two renderers were run over the same variables: a path renders the same text for a string, a number, a boolean, `null`, an absent key or variable, an ISO date string, an object or an array, but a `Date` value rendered JSON-quoted under the 17.x interpolator (`"2026-10-08T09:30:00.000Z"`, quotes included) and as its ISO text now, and a screen or `end` text that was one token holding an object, an array or a `Date` rendered `String(value)` (`[object Object]`). So the rewrite is the author's to check; the D3 record is the semantic entry `flow-text-slot-single-brace-refused`.
   

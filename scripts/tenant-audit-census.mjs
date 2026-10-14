@@ -1531,13 +1531,6 @@ export const UNTYPED_RECEIVERS = [
     engine: true,
     what: '`ql: any` seed helper writing `schema.name` -- a runtime object name off the registered schema',
   },
-
-  {
-    file: 'packages/plugins/plugin-security/src/position-write-through.ts',
-    receiver: 'ql',
-    engine: true,
-    what: '`ql: any` writing `POSITION_OBJECT` (`sys_position`) -- a catalog row object retired by C3 stage 8 (ADR-0131 D3); the module is unwired and deleted with stage 7b',
-  },
   {
     file: 'packages/services/service-settings/src/settings-service-plugin.ts',
     receiver: 'eng',

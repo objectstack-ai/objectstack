@@ -214,8 +214,11 @@ describe('#14310 — a 5xx is never silent', () => {
         // The one door-level guard kept HERE, so this file cannot go green
         // while believing `/notifications` still costs an `error` line.
         // Everything else about the exception is pinned next door in
-        // `declared-capability-absence-warn-once.test.ts`.
-        const { handlers, logger } = await boot({});
+        // `declared-capability-absence-warn-once.test.ts`. Signed in: since
+        // ADR-0138 D2 the `/notifications` domain refuses an anonymous caller
+        // 401 as its first statement, ahead of the capability answer this case
+        // is about.
+        const { handlers, logger } = await boot({ auth: SIGNED_IN_AUTH });
 
         const res = makeRes();
         await handlers['GET /api/v1/notifications']({ body: {}, query: {}, headers: {}, params: {} }, res);

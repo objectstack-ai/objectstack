@@ -147,10 +147,16 @@ describe('ActionSchema.onSuccess — one closed post-success navigation key for 
         onSuccess: { navigate: '/x' },
       });
       expect(r.success).toBe(false);
-      const msg = r.error!.issues.map((i) => i.message).join('\n');
-      expect(msg).toContain('onSuccess');
-      expect(msg).toContain("'api'");
-      expect(msg).toContain("'script'");
+      const issues = r.error!.issues;
+      expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['onSuccess']]]);
+      // The subject names the action's type; the text is the one the page
+      // action rows print (`action-on-success-executor.ts`), pinned there.
+      expect(issues[0].message.startsWith(`A \`type: '${type}'\` action's \`onSuccess\``)).toBe(true);
+    });
+
+    it.each(['api', 'script'] as const)('NEGATIVE CONTROL: accepts onSuccess on a type:%s action', (type) => {
+      const r = ActionSchema.safeParse({ ...base, type, target: type === 'api' ? '/api/v1/x' : 'fn', onSuccess: { navigate: '/x' } });
+      expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
     });
   });
 

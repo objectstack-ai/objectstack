@@ -87,6 +87,15 @@ import type { ExecutionContext } from '../kernel/execution-context.zod.js';
  * as expanded `user` rows. The remaining members are persisted-for-forward-
  * compatibility vocabulary, kept in lockstep with the select.
  *
+ * `guest` is NOT a member: it was removed (ADR-0138 D8). A record share to the
+ * anonymous principal was declared and never honoured — the grant refused it,
+ * and no gate reads such a row — because guest access flows through the guest
+ * position and share links only (ADR-0090 D11). A record a guest must reach is
+ * exposed through a public form or a share link. {@link ISharingService.grant}
+ * refuses a `'guest'` that still arrives at runtime with that prescription, and
+ * the select refuses it on a row write. The sharing-RULE vocabulary retired the
+ * same recipient earlier (the ADR-0087 entry `sharing-rule-recipient-reconcile`).
+ *
  * NOT the sharing-RULE recipient vocabulary — that is
  * {@link SharingRuleRecipientType} here, whose authorable subset is
  * `ShareRecipientType` in `spec/security` (a different concept that shares
@@ -96,8 +105,7 @@ export type RecordShareRecipientType =
   | 'user'
   | 'group'
   | 'position'
-  | 'unit_and_subordinates'
-  | 'guest';
+  | 'unit_and_subordinates';
 
 /**
  * Access level on a single record — the authorable subset, mirroring

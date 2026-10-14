@@ -175,3 +175,49 @@ describe('registerFlow still behaves identically (#4454 refactor)', () => {
         expect(returned.version).toBe(1);
     });
 });
+
+describe('canonicalizeStoredFlow — a site registerFlow refuses comes back as a TODO (#23269)', () => {
+    // A stored v17 flow: a `get_record` filter operand still in the retired
+    // single-brace dialect. `FlowSchema` accepts it and no conversion rewrites
+    // it (no lossless one exists), so without the TODO the stored pass read
+    // this flow as on protocol while `registerFlow` refused it at boot.
+    const storedFlow = (operand: unknown) => ({
+        name: 'fd_refused_filter',
+        label: 'Refused Filter',
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'get', type: 'get_record', label: 'Get', config: { objectName: 'lead', filter: { id: operand } } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'get' }, { id: 'e2', source: 'get', target: 'end' }],
+    });
+
+    it('a braced operand parses, is not rewritten, and is reported by node — and registerFlow refuses the same site', () => {
+        const engine = new AutomationEngine(silentLogger);
+        const flow = storedFlow('{record.id}');
+        const { storable, notices, conflicts, todos } = engine.canonicalizeStoredFlow('fd_refused_filter', flow);
+
+        expect(notices).toEqual([]);
+        expect(conflicts).toEqual([]);
+        expect((storable as any).nodes[1].config.filter).toEqual({ id: '{record.id}' });
+        expect(todos.map((t) => [t.conversionId, t.path])).toEqual([
+            ['flow-value-slot-template-dialect-refused', 'flows[0].nodes[1].config.filter.id'],
+        ]);
+        expect(todos[0]!.reason).toContain("node 'get' (get_record), get_record filter operand at config.filter.id");
+
+        // The listing and the boot refuse one site.
+        expect(() => engine.registerFlow('fd_refused_filter', flow))
+            .toThrow(/node 'get' \(get_record\) get_record filter operand at config\.filter\.id/);
+    });
+
+    it('the same flow in the CEL form reports no TODO and registers', async () => {
+        const engine = new AutomationEngine(silentLogger);
+        const flow = storedFlow({ dialect: 'cel', source: 'record.id' });
+
+        expect(engine.canonicalizeStoredFlow('fd_refused_filter', flow).todos).toEqual([]);
+        engine.registerFlow('fd_refused_filter', flow);
+        expect(await engine.getFlow('fd_refused_filter')).not.toBeNull();
+    });
+});

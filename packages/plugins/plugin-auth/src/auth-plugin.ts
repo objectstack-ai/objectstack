@@ -253,6 +253,33 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * @default false
    */
   hostSignInHandoff?: boolean;
+
+  /**
+   * Whether this plugin registers the platform's default record page for
+   * `sys_organization`: `sys_organization_detail`, the Members / Invitations /
+   * Teams tab strip (`SysOrganizationDetailPage`, `@objectstack/platform-objects`).
+   *
+   * A deployment holds at most ONE `isDefault: true` record page per object; a
+   * second is refused at registration with `DEFAULT_RECORD_PAGE_CONFLICT`
+   * (maintainer ruling A on objectstack#23015, record 6134056653). A host that
+   * ships its OWN default record page for `sys_organization` passes `false`, so
+   * its page is the single default by composition. Neither registration order
+   * nor a precedence rule decides it: ruling A takes neither.
+   *
+   * `false` removes exactly one registration, `sys_organization_detail`.
+   * Everything else stays: the `sys_organization` object and every other
+   * identity object, the `sys_user_detail` record page, the System Overview
+   * dashboard, and the auth routes and services. The host's page then owns what
+   * the platform page gave. Set `false` with no default record page of the
+   * host's own, and `sys_organization`'s record view opens the synthesized
+   * default layout, without the Members / Invitations / Teams tabs.
+   *
+   * Only an explicit `false` removes the page; `true` and an absent key keep
+   * it. Read from this option alone (no env var, no setting), so the code that
+   * composes the host's own page is the one place the choice is stated.
+   * @default true
+   */
+  registerOrganizationRecordPage?: boolean;
 }
 
 /**
@@ -647,6 +674,10 @@ export class AuthPlugin implements Plugin {
     ctx.registerService('tenancy', tenancy);
     this.tenancy = tenancy;
 
+    // Only an explicit `false` leaves the organization page out — see
+    // `AuthPluginOptions.registerOrganizationRecordPage`.
+    const registerOrganizationRecordPage = this.options.registerOrganizationRecordPage !== false;
+
     ctx.getService<{ register(m: any): void }>('manifest').register({
       // The header, `objects` and `objectExtensions`, from the ONE builder
       // `IdentityObjectsPlugin` registers on its own in a reduced kernel, so the
@@ -671,7 +702,13 @@ export class AuthPlugin implements Plugin {
       // sys_organization gets a Members / Invitations / Teams tab strip
       // (see SysOrganizationDetailPage for the rationale and the
       // intentionally-omitted OAuth / SSO tabs).
-      pages: [SysOrganizationDetailPage, SysUserDetailPage],
+      //
+      // `registerOrganizationRecordPage: false` leaves the organization page
+      // out, for a host that ships its own `sys_organization` default record
+      // page: one default per object per deployment, kept by composition
+      // (ruling A on objectstack#23015). `SysUserDetailPage` is registered
+      // either way.
+      pages: [...(registerOrganizationRecordPage ? [SysOrganizationDetailPage] : []), SysUserDetailPage],
       // List views for each Setup-nav object are defined on the schema
       // itself via the canonical `listViews` map (e.g.
       // sys_user.listViews.{all_users,unverified,two_factor}). Registering
@@ -713,6 +750,15 @@ export class AuthPlugin implements Plugin {
           }
         : {}),
     });
+    if (!registerOrganizationRecordPage) {
+      // A deliberate composition, said once at boot so a missing tab strip is
+      // never left to be diagnosed from its absence.
+      ctx.logger.info(
+        '[auth] sys_organization_detail is not registered (registerOrganizationRecordPage: false): the host ' +
+          'composes its own default record page for sys_organization. Without one, the organization record ' +
+          'view opens the synthesized default layout, with no Members / Invitations / Teams tabs.',
+      );
+    }
 
     // [ADR-0108 / #3723] There is no organization-role derivation any more.
     //
@@ -3129,6 +3175,7 @@ export class AuthPlugin implements Plugin {
               smsInviteAvailable: () =>
                 this.authManager!.isPhoneNumberEnabled() && this.authManager!.isPhoneOtpDeliverable(),
               sendInviteSms: (phone: string) => this.authManager!.sendPhoneInviteSms(phone),
+              consoleResetPasswordUrl: () => this.authManager!.getConsoleUrl('/reset-password'),
               noteMustChangePasswordIssued: () => this.authManager!.noteMustChangePasswordIssued(),
               logger: ctx.logger,
             },

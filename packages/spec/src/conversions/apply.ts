@@ -13,6 +13,7 @@
  */
 
 import { ALL_CONVERSIONS } from './registry.js';
+import { reportRefusedStoredShapes } from './refused-shapes.js';
 import {
   CONVERSION_CONFLICT_CODE,
   CONVERSION_NOTICE_CODE,
@@ -75,9 +76,16 @@ export interface ApplyConversionsOptions {
    * the sink only makes it visible.
    *
    * Read today by the stored-metadata migration pass (`os migrate meta
-   * --stored`, through `applyConversionsToStoredItem`), which lists each TODO
-   * under its row. The authoring funnel and the other data-at-rest seams do not
-   * pass one.
+   * --stored`, through `applyConversionsToStoredItem` and, for a flow row, the
+   * automation engine's `canonicalizeStoredFlow`), which lists each TODO under
+   * its row. The authoring funnel and the other data-at-rest seams do not pass
+   * one.
+   *
+   * A sink also turns on the refused-shape listing (#23269, #23270, #23271):
+   * after the conversions, every shape protocol 18 refuses with no lossless
+   * rewrite (`refused-shapes.ts`) is reported here too, one TODO per site,
+   * its `conversionId` naming the D3 entry that refuses it. With no sink
+   * nothing of it runs, and in either case nothing is rewritten.
    */
   onTodo?: (todo: ConversionTodoNotice) => void;
   /**
@@ -197,6 +205,25 @@ export function applyConversions(
       },
       context,
     );
+  }
+
+  // [#23269, #23270, #23271] What protocol 18 refuses and nothing converts,
+  // judged on the converted stack and listed through the same sink: a row the
+  // chain leaves refused must not read as already on protocol.
+  if (onTodo) {
+    reportRefusedStoredShapes(current, (refused, detail) =>
+      onTodo({
+        code: CONVERSION_TODO_CODE,
+        conversionId: refused.id,
+        surface: refused.surface,
+        from: detail.from,
+        path: detail.path,
+        reason: detail.reason,
+        message:
+          `[protocol] left ${refused.surface} at ${detail.path} as stored — protocol ${refused.toMajor} `
+          + `refuses it (ADR-0087 D3 entry '${refused.id}') and no conversion rewrites it losslessly: `
+          + detail.reason,
+      }));
   }
 
   return current;
