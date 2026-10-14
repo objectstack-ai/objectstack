@@ -168,12 +168,11 @@ create the new key first, switch the integration over, then revoke the old one.
 An unknown key (a typo, a key that never existed) still gets the generic
 `401 UNAUTHENTICATED`.
 
-These codes reach the caller on the REST data API (`/api/v1/data/…`), the
-datasource admin and share-link routes, the marketplace install routes and the
-MCP **stdio** transport. The other endpoints the runtime serves — the MCP HTTP
-endpoint (`/api/v1/mcp`) among them — and the settings and file-storage routes
-refuse the same key with the generic `401 UNAUTHENTICATED`; the server log
-names the code there.
+These codes reach the caller on every endpoint that accepts a key: the MCP
+HTTP endpoint (`/api/v1/mcp`) and the other endpoints the runtime serves, the
+REST data API (`/api/v1/data/…`), the settings, file-download, datasource
+admin and share-link routes, the marketplace install routes, and the MCP
+**stdio** transport.
 
 Send it on every request in any of three equivalent forms:
 

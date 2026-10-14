@@ -449,7 +449,7 @@ result set — a response indistinguishable from a successful query.
 **Fix:** Create a new key and replace this one wherever it is configured. A revoked key never works again.  
 **Retry:** `no_retry`
 
-These three are answered by the REST data API, the datasource admin and share-link routes, the marketplace install routes and the MCP stdio transport. The other endpoints the runtime serves (the MCP HTTP endpoint among them) and the settings and file-storage routes refuse the same key with the generic `401 UNAUTHENTICATED`. An unknown key is always the generic 401.
+These three are answered on every endpoint that accepts an API key: the endpoints the runtime serves (the MCP HTTP endpoint among them), the REST data API, the settings, file-download, datasource admin and share-link routes, the marketplace install routes and the MCP stdio transport. An unknown key is always the generic 401.
 
 ---
 
