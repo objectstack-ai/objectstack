@@ -525,6 +525,61 @@ export function packageScopedRowWhere(
 }
 
 /**
+ * [#23165, ADR-0048] The refusal of a save, or a delete, that names no
+ * package, of an item whose rows at the address are bound to two or more
+ * packages: the direct save and the delete, whose address the protocol
+ * resolves (`ObjectStackProtocolImplementation.packagelessAddress` in
+ * `protocol.ts`), and [#23297] the draft save, whose address
+ * {@link SysMetadataRepository.put} resolves (the inheritance in
+ * `resolveWriteHead`). One sentence for the three, so the doors cannot answer
+ * the same request in different words.
+ *
+ * A `sys_metadata` row is keyed `(org, type, name, package_id)`, so such a
+ * write has no one row to write or remove. Before this refusal the save wrote
+ * a package-less row beside the packages' rows and answered `200`, for a row
+ * the item read does not serve, and the delete removed whichever row the
+ * package-agnostic `findOne` met first and answered "it no longer exists"
+ * while another package's row stayed served; the draft save went into the
+ * package of whichever active row that `findOne` met first. Choosing one of
+ * the packages is that driver-order coin toss (#8907). The remedy is the
+ * request's: name the package, which is the address every door of the item
+ * takes (`?package=`, ADR-0048).
+ *
+ * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member for
+ * a refusal that comes from environment state rather than the body (the same
+ * request is accepted once it names its package), and the code this
+ * package already answers when a name is held by more than one owner
+ * (`importUnmanagedPackage`). The prescription first, because a 4xx message
+ * crosses the REST boundary bounded at 500 characters with its tail
+ * truncated; the candidates follow, sorted, so the message is the same on
+ * every driver.
+ *
+ * Deliberately NOT exported from the package entry: a shared refusal between
+ * this module and `protocol.ts`, as {@link packageScopedRowWhere} is a shared
+ * predicate.
+ */
+export function packagelessAddressAmbiguityRefusal(
+  verb: 'save' | 'delete',
+  type: string,
+  name: string,
+  packageIds: readonly string[],
+): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+  const shown = packageIds.slice(0, 5).map((id) => `'${id}'`).join(', ');
+  const more = packageIds.length > 5 ? ` and ${packageIds.length - 5} more` : '';
+  const [nothing, single] = verb === 'save'
+    ? ['Nothing was written.', 'no single row to write']
+    : ['Nothing was deleted.', 'no single row to remove'];
+  const err = new Error(
+    `Name the package this ${verb} is for, then send it again: on the REST door add ?package= with the package id, `
+    + `in process pass packageId. ${nothing} ${type} '${name}' belongs to ${packageIds.length} packages `
+    + `(${shown}${more}), and a ${verb} that names none has ${single}.`,
+  ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+  err.code = 'RESOURCE_CONFLICT';
+  err.status = 409;
+  return err;
+}
+
+/**
  * One live `watch()` subscription, as a record rather than a bare listener.
  *
  * Both halves live together because SHUTDOWN NEEDS THE SECOND ONE. A registry
@@ -725,6 +780,21 @@ export class SysMetadataRepository implements MetadataRepository {
    * ADR-0048), and with no active row — a brand-new item drafted first —
    * there is nothing to inherit and the package-less semantics stand.
    *
+   * [#23297] The binding inherited is read from EVERY active row of the
+   * address, never from the first row a package-agnostic `findOne` returns
+   * (a driver-order coin toss, #8907):
+   *
+   *  - bound to one package (a package-less row beside it is not a second
+   *    package, #23165's rule for the direct save): the draft inherits it,
+   *    whatever order the store returns the rows in;
+   *  - bound to two or more: the draft has no single package to go into, so
+   *    the resolution names no package and reports the bindings in
+   *    `ambiguousPackages`. {@link put} refuses the write
+   *    ({@link packagelessAddressAmbiguityRefusal}, the refusal the direct save
+   *    and the delete answer); {@link headAt} answers the package-unbound
+   *    draft key, so a read's version token never names a package picked by
+   *    storage order.
+   *
    * [#22877] A write addresses ONE bundle member of a type whose identity is
    * a pair: `member` is that member as {@link OVERLAY_MEMBER_COLUMN} stores
    * it (`null` the canonical one), and every lookup below — the inherited
@@ -739,9 +809,10 @@ export class SysMetadataRepository implements MetadataRepository {
     packageId: string | null | undefined,
     ctx?: Record<string, unknown>,
     member?: string | null,
-  ): Promise<{ row: any | null; targetPackageId: string | null }> {
+  ): Promise<{ row: any | null; targetPackageId: string | null; ambiguousPackages?: readonly string[] }> {
     const context = { ...ctx, isSystem: true };
     let targetPackageId: string | null = packageId ?? null;
+    let ambiguousPackages: readonly string[] | undefined;
     if (state === 'draft' && packageId == null) {
       // The overlaid base is the environment's active row, as the draft list
       // reads it (ADR-0131 D6: every row is the environment's) — a lookup
@@ -755,9 +826,16 @@ export class SysMetadataRepository implements MetadataRepository {
         state: 'active',
       };
       if (member !== undefined) activeWhere[OVERLAY_MEMBER_COLUMN] = member;
-      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere, context });
-      const activePkg = (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
-      if (activePkg) targetPackageId = activePkg;
+      // [#23297] Every active row, never the first one: see this method's
+      // header. A failed read propagates (the caller's write fails), as the
+      // single-row read did.
+      const activeRows = await this.engine.find('sys_metadata', { where: activeWhere, context });
+      const bindings = new Set<string>();
+      for (const activeRow of (activeRows ?? []) as Array<{ package_id?: unknown }>) {
+        if (typeof activeRow?.package_id === 'string' && activeRow.package_id !== '') bindings.add(activeRow.package_id);
+      }
+      if (bindings.size === 1) targetPackageId = [...bindings][0] ?? null;
+      else if (bindings.size > 1) ambiguousPackages = [...bindings].sort();
     }
     let row = await this.engine.findOne('sys_metadata', {
       where: this.whereFor(ref, state, targetPackageId, member),
@@ -775,7 +853,7 @@ export class SysMetadataRepository implements MetadataRepository {
         context,
       });
     }
-    return { row: row ?? null, targetPackageId };
+    return { row: row ?? null, targetPackageId, ...(ambiguousPackages ? { ambiguousPackages } : {}) };
   }
 
   /**
@@ -855,7 +933,15 @@ export class SysMetadataRepository implements MetadataRepository {
       // create, from THE write-address resolution ({@link resolveWriteHead}):
       // the one {@link headAt} answers too, so the head a caller was served
       // for this address is the head this lock judges.
-      const { row: existing, targetPackageId } = await this.resolveWriteHead(ref, state, opts.packageId, ctx, member);
+      const { row: existing, targetPackageId, ambiguousPackages } = await this.resolveWriteHead(
+        ref, state, opts.packageId, ctx, member,
+      );
+      // [#23297] A draft that names no package, of an item whose active rows
+      // are bound to two or more packages, has no single row to write: refused
+      // before anything is written, as the direct save is (#23165).
+      if (ambiguousPackages) {
+        throw packagelessAddressAmbiguityRefusal('save', ref.type, ref.name, ambiguousPackages);
+      }
       // The row's stored stamp, as written: the parent link this write records
       // (`previous_checksum`, the event's `parentHash`) and the no-op check's
       // input. `null` for a row stored without one.

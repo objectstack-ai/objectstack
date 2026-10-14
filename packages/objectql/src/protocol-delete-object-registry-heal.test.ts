@@ -415,3 +415,94 @@ describe('#6808 — deleteMetaItem stops BOTH registry exits serving a deleted o
     expect(plainKeyEntry(registry, 'myapp_invoice')).toBe(false);
   });
 });
+
+/**
+ * [#23297, ADR-0048] A delete naming ONE package, of an item two packages
+ * hold, leaves the other package's row stored and served by the store-backed
+ * doors (the item read, the list). The registry heal ran its tiers as if the
+ * deleted row were the whole item: no packaged artifact, no MetadataService
+ * baseline, so it retired the registry entry. For an `object` that is the
+ * entry the data plane dispatches on, so data CRUD answered `OBJECT_NOT_FOUND`
+ * for an object whose row the store still served, until the next boot or save.
+ * Measured on a booted showcase before the fix: after `DELETE
+ * /api/v1/meta/object/x?package=P`, `GET /api/v1/meta/object/x` answered 200
+ * with Q's row while `GET` and `POST /api/v1/data/x` answered 404.
+ *
+ * The heal now asks the store first: when a row of the item is still stored,
+ * that row is what is served next, so it is registered again (the boot
+ * hydration's order) and nothing is retired.
+ *
+ * Both save orders: the registry holds ONE owner per object name, so the
+ * second package's write-through is refused at save time, and which package
+ * the registry holds before the delete depends on the order.
+ */
+describe('[#23297] a delete naming one package, of an object two packages hold, keeps the other package\'s row registered', () => {
+  const P = 'app.pkg_p';
+  const Q = 'app.pkg_q';
+  const bodyOf = (name: string, label: string) => ({ ...invoiceBody(name), label });
+
+  async function twoPackageObject(name: string, order: readonly string[], controlPlane: boolean) {
+    const harness = makeHarness({ controlPlane });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const packageId of order) {
+        await harness.protocol.saveMetaItem({ type: 'object', name, packageId, item: bodyOf(name, `Invoice ${packageId}`) });
+      }
+    } finally {
+      warn.mockRestore();
+    }
+    expect(storedRows(harness.rows, name).map((r) => r.package_id).sort()).toEqual([P, Q].sort());
+    return harness;
+  }
+
+  for (const controlPlane of [false, true]) {
+    for (const order of [[P, Q], [Q, P]] as const) {
+      it(`${controlPlane ? 'control-plane' : 'tenant'} kernel, saved ${order.join(' then ')}: getObject, getItem and data CRUD serve Q's row after DELETE ?package=P`, async () => {
+        const name = 'shared_invoice';
+        const { protocol, registry, rows, dataRows } = await twoPackageObject(name, order, controlPlane);
+
+        const res = await protocol.deleteMetaItem({ type: 'object', name, packageId: P });
+
+        expect(res.success).toBe(true);
+        expect(storedRows(rows, name).map((r) => r.package_id)).toEqual([Q]);
+        expect((registry.getObject(name) as any)?.label).toBe(`Invoice ${Q}`);
+        expect((registry.getItem('object', name) as any)?.label).toBe(`Invoice ${Q}`);
+        expect(plainKeyEntry(registry, name)).toBe(true);
+        const created = await protocol.createData({ object: name, data: { name: 'INV-Q', amount: 1 } });
+        expect(created.id).toBeTruthy();
+        expect(dataRows.filter((r) => r.object === name)).toHaveLength(1);
+      });
+    }
+  }
+
+  it('CONTROL: deleting the last remaining row still retires the object (OBJECT_NOT_FOUND/404 on data CRUD)', async () => {
+    const name = 'shared_invoice';
+    const { protocol, registry, rows } = await twoPackageObject(name, [P, Q], false);
+    await protocol.deleteMetaItem({ type: 'object', name, packageId: P });
+
+    await protocol.deleteMetaItem({ type: 'object', name, packageId: Q });
+
+    expect(storedRows(rows, name)).toHaveLength(0);
+    expect(registry.getObject(name)).toBeUndefined();
+    expect(registry.getItem('object', name)).toBeUndefined();
+    const err = await protocol
+      .createData({ object: name, data: { name: 'INV-X', amount: 1 } })
+      .then(() => null, (e: any) => e);
+    expect(err?.code).toBe('OBJECT_NOT_FOUND');
+    expect(err?.status).toBe(404);
+  });
+
+  it('a non-object item on a control-plane kernel: the registry serves the remaining package\'s row, not nothing', async () => {
+    const { protocol, registry, rows } = makeHarness({ controlPlane: true });
+    const name = 'shared_dash';
+    for (const packageId of [P, Q]) {
+      await protocol.saveMetaItem({ type: 'dashboard', name, packageId, item: { name, label: `Dash ${packageId}`, widgets: [] } });
+    }
+    expect(storedRows(rows, name).map((r) => r.package_id).sort()).toEqual([P, Q].sort());
+
+    await protocol.deleteMetaItem({ type: 'dashboard', name, packageId: P });
+
+    expect(storedRows(rows, name).map((r) => r.package_id)).toEqual([Q]);
+    expect((registry.getItem('dashboard', name) as any)?.label).toBe(`Dash ${Q}`);
+  });
+});

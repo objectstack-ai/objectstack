@@ -1,0 +1,8 @@
+{
+  "file": "packages/spec/src/api/endpoint-publish-gate.ts",
+  "adrs": [
+    "ADR-0121",
+    "ADR-0138"
+  ],
+  "invariant": "ADR-0121 — a declared `apis:` endpoint is refused at publish for being a shape the runtime cannot serve, one gate at a time, each mirroring a runtime refusal (D6: `authRequired: false` requires `rateLimit.enabled: true`, because the enabled flag defaults to false and a presence check would pass a budget that meters nothing). ADR-0138 D2b — the one CROSS-ITEM gate: an `authRequired: false` endpoint of `type: 'flow'` whose `target` flow declares `runAs: 'system'` is refused at publish in BOTH directions, because either item can be the last one edited. It is a pair judge (`anonymousElevatedFlowPairs`), not a member of the per-endpoint `firstFailure` chain, because no single declaration carries both halves; and it deliberately has no full runtime mirror: the endpoint executor's elevated-start refusal covers self-triggered flow types only, so an `api` or `screen` flow running as `system` behind an anonymous endpoint executes elevated unless publish refuses it. Every publish door that holds the pair calls this one judge: the stack parse, `MetadataManager.publishPackage`, and the metadata protocol's flow publish. The prescription is the record's: an authenticated endpoint, the signed inbound hook (ADR-0041), or a public form; `runAs: 'automation'` joins it only when ADR-0073 M2 adds the value."
+}
