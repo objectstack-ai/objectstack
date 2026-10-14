@@ -119,7 +119,7 @@ async function boot() {
         const found = (await engine.find('sys_metadata', {
             where: { type: 'flow', name },
             context: { isSystem: true },
-        } as any)) ?? [];
+        })) ?? [];
         return [...found]
             .map((row: any) => ({ ...row, package_id: row.package_id ?? null }))
             .sort((a, b) => String(a.package_id).localeCompare(String(b.package_id)));
