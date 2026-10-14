@@ -63,7 +63,6 @@ interface MetaRow {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
 }
 
@@ -84,9 +83,9 @@ function makeEngine(rows: MetaRow[]) {
     const engine = {
         async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
-            // This double implements ONE `where` shape — the env-wide filter
-            // `{ organization_id: null }` the producer passes (ADR-0131 D6:
-            // only env-wide orphans are adopted) — and NO bound, and REFUSES
+            // This double implements ONE `where` shape — the empty filter the
+            // producer passes (ADR-0131 D6/D7: every row is the environment's,
+            // so every orphan is adopted) — and NO bound, and REFUSES
             // anything else rather than answering it silently. Paging belongs
             // to tests that do not exist yet. A double looser than the engine
             // it stands in for converts a green suite into no suite at all
@@ -98,10 +97,10 @@ function makeEngine(rows: MetaRow[]) {
             }
             const where = opts?.where ?? {};
             const keys = Object.keys(where);
-            if (keys.length !== 1 || keys[0] !== 'organization_id' || where.organization_id !== null) {
+            if (keys.length !== 0) {
                 throw new Error(`fake engine: unsupported where ${JSON.stringify(where)}`);
             }
-            // Every fixture row is env-wide, so the store IS the env-wide answer.
+            // The store IS the answer.
             return [...store.values()];
         },
         async update(_table: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
@@ -128,7 +127,6 @@ const orphan = (id: string): MetaRow => ({
     id,
     type: 'object',
     name: `obj_${id}`,
-    organization_id: null,
     package_id: null,
 });
 

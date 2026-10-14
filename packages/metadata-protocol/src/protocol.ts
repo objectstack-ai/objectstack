@@ -2518,8 +2518,8 @@ interface StoredRowPlace {
  * The first candidate that holds a row is the served row.
  *
  *  - Scope (ADR-0131 D6): the environment's rows only. A legacy
- *    organization-scoped row is reported at boot
- *    ({@link ObjectStackProtocolImplementation.reportUnhydratableOrgScopedRows})
+ *    organization-scoped row is refused at boot
+ *    (the v18 boot refusal, ADR-0131 D10 item 5)
  *    and never served, by any read: the anonymous form doors' read of the
  *    Default Organization's legacy layer was deleted when the v18 migration
  *    ceremony began carrying those rows' withdrawals into the environment
@@ -7129,8 +7129,8 @@ export class ObjectStackProtocolImplementation implements
         let rows: Record<string, unknown>[];
         try {
             // [ADR-0131 D6] The environment's rows only: a legacy
-            // organization-scoped row is reported at boot, never read
-            // ({@link reportUnhydratableOrgScopedRows}).
+            // organization-scoped row is refused at boot, never read
+            // (the v18 boot refusal, ADR-0131 D10 item 5).
             const read = async (type: string): Promise<Record<string, unknown>[]> => {
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 const rs = await this.engine.find('sys_metadata', {
@@ -8380,9 +8380,8 @@ export class ObjectStackProtocolImplementation implements
      *    path — that key never had a reader and was retired by #8586.)
      *
      * Extracted from {@link getMetaTypes} rather than copied: the listing and
-     * {@link reportUnhydratableOrgScopedRows} must answer "which types exist
-     * here" identically, or the audit accuses a type the listing does not
-     * admit exists (and vice versa). One accessor, no second vocabulary.
+     * every other caller must answer "which types exist here" identically.
+     * One accessor, no second vocabulary.
      */
     private async listLiveMetadataTypes(): Promise<string[]> {
         const schemaTypes = this.engine.registry.getRegisteredTypes();
@@ -9493,8 +9492,8 @@ export class ObjectStackProtocolImplementation implements
         //
         // The list serves the environment's stored rows over the code
         // packages' definitions, and no organization's: a legacy
-        // organization-scoped row is reported at boot
-        // ({@link reportUnhydratableOrgScopedRows}) and never served — the
+        // organization-scoped row is refused at boot
+        // (the v18 boot refusal, ADR-0131 D10 item 5) and never served — the
         // anonymous form doors included: their read of the Default
         // Organization's legacy `view` layer was deleted when the v18
         // migration ceremony (ADR-0131 C7) began carrying its withdrawals into
@@ -10426,7 +10425,7 @@ export class ObjectStackProtocolImplementation implements
      * `findOne` returned first.
      *
      * The environment's rows only (`organization_id` null, ADR-0131 D6): a
-     * legacy organization-scoped row is reported at boot and never served.
+     * legacy organization-scoped row is refused at boot and never served.
      * ADR-0048 prefer-local: with a `packageId`, that package's row first and
      * then the package-less row, never another package's; with none, any row.
      *
@@ -10535,8 +10534,8 @@ export class ObjectStackProtocolImplementation implements
         let item: unknown;
         // [ADR-0131 D6] Environment → code: the environment's stored row,
         // else the code packages' definition. No organization's row is read —
-        // a legacy organization-scoped row is reported at boot
-        // ({@link reportUnhydratableOrgScopedRows}) and never served.
+        // a legacy organization-scoped row is refused at boot
+        // (the v18 boot refusal, ADR-0131 D10 item 5) and never served.
         // Studio's editor opens a draft buffer with `state: 'draft'`;
         // runtime loaders omit it and get the live published row.
         const readState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
@@ -11807,9 +11806,8 @@ export class ObjectStackProtocolImplementation implements
      *   refuses an org-scoped write of every type (ADR-0131 D6), on every
      *   minting path, so the only org-scoped `object` rows that can
      *   exist are residue written before that gate (#6190's ruling 2 = A:
-     *   handled non-destructively — made audible by
-     *   {@link reportUnhydratableOrgScopedRows} and disposed of operationally,
-     *   NOT rewritten by a migration). Fail-closed stays the right answer for
+     *   handled non-destructively — carried by the v18 ceremony, and a
+     *   database still holding them refused at boot, ADR-0131 D10 item 5). Fail-closed stays the right answer for
      *   those: the registry entry is genuinely absent, and serving the table
      *   would serve one org's rows to every org. Pinned by
      *   `protocol.org-scoped-write-refused.test.ts`, which keeps `object` as
@@ -26916,9 +26914,8 @@ export class ObjectStackProtocolImplementation implements
         createdAt?: string;
     }>> {
         try {
-            // [ADR-0131 D6] The environment's timeline: `organization_id IS
-            // NULL`, whoever asks. A legacy organization-scoped commit row is
-            // reported at boot ({@link reportUnhydratableOrgScopedRows}) and
+            // [ADR-0131 D6] The environment's timeline, whoever asks. A legacy organization-scoped commit row is
+            // refused at boot (the v18 boot refusal, ADR-0131 D10 item 5) and
             // never served — the same rule as the legacy `sys_metadata` rows
             // it recorded, which no read serves either. So the timeline an
             // operator reverts from ({@link rollbackToPackageCommit} filters
@@ -26927,8 +26924,8 @@ export class ObjectStackProtocolImplementation implements
             // organization's operator.
             const where: Record<string, unknown> = { package_id: request.packageId };
             // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
-            // platform store the door already authorized; the protocol scopes the
-            // `where` by organization itself. Principal-less, the engine refuses it.
+            // platform store the door already authorized. Principal-less, the
+            // engine refuses it.
             const rows = (await this.engine.find('sys_metadata_commit', {
                 where,
                 ...(request.limit ? { limit: request.limit } : {}),
@@ -28821,9 +28818,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * Per ADR-0005, environment-kernel mode ALSO hydrates from sys_metadata —
      * customization overlay rows must survive restart. The where-clause below
-     * is `{ state: 'active', organization_id: null }`: the environment's rows
-     * only (ADR-0131 D6 — a legacy organization-scoped row is served by no
-     * read, and {@link reportUnhydratableOrgScopedRows} names it). There is no
+     * is `{ state: 'active' }`: every row is the environment's (ADR-0131
+     * D6/D7 — the family declares no organization column, and the runtime
+     * refuses to boot on a database still holding one). There is no
      * `environment_id` constraint — ADR-0005 (revised 2026-05) gave each
      * environment its own database.
      *
