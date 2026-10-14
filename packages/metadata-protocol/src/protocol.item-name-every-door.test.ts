@@ -12,6 +12,13 @@
  * (ADR-0086 D3, `permissionSetOwnerBindingRefusal`). It shares this file's
  * double and its staging of a stored body.
  *
+ * Section 5 pins ADR-0138 D2b's flow half at the same publish doors, on the
+ * same double: a flow published with `runAs: 'system'` while an anonymous
+ * endpoint of `type: 'flow'` names it (`anonymousElevatedFlowRefusal`). The
+ * double's registry lists `api` items, which is one of the two places the
+ * protocol reads the declared endpoints from; the other, the `metadata`
+ * service, is handed in per case.
+ *
  * ---------------------------------------------------------------------------
  * The defect, measured on `origin/main` `e9dec3dab` before this change
  * ---------------------------------------------------------------------------
@@ -808,5 +815,196 @@ describe('[ADR-0086 D3] duplicatePackage copies a set that declares its source p
         expect(storedSets(h).filter((r) => r.binding === DST)).toEqual([
             { row: 'dupdst_member', state: 'active', binding: DST, body: DST },
         ]);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. A flow published as `system` while an anonymous endpoint names it (ADR-0138 D2b)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The record refuses the anonymous flow endpoint × `runAs: 'system'` flow pair
+// "in both directions, because either item can be the last one edited". An
+// endpoint is code-only, so this door holds the FLOW direction: the flow is the
+// item being published, and the endpoints that name it are read from the engine
+// registry and the `metadata` service. Every door a flow body reaches `active`
+// through is pinned — the publish-mode save, the per-item publish of a draft,
+// the package's publish-drafts — each with its control, and with the envelope
+// (`INVALID_METADATA` / 422, the issue located at `runAs`) and the prescription.
+
+const D2B_FLOW = 'acme_partner_intake';
+const D2B_ENDPOINT = 'acme_partner_intake_api';
+
+/**
+ * A start → end flow. `autolaunched`, so the shared authoring rules have
+ * nothing to say about its trigger (a `type: 'api'` flow owes its start node a
+ * signed secret) and every control below isolates the D2b verdict; the pair
+ * is judged on `runAs` and the endpoint's `target`, never on the flow's type.
+ */
+const d2bFlow = (runAs: 'system' | 'user') => ({
+    name: D2B_FLOW,
+    label: 'Partner intake',
+    type: 'autolaunched',
+    runAs,
+    nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+});
+
+/** A code-declared flow endpoint naming {@link D2B_FLOW}, as `registerApp` files it. */
+const d2bEndpoint = (authRequired: boolean) => ({
+    name: D2B_ENDPOINT,
+    path: '/api/v1/apps/acme/partner/intake',
+    method: 'POST',
+    type: 'flow',
+    target: D2B_FLOW,
+    authRequired,
+    ...(authRequired ? {} : { rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 100 } }),
+});
+
+/** A protocol over this file's double, with an optional `metadata` service answering `list('api')`. */
+function makeD2bProtocol(metadataList?: (type: string) => Promise<unknown[]>, installedPackage?: string) {
+    const h = makeStubEngine();
+    // A flow saved into a package needs that package installed (the named-base
+    // rule); the double's registry installs the one a case names.
+    if (installedPackage) {
+        h.engine.registry.getPackage = (id: string) =>
+            (id === installedPackage ? { manifest: { id, scope: 'project' } } : undefined);
+    }
+    const services = new Map<string, unknown>();
+    if (metadataList) services.set('metadata', { list: metadataList });
+    const protocol = new ObjectStackProtocolImplementation(h.engine, () => services as Map<string, any>, undefined) as any;
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+    return { protocol, ...h };
+}
+
+/** The refusal this section pins: the envelope, the key located, both items and the prescription named. */
+function expectElevatedRefusal(error: any) {
+    expect(error).toBeInstanceOf(Error);
+    expect(error.code).toBe('INVALID_METADATA');
+    expect(error.status).toBe(422);
+    expect(error.issues).toEqual([expect.objectContaining({ path: 'runAs', code: 'custom' })]);
+    expect(error.message).toContain(`Flow '${D2B_FLOW}'`);
+    expect(error.message).toContain(`'${D2B_ENDPOINT}'`);
+    expect(error.message).toContain('authenticated endpoint');
+    expect(error.message).toContain('signed inbound hook');
+    expect(error.message).toContain('public form');
+}
+
+const storedFlows = (h: { rows: Map<string, Row> }) => Array.from(h.rows.values())
+    .filter((r) => r.type === 'flow')
+    .map((r) => ({ row: r.name, state: r.state, runAs: JSON.parse(r.metadata).runAs }));
+
+describe('[ADR-0138 D2b] the save door refuses a flow published as `system` while an anonymous endpoint names it', () => {
+    it('publish mode: refused with the envelope; nothing stored', async () => {
+        const h = makeD2bProtocol();
+        h.engine.registry.registerItem('api', d2bEndpoint(false));
+
+        const { error } = await attempt(() => h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('system') }));
+
+        expectElevatedRefusal(error);
+        expect(storedFlows(h)).toEqual([]);
+    });
+
+    it('CONTROL: the same flow under `user` beside the anonymous endpoint saves', async () => {
+        const h = makeD2bProtocol();
+        h.engine.registry.registerItem('api', d2bEndpoint(false));
+
+        const res = await h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('user') });
+
+        expect(res.success).toBe(true);
+        expect(storedFlows(h)).toEqual([{ row: D2B_FLOW, state: 'active', runAs: 'user' }]);
+    });
+
+    it('CONTROL: the flow under `system` behind an AUTHENTICATED endpoint saves', async () => {
+        const h = makeD2bProtocol();
+        h.engine.registry.registerItem('api', d2bEndpoint(true));
+
+        const res = await h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('system') });
+
+        expect(res.success).toBe(true);
+        expect(storedFlows(h)).toEqual([{ row: D2B_FLOW, state: 'active', runAs: 'system' }]);
+    });
+
+    it('the endpoint is read from the `metadata` service too — the index the endpoint matcher serves from', async () => {
+        const h = makeD2bProtocol(async (type) => (type === 'api' ? [d2bEndpoint(false)] : []));
+
+        const { error } = await attempt(() => h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('system') }));
+
+        expectElevatedRefusal(error);
+        expect(storedFlows(h)).toEqual([]);
+    });
+
+    it('a `metadata` service whose read fails fails the publish: "nothing names it" is never answered from a read that did not happen', async () => {
+        const outage = Object.assign(new Error('metadata store unreachable'), { code: 'METADATA_STORE_UNAVAILABLE' });
+        const h = makeD2bProtocol(async () => { throw outage; });
+
+        const { error } = await attempt(() => h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('system') }));
+
+        expect(error).toBe(outage);
+        expect(storedFlows(h)).toEqual([]);
+    });
+
+    it('draft mode is let through (a draft does not execute); a `migrate-stored` re-save is not judged', async () => {
+        const h = makeD2bProtocol();
+        h.engine.registry.registerItem('api', d2bEndpoint(false));
+
+        const draft = await h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('system'), mode: 'draft' });
+        expect(draft.success).toBe(true);
+
+        const migrated = await h.protocol.saveMetaItem({
+            type: 'flow', name: D2B_FLOW, item: d2bFlow('system'), source: 'migrate-stored',
+        });
+        expect(migrated.success).toBe(true);
+        expect(storedFlows(h)).toEqual(expect.arrayContaining([{ row: D2B_FLOW, state: 'active', runAs: 'system' }]));
+    });
+});
+
+describe('[ADR-0138 D2b] the draft promotion refuses a `system` flow draft an anonymous endpoint names', () => {
+    it('publishMetaItem: refused with the envelope; the draft is kept, nothing goes live', async () => {
+        const h = makeD2bProtocol();
+        h.engine.registry.registerItem('api', d2bEndpoint(false));
+        await h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('system'), mode: 'draft' });
+
+        const { error } = await attempt(() => h.protocol.publishMetaItem({ type: 'flow', name: D2B_FLOW }));
+
+        expectElevatedRefusal(error);
+        expect(storedFlows(h)).toEqual([{ row: D2B_FLOW, state: 'draft', runAs: 'system' }]);
+    });
+
+    it('publishMetaItem CONTROL: a `user` draft beside the anonymous endpoint publishes', async () => {
+        const h = makeD2bProtocol();
+        h.engine.registry.registerItem('api', d2bEndpoint(false));
+        await h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('user'), mode: 'draft' });
+
+        const res = await h.protocol.publishMetaItem({ type: 'flow', name: D2B_FLOW });
+
+        expect(res.success).toBe(true);
+        expect(storedFlows(h)).toEqual([{ row: D2B_FLOW, state: 'active', runAs: 'user' }]);
+    });
+
+    it('publishPackageDrafts: the refused flow draft aborts the batch with the envelope\'s code; nothing goes live', async () => {
+        const PKG = 'app.intake';
+        const h = makeD2bProtocol(undefined, PKG);
+        h.engine.registry.registerItem('api', d2bEndpoint(false));
+        await h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('system'), mode: 'draft', packageId: PKG });
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const res = await h.protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.success).toBe(false);
+        expect(res.publishedCount).toBe(0);
+        expect(res.failed).toEqual([expect.objectContaining({ type: 'flow', name: D2B_FLOW, code: 'INVALID_METADATA' })]);
+        expect(storedFlows(h)).toEqual([{ row: D2B_FLOW, state: 'draft', runAs: 'system' }]);
+    });
+
+    it('publishPackageDrafts CONTROL: the same draft behind an authenticated endpoint publishes', async () => {
+        const PKG = 'app.intake';
+        const h = makeD2bProtocol(undefined, PKG);
+        h.engine.registry.registerItem('api', d2bEndpoint(true));
+        await h.protocol.saveMetaItem({ type: 'flow', name: D2B_FLOW, item: d2bFlow('system'), mode: 'draft', packageId: PKG });
+
+        const res = await h.protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.outcome).toBe('published');
+        expect(res.publishedCount).toBe(1);
     });
 });
