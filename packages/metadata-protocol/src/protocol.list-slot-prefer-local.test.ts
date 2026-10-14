@@ -20,17 +20,16 @@
  * package-less row. `findServedOverlayRow` reads
  * it from the store; the list reads it over the rows it already holds.
  *
- *  1. The generated pin: every subset of five stored rows (env-wide and
- *     org-scoped, package-less and package A's, plus a third package B's
- *     env-wide row), in every order the store can return them, for a request
+ *  1. The generated pin: every subset of three stored rows (package-less,
+ *     package A's and a third package B's, all env-wide: ADR-0131 D6/D7, the
+ *     family declares no organization column), in every order the store can return them, for a request
  *     with and without an organization. Every package slot in the list serves
  *     the row an oracle written from the rule names, and `getMetaItem` naming
  *     that package serves the same row.
  *  2. Named: package A's row and the package-less row, both env-wide, both
  *     orders, with and without A's packaged artifact. The slot is A's row.
  *  3. Named, a request from an organization (ADR-0131 D6): the
- *     organization's legacy rows are served by no read; the environment's
- *     rows are. Both orders.
+ *     environment's rows are served. Both orders.
  *  4. Control: only the package-less row is stored, under A's artifact. The
  *     slot still falls back to it (stamped as A's), as the by-name read does.
  *  5. The draft preview: A's draft and a package-less draft, both orders. The
@@ -57,7 +56,7 @@ const PKG_A = 'com.example.a';
 const PKG_B = 'com.example.b';
 const NAME = 'v_slot';
 
-type Scope = 'env-wide' | 'org-scoped';
+type Scope = 'env-wide';
 interface RowSpec { scope: Scope; packageId: string | null; label: string }
 
 /** The stored rows the tables draw from. */
@@ -65,8 +64,6 @@ const ROWS = {
     envPackageless: { scope: 'env-wide', packageId: null, label: 'env-wide package-less row' },
     envA: { scope: 'env-wide', packageId: PKG_A, label: 'env-wide row of A' },
     envB: { scope: 'env-wide', packageId: PKG_B, label: 'env-wide row of B' },
-    orgPackageless: { scope: 'org-scoped', packageId: null, label: 'org-scoped package-less row' },
-    orgA: { scope: 'org-scoped', packageId: PKG_A, label: 'org-scoped row of A' },
 } as const satisfies Record<string, RowSpec>;
 type RowKey = keyof typeof ROWS;
 const ROW_KEYS = Object.keys(ROWS) as RowKey[];
@@ -75,7 +72,6 @@ interface StoredRow {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
@@ -88,7 +84,6 @@ function stored(key: RowKey, state: 'active' | 'draft' = 'active', type: string 
         id: `r_${key}_${state}`,
         type,
         name: NAME,
-        organization_id: spec.scope === 'org-scoped' ? ORG : null,
         package_id: spec.packageId,
         state,
         metadata: JSON.stringify({ name: NAME, label, ...(type === 'view' ? { object: 'account' } : {}), _provenance: 'org' }),
@@ -204,15 +199,14 @@ describe('pin 1 (generated) — every package slot in the list serves the row ge
     const TABLE = subsets(ROW_KEYS).flatMap((rows) =>
         ([undefined, ORG] as const).map((organizationId) => ({ rows, organizationId })));
 
-    it('completeness: every subset of the five rows, with and without an organization, and both packages are reachable', () => {
+    it('completeness: every subset of the three rows, with and without an organization, and both packages are reachable', () => {
         expect(TABLE).toHaveLength(2 ** ROW_KEYS.length * 2);
         expect(new Set(ROW_KEYS.map((key) => ROWS[key].packageId))).toEqual(new Set([null, PKG_A, PKG_B]));
-        expect(new Set(ROW_KEYS.map((key) => ROWS[key].scope))).toEqual(new Set(['env-wide', 'org-scoped']));
+        expect(new Set(ROW_KEYS.map((key) => ROWS[key].scope))).toEqual(new Set(['env-wide']));
         // The arrangements this card is about are in the table: the package's
         // row beside the package-less row of one scope, in more than one order.
         const both = TABLE.filter(({ rows }) =>
-            (rows.includes('envA') && rows.includes('envPackageless'))
-            || (rows.includes('orgA') && rows.includes('orgPackageless')));
+            rows.includes('envA') && rows.includes('envPackageless'));
         expect(both.length).toBeGreaterThan(0);
         expect(both.every(({ rows }) => orders(rows).length >= 2)).toBe(true);
     });
@@ -266,17 +260,17 @@ describe('pin 2 — the package\'s row beside the package-less row (one scope, e
     }
 });
 
-describe('pin 3 — [ADR-0131 D6] a request from an organization: its legacy rows are served by no read', () => {
-    for (const order of orders<RowKey>(['orgPackageless', 'envA', 'envPackageless'])) {
-        it(`the organization's legacy package-less row is not served over an env-wide row of A · row order ${order.join(', ')}`, async () => {
+describe('pin 3 — [ADR-0131 D6] a request from an organization is served the environment\'s rows', () => {
+    for (const order of orders<RowKey>(['envA', 'envPackageless'])) {
+        it(`the env-wide row of A is served over the env-wide package-less row · row order ${order.join(', ')}`, async () => {
             const protocol = harness(order.map((key) => stored(key)));
             const slots = await listSlots(protocol, PKG_A, { organizationId: ORG });
             expect(slots.map((s) => s.label)).toEqual([ROWS.envA.label]);
             expect((await byName(protocol, PKG_A, { organizationId: ORG }))?.label).toBe(ROWS.envA.label);
         });
     }
-    for (const order of orders<RowKey>(['orgA', 'envPackageless'])) {
-        it(`the organization's legacy row of A is not served; A has no slot, and by name A is served the env-wide package-less row · row order ${order.join(', ')}`, async () => {
+    for (const order of orders<RowKey>(['envPackageless'])) {
+        it(`no row of A: A has no slot, and by name A is served the env-wide package-less row · row order ${order.join(', ')}`, async () => {
             const protocol = harness(order.map((key) => stored(key)));
             const slots = await listSlots(protocol, PKG_A, { organizationId: ORG });
             expect(slots).toEqual([]);
