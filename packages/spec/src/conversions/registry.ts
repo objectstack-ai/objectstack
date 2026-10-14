@@ -4187,19 +4187,18 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
  *    default flip 3 → 0 never needed a materialization step while the job one
  *    did: nothing was ever deployed under the old reading.
  *
- * `retiredFromLoadPath` is NOT set: `FlowNodeSchema.config` is an unconstrained
- * record, so no schema rejection can reach `config.retry.retryDelayMs` and the
- * conversion layer is the only seam that can declare and retire that spelling.
- * The `RetryPolicySchema` tombstone still fires for anyone who reaches the
- * policy through a parsed job.
+ * `retiredFromLoadPath` is NOT set, and the base-delay rename is not why:
+ * every surface that carried `retryDelayMs` already refuses it with the rename
+ * to `backoffMs` (the `RetryPolicySchema` tombstone, which a `try_catch` node's
+ * `config.retry` is, and `flow.errorHandling`'s own).
  *
- * **A recorded verdict at 18 (#23487):** it stays. Re-measured on the 18 line,
- * a `try_catch` node's `config.retry: { retryDelayMs }` still passes the flow
- * parse unrefused, and a source job that omits `maxRetries` would silently drop
- * from three retries to none without the step-0 default materialization. It can
- * retire once that `retry` block refuses `retryDelayMs` naming `backoffMs`, and
- * the job default flip is settled for sources (or the entry is recorded as
- * permanent).
+ * **A recorded verdict at 18 (#23487):** it stays, for the job half alone. It
+ * writes the pre-17 `maxRetries: 3` / `backoffMultiplier: 2` into a source
+ * `job.retryPolicy` that omits them; retired, the authoring funnel would stop
+ * doing that, and such a job would silently drop from three retries to none
+ * under the merged 0 / 1 defaults — a default flip no gate can see. It can
+ * retire once that default flip has a ruling for authored sources (or the entry
+ * is recorded as permanent).
  */
 const retryPolicyConverged: MetadataConversion = {
   id: 'retry-policy-converged',

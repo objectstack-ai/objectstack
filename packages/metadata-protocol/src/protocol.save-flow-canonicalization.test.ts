@@ -401,10 +401,13 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
      * [#21982] On the fallback path — no canonicalizer resolved, or it threw —
      * the gate judges the body in its ADR-0087 D2-converted spelling, for the
      * verdict only. The flow parse refuses an undeclared config key on the
-     * builtin node types, so without the conversion a D2 spelling every other
-     * door converts first (`os validate`, `defineStack`, `registerFlow`) would
-     * be refused here, and only here: a verdict that depended on whether the
-     * host runs an automation service. What is STORED stays the raw body.
+     * builtin node types, so without the conversion a D2 spelling the
+     * canonicalizer converts first (`registerFlow`'s full chain, retired
+     * entries included) would be refused here, and only here: a verdict that
+     * depended on whether the host runs an automation service. So the fallback
+     * replays that same full chain (#23487) — for the seven flow spellings
+     * retired from the authoring funnel at 18 and for those retired before
+     * them alike. What is STORED stays the raw body.
      */
     describe('[#21982] the fallback gate judges the D2-converted body, and stores the raw one', () => {
         const scriptBody = (config: Record<string, unknown>) => ({
@@ -428,6 +431,20 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
             expect(result.success).toBe(true);
             // Judged as `function`, stored exactly as written.
             expect(storedFlow(rows)!.body.nodes[0].config).toEqual({ functionName: 'helpdesk.triage' });
+        });
+
+        it('an older-retired flow shape (`flow.active`) reaches the canonicalizer\'s verdict too — healed for the verdict, stored raw', async () => {
+            // `flow-inert-keys-removed` (retired from the load path after 16.1.0)
+            // tombstones `active`. On a host with no automation service the
+            // fallback used to judge it in the authoring posture and refuse it
+            // 422; the service-backed path replays the entry and heals it. Since
+            // #23487 the fallback replays the same chain, so both hosts agree.
+            const { protocol, rows } = makeProtocol(new Map());
+
+            const result = await save(protocol, { ...flowBody({ objectName: 'lead', filter: { status: 'stale' } }), active: false });
+
+            expect(result.success).toBe(true);
+            expect(storedFlow(rows)!.body.active).toBe(false);
         });
 
         it('an undeclared key on delete_record is refused 422 INVALID_METADATA at its path — the alias beside it is not', async () => {
