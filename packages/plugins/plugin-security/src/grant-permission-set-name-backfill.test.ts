@@ -674,12 +674,11 @@ describe('[ADR-0131 D4] grant name backfill — boot wiring', () => {
     await seedPrincipals(world, 'single');
     await clearAllNames(world.engine);
 
-    // The `kernel:bootstrapped` handlers, in registration order: this backfill
-    // first, the catalog reference report (`catalog-reference-report.test.ts`)
-    // last — and between them the row-only position backfill until C3 stage 8
-    // unwires it. Only the first runs here.
+    // Two `kernel:bootstrapped` handlers, in registration order: this
+    // backfill, then the catalog reference report, which
+    // `catalog-reference-report.test.ts` drives. Only the first runs here.
     const handlers = world.hooks.get('kernel:bootstrapped') ?? [];
-    expect(handlers.length).toBeGreaterThanOrEqual(2);
+    expect(handlers).toHaveLength(2);
     const errorsBefore = world.pluginLogger.error.mock.calls.length;
     const warningsBefore = world.pluginLogger.warn.mock.calls.length;
     await handlers[0]();
