@@ -93,8 +93,7 @@ export function logSeedDurabilityFailure(
   meta?: Record<string, any>,
 ): void {
   // No single cause: this line summarises N refusals, so the cause slot is
-  // `undefined` and the detail travels in meta — the same shape the sibling
-  // reconcile summary in `permission-set-projection.ts` uses.
+  // `undefined` and the detail travels in meta.
   if (logger?.error) logger.error(message, undefined, meta);
   else logger?.warn?.(message, meta);
 }

@@ -84,7 +84,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_user_position: {
     label: "用户岗位",
     pluralLabel: "用户岗位",
-    description: "将岗位（sys_position.name）分配给用户。由平台管理（ADR-0057 D4、ADR-0090 D3）。",
+    description: "按名称将岗位分配给用户。由平台管理（ADR-0057 D4、ADR-0090 D3）。",
     fields: {
       id: {
         label: "分配 ID",
@@ -100,7 +100,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       position: {
         label: "岗位",
-        help: "岗位机器名（引用 sys_position.name）。"
+        help: "岗位机器名（在安全目录中解析）。"
       },
       business_unit_id: {
         label: "业务单元",

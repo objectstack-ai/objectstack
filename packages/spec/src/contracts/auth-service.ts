@@ -13,6 +13,8 @@
  * Aligned with CoreServiceName 'auth' in core-services.zod.ts.
  */
 
+import type { ExecutionContext } from '../kernel/execution-context.zod.js';
+
 /**
  * Authenticated session user information
  */
@@ -151,6 +153,35 @@ export interface IAuthService {
      * a member the contract never mentioned.
      */
     isAuthGateActive?(): boolean;
+
+    /**
+     * [ADR-0069 · #23287, ruling C′ item 3] Every authentication-policy posture
+     * `userId` holds right now, most urgent first, or `[]` for a user no
+     * policy holds. The ONE per-user posture computation: the session gate
+     * carries its first entry on `user.authGate`, and the API-key admission
+     * seam (`resolveApiKeyAdmission`, `@objectstack/core`) asks it for a key's
+     * owner and refuses the key on an `account`-scope entry
+     * (`AUTH_GATE_SCOPES`). Keyed by user id, so a caller outside the session
+     * and the key seam can ask it too.
+     *
+     * `organizationId` is the organization the credential operates in (a
+     * session's active organization, an API key's own organization): an
+     * organization may require MFA above the deployment-wide floor.
+     *
+     * Cheap when no policy is enabled (no read at all). A lookup that fails
+     * answers `[]`, exactly as the session gate fails open on it, so a
+     * transient fault never holds a compliant user. A REFUSAL is not a
+     * revocation: the answer changes the moment the user remediates, with
+     * nothing reissued.
+     *
+     * @param userId - The user whose standing is asked
+     * @param options - The organization the credential operates in, if any
+     * @returns The held postures, most urgent first
+     */
+    resolveUserAuthGates?(
+        userId: string,
+        options?: { organizationId?: string },
+    ): Promise<readonly NonNullable<ExecutionContext['authGate']>[]>;
 
     /**
      * Verify an OAuth 2.1 access token issued by this deployment's embedded

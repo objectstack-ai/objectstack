@@ -142,8 +142,8 @@ describe('pin 4 — the detection reading NAMES the forked sets', () => {
   });
 
   it('⭐ finds the CONFOUNDED row the card measured — managed_by wrong AND an overlay present', async () => {
-    // The field-reported shape. `customized` is forced false here by
-    // `upsertEnvPermissionSet`'s `existing.managed_by === 'package'` gate, so a
+    // The field-reported shape. `customized` was forced false here by the
+    // retired projector's `existing.managed_by === 'package'` gate, so a
     // reading that consulted the column would report zero forks on precisely
     // the environment that had one — for two weeks, measured.
     const a = declaredSet();
@@ -180,11 +180,8 @@ describe('pin 4 — the detection reading NAMES the forked sets', () => {
   });
 
   it('an ORG-scoped overlay row is out of scope, the same as everywhere else in this family', async () => {
-    // `reconcilePermissionSetProjection` and `permission-set-drift.ts` both
-    // consider env-wide overlays only (#10103 residue, deliberately out of
-    // scope). A reading that answered a different question from the reconciler
-    // it is reporting on would send an operator to a row the reconciler never
-    // touches.
+    // Env-wide overlays only (#10103 residue, deliberately out of scope), the
+    // boundary the retired reconciler and drift diagnostic drew.
     const a = declaredSet();
     const ql = makeQl([a]);
     ql.permRows.push(rowFor(a));

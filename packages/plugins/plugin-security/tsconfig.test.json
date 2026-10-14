@@ -32,7 +32,7 @@
 //     the CHECK rather than the code — TS1470 (`import.meta` in a file "which
 //     will build into CommonJS output", `src/audience-anchor-set-claims.pin.test.ts`,
 //     a file vitest runs as ESM every day) and TS2550 (`Array.prototype.at`
-//     against a `lib` older than es2022, `src/permission-set-projection.test.ts`,
+//     against a `lib` older than es2022, `src/permission-set-projection.test.ts`, since deleted,
 //     on Node >= 22). Matching vitest is fidelity, not laxity: it is the same
 //     subtraction `packages/spec` and `packages/rest` made, and it removes the
 //     pressure that produced the `__dirname` workaround above.

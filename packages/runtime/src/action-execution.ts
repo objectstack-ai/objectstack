@@ -364,8 +364,34 @@ export async function callData(deps: ActionExecutionDeps,
     }
 
     if (action === 'update') {
+        // [#23462] `expectedVersion` rides through to `updateData`, whose
+        // version check refuses a stale update. This arm forwarded only
+        // `{ object, id, data }`, so a token the `/data` domain read was
+        // dropped here a second time. Present only when a caller sent one:
+        // every other caller hands `{ object, id, data }` and reaches
+        // `updateData` as before. The `delete` arm below does the same.
+        const expectedVersion = params?.expectedVersion;
         if (protocol && typeof protocol.updateData === 'function') {
-            return await protocol.updateData({ object: params.object, id: params.id, data: params.data, ...(scopeId ? { environmentId: scopeId } : {}), context: executionContext });
+            return await protocol.updateData({
+                object: params.object,
+                id: params.id,
+                data: params.data,
+                ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+                ...(scopeId ? { environmentId: scopeId } : {}),
+                context: executionContext,
+            });
+        }
+        // [#23462] The fallback below updates by id and nothing else, so it
+        // cannot judge a version. A caller who sent one is refused `501`
+        // before anything is read, never updated unguarded: that is the very
+        // drop the arm above just closed. The `delete` arm's fallback refuses
+        // it the same way.
+        if (expectedVersion !== undefined) {
+            throw {
+                statusCode: 501,
+                message: 'This host has no protocol updateData, so it cannot honour expectedVersion or If-Match on an '
+                    + 'update. Send the update without them, or update through a host whose protocol implements updateData.',
+            };
         }
         if (ql && params.id && typeof ql.update === 'function') {
             let all = await ql.find(params.object, findOpts({ where: { id: params.id }, limit: 1 }));

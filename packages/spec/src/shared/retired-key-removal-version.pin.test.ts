@@ -88,6 +88,7 @@ import {
   ActionMenuPropsSchema,
   ElementNumberPropsSchema,
   ElementRecordPickerPropsSchema,
+  ElementButtonPropsSchema,
   ElementRepeaterPropsSchema,
   ObjectGridPropsSchema,
   ObjectKanbanPropsSchema,
@@ -238,6 +239,19 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
         fields: { order: { type: 'master_detail', label: 'Order', reference: 'cbp_order' } },
       }),
       'sharingModel',
+    ),
+  ],
+  // Two protocol-17 live-window conversions retired from the load path at 18
+  // (`toMajor: 17`, unlike every other row): the prescription is the refusal
+  // the surface answers once the loader stops rewriting the old spelling.
+  'page-header-subtitle-alias': [
+    refusal("page:header property 'description'", () => PageHeaderProps.safeParse({ title: 'Leads', description: 'All open leads' })),
+  ],
+  'inline-action-api-params-to-body-extra': [
+    refusal(
+      "an inline type:'api' action's object-form params",
+      () => ElementButtonPropsSchema.safeParse({ label: 'Go', action: { type: 'api', target: '/x', params: { a: 1 } } }),
+      'action',
     ),
   ],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.
