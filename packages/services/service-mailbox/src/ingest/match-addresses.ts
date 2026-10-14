@@ -29,8 +29,10 @@
  *  - `attachment` — the same headers of a `message/rfc822` (RFC 2046 §5.2.1)
  *    or `message/global` (RFC 6532 §3.7) part of the received message: a
  *    message forwarded as an attachment;
- *  - `inline` — a forwarded message quoted in the body text. Declared so a
- *    stored row that carries it replays; this package writes it nowhere yet.
+ *  - `inline` — the From, Reply-To, To and Cc of a forwarded message quoted
+ *    in the body text: the "Forwarded message" block of Gmail, Outlook or
+ *    Apple Mail (`inline-forward.ts`), read only for a message sent by a user
+ *    of the mailbox's organization (`mail-ingest-service.ts`).
  */
 export const MAIL_MATCH_ADDRESS_SOURCES = ['outer', 'attachment', 'inline'] as const;
 
@@ -70,8 +72,9 @@ export function normalizeMailAddress(value: unknown): string | null {
 
 /**
  * The participant set for one message: `outer` addresses first, then
- * `attachment` ones, each normalized, the mailbox's own addresses removed, and
- * each (address, source) pair kept once.
+ * `attachment` ones, then `inline` ones — the order of `parts` — each
+ * normalized, the mailbox's own addresses removed, and each (address, source)
+ * pair kept once.
  */
 export function collectMatchAddresses(
   parts: ReadonlyArray<{ source: MailMatchAddressSource; addresses: ReadonlyArray<string> }>,

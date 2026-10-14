@@ -76,6 +76,99 @@ export function forwardAsAttachment(options: {
   );
 }
 
+/**
+ * The original message an inline forward quotes: header values exactly as the
+ * client writes them into its block (display names, angle brackets and list
+ * separators included).
+ */
+export interface InlineOriginal {
+  from?: string;
+  to?: string;
+  cc?: string | null;
+  replyTo?: string;
+  subject?: string;
+  body?: string;
+}
+
+/**
+ * The "Forwarded message" block of a Gmail forward, as Gmail writes it into
+ * the text/plain body: the shape of `test/fixtures/gmail_en_body.txt` in
+ * `email-forward-parser` (MIT, Crisp IM SAS) — separator, then From, Date,
+ * Subject, To and Cc, an empty line, the original's text.
+ */
+export function gmailForwardBlock(original: InlineOriginal = {}): string {
+  return [
+    '---------- Forwarded message ---------',
+    `From: ${original.from ?? 'Customer <customer@acme.test>'}`,
+    'Date: Wed, Oct 27, 2021 at 9:31 AM',
+    `Subject: ${original.subject ?? 'A question'}`,
+    `To: ${original.to ?? '<rep@corp.test>'}`,
+    ...(original.cc === null ? [] : [`Cc: ${original.cc ?? 'Buyer <buyer@acme.test>, Partner <partner@globex.test>'}`]),
+    '',
+    original.body ?? 'What does it cost?',
+  ].join('\r\n');
+}
+
+/**
+ * The block of an Outlook forward (Outlook on the web / Microsoft 365), as it
+ * writes the text/plain body: the shape of `test/fixtures/outlook_live_body.txt`
+ * in `email-forward-parser` — 32 underscores, then From, Sent, To, Cc (a `;`
+ * list) and Subject, an empty line, the original's text.
+ */
+export function outlookForwardBlock(original: InlineOriginal = {}): string {
+  return [
+    '________________________________',
+    `From: ${original.from ?? 'Customer <customer@acme.test>'}`,
+    'Sent: Wednesday, October 27, 2021 15:14',
+    `To: ${original.to ?? 'rep@corp.test <rep@corp.test>'}`,
+    ...(original.cc === null ? [] : [`Cc: ${original.cc ?? 'Buyer <buyer@acme.test>; Partner <partner@globex.test>'}`]),
+    `Subject: ${original.subject ?? 'A question'}`,
+    '',
+    original.body ?? 'What does it cost?',
+  ].join('\r\n');
+}
+
+/**
+ * The block of an Apple Mail forward, as its text/plain rendering writes it:
+ * the shape of `test/fixtures/apple_mail_en_body.txt` in
+ * `email-forward-parser` — every line quoted with `>`, the separator, an empty
+ * line, then From, Subject, Date, To and Cc (and Reply-To when the original
+ * carried one), an empty line, the original's text.
+ */
+export function appleMailForwardBlock(original: InlineOriginal = {}): string {
+  return [
+    'Begin forwarded message:',
+    '',
+    `From: ${original.from ?? 'Customer <customer@acme.test>'}`,
+    `Subject: ${original.subject ?? 'A question'}`,
+    'Date: 25 October 2021 at 11:17:21 EEST',
+    `To: ${original.to ?? 'rep@corp.test'}`,
+    ...(original.cc === null ? [] : [`Cc: ${original.cc ?? 'Buyer <buyer@acme.test>, Partner <partner@globex.test>'}`]),
+    ...(original.replyTo === undefined ? [] : [`Reply-To: ${original.replyTo}`]),
+    '',
+    original.body ?? 'What does it cost?',
+  ]
+    .map((line) => (line === '' ? '>' : `> ${line}`))
+    .join('\r\n');
+}
+
+/**
+ * A message forwarded INLINE: a plain-text message from the forwarder whose
+ * body is a note followed by the client's forward `block` — or, with `block`
+ * `null`, the same message carrying the note only (the control).
+ */
+export function forwardInline(options: { forwarder?: string; messageId: string; block: string | null }): string {
+  const note = "See the customer's question below.";
+  return plainMessage(
+    {
+      From: options.forwarder ?? 'Rep <rep@corp.test>',
+      Subject: 'Fwd: A question',
+      'Message-ID': options.messageId,
+    },
+    options.block === null ? note : `${note}\r\n\r\n${options.block}`,
+  );
+}
+
 /** A delivery-status report (RFC 3464 inside RFC 6522 `multipart/report`): a bounce. */
 export function bounce(): string {
   return rfc822(

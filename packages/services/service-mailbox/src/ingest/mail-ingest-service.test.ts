@@ -19,11 +19,22 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 // Engine options are DECLARED, never erased to `any` (`pnpm check:query-options-erasure`).
 import type { DataEngineInsertOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
+import { SysMember, SysUser } from '@objectstack/platform-objects/identity';
 import { SysMailAssociation, SysMailbox, SysMailMessage } from '../objects/index.js';
 import { MAILBOX_ADMIN_CAPABILITY } from '../mail-read-visibility.js';
 import { MailIngestService, MailboxServiceError, type MailIngestEngine } from './mail-ingest-service.js';
 import { parseMatchAddresses } from './match-addresses.js';
-import { bounce, forwardAsAttachment, plainMessage, rfc822 } from './messages.fixture.js';
+import {
+  appleMailForwardBlock,
+  bounce,
+  forwardAsAttachment,
+  forwardInline,
+  gmailForwardBlock,
+  outlookForwardBlock,
+  plainMessage,
+  rfc822,
+  type InlineOriginal,
+} from './messages.fixture.js';
 
 const SYSTEM = { isSystem: true } as const;
 const ORG_A = 'org_mail_a';
@@ -88,7 +99,8 @@ describe('the ingest seam on a real engine', () => {
       true,
     );
     await engine.init();
-    for (const def of [SysMailbox, SysMailMessage, SysMailAssociation, Contact, Lead, Vendor]) {
+    // The identity objects the inline-forward door reads, as the auth plugin registers them.
+    for (const def of [SysMailbox, SysMailMessage, SysMailAssociation, SysUser, SysMember, Contact, Lead, Vendor]) {
       engine.registry.registerObject(def as any, 'mailbox-test', 'mailbox-test');
     }
     await engine.syncSchemas();
@@ -301,6 +313,181 @@ describe('the ingest seam on a real engine', () => {
       expect(await service.rematch({ mailboxId: mailbox }, SYSTEM)).toEqual({
         scanned: 1, linksAdded: 0, associated: 0, unreadable: [id],
       });
+    });
+  });
+
+  describe('a forward quoted INLINE, read only for a user of the mailbox’s organization', () => {
+    // The forwarder, `rep@corp.test`, is a user who is a member of ORG_A (its
+    // stored email in another case: the door folds ASCII case as the matcher
+    // does). `elsewhere@corp.test` is a user, but a member of ORG_B only.
+    // `stranger@far.test` is no user at all.
+    beforeAll(async () => {
+      const rep = await insert('sys_user', { name: 'Rep', email: 'Rep@Corp.test' });
+      await insert('sys_member', { organization_id: ORG_A, user_id: rep, role: 'member' });
+      const elsewhere = await insert('sys_user', { name: 'Elsewhere', email: 'elsewhere@corp.test' });
+      await insert('sys_member', { organization_id: ORG_B, user_id: elsewhere, role: 'member' });
+    });
+
+    const FORMATS: ReadonlyArray<readonly [string, (original?: InlineOriginal) => string]> = [
+      ['gmail', gmailForwardBlock],
+      ['outlook', outlookForwardBlock],
+      ['apple-mail', appleMailForwardBlock],
+    ];
+
+    for (const [format, block] of FORMATS) {
+      it(`${format}: the forward associates through the original sender’s flagged field, and the stored set carries \`inline\`; control: the same message without the block pools`, async () => {
+        const mailbox = await newMailbox();
+        const customer = `customer-${format}@acme.test`;
+        const contact = await insert('mailtest_contact', { organization_id: ORG_A, name: 'C', email: customer });
+
+        const control = await service.ingest(
+          { mailboxId: mailbox, raw: forwardInline({ messageId: `<inline-${format}-none@corp.test>`, block: null }) },
+          SYSTEM,
+        );
+        expect(control).toMatchObject({ outcome: 'stored', associationState: 'unassociated', associations: [] });
+
+        const result = await service.ingest(
+          {
+            mailboxId: mailbox,
+            raw: forwardInline({
+              messageId: `<inline-${format}@corp.test>`,
+              block: block({ from: `Customer <${customer.toUpperCase()}>`, cc: null }),
+            }),
+          },
+          SYSTEM,
+        );
+        expect(result).toMatchObject({
+          outcome: 'stored',
+          associationState: 'associated',
+          associations: [{ object: 'mailtest_contact', recordId: contact, matchedField: 'email', matchedAddress: customer }],
+        });
+
+        const rows = await messagesIn(mailbox);
+        const stored = rows.find((r) => r.message_id === `inline-${format}@corp.test`)!;
+        expect(parseMatchAddresses(stored.match_addresses)).toEqual([
+          { address: 'rep@corp.test', source: 'outer' },
+          { address: customer, source: 'inline' },
+          { address: 'rep@corp.test', source: 'inline' },
+        ]);
+        const pooled = rows.find((r) => r.message_id === `inline-${format}-none@corp.test`)!;
+        expect(parseMatchAddresses(pooled.match_addresses)).toEqual([{ address: 'rep@corp.test', source: 'outer' }]);
+        expect((await linksOf(stored.id)).map((l) => [l.record_id, l.matched_address, l.matched_by])).toEqual([
+          [contact, customer, 'ingest'],
+        ]);
+      });
+    }
+
+    it('a block the parser does not recognise is not guessed at: the message pools, with no `inline` entry', async () => {
+      const mailbox = await newMailbox();
+      await insert('mailtest_contact', { organization_id: ORG_A, name: 'C', email: 'customer-localized@acme.test' });
+      // Gmail in German labels the original's sender `Von:`.
+      const localized = gmailForwardBlock({ from: 'Customer <customer-localized@acme.test>', cc: null }).replace('From: ', 'Von: ');
+      const result = await service.ingest(
+        { mailboxId: mailbox, raw: forwardInline({ messageId: '<inline-localized@corp.test>', block: localized }) },
+        SYSTEM,
+      );
+      expect(result).toMatchObject({ outcome: 'stored', associationState: 'unassociated', associations: [] });
+      const [row] = await messagesIn(mailbox);
+      expect(parseMatchAddresses(row!.match_addresses)).toEqual([{ address: 'rep@corp.test', source: 'outer' }]);
+    });
+
+    it('a forward not sent by a user of the mailbox’s organization is not read: no user, a member elsewhere, two From addresses', async () => {
+      const mailbox = await newMailbox();
+      const contact = await insert('mailtest_contact', { organization_id: ORG_A, name: 'C', email: 'customer-door@acme.test' });
+      const block = gmailForwardBlock({ from: 'Customer <customer-door@acme.test>', cc: null });
+      const forwarders: Array<[string, string]> = [
+        ['stranger', 'Stranger <stranger@far.test>'],
+        ['elsewhere', 'Elsewhere <elsewhere@corp.test>'],
+        ['two-from', 'rep@corp.test, stranger@far.test'],
+      ];
+      for (const [name, forwarder] of forwarders) {
+        const result = await service.ingest(
+          { mailboxId: mailbox, raw: forwardInline({ forwarder, messageId: `<door-${name}@corp.test>`, block }) },
+          SYSTEM,
+        );
+        expect(result, name).toMatchObject({ outcome: 'stored', associationState: 'unassociated', associations: [] });
+      }
+      for (const row of await messagesIn(mailbox)) {
+        expect(parseMatchAddresses(row.match_addresses)!.map((a) => a.source), String(row.message_id)).not.toContain('inline');
+      }
+
+      // Control: the same block, forwarded by the organization's user, is read.
+      const opened = await service.ingest(
+        { mailboxId: mailbox, raw: forwardInline({ messageId: '<door-rep@corp.test>', block }) },
+        SYSTEM,
+      );
+      expect(opened).toMatchObject({ associationState: 'associated', associations: [{ recordId: contact }] });
+    });
+
+    it('with no identity objects registered, no sender is an organization user: the forward is not read, and that is said once', async () => {
+      const mailbox = await newMailbox();
+      await insert('mailtest_contact', { organization_id: ORG_A, name: 'C', email: 'customer-noauth@acme.test' });
+      const withoutIdentity = new Proxy(engine, {
+        get(target, prop) {
+          if (prop === 'registry') {
+            return {
+              getAllObjects: () =>
+                target.registry.getAllObjects().filter((o: { name?: string }) => o.name !== 'sys_user' && o.name !== 'sys_member'),
+            };
+          }
+          const value = Reflect.get(target, prop);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const said: string[] = [];
+      const noAuth = new MailIngestService({
+        engine: () => withoutIdentity as unknown as MailIngestEngine,
+        logger: { warn: (m: string) => said.push(m) },
+      });
+      for (const id of ['<noauth-1@corp.test>', '<noauth-2@corp.test>']) {
+        const block = gmailForwardBlock({ from: 'customer-noauth@acme.test', cc: null });
+        const result = await noAuth.ingest({ mailboxId: mailbox, raw: forwardInline({ messageId: id, block }) }, SYSTEM);
+        expect(result).toMatchObject({ outcome: 'stored', associationState: 'unassociated' });
+      }
+      expect(said.filter((m) => m.includes('identity objects'))).toHaveLength(1);
+      expect(said[0]).toContain("'sys_user' and 'sys_member' are not registered");
+    });
+
+    it('re-match replays the stored `inline` entries, and never re-reads the body', async () => {
+      const mailbox = await newMailbox();
+      await service.ingest(
+        {
+          mailboxId: mailbox,
+          raw: forwardInline({
+            messageId: '<inline-later@corp.test>',
+            block: outlookForwardBlock({ from: 'Later <later@acme.test>', cc: null }),
+          }),
+        },
+        SYSTEM,
+      );
+      // A row whose body quotes a forward its stored set does not carry: the
+      // re-match reads `match_addresses`, so the body's addresses never match.
+      await insert('sys_mail_message', {
+        organization_id: ORG_A,
+        mailbox_id: mailbox,
+        received_at: new Date().toISOString(),
+        association_state: 'unassociated',
+        dedupe_key: 'mid:inline-body-only',
+        body_text: gmailForwardBlock({ from: 'Body Only <body-only@acme.test>', cc: null }),
+        match_addresses: JSON.stringify([{ address: 'rep@corp.test', source: 'outer' }]),
+      });
+      expect(await service.rematch({ mailboxId: mailbox }, SYSTEM)).toEqual({
+        scanned: 2, linksAdded: 0, associated: 0, unreadable: [],
+      });
+
+      const later = await insert('mailtest_contact', { organization_id: ORG_A, name: 'L', email: 'later@acme.test' });
+      await insert('mailtest_contact', { organization_id: ORG_A, name: 'B', email: 'body-only@acme.test' });
+      expect(await service.rematch({ mailboxId: mailbox }, SYSTEM)).toEqual({
+        scanned: 2, linksAdded: 1, associated: 1, unreadable: [],
+      });
+      const rows = await messagesIn(mailbox);
+      const replayed = rows.find((r) => r.message_id === 'inline-later@corp.test')!;
+      expect(replayed.association_state).toBe('associated');
+      expect((await linksOf(replayed.id)).map((l) => [l.record_id, l.matched_address, l.matched_by])).toEqual([
+        [later, 'later@acme.test', 'rematch'],
+      ]);
+      const bodyOnly = rows.find((r) => r.dedupe_key === 'mid:inline-body-only')!;
+      expect(bodyOnly.association_state).toBe('unassociated');
     });
   });
 
