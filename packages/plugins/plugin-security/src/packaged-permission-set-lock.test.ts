@@ -224,4 +224,17 @@ describe('the lock refusal carries its guidance as `userMessage` on the wire env
     // The reason stays where it was: the diagnostic channel.
     expect(String(rejection.message)).toContain('registry unavailable');
   });
+
+  it('a SchemaRegistry that answers with a NON-LIST is the same ambiguity: the save is refused, not read as "nothing declared"', async () => {
+    const ql = makeQl([]);
+    ql.registry = { listItems: () => undefined as any };
+    expect(classifyPackagedPermissionSet('unknown_provenance', ql)).toMatchObject({ status: 'unknown' });
+
+    const gate = lockGate(ql, async () => { throw new Error('metadata store unavailable'); });
+    const rejection = await gate({ type: 'permission', name: 'unknown_provenance', body: {} })
+      .then(() => null, (e: any) => e);
+    expect(rejection).toBeInstanceOf(PackagedPermissionSetProvenanceUnknownError);
+    expect(resolveThrownHttpError(rejection)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+    expect(String(rejection.message)).toContain('schema registry returned no list of declared permission sets');
+  });
 });
