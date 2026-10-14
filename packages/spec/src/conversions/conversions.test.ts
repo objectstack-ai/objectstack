@@ -437,7 +437,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       };
       let refusal: unknown;
       try {
-        defineStack(authored);
+        defineStack(authored as never);
       } catch (error) {
         refusal = error;
       }
