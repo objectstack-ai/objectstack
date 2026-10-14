@@ -17805,9 +17805,9 @@ export class ObjectStackProtocolImplementation implements
      * returns `null` and the caller proceeds exactly as before.
      *
      * [#22591] `operation: 'create'` says the write takes the name for a flow of
-     * the caller's own (the `/meta` door's first-write pin); rule 1's refusal
-     * then names the create remedy. The verdict is the same; absent, the write
-     * is an edit.
+     * the caller's own (the `/meta` door's first-write pin on a publish save —
+     * [#23406] a first draft is an edit); rule 1's refusal then names the
+     * create remedy. The verdict is the same; absent, the write is an edit.
      *
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
@@ -19059,8 +19059,21 @@ export class ObjectStackProtocolImplementation implements
      * door it is the version the next item read at the same address serves
      * ({@link readVersionToken}), so a client re-pins from the refusal without
      * parsing prose. A head with no served form sets neither attribute.
+     *
+     * [#23406] `firstWritePin` — the lifecycle a save's first-write pin (a
+     * present `null` parent, `If-None-Match: *` on the REST door) asserted had
+     * no row. That caller loaded nothing, so "modified since you loaded it"
+     * and "Expected parent null" misstate what it did; when the repository
+     * judged that `null` parent, the sentence states the assertion and the row
+     * that contradicts it instead. The code, the status and every attribute
+     * are the same as for any other conflict.
      */
-    private async metadataConflictRefusal(err: ConflictError, subject: string, prefix: string): Promise<Error> {
+    private async metadataConflictRefusal(
+        err: ConflictError,
+        subject: string,
+        prefix: string,
+        firstWritePin?: 'draft' | 'active',
+    ): Promise<Error> {
         const conflict: any = new Error(subject);
         conflict.code = 'METADATA_CONFLICT';
         conflict.status = 409;
@@ -19077,7 +19090,11 @@ export class ObjectStackProtocolImplementation implements
         }
         const expected = await servedContentHash(err.expectedParent, digest);
         if (expected !== undefined) conflict.expectedParent = expected;
-        conflict.message = `${prefix} Expected parent ${show(expected)} but current is ${show(current)}.`;
+        conflict.message = firstWritePin !== undefined && expected === null
+            ? `${subject}: this save asserted that no ${firstWritePin} row exists (the first-write pin, `
+                + `If-None-Match: * on the REST door), but one does (current is ${show(current)}). Send that `
+                + `version as If-Match to save over it, or re-read the item to merge first.`
+            : `${prefix} Expected parent ${show(expected)} but current is ${show(current)}.`;
         return conflict;
     }
 
@@ -21861,12 +21878,27 @@ export class ObjectStackProtocolImplementation implements
         // the silent strip it always had rather than failing the rewrite.
         //
         // [#22591] What this save does to the name, read for the sealed-item
-        // refusal's remedy and nothing else: a present `null` parent is the
-        // first-write pin (`If-None-Match: *` on the REST door) — the caller
-        // holds no row under the name and is writing one of its own, a create.
-        // Every other save is an edit. Read by the flow rule just below and by
-        // the package door further down.
-        const sealedWrite: 'save' | 'create' = request.parentVersion === null ? 'create' : 'save';
+        // refusal's remedy and nothing else. Read by the flow rule just below
+        // and by the package door further down, and each reads it only for a
+        // name a managed package (or the loader's set) already holds — so an
+        // item is under the name whenever it is read.
+        //
+        // [#23406] A present `null` parent is the first-write pin
+        // (`If-None-Match: *` on the REST door), and it asserts what the spec
+        // says it asserts — "no current row of THIS lifecycle"
+        // (`SaveMetaItemRequestSchema.parentVersion`) — and nothing more:
+        //  - on a publish save the lifecycle is the item's live row: the
+        //    caller asserts there is none and brings one into existence under
+        //    the name, a create;
+        //  - on a draft save the lifecycle is the draft's: the pin asserts that
+        //    no draft is pending, never that the name is free. Over a held
+        //    name it is a first draft of the item already there, an edit, and
+        //    its refusal names that item's own remedy, as the unpinned draft's
+        //    does. Read as a create, it named a free name, and a client that
+        //    followed it authored a second item instead of editing the source.
+        // Every other save is an edit.
+        const sealedWrite: 'save' | 'create' =
+            request.parentVersion === null && request.mode !== 'draft' ? 'create' : 'save';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
@@ -22035,8 +22067,9 @@ export class ObjectStackProtocolImplementation implements
         // repository has refused these writes on them all along; the door
         // only answers first.
         //
-        // [#22591] A first write (`sealedWrite`, above) reads the create
-        // remedy; the verdict is the same.
+        // [#22591] A first write of the live row (`sealedWrite`, above) reads
+        // the create remedy — [#23406] a first DRAFT is an edit and keeps the
+        // edit remedy; the verdict is the same.
         this.refusePackagedBaseOverride(request, sealedWrite);
 
         // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
@@ -23127,16 +23160,20 @@ export class ObjectStackProtocolImplementation implements
      * One builder for both, so the two cannot answer in different words.
      * [#21207] The text and attributes carry keyed values or none
      * ({@link metadataConflictRefusal}); the audit row carries no hash at all.
+     * [#23406] A caller that sent the first-write pin (`parentVersion: null`)
+     * asserted that the lifecycle it writes had no row, and is told that, not
+     * that the item changed since it loaded it.
      */
     private async saveConflict(
         err: ConflictError,
-        request: { type: string; name: string; actor?: string },
+        request: { type: string; name: string; actor?: string; parentVersion?: string | null; mode?: 'draft' | 'publish' },
         writeSource: string,
     ): Promise<Error> {
         const conflict = await this.metadataConflictRefusal(
             err,
             `${request.type}/${request.name}`,
             `${request.type}/${request.name} has been modified since you loaded it.`,
+            request.parentVersion === null ? (request.mode === 'draft' ? 'draft' : 'active') : undefined,
         );
         await this.recordOptimisticConflictAudit({
             type: request.type,
