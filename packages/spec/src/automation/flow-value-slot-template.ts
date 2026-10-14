@@ -35,9 +35,10 @@
  * rule (`expression-invalid` at `error`), which `objectstack validate`,
  * `objectstack compile` and the runtime publish gate of an `active` metadata
  * save run; and every run, through the node contracts that compose
- * `FlowValueSlotSchema`. The flow parse does NOT run it: `FlowSchema.parse`,
- * and so `defineStack`, `ObjectStackDefinitionSchema`, the `flow` metadata
- * type's schema and an artifact's parse, accept a value-slot token. The parse
+ * `FlowValueSlotSchema` and the `assignment` executor's own call. The flow
+ * parse does NOT run it: `FlowSchema.parse`, and so `defineStack`,
+ * `ObjectStackDefinitionSchema`, the `flow` metadata type's schema and an
+ * artifact's parse, accept a value-slot token. The parse
  * parses the node contracts too (`flowNodeConfigRefusals`' value arm), and
  * that arm stands aside at exactly the paths this judge refuses
  * (`slotJudgeRefusedPaths`, #23260), so the parse leaves the token to the
@@ -51,7 +52,7 @@
  *    `source:` — at registration and in the boot's log, and `objectstack
  *    validate` and `objectstack compile`, which parse the stack before their
  *    rules run, would stop at the parse before the `expression-invalid`
- *    finding. Every pin of either located refusal went red.
+ *    finding. Those doors' pins of the located refusal went red.
  *  - **The stored pass.** The parse is also the stored-flow canonicalization
  *    (`AutomationEngine.canonicalizeStoredFlow`) that `os migrate meta
  *    --stored` runs on each flow row, and a parse refusal reports the row
