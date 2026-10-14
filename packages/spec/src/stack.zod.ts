@@ -58,6 +58,7 @@ import { JobSchema } from './system/job.zod';
 // Security Protocol
 import { PositionSchema } from './identity/position.zod';
 import { PermissionSetSchema } from './security/permission.zod';
+import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
 import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
 
@@ -196,6 +197,67 @@ function applyApiEndpointGates(
   })) {
     ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
   }
+}
+
+/**
+ * [ADR-0086 D3] Raise every permission set whose body `packageId` disagrees
+ * with the package that ships it as a Zod issue at that key: the BUILD door of
+ * the owner-binding judge ({@link judgePermissionSetOwnerBinding},
+ * `security/permission-set-owner-binding.ts`, whose header holds the rule and
+ * every other door). A set's owner is the package it is registered under, so a
+ * key naming another package (or any key, on a set no package ships) was
+ * registered over in silence; refused here instead, before anything is built.
+ *
+ * On the SCHEMA rather than inside `defineStack`, for the reason
+ * {@link applyApiEndpointGates} gives: `defineStack`, `os validate`, `os build`,
+ * the lint scorer and the metadata plugin's artifact ingestion all run this one
+ * parse, so no build or load path can skip the judgement. The binding is the id
+ * each set is registered under, and nothing else:
+ *
+ * - **no `packages[]`**: the stack IS its one package, so every top-level set
+ *   ships from `manifest.id`, and from no package when there is no `manifest`;
+ * - **`packages[]`** (ADR-0130 D4): a body's sets ship from that body's own
+ *   `id`. A top-level set that no body declares is the stack's residual,
+ *   registered under `manifest.id` (the residual rule is `unclaimedTopLevel` in
+ *   `@objectstack/metadata`; a permission set's slot there is its name). A
+ *   top-level set that a body declares is a copy of that body's set and is never
+ *   registered from the top level, so the top level does not judge it.
+ */
+function applyPermissionSetOwnerBindingGate(
+  config: { manifest?: { id?: unknown } | undefined; permissions?: unknown; packages?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const nameOf = (set: unknown): unknown => (set as { name?: unknown } | null | undefined)?.name;
+  const judge = (set: unknown, binding: unknown, path: (string | number)[]): void => {
+    const name = nameOf(set);
+    const refusal = judgePermissionSetOwnerBinding(
+      set,
+      typeof name === 'string' ? name : String(name),
+      typeof binding === 'string' ? binding : undefined,
+      'build',
+    );
+    if (refusal) ctx.addIssue({ code: 'custom', path: [...path, 'packageId'], message: refusal.message });
+  };
+  const topLevel = Array.isArray(config.permissions) ? config.permissions : [];
+  if (!Array.isArray(config.packages)) {
+    topLevel.forEach((set, i) => judge(set, config.manifest?.id, ['permissions', i]));
+    return;
+  }
+  const claimed = new Set<string>();
+  config.packages.forEach((entry: unknown, j: number) => {
+    const body = (entry as { manifest?: { id?: unknown; permissions?: unknown } } | null | undefined)?.manifest;
+    if (!body || !Array.isArray(body.permissions)) return;
+    body.permissions.forEach((set: unknown, i: number) => {
+      const name = nameOf(set);
+      if (typeof name === 'string') claimed.add(name);
+      judge(set, body.id, ['packages', j, 'manifest', 'permissions', i]);
+    });
+  });
+  topLevel.forEach((set, i) => {
+    const name = nameOf(set);
+    if (typeof name === 'string' && claimed.has(name)) return;
+    judge(set, config.manifest?.id, ['permissions', i]);
+  });
 }
 
 /**
@@ -1788,7 +1850,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     .describe('Assembled package bodies carried by this release artifact (ADR-0130 D4)'),
 
   ...STACK_DEFINITION_COLLECTIONS_SHAPE,
-}).superRefine(applyApiEndpointGates));
+}).superRefine(applyApiEndpointGates).superRefine(applyPermissionSetOwnerBindingGate));
 
 export type ObjectStackDefinition = z.input<typeof ObjectStackDefinitionSchema>;
 /** Post-parse shape of {@link ObjectStackDefinition} — defaults applied, transforms run (ADR-0122). */
