@@ -1887,13 +1887,19 @@ const emptyStateLinkSchema = () => strictObject({
  * route letter A on objectstack-ai/cloud#2803). Taken by reference, the link
  * widens EVERY door at once: the list view's `emptyState` and the doors it
  * reaches, the `object-grid` page block's, and a list page's own
- * `interfaceConfig.emptyState` (`page.zod.ts`, #23005). No renderer draws it
- * yet — measured at objectui `7af0ab3`, `ListView` hands `ListEmptyState` the
- * `title`, `message` and `icon` and nothing else (`ListView.tsx:5688-5696`),
- * `ObjectGrid` reads the same three (`ObjectGrid.tsx:6647-6655`), and
- * `InterfaceListPage` passes a source view's `emptyState` only
- * (`InterfaceListPage.tsx:503`) — so its describe carries the planned marker;
- * the renderer half is objectstack-ai/objectui#12270.
+ * `interfaceConfig.emptyState` (`page.zod.ts`, #23005). It was declared ahead
+ * of its renderer, with the planned marker on its describe. The renderer half,
+ * objectstack-ai/objectui#12270 (objectui `b434f5f47`), is inside the console
+ * pin from objectui `b9814b334`, so the marker is dropped. Measured there:
+ * `ListView` hands `ListEmptyState` the `link` (`ListView.tsx:5716`), which
+ * draws it beside the add-record action (`ListEmptyState.tsx:153`) in the
+ * empty branch of the `grid` and `gallery` visualizations; `ObjectGrid` draws
+ * it in `DataEmptyState`'s action slot (`ObjectGrid.tsx:6897-6899`); and
+ * `InterfaceListPage` hands `ListView` the page's own `emptyState` ahead of
+ * the source view's (`InterfaceListPage.tsx:509`). Each draws it through the
+ * one shared `EmptyStateLink` (`@object-ui/components`), which follows it as a
+ * `type: 'url'` action through the action runner, so a click opens what the
+ * runner opens for that target.
  */
 export const EmptyStateSchema = lazySchema(() => strictObject({
   surface: 'this empty state',
@@ -1917,10 +1923,11 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
     .describe('Icon name drawn above the heading; a name that resolves to no icon draws the default empty-state glyph'),
   link: emptyStateLinkSchema().optional()
     .describe(
-      '[PLANNED — not yet rendered] The one next step an empty list names: a link the user follows, '
-      + '`{ label, url }` — for example to the how-to page that explains what belongs here when nobody can '
-      + 'add a row. It opens a page or an address and runs no action. The console\'s empty-state renderers '
-      + 'are its planned readers; until they ship, the link parses and is not drawn.',
+      'The one next step an empty list names: a link the user follows, `{ label, url }` — for example '
+      + 'to the how-to page that explains what belongs here when nobody can add a row. It opens a page or '
+      + 'an address and runs no action. The console draws it in a list\'s empty state (the `grid` and '
+      + '`gallery` visualizations) and in an `object-grid` block\'s, beside the add-record action where '
+      + 'one is offered.',
     ),
 }));
 
@@ -2376,14 +2383,25 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * byte-identical; `ObjectView.tsx`, `objectql.zod.ts` and `ObjectMap.tsx` are
  * byte-identical (`git diff --quiet`), so `case 'map':` (`2479`),
  * `ObjectMapConfigSchema` (`2523`) and the two `getMapConfig` lines did not
- * move. Each anchor quotes the line it was read at,
+ * move. RE-READ again at pin `b9814b334` on 2026-10-14: that bump redded
+ * three anchors, and none of them changed what it reads. `ObjectView.tsx`
+ * (+20/-40) and `objectql.zod.ts` (+13/-19), both changed by objectui#12030
+ * (objectui `c5406c201`) above the anchors, moved them: `case 'map':`
+ * `2479` -> `2460`, the whole arm byte-identical; `ObjectMapConfigSchema`
+ * `2523` -> `2520`, its declaration byte-identical and still closed with
+ * `.strict()`; and `LIST_VIEW_LOCAL_OVERRIDES` `1506` -> `1503`, the whole
+ * list byte-identical and still without `map`. `ListView.tsx` (+23/-3)
+ * changed only below both of its anchors, so `resolveListMapConfig` (`210`)
+ * and `FLAT_MAP_CONFIG_SPELLING` (`96`) did not move, and `ObjectMap.tsx` is
+ * byte-identical, so the two `getMapConfig` lines did not move. Each anchor
+ * quotes the line it was read at,
  * so the next pin bump reds instead of rotting
  * (`check:objectui-pin-citations`):
  *
  * - **The block this face feeds is FLATTENED, not forwarded.** `ListView`
  *   (`packages/plugin-list/src/ListView.tsx:210` first line
  *   `function resolveListMapConfig(schema: { map?: unknown; options?: { map?: unknown } }): Record<string, unknown> {`)
- *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2479` first line
+ *   and `ObjectView` (`packages/plugin-view/src/ObjectView.tsx:2460` first line
  *   `case 'map':`) copy it through a HAND-LISTED whitelist
  *   (`packages/plugin-list/src/ListView.tsx:96` first line
  *   `export const FLAT_MAP_CONFIG_SPELLING = {`) — ⚠️ re-read at the new pin:
@@ -2395,7 +2413,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  *   there, but by a whitelist and in SILENCE: no parse, no warning, no
  *   diagnostic of any kind.
  * - **The renderer's own zod schema does not close the set.**
- *   `packages/types/src/zod/objectql.zod.ts:2523` first line
+ *   `packages/types/src/zod/objectql.zod.ts:2520` first line
  *   `export const ObjectMapConfigSchema = z.object({` — a plain `z.object` at `dd3f7e1be`,
  *   NOT strict, so an undeclared key parses clean there: zero issues, no
  *   warning. ⚠️ At `db11afd49` the declaration is closed with `.strict()`
@@ -2418,7 +2436,7 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * `db11afd49` it is closed by `.strict()` and still warn-only). And this parse is
  * the only
  * place an author is told ANYWHERE: `map` is not in objectui's
- * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:1506`
+ * `LIST_VIEW_LOCAL_OVERRIDES` (`packages/types/src/zod/objectql.zod.ts:1503`
  * first line `const LIST_VIEW_LOCAL_OVERRIDES = [`), so objectui's own
  * `ListViewSchema` imports THIS block by reference and the document check on
  * that side is this same schema. The two key sets MIRROR each other, key for
@@ -3575,7 +3593,10 @@ const FormFieldBaseSchema = lazySchema(() => {
    * inside the `53ded82bf7...87af769e9` range, so the widest-tier-only
    * under-span this block used to record (#17328: one cell of two at
    * 720px) no longer reproduces at the pin this repo builds against
-   * (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+   * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
+   * `1fb1ced36`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
    * `7578323a5`, re-read there 2026-10-12:
@@ -3711,7 +3732,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * had changed only in its registration's input list, objectui#9910's
    * `children` slot; at `62597c588` it was byte-identical to `87af769e9`).
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `1fb1ced36243`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — at the pin this repo builds against (`.objectui-sha` = `b9814b334d8a`), only textarea, markdown, html, richtext and repeater resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: at that same pin the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),

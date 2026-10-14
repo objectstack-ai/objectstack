@@ -922,15 +922,18 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
    * in an empty list: the "packages you publish appear here" line of an empty
    * My Packages page, for one.
    *
-   * Planned, not yet rendered: measured at objectui `7af0ab3`,
-   * `InterfaceListPage` hands `ListView` the resolved SOURCE view's
-   * `emptyState` (`InterfaceListPage.tsx:503`, `emptyState: view.emptyState`)
-   * and reads no `interfaceConfig.emptyState`. The renderer half — the page's
-   * own empty state preferred over a source view's, on every visualization —
-   * is objectstack-ai/objectui#12270.
+   * It was declared ahead of its renderer, with the planned marker on its
+   * describe. The renderer half, objectstack-ai/objectui#12270 (objectui
+   * `b434f5f47`), is inside the console pin from objectui `b9814b334`, so the
+   * marker is dropped. Measured there: `InterfaceListPage` hands `ListView`
+   * `emptyState: cfg.emptyState ?? view.emptyState` (`InterfaceListPage.tsx:509`),
+   * so the page's own empty state wins over its source view's, whole, and the
+   * source view's stays the fallback. Where `ListView` draws an empty state at
+   * all (the `grid` and `gallery` visualizations), that is the one it draws,
+   * `link` included.
    */
   emptyState: EmptyStateSchema.optional()
-    .describe('[PLANNED — not yet rendered] What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view\'s own empty-state shape. The console\'s list page is its planned reader; until it ships, the page draws a source view\'s empty state, if any.'),
+    .describe('What the page draws in place of rows when its list has none to show: `{ title, message, icon, link }`, the list view\'s own empty-state shape. The console\'s list page prefers it, whole, over its source view\'s empty state; with none declared, the page draws the source view\'s, if any.'),
 
   /** Advanced */
   allowPrinting: z.boolean().optional().describe('Allow users to print the page'),
