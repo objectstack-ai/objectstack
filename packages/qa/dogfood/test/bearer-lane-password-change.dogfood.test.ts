@@ -6,8 +6,11 @@
  * ## The defect this pins
  *
  * An admin-provisioned user (`mustChangePassword` defaults to true) is gated out
- * of every protected route with `403 PASSWORD_EXPIRED` until they rotate their
- * password. On the COOKIE lane the escape hatch worked. On the BEARER lane —
+ * of every protected route with `403 PASSWORD_RESET_REQUIRED` until they rotate
+ * their password. (#23287, ruling C′ item 2: the administrator-forced change has
+ * its own code, scope `credential`; it reused `PASSWORD_EXPIRED`, which stays
+ * natural expiry under `passwordExpiryDays`, until then.) On the COOKIE lane the
+ * escape hatch worked. On the BEARER lane —
  * the documented API/agent/CLI lane — `/auth/change-password` answered **200**,
  * the password really rotated, and nothing else happened: `must_change_password`
  * stayed `true`, `password_changed_at` stayed `null`, and the caller stayed
@@ -225,7 +228,7 @@ describe('#8049: /auth/change-password clears the force-change flag and enforces
       const email = `bearer.lane.8049.${lane.name.replace(/[^a-z]/gi, '').toLowerCase()}@example.com`;
       let credential = '';
 
-      it('an admin-provisioned user is gated out with 403 PASSWORD_EXPIRED', async () => {
+      it('an admin-provisioned user is gated out with 403 PASSWORD_RESET_REQUIRED', async () => {
         const created = await stack.apiAs(adminToken, 'POST', '/auth/admin/create-user', {
           email,
           name: `Bearer Lane ${lane.name}`,
@@ -241,9 +244,12 @@ describe('#8049: /auth/change-password clears the force-change flag and enforces
 
         const read = await stack.api('/data/showcase_task?$top=1', { headers: lane.headers(credential) });
         // The gate refusal — asserted as code AND status, and distinctly from
-        // the reuse refusal below (different envelope, different outcome).
+        // the reuse refusal below (different envelope, different outcome). The
+        // flag is the administrator's forced change, not expiry: no
+        // `passwordExpiryDays` is armed here, so the one ruled answer is
+        // `PASSWORD_RESET_REQUIRED` (ruling C′ item 2).
         expect(read.status).toBe(403);
-        expect((await read.json())?.error?.code).toBe('PASSWORD_EXPIRED');
+        expect((await read.json())?.error?.code).toBe('PASSWORD_RESET_REQUIRED');
       }, 120_000);
 
       it('POST /auth/change-password rotates the password AND clears the force-change flag', async () => {
