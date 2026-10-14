@@ -146,6 +146,15 @@ const ticketViewsBody = {
     name: 'ticket_views', object: 'ticket',
     list: { label: 'All tickets', type: 'grid', columns: [{ field: 'title' }] },
 };
+/** A flow binds its object on a node `config`, which the derived site index does not walk. */
+const onTicketBody = {
+    name: 'dupsrc_on_ticket', label: 'On ticket', type: 'record_change',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: 'ticket', triggerType: 'record-after-create' } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+};
 const opsBody = {
     name: 'dupsrc_ops', label: 'Ops',
     objects: { dupsrc_customer: { allowRead: true }, ticket: { allowRead: true } },
@@ -194,6 +203,7 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         await save('object', noteBody);
         await save('view', ticketViewsBody);
         await save('permission', opsBody);
+        await save('flow', onTicketBody);
         for (const [type, item] of extra) await save(type, item);
         // CONTROL: the bare name was stored by a direct save, no prefix gate read it.
         expect(owner('ticket')).toBe(P);
@@ -239,6 +249,7 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         expect(noteCopy.fields.ticket.name).toBe('ticket');
 
         expect(storedBody('view', 'ticket_views', Q).object).toBe('dupdst_ticket');
+        expect(storedBody('flow', 'dupdst_on_ticket', Q).nodes[0].config.objectName).toBe('dupdst_ticket');
         // A permission set is keyed by object name: both grants follow.
         expect(Object.keys(storedBody('permission', 'dupdst_ops', Q).objects).sort())
             .toEqual(['dupdst_customer', 'dupdst_ticket']);
