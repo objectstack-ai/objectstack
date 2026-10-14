@@ -299,6 +299,7 @@ const apply = (
       generatedAt: '2026-10-11T00:00:00Z',
       database: file,
       inventoryDigest: inventoryDigest(),
+      posture: opts.posture ?? 'single',
       ...opts.reviewed,
     },
     executor: opts.executor ?? executor(),
@@ -475,6 +476,25 @@ describe('ADR-0131 D10 --apply — only the reviewed plan is executed', () => {
     expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(hash);
   });
 
+  it('refuses, before any write, a plan computed under another tenancy posture, naming both and the remedy', async () => {
+    const c = catalog();
+    const l = ledger();
+    const hash = createHash('sha256').update(readFileSync(file)).digest('hex');
+
+    // Reviewed under a wall, where anchorless rows are reported; run under single, where they would take an owner.
+    const refused = apply(c, l, { posture: 'single', reviewed: { posture: 'isolated' } });
+
+    await expect(refused).rejects.toBeInstanceOf(ReviewedPlanRefusal);
+    await expect(refused).rejects.toMatchObject({
+      reason: 'plan-posture-mismatch',
+      detail: { reviewed: 'isolated', current: 'single' },
+      message: expect.stringMatching(/computed under the isolated tenancy posture, and this run resolves single .*Nothing was written\..*--plan-file/s),
+    });
+    expect(writes).toEqual([]);
+    expect(l.checkpoint).toBeNull();
+    expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(hash);
+  });
+
   it('refuses, before any write, a plan file computed for another database', async () => {
     const c = catalog();
     const l = ledger();
@@ -515,11 +535,13 @@ describe('ADR-0131 D10 --apply — only the reviewed plan is executed', () => {
 });
 
 describe('reviewedPlanFromFile', () => {
-  const plan = { kind: 'organization-ownership-plan', ceremony: 'ADR-0131 D10', generatedAt: 'g', database: 'd', inventoryDigest: 'x' };
+  const plan = {
+    kind: 'organization-ownership-plan', ceremony: 'ADR-0131 D10', generatedAt: 'g', database: 'd', inventoryDigest: 'x', posture: 'single',
+  };
 
-  it('reads the three compared fields of a plan file', () => {
+  it('reads the compared fields of a plan file', () => {
     expect(reviewedPlanFromFile('p.json', JSON.stringify({ ...plan, tables: [] }))).toEqual({
-      file: 'p.json', generatedAt: 'g', database: 'd', inventoryDigest: 'x',
+      file: 'p.json', generatedAt: 'g', database: 'd', inventoryDigest: 'x', posture: 'single',
     });
   });
 
@@ -528,6 +550,7 @@ describe('reviewedPlanFromFile', () => {
     ['an apply report, not a plan', JSON.stringify({ ...plan, kind: 'organization-ownership-apply' })],
     ['no digest', JSON.stringify({ ...plan, inventoryDigest: '' })],
     ['no database', JSON.stringify({ ...plan, database: undefined })],
+    ['no posture', JSON.stringify({ ...plan, posture: undefined })],
   ])('refuses a file that is %s', (_label, text) => {
     expect(() => reviewedPlanFromFile('p.json', text)).toThrow(ReviewedPlanRefusal);
     try {

@@ -43,6 +43,7 @@ writeFileSync(PLAN_FILE, JSON.stringify({
   generatedAt: '2026-10-14T00:00:00Z',
   database: 'fixture.db',
   inventoryDigest: 'f'.repeat(64),
+  posture: 'single',
 }));
 const NOT_A_PLAN = join(PLAN_DIR, 'report.json');
 writeFileSync(NOT_A_PLAN, JSON.stringify({ kind: 'organization-ownership-apply' }));

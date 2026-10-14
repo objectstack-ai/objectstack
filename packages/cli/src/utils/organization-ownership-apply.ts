@@ -95,7 +95,9 @@ import {
  * swapped for another, a release whose inventory moved. So the apply takes
  * the kept plan file ({@link ReviewedPlan}) and refuses, before anything is
  * written, when the inventory digest it computes is not the one that file
- * recorded, or the file names another database ({@link ReviewedPlanRefusal}).
+ * recorded, the posture it runs under is not the one the plan was computed
+ * under (the posture decides what attribution and the authored conversion
+ * write), or the file names another database ({@link ReviewedPlanRefusal}).
  * The remedy is always the same: plan again, review it, hand the new file in.
  * A checkpoint recorded under another digest is therefore one the reviewed
  * plan supersedes: the run starts over (each step is idempotent), and the
@@ -169,7 +171,7 @@ export interface CeremonyLedgerPort {
 
 /**
  * What the apply reads from the kept `--plan` file: the plan the operator
- * reviewed. Only these three fields are compared or reported.
+ * reviewed. Only these fields are compared or reported.
  */
 export interface ReviewedPlan {
   /** The plan file's path, for the refusal and the report. */
@@ -177,6 +179,8 @@ export interface ReviewedPlan {
   generatedAt: string;
   database: string;
   inventoryDigest: string;
+  /** The tenancy posture the plan was computed under. */
+  posture: string;
 }
 
 /**
@@ -186,7 +190,7 @@ export interface ReviewedPlan {
  */
 export class ReviewedPlanRefusal extends Error {
   constructor(
-    readonly reason: 'plan-file-unusable' | 'plan-digest-mismatch' | 'plan-database-mismatch',
+    readonly reason: 'plan-file-unusable' | 'plan-digest-mismatch' | 'plan-posture-mismatch' | 'plan-database-mismatch',
     message: string,
     readonly detail: Readonly<Record<string, string>> = {},
   ) {
@@ -221,16 +225,18 @@ export function reviewedPlanFromFile(file: string, text: string): ReviewedPlan {
     typeof p.inventoryDigest !== 'string' ||
     !p.inventoryDigest ||
     typeof p.database !== 'string' ||
-    typeof p.generatedAt !== 'string'
+    typeof p.generatedAt !== 'string' ||
+    typeof p.posture !== 'string' ||
+    !p.posture
   ) {
     throw new ReviewedPlanRefusal(
       'plan-file-unusable',
-      `The file ${file} is not an organization-ownership plan (it needs kind, ceremony, inventoryDigest, database and ` +
-        'generatedAt). Hand in the file the plan run wrote.',
+      `The file ${file} is not an organization-ownership plan (it needs kind, ceremony, inventoryDigest, posture, ` +
+        'database and generatedAt). Hand in the file the plan run wrote.',
       { file },
     );
   }
-  return { file, generatedAt: p.generatedAt, database: p.database, inventoryDigest: p.inventoryDigest };
+  return { file, generatedAt: p.generatedAt, database: p.database, inventoryDigest: p.inventoryDigest, posture: p.posture };
 }
 
 export interface StepReport {
@@ -1256,7 +1262,7 @@ async function remainingFor(run: Run, table: TablePlan, complete: boolean): Prom
 /**
  * Refuse, before anything is written, an apply whose plan is not the reviewed
  * one: another inventory digest (another supplement, another release's
- * inventory), or another database.
+ * inventory), another tenancy posture, or another database.
  */
 function refuseUnreviewedPlan(plan: OrganizationOwnershipPlan, reviewed: ReviewedPlan): void {
   if (reviewed.inventoryDigest !== plan.inventoryDigest) {
@@ -1267,6 +1273,17 @@ function refuseUnreviewedPlan(plan: OrganizationOwnershipPlan, reviewed: Reviewe
         '--fate-supplement, or another release). Nothing was written. Run the plan again with the same flags, review ' +
         'it, and pass the new file with --plan-file.',
       { file: reviewed.file, reviewed: reviewed.inventoryDigest, current: plan.inventoryDigest },
+    );
+  }
+  if (reviewed.posture !== plan.posture) {
+    throw new ReviewedPlanRefusal(
+      'plan-posture-mismatch',
+      `The plan file ${reviewed.file} was computed under the ${reviewed.posture} tenancy posture, and this run resolves ` +
+        `${plan.posture} (OS_TENANCY_POSTURE / OS_MULTI_ORG_ENABLED): the posture decides which rows attribution gives ` +
+        'an owner and which it reports, and whether authored sets and positions are converted, so the fates it would ' +
+        'execute are not the ones that plan showed. Nothing was written. Run the apply under the posture the plan was ' +
+        'computed under, or plan again under this one, review it, and pass the new file with --plan-file.',
+      { file: reviewed.file, reviewed: reviewed.posture, current: plan.posture },
     );
   }
   if (reviewed.database !== plan.database) {

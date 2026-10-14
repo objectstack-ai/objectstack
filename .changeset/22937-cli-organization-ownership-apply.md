@@ -8,7 +8,7 @@ Clause-②: yes (widening)
 
 The command that planned the ceremony now performs it. Without `--apply` nothing changes: the read-only plan, written to a file. With `--apply`:
 
-- **The backup comes first.** It is the operator's act: pass `--backup-taken`, or answer yes at the prompt. A non-interactive run without the flag is refused before the database is opened.
+- **The reviewed plan, then the backup.** `--apply` takes the plan file the plan run wrote (`--plan-file FILE`) and executes only that plan. The backup is the operator's act: pass `--backup-taken`, or answer yes at the prompt. A run without the plan file, or a non-interactive run without `--backup-taken`, is refused before the database is opened.
 - **The fates run in order**, each step stopping the run where it meets a blocker:
   1. **Attribution** — every NULL `organization_id` row the plan derives an owner for takes it (a parent, subject or holder anchor; under `single`, the Default Organization). A row with no derivable owner is never assigned one: it stays NULL and is listed by id.
   2. **Authored catalog rows** — permission sets and positions an organization authored in Setup become environment metadata through the metadata door (under `single`; under a wall they are reported), with each position's binding rows carried into its `permissionSets`.

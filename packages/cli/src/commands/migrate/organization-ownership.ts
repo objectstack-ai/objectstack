@@ -90,9 +90,11 @@ async function confirm(question: string): Promise<boolean> {
  *
  * ## `--apply` (ADR-0131 D10 ceremony items 2 to 4)
  *
- * The writing mode. It asks about the backup first — the operator's act and
- * the precondition (D10 item 2): `--backup-taken`, or a yes at the prompt; a
- * non-interactive run without the flag is refused before the boot. It then
+ * The writing mode. It reads the reviewed plan file first (`--plan-file`, the
+ * file a plan run wrote; without it the run is refused before the boot), then
+ * asks about the backup — the operator's act and the precondition (D10 item
+ * 2): `--backup-taken`, or a yes at the prompt; a non-interactive run without
+ * the flag is refused before the boot. It then
  * performs the fates in order — attribution, the authored catalog conversion,
  * the template promotion, the settings global-rung move, the verified id→name
  * rewrite, mirror deletion, column drops — through `../../utils/organization-ownership-apply.ts`,
@@ -142,7 +144,7 @@ export default class MigrateOrganizationOwnership extends Command {
     'The v18 organization-ownership ceremony (ADR-0131 D10). Without --apply, the read-only plan: per table, the fate, ' +
     'the row counts, the rows whose owner cannot be derived (by id), and which tables will receive NOT NULL, written ' +
     'to a file — never a row or a column changed; it refuses, naming it, any table it cannot enumerate. With --apply ' +
-    '(and a backup): attribution, the authored catalog conversion, the template promotion, the settings move, the ' +
+    '(the reviewed plan file in --plan-file, and a backup), only that plan: attribution, the authored catalog conversion, the template promotion, the settings move, the ' +
     'verified id-to-name rewrite, mirror deletion and column drops, in that order, ' +
     'resumable from a recorded checkpoint, then the post-check.';
 
