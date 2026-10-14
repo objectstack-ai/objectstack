@@ -63,7 +63,7 @@ const settle = async (p: Promise<unknown>) =>
 
 describe('[#13279] resolveAuthzContext — an outage is loud, an empty store is not', () => {
   it('a permission-store OUTAGE refuses, with the branded error', async () => {
-    const r = await settle(resolveAuthzContext({ ql: qlDown(), headers: {}, ...SESSION }));
+    const r = await settle(resolveAuthzContext({ userAuthGates: undefined, ql: qlDown(), headers: {}, ...SESSION }));
     expect(r.ok).toBe(false);
     expect(isAuthzStoreUnavailableError((r as any).e)).toBe(true);
     // The wire vocabulary an outage selects — an EXISTING ADR-0112 member.
@@ -77,13 +77,13 @@ describe('[#13279] resolveAuthzContext — an outage is loud, an empty store is 
   it('⭐ THE TWIN: a reachable, genuinely EMPTY store still resolves to zero capabilities', async () => {
     // The assertion that keeps the fix honest. If this ever throws, the repair
     // has stopped distinguishing the two facts and merely moved the lie.
-    const ctx = await resolveAuthzContext({ ql: qlEmpty(), headers: {}, ...SESSION });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql: qlEmpty(), headers: {}, ...SESSION });
     expect(ctx.userId).toBe(USER);
     expect(ctx.systemPermissions).toEqual([]);
   });
 
   it('⭐ CONTROL: a healthy store still resolves the capability it grants', async () => {
-    const ctx = await resolveAuthzContext({ ql: qlHealthy(), headers: {}, ...SESSION });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql: qlHealthy(), headers: {}, ...SESSION });
     expect(ctx.userId).toBe(USER);
     expect(ctx.systemPermissions).toContain('studio.access');
   });
@@ -91,15 +91,15 @@ describe('[#13279] resolveAuthzContext — an outage is loud, an empty store is 
   it('an ABSENT engine is not a failed read — it still resolves, as it always did', async () => {
     // `tryFind`'s `!ql` guard. An embedder that never wired a data plane must
     // keep resolving; only a read that was ISSUED and THREW is loud.
-    const ctx = await resolveAuthzContext({ ql: undefined, headers: {}, ...SESSION });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql: undefined, headers: {}, ...SESSION });
     expect(ctx.userId).toBe(USER);
     expect(ctx.systemPermissions).toEqual([]);
-    const noFind = await resolveAuthzContext({ ql: {} as any, headers: {}, ...SESSION });
+    const noFind = await resolveAuthzContext({ userAuthGates: undefined, ql: {} as any, headers: {}, ...SESSION });
     expect(noFind.userId).toBe(USER);
   });
 
   it('an ANONYMOUS request never reaches the store, so an outage cannot make it loud', async () => {
-    const ctx = await resolveAuthzContext({ ql: qlDown(), headers: {} });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql: qlDown(), headers: {} });
     expect(ctx.userId).toBeUndefined();
     expect(ctx.systemPermissions).toEqual([]);
   });
@@ -380,7 +380,7 @@ const OUTAGE_SHAPES: ReadonlyArray<readonly [string, (object: string) => unknown
 
 describe('[#13279 option A] ⭐ THE OUTAGE DIRECTION — a read failure that is not an unprovisioned table stays LOUD', () => {
   it.each(OUTAGE_SHAPES)('%s ⇒ AuthzStoreUnavailableError (503 SERVICE_UNAVAILABLE)', async (_label, make) => {
-    const r = await settle(resolveAuthzContext({ ql: qlThrowing(make), headers: {}, ...SESSION }));
+    const r = await settle(resolveAuthzContext({ userAuthGates: undefined, ql: qlThrowing(make), headers: {}, ...SESSION }));
     expect(r.ok).toBe(false);
     expect(isAuthzStoreUnavailableError((r as any).e)).toBe(true);
     expect((r as any).e.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
@@ -397,7 +397,7 @@ describe('[#13279 option A] ⭐ THE OUTAGE DIRECTION — a read failure that is 
         return [];
       },
     };
-    const r = await settle(resolveAuthzContext({ ql, headers: {}, ...SESSION }));
+    const r = await settle(resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, ...SESSION }));
     expect(r.ok).toBe(false);
     expect(isAuthzStoreUnavailableError((r as any).e)).toBe(true);
     expect((r as any).e.object).toBe('sys_user_permission_set');
@@ -428,7 +428,7 @@ describe('[#13279 option A] ⭐ THE UNPROVISIONED DIRECTION — a never-provisio
   it.each(UNPROVISIONED_SHAPES)(
     '%s ⇒ zero capabilities, because that is the TRUE answer and not a fabrication',
     async (_label, make) => {
-      const ctx = await resolveAuthzContext({ ql: qlThrowing(make), headers: {}, ...SESSION });
+      const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql: qlThrowing(make), headers: {}, ...SESSION });
       expect(ctx.userId).toBe(USER);
       expect(ctx.systemPermissions).toEqual([]);
       expect(ctx.permissions).toEqual([]);
@@ -447,12 +447,13 @@ describe('[#13279 option A] ⭐ THE UNPROVISIONED DIRECTION — a never-provisio
     // is granted — so they must be the same envelope, byte for byte. Anything
     // less means the quiet branch is quietly different.
     const unprovisioned = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql: qlThrowing((o) => new Error(`no such table: ${o}`)), headers: {}, ...SESSION,
     });
-    const empty = await resolveAuthzContext({ ql: qlEmpty(), headers: {}, ...SESSION });
+    const empty = await resolveAuthzContext({ userAuthGates: undefined, ql: qlEmpty(), headers: {}, ...SESSION });
     expect(JSON.stringify(unprovisioned)).toBe(JSON.stringify(empty));
     // CONTROL against a vacuous comparison: a HEALTHY store differs from both.
-    const healthy = await resolveAuthzContext({ ql: qlHealthy(), headers: {}, ...SESSION });
+    const healthy = await resolveAuthzContext({ userAuthGates: undefined, ql: qlHealthy(), headers: {}, ...SESSION });
     expect(JSON.stringify(healthy)).not.toBe(JSON.stringify(empty));
   });
 

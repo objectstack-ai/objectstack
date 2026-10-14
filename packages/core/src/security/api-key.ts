@@ -248,23 +248,42 @@ export function effectiveTenancyPosture(
 }
 
 /**
- * Verify an inbound API key against `sys_api_key` and resolve its principal.
- * This is the ONE verify path shared by the dispatcher/MCP and REST surfaces.
+ * Verify an inbound API key against `sys_api_key` and resolve its principal —
+ * the verdict of {@link resolveApiKeyAdmission}, collapsed to a principal.
  *
  * Fail-closed: returns `undefined` for a missing key, an unusable data engine,
- * a lookup error, or a key that is unknown / revoked / expired / owner-less.
+ * a lookup error, a key that is unknown / revoked / expired / owner-less, a key
+ * the tenancy posture refuses, and a key whose OWNER holds an `account`-scope
+ * ADR-0069 posture (`held`).
  *
- * @param ql      A data engine with `find(object, { where, limit, context })`.
- * @param headers Request headers (Web `Headers` or a plain object).
- * @param nowMs   Clock for expiry checks (injectable for tests).
+ * ⚠️ The collapse is lossy by construction: a principal-or-nothing answer cannot
+ * carry the posture's code, so a host that admits keys through this function
+ * answers a held owner's key as it answers no key at all, never with the `403`
+ * and code ruling C′ item 1 gives every other seam. A transport that answers
+ * requests reads {@link resolveApiKeyAdmission} (or `resolveAuthzContext`) and
+ * refuses `held` with `gate.code`.
+ *
+ * [#23455] `userAuthGates` is REQUIRED, for the reason it is on
+ * {@link resolveApiKeyAdmission}: while this function took no posture source
+ * at all, any host admitting keys through it admitted a held owner's key.
+ * `tenancyPosture` is required with it, because a required parameter cannot
+ * follow an optional one; `undefined` is a legitimate value for both and is
+ * passed on purpose.
+ *
+ * @param ql             A data engine with `find(object, { where, limit, context })`.
+ * @param headers        Request headers (Web `Headers` or a plain object).
+ * @param nowMs          Clock for expiry checks (injectable for tests).
+ * @param tenancyPosture The deployment's effective tenancy posture, or `undefined` when no `tenancy` service is registered.
+ * @param userAuthGates  `userAuthGateSourceOf(authService)`, or `undefined` when the kernel has no auth service.
  */
 export async function resolveApiKeyPrincipal(
   ql: any,
   headers: any,
   nowMs: number = Date.now(),
-  tenancyPosture?: TenancyPosture,
+  tenancyPosture: TenancyPosture | undefined,
+  userAuthGates: UserAuthGateSource | undefined,
 ): Promise<ApiKeyPrincipal | undefined> {
-  const admission = await resolveApiKeyAdmission(ql, headers, nowMs, tenancyPosture);
+  const admission = await resolveApiKeyAdmission(ql, headers, nowMs, tenancyPosture, userAuthGates);
   return admission.outcome === 'admitted' ? admission.principal : undefined;
 }
 
@@ -272,28 +291,41 @@ export async function resolveApiKeyPrincipal(
  * [#8287] The full verdict behind {@link resolveApiKeyPrincipal} — same lookup,
  * but it distinguishes a POSTURE REFUSAL from "no principal".
  *
- * `resolveApiKeyPrincipal` collapses `refused` into `undefined` so every
- * existing caller keeps working and keeps failing closed; a caller that can
- * report WHY (the shared `resolveAuthzContext`) uses this instead.
+ * `resolveApiKeyPrincipal` collapses `refused` and `held` into `undefined`, so
+ * a caller of it fails closed; a caller that can report WHY (the shared
+ * `resolveAuthzContext`) uses this instead.
  *
  * The only refusal decided here is the org-less one, because it needs nothing
  * but the row and the posture. The ex-member refusal needs the caller's
  * membership set and is decided in `resolveAuthzContext`, where that set is
  * already resolved.
+ *
+ * [#23455] Every parameter after `nowMs` is REQUIRED, and `undefined` is a
+ * value passed on purpose — see `userAuthGates` below.
  */
 export async function resolveApiKeyAdmission(
   ql: any,
   headers: any,
   nowMs: number = Date.now(),
-  tenancyPosture?: TenancyPosture,
+  /**
+   * The deployment's effective tenancy posture (`effectiveTenancyPosture`),
+   * or `undefined` when no `tenancy` service is registered. Required because
+   * `userAuthGates` after it is: a required parameter cannot follow an
+   * optional one.
+   */
+  tenancyPosture: TenancyPosture | undefined,
   /**
    * [#23287, ruling C′ item 3] The auth service's per-user posture
-   * computation (`userAuthGateSourceOf`). OMITTING it leaves the key's owner
-   * unasked — the behaviour before the ruling — so an unwired caller is never
-   * made worse, only less strict. A kernel without `plugin-auth` has no policy
-   * to hold anyone with, and supplies nothing.
+   * computation (`userAuthGateSourceOf(authService)`).
+   *
+   * [#23455] REQUIRED. While it was optional, a caller that never named a
+   * source compiled and admitted a held owner's key — the fail-open three
+   * seams carried after the ruling. `undefined` is the value a kernel
+   * without `plugin-auth` passes (no policy can hold anyone there); ⛔ never
+   * the value a caller that can reach the `auth` service passes to quiet the
+   * compiler.
    */
-  userAuthGates?: UserAuthGateSource,
+  userAuthGates: UserAuthGateSource | undefined,
 ): Promise<ApiKeyAdmission> {
   const apiKey = extractApiKey(headers);
   if (!apiKey) return { outcome: 'none' };

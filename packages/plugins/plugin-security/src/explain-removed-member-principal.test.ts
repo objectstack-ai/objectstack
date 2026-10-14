@@ -204,6 +204,7 @@ async function boot(makeDriver: () => Driver, posture: TenancyPosture) {
   /** Enforcement's context for `userId`, whose session claims `org_alpha`: the real resolver and assembler. */
   const enforced = async (userId: string) => {
     const authz = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql: engine,
       headers: {},
       getSession: async () => ({

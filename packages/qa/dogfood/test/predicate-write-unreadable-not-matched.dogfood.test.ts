@@ -172,6 +172,7 @@ async function callerContext(b: Booted): Promise<CallerContext> {
   if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
   const headers = new Headers({ authorization: `Bearer ${b.token}` });
   return resolveAuthzContext({
+    userAuthGates: undefined,
     ql: b.ql,
     headers,
     getSession: async (h: any) => api?.getSession?.({ headers: h }),

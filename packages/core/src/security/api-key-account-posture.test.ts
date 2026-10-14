@@ -20,12 +20,16 @@
  *  - a posture computation that rejects is the branded outage, never an
  *    admission;
  *  - the tenancy refusal still answers first, as the generic 401;
- *  - the key's own organization is what the owner is asked about.
+ *  - the key's own organization is what the owner is asked about;
+ *  - [#23455] `resolveApiKeyPrincipal` never answers a held owner's key with
+ *    a principal;
+ *  - [#23455] the posture source is a REQUIRED input of all three entries, so
+ *    a seam that forgets it does not compile (compile-level pins below).
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { resolveAuthzContext } from './resolve-authz-context.js';
-import { hashApiKey, resolveApiKeyAdmission } from './api-key.js';
+import { hashApiKey, resolveApiKeyAdmission, resolveApiKeyPrincipal } from './api-key.js';
 import {
   accountScopeAuthGate,
   authGateScope,
@@ -170,9 +174,49 @@ describe('resolveApiKeyAdmission — the held arm (ruling C′ item 3)', () => {
     expect(err.code).toBe('SERVICE_UNAVAILABLE');
   });
 
-  it('without a posture source the owner is not asked (an unwired caller keeps the old answer)', async () => {
+  it('an explicit `undefined` source (a kernel with no auth service) leaves the owner unasked', async () => {
     const { ql } = makeQl();
-    expect((await resolveApiKeyAdmission(ql, keyHeaders(), Date.now())).outcome).toBe('admitted');
+    expect((await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, undefined)).outcome).toBe('admitted');
+  });
+});
+
+describe('[#23455] resolveApiKeyPrincipal — never a principal for a held owner\'s key', () => {
+  it('collapses `held` to no principal, and still admits a key whose owner is not held', async () => {
+    const { ql } = makeQl();
+    const { table, source } = postureSource({ [OWNER]: [MFA_REQUIRED] });
+    expect(await resolveApiKeyPrincipal(ql, keyHeaders(), Date.now(), undefined, source)).toBeUndefined();
+    // A credential-scope posture holds password sign-in alone.
+    table[OWNER] = [PASSWORD_RESET_REQUIRED];
+    expect((await resolveApiKeyPrincipal(ql, keyHeaders(), Date.now(), undefined, source))?.userId).toBe(OWNER);
+    // Not a revocation: the posture clears and the same key answers again.
+    table[OWNER] = [];
+    expect((await resolveApiKeyPrincipal(ql, keyHeaders(), Date.now(), undefined, source))?.userId).toBe(OWNER);
+  });
+});
+
+describe('[#23455] the posture source is a REQUIRED input at every key-admitting entry', () => {
+  /**
+   * Compile-level pins. `compileOnly` is never invoked: its lines are read by
+   * the package's test tsc program (`check:test-typecheck`), where an
+   * `@ts-expect-error` that stops erroring is itself an error (TS2578). So a
+   * change that makes the input optional again turns that gate red here,
+   * naming this file — the omission compiling silently is the defect.
+   */
+  it('omitting it does not compile; an explicit `undefined` does', () => {
+    const compileOnly = (ql: unknown, headers: Headers): void => {
+      // @ts-expect-error — `userAuthGates` is a required key of `ResolveAuthzInput`.
+      void resolveAuthzContext({ ql, headers });
+      // @ts-expect-error — `tenancyPosture` and `userAuthGates` are required parameters.
+      void resolveApiKeyAdmission(ql, headers, Date.now());
+      // @ts-expect-error — `userAuthGates` is a required parameter.
+      void resolveApiKeyAdmission(ql, headers, Date.now(), undefined);
+      // @ts-expect-error — `userAuthGates` is a required parameter.
+      void resolveApiKeyPrincipal(ql, headers, Date.now(), undefined);
+      void resolveAuthzContext({ ql, headers, userAuthGates: undefined });
+      void resolveApiKeyAdmission(ql, headers, Date.now(), undefined, undefined);
+      void resolveApiKeyPrincipal(ql, headers, Date.now(), undefined, undefined);
+    };
+    expect(typeof compileOnly).toBe('function');
   });
 });
 
@@ -244,6 +288,7 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
   it('the session arm carries the session\'s own posture, every scope included', async () => {
     const { ql } = makeQl();
     const authz = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers: new Headers({ cookie: 'session=held' }),
       getSession: async () => ({ user: { id: COOKIE_USER, authGate: PASSWORD_EXPIRED } }),

@@ -192,11 +192,21 @@ export interface ResolveAuthzInput {
    * `account`-scope posture ({@link ResolvedAuthzContext.authGate}).
    *
    * Supplied by the transport, like {@link tenancyPosture}, because this
-   * resolver is kernel-agnostic. OMITTING it leaves a key's owner unasked —
-   * the behaviour before the ruling — so an unwired caller is never made
-   * worse, only less strict.
+   * resolver is kernel-agnostic.
+   *
+   * [#23455] REQUIRED, and `undefined` is a VALUE a caller passes on purpose.
+   * While it was optional, a seam that never named its source compiled, and
+   * every API key it admitted skipped its owner's posture: a held owner's key
+   * was served at three seams after ruling C′ refused it everywhere else. The
+   * key is now present in every call, so the compiler names a new seam that
+   * forgets it. Pass `userAuthGateSourceOf(authService)` wherever the kernel's
+   * `auth` service is reachable (it answers `undefined` itself for a service
+   * with no posture computation). Pass a bare `undefined` only where no auth
+   * service exists at all — a kernel composed without `plugin-auth` has no
+   * policy to hold anyone with — ⛔ never to quiet the compiler at a seam that
+   * could reach one.
    */
-  userAuthGates?: UserAuthGateSource;
+  userAuthGates: UserAuthGateSource | undefined;
 }
 
 /**

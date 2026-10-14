@@ -481,6 +481,7 @@ async function bootPrincipal(source: PostureSource) {
 
   const enforced = async (userId: string) => {
     const authz = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql: engine,
       headers: {},
       getSession: async () => ({
