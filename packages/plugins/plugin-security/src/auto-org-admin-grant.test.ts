@@ -784,16 +784,24 @@ describe('[ADR-0131 D4/D10] by-name grants; no id reaches a grant', () => {
     expect(stub.tables.sys_user_permission_set.map((r) => r.id)).toEqual(['ups_old']);
   });
 
-  it('an unnamed legacy grant does not stand for the pair: it is left, and the pair is granted by name', async () => {
+  it('[Q-S3b (ii)] a qualifying pair holding an unnamed legacy grant in that organization is written nothing: the ceremony names that grant', async () => {
     const stub = makeStub({
       sys_permission_set: catalogFor('o1', 'o2'),
       sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
-      sys_user_permission_set: [{ id: 'ups_pre', user_id: 'u1', organization_id: 'o1' }],
+      sys_user_permission_set: [{ id: 'ups_pre', user_id: 'u1', organization_id: 'o1', permission_set: null }],
+    });
+    expect(await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED)).toEqual({ action: 'skipped', reason: 'unnamed_grant_awaits_ceremony' });
+    expect(stub.tables.sys_user_permission_set).toEqual([{ id: 'ups_pre', user_id: 'u1', organization_id: 'o1', permission_set: null }]);
+  });
+
+  it('CONTROL — an unnamed grant in ANOTHER organization does not hold back this one: the pair is granted by name', async () => {
+    const stub = makeStub({
+      sys_permission_set: catalogFor('o1', 'o2'),
+      sys_member: [{ id: 'm1', user_id: 'u1', organization_id: 'o1', role: 'owner' }],
+      sys_user_permission_set: [{ id: 'ups_o2', user_id: 'u1', organization_id: 'o2', permission_set: null }],
     });
     expect((await reconcileOrgAdminGrant(stub, 'u1', 'o1', WALLED)).action).toBe('granted');
-    const rows = stub.tables.sys_user_permission_set;
-    expect(rows.find((r) => r.id === 'ups_pre')).toEqual({ id: 'ups_pre', user_id: 'u1', organization_id: 'o1' });
-    expect(rows.filter((r) => r.permission_set === 'organization_admin')).toHaveLength(1);
+    expect(stub.tables.sys_user_permission_set.filter((r) => r.permission_set === 'organization_admin')).toHaveLength(1);
   });
 
   it('the backfill grants with ZERO sys_permission_set rows, and an orphan by name is swept', async () => {
@@ -833,10 +841,11 @@ describe('[ADR-0131 D4/D10] by-name grants; no id reaches a grant', () => {
       'sys_member', // does the pair qualify
       'sys_user_permission_set', // superseded grants for the pair, by name
       'sys_user_permission_set', // does the grant already exist, by name
+      'sys_user_permission_set', // does the pair hold an unnamed legacy grant (Q-S3b)
     ]);
     const grantReads = stub.findCalls.filter((c) => c.object === 'sys_user_permission_set');
     expect(grantReads.map((c) => c.where?.permission_set ?? null)).toEqual([
-      'organization_admin', 'organization_admin_no_bypass',
+      'organization_admin', 'organization_admin_no_bypass', null,
     ]);
     expect(grantReads.every((c) => !('permission_set_id' in (c.where ?? {})))).toBe(true);
   });

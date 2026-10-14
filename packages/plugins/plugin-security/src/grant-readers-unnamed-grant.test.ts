@@ -17,8 +17,10 @@
  *   who may already exist, and withholds the promotion — without naming it as
  *   the holder;
  * - **the organization-administrator reconcile** reads grants by name alone:
- *   it neither counts such a grant nor revokes it, and once the rewrite names
- *   it, the boot sweep revokes it where its pair no longer qualifies.
+ *   it neither counts such a grant nor revokes it, and writes NOTHING for a
+ *   qualifying pair holding one in that organization (the ceremony's rename
+ *   needs its key); once the rewrite names it, the boot sweep revokes it where
+ *   its pair no longer qualifies.
  *
  * Real ObjectQL over the SQL driver with the real `SecurityPlugin`; a grant is
  * unnamed by writing `NULL` beneath the engine.
@@ -241,11 +243,11 @@ describe('[ADR-0131 D4] a grant that names nothing — the organization-administ
     return engine;
   }
 
-  it('a qualifying pair holding it is granted by name beside it: the unnamed grant confers nothing and does not stand for the pair', async () => {
+  it('[Q-S3b (ii)] a qualifying pair holding it is written nothing — a named grant beside it would hold the key the ceremony\'s rename needs — and it confers nothing meanwhile', async () => {
     const engine = await orgAdmin();
-    expect((await reconcileOrgAdminGrant(engine, 'usr_orgadmin', ORG)).action).toBe('granted');
-    expect((await grantsOf(engine, 'usr_orgadmin')).map((g) => g.permission_set ?? null).sort())
-      .toEqual([null, 'organization_admin_no_bypass']);
+    expect(await reconcileOrgAdminGrant(engine, 'usr_orgadmin', ORG)).toEqual({ action: 'skipped', reason: 'unnamed_grant_awaits_ceremony' });
+    expect(await backfillOrgAdminGrants(engine)).toMatchObject({ granted: 0 });
+    expect((await grantsOf(engine, 'usr_orgadmin')).map((g) => g.permission_set ?? null)).toEqual([null]);
   });
 
   it('a demotion does not reach it while it is unnamed; once the rewrite names it, the boot sweep revokes it', async () => {

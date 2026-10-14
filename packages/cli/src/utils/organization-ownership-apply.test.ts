@@ -35,6 +35,7 @@ import {
   type TemplatePort,
 } from './organization-ownership-apply.js';
 import { buildOrganizationOwnershipPlan } from './organization-ownership-plan.js';
+import { backfillOrgAdminGrants } from '@objectstack/plugin-security';
 
 let dir: string;
 let file: string;
@@ -756,28 +757,83 @@ describe('ADR-0131 D10 --apply — the grant\'s retired id column (C7b, seat ans
   const grantsPlan = async () => (await plan()).tables.find((t) => t.object === 'sys_user_permission_set')!.grants!;
   const idColumn = () => rows(`SELECT name FROM pragma_table_info('sys_user_permission_set') WHERE name = 'permission_set_id'`);
 
-  it('a legacy grant whose name its user already holds in its organization is not named, on a database carrying the declared index: --plan counts the pair, --apply blocks the rewrite naming both ids, deletes neither, and finishes once the operator removes one', async () => {
-    // The first v18 boot creates the declared unique index, and its
-    // organization-administrator sweep writes a NAMED grant beside the pair's
-    // legacy one; this row stands for the sweep's write (usr_1 holds grant_1,
-    // whose ps_org names member_default, in org_default).
+  /**
+   * The engine surface the organization-administrator sweep reads and writes,
+   * over the fixture database. An insert keeps the columns the 17.x table has.
+   */
+  const sqliteQl = {
+    async find(object: string, query: { where?: Record<string, unknown>; limit?: number }) {
+      const where = query?.where ?? {};
+      const keys = Object.keys(where);
+      const text = keys.map((k) => (where[k] === null ? `"${k}" IS NULL` : `"${k}" = ?`)).join(' AND ');
+      return db.prepare(`SELECT * FROM "${object}"${keys.length ? ` WHERE ${text}` : ''}${query?.limit ? ` LIMIT ${query.limit}` : ''}`)
+        .all(...keys.filter((k) => where[k] !== null).map((k) => where[k] as never)) as Record<string, unknown>[];
+    },
+    async insert(object: string, data: Record<string, unknown>) {
+      const columns = new Set(rows(`SELECT name FROM pragma_table_info('${object}')`).map((r) => String(r.name)));
+      const keys = Object.keys(data).filter((k) => columns.has(k));
+      db.prepare(`INSERT INTO "${object}" (${keys.map((k) => `"${k}"`).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`)
+        .run(...keys.map((k) => data[k] as never));
+      return data;
+    },
+    async delete(object: string, opts: { where?: { id?: unknown } }) {
+      db.prepare(`DELETE FROM "${object}" WHERE id = ?`).run(opts?.where?.id as never);
+      return 1;
+    },
+  };
+
+  /** A 17.x organization owner: a membership, and a legacy grant of the organization-administrator set by id. */
+  function seedOrgAdminLegacyGrant(): void {
     db.exec(`
-      CREATE UNIQUE INDEX uniq_grant_key ON sys_user_permission_set (user_id, permission_set, organization_id);
-      INSERT INTO sys_user_permission_set VALUES ('grant_sweep', 'org_default', 'usr_1', NULL, 'member_default');
+      CREATE UNIQUE INDEX uniq_grant_key ON sys_user_permission_set (user_id, permission_set, COALESCE(organization_id, '__global__'));
+      CREATE TABLE sys_member (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT, role TEXT);
+      INSERT INTO sys_member VALUES ('mem_oa', 'org_default', 'usr_oa', 'owner');
+      INSERT INTO sys_permission_set VALUES ('ps_oa', NULL, 'organization_admin_no_bypass', 'Org Admin', 'platform', 1, '{}', '[]');
+      INSERT INTO sys_user_permission_set VALUES ('grant_oa', 'org_default', 'usr_oa', 'ps_oa', NULL);
     `);
-    expect((await grantsPlan()).rewriteCollisions).toEqual([{ id: 'grant_1', name: 'member_default', heldBy: 'grant_sweep' }]);
+  }
+  const withOrgAdminSet = (c: ReturnType<typeof catalog>): ReturnType<typeof catalog> => {
+    const resolve = c.resolve.bind(c);
+    c.resolve = async (type, name) =>
+      type === 'permission' && name === 'organization_admin_no_bypass' ? { definition: { name, label: 'Org Admin' } } : resolve(type, name);
+    return c;
+  };
+
+  it('[Q-S3b (ii)] on a 17.x grant table carrying the declared index, the first boot\'s organization-administrator sweep writes NO row beside the owner\'s legacy grant, so --plan counts no collision and the rewrite names it and completes', async () => {
+    seedOrgAdminLegacyGrant();
+    const swept = await backfillOrgAdminGrants(sqliteQl, { posture: 'single' });
+    expect(swept).toMatchObject({ granted: 0, skipped: 1 });
+    expect(rows(`SELECT id FROM sys_user_permission_set WHERE user_id = 'usr_oa'`)).toEqual([{ id: 'grant_oa' }]);
+    expect((await grantsPlan()).rewriteCollisions).toEqual([]);
+
+    const report = await apply(withOrgAdminSet(catalog()), ledger());
+    const rewrite = report.steps.find((s) => s.step === 'rewrite')!;
+    expect(rewrite.status).toBe('done');
+    expect(rewrite.summary.collisions).toBe(0);
+    expect(rows(`SELECT id, permission_set FROM sys_user_permission_set WHERE user_id = 'usr_oa'`))
+      .toEqual([{ id: 'grant_oa', permission_set: 'organization_admin_no_bypass' }]);
+    // …and once named, the next sweep finds it and writes nothing either.
+    expect(await backfillOrgAdminGrants(sqliteQl, { posture: 'single' })).toMatchObject({ granted: 0 });
+  });
+
+  it('the safety net — a legacy grant whose name its user already holds in its organization (written by any other writer) is not named, on a database carrying the declared index: --plan counts the pair, --apply blocks the rewrite naming both ids, deletes neither, and finishes once the operator removes one', async () => {
+    db.exec(`
+      CREATE UNIQUE INDEX uniq_grant_key ON sys_user_permission_set (user_id, permission_set, COALESCE(organization_id, '__global__'));
+      INSERT INTO sys_user_permission_set VALUES ('grant_named', 'org_default', 'usr_1', NULL, 'member_default');
+    `);
+    expect((await grantsPlan()).rewriteCollisions).toEqual([{ id: 'grant_1', name: 'member_default', heldBy: 'grant_named' }]);
 
     const report = await apply(catalog(), ledger());
     const rewrite = report.steps.find((s) => s.step === 'rewrite')!;
     expect(rewrite.status).toBe('blocked');
     expect(rewrite.summary.collisions).toBe(1);
-    expect(rewrite.blockers.join('\n')).toMatch(/1 legacy grant\(s\) would name a permission set their user already holds in the same organization \(grant_1 \(member_default, held by grant_sweep\)\)/);
+    expect(rewrite.blockers.join('\n')).toMatch(/1 legacy grant\(s\) would name a permission set their user already holds in the same organization \(grant_1 \(member_default, held by grant_named\)\)/);
     expect(rows(`SELECT id, permission_set FROM sys_user_permission_set WHERE user_id = 'usr_1' ORDER BY id`))
-      .toEqual([{ id: 'grant_1', permission_set: null }, { id: 'grant_sweep', permission_set: 'member_default' }]);
+      .toEqual([{ id: 'grant_1', permission_set: null }, { id: 'grant_named', permission_set: 'member_default' }]);
     expect(writes.some((w) => /DELETE FROM "sys_user_permission_set"/.test(w))).toBe(false);
     expect(idColumn()).toHaveLength(1);
 
-    // The operator keeps the sweep's grant; the re-run names the rest and drops the column.
+    // The operator keeps the named grant; the re-run names the rest and drops the column.
     db.exec(`DELETE FROM sys_user_permission_set WHERE id = 'grant_1'`);
     const again = await apply(catalog(), ledger());
     expect(again.steps.find((s) => s.step === 'rewrite')!.status).toBe('done');
