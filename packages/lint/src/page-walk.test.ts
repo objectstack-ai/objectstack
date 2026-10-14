@@ -143,6 +143,46 @@ describe('walkPageComponents — object binding precedence', () => {
     );
     expect(walked.map((w) => w.objectName)).toEqual(['ds_obj', 'ds_obj']);
   });
+
+  // [#23207] A component's OWN override never leaks into what it inherits:
+  // `inheritedObject` is the container's binding (else the page object), the
+  // object a `record:related_list`'s parent-side ref resolves against while
+  // its own `dataSource` binds the child rows.
+  it('reports the inherited object apart from the component\'s own override', () => {
+    const walked = walkPageComponents(
+      {
+        object: 'page_obj',
+        regions: [
+          {
+            name: 'main',
+            components: [
+              {
+                type: 'flex',
+                dataSource: { object: 'ds_obj' },
+                properties: { children: [{ type: 'leaf', dataSource: { object: 'leaf_obj' } }, { type: 'bare' }] },
+              },
+              { type: 'top', properties: { object: 'prop_obj' } },
+            ],
+          },
+        ],
+      },
+      'pages[0]',
+    );
+    expect(walked.map((w) => [w.objectName, w.inheritedObject])).toEqual([
+      ['ds_obj', 'page_obj'],
+      ['leaf_obj', 'ds_obj'],
+      ['ds_obj', 'ds_obj'],
+      ['prop_obj', 'page_obj'],
+    ]);
+  });
+
+  it('inherits nothing on a page that names no object', () => {
+    const walked = walkPageComponents(
+      { regions: [{ name: 'main', components: [{ type: 'a', dataSource: { object: 'ds_obj' } }] }] },
+      'pages[0]',
+    );
+    expect(walked.map((w) => [w.objectName, w.inheritedObject])).toEqual([['ds_obj', undefined]]);
+  });
 });
 
 describe('walkPageComponents — cycle guard', () => {
