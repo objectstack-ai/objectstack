@@ -24,6 +24,13 @@ rule `@objectstack/plugin-hono-server`'s direct-mount routes have used since
 two conditions, the same 5xx disclosure filter (`looksLikeInternalErrorLeak`),
 and `details` and `userMessage` forwarded only when the producer declared them.
 
+The rule's other limbs come with it, as they did on the direct-mount door. A
+validation-shaped throw answers `400 VALIDATION_FAILED` with its `fields[]`. A
+driver fault the engine has already classified keeps its `500` and now carries
+the code it declared instead of `INTERNAL_ERROR`. Measured: `GET /data/:object`
+over an object whose table is missing answers `500 DATABASE_ERROR`, with the
+same message as before.
+
 **What did NOT change**, pinned in the same PR through a real `createHonoApp`
 over the real dispatcher and protocol (`packages/qa/http-conformance`):
 
