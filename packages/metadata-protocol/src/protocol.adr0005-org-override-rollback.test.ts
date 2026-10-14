@@ -65,7 +65,7 @@
  *     `assertAllowed` allow-list are both DERIVED from the registry (Prime
  *     Directive #8) — no hardcoded copy to align.
  *   • plugin-security's ADR-0094 write-through
- *     (`permission-set-projection.ts`) redirects data-door edits of
+ *     (`permission-set-projection.ts`, since retired) redirected data-door edits of
  *     permission sets into `saveMetaItem({type:'permission'})`. For
  *     RUNTIME-CREATED sets that write rides `allowRuntimeCreate` and keeps
  *     working. For PACKAGE-OWNED sets it now refuses with 403 — which is
@@ -301,11 +301,10 @@ describe('#6483 — the nine ADR-0005 divergences: allowEnvironmentOverlay rolle
         // two production paths named above rather than assumed:
         //
         //   • ADR-0094's permission write-through
-        //     (`plugin-security/src/permission-set-projection.ts`) passes NO
-        //     `organizationId` on any of its four `saveMetaItem` call sites —
-        //     it is env-scoped by design ("its update/delete translate into
-        //     env-scope overlay operations"). Unaffected, and this case is its
-        //     accurate pin.
+        //     (`plugin-security/src/permission-set-projection.ts`, retired with
+        //     C3 stage 7a) passed NO `organizationId` on any of its four
+        //     `saveMetaItem` call sites — it was env-scoped by design.
+        //     Unaffected, and this case was its accurate pin.
         //   • ADR-0045's visibility flip (`runtime/src/domains/packages.ts`)
         //     DOES thread the session's active org into
         //     `saveMetaItem({ type: 'app' })`. That path is the open question

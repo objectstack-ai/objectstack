@@ -31,16 +31,40 @@
  *    organization (D5: forwarding is consent). A block the parser does not
  *    recognise is not guessed at, and a forward from anyone else is not read:
  *    the message is matched on its other participants, which may pool it.
+ *  - **Attachments are stored as files of the row** (the attachment item of
+ *    the inbound-mail record, ADR-0029 D1 "attachments by file reference").
+ *    Each part the message carries besides its bodies — a file, or a message
+ *    forwarded as an attachment, stored as the `.eml` it is — is handed to the
+ *    server-side attach verb, `IFileAttachmentService.attachFile` (the kernel
+ *    service `file-attachments`), with the message's own `sys_mail_message`
+ *    row as its parent and the mailbox's organization as the organization the
+ *    call acts in, never `null`: the verb, which applies no per-user check,
+ *    then writes the `sys_file` and `sys_attachment` rows behind the same wall
+ *    as the message. No second representation is kept: no column of the row
+ *    names a part, and no byte is stored in a column.
  *
  * ## Writes, in order
  *
  * 1. the message row, `unassociated`;
- * 2. one link per matched record (`matched_by: 'ingest'`);
- * 3. `association_state: 'associated'`, once its links exist.
+ * 2. one file and one attachment per part, in message order — the row exists
+ *    first, because it is the parent;
+ * 3. one link per matched record (`matched_by: 'ingest'`);
+ * 4. `association_state: 'associated'`, once its links exist.
  *
- * A failure between them leaves the message in the pool with the links that
- * landed — visible to the mailbox's owner and administrators — and a re-match
- * completes it. The failure itself reaches the caller.
+ * Only a message this call stored reaches step 2: a duplicate (stage 1's
+ * dedupe, or the unique key settling a concurrent pair) and a suppressed
+ * message stop before it, so a re-delivery adds no attachment, and a re-match
+ * never reads a part at all.
+ *
+ * A failure at steps 1, 3 or 4 leaves the message in the pool with the links
+ * that landed — visible to the mailbox's owner and administrators — and a
+ * re-match completes it. The failure itself reaches the caller. A part the
+ * verb refuses (over the upload size limit, the service not yet serving, any
+ * gate on the attachment) is not a failure of the message: the message and
+ * its other parts are stored, and the refused part is reported at `error`,
+ * once, by name — nothing else will report it, because a re-delivery is a
+ * duplicate. Where no `file-attachments` service is composed at all, the
+ * message is stored without its parts, and that is said once per instance.
  *
  * Every write is a system write that carries the mailbox's organization
  * (ADR-0131 D9), and every match is read inside it — the organization-user
@@ -56,6 +80,7 @@
  *    read gate serves (Q4 A). A mailbox in another organization is not found.
  */
 
+import { FILE_ATTACHMENT_SERVICE, type IFileAttachmentService } from '@objectstack/spec/contracts';
 import { keysetWalk } from '@objectstack/types';
 import {
   MAILBOX_ADMIN_CAPABILITY,
@@ -81,6 +106,7 @@ import {
 import {
   parseInboundMessage,
   participantAddresses,
+  type MailAttachmentPart,
   type MailParticipantHeaders,
   type ParsedInboundMessage,
   type RawMailMessage,
@@ -96,9 +122,13 @@ export interface MailIngestEngine extends MailMatchEngine {
   update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
 }
 
-/** The logger surface the seam reports through. */
+/**
+ * The logger surface the seam reports through: `error` for a part of a stored
+ * message that was not stored (nothing else reports it), `warn` for the rest.
+ */
 export interface MailIngestLogger {
   warn(message: string): void;
+  error(message: string): void;
 }
 
 /**
@@ -199,6 +229,14 @@ export const REMATCH_LINK_SCAN_LIMIT = 5_000;
  */
 export const SENDER_USER_SCAN_LIMIT = 100;
 
+/** The bounds of the `sys_attachment` columns a part's name and type land in (`file_name`, `mime_type`). */
+const ATTACHMENT_NAME_MAX = 255;
+const ATTACHMENT_TYPE_MAX = 128;
+/** RFC 2046 §4.5.1: the media type of bytes whose own type cannot be stored. */
+const OCTET_STREAM = 'application/octet-stream';
+/** The extension a forwarded message is stored under: the file it is, an RFC 822 message. */
+const EML = '.eml';
+
 /** The identity objects the organization-user door reads (registered by the auth plugin). */
 const USER_OBJECT = 'sys_user';
 const MEMBER_OBJECT = 'sys_member';
@@ -269,6 +307,51 @@ function distinctAddresses(addresses: ReadonlyArray<MailMatchAddress>): string[]
 }
 
 /**
+ * A name a sender wrote, made a file name: control characters and path
+ * separators become `_`, surrounding space goes, and a name over the column's
+ * bound is cut in its stem so the extension — the storage key keeps it — stays.
+ * `null` when nothing is left.
+ */
+function fileNameOf(value: string | null): string | null {
+  if (value === null) return null;
+  const clean = value.replace(/[\u0000-\u001f\u007f/\\]/g, '_').trim();
+  if (clean === '') return null;
+  if (clean.length <= ATTACHMENT_NAME_MAX) return clean;
+  const ext = /\.[^.\s]{1,16}$/.exec(clean)?.[0] ?? '';
+  return `${fit(clean.slice(0, clean.length - ext.length), ATTACHMENT_NAME_MAX - ext.length) ?? ''}${ext}`;
+}
+
+/**
+ * The file name one part is stored under. A file keeps the name the message
+ * gives it, or is `attachment-<n>` (its position among the message's parts)
+ * when it has none. A forwarded message is an `.eml` file named by the part's
+ * own name, or else by the forwarded message's Subject, or else `forwarded`.
+ */
+function attachmentNameOf(part: MailAttachmentPart, position: number): string {
+  if (part.forwarded === null) return fileNameOf(part.filename) ?? `attachment-${position}`;
+  const base = fileNameOf(part.filename) ?? fileNameOf(part.forwarded.subject) ?? 'forwarded';
+  return base.toLowerCase().endsWith(EML) ? base : (fileNameOf(`${base}${EML}`) ?? `forwarded${EML}`);
+}
+
+/** The media type a part is stored with: its own, unless the column cannot hold it. */
+function attachmentTypeOf(part: MailAttachmentPart): string {
+  const type = part.mimeType.trim();
+  return type === '' || type.length > ATTACHMENT_TYPE_MAX ? OCTET_STREAM : type;
+}
+
+/**
+ * A refusal as the log names it: `CODE (status): message`. The verb's
+ * refusals carry their ADR-0112 `code` and `status`, and each message names its
+ * cause and what moves it (the upload size limit names its setting).
+ */
+function describeRefusal(err: unknown): string {
+  const e = (err ?? {}) as { code?: unknown; status?: unknown; message?: unknown };
+  const message = typeof e.message === 'string' && e.message !== '' ? e.message : String(err);
+  if (typeof e.code !== 'string') return message;
+  return `${e.code}${typeof e.status === 'number' ? ` (${e.status})` : ''}: ${message}`;
+}
+
+/**
  * The ingest seam and the re-match action. The engine is resolved on each
  * call, never cached at construction, so a plugin may build this before the
  * engine's own registration completes.
@@ -277,6 +360,8 @@ export class MailIngestService {
   private readonly matcher: MailRecordMatcher;
   /** Whether the absence of the identity objects the door reads has been said. */
   private reportedNoIdentityObjects = false;
+  /** Whether the absence of the attach verb has been said. */
+  private reportedNoAttachmentService = false;
 
   constructor(
     private readonly options: {
@@ -285,6 +370,15 @@ export class MailIngestService {
       logger: MailIngestLogger;
       /** The ingest clock, for a message with no `receivedAt`. */
       now?: () => Date;
+      /**
+       * The server-side attach verb — the kernel service `file-attachments`
+       * (`FILE_ATTACHMENT_SERVICE`), which the storage capability registers —
+       * resolved per message that carries a part, never cached, so a service
+       * registered after this seam is constructed is still found. Answers
+       * `undefined` where none is composed; absent, likewise: such a message is
+       * stored without its parts, and that is said once.
+       */
+      attachments?: () => IFileAttachmentService | undefined;
     },
   ) {
     this.matcher = new MailRecordMatcher(options.engine, options.logger);
@@ -326,7 +420,8 @@ export class MailIngestService {
     if (parsed.unreadForwardedParts > 0) {
       this.options.logger.warn(
         `[mailbox] a message for mailbox '${mailbox.id}' carries ${parsed.unreadForwardedParts} forwarded part(s) that ` +
-          'could not be read; their addresses take no part in matching, and the message is stored without them.',
+          'could not be read; their addresses take no part in matching, and the message is matched on its other ' +
+          'participants.',
       );
     }
 
@@ -387,6 +482,7 @@ export class MailIngestService {
     if (messageId === null) {
       throw new MailboxServiceError('INTERNAL_ERROR', `The engine stored a message for mailbox '${mailbox.id}' but returned no id.`);
     }
+    await this.attach(organizationId, mailbox.id, messageId, parsed.attachments);
     if (links.length === 0) return { outcome: 'stored', messageId, associationState: 'unassociated', associations: [] };
 
     for (const link of links) await this.link(engine, organizationId, messageId, link, 'ingest');
@@ -492,6 +588,56 @@ export class MailIngestService {
       if (message.state !== 'associated' && have.size > 0) {
         await this.markAssociated(engine, message.id);
         result.associated++;
+      }
+    }
+  }
+
+  /**
+   * Store each part of a message this call stored as a file of its row, in
+   * message order: parent `sys_mail_message` / `messageId`, in the mailbox's
+   * organization. A refused part is reported and the next one is stored —
+   * the message is already stored, and a refusal of one part loses no other.
+   */
+  private async attach(
+    organizationId: string,
+    mailboxId: string,
+    messageId: string,
+    parts: ReadonlyArray<MailAttachmentPart>,
+  ): Promise<void> {
+    if (parts.length === 0) return;
+    const verb = this.options.attachments?.();
+    if (!verb || typeof verb.attachFile !== 'function') {
+      if (!this.reportedNoAttachmentService) {
+        this.reportedNoAttachmentService = true;
+        this.options.logger.warn(
+          `[mailbox] a message for mailbox '${mailboxId}' carries ${parts.length} attachment(s), but no ` +
+            `'${FILE_ATTACHMENT_SERVICE}' service is composed, so no attachment of an ingested message is stored: such ` +
+            'messages are stored without their attached files and forwarded messages. Compose the storage capability ' +
+            `(\`@objectstack/service-storage\`, which registers '${FILE_ATTACHMENT_SERVICE}') to store them.`,
+        );
+      }
+      return;
+    }
+    for (const [index, part] of parts.entries()) {
+      const filename = attachmentNameOf(part, index + 1);
+      const mimeType = attachmentTypeOf(part);
+      try {
+        await verb.attachFile({
+          parentObject: MAIL_MESSAGE_OBJECT,
+          parentId: messageId,
+          organizationId,
+          filename,
+          mimeType,
+          data: Buffer.from(part.content.buffer, part.content.byteOffset, part.content.byteLength),
+        });
+      } catch (err) {
+        this.options.logger.error(
+          `[mailbox] attachment ${index + 1} of ${parts.length} ('${filename}', ${mimeType}, ` +
+            `${part.content.byteLength} bytes) of message '${messageId}' in mailbox '${mailboxId}' is NOT stored. ` +
+            'The message and its other attachments are stored, and nothing else will report this one: a ' +
+            're-delivery of the message is a duplicate and adds no attachment. The file-attachments service ' +
+            `refused it: ${describeRefusal(err)}`,
+        );
       }
     }
   }

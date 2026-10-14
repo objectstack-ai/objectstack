@@ -162,8 +162,31 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
         // PATCH /data/:object/:id
         if (parts.length === 2 && m === 'PATCH') {
             const id = parts[1];
+            // [#23462] The optimistic-concurrency token, read the way
+            // `RestServer`'s twin of this route reads it: the body's
+            // `expectedVersion`, else `If-Match`, and forwarded to `updateData`,
+            // which refuses an update whose version moved (`409
+            // CONCURRENT_UPDATE`). This branch read neither and handed the
+            // whole body over as the patch, so through the `@objectstack/hono`
+            // catch-all a stale `If-Match` update was APPLIED, and a body
+            // `expectedVersion` reached the engine as a field it refused as
+            // unknown. The key is stripped from the patch whatever its value,
+            // and a token is forwarded only when truthy: the twin's own
+            // statements, so both doors send `updateData` the same thing.
+            const bodyVersion = (body && typeof body === 'object') ? body.expectedVersion : undefined;
+            const expectedVersion = bodyVersion ?? requestIfMatch(_context.request?.headers);
+            let data = body;
+            if (body && typeof body === 'object' && 'expectedVersion' in body) {
+                const { expectedVersion: _token, ...patch } = body;
+                data = patch;
+            }
             // Spec: returns UpdateDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, _context, 'update', { object: objectName, id, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'update', {
+                object: objectName,
+                id,
+                data,
+                ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+            }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 

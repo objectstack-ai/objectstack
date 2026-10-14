@@ -198,3 +198,64 @@ export function bounce(): string {
     ].join('\r\n'),
   );
 }
+
+/** One part of a {@link messageWithParts} message besides its text body. */
+export interface FixturePart {
+  /** The Content-Type value, parameters included (`application/pdf; name="q.pdf"`). */
+  contentType: string;
+  /** The Content-Disposition value (`attachment; filename="q.pdf"`), or none. */
+  disposition?: string;
+  /** The Content-ID, angle brackets included. */
+  contentId?: string;
+  /** The part's bytes, sent base64. */
+  bytes?: Uint8Array;
+  /** A forwarded message, sent as it is (an RFC 822 text), in place of `bytes`. */
+  message?: string;
+}
+
+/**
+ * A `multipart/mixed` message: a text/plain note, then each part in order —
+ * a file sent base64, or a forwarded message sent as it is.
+ */
+export function messageWithParts(options: {
+  messageId: string;
+  from?: string;
+  subject?: string;
+  headers?: HeaderList;
+  parts: ReadonlyArray<FixturePart>;
+}): string {
+  const boundary = `parts-${++boundarySeq}-boundary`;
+  const lines: string[] = [`--${boundary}`, 'Content-Type: text/plain; charset=utf-8', '', 'See attached.'];
+  for (const part of options.parts) {
+    lines.push(`--${boundary}`, `Content-Type: ${part.contentType}`);
+    if (part.disposition) lines.push(`Content-Disposition: ${part.disposition}`);
+    if (part.contentId) lines.push(`Content-ID: ${part.contentId}`);
+    if (part.message !== undefined) {
+      lines.push('', part.message);
+    } else {
+      const base64 = Buffer.from(part.bytes ?? new Uint8Array()).toString('base64');
+      lines.push('Content-Transfer-Encoding: base64', '', ...(base64.match(/.{1,76}/g) ?? ['']));
+    }
+  }
+  lines.push(`--${boundary}--`, '');
+  return rfc822(
+    [
+      ['From', options.from ?? 'Rep <rep@corp.test>'],
+      ['To', 'inbox@corp.test'],
+      ['Subject', options.subject ?? 'Fwd: A question'],
+      ['Message-ID', options.messageId],
+      ['Date', 'Mon, 12 Oct 2026 10:00:00 +0000'],
+      ...(options.headers ?? []),
+      ['MIME-Version', '1.0'],
+      ['Content-Type', `multipart/mixed; boundary="${boundary}"`],
+    ],
+    lines.join('\r\n'),
+  );
+}
+
+/** Bytes that are not text: every byte value once, then `filler` more. */
+export function binaryBytes(filler = 0): Uint8Array {
+  const out = new Uint8Array(256 + filler);
+  for (let i = 0; i < out.length; i++) out[i] = i % 256;
+  return out;
+}

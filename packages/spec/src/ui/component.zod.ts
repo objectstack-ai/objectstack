@@ -588,23 +588,34 @@ export const PageHeaderProps = strictObject({
   surface: 'this `page:header`',
   history: PROPS_HISTORY,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
-  aliases: {
+  guidance: {
     /**
      * The ADR-0087 D2 conversion `page-header-subtitle-alias` (#4827,
-     * objectui#3226) renames this on load and on stored-row rehydration, so the
-     * canonical paths never reach here. What DOES reach here is the source an
-     * author is typing right now — and until this shape closed, that was the
+     * objectui#3226) renamed this on load for protocol 17's window; retired
+     * from the load path at 18, it renames only data at rest (stored-row
+     * rehydration, artifacts inside the ingestion window, `os migrate meta`).
+     * What reaches here is the source an author is typing right now — every
+     * authored `description`, since the retirement — and until this shape closed, that was the
      * one path with no diagnostic at all: `conversions/walk.ts` records the
      * hole in as many words, that `description` "is tombstoned nowhere
      * (`description` is a live declared prop on other components), got no
      * diagnostic at a nested site from any layer".
      *
-     * An alias rather than a `retiredKey` tombstone precisely because of that
-     * parenthesis: `description` is a live prop elsewhere in this file
-     * (`element:text_input`), so the answer is a rename on THIS surface, not a
-     * removal notice. Grounded in the conversion registry rather than guessed.
+     * A guidance row rather than a `retiredKey` tombstone: `PageHeaderProps`
+     * never declared `description`, so there is no property for a tombstone to
+     * replace, and `description` is a live prop elsewhere in this file
+     * (`element:text_input`), so the answer is a rename on THIS surface. It was
+     * an `aliases` row (a bare "did you mean") while the conversion was live;
+     * retired, it is the upgrade prescription, naming the release that refuses
+     * the spelling (#23421). Grounded in the conversion registry rather than
+     * guessed.
      */
-    description: 'subtitle',
+    description:
+      '`page:header` property `description` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was an '
+      + 'off-spec second spelling of the header\'s second line, which the loader rewrote to `subtitle` until '
+      + 'this release; `subtitle` is the declared key. Use `subtitle`. Rename the key; the value '
+      + '(the second line\'s text) is unchanged. '
+      + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   },
 }, {
   /**

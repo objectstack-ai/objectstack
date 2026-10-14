@@ -714,7 +714,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       positions: {
         label: "分配岗位",
-        help: "接受邀请时分配的 sys_position 名称（ADR-0105 D8）。每个岗位的权限集都必须在邀请发起人的 adminScope 允许列表内。"
+        help: "接受邀请时分配的岗位名称（ADR-0105 D8）。每个岗位的权限集都必须在邀请发起人的 adminScope 允许列表内。"
       }
     },
     _views: {

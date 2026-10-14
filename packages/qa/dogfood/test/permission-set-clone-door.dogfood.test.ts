@@ -69,15 +69,9 @@ describe('the permission-set clone door, on a booted showcase', () => {
         expect(source?.packageId, 'the source is not packaged on this boot').toBeTruthy();
         expect(source?.definition.adminScope, 'the source carries no adminScope').toBeTruthy();
 
-        // The source's catalog ROWS are removed first, where the row object is
-        // still registered: the door reads the catalog, so the clone must land
-        // with no row to read. (C3 stage 8 retires the object, and there are
-        // then no rows at all.)
-        if (ql.getObject?.('sys_permission_set')) {
-          const rows = await ql.find('sys_permission_set', { where: { name: DELEGATE_SET }, context: SYSTEM_CTX });
-          for (const row of rows) await ql.delete('sys_permission_set', { where: { id: row.id }, context: SYSTEM_CTX });
-          expect(await ql.find('sys_permission_set', { where: { name: DELEGATE_SET }, context: SYSTEM_CTX })).toEqual([]);
-        }
+        // The door reads the catalog, and no row stands for the source: C3
+        // stage 8 retired the `sys_permission_set` row object.
+        expect(ql.getObject?.('sys_permission_set')).toBeFalsy();
 
         const res = await clone(token, DELEGATE_SET, { name: DELEGATE_COPY, label: 'My Field Ops Delegate' });
         const text = await res.clone().text();
