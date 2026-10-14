@@ -14,7 +14,7 @@ Clause-②: no (narrowing)
 
 What changes for you, wherever the runtime dispatcher serves `DELETE /data/:object/:id`. Where `@objectstack/rest` is mounted it serves this route itself and already answered each of these, so the standalone server's answers do not move.
 
-- FROM a delete with a stale `?expectedVersion` or `If-Match` that deleted the record and answered `200`, TO the protocol's `409 CONCURRENT_UPDATE` refusal with the record kept. The refusal is thrown out of `dispatch()` for the host's exit to render, as every other refusal `deleteData` throws is.
+- FROM a delete with a stale `?expectedVersion` or `If-Match` that deleted the record and answered `200`, TO a refusal with the record kept: the protocol's `409 CONCURRENT_UPDATE`, thrown out of `dispatch()` for the host's exit to render, as every other refusal `deleteData` throws is. A `@objectstack/hono` `createHonoApp` host still renders that refusal as `500` (the record is kept): its catch-all reads only an error's `statusCode`, and rendering the declared `409` is a separate fix.
 - FROM a repeated `?expectedVersion` that was ignored (the record deleted, `200`), TO `400 VALIDATION_ERROR` in the dispatcher's envelope with the sentence `RestServer` answers ("The "expectedVersion" query parameter was supplied N times…"), before the protocol is asked. A one-element array is read as the one token it encodes.
 - FROM a delete carrying a token on a host whose protocol has no `deleteData` (the ObjectQL fallback), which deleted unguarded, TO `501 NOT_IMPLEMENTED`, before anything is read or deleted. A delete with no token reaches the fallback as before.
 
