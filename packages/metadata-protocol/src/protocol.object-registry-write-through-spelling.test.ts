@@ -38,7 +38,7 @@
 // The trace, measured on `origin/main` — all four routes fold at the producer
 // ---------------------------------------------------------------------------
 // `applyObjectRegistryMutation` has exactly ONE caller
-// (`applyRegistryWriteThrough`), which has exactly SIX:
+// (`applyRegistryWriteThrough`), which has exactly SEVEN:
 //
 //   1. `saveMetaItem`            passes `singularTypeForRepo`, and the method
 //                                already ran `canonicalizeMetaRequestType`.
@@ -66,6 +66,12 @@
 //                                `'view'`. It never passes `'object'`, so it
 //                                never reaches `applyObjectRegistryMutation`:
 //                                an orphaned object is rebound in storage only.
+//   7. `restoreArtifactRegistryView` (#23297) folds at the call site through
+//                                `canonicalMetaType`, the key it also reads
+//                                the stored rows under, and registers a row
+//                                still stored after a delete (another
+//                                package's, or the package-less one), so the
+//                                registry keeps serving what the store serves.
 //
 // Both fold maps resolve the plural — `PLURAL_TO_SINGULAR.objects === 'object'`
 // and `canonicalMetaUrlType('objects') === 'object'` — so no route can deliver
@@ -567,9 +573,9 @@ describe('[#8862] the `applyRegistryWriteThrough` caller set stays closed', () =
         'utf8',
     );
 
-    it('has exactly six call sites, all traced in this file’s header', () => {
+    it('has exactly seven call sites, all traced in this file’s header', () => {
         const callSites = source.match(/this\.applyRegistryWriteThrough\(/g) ?? [];
-        expect(callSites).toHaveLength(6);
+        expect(callSites).toHaveLength(7);
     });
 
     it('`applyObjectRegistryMutation` is reached only through the write-through', () => {

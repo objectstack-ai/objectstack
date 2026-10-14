@@ -461,8 +461,15 @@ describe('[#23149] a reset of a packaged view container heals the expansions its
     });
 
     it('an organization-scoped heal touches none of the expansions; an environment-wide one after it heals them', async () => {
-        const { protocol, registry } = boot();
+        const { protocol, registry, rows } = boot();
         await publishContainerOverlay(protocol, xEdit('All Tasks (X)', true));
+        // The heal runs after the delete that removed the row. [#23297] Since a
+        // row still stored is what the heal registers again (another package's
+        // row after a delete naming one package), the fixture removes the row
+        // the reset removes, rather than healing over a row that is still served.
+        for (const [key, row] of rows) {
+            if (row.type === 'view' && row.name === OBJ && row.state === 'active') rows.delete(key);
+        }
         const heal = (organizationId: string | null) =>
             (protocol as any).restoreArtifactRegistryView('view', OBJ, organizationId) as Promise<void>;
 

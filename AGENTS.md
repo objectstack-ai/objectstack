@@ -581,8 +581,8 @@ Even inside your own worktree, operate defensively:
 10. **A clean merge is not a working merge — but scope the re-check to the overlap.**
    Git conflicts on overlapping lines; nothing warns you when two changes are
    individually fine and jointly wrong. **Before opening a PR, pull `main`, refresh build
-   state (§9), and run the full suite once.** For the *subsequent* pre-merge merges of
-   `main` — the ones you do only because `main` moved again while CI ran — scope it:
+   state (§9), and run the full suite once.** After the PR is open, merge `main` only on a GitHub-reported
+   conflict, a `main`-caused CI red or a queue removal, then only the scoped re-checks; dogfood once, on the final head:
    - **Always:** rebuild what the merge touched, and if `packages/spec` moved on either
      side, `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec
      check:generated` — generated snapshots (`api-surface`, baselines) are the classic
