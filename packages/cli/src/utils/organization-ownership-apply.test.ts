@@ -1193,18 +1193,48 @@ describe('ADR-0131 D10 --apply — a customization conflict resolved by --metada
     expect(step(report)).toMatchObject({ status: 'done', summary: { chosen: 1, organizationRowsDeleted: 1, conflicts: 0 } });
     expect(owners()).toEqual([['md_env', null]]);
     expect(labelOf('md_env')).toBe('Org list');
-    // Exactly one environment row at every point: the door wrote onto the one
-    // there was, and no UPDATE ever cleared an organization row of this key.
-    expect(c.envRowsAtSave).toEqual([1]);
+    // Exactly one environment row at every point: the environment row took the
+    // body in place, by one UPDATE, and no UPDATE ever cleared an organization
+    // row of this key. No withdrawal to record, so the door was not asked.
+    expect(writes.filter((w) => /^UPDATE "sys_metadata" SET "metadata" = \?/.test(w))).toHaveLength(1);
     expect(writes.some((w) => /^UPDATE "sys_metadata" SET "organization_id" = NULL/.test(w))).toBe(false);
-    const save = c.viewSaves.length;
-    expect(save).toBe(1);
+    expect(c.viewSaves).toEqual([]);
   });
 
-  it('the environment row is read back before any delete: a door that stores nothing deletes nothing', async () => {
+  it('⭐ an item a package ships: a package-less environment row of the key takes the body, though the door writes only into the package', async () => {
+    // The real door writes an environment customization of a packaged item into
+    // that package's slot, whatever the target (measured on the showcase).
+    metadataTable([
+      md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(true, 'Org copy')),
+      md('md_env', null, 'view', 'crm_lead.intake', formView(false, 'Env copy')),
+    ].join(', '));
+    const base = storingDoor(catalog());
+    const packaged: ReturnType<typeof catalog> = {
+      ...base,
+      async save(type, name, body) {
+        return base.save(type, name, body, { packageId: 'pkg_a' });
+      },
+    };
+    const report = await apply(packaged, ledger(), { views: servedViews(base, []), metadataChoices: ['md_org'] });
+    expect(step(report)).toMatchObject({ status: 'done', summary: { chosen: 1, organizationRowsDeleted: 1 } });
+    // The key's own environment row holds the chosen body, with the environment row's withdrawal kept.
+    expect(labelOf('md_env')).toBe('Org copy');
+    expect((JSON.parse(String(rows(`SELECT metadata FROM sys_metadata WHERE id = 'md_env'`)[0]!.metadata)) as any).config.sharing.enabled).toBe(false);
+    expect(rows(`SELECT id FROM sys_metadata WHERE id = 'md_org'`)).toEqual([]);
+  });
+
+  it('the environment row is read back before any delete: a write that does not land deletes nothing', async () => {
     metadataTable(conflictRows);
     const c = catalog();
-    await expect(apply(c, ledger(), { metadataChoices: ['md_org'] })).rejects.toThrow(/did not read back as one environment row/);
+    const base = executor();
+    const lost: ApplyExecutor = {
+      ...base,
+      async execute(statement, params) {
+        if (/^UPDATE "sys_metadata" SET "metadata"/.test(statement)) return;
+        return base.execute(statement, params);
+      },
+    };
+    await expect(apply(c, ledger(), { metadataChoices: ['md_org'], executor: lost })).rejects.toThrow(/did not read back as one environment row/);
     expect(deletes()).toEqual([]);
     expect(owners()).toEqual([['md_env', null], ['md_org', 'org_default']]);
   });

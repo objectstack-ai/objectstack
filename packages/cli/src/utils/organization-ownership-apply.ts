@@ -1261,6 +1261,33 @@ async function environmentRowOf(run: Run, conflict: MetadataConflict): Promise<A
   return found.map((row) => ({ id: String(row.id), body: parseBody(row) }));
 }
 
+/** One `sys_metadata` row takes a body in place, by ONE statement (its version too, when given and stored). */
+async function writeBody(run: Run, rowId: string, body: Record<string, unknown>, version?: number): Promise<void> {
+  const sql = run.sql;
+  const t = METADATA_OBJECT;
+  const cols = (await columnsOf(run, t)) ?? new Set<string>();
+  const sets = [`${sql.q('metadata', t)} = ?`];
+  const params: unknown[] = [JSON.stringify(body)];
+  if (version !== undefined && cols.has('version')) {
+    sets.push(`${sql.q('version', t)} = ?`);
+    params.push(version);
+  }
+  await execute(run, t, `UPDATE ${sql.q(t, t)} SET ${sets.join(', ')} WHERE ${sql.q('id', t)} = ?`, [...params, rowId]);
+}
+
+/** A `sys_metadata` row's stored version, when the table stores one. */
+async function versionOf(run: Run, rowId: string): Promise<number | undefined> {
+  const cols = (await columnsOf(run, METADATA_OBJECT)) ?? new Set<string>();
+  if (!cols.has('version')) return undefined;
+  const [row] = await run.sql.read(
+    METADATA_OBJECT,
+    `SELECT ${run.sql.q('version', METADATA_OBJECT)} AS v FROM ${run.sql.q(METADATA_OBJECT, METADATA_OBJECT)} WHERE ${run.sql.q('id', METADATA_OBJECT)} = ?`,
+    [rowId],
+  );
+  const v = Number(row?.v);
+  return Number.isFinite(v) ? v : undefined;
+}
+
 /** Two bodies define the same item (key order aside). */
 const sameBody = (a: Readonly<Record<string, unknown>>, b: Readonly<Record<string, unknown>>): boolean => {
   const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
@@ -1274,11 +1301,16 @@ const sameBody = (a: Readonly<Record<string, unknown>>, b: Readonly<Record<strin
  * 1. The body the environment keeps: the chosen row's, with every public-form
  *    withdrawal an unchosen row holds applied (fail-closed: a choice never
  *    reopens a form).
- * 2. Where the key has an environment row, that row takes the body through the
- *    metadata door, in place (the door's history and version with it), even
- *    when an organization's row was chosen. Where it has none, the chosen
- *    organization row is promoted in place, its history with it, and a
- *    withdrawal is then saved onto it through the door.
+ * 2. Where the key has an environment row, that row takes the body in place,
+ *    by one UPDATE, even when an organization's row was chosen: the chosen
+ *    row's lineage becomes environment history first ({@link foldLineage}) and
+ *    the environment row takes the chosen row's version, which names that
+ *    body's snapshot. Where the key has none, the chosen organization row is
+ *    promoted in place, its history with it. Not through the door: for an item
+ *    a package ships, the door writes the environment's customization into that
+ *    package's slot, never onto a package-less row of the key. A withdrawal the
+ *    body keeps is then saved through the door as well, which records it in
+ *    history and, for a packaged item, closes the form in the package's slot.
  * 3. The environment row is read back and must define that body.
  * 4. The choice is recorded in the checkpoint.
  * 5. Under `single`, the conflict's organization rows that remain are deleted,
@@ -1318,16 +1350,25 @@ async function resolveMetadataConflict(run: Run, r: MetadataResolution, notes: s
       'single row can take the chosen body. Delete all but one, then re-run.'
     );
   }
+  const env = environment[0];
   try {
-    if (environment.length === 0 && chosen.organizationId !== null) {
-      await promoteRows(run, chosen.organizationId, [{ id: chosen.id, type: conflict.type, name: conflict.name }]);
-      if (closing.length > 0) await run.opts.door.save(conflict.type as never, conflict.name, body, { packageId: conflict.packageId });
-    } else if (environment.length === 1 && !(environment[0]!.body && sameBody(environment[0]!.body, body))) {
-      await run.opts.door.save(conflict.type as never, conflict.name, body, { packageId: conflict.packageId });
+    if (!env) {
+      if (chosen.organizationId !== null) {
+        await promoteRows(run, chosen.organizationId, [{ id: chosen.id, type: conflict.type, name: conflict.name }]);
+        if (closing.length) await writeBody(run, chosen.id, body);
+      }
+    } else if (!(env.body && sameBody(env.body, body))) {
+      let version: number | undefined;
+      if (chosen.organizationId !== null) {
+        await foldLineage(run, chosen.organizationId, conflict.type, conflict.name);
+        version = await versionOf(run, chosen.id);
+      }
+      await writeBody(run, env.id, body, version);
     }
+    if (closing.length) await run.opts.door.save(conflict.type as never, conflict.name, body, { packageId: conflict.packageId });
   } catch (error) {
     return (
-      `The metadata door refused to give ${what} the body of the chosen row ${chosen.id}` +
+      `${what} could not take the body of the chosen row ${chosen.id}` +
       `${closing.length ? ` (with the public form(s) ${closing.join(', ')} an unchosen row withdraws, withdrawn)` : ''}: ` +
       `${error instanceof Error ? error.message : String(error)}. Nothing was deleted; fix the cause, then re-run.`
     );
