@@ -109,7 +109,7 @@ describe('[#23214] a single-valued name arrives exactly as the old line produced
 describe('[#23214] `__proto__` is an own key, and no prototype moves', () => {
   it('keeps one `__proto__` as an own data property', async () => {
     const got = await dispatchedQuery('?__proto__=x&polluted=1');
-    expect(Object.hasOwn(got, '__proto__')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(got, '__proto__')).toBe(true);
     expect(Object.getOwnPropertyDescriptor(got, '__proto__')?.value).toBe('x');
     expect(Object.getPrototypeOf(got)).toBe(Object.prototype);
     expect(({} as any).polluted).toBeUndefined();
