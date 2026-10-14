@@ -5,18 +5,20 @@ working in **any ObjectStack app** — this monorepo *and* third-party projects.
 They ship as the npm package `@objectstack/skills`, released with the other
 `@objectstack/*` packages at one shared version. Install it at your installed
 `@objectstack/spec`'s version — the catalog's version is then your spec's — and
-sync it from `node_modules` into your agent's directory:
+copy it from `node_modules` into your agent's directory:
 
 ```bash
 npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
-npx skills experimental_sync --agent claude-code -y
+npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```
 
-Name your own runtime after `--agent` (`codex`, `cursor`, …). To update, bump
-`@objectstack/skills` with the other `@objectstack/*` packages, then re-run the
-sync. The package is published from `18.0.0-next.0` on (there is no 17.x release);
-`--copy`, projects scaffolded by `npm create objectstack` and the rest are in the
-[Skills reference](https://objectstack.ai/docs/ai/skills-reference#installing-skills).
+Keep `--copy`: the skills land as real files in `.claude/skills/`, to commit with
+the project; without it they are links into `node_modules`, which a clone does
+not have. Name your own runtime after `--agent` (`codex`, `cursor`, …). To update,
+bump `@objectstack/skills` with the other `@objectstack/*` packages, then re-run
+the sync. The package is published from `18.0.0-next.0` on (there is no 17.x
+release); scaffolded projects, the move from a `skills add` install and the rest
+are in the [Skills reference](https://objectstack.ai/docs/ai/skills-reference#installing-skills).
 
 **The `next` channel.** `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`
 reads the catalog straight from the repository's unreleased `main` — for trying

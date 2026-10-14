@@ -75,8 +75,6 @@ os migrate meta --from 17 --json # `applied` must be [] (see §3.3)
 # → write .upgrade/REPORT.md (template in §3.4)
 ```
 
-Everything below is the long form of those four steps.
-
 ---
 
 ## 0 · Preflight
@@ -102,8 +100,7 @@ one installed. Three sources, in order of authority:
 
 Arriving several majors late is the designed-for case: `os migrate meta --from 16`
 replays every step in order, with no requirement to upgrade one major at a time —
-down to the chain's support floor, 16 today. Below the floor, upgrade to it by
-the older route first, then run the chain.
+down to the chain's support floor, 16 today.
 
 ### Make the work reviewable before you change anything
 
@@ -116,6 +113,22 @@ The `.upgrade/` directory is the deliverable's workspace: the machine outputs
 (`migrate.json`, `migrated.stack.json`, `spec-changes.json`, `retired-names.txt`)
 and the human output (`REPORT.md`). Keeping them in the repo for the review, and
 deleting them on merge, is the usual arrangement — decide it with the owner.
+
+### Re-install the skills from the moved catalog
+
+A 17.x project's skills came from `skills add`; their `skills-lock.json` entries
+read `sourceType: github`, so the sync skips them (exit 0) and the agent keeps
+reading 17.x skill text. Remove them (a missing name is skipped; `--all` when
+they are the project's only skills), add `@objectstack/skills` at the installed
+spec's version, copy it:
+
+```bash
+npx skills remove objectstack-ai objectstack-api objectstack-automation \
+  objectstack-data objectstack-formula objectstack-i18n objectstack-platform \
+  objectstack-pm-dispatch objectstack-query objectstack-ui objectstack-upgrade -y
+npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
+```
 
 ---
 
@@ -156,9 +169,6 @@ in place each edit it can trace to one literal in one project file, lists every
 other with the reason it was not written, never writes a semantic change, and
 if re-running the chain over the written files disagrees, restores every file
 and exits 1.
-
-Porting the edits left unwritten is yours, one `conversionId` at a time; use
-`--out` as the oracle you diff against, never as the file you ship.
 
 ### Stored rows: rehydration replays the same conversions
 
@@ -318,16 +328,9 @@ os migrate meta --from 16 --json | node -e "
 grep -rn "<surface-token>" src/ app/ --include='*.ts' --include='*.tsx'
 ```
 
-Two traps that have cost real upgrades a lap:
-
-- **A renamed context field keeps compiling.** When a read moves from one key to
-  another and the old key is simply absent afterwards, the code reads
-  `undefined` and every branch quietly takes its false path. Verify against a
-  real dispatch, not a fixture — invoke the path and assert the value observed
-  under the canonical key.
-- **A rename is not always the fix.** If the old read was itself wrong, renaming
-  it migrates the defect rather than the code. Read the semantic entry's
-  `reason` before applying its `replacement`.
+One trap that has cost real upgrades a lap: **a rename is not always the fix.**
+If the old read was itself wrong, renaming it migrates the defect rather than
+the code. Read the semantic entry's `reason` before applying its `replacement`.
 
 ### 2.6 Working an R3 — the prose sweep
 
@@ -383,9 +386,7 @@ the author-time rule set. Read the two separately — a rule finding about a
 missing sharing model or an options-less choice field is a **pre-existing**
 project-quality issue, not upgrade residue. Establish which is which by running
 `os validate` **once before you start**, on the un-upgraded source, and keeping
-that output as the control. Fixing the project's standing lint debt may be a
-welcome side-effect, but it is not this upgrade, and it must not be reported as
-part of it.
+that output as the control.
 
 > ### ⚠ A green `validate` does NOT mean the chain has nothing left to do
 >
@@ -408,8 +409,6 @@ part of it.
 > build carries a step for, which is one PAST the installed major for most of a
 > release line, so `todos` carries the next major's semantic residue — real, but
 > not this upgrade's business.
->
-> Run both. A report that cites only `validate` cannot see this class at all.
 
 → Moved verbatim to [references/examples-upgrade.md](./references/examples-upgrade.md) § 3.4 The report — the human half.
 

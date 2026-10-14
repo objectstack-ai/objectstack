@@ -27,16 +27,18 @@ agent's own skills directory (`.claude/skills/` for Claude Code, and so on):
 # 1 · the catalog, at the version of your installed @objectstack/spec
 npm install --save-dev "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
 
-# 2 · link it from node_modules into your agent's skills directory
-npx skills experimental_sync --agent claude-code -y
+# 2 · copy it from node_modules into your agent's skills directory
+npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
 ```
 
 `experimental_sync` discovers the skills at `dist/skills/<skill>/SKILL.md` of
-every dependency and links each one into the named agent's skills directory
-(`--agent <name>` names the runtime — `codex`, `cursor`, …; `--copy` writes real
-files instead of links). Keep the version in step 1: a bare
-`npm install --save-dev @objectstack/skills` installs whichever version the
-registry tags `latest`, not your spec's.
+every dependency and copies each one into the named agent's skills directory
+as real files, recording the source in `skills-lock.json` (`--agent <name>`
+names the runtime — `codex`, `cursor`, …). Keep `--copy`: without it the sync
+writes links into `node_modules`, which a clone of the project does not have;
+the CLI is pinned to the version `create-objectstack` runs. Keep the version
+in step 1: a bare `npm install --save-dev @objectstack/skills` installs
+whichever version the registry tags `latest`, not your spec's.
 
 **Updating.** The catalog moves only with your ObjectStack version: bump
 `@objectstack/skills` with the other `@objectstack/*` packages, then re-run the
