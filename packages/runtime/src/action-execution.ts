@@ -395,8 +395,32 @@ export async function callData(deps: ActionExecutionDeps,
     }
 
     if (action === 'delete') {
+        // [#23265] `expectedVersion` rides through to `deleteData`, whose
+        // version check refuses a stale delete. This arm forwarded only
+        // `{ object, id }`, so a token the `/data` domain read was dropped here
+        // a second time. Present only when a caller sent one: every other
+        // caller hands `{ object, id }` and reaches `deleteData` as before.
+        const expectedVersion = params?.expectedVersion;
         if (protocol && typeof protocol.deleteData === 'function') {
-            return await protocol.deleteData({ object: params.object, id: params.id, ...(scopeId ? { environmentId: scopeId } : {}), context: executionContext });
+            return await protocol.deleteData({
+                object: params.object,
+                id: params.id,
+                ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+                ...(scopeId ? { environmentId: scopeId } : {}),
+                context: executionContext,
+            });
+        }
+        // [#23265] The fallback below deletes by id and nothing else, so it
+        // cannot judge a version. A caller who sent one is refused `501`
+        // before anything is read, never deleted unguarded: that is the very
+        // drop the arm above just closed. The `/meta` save refuses a
+        // precondition its fallback writer cannot honour the same way.
+        if (expectedVersion !== undefined) {
+            throw {
+                statusCode: 501,
+                message: 'This host has no protocol deleteData, so it cannot honour ?expectedVersion or If-Match on a '
+                    + 'delete. Send the delete without them, or delete through a host whose protocol implements deleteData.',
+            };
         }
         if (ql && typeof ql.delete === 'function') {
             // [#5138] There was NO existence check here: the delete ran and the
