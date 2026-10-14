@@ -360,7 +360,8 @@ describe('#23317 — a stored page whose component binds the retired API source 
     const todo = todos[0]!;
     expect(todo.reason).toContain(`The \`${type}\` component \`block\` of page \`partner_page\`, at pages[0].regions[0].components[0], binds the retired view-level API data source.`);
     expect(todo.reason).toMatch(/No mechanical move: the successor is a page component's `dataSource` binding/);
-    expect(todo.reason).toMatch(/Left as stored, the page still loads and saves, because the page parse does not judge a component's properties/);
+    expect(todo.reason).toMatch(/Left as stored, the parse refuses the page: it still loads and is served, registered under `\[metadata_spec_invalid\]`/);
+    expect(todo.reason).toMatch(/its next save through the Studio, REST or MCP is refused with 422/);
     expect(todo.reason).toMatch(PRESCRIPTION);
   });
 
@@ -373,6 +374,12 @@ describe('#23317 — a stored page whose component binds the retired API source 
     expect(todos.map((t) => t.path)).toEqual([
       'pages[0].regions[0].components[0].properties.items[0].children[0].properties.data',
       'pages[0].slots.details.properties.data',
+    ]);
+    // [#23357] …and the page parse refuses exactly those two positions.
+    const verdict = PageSchema.safeParse(row);
+    expect(verdict.success ? [] : verdict.error.issues.map((i) => i.path.join('.'))).toEqual([
+      'regions.0.components.0.properties.items.0.children.0.properties.data.provider',
+      'slots.details.properties.data.provider',
     ]);
   });
 
@@ -414,9 +421,24 @@ describe('#23317 — a stored page whose component binds the retired API source 
     }
   });
 
-  it('the fate it states holds: the page parse accepts the page, and the component props row refuses the binding', () => {
+  // [#23357] Until the page parse judged this binding the fate read "the page
+  // still loads and saves", and this pin asserted `PageSchema` ACCEPTED the
+  // row. Since `checkPageComponentViewData` the page parse refuses each listed
+  // component at the listed position with the same prescription, which is
+  // what the save door's 422 and the read / boot `_diagnostics` resolve.
+  it('the fate it states holds: the page parse refuses each listed component at the listed position, and so does its props row', () => {
     const row = pageRow(VIEW_DATA_COMPONENTS.map((type, i) => component(type, apiData(), `b${i}`)));
-    expect(PageSchema.safeParse(row).success).toBe(true);
+    const { todos } = storedTodos('page', row);
+    const verdict = PageSchema.safeParse(row);
+    expect(verdict.success).toBe(false);
+    const refused = verdict.success ? [] : verdict.error.issues;
+    // The parse locates the issue at `…properties.data.provider`; the listing
+    // names the `data` prop it would rewrite, in the conversion walker's spelling.
+    const listedAt = (path: readonly PropertyKey[]) =>
+      `pages[0]${path.slice(0, -1).map((k) => (typeof k === 'number' ? `[${k}]` : `.${String(k)}`)).join('')}`;
+    expect(refused.map((i) => listedAt(i.path))).toEqual(todos.map((t) => t.path));
+    expect(todos).toHaveLength(VIEW_DATA_COMPONENTS.length);
+    for (const issue of refused) expect(issue.message).toMatch(PRESCRIPTION);
     for (const type of VIEW_DATA_COMPONENTS) {
       expect(ComponentPropsMap[type].safeParse({ objectName: 'crm_case', data: apiData() }).success, type).toBe(false);
     }

@@ -105,15 +105,11 @@ Four canonical values, no aliases (ADR-0090 D4):
 custom object requires choosing explicitly; pre-existing OWD-less objects were stamped
 `public_read_write` once, with a warning, at migration time — the unset state no longer exists.
 
-**External users get a second, stricter dial.** For portal/partner scenarios an object may also
-declare `externalSharingModel` (same four values, ADR-0090 D11). It defaults to `private` and may
-**never be wider than the internal one** — e.g. accounts can be `public_read` for employees while
-staying `private` for dealer-portal users, who then see only records they own or were explicitly
-shared. If your object has no external audience, ignore this field entirely.
-*Status:* the dial is authoring-validated (D7 lint `security-external-wider-than-internal`) and
-surfaced in Studio; the runtime evaluator branch that applies it to `audience: 'external'`
-principals lands with the principal-taxonomy semantics phase (#2696, liveness `planned` +
-author-warning). No request evaluates as external today.
+**External users get no org-wide default of their own.** A portal or partner principal reaches
+explicitly shared rows only — the authorization kernel's `EXTERNAL` rung (ADR-0095), never
+OWD-derived — so grant it rows with shares, sharing rules or share links. The external dial
+ADR-0090 D11 declared, `externalSharingModel`, was removed in `@objectstack/spec` 18
+(ADR-0049): nothing ever evaluated it, and the schema now refuses it with "delete the key".
 
 ## 4. Worked example — a CRM package
 
@@ -347,7 +343,7 @@ dev → test → prod).
 - **admin scope** — a delegated-administration grant: a BU subtree + the actions allowed there +
   an allowlist of assignable sets; self-escalation is structurally impossible.
 - **OWD / `sharingModel`** — `private` · `public_read` · `public_read_write` ·
-  `controlled_by_parent`. Nothing else parses. Optional `externalSharingModel` is the stricter
-  dial for external (portal/partner) users; defaults to `private`, never wider than internal.
+  `controlled_by_parent`. Nothing else parses. There is no external OWD: an external
+  (portal/partner) user reaches explicitly shared rows only (ADR-0095).
 - **role** — reserved-forbidden word (lint-enforced). Sole exception: better-auth's internal
   `sys_member.role`, projected as `org_membership_level`.

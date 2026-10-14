@@ -54,15 +54,14 @@ The other sets each demonstrate one axis:
   (ADR-0090 D12): an `adminScope` bounded to the Field Operations subtree
   with an assignable-set allowlist; no self-escalation.
 
-## Record baseline — OWD, internal and external
+## Record baseline — OWD
 
 Every object declares its `sharingModel` explicitly (the unset state no
 longer exists — ADR-0090 D1). The showcase covers all four canonical values:
 `showcase_private_note` (`private`), `showcase_announcement` (`public_read`),
 most demo objects (`public_read_write`), and `showcase_invoice_line`
-(`controlled_by_parent`). Two objects also declare the **external dial**
-(`externalSharingModel`, ADR-0090 D11): announcements are `private` to
-portal users; accounts are `public_read`.
+(`controlled_by_parent`). There is no separate external baseline: an
+external principal reaches explicitly shared rows only (ADR-0095).
 
 ## Widening — sharing rules
 
@@ -90,7 +89,7 @@ from the declarations above and **fails the build on drift** with a semantic
 diff ("`showcase_auditor` gains delete on `showcase_invoice`") until the
 snapshot is regenerated with `--update-access-matrix`. The snapshot's git
 diff is the review artifact. The same build runs the ADR-0090 D7 security
-posture linter (unset OWD, retired aliases, external-wider-than-internal,
+posture linter (unset OWD, retired aliases,
 wildcard VAMA, high-privilege anchor suggestions, forbidden vocabulary).
 
 ## See it enforced

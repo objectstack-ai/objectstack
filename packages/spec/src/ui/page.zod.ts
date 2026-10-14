@@ -17,6 +17,7 @@ import {
   AddRecordConfigSchema,
   ListColumnSchema,
   EmptyStateSchema,
+  ViewDataSchema,
 } from './view.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
@@ -1077,6 +1078,113 @@ export function checkPageSlotPair(
 }
 
 /**
+ * The page-component types whose `data` prop is a view data source — the
+ * `object-*` blocks whose `ComponentPropsMap` row (`component.zod.ts`)
+ * declares `data` as {@link ViewDataSchema}. Read by
+ * {@link checkPageComponentViewData} and by nothing else.
+ *
+ * Declared here, not derived, because this module cannot read those rows:
+ * `component.zod.ts` imports this module (`ElementDataSourceSchema`,
+ * `RETIRED_PAGE_COMPONENT_TYPES`), and this package has no import cycle. The
+ * set is held equal to the derivation — every row whose `data` member is
+ * `ViewDataSchema` by identity, and no other — by
+ * `page-component-view-data.test.ts`, so a row that gains or loses the view
+ * data source fails that pin the day it lands (the
+ * {@link PRINT_REFUSED_PAGE_COMPONENT_TYPES} discipline). A type whose row
+ * takes a row array as `data` (`object-kanban`, `object-calendar`,
+ * `object-timeline`), and a type with no row (a custom or registered SDUI
+ * block), is not in it: there `data` is that component's own contract.
+ */
+const VIEW_DATA_SOURCE_COMPONENT_TYPES: ReadonlySet<string> = new Set([
+  'object-grid',
+  'object-map',
+  'object-gantt',
+  'object-tree',
+]);
+
+/**
+ * The page parse refuses a component's `data` prop that names the retired
+ * view-level `api` provider, as a view's own `data` is refused (#23357; the
+ * retirement is `view.zod.ts`'s, ADR-0049 enforce-or-remove).
+ *
+ * Why the page parse: it leaves a component's `properties` an open record,
+ * and the door that judges the bag — the component-props gate, against the
+ * type's `ComponentPropsMap` row — runs at the CLI doors only, a rollout
+ * decision this check does not reopen. So a page saved through the Studio,
+ * REST or MCP kept a component's retired binding, and the console kept
+ * sending its request with the stored headers. This check is the narrow
+ * judge: one retirement, at every door that parses a page (`definePage`,
+ * `defineStack`, the metadata save door's `422 INVALID_METADATA`, and the
+ * read and boot diagnostics), and nothing else about the bag.
+ *
+ * The judge is the retirement's own. `ViewDataSchema` parses the component's
+ * `data`, and the prescription its issue at `provider` carries is raised
+ * here, located at the component's `properties.data.provider`. Nothing is
+ * copied, so a page and a view refuse with one text. The code is `custom`,
+ * the code of every object-level check on this schema (the view's own
+ * `invalid_union` is the discriminated union's).
+ *
+ * Reach: every component node under `regions` and `slots`, at any depth — a
+ * node nested in another component's `properties` (a `page:tabs` item's
+ * `children`, a container's `children`) included. The canonical slot list
+ * (`pageComponentSlotPositions()`) lives in `component.zod.ts`, out of this
+ * module's reach for the cycle reason above, so the walk descends every
+ * object and array under `regions` and `slots` instead. That is a superset of
+ * every slot position, so it reaches no less than `os migrate meta --stored`
+ * lists or the props gate judges, and what it judges at a node stays narrow:
+ * a type in {@link VIEW_DATA_SOURCE_COMPONENT_TYPES} whose `properties.data`
+ * names the retired provider. A binding found anywhere else is still a
+ * request, and its headers, stored in metadata and served to every reader.
+ *
+ * Exported for the reason {@link checkPageSourceCompleteness} is: a
+ * downstream mirror that derives its schema from `PageSchema.shape` drops
+ * every object-level check, and re-attaches this one with
+ * `.superRefine(checkPageComponentViewData)`. `PageSchema` attaches this same
+ * binding — pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageComponentViewData(
+  page: { regions?: unknown; slots?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  // A hand-built `defineStack` object can share a node or refer back to one;
+  // each object is visited once.
+  const seen = new Set<object>();
+  const visit = (value: unknown, path: PropertyKey[]): void => {
+    if (value === null || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((entry, i) => visit(entry, [...path, i]));
+      return;
+    }
+    const node = value as Record<string, unknown>;
+    const properties = node.properties;
+    if (
+      typeof node.type === 'string' && VIEW_DATA_SOURCE_COMPONENT_TYPES.has(node.type)
+      && properties !== null && typeof properties === 'object' && !Array.isArray(properties)
+    ) {
+      const bound = (properties as Record<string, unknown>).data;
+      // The retired spelling only: any other `data` is the props gate's to judge.
+      if (bound !== null && typeof bound === 'object' && (bound as { provider?: unknown }).provider === 'api') {
+        const verdict = ViewDataSchema.safeParse(bound);
+        const retirement = verdict.success
+          ? undefined
+          : verdict.error.issues.find((issue) => issue.path.length === 1 && issue.path[0] === 'provider');
+        if (retirement !== undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            message: retirement.message,
+            path: [...path, 'properties', 'data', ...retirement.path],
+          });
+        }
+      }
+    }
+    for (const [key, child] of Object.entries(node)) visit(child, [...path, key]);
+  };
+  visit(page.regions, ['regions']);
+  visit(page.slots, ['slots']);
+}
+
+/**
  * Page Schema
  * Defines a composition of components for a specific context.
  * Supports both platform pages (Salesforce FlexiPage style: record, home, app, utility)
@@ -1726,11 +1834,15 @@ export const PageSchema = lazySchema(() => strictObject({
   // #22568: `slots.details` beside `slots.tabs` never renders — the `tabs`
   // slot replaces the strip the Details tab lives in. Attached by identifier
   // for the same reason as the checks above.
-  .superRefine(checkPageSlotPair));
-// PageSchema's cross-field rules are the four checks above: the
+  .superRefine(checkPageSlotPair)
+  // #23357: a component's `data` prop naming the retired view-level `api`
+  // provider is refused by the page parse, as a view's own `data` is.
+  // Attached by identifier for the same reason as the checks above.
+  .superRefine(checkPageComponentViewData));
+// PageSchema's cross-field rules are the five checks above: the
 // ADR-0080/0081 source completeness check, the compiled-kind `requires`
-// check, the print-page composition check and the `details` + `tabs` slot
-// pair check. It once also required
+// check, the print-page composition check, the `details` + `tabs` slot
+// pair check and the component view-data check. It once also required
 // `recordReview`/`blankLayout` and `slots` (all removed — unrendered roadmap /
 // "required-but-unauthorable" Studio traps).
 

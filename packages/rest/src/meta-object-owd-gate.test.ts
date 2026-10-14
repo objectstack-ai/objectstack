@@ -14,15 +14,18 @@
  *
  *  - **The 422 lint door answers FIRST** for every posture defect it judges:
  *    an unauthored `sharingModel` (`security-owd-unset` — absence is not a
- *    decision; the ruled strictness), and external > internal
- *    (`security-external-wider-than-internal`).
+ *    decision; the ruled strictness).
+ *  - **[#23268] `externalSharingModel` is RETIRED** (ADR-0049): the object
+ *    schema refuses it with its prescription (422 `INVALID_METADATA`) on
+ *    every door, draft included, before any posture rule is asked. The lint
+ *    rule `security-external-wider-than-internal` left with it.
  *  - **The 403 R1 door (`owd_widening_forbidden`, env-tighten-only over a
  *    packaged declaration) remains** for writes that pass lint — no lint
  *    rule can judge it, because it needs the packaged declaration.
  *  - **R2 (`owd_external_wider`) is RETIRED from the plugin gate** as the
  *    lint door's duplicate (same ruling; see `object-posture-gate.ts`). Its
- *    former pins here are re-pinned onto the 422 envelope, and the door-order
- *    case below proves the lint door answers even when R1 would also refuse.
+ *    former pins here were re-pinned onto the 422 envelope, and left with the
+ *    key they ordered (#23268).
  *  - The former pin that a write with NO OWD keys at all SAVES (ADR-0094
  *    read absence as the D1 `private` default) is OVERTURNED by the ruling:
  *    absence now refuses (`security-owd-unset`), pinned below.
@@ -42,10 +45,9 @@
  *
  * ## Scope
  *
- * This is an AUTHORING-validation pin, not an external-principal enforcement
- * one. External-principal enforcement is #2696-planned; a wider external
- * baseline discloses nothing today. Nothing here should be read as asserting
- * that an external principal is refused at read time.
+ * This is an AUTHORING-validation pin. It asserts nothing about what an
+ * external principal reads: that is the authorization kernel's `EXTERNAL`
+ * rung (ADR-0095 — explicitly shared rows only).
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -131,7 +133,6 @@ const PACKAGED_ACCOUNT = {
     label: 'Packaged Account',
     _packageId: 'demo_pkg',
     sharingModel: 'public_read',
-    externalSharingModel: 'private',
     fields: { name: { type: 'text' as const, label: 'Name' } },
 };
 
@@ -250,7 +251,7 @@ async function boot(opts: { channel?: MetadataAuthoringChannel; envWritableObjec
 }
 
 // ---------------------------------------------------------------------------
-// The 422 lint door — external ≤ internal and authored-OWD-required (#8310)
+// The 422 doors — the retired external key (#23268) and authored-OWD-required (#8310)
 // ---------------------------------------------------------------------------
 
 describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () => {
@@ -265,25 +266,23 @@ describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () =
     it.each([
         { door: 'the active path (bare PUT)', query: {} as Record<string, unknown> },
         { door: 'package authoring (`?package=demo_pkg`)', query: { package: 'demo_pkg' } },
-    ])('refuses 422 security-external-wider-than-internal on $door', async ({ query }) => {
+        { door: 'the draft save (`?mode=draft`)', query: { mode: 'draft' } as Record<string, unknown> },
+    ])('[#23268] refuses the retired externalSharingModel 422 with its prescription on $door', async ({ query }) => {
         const { put, storedRows } = await boot();
 
         const res = await put('qa_probe', probeObject({
             sharingModel: 'private',
-            externalSharingModel: 'public_read',
+            externalSharingModel: 'private',
         }), query);
 
-        // ADR-0112 envelope — both halves, plus the lint rule id the 422
-        // carries in `issues`. `403 owd_external_wider` is what this answered
-        // before the retirement; `200` is what it answered before #7674.
+        // ADR-0112 envelope — both halves — and the prescription the schema's
+        // tombstone carries. The pair this body holds is one the retired
+        // ordering rule ADMITTED (external ≤ internal): what refuses it now is
+        // the key itself, on the draft door as on the active ones.
         expect(res._status).toBe(422);
         expect(res._json?.code).toBe('INVALID_METADATA');
-        expect((res._json?.issues ?? []).map((i: any) => i.rule))
-            .toContain('security-external-wider-than-internal');
-
-        // The point the status code alone cannot make: the gate is
-        // PRE-persistence. A 422 answered after the row landed would still be
-        // the defect, and `GET` would still return the violating pair.
+        expect(JSON.stringify(res._json?.issues ?? []))
+            .toContain('`object.externalSharingModel` was removed in @objectstack/spec 18');
         expect(await storedRows('qa_probe')).toEqual([]);
     }, 60_000);
 
@@ -304,34 +303,18 @@ describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () =
         expect(await storedRows('qa_probe')).toEqual([]);
     }, 60_000);
 
-    it('declaring only the external side is refused as the MISSING internal decision (owd-unset)', async () => {
-        // #7674's unset-internal case, re-pinned. R2 resolved the unset
-        // internal to `private` and called the defect `owd_external_wider`;
-        // the ruled door names the actual defect — the internal decision was
-        // never authored.
-        const { put, storedRows } = await boot();
-
-        const res = await put('qa_probe', probeObject({ externalSharingModel: 'public_read_write' }));
-
-        expect(res._status).toBe(422);
-        expect(res._json?.code).toBe('INVALID_METADATA');
-        expect((res._json?.issues ?? []).map((i: any) => i.rule)).toContain('security-owd-unset');
-        expect(await storedRows('qa_probe')).toEqual([]);
-    }, 60_000);
-
     it('the draft door: a dirty draft SAVES (D1), and the draft→active PROMOTION refuses 422', async () => {
         // #7674 pinned a 403 on `?mode=draft` because the plugin gate ran on
         // drafts too. The lint discipline is deliberately different (#4463
         // D1): drafts are work-in-progress and save ungated; the gate arms on
         // the draft→active promotion, so the second minting path stays closed
         // without making a half-finished body unsaveable. That discipline now
-        // governs the object door too.
+        // governs the object door too. (The body was external-wider until
+        // #23268 retired that key; an unauthored `sharingModel` is the defect
+        // the same discipline defers now.)
         const { put, protocol } = await boot();
 
-        const res = await put('qa_probe', probeObject({
-            sharingModel: 'private',
-            externalSharingModel: 'public_read',
-        }), { mode: 'draft' });
+        const res = await put('qa_probe', probeObject(), { mode: 'draft' });
         expect(res._status, `draft save must pass ungated: ${JSON.stringify(res._json)}`).toBe(200);
 
         const err = await (protocol as any).publishMetaItem({ type: 'object', name: 'qa_probe' })
@@ -339,28 +322,7 @@ describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () =
         expect(err, 'the promotion is where the lint verdict binds').toBeInstanceOf(Error);
         expect(err.status).toBe(422);
         expect(err.code).toBe('INVALID_METADATA');
-        expect((err.issues ?? []).map((i: any) => i.rule))
-            .toContain('security-external-wider-than-internal');
-    }, 60_000);
-
-    it('[ADR-0131 D6] door ORDER over a PACKAGED object: the package door answers ahead of lint AND R1, hatch open', async () => {
-        // An env overlay over the packaged object whose body is BOTH
-        // external-wider (lint) and posture-widening against the packaged
-        // baseline (R1). The lint table used to answer first, because the
-        // hatch carried the write past the package door. Managed content is
-        // sealed now: with the hatch open as with it shut, the package door
-        // answers ahead of both, and nothing is stored. The lint-before-R1
-        // order itself stands wherever both are reached.
-        const { put, storedRows } = await boot({ envWritableObject: true });
-
-        const res = await put('qa_packaged_account', packagedOverlay({
-            sharingModel: 'private',
-            externalSharingModel: 'public_read',
-        }));
-
-        expect(res._status).toBe(403);
-        expect(res._json?.code).toBe('NOT_OVERRIDABLE');
-        expect(await storedRows('qa_packaged_account')).toEqual([]);
+        expect((err.issues ?? []).map((i: any) => i.rule)).toContain('security-owd-unset');
     }, 60_000);
 });
 
@@ -411,7 +373,6 @@ describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:n
     // that, rather than deleted, so the change in who answers is visible.
     for (const [label, over] of [
         ['widens a packaged object\'s internal OWD', { sharingModel: 'public_read_write' }],
-        ['widens the EXTERNAL side against the packaged baseline', { sharingModel: 'public_read', externalSharingModel: 'public_read' }],
     ] as const) {
         it(`[ADR-0131 D6] an env overlay that ${label} is refused by the package door before R1, hatch open`, async () => {
             const { put, storedRows } = await boot({ envWritableObject: true });
@@ -438,14 +399,13 @@ describe('[#7674] what the gate must still let through', () => {
      * other half of the claim.
      */
     it.each([
-        { pair: 'private / private', over: { sharingModel: 'private', externalSharingModel: 'private' } },
-        { pair: 'public_read / private (external TIGHTER)', over: { sharingModel: 'public_read', externalSharingModel: 'private' } },
-        { pair: 'public_read / public_read (equal, not wider)', over: { sharingModel: 'public_read', externalSharingModel: 'public_read' } },
+        { pair: 'private', over: { sharingModel: 'private' } },
+        { pair: 'public_read', over: { sharingModel: 'public_read' } },
+        { pair: 'public_read_write', over: { sharingModel: 'public_read_write' } },
         // 'no OWD keys at all' left this table on #8310: absence is now a
         // 422 refusal (`security-owd-unset`), pinned in the lint-door suite
         // above — the ruling overturned ADR-0094's absence-defaults-to-private
         // reading at this door.
-        { pair: 'internal only, external unset', over: { sharingModel: 'private' } },
     ])('a legal pair still saves — $pair', async ({ over }) => {
         const { put, storedRows } = await boot();
 
@@ -467,7 +427,6 @@ describe('[#7674] what the gate must still let through', () => {
 
         const res = await put('qa_packaged_account', packagedOverlay({
             sharingModel: 'private',
-            externalSharingModel: 'private',
         }));
 
         expect(res._status).toBe(403);
@@ -486,11 +445,10 @@ describe('[#7674] what the gate must still let through', () => {
      *
      * [#8310] Read that as "judged earlier", NOT as "gated at build time
      * instead" — the header above is the correction: the same rule answers at
-     * THIS door too for `object` writes, and the
-     * `security-external-wider-than-internal` case at the top of this file
-     * refuses the exact body used below (`private` / `public_read`) with a
-     * 422. What exempts the write here is the CHANNEL — not the posture, and
-     * not a gap in the rule's reach.
+     * THIS door too for `object` writes, and the `security-owd-unset` case at
+     * the top of this file refuses the exact body used below (no authored
+     * `sharingModel`) with a 422. What exempts the write here is the CHANNEL —
+     * not the posture, and not a gap in the rule's reach.
      *
      * That reach is not total at this door either: `security-owd-unset`
      * exempts system objects, so an `isSystem` / `sys_*` object whose
@@ -506,10 +464,7 @@ describe('[#7674] what the gate must still let through', () => {
     it('the `package-author` channel still bypasses the gate — the #6710 carve-out is intact', async () => {
         const { put, storedRows } = await boot({ channel: 'package-author' });
 
-        const res = await put('qa_probe', probeObject({
-            sharingModel: 'private',
-            externalSharingModel: 'public_read',
-        }));
+        const res = await put('qa_probe', probeObject());
 
         expect(res._status, `the control plane must still install its own packages: ${JSON.stringify(res._json)}`).toBe(200);
         expect(await storedRows('qa_probe')).toHaveLength(1);

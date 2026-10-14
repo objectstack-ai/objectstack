@@ -19,7 +19,6 @@ import {
   validateSecurityRoleWord,
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,
-  SECURITY_EXTERNAL_WIDER,
   SECURITY_WILDCARD_VAMA,
   SECURITY_ANCHOR_HIGH_PRIVILEGE,
   SECURITY_ROLE_WORD,
@@ -180,25 +179,9 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(findings[0].message).toContain("fails CLOSED to 'private'");
   });
 
-  // ── Rule: security-external-wider-than-internal (ADR-0090 D11) ──────
-  it('errors when the external dial is wider than the internal one', () => {
-    const findings = validateSecurityPosture({
-      objects: [{ name: 'portal_case', sharingModel: 'private', externalSharingModel: 'public_read' }],
-    });
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(SECURITY_EXTERNAL_WIDER);
-  });
-
-  it('accepts external ≤ internal', () => {
-    expect(
-      rulesOf({
-        objects: [
-          { name: 'a', sharingModel: 'public_read_write', externalSharingModel: 'public_read' },
-          { name: 'b', sharingModel: 'public_read', externalSharingModel: 'public_read' },
-        ],
-      }),
-    ).toEqual([]);
-  });
+  // `security-external-wider-than-internal` left with its key (#23268): the
+  // `obj` receiver's key list in the reads-are-declared table below pins that
+  // this linter reads no `externalSharingModel`.
 
   // ── Rule: security-wildcard-vama (ADR-0066) ─────────────────────────
   it("errors on a '*' wildcard carrying viewAll/modifyAll in an authored set", () => {
@@ -1500,7 +1483,7 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // [#18306] `fieldGroups` joined when the ADR-0090 D3 vocabulary freeze
     // started visiting the group headings that sit above the fields it already
     // judged.
-    expected: ['actions', 'externalSharingModel', 'fieldGroups', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
+    expected: ['actions', 'fieldGroups', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -1656,7 +1639,7 @@ describe('validateSecurityPosture — undeclared keys are the schema’s job, no
   it('there is no `objects[].security` envelope: the OWD dials are declared FLAT', () => {
     const objectKeys = Object.keys(ObjectSchema.shape);
     expect(objectKeys).not.toContain('security');
-    expect(objectKeys).toEqual(expect.arrayContaining(['sharingModel', 'externalSharingModel', 'publicSharing']));
+    expect(objectKeys).toEqual(expect.arrayContaining(['sharingModel', 'publicSharing']));
 
     // And `ObjectSchema` is strict, so this is not a silent strip: a stack
     // nesting the OWD under `security` is REFUSED, by name.
@@ -1730,7 +1713,6 @@ function pushedRuleIds(): string[] {
 const RULE_IDS: Record<string, string> = {
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,
-  SECURITY_EXTERNAL_WIDER,
   SECURITY_WILDCARD_VAMA,
   SECURITY_ANCHOR_HIGH_PRIVILEGE,
   SECURITY_ROLE_WORD,
@@ -1757,11 +1739,6 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
   { label: 'owd-unset', stack: { objects: [objectFixture({ name: 'leave_request' })] } },
   { label: 'owd-alias (retired value)', stack: { objects: [objectFixture({ name: 'leave_request', sharingModel: 'read' })] } },
   { label: 'owd-alias (non-canonical value)', stack: { objects: [objectFixture({ name: 'leave_request', sharingModel: 'nonsense' })] } },
-  { label: 'owd-alias (external retired value)', stack: { objects: [objectFixture({ name: 'o', sharingModel: 'private', externalSharingModel: 'full' })] } },
-  {
-    label: 'external-wider',
-    stack: { objects: [objectFixture({ name: 'o', sharingModel: 'private', externalSharingModel: 'public_read_write' })] },
-  },
   { label: 'fls-unqualified-key', stack: { permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { budget: { readable: true } } }] } },
   {
     label: 'fls-unknown-field',
@@ -1855,7 +1832,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
   });
 
   it('maps every `findings.push` site in the source', () => {
-    expect(pushedRuleIds()).toHaveLength(18);
+    // 16 since #23268: the external dial's alias and wider-than-internal sites left with the key.
+    expect(pushedRuleIds()).toHaveLength(16);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {
