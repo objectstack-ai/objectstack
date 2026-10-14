@@ -22068,9 +22068,20 @@ export class ObjectStackProtocolImplementation implements
         // reachable type set and carries the measurements above.
         if (!request.force && singularType === 'object') {
             try {
+                // [#23291, ADR-0048] Judged against the row this save
+                // overwrites: the read at the save's own address. A
+                // package-less publish save has resolved `packageId` to the
+                // item's one package above (#23165); a save naming a package
+                // with no row of its own reads that package's address, the
+                // package-unbound stand-in it overlays. Before, the read named
+                // no package, so with a package-unbound row stored beside the
+                // package's it judged a row no package-less save writes, and a
+                // save naming a third package was judged against another
+                // package's row.
                 const existing = await this.getMetaItem({
                     type: request.type,
                     name: request.name,
+                    ...(request.packageId ? { packageId: request.packageId } : {}),
                 } as any);
                 const prev = (existing as any)?.item;
                 if (prev) {

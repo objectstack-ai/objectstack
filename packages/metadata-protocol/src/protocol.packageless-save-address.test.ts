@@ -891,3 +891,69 @@ describe('[#23291] the read naming no package serves the row the save naming non
         expect((await protocol.getMetaItem({ type: 'app', name })).item.label).toBe('pkg 2');
     });
 });
+
+/**
+ * [#23291] The `object` save's destructive-change check (409
+ * `DESTRUCTIVE_CHANGE`) judges the row the save overwrites: the read at the
+ * save's own address. With a package-unbound row stored before the package's,
+ * the check used to read naming no package and judge the unbound row, which no
+ * package-less save writes, and a save naming a third package was judged
+ * against whichever row was stored first.
+ */
+describe('[#23291] an object\'s destructive-change check judges the row the save overwrites', () => {
+    const objectBody = (name: string, fields: readonly string[]) => ({
+        name, label: name, sharingModel: 'private', fields: Object.fromEntries(fields.map((f) => [f, { name: f, type: 'text' }])),
+    });
+    /** Unbound `{a, d}` stored first, the package's `{a, c}` beside it. */
+    function pairFixture(name: string) {
+        const fixture = makeProtocol();
+        fixture.seedRow({ type: 'object', name, package_id: null, metadata: JSON.stringify(objectBody(name, ['a', 'd'])), checksum: 'sha-unbound' });
+        fixture.seedRow({ type: 'object', name, package_id: WRITABLE, metadata: JSON.stringify(objectBody(name, ['a', 'c'])), checksum: 'sha-pkg' });
+        return fixture;
+    }
+    const fieldsOf = (row: Row) => Object.keys(JSON.parse(row.metadata).fields ?? {}).sort();
+
+    it('a package-less save dropping a field only the package\'s row has is refused 409 DESTRUCTIVE_CHANGE, and accepted with force', async () => {
+        const name = 's6_obj_pkg_field';
+        const { protocol, rows } = pairFixture(name);
+        const before = rows('object', name).map((r) => [r.package_id ?? null, fieldsOf(r)]);
+
+        const envelope = resolveThrownHttpError(await refusalOf(() => protocol.saveMetaItem({
+            type: 'object', name, item: objectBody(name, ['a', 'd']),
+        })));
+        expect(envelope).toMatchObject({ status: 409, code: 'DESTRUCTIVE_CHANGE' });
+        expect(rows('object', name).map((r) => [r.package_id ?? null, fieldsOf(r)])).toEqual(before);
+
+        await protocol.saveMetaItem({ type: 'object', name, item: objectBody(name, ['a', 'd']), force: true });
+        expect(Object.fromEntries(rows('object', name).map((r) => [String(r.package_id ?? null), fieldsOf(r)])))
+            .toEqual({ null: ['a', 'd'], [WRITABLE]: ['a', 'd'] });
+    });
+
+    it('a package-less save dropping a field only the package-unbound row has is accepted: it writes the package\'s row', async () => {
+        const name = 's6_obj_unbound_field';
+        const { protocol, rows } = pairFixture(name);
+
+        const saved = await protocol.saveMetaItem({ type: 'object', name, item: objectBody(name, ['a', 'c']) });
+
+        expect(saved.success).toBe(true);
+        expect(Object.fromEntries(rows('object', name).map((r) => [String(r.package_id ?? null), fieldsOf(r)])))
+            .toEqual({ null: ['a', 'd'], [WRITABLE]: ['a', 'c'] });
+    });
+
+    it('a save naming a third package with no row of its own is judged against the package-unbound stand-in it overlays', async () => {
+        const name = 's6_obj_third_pkg';
+        const { protocol, rows } = pairFixture(name);
+
+        // Drops `c`, which only the OTHER package's row has: not this save's row.
+        const saved = await protocol.saveMetaItem({ type: 'object', name, item: objectBody(name, ['a', 'd']), packageId: OTHER_WRITABLE });
+        expect(saved.success).toBe(true);
+        expect(fieldsOf(rows('object', name).find((r) => r.package_id === OTHER_WRITABLE)!)).toEqual(['a', 'd']);
+
+        // Drops `d`, which the stand-in it overlays has: refused.
+        const { protocol: second } = pairFixture(`${name}_2`);
+        const envelope = resolveThrownHttpError(await refusalOf(() => second.saveMetaItem({
+            type: 'object', name: `${name}_2`, item: objectBody(`${name}_2`, ['a', 'c']), packageId: OTHER_WRITABLE,
+        })));
+        expect(envelope).toMatchObject({ status: 409, code: 'DESTRUCTIVE_CHANGE' });
+    });
+});
