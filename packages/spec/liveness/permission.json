@@ -10,15 +10,17 @@
     },
     "label": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "rendered as the record title of sys_permission_set in Setup's generic object views (objectui app-shell list/detail rendering via displayNameField)",
-      "note": "display metadata."
+      "verifiedAt": "2026-10-14",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui @b9814b334d8a, the .objectui-sha pin and unchanged at objectui main @524136ea7: packages/app-shell/src/services/builtinComponents.tsx:206 registers `{ key: 'label', label: 'Label' }` as a list column of the `permission` metadata resource, and packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx:698 renders it as `row.item[c.key]` for every set Studio's permission-set list reads through `client.list('permission')`, which is GET /api/v1/meta/permission; framework: packages/metadata-protocol/src/protocol.ts#getMetaItems serves the authored body unprojected, so the authored label reaches that column.",
+      "note": "display metadata. RE-VERIFIED 2026-10-14 (#23404): the previous evidence named the record title of the sys_permission_set row object in Setup's generic object views, and that object was retired at C3 stage 8; the Studio list column is the reader that remains."
     },
     "description": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "persisted to sys_permission_set.description (plugin-security sys-permission-set.object.ts: textarea field, list columns + form); read from the authored set by permission-set-projection.ts (description: ps.description ?? null) and diffed on re-seed",
-      "note": "Declared in #4001: the built-in default sets always authored it, but the schema could not represent it, so it was silently stripped at parse (ADR-0078 §3 inverse drift) — the .strict() gate surfaced the gap."
+      "verifiedAt": "2026-10-14",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui @b9814b334d8a, the .objectui-sha pin and unchanged at objectui main @524136ea7: packages/app-shell/src/services/builtinComponents.tsx:207 registers `{ key: 'description', label: 'Description' }` as a list column of the `permission` metadata resource, and packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx:698 renders it as `row.item[c.key]` for every set Studio's permission-set list reads through `client.list('permission')`, which is GET /api/v1/meta/permission; framework: packages/metadata-protocol/src/protocol.ts#getMetaItems serves the authored body unprojected, so the authored description reaches that column.",
+      "note": "Declared in #4001: the built-in default sets always authored it, but the schema could not represent it, so it was silently stripped at parse (ADR-0078 §3 inverse drift) — the .strict() gate surfaced the gap. RE-VERIFIED 2026-10-14 (#23404): both readers the previous evidence named are deleted — the sys_permission_set row object (C3 stage 8) and the permission-set projection (C3 stage 7a). No framework-side reader of the authored key remains: packages/core/src/security/permission-set-row-definition.ts maps a legacy row INTO the key for the upgrade ceremony (a producer, not a reader), and the security catalog never reads it. Display-only, so the Studio list column is the whole of its claimed effect (README, the display/behaviour table)."
     },
     "packageId": {
       "status": "live",

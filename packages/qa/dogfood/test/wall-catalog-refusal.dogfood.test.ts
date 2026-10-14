@@ -22,10 +22,9 @@
 // Pinned here:
 //   - walled: org A's catalog writes at `/meta` (save, create, delete) answer
 //     `403 FORBIDDEN`, and B's resolution does not move;
-//   - walled: the data door's catalog creates answer `403 PERMISSION_DENIED`
-//     while the catalog row objects are registered, and `404 OBJECT_NOT_FOUND`
-//     once C3 stage 8 retires them; either way nothing reaches the environment
-//     ledger;
+//   - walled: the data door's catalog creates answer `404 OBJECT_NOT_FOUND`
+//     (C3 stage 8 retired the catalog row objects), and nothing reaches the
+//     environment ledger;
 //   - walled: the permission-set clone door refuses org A a clone
 //     `403 PERMISSION_DENIED`, and nothing is saved;
 //   - walled CONTROLS: org A still assigns a catalog permission set to its own
@@ -172,24 +171,19 @@ for (const posture of ['isolated', 'group'] as const) {
       expect((await definitionOf('permission', SHARED))?.item?.name).toBe(SHARED);
     });
 
-    it('the data door refuses org A a catalog create, and nothing reaches the environment ledger', async () => {
-      // While the catalog row objects are registered the walled data-door
-      // refusal answers; once C3 stage 8 retires them (ADR-0131 D3) the data
-      // door serves no such object at all.
-      const refusal = (object: string) => (ql.getObject?.(object)
-        ? { status: 403, code: 'PERMISSION_DENIED' }
-        : { status: 404, code: 'OBJECT_NOT_FOUND' });
+    it('the data door serves org A no catalog object 404 OBJECT_NOT_FOUND, and nothing reaches the environment ledger', async () => {
+      // C3 stage 8 retired the catalog row objects (ADR-0131 D3): the catalog
+      // is written through the metadata door alone.
+      expect(ql.getObject?.('sys_permission_set')).toBeFalsy();
+      expect(ql.getObject?.('sys_position')).toBeFalsy();
 
       const set = await stack.apiAs(tokA, 'POST', '/data/sys_permission_set', { name: 'w_dd_set', label: 'Data door set' });
-      expect(await envelopeOf(set)).toEqual(refusal('sys_permission_set'));
+      expect(await envelopeOf(set)).toEqual({ status: 404, code: 'OBJECT_NOT_FOUND' });
       expect((await definitionOf('permission', 'w_dd_set'))?.item).toBeFalsy();
 
       const position = await stack.apiAs(tokA, 'POST', '/data/sys_position', { name: 'w_dd_pos', label: 'Data door position' });
-      expect(await envelopeOf(position)).toEqual(refusal('sys_position'));
+      expect(await envelopeOf(position)).toEqual({ status: 404, code: 'OBJECT_NOT_FOUND' });
       expect((await definitionOf('position', 'w_dd_pos'))?.item).toBeFalsy();
-      if (ql.getObject?.('sys_position')) {
-        expect(await ql.find('sys_position', { where: { name: 'w_dd_pos' }, context: SYS })).toEqual([]);
-      }
     });
 
     it("the clone door refuses org A a clone of an environment set 403 PERMISSION_DENIED, and nothing is saved", async () => {

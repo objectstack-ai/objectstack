@@ -238,12 +238,11 @@ export const SysSharingRule = ObjectSchema.create({
     }),
 
     // ── Provenance (#2909 P0 — record-authoritative seed-not-clobber) ──
-    // Unified A4 (#2920) tri-state, shared verbatim with sys_position /
-    // sys_capability / sys_permission_set. Both columns are `readonly`:
+    // Unified A4 (#2920) tri-state, the vocabulary the retired security
+    // catalog rows shared. Both columns are `readonly`:
     // the engine strips them from non-system payloads (forge/clear-proof),
     // while the seeder and the provenance stamp hook write with isSystem.
-    // NOTE deliberately NOT in SYSTEM_ROW_PROVENANCE (no write gate):
-    // sharing rules are a first-class admin authoring/tuning surface —
+    // NOTE deliberately no provenance write gate: sharing rules are a first-class admin authoring/tuning surface —
     // admins may edit or deactivate package rules; the seeder simply stops
     // overwriting rows once `customized` is stamped (ADR-0094 addendum).
     managed_by: Field.select({

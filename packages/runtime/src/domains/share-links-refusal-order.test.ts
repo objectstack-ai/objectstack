@@ -32,6 +32,23 @@
  * the password arms to an anonymous caller, an unprotected `public` link
  * still serves, and a revoked link still answers the 410 whoever asks.
  *
+ * ## The email audience (#23372)
+ *
+ * For a live link whose audience is `email`, every caller the link does not
+ * resolve for is answered `404 INVALID_OR_EXPIRED` — whatever email and
+ * whatever password it sent, signed in or not. The email is the caller's own
+ * claim (`?email=`), never a verified identity, so the probe may not answer
+ * by it: an allowlisted email with a wrong password that read differently
+ * from an off-list email would let anyone holding the token test addresses
+ * against the allowlist. Nor may it answer from the password: `resolveToken`
+ * refuses the audience before it verifies any password, so the password arm
+ * could only report whether one was SENT — `WRONG_PASSWORD` for the correct
+ * one. The refusal is the one a password-less `email` link already answered
+ * and an unknown token answers, so it tells the holder neither whether the
+ * email is on the list, nor whether the password is right, nor whether the
+ * link has one. Only the record itself — an allowlisted email AND the right
+ * password — differs.
+ *
  * ## What is real here
  *
  * Both mounts' production entries over ONE `ObjectQL` on
@@ -61,11 +78,13 @@ const RECORD = 'doc_1';
 const VIEWER = 'usr_viewer';
 const PASSWORD = 'correct horse 23328';
 const WRONG = 'not the password 23328';
+const RECIPIENT = 'recipient-23372@example.test';
+const STRANGER = 'stranger-23372@example.test';
 
 const TARGET = {
   name: OBJECT,
   label: 'Refusal Doc',
-  publicSharing: { enabled: true, allowedAudiences: ['public', 'signed_in'], allowedPermissions: ['view'] },
+  publicSharing: { enabled: true, allowedAudiences: ['public', 'signed_in', 'email'], allowedPermissions: ['view'] },
   fields: {
     id: { name: 'id', label: 'ID', type: 'text', primaryKey: true },
     title: { name: 'title', label: 'Title', type: 'text' },
@@ -75,7 +94,15 @@ const TARGET = {
 type Mount = 'plugin route' | 'dispatcher twin';
 type Caller = 'anonymous' | 'signed in';
 type Presented = 'no password' | 'a wrong password' | 'the correct password';
-type LinkKey = 'signed_in + password' | 'public + password' | 'public' | 'revoked signed_in + password';
+type Email = 'no email' | 'an off-list email' | 'an allowlisted email';
+type LinkKey =
+  | 'signed_in + password'
+  | 'public + password'
+  | 'public'
+  | 'revoked signed_in + password'
+  | 'email + password'
+  | 'email'
+  | 'unknown token';
 type Answer = { status: number; body: any; headers: Record<string, string> };
 
 const MOUNTS: readonly Mount[] = ['plugin route', 'dispatcher twin'];
@@ -83,6 +110,12 @@ const PRESENTED: Record<Presented, string | undefined> = {
   'no password': undefined,
   'a wrong password': WRONG,
   'the correct password': PASSWORD,
+};
+/** The `?email=` query parameter, as an API or SDK caller sends it. */
+const EMAILS: Record<Email, string | undefined> = {
+  'no email': undefined,
+  'an off-list email': STRANGER,
+  'an allowlisted email': RECIPIENT,
 };
 
 /** The dispatcher's REAL thrown-error mapper, as the sibling suites borrow it. */
@@ -123,7 +156,7 @@ const CALLERS: Record<Caller, ExecutionContext> = {
 
 let engine: ObjectQL;
 const tokens = {} as Record<LinkKey, string>;
-let open: (mount: Mount, link: LinkKey, caller: Caller, presented: Presented) => Promise<Answer>;
+let open: (mount: Mount, link: LinkKey, caller: Caller, presented: Presented, email?: Email) => Promise<Answer>;
 
 beforeAll(async () => {
   engine = new ObjectQL();
@@ -138,14 +171,27 @@ beforeAll(async () => {
 
   const svc = new ShareLinkService({ engine: engine as any });
   const creator = { isSystem: true, userId: 'usr_creator' } as any;
-  const mint = async (audience: 'public' | 'signed_in', password?: string) =>
-    svc.createLink({ object: OBJECT, recordId: RECORD, audience, ...(password ? { password } : {}) }, creator);
+  const mint = async (audience: 'public' | 'signed_in' | 'email', password?: string) =>
+    svc.createLink(
+      {
+        object: OBJECT,
+        recordId: RECORD,
+        audience,
+        ...(password ? { password } : {}),
+        ...(audience === 'email' ? { emailAllowlist: [RECIPIENT] } : {}),
+      },
+      creator,
+    );
   tokens['signed_in + password'] = (await mint('signed_in', PASSWORD)).token;
   tokens['public + password'] = (await mint('public', PASSWORD)).token;
   tokens.public = (await mint('public')).token;
   const revoked = await mint('signed_in', PASSWORD);
   await svc.revokeLink(revoked.id, creator);
   tokens['revoked signed_in + password'] = revoked.token;
+  tokens['email + password'] = (await mint('email', PASSWORD)).token;
+  tokens.email = (await mint('email')).token;
+  // Long enough to reach the row lookup; no row carries it.
+  tokens['unknown token'] = 'never-minted-token-23372';
 
   // The plugin mount, once per caller: the family door resolves the caller
   // through `contextFromRequest`, exactly as production wires it.
@@ -159,12 +205,14 @@ beforeAll(async () => {
   }
   const deps = makeDeps(engine, svc);
 
-  open = async (mount, link, caller, presented) => {
+  open = async (mount, link, caller, presented, email = 'no email') => {
     const token = tokens[link];
     const password = PRESENTED[presented];
     const headers: Record<string, string> = password === undefined ? {} : { 'x-share-password': password };
+    const address = EMAILS[email];
+    const query: Record<string, string> = address === undefined ? {} : { email: address };
     if (mount === 'dispatcher twin') {
-      const res = await handleShareLinksRequest(deps, `/${token}/resolve`, 'GET', undefined, {}, {
+      const res = await handleShareLinksRequest(deps, `/${token}/resolve`, 'GET', undefined, query, {
         executionContext: CALLERS[caller],
         request: { headers },
       } as unknown as HttpProtocolContext);
@@ -181,7 +229,7 @@ beforeAll(async () => {
     };
     const req: IHttpRequest = {
       params: { token },
-      query: {},
+      query,
       body: undefined,
       headers,
       method: 'GET',
@@ -203,6 +251,8 @@ afterAll(async () => {
 interface Row {
   link: LinkKey;
   caller: Caller;
+  /** The `?email=` sent; `no email` when the row leaves it out. */
+  email?: Email;
   presented: Presented;
   status: number;
   /** The refusal's `error.code`; absent on a row that serves the record. */
@@ -228,11 +278,37 @@ const TABLE: readonly Row[] = [
   // Control: the 410 arm is not reordered — a revoked link answers it whoever asks.
   { link: 'revoked signed_in + password', caller: 'anonymous', presented: 'the correct password', status: 410, code: 'EXPIRED_OR_REVOKED' },
   { link: 'revoked signed_in + password', caller: 'signed in', presented: 'the correct password', status: 410, code: 'EXPIRED_OR_REVOKED' },
+  // [#23372] A password AND audience `email`: until the link resolves, one
+  // refusal, whatever email and whatever password were sent.
+  { link: 'email + password', caller: 'anonymous', email: 'no email', presented: 'no password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'anonymous', email: 'no email', presented: 'a wrong password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'anonymous', email: 'no email', presented: 'the correct password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'anonymous', email: 'an off-list email', presented: 'no password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'anonymous', email: 'an off-list email', presented: 'a wrong password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'anonymous', email: 'an off-list email', presented: 'the correct password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'anonymous', email: 'an allowlisted email', presented: 'no password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'anonymous', email: 'an allowlisted email', presented: 'a wrong password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'anonymous', email: 'an allowlisted email', presented: 'the correct password', status: 200 },
+  // Sign-in neither satisfies an `email` audience nor changes its refusal.
+  { link: 'email + password', caller: 'signed in', email: 'an off-list email', presented: 'the correct password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'signed in', email: 'an allowlisted email', presented: 'a wrong password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email + password', caller: 'signed in', email: 'an allowlisted email', presented: 'the correct password', status: 200 },
+  // Control: a password-less `email` link refuses an off-list email the same
+  // way, and serves an allowlisted one.
+  { link: 'email', caller: 'anonymous', email: 'an off-list email', presented: 'no password', status: 404, code: 'INVALID_OR_EXPIRED' },
+  { link: 'email', caller: 'anonymous', email: 'an allowlisted email', presented: 'no password', status: 200 },
 ];
 
+/** Every row names the email it sent, so each title reads the whole request. */
+const ROWS: readonly (Row & { email: Email })[] = TABLE.map((row) => ({ email: 'no email' as const, ...row }));
+
+const CALLER_KEYS = Object.keys(CALLERS) as Caller[];
+const EMAIL_KEYS = Object.keys(EMAILS) as Email[];
+const PRESENTED_KEYS = Object.keys(PRESENTED) as Presented[];
+
 describe.each(MOUNTS)('[#23328] share-link resolve refusal order — the %s', (mount) => {
-  it.each(TABLE)('$link, $caller, $presented → $status $code', async (row) => {
-    const answer = await open(mount, row.link, row.caller, row.presented);
+  it.each(ROWS)('$link, $caller, $email, $presented → $status $code', async (row) => {
+    const answer = await open(mount, row.link, row.caller, row.presented, row.email);
     const label = `${mount}: ${JSON.stringify(answer.body)}`;
     expect(answer.status, label).toBe(row.status);
     if (row.code) {
@@ -250,5 +326,45 @@ describe.each(MOUNTS)('[#23328] share-link resolve refusal order — the %s', (m
     const correct = await open(mount, 'signed_in + password', 'anonymous', 'the correct password');
     expect(correct, 'the correct password against a wrong one').toEqual(wrong);
     expect(correct, 'the correct password against none').toEqual(none);
+  });
+
+  // [#23372] The email audience. Each pin compares whole answers — status,
+  // envelope and headers — against one reference, so any difference a caller
+  // could read is a difference here.
+  it('[#23372] email audience, no password oracle: no email or an off-list email reads one answer whatever password was sent', async () => {
+    const reference = await open(mount, 'email + password', 'anonymous', 'no password', 'no email');
+    for (const caller of CALLER_KEYS) {
+      for (const email of ['no email', 'an off-list email'] as const) {
+        for (const presented of PRESENTED_KEYS) {
+          const answer = await open(mount, 'email + password', caller, presented, email);
+          expect(answer, `${caller}, ${email}, ${presented}`).toEqual(reference);
+        }
+      }
+    }
+  });
+
+  it('[#23372] email audience, no allowlist-membership oracle: an allowlisted email without the right password reads what an off-list email reads', async () => {
+    for (const caller of CALLER_KEYS) {
+      for (const presented of ['no password', 'a wrong password'] as const) {
+        const offList = await open(mount, 'email + password', caller, presented, 'an off-list email');
+        const allowlisted = await open(mount, 'email + password', caller, presented, 'an allowlisted email');
+        expect(allowlisted, `${caller}, ${presented}`).toEqual(offList);
+      }
+    }
+  });
+
+  it('[#23372] email audience: the refusal is the one an unknown token and a password-less email link answer', async () => {
+    const unknown = await open(mount, 'unknown token', 'anonymous', 'no password');
+    const passwordless = await open(mount, 'email', 'anonymous', 'no password', 'an off-list email');
+    expect(passwordless, 'a password-less email link against an unknown token').toEqual(unknown);
+    for (const caller of CALLER_KEYS) {
+      for (const email of EMAIL_KEYS) {
+        for (const presented of PRESENTED_KEYS) {
+          if (email === 'an allowlisted email' && presented === 'the correct password') continue; // served
+          const answer = await open(mount, 'email + password', caller, presented, email);
+          expect(answer, `${caller}, ${email}, ${presented}`).toEqual(unknown);
+        }
+      }
+    }
   });
 });

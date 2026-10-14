@@ -103,9 +103,9 @@ const sysPermissionSet = {
     id: { name: 'id', type: 'text' as const, primaryKey: true },
     name: { name: 'name', type: 'text' as const },
     // [#6084] Not read by the guard — that is its job here. `label` is what
-    // every projection pass and every Setup edit writes
-    // (`permissionSetRowFields`), so it is the column the "costs no reads"
-    // pin drives.
+    // every projection pass and every Setup edit wrote
+    // (`permissionSetRowFields`, retired with C3 stage 7a), so it is the column
+    // the "costs no reads" pin drives.
     label: { name: 'label', type: 'text' as const },
     // [#8613 / ADR-0049] The Deactivate switch. Declared `boolean`, so on this
     // real sqlite database it stores as 0/1 and the guard's flag handling is

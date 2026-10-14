@@ -326,10 +326,9 @@ export function registerExternalDatasourceRoutes(
     //
     // No path is consulted. This registrar's base is the host's argument, and
     // nothing here is a remediation or bootstrap route, so the allow-list has
-    // nothing to exempt. `code` is declared as a bare string on the envelope's
-    // `authGate`. Its one producer (plugin-auth's `customSession` enrichment)
-    // writes only `PASSWORD_EXPIRED` and `MFA_REQUIRED`, both members of the
-    // vocabulary.
+    // nothing to exempt. The envelope's `authGate.code` is a member of the
+    // closed posture vocabulary (`AuthGateCodeSchema`),
+    // every member of which is registered in the error-code vocabulary.
     if (authz?.authGate) {
       sendError(res, 403, authz.authGate.code as ErrorCode, authz.authGate.message);
       return true;
