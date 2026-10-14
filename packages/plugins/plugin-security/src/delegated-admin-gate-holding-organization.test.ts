@@ -6,8 +6,9 @@
  *
  * ## The defect this exists to keep closed
  *
- * `sys_user_position.position` is a position NAME, and `sys_position.name` is
- * unique per organization only, so in a single-database multi-org posture
+ * `sys_user_position.position` is a position NAME, the same string in every
+ * organization that holds it (ADR-0131 D3: one environment catalog), so in a
+ * single-database multi-org posture
  * (ADR-0105 D1 `group` / `isolated`) two organizations' holdings of the same
  * name are the same string. Two gate reads selected holdings by that name under
  * a bare `{ isSystem: true }` context with no organization condition. The one

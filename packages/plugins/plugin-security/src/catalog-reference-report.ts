@@ -30,7 +30,7 @@
  * And it lists PER POSITION, since a definition belongs to the environment and
  * to no organization:
  *
- * 4. **Positions naming no permission set** — position definitions in the
+ * 4. **Positions naming a permission set the catalog does not resolve** — position definitions in the
  *    catalog whose `permissionSets` name a set the catalog does not resolve.
  *    The authorization resolver reads a position's sets from its definition,
  *    so a holder of the position is granted nothing through such a name. The

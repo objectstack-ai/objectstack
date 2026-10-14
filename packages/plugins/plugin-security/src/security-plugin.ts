@@ -4360,9 +4360,8 @@ export class SecurityPlugin implements Plugin {
             });
             everyoneMutationWired = true;
           }
-          // [#2747] When the owning package is uninstalled, revoke its data-plane permission
-          // rows (package-owned sets + their position/user bindings + the
-          // package's suggestion rows) and the grants naming the sets it
+          // [#2747] When the owning package is uninstalled, remove the
+          // package's suggestion rows and revoke the grants naming the sets it
           // declared (`args.declared`, captured by the door before it withdrew
           // the package) so grants die with the package — the "no ghost
           // grants" clause of ADR-0090 D5.

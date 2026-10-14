@@ -5708,8 +5708,8 @@ export type PublishMaterializer = (args: {
 /**
  * Uninstall-time data-plane cleanup (ADR-0086 D3, #2747). The exact mirror of
  * {@link PublishMaterializer}: domain plugins own data-plane tables the
- * protocol layer must not know the shape of (e.g. plugin-security's
- * `sys_permission_set` and its binding tables), so they register a named
+ * protocol layer must not know the shape of (e.g. plugin-security's grant
+ * table, `sys_user_permission_set`), so they register a named
  * cleanup here and {@link ObjectStackProtocolImplementation.deletePackage}
  * invokes every cleanup with the uninstalled package id. Cleanups run
  * best-effort — a failure is REPORTED on the uninstall response (`cleanups`),
@@ -5944,8 +5944,8 @@ export interface MetaItemPublishedEvent {
  * Awaited per-type mutation projector (ADR-0094). Invoked AFTER a metadata
  * mutation persists — `saveMetaItem` (draft AND active saves),
  * `publishMetaItem`, `deleteMetaItem` — and AWAITED before the write returns,
- * so a data-plane read-model derived from the metadata (e.g. `permission` →
- * `sys_permission_set`) is already consistent when the caller's next read
+ * so a data-plane read-model derived from the metadata (e.g. the
+ * `datasource` projector's) is already consistent when the caller's next read
  * lands. This is what makes such a read-model a PURE projection: the
  * projector is its only writer, and it runs in the same awaited operation as
  * every metadata write, instead of a fire-and-forget subscriber a new write
@@ -14606,11 +14606,12 @@ export class ObjectStackProtocolImplementation implements
         // The same measurement, one outcome over: `success` was still a
         // LITERAL for every answer that was not the contract's `false`, so a
         // row that MATCHED and was deliberately NOT removed reported a
-        // deletion. `sys_permission_set` is the shipped case — a
-        // package-declared set's delete is an ADR-0005 RESET, the record
-        // re-projects to the declared body instead of vanishing — and the
-        // envelope was byte-identical to a real delete, so a UI fired a
-        // success toast and showed the row again on refresh.
+        // deletion. `sys_permission_set` was the shipped case until C3 stage
+        // 8 retired that object — a package-declared set's delete was an
+        // ADR-0005 RESET, the record re-projected to the declared body instead
+        // of vanishing — and the envelope was byte-identical to a real
+        // delete, so a UI fired a success toast and showed the row again on
+        // refresh.
         //
         // `success` is declared "Whether deletion succeeded", and this is the
         // only key on `DeleteDataResponseSchema` that can carry the
@@ -15807,11 +15808,12 @@ export class ObjectStackProtocolImplementation implements
                         // LITERAL for every result that was not the contract's
                         // `false`, so that row was reported as a deletion too.
                         //
-                        // `sys_permission_set` is the shipped shape of it: deleting
-                        // a package-declared set is an ADR-0005 RESET — the overlay
-                        // tombstones and the record re-projects to the declared body
-                        // instead of vanishing — so the row MATCHED, the write ran,
-                        // and the record is still there. On a security-configuration
+                        // `sys_permission_set` was the shipped shape of it until C3
+                        // stage 8 retired that object: deleting a package-declared
+                        // set was an ADR-0005 RESET — the overlay tombstoned and the
+                        // record re-projected to the declared body instead of
+                        // vanishing — so the row MATCHED, the write ran, and the
+                        // record was still there. On a security-configuration
                         // write this envelope told an operator a permission set was
                         // gone while it was still being enforced.
                         //
@@ -16467,11 +16469,12 @@ export class ObjectStackProtocolImplementation implements
                 // every answer that was not the contract's `false`, so that row
                 // was reported as a deletion too.
                 //
-                // `sys_permission_set` is the shipped case: a package-declared
-                // set's delete is an ADR-0005 RESET — plugin-security's
-                // write-through tombstones the overlay and the record
-                // re-projects to the declared body instead of vanishing — so the
-                // row MATCHED, the write ran, and the record is still there. The
+                // `sys_permission_set` was the shipped case until C3 stage 8
+                // retired that object: a package-declared set's delete was an
+                // ADR-0005 RESET — plugin-security's write-through tombstoned the
+                // overlay and the record re-projected to the declared body
+                // instead of vanishing — so the row MATCHED, the write ran, and
+                // the record was still there. The
                 // batch envelope said `success: true` and counted it in
                 // `succeeded`, which on a security-configuration write tells an
                 // operator a permission set is gone while it is still enforced.
@@ -22758,8 +22761,8 @@ export class ObjectStackProtocolImplementation implements
                 note: mode === 'draft' ? 'draft' : 'active',
             });
             // [ADR-0094] Awaited projection BEFORE the fire-and-forget
-            // listeners: a derived read-model (e.g. sys_permission_set)
-            // is already consistent when this save returns.
+            // listeners: a derived read-model (e.g. the `datasource`
+            // projector's) is already consistent when this save returns.
             const projectionApplied = await this.runMutationProjector({
                 type: singularTypeForRepo,
                 name: request.name,

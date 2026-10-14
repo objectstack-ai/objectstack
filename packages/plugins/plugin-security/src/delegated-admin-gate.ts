@@ -107,9 +107,10 @@ function callerOrganizationId(context: any): string | undefined {
  * `organizationId` undefined (a context carrying no organization) drops nothing.
  *
  * Every holding the gate reasons about goes through this, because
- * `sys_user_position.position` is a position NAME and `sys_position.name` is
- * unique per organization only — so under a walled posture another
- * organization's holding of a same-named position is the same string. The
+ * `sys_user_position.position` is a position NAME, the same string in every
+ * organization that holds it (ADR-0131 D3: one environment catalog) — so under
+ * a walled posture another organization's holding of the position is the same
+ * string. The
  * gate must count exactly the holdings the runtime grants: counting another
  * organization's lets a user self-delegate a position they do not hold there;
  * dropping organization-less ones refuses holdings the runtime honours.
