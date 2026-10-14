@@ -8,6 +8,8 @@ Clause-②: yes (widening)
 
 The plan of `os migrate organization-ownership` gains a key, `metadataConflicts` on the `sys_metadata` table. It lists every overlay key that more than one row would hold once the organization leaves the key, with each row's id. `--apply` gains a flag, `--metadata-choice ROW_ID`. Nothing is removed from the plan or the apply.
 
+`--apply` shipped in 18.0.0-next.1. This adds to it, and refuses no invocation that release could finish: a conflict now blocks the new step until it is chosen, but on such a database 18.0.0-next.1's `--apply` already stopped at `column-drops`, which never drops `sys_metadata`'s still-declared column.
+
 `--apply` gains a step, `metadata-promotion`, after the authored catalog conversion:
 
 - **Form withdrawals are carried first, under every posture, and fail-closed.** When an organization withdrew a public form (`sharing.enabled` or `sharing.allowAnonymous` set to `false`, link kept), every view the environment serves under that name that still serves the form open takes the withdrawal. That covers stored views and views served from code, in every package. The ceremony saves it through the metadata door, into the view's own package, and any organization's withdrawal wins.
