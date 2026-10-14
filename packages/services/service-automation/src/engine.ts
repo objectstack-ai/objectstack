@@ -4465,9 +4465,10 @@ export class AutomationEngine implements IAutomationService {
      * stored pass reports that row `failed` with the parse's words.
      *
      * None of it changes `parsed` or `storable`, and nothing here throws for
-     * it, so a caller that reads no `todos` (the save door, a package
-     * duplication) behaves as before. `registerFlow` reads none either: it
-     * runs the same checks itself and throws the first refusal.
+     * it. The checks run on the first read of `todos`, so a caller that reads
+     * none (the save door, a package duplication, the sync's comparison of a
+     * held flow) does no more work than before. `registerFlow` reads none
+     * either: it runs the same checks itself and throws the first refusal.
      */
     canonicalizeStoredFlow(name: string, definition: unknown): {
         parsed: FlowParsed;
@@ -4476,19 +4477,37 @@ export class AutomationEngine implements IAutomationService {
         conflicts: ConversionConflictNotice[];
         todos: ConversionTodoNotice[];
     } {
-        const canonical = this.canonicalizeFlow(name, definition);
-        // One listing per site: a site a conversion TODO names (the value-slot
-        // refusal the spec lists under its D3 entry) keeps that TODO, which
-        // names the retirement; the registration check's line for it is the
-        // same refusal and is not repeated.
-        const listed = new Set(canonical.todos.map((todo) => todo.path));
-        for (const refusal of this.registrationCheckRefusals(name, canonical.parsed)) {
-            for (const site of refusal.sites) {
-                if (listed.has(site.path)) continue;
-                canonical.todos.push(flowRegistrationTodo(name, site));
+        const { parsed, storable, notices, conflicts, todos: chainTodos } = this.canonicalizeFlow(name, definition);
+        // The registration checks run when `todos` is first READ, once: the
+        // stored pass reads it, and the doors that only want `parsed` or
+        // `storable` (the save door, a package duplication, the sync's
+        // "already held?" comparison) pay nothing for a listing they discard.
+        const listRegistrationRefusals = (): ConversionTodoNotice[] => {
+            const todos = [...chainTodos];
+            // One listing per site: a site a conversion TODO names (the value-slot
+            // refusal the spec lists under its D3 entry) keeps that TODO, which
+            // names the retirement; the registration check's line for it is the
+            // same refusal and is not repeated.
+            const listed = new Set(chainTodos.map((todo) => todo.path));
+            for (const refusal of this.registrationCheckRefusals(name, parsed)) {
+                for (const site of refusal.sites) {
+                    if (listed.has(site.path)) continue;
+                    todos.push(flowRegistrationTodo(name, site));
+                }
             }
-        }
-        return canonical;
+            return todos;
+        };
+        let listedTodos: ConversionTodoNotice[] | undefined;
+        return {
+            parsed,
+            storable,
+            notices,
+            conflicts,
+            get todos(): ConversionTodoNotice[] {
+                listedTodos ??= listRegistrationRefusals();
+                return listedTodos;
+            },
+        };
     }
 
     /**

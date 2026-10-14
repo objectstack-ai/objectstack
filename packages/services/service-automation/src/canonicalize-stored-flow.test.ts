@@ -350,6 +350,20 @@ describe('canonicalizeStoredFlow — every site registerFlow refuses after the p
         expect(result.todos).toHaveLength(1);
     });
 
+    it('runs the checks only for a caller that reads `todos`, and once however often it is read', () => {
+        const engine = engineWithStamp();
+        const checks = vi.spyOn(engine as any, 'registrationCheckRefusals');
+        const result = engine.canonicalizeStoredFlow('fd_stored', flowOf([notify('Hi {record.name}')]));
+        // What the save door, a duplication and the sync's held-flow comparison read.
+        void result.parsed;
+        void result.storable;
+        void result.conflicts;
+        expect(checks).not.toHaveBeenCalled();
+        expect(result.todos).toHaveLength(1);
+        expect(result.todos).toBe(result.todos);
+        expect(checks).toHaveBeenCalledTimes(1);
+    });
+
     it('every site of a flow refused by several checks is listed, in the order registerFlow judges them', () => {
         const flow = flowOf([
             { id: 'w', type: STAMP, label: 'W', config: { count: 1, countz: 2 } },
