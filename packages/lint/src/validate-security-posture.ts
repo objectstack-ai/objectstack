@@ -33,8 +33,9 @@
  * an operator binds to `guest` at install time is a decision ADR-0090 D9
  * ("a package may suggest bindings … the admin confirms each individually")
  * puts past authoring, so this rule is not — and cannot be — coverage for an
- * app-authored anchor set bound to `guest` (#16110). That binding is held by
- * the runtime's own `describeAnchorForbiddenBits(set, 'guest')` gate instead.
+ * app-authored anchor set bound to `guest` (#16110). No runtime door binds a
+ * set to `guest` today; ADR-0138 D3 item 5's bind door runs
+ * `describeAnchorForbiddenBits(set, 'guest')` when it is built.
  *
  * `security-cbp-ambiguous-relation` used to be the one exception: the runtime
  * did not refuse two candidate masters, it silently PICKED one by field

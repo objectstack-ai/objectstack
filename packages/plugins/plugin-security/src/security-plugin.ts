@@ -6146,9 +6146,10 @@ export class SecurityPlugin implements Plugin {
    *  - **The remaining PRE-RESOLUTION gates, which run beside arms 2 and 3 and
    *    are not asked here.** Two judge a row's PROVENANCE, which a preview
    *    holds no row to carry: the ADR-0086/0094 package-managed write gate and
-   *    the ADR-0066 system-row write gate. Two judge a payload VALUE: the
-   *    ADR-0066 D1 curated-capability-name refusal and the ADR-0090 D5/D9
-   *    audience-anchor binding guard. And the ADR-0056 `publicFormGrant` scope,
+   *    the ADR-0066 system-row write gate. One judges a payload VALUE: the
+   *    ADR-0066 D1 curated-capability-name refusal. (The ADR-0090 D5/D9
+   *    audience-anchor binding guard is gone: it judged `sys_position_permission_set`
+   *    writes, an object C3 stage 8 retired.) And the ADR-0056 `publicFormGrant` scope,
    *    which admits create plus read-back on exactly the granted object and
    *    refuses everything else pre-resolution — not asked because no wire
    *    caller and no constructor in the tree presents the grant here (it is
