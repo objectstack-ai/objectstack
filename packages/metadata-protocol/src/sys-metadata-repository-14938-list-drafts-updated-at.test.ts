@@ -212,7 +212,6 @@ const draftRow = (stamps: Row): Row => ({
 function makeRepo(engine: ReturnType<typeof makeFakeEngine>, organizationId: string | null = null) {
   return new SysMetadataRepository({
     engine: engine as never,
-    organizationId,
     orgLabel: organizationId ?? 'env',
   } as never);
 }

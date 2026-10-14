@@ -318,7 +318,7 @@ function boot() {
          * planted at rest — the protocol now refuses it (`403 NOT_OVERRIDABLE`).
          */
         plantLegacyOrgRow: async (type: string, name: string, label = MARKER, organizationId = ORG_A) => {
-            const repo = new SysMetadataRepository({ engine, organizationId, orgLabel: organizationId });
+            const repo = new SysMetadataRepository({ engine, orgLabel: organizationId });
             const ref = { org: organizationId, type, name } as Parameters<typeof repo.get>[0];
             const head = await repo.get(ref);
             return repo.put(ref, bodyFor(type, name, label), { parentVersion: head?.hash ?? null, actor: null });

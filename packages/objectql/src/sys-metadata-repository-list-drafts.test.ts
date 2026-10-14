@@ -31,7 +31,7 @@ function makeRepo(rows = ROWS, organizationId: string | null = null) {
     return rows.filter((r) => matchesWhere(r, where));
   });
   const engine = { find } as any;
-  const repo = new SysMetadataRepository({ engine, organizationId, orgLabel: 'env' });
+  const repo = new SysMetadataRepository({ engine, orgLabel: 'env' });
   return { repo, find };
 }
 

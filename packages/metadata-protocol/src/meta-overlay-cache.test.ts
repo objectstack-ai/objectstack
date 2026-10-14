@@ -95,7 +95,6 @@ interface StoredRow {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
@@ -109,7 +108,6 @@ const storedRow = (
     id: `r_${type}_${name}`,
     type,
     name,
-    organization_id: null,
     package_id: null,
     state: 'active',
     metadata: JSON.stringify({ name, label: `Label for ${name}` }),
@@ -583,10 +581,7 @@ describe('[#11967] §7 distinct reads never share an entry', () => {
     // the anonymous form doors' deleted `legacyFormOrganizationId` included —
     // answers from the environment's entry.
     it('a read naming an organization, by any key, answers from the env-wide entry', async () => {
-        const h = makeHarness([
-            storedRow('view', 'alpha'),
-            storedRow('view', 'org_only', { organization_id: 'org_1', id: 'r_view_org' }),
-        ]);
+        const h = makeHarness([storedRow('view', 'alpha')]);
 
         const envWide = await h.protocol.getMetaItems({ type: 'view' });
         const findsAfterEnvWide = h.finds.length;

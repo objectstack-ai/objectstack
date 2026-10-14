@@ -170,7 +170,6 @@ describe('SysMetadataRepository', () => {
         engine = makeFakeEngine();
         repo = new SysMetadataRepository({
             engine,
-            organizationId: 'org_alpha',
             orgLabel: 'org_alpha',
         });
     });

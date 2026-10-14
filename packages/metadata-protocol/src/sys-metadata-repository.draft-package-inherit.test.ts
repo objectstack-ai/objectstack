@@ -95,7 +95,6 @@ const REF = { org: 'system', type: 'view' as const, name: 'k9qk_member.member_li
 function makeRepo(engine: ReturnType<typeof makeFakeEngine>) {
   return new SysMetadataRepository({
     engine: engine as never,
-    organizationId: null,
     orgLabel: 'env',
   } as never);
 }
@@ -146,7 +145,6 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
     ]);
     const repo = new SysMetadataRepository({
       engine: engine as never,
-      organizationId: 'org_1',
       orgLabel: 'org_1',
     } as never);
     await repo.put(REF, { label: 'Member v2' }, { parentVersion: null, actor: 't', state: 'draft' as const });
@@ -245,7 +243,6 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
     const engine = makeFakeEngine([seededActive('app.k9qk')]);
     const repo = new SysMetadataRepository({
       engine: engine as never,
-      organizationId: 'org_1',
       orgLabel: 'org_1',
     } as never);
     const first = await repo.put(REF, { label: 'org draft' }, { parentVersion: null, actor: 't', state: 'draft' as const });

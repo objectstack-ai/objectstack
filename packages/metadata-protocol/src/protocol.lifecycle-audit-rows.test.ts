@@ -99,7 +99,6 @@ interface Row {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
@@ -121,14 +120,13 @@ interface HistoryRow {
     previous_checksum: string | null;
     change_note?: string | null;
     source?: string | null;
-    organization_id: string | null;
     recorded_by?: string | null;
     recorded_at: string;
 }
 
 /** The ADR-0048 overlay key — draft and active rows for one identity coexist. */
 function keyOf(w: Record<string, unknown>) {
-    return `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
+    return `${w.type}|${w.name}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
 }
 
 function matchesMetadataWhere(r: Row, where: Record<string, unknown>): boolean {
@@ -176,7 +174,6 @@ function makeStubEngine(opts: { failAudit?: boolean } = {}): Harness {
     };
 
     const matchesHistory = (h: HistoryRow, w: Record<string, unknown>): boolean => {
-        if (w.organization_id !== undefined && h.organization_id !== w.organization_id) return false;
         if (w.type !== undefined && h.type !== w.type) return false;
         if (w.name !== undefined && h.name !== w.name) return false;
         if (w.version !== undefined && h.version !== w.version) return false;
@@ -315,7 +312,6 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         expect(opRows(h, 'save')[0]).toMatchObject({
             type: 'view',
             name: 'case_grid',
-            organization_id: null,
             operation: 'save',
             outcome: 'allowed',
             code: 'ok',
@@ -346,7 +342,6 @@ describe('[#7748] the audit trail records the whole lifecycle, not only `save`',
         expect(opRows(h, 'publish')[0]).toMatchObject({
             type: 'view',
             name: 'case_grid',
-            organization_id: null,
             operation: 'publish',
             outcome: 'allowed',
             code: 'ok',

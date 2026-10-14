@@ -382,7 +382,7 @@ describe('[#5707] the layered read stops painting an outage as "nothing was cust
     it('a healthy store still reports the overlay layer and its scope', async () => {
         const engine = engineWithRows([], { acct: codeBaseline });
         engine.findOne = vi.fn(async (_o: string, opts: any) =>
-            (opts?.where?.organization_id === null
+            (opts?.where?.type === 'object' && opts?.where?.name === 'acct' && !('organization_id' in (opts?.where ?? {}))
                 ? { type: 'object', name: 'acct', state: 'active', metadata: JSON.stringify({ name: 'acct', label: 'Env overlay' }) }
                 : null),
         );

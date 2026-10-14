@@ -170,7 +170,6 @@ function makeRepo(): SysMetadataRepository {
     // `fullRef().org` agree with the suite's `refOf()` — the repository ignores
     // `ref.org` and stamps its own, which is exactly the single-org shape the
     // "different orgs have independent sequences" clause is written to skip.
-    organizationId: null,
     orgLabel: 'system',
   });
   created.push(repo);
@@ -202,7 +201,7 @@ runRepositoryContractTests('SysMetadataRepository', makeRepo, {
 describe('SysMetadataRepository — what the contract suite does and does not reach', () => {
   it('every suite write lands on the ACTIVE row; no draft row is ever created', async () => {
     const engine = makeFakeEngine();
-    const repo = new SysMetadataRepository({ engine, organizationId: null, orgLabel: 'system' });
+    const repo = new SysMetadataRepository({ engine, orgLabel: 'system' });
     created.push(repo);
     const ref = { org: 'system', type: 'view' as const, name: 'sample_view' };
 
@@ -216,7 +215,7 @@ describe('SysMetadataRepository — what the contract suite does and does not re
 
   it('every suite write lands on the UNBOUND row — `package_id` is null throughout', async () => {
     const engine = makeFakeEngine();
-    const repo = new SysMetadataRepository({ engine, organizationId: null, orgLabel: 'system' });
+    const repo = new SysMetadataRepository({ engine, orgLabel: 'system' });
     created.push(repo);
     const ref = { org: 'system', type: 'view' as const, name: 'sample_view' };
 
@@ -227,7 +226,7 @@ describe('SysMetadataRepository — what the contract suite does and does not re
 
   it('is single-org: `ref.org` is ignored, which is WHY the multi-org clause self-skips', async () => {
     const engine = makeFakeEngine();
-    const repo = new SysMetadataRepository({ engine, organizationId: null, orgLabel: 'system' });
+    const repo = new SysMetadataRepository({ engine, orgLabel: 'system' });
     created.push(repo);
     const orgA = { org: 'org_a', type: 'view' as const, name: 'sample_view' };
     const orgB = { org: 'org_b', type: 'view' as const, name: 'sample_view' };
@@ -392,7 +391,6 @@ describe('SysMetadataRepository — invariant 6, both halves (#10842)', () => {
     };
     const repo = new SysMetadataRepository({
       engine: gated,
-      organizationId: null,
       orgLabel: 'system',
     });
     created.push(repo);
@@ -432,7 +430,6 @@ describe('SysMetadataRepository — invariant 6, both halves (#10842)', () => {
     };
     const repo = new SysMetadataRepository({
       engine: flaky,
-      organizationId: null,
       orgLabel: 'system',
     });
     created.push(repo);
@@ -622,7 +619,7 @@ describe('SysMetadataRepository — a declared ordered map: object `fields` (#21
   const storedOrder = (engine: Engine) =>
     Object.keys((JSON.parse(activeRow(engine).metadata as string) as { fields: object }).fields);
   const repoOn = (engine: Engine) => {
-    const repo = new SysMetadataRepository({ engine, organizationId: null, orgLabel: 'system' });
+    const repo = new SysMetadataRepository({ engine, orgLabel: 'system' });
     created.push(repo);
     return repo;
   };
