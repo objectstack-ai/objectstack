@@ -13,6 +13,7 @@ import {
     // [#21941] The environment-membership gate raises the same loud outage
     // when its own read cannot answer.
     AuthzStoreUnavailableError,
+    type AuthGate,
 } from '@objectstack/core';
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
@@ -104,6 +105,16 @@ export interface HttpProtocolContext {
      * RBAC/RLS/FLS. Optional — anonymous requests carry an empty context.
      */
     executionContext?: ExecutionContext;
+    /**
+     * [#23287, ruling C′ item 3] Which credential admitted
+     * {@link executionContext}'s principal, and — for an API key — the
+     * key-admission seam's ADR-0069 answer on the key's owner. Written by
+     * {@link HttpDispatcher.resolveRequestScope}; read by the ADR-0069 gate,
+     * which judges a key-admitted request by the key's answer and re-reads the
+     * session only for a principal a session admitted. Undefined for an
+     * anonymous request.
+     */
+    admission?: { credential: 'api_key' | 'session'; authGate: AuthGate | undefined };
     /**
      * The kernel THIS request is served from (#5155).
      *
@@ -684,6 +695,9 @@ export class HttpDispatcher {
                 // have to move together: left behind, scoped MCP callers would
                 // reach the domain with their OAuth 2.1 access tokens refused.
                 acceptOAuthAccessToken: /^(?:\/environments\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
+                // [#23287] Kept on THIS request, beside the envelope, for the
+                // ADR-0069 gate below (`enforceAuthGate`).
+                onAdmission: (admission) => { context.admission = admission; },
             });
         } catch (err) {
             // [#13906 decision 1 A / commit 6a180e42d] The ONE fault that must stay loud:
@@ -1387,6 +1401,19 @@ export class HttpDispatcher {
     private async enforceAuthGate(context: any, cleanPath: string, method?: string): Promise<any | null> {
         try {
             if (isAuthGateAllowlisted(cleanPath, method)) return null;
+            // [#23287 — ruling C′ item 3] A principal an API KEY admitted is
+            // judged by the key's own answer, decided once at the shared
+            // key-admission seam: the owner's `account`-scope posture, or none.
+            // ⛔ No cookie re-read for it. That re-read is the SESSION's gate;
+            // run for a key, it refused the key with whatever posture a cookie
+            // sent beside it carried (another credential's, possibly another
+            // user's), and it never asked the key's owner at all when no
+            // cookie came along.
+            const admission = (context as HttpProtocolContext | undefined)?.admission;
+            if (admission?.credential === 'api_key') {
+                const gate = evaluateAuthGate(admission, cleanPath, method);
+                return gate ? this.error(gate.message, 403, { code: gate.code }) : null;
+            }
             // [#4127 FINDING, batch 5]
             // `auth` IS contracted, so this `any` is not legitimate.
             // `isAuthGateActive` is implemented (auth-manager.ts) and load-bearing

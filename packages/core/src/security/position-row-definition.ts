@@ -12,10 +12,9 @@
  * the dual source ADR-0131 D10 retires.
  *
  * The function is pure: one row in, one body out — no engine, no I/O. It is
- * the mapping the security plugin's row-only position backfill applies today
- * (`positionBodyFromRow`, beside its position write-through), held here so the
- * ceremony and that plugin read one mapping; the plugin's copy is deleted when
- * its boot module is.
+ * the mapping the security plugin's row-only position backfill applied until
+ * C3 stage 8 retired that boot module, held here as the one mapping the
+ * ceremony reads.
  *
  * The definition is the four `PositionSchema` keys the row has columns for, in
  * this key order:

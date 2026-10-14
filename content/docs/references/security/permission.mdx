@@ -114,7 +114,7 @@ const result = AdminScopeSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Permission set name, unique per organization (lowercase snake_case) |
+| **name** | `string` | ✅ | Permission set name, unique within the security catalog the environment serves (lowercase snake_case) |
 | **label** | `string` | optional | Display label |
 | **description** | `string` | optional | Human-readable description shown in Setup |
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored); a value that disagrees with the package that ships the set, or that it is saved into, is refused by the stack schema (defineStack, os validate, os build), the package registration, and the metadata save, restore and publish doors |

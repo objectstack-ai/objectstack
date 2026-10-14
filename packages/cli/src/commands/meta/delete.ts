@@ -31,6 +31,26 @@ export const EMPTY_IF_MATCH_REFUSAL =
   + 'to accept the unpinned (last-write-wins) reset.';
 
 /**
+ * [#23350] The refusal an EMPTY `--package` earns, before anything reaches
+ * the door — the `--if-match` rule above, for the same reason.
+ *
+ * The SDK sends nothing for `packageId: ''` (`DeleteMetaItemOptions.packageId`:
+ * "`undefined` and `''` both send nothing"), and a delete that names no
+ * package is not a refusal on every item: the door resolves it, removing the
+ * row of the one package that holds the item, or the package-unbound row when
+ * none does. So `os meta delete view x --package "$PKG"` with `PKG` unset would
+ * remove whichever row that resolution picks while the operator reads their
+ * command line as naming one package — and where the package they meant holds
+ * no row, the named delete would have removed nothing. The CLI refuses rather
+ * than degrades. A non-empty id is forwarded verbatim: the door, not this
+ * command, decides what an id names.
+ */
+export const EMPTY_PACKAGE_DELETE_REFUSAL =
+  '--package needs the id of the package whose row to delete, and was given an empty value. '
+  + 'Name the package (for example com.acme.crm), or omit --package to delete the row '
+  + 'the server resolves when the item belongs to one package.';
+
+/**
  * [#13024] The `DeleteMetaItemOptions` bag this command's flags mean — the one
  * place the CLI decides what goes on the wire.
  *
@@ -45,19 +65,34 @@ export const EMPTY_IF_MATCH_REFUSAL =
  * `os meta delete <type> <name>` hands the SDK the same argument list it has
  * always handed it and the request stays byte-identical.
  *
- * ⛔ `?dropStorage` is NOT here and gets no flag. Commit cf71d73f8 shipped two of the
- * door's three carriers on purpose: the third ADDS destructive reach (it drops
- * the object's physical table), no caller was measured needing it, and the
- * door's repeated-parameter refusal exists because of that destructiveness.
- * Publishing it from the CLI would reverse that ruling from the layer above.
+ * The reset door (`DELETE /meta/:type/:name`) reads these carriers: the
+ * `If-Match` header and the `state`, `package`, `dropStorage` and `member`
+ * query parameters (`META_ITEM_RESET_PARAMS` in `@objectstack/rest` is the
+ * query half). This command sends the first three, each from its own flag:
+ * `--if-match`, `--draft` and `--package` (#23350). The other two get no flag:
+ *
+ * ⛔ `?dropStorage` is NOT here and gets no flag, on purpose (commit cf71d73f8):
+ * it ADDS destructive reach (it drops the object's physical table), no caller
+ * was measured needing it, and the door's repeated-parameter refusal exists
+ * because of that destructiveness. Publishing it from the CLI would reverse
+ * that ruling from the layer above.
+ *
+ * `?member` (one member of a bundled type) gets no flag because
+ * `DeleteMetaItemOptions` declares no member for it, and this command sends
+ * only what the SDK bag carries.
  */
 export function metaDeleteOptions(flags: {
   'if-match'?: string;
   draft?: boolean;
+  package?: string;
 }): DeleteMetaItemOptions | undefined {
   const pin = flags['if-match'];
   if (pin !== undefined && pin.trim() === '') {
     throw new Error(EMPTY_IF_MATCH_REFUSAL);
+  }
+  const packageId = flags.package;
+  if (packageId !== undefined && packageId.trim() === '') {
+    throw new Error(EMPTY_PACKAGE_DELETE_REFUSAL);
   }
   const options: DeleteMetaItemOptions = {};
   if (pin !== undefined) options.ifMatch = pin;
@@ -65,6 +100,8 @@ export function metaDeleteOptions(flags: {
   // and the SDK drops it. The flag is therefore a boolean, matching every
   // other binary opt-in in this CLI.
   if (flags.draft) options.state = 'draft';
+  // [#23350] Verbatim, as the SDK takes it: `packageId` → `?package=`.
+  if (packageId !== undefined) options.packageId = packageId;
   return Object.keys(options).length > 0 ? options : undefined;
 }
 
@@ -77,6 +114,7 @@ export default class MetaDelete extends Command {
     '$ os meta delete object my_custom_object --format json',
     '$ os meta delete view shared_grid --if-match "$VERSION"',
     '$ os meta delete view shared_grid --draft',
+    '$ os meta delete view shared_grid --package com.acme.crm',
   ];
 
   static override args = {
@@ -131,6 +169,15 @@ export default class MetaDelete extends Command {
         'Discard ONLY the pending draft overlay, leaving the published overlay serving. '
         + 'Without it the reset is the full one and drops the published overlay too.',
       default: false,
+    }),
+    // [#23350] The package whose row the delete removes, forwarded verbatim as
+    // `DeleteMetaItemOptions.packageId` (`?package=`). It is the remedy the
+    // door's `409 RESOURCE_CONFLICT` prescribes for an item two packages hold.
+    package: Flags.string({
+      description:
+        'Delete only the row of this package (a package id, e.g. com.acme.crm). Required when '
+        + 'two or more packages hold the item: without it the server refuses with 409 '
+        + 'RESOURCE_CONFLICT and names the packages. Other packages\' rows are left in place.',
     }),
   };
 

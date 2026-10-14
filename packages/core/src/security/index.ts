@@ -247,8 +247,14 @@ export {
   evaluateAuthGate,
   normalizeAuthGate,
   matchInboundHookRoute,
+  // [#23287, ruling C′] The posture scope reader and the per-user posture
+  // computation the API-key admission seam asks.
+  authGateScope,
+  userAuthGateSourceOf,
+  accountScopeAuthGate,
   type AuthGate,
   type InboundHookRouteMatch,
+  type UserAuthGateSource,
 } from './auth-gate.js';
 
 // #2567 — the single anonymous-deny decision shared by every HTTP seam.

@@ -45,6 +45,10 @@ import {
   // for an authorization input that exists and could not be read. Never
   // message text (#13905). ⛔ The RESOLUTION stays here — see the call site.
   classifyAdmissionTenancyPosture,
+  // [#23287, ruling C′ item 3] The auth service's per-user posture
+  // computation, bound for the shared key-admission seam.
+  userAuthGateSourceOf,
+  type AuthGate,
 } from '@objectstack/core';
 
 /**
@@ -80,6 +84,18 @@ interface ResolveOptions {
    * can't ride along on ambient browser state.
    */
   acceptOAuthAccessToken?: boolean;
+  /**
+   * [#23287, ruling C′ item 3] Told, once, which credential admitted the
+   * principal and — for an API key — the key-admission seam's ADR-0069 answer
+   * on the key's owner (`ResolvedAuthzContext.credential` / `.authGate`).
+   *
+   * The dispatcher's gate (`HttpDispatcher.enforceAuthGate`) reads it so that a
+   * principal an API key admitted is judged by the KEY's answer instead of by a
+   * session cookie re-read beside it. The envelope this function returns does
+   * not carry either fact (its `authGate` stays withheld on this face, see
+   * below), so this is the channel. Not called for an anonymous request.
+   */
+  onAdmission?: (admission: { credential: 'api_key' | 'session'; authGate: AuthGate | undefined }) => void;
 }
 
 /**
@@ -220,6 +236,11 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     () => opts.getService('tenancy'),
   );
 
+  // [#23287, ruling C′ item 3] The per-user posture computation the shared
+  // key-admission seam asks for a key's owner. A probe that faults is a host
+  // with no posture to ask, exactly as for the session getter above.
+  const authServiceForGates = await Promise.resolve(opts.getService('auth')).catch(() => undefined);
+
   const authz = await resolveAuthzContext({
     ql,
     headers,
@@ -229,7 +250,11 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // request that resolves no principal is served the guest's grants: the
     // sets bound to the `guest` anchor, in the organization D4 derives.
     guestEntry: true,
+    userAuthGates: userAuthGateSourceOf(authServiceForGates as any),
   });
+  if (authz.userId && authz.credential) {
+    opts.onAdmission?.({ credential: authz.credential, authGate: authz.authGate });
+  }
 
   // [commit f586f1a89 — maintainer ruling 2026-08-08, Option A] The ExecutionContext
   // ASSEMBLY now lives in ONE place too (`assembleExecutionContext*`,
@@ -295,7 +320,8 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // reads — the shape that drifts. Converging the dispatcher onto the envelope
     // (so the gate is resolved once per request like every other identity fact)
     // is a real option, but it is a behaviour-bearing change to a security seam,
-    // not a declaration's rider.
+    // not a declaration's rider. [#23287] The key-admission seam's answer reaches
+    // that gate through `opts.onAdmission`, not through this field.
     authGate: undefined,
   });
 }

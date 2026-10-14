@@ -38,6 +38,9 @@ import {
   MetadataProvenanceSchema,
 } from '../kernel/metadata-protection.zod';
 import { MetadataValidationResultSchema } from '../kernel/metadata-plugin.zod';
+// [#23183] The package-id grammar the app item read's package-id key is
+// recognised by ({@link isAppPackageIdKey}) — its one declaration.
+import { MANIFEST_ID_PATTERN } from '../kernel/manifest.zod';
 // [#10235] The per-column sortability projection the object read serves on its
 // envelope — computed at serve time, never authorable; see sortability.zod.ts.
 import { ObjectSortabilitySchema } from './sortability.zod';
@@ -350,7 +353,19 @@ const BUNDLE_MEMBER_SELECTOR_DESCRIPTION =
  */
 export const GetMetaItemRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
-  name: z.string().describe('Item name (snake_case identifier)'),
+  name: z.string().describe(
+    'Item name: the item\'s own `name`. For `type: \'app\'` only, it may instead be the id of the '
+    + 'package that ships the app (`manifest.id`, reverse-domain, e.g. `com.acme.crm`): with one app '
+    + 'per package the app IS the package container, and the package id is its route key (ADR-0048 '
+    + '§3.1). The two grammars are disjoint (an app name is snake_case with no dot; a package id '
+    + 'matches `MANIFEST_ID_PATTERN`, with at least one dot), so an app key in the package-id grammar '
+    + 'always names the package (`isAppPackageIdKey`). That read answers the package\'s one app as the '
+    + 'by-name read answers it, under the app\'s own `name`, and the per-caller read gate judges it as '
+    + 'it judges that app read by name (an app withheld from the caller answers 403 '
+    + '`PERMISSION_DENIED`). A package with no app, or with more than one, answers as an absent item. '
+    + 'A `packageId` naming a different package is refused with 400 `INVALID_REQUEST`. Every other '
+    + 'type, and every other key, is read by name.',
+  ),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
   state: z.enum(['active', 'draft']).optional().describe(
@@ -373,6 +388,24 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
     + 'upstream, not by this schema.',
   ),
 }));
+
+/**
+ * [#23183] Does `name` address the app item read by PACKAGE ID — the arm
+ * {@link GetMetaItemRequestSchema}'s `name` declares (ADR-0048 §3.1)? True
+ * exactly when `type` is `app` and `name` is in the package-id grammar
+ * ({@link MANIFEST_ID_PATTERN}), which no app name can be: `AppSchema.name` is
+ * snake_case with no dot, and a package id carries at least one. So the arm is
+ * unambiguous, and a by-name read of every other key is unchanged.
+ *
+ * The one spelling of the rule: the producer that resolves the key
+ * (`getMetaItem` in `@objectstack/metadata-protocol`) asks it, and so does any
+ * door that must tell the arm from a by-name read — ⛔ never a second regex or
+ * type test beside it. `type` is the canonical SINGULAR type: a door folds
+ * `apps` once, at its boundary, before asking.
+ */
+export function isAppPackageIdKey(type: string, name: string): boolean {
+  return type === 'app' && MANIFEST_ID_PATTERN.test(name);
+}
 
 /**
  * ADR-0010 read-side protection envelope — the flags a metadata READ publishes
@@ -887,7 +920,7 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
   }).optional().describe(
     'Outcome of the awaited ADR-0094 mutation projector — the post-persist step '
     + 'that materializes this metadata into its derived data-plane read model '
-    + '(e.g. `permission` → `sys_permission_set`). Present ONLY when a projector '
+    + '(e.g. `datasource` → its live connection pool). Present ONLY when a projector '
     + 'is registered for this metadata type, which is why it is optional: its '
     + 'absence means "no projector ran", never "the projection failed". '
     + 'Best-effort by design — a projector failure is reported here and logged, '
@@ -1044,7 +1077,8 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
  * - `seedApplied` — only when the published type is `seed`. Publishing a seed
  *   is what makes its rows live, so the row materialization rides along.
  * - `materializeApplied` — only when an ADR-0086 P2 publish materializer is
- *   registered for the type (e.g. `permission` → `sys_permission_set`).
+ *   registered for the type (e.g. `flow`, whose draft credentials become the
+ *   live ones).
  * - `projectionApplied` — only when an ADR-0094 mutation projector is
  *   registered for the type. Same field, same meaning, as on
  *   {@link SaveMetaItemResponseSchema}: both write doors run the projector.
@@ -1116,8 +1150,8 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     error: z.string().optional().describe('Materializer failure message, present only when `success` is false.'),
   }).optional().describe(
     'Outcome of the ADR-0086 P2 publish-time materializer — the step that '
-    + 'projects the published body into its data-plane row (e.g. `permission` '
-    + '→ `sys_permission_set`, under the owning package). Present ONLY when a '
+    + 'applies the published body to its data-plane state (e.g. `flow`, whose '
+    + 'draft credentials become the live ones). Present ONLY when a '
     + 'materializer is registered for this metadata type, which is why it is '
     + 'optional: its absence means "no materializer ran", never "it failed". '
     + 'Best-effort, same contract as `seedApplied`.',
@@ -1375,7 +1409,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     ),
   }).optional().describe(
     'ADR-0086 P2 — aggregate result of publish-time materializers across '
-    + 'the batch (e.g. `permission` → `sys_permission_set`), including '
+    + 'the batch (e.g. `flow`, whose draft credentials become the live ones), including '
     + 'side-effect failures surfaced by the per-item effects loop. Present '
     + 'ONLY when at least one published item had a registered materializer '
     + 'or a side-effect failure. Best-effort, same contract as '

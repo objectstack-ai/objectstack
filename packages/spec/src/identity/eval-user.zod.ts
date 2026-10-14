@@ -21,7 +21,7 @@ import type { PermissionSet } from '../security/permission.zod';
  * ## Which axis `positions` is — and which it is not (#15136)
  *
  * It is the **security** axis: the built-in identity names plus the
- * `sys_position` names the principal actually holds through `sys_user_position`
+ * position names the principal actually holds through `sys_user_position`
  * (ADR-0057 D4) and their active membership, plus the `everyone` anchor
  * (ADR-0090 D5) — exactly the set `/auth/me/permissions` reports and
  * `resolveUserAuthzGrants` resolves. Every surface derives it from that one
@@ -192,7 +192,7 @@ export const ORGANIZATION_ADMIN_GRANTS: readonly string[] = [
   ORGANIZATION_ADMIN_NO_BYPASS,
 ] as const;
 
-/** Human-readable metadata for the built-in identity names (seeded into `sys_position`; AI grounding). */
+/** Human-readable metadata for the built-in identity names (declared as positions in the security catalog; AI grounding). */
 export const BUILTIN_IDENTITY_METADATA: Record<BuiltinIdentityName, { label: string; description: string }> = {
   [BUILTIN_IDENTITY_PLATFORM_ADMIN]: { label: 'Platform Admin', description: 'Platform operator (SaaS admin). NOT a tenant user role.' },
   [BUILTIN_IDENTITY_ORG_OWNER]: { label: 'Organization Owner', description: 'Organization owner within a tenant.' },
@@ -225,7 +225,7 @@ export const EvalUserSchema = lazySchema(() =>
      * position names. The SECURITY axis (#15136) — never the better-auth
      * `sys_user.role` scalar, which stays published as `user.role`.
      */
-    positions: z.array(z.string()).default([]).describe('Canonical position/identity names the user holds — built-in identity names plus sys_position assignments, scope-resolved (ADR-0068 D3). The security axis, the same set /auth/me/permissions reports; NOT the better-auth user.role scalar, which remains published as user.role'),
+    positions: z.array(z.string()).default([]).describe('Canonical position/identity names the user holds — built-in identity names plus the positions assigned through sys_user_position, scope-resolved (ADR-0068 D3). The security axis, the same set /auth/me/permissions reports; NOT the better-auth user.role scalar, which remains published as user.role'),
     /**
      * The `PLATFORM_ADMIN` standing of ADR-0095 D3: true when the platform
      * resolves the user, per request, to the `PLATFORM_ADMIN` posture rung —
