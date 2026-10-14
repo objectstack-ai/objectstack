@@ -8,6 +8,8 @@ import {
   // bound for the shared key-admission seam; the posture the resolver decides
   // is what this resolver puts on the context (`SettingsContext.authGate`).
   userAuthGateSourceOf,
+  // [#23367] The API-key lifecycle policy source, bound beside it.
+  apiKeyLifecyclePolicySourceOf,
   // [#16013] The posture derivation, in ONE call. It reads the posture IN
   // FORCE off the `tenancy` service (never the REQUESTED one an env var asks
   // for) and carries decision-1-option-A's classification (#13906) for every
@@ -327,6 +329,8 @@ export class SettingsServicePlugin implements Plugin {
             getSession,
             tenancyPosture,
             userAuthGates: userAuthGateSourceOf(authService),
+            // [#23367] The API-key lifecycle policy, from the same service.
+            apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
           });
           // [ADR-0069 · #23287] The posture the shared resolver decided for
           // whichever credential admitted the caller (`authz.authGate`): a held
@@ -360,6 +364,12 @@ export class SettingsServicePlugin implements Plugin {
           // caller with no permissions — re-raise it rather than returning an
           // enforced-but-empty context the routes read as a denial.
           if (isAuthzStoreUnavailableError(err)) throw err;
+          // [#23367] A key its own lifecycle refused (revoked, expired,
+          // inactive) lands here too, and fails CLOSED to the family's 401:
+          // this family's door (`registerSettingsRoutes`) relays only the
+          // store outage by brand and answers every other throw with a 500,
+          // so re-raising the refusal would trade the 401 for a fault. The
+          // refusal's code reaches the operator's log, from the resolver.
           return { enforced: true }; // fail closed
         }
       };

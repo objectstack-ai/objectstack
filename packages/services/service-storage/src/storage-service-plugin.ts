@@ -20,6 +20,9 @@ import {
   // judges a key-admitted request by the KEY's answer.
   resolveApiKeyAdmission,
   userAuthGateSourceOf,
+  // [#23367] The API-key lifecycle policy source, and its branded refusal.
+  apiKeyLifecyclePolicySourceOf,
+  isApiKeyLifecycleRefusalError,
 } from '@objectstack/core';
 import type {
   IHttpServer,
@@ -1233,6 +1236,10 @@ function buildAuthGateSessionReader(
         Date.now(),
         await resolveAdmissionTenancyPosture(registry),
         userAuthGateSourceOf(auth),
+        // [#23367] The API-key lifecycle policy, from the same service. A key
+        // its own lifecycle refuses (`lifecycle`) carries no posture and is
+        // left to the identity resolution below, which fails it closed.
+        apiKeyLifecyclePolicySourceOf(auth),
       );
       if (admission.outcome === 'held') return { authGate: admission.gate };
       if (admission.outcome !== 'none') return undefined;
@@ -1406,6 +1413,8 @@ function buildFileReadAuthorizer(
         getSession,
         tenancyPosture,
         userAuthGates: userAuthGateSourceOf(resolveGateAuthService(registry)),
+        // [#23367] The API-key lifecycle policy, from the same service.
+        apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(resolveGateAuthService(registry)),
       });
       if (!authz.userId) return 'unauthenticated';
 
@@ -1461,6 +1470,13 @@ function buildFileReadAuthorizer(
       // the file-read door answers the 503 it is instead of a silent 'deny'
       // indistinguishable from a genuine refusal.
       if (isAuthzStoreUnavailableError(err)) throw err;
+      // [#23367] A key its own lifecycle refused (revoked, expired, inactive)
+      // fails CLOSED to the door's 401, exactly as the key it used to read as
+      // unknown did — not to a 'deny', which would tell a dead credential it
+      // was recognised and refused on the record. This family's download door
+      // relays only the store outage by brand, so the refusal's code reaches
+      // the operator's log, from the resolver, and not the wire.
+      if (isApiKeyLifecycleRefusalError(err)) return 'unauthenticated';
       return 'deny'; // fail closed
     }
   };

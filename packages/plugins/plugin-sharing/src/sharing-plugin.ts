@@ -18,6 +18,9 @@ import {
   // for the shared key-admission seam; the posture the resolver decides rides
   // the envelope the share-link door reads (`ExecutionContext.authGate`).
   userAuthGateSourceOf,
+  // [#23367] The API-key lifecycle policy source, and its branded refusal.
+  apiKeyLifecyclePolicySourceOf,
+  isApiKeyLifecycleRefusalError,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type {
@@ -968,6 +971,8 @@ export class SharingServicePlugin implements Plugin {
                   getSession,
                   tenancyPosture,
                   userAuthGates: userAuthGateSourceOf(authService),
+                  // [#23367] The API-key lifecycle policy, from the same service.
+                  apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
                 });
                 // [ADR-0069 · #23287] The envelope carries the posture the
                 // shared resolver decided for whichever credential admitted
@@ -988,6 +993,11 @@ export class SharingServicePlugin implements Plugin {
                 // answer a genuine anonymous caller gets. Re-raised so the
                 // outage is not laundered into an authentication verdict.
                 if (isAuthzStoreUnavailableError(err)) throw err;
+                // [#23367, ruling A] A key its own lifecycle refused (revoked,
+                // expired, inactive) is re-raised too: the family's door answers
+                // a throw that declares its status with that status and code, so
+                // the caller is told the key's state and date, not a bare 401.
+                if (isApiKeyLifecycleRefusalError(err)) throw err;
                 return {}; // anonymous → authed routes 401
               }
             };

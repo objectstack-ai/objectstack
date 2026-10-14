@@ -19,6 +19,10 @@ import {
   // the auth service's per-user posture computation the key-admission seam asks.
   evaluateAuthGate,
   userAuthGateSourceOf,
+  // [#23367, ruling A] The API-key lifecycle policy source, and its branded refusal.
+  apiKeyLifecyclePolicySourceOf,
+  isApiKeyLifecycleRefusalError,
+  type ApiKeyLifecyclePolicySource,
   type AuthGate,
   type EntryLocalization,
   type TenancyPostureSource,
@@ -152,6 +156,23 @@ function resolveStdioUserAuthGates(ctx: PluginContext): UserAuthGateSource | und
   return userAuthGateSourceOf(authService);
 }
 
+/**
+ * [#23367, ruling A] The auth service's API-key lifecycle policy for the
+ * stdio door, beside {@link resolveStdioUserAuthGates} and read on the same
+ * schedule — per call — so a key that expires or idles mid-session is refused
+ * on its next call, and a policy change applies with no restart. `undefined`
+ * on a kernel with no `auth` service.
+ */
+function resolveStdioApiKeyLifecycle(ctx: PluginContext): ApiKeyLifecyclePolicySource | undefined {
+  let authService: IAuthService | undefined;
+  try {
+    authService = ctx.getService<IAuthService>('auth');
+  } catch {
+    authService = undefined;
+  }
+  return apiKeyLifecyclePolicySourceOf(authService);
+}
+
 /** The status the REST and dispatcher faces answer a held principal with. */
 const AUTH_GATE_REFUSAL_STATUS = 403;
 
@@ -186,8 +207,10 @@ function stdioAuthGateRefusal(gate: AuthGate): Error & { code: string; status: n
  * resolved no localization at all. The assembler's field set is CLOSED, so the
  * NEXT `ExecutionContext` field cannot miss this transport the way those did.
  *
- * Fail-closed: returns `undefined` for an unknown / revoked / expired /
- * owner-less key. That contract is not re-implemented here — it IS
+ * Fail-closed: returns `undefined` for an unknown / owner-less key; a key its
+ * own lifecycle refuses (revoked / expired / inactive, #23367) raises the
+ * branded `ApiKeyLifecycleRefusalError` — `403`, its code and located message,
+ * the thrown-envelope shape this door's refusals take. That contract is not re-implemented here — it IS
  * `assembleExecutionContext`'s default entry (`!authz.userId ⇒ undefined`),
  * which is why the explicit guard this function used to carry is gone rather
  * than merely moved. Re-run per read, so revocation of a key takes effect on
@@ -227,12 +250,14 @@ async function resolveStdioExecutionContext(
   localization: EntryLocalization | undefined,
   tenancyPosture: TenancyPosture | undefined,
   userAuthGates: UserAuthGateSource | undefined,
+  apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined,
 ): Promise<ExecutionContext | undefined> {
   const authz = await resolveAuthzContext({
     ql,
     headers: { 'x-api-key': apiKey },
     tenancyPosture,
     userAuthGates,
+    apiKeyLifecycle,
   });
   return assembleExecutionContext({
     authz,
@@ -489,13 +514,22 @@ export class MCPServerPlugin implements Plugin {
       // boot rather than starting a door whose admission was never decided.
       // [#23455] …and so is the owner's posture: a key whose owner holds an
       // `account`-scope posture resolves here as a HELD identity.
+      // [#23367] …and so is the key's own lifecycle: a revoked, expired or
+      // inactive key is no credential this transport can run under, so it
+      // takes the refusal-to-start, naming its code and date.
       const initial = await resolveStdioExecutionContext(
         ql,
         apiKey,
         undefined,
         await resolveStdioTenancyPosture(ctx),
         resolveStdioUserAuthGates(ctx),
-      );
+        resolveStdioApiKeyLifecycle(ctx),
+      ).catch((err: unknown) => {
+        if (!isApiKeyLifecycleRefusalError(err)) throw err;
+        throw new Error(
+          `[MCP] OS_MCP_STDIO_API_KEY is refused (${err.code}): ${err.message} Refusing to start stdio (ADR-0101).`,
+        );
+      });
       if (!initial) {
         throw new Error(
           '[MCP] OS_MCP_STDIO_API_KEY did not resolve to a valid identity (unknown / revoked / expired / owner-less). ' +
@@ -652,12 +686,15 @@ export class MCPServerPlugin implements Plugin {
       // next call, and one that clears serves the next call — the refusal is
       // not a revocation, so nothing is written and nothing needs a restart.
       const resolvePrincipal = async (): Promise<ExecutionContext> => {
+        // [#23367] A key its own lifecycle refuses raises its branded
+        // `403` envelope out of this call, as the held refusal below does.
         const ec = await resolveStdioExecutionContext(
           scopedQl,
           apiKey,
           await localizationForRead(),
           await resolveStdioTenancyPosture(ctx),
           resolveStdioUserAuthGates(ctx),
+          resolveStdioApiKeyLifecycle(ctx),
         );
         if (!ec) throw new Error('MCP stdio identity is no longer valid (key revoked or expired)');
         // No request path: no stdio call is a remediation or bootstrap route,
