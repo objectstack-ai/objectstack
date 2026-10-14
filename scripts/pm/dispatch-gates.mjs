@@ -11839,12 +11839,15 @@ export function tierLines(result) {
         `${hits.length} hit(s) — a mandatory surface must print its mandate`,
     );
   }
+  // Owed by SURFACE, never by lane (the contract-review reference's three faces), and served at the tier of the
+  // face that made it owed (ruling record 6159870311 on #23352, letter B′ with C) — `reviewFace` in
+  // `record-recognisers.mjs` holds the mapping; this note names both tiers by their constant NAMES.
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that WIDENS a published accept set or the public surface owes a' +
-    ` REVIEW too, at the tier of the face that made it owed — ${CONTRACT_REVIEW_TIER_NAME} for a published schema or` +
-    ` governed rules text, ${TIER_DEFAULT_NAME} for the \`Clause-②: yes\` declaration alone, the lane seat's review` +
-    ' of record (owed in the spec and skills lanes, in-seat at tier or by the at-tier subagent;' +
-    ' default-tier build; a hit outside those lanes is spec-lane work and moves there); a card that only NARROWS one is' +
+    ' REVIEW too — owed by SURFACE, never by lane — at the tier of the face that made it owed:' +
+    ` ${CONTRACT_REVIEW_TIER_NAME} for a published schema or governed rules text (in-seat at tier or by the at-tier` +
+    ` subagent), ${TIER_DEFAULT_NAME} for the \`Clause-②: yes\` declaration alone, the lane seat's own review of record;` +
+    ' default-tier build; a hit outside the spec lane is spec-lane work and moves there. A card that only NARROWS one is' +
     ' `Clause-②: no`, stays in its lane, and owes one contract-review-tier review before the queue — judged from' +
     ' the card CONTENT. This line is a FLOOR, never a clearance.';
   // The suspicion tail prints only on a hit — unlike the clause-② note above,
