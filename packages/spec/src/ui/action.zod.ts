@@ -1295,11 +1295,13 @@ const actionObject = () => strictObject({
         && typeof iss.input === 'object'
         && !Array.isArray(iss.input)
         ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not a values map. "
-          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead. "
+          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead; "
+          + "the loader rewrote that object form to `bodyExtra` on an inline page button until @objectstack/spec 18, which refuses it (ADR-0087 D2). "
           + "For a `type:'url'` action there is nowhere to move it to, by decision: put static values straight into the `target` string "
           + "(`${param.X}` interpolates a value collected by the params dialog, `${ctx.X}` one from the action context), and open a new tab with "
           + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed. "
-          + 'Expected an array of ActionParam, received an object.'
+          + 'Expected an array of ActionParam, received an object. '
+          + 'Run `os migrate meta --from 16` to list the mechanical edits for the inline `element:button` action case; `--write` applies the ones it can prove, and a registered action keeps its object form until you move it by hand.'
         : undefined
     ),
   }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
