@@ -103,7 +103,9 @@ async function bootPlugin(postures: Record<string, Array<{ code: string; message
   await plugin.init(ctx);
   await plugin.start(ctx);
   await readyHook!();
-  const contextFromRequest = captured.contextFromRequest;
+  const contextFromRequest = captured.contextFromRequest as
+    | ((req: IHttpRequest) => SettingsContext | Promise<SettingsContext>)
+    | undefined;
   if (!contextFromRequest) throw new Error('fixture: the settings routes were not registered');
   return { http, contextFromRequest };
 }

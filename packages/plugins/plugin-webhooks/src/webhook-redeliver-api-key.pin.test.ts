@@ -102,7 +102,7 @@ describe('webhook redeliver — an API key is no credential at this door (#23287
             const faces = await boot();
             const res = await faces[face](keyRequest());
             expect(res.status).toBe(401);
-            const body = await res.json();
+            const body = (await res.json()) as { error?: { code?: string } };
             expect(body?.error?.code).toBe('UNAUTHENTICATED');
         });
     }

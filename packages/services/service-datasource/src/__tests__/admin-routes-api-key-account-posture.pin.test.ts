@@ -55,7 +55,7 @@ function mountFamily() {
     resolveUserAuthGates: async (userId: string) => postures[userId] ?? [],
   };
   // The fixture's grants engine, taught the one key the entitled operator owns.
-  const engine = createGrantsEngine();
+  const engine: { find: (object: string, opts: any) => Promise<unknown[]> } = createGrantsEngine();
   const grantsFind = engine.find;
   const keyHash = hashApiKey(KEY);
   engine.find = async (object: string, opts: any) => (
