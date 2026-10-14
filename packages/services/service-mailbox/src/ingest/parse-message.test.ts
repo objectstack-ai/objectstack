@@ -1,7 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
-import { messageIdsOf, parseInboundMessage, participantAddresses, rawHeaderBlockOf } from './parse-message.js';
+import {
+  MAX_FORWARDED_PARTS,
+  messageIdsOf,
+  parseInboundMessage,
+  participantAddresses,
+  rawHeaderBlockOf,
+} from './parse-message.js';
 import {
   collectMatchAddresses,
   normalizeMailAddress,
@@ -96,6 +102,41 @@ describe('parseInboundMessage — a message forwarded as an attachment (source `
     const parsed = await parseInboundMessage(forwardAsAttachment({ original: nested }));
     expect(parsed.forwarded).toHaveLength(1);
     expect(participantAddresses(parsed.forwarded[0]!)).toEqual(['customer@acme.test', 'rep@corp.test']);
+  });
+
+  it('reads a message/global part (RFC 6532) the same way, UTF-8 headers included', async () => {
+    const original = rfc822(
+      [
+        ['From', 'Zoë Kunde <zoë@acme.test>'],
+        ['To', 'rep@corp.test'],
+        ['Subject', 'Grüße'],
+        ['Message-ID', '<global-1@acme.test>'],
+      ],
+      'Hallo',
+    );
+    for (const base64 of [false, true]) {
+      const parsed = await parseInboundMessage(forwardAsAttachment({ original, mediaType: 'message/global', base64 }));
+      expect(parsed.forwarded, `base64: ${base64}`).toHaveLength(1);
+      expect(participantAddresses(parsed.forwarded[0]!), `base64: ${base64}`).toEqual(['zoë@acme.test', 'rep@corp.test']);
+      expect(parsed.unreadForwardedParts).toBe(0);
+    }
+  });
+
+  it(`reads at most MAX_FORWARDED_PARTS (${MAX_FORWARDED_PARTS}) forwarded parts of either type, and counts the rest unread`, async () => {
+    const boundary = 'many-parts';
+    const part = (i: number) => [
+      `--${boundary}`,
+      `Content-Type: ${i % 2 === 0 ? 'message/rfc822' : 'message/global'}`,
+      '',
+      rfc822([['From', `sender${i}@acme.test`], ['Message-ID', `<p${i}@acme.test>`]], 'x'),
+    ];
+    const raw = rfc822(
+      [['From', 'rep@corp.test'], ['MIME-Version', '1.0'], ['Content-Type', `multipart/mixed; boundary="${boundary}"`]],
+      [...Array.from({ length: MAX_FORWARDED_PARTS + 2 }, (_, i) => part(i)).flat(), `--${boundary}--`, ''].join('\r\n'),
+    );
+    const parsed = await parseInboundMessage(raw);
+    expect(parsed.forwarded).toHaveLength(MAX_FORWARDED_PARTS);
+    expect(parsed.unreadForwardedParts).toBe(2);
   });
 
   it('control: a forward quoted inline in the body names no forwarded participants (that is the `inline` source)', async () => {

@@ -159,7 +159,9 @@ describe('a builtin\'s undeclared key is the spec\'s, met at registration (#4277
 
   it('the descriptor walk stands aside for every type the spec judges, and keeps the rest', () => {
     const engine = engineWith(recordingLogger().logger);
-    const walk = (type: string, config: Record<string, unknown>) => () =>
+    // [#23317] The walk returns its refusal (`registerFlow` throws it), so the
+    // stored pass can list the same sites without registering.
+    const walk = (type: string, config: Record<string, unknown>): { message: string } | undefined =>
       (engine as any).validateNodeConfigKeys('f', flowWith(type, config));
     // One judge per type: the spec already refused these in `FlowSchema.parse`.
     for (const [type, config] of [
@@ -169,11 +171,11 @@ describe('a builtin\'s undeclared key is the spec\'s, met at registration (#4277
       ['try_catch', { try: { nodes: [], edges: [] }, bogusKey: 1, retry: { maxRetry: 2 } }],
     ] as const) {
       expect(builtinNodeConfigKeysJudged(type), type).toBe(true);
-      expect(walk(type, config), type).not.toThrow();
+      expect(walk(type, config), type).toBeUndefined();
     }
     // The walk keeps plugin types.
     expect(builtinNodeConfigKeysJudged(STAMP)).toBe(false);
-    expect(walk(STAMP, { count: 1, bogusKey: 1 })).toThrow(/undeclared config key/);
+    expect(walk(STAMP, { count: 1, bogusKey: 1 })?.message).toMatch(/undeclared config key/);
   });
 });
 

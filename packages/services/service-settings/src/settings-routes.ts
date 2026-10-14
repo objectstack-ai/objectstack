@@ -45,7 +45,11 @@ import type { ErrorCode } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // Its `extra` is `ApiError`'s own optional fields, so the undeclared siblings
 // #4224 retired from this module cannot come back through it either.
-import { sendOk, sendError } from '@objectstack/types';
+// [#23174] Each route's catch-all 5xx answers through `sendServerFault`: the
+// route's generic text on the wire, the caught error with its stack in the
+// fault log. The authored `SETTINGS_CRYPTO_UNAVAILABLE` refusal and the
+// authorization-store outage relay keep their own text on `sendError`.
+import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 import { SettingsService } from './settings-service.js';
 // #7522 — the REST boundary is where an encrypted setting stops being cleartext.
 // The service decrypts on purpose (in-process plugins need the real secret);
@@ -242,7 +246,7 @@ export function registerSettingsRoutes(
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else {
-        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to list manifests');
+        sendServerFault(res, 500, 'INTERNAL_ERROR', 'Failed to list manifests', err);
       }
     },
   });
@@ -263,7 +267,7 @@ export function registerSettingsRoutes(
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else {
-        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to read namespace');
+        sendServerFault(res, 500, 'INTERNAL_ERROR', 'Failed to read namespace', err);
       }
     },
   });
@@ -345,7 +349,7 @@ export function registerSettingsRoutes(
           details: { namespace: err.namespace, key: err.key },
         });
       } else {
-        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to write namespace');
+        sendServerFault(res, 500, 'INTERNAL_ERROR', 'Failed to write namespace', err);
       }
     },
   });
@@ -378,7 +382,7 @@ export function registerSettingsRoutes(
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else {
-        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Action failed');
+        sendServerFault(res, 500, 'INTERNAL_ERROR', 'Action failed', err);
       }
     },
   });

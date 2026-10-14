@@ -472,18 +472,26 @@ describe('[#22332] updateSessionProgressIfUnchanged on a wired engine is the eng
       };
 
       const res = createMockRes();
-      await server.handler('PUT', CHUNK)(
-        createMockReq({
-          params: { uploadId, chunkIndex: '0' },
-          headers: { 'x-resume-token': resumeToken },
-          rawBody: async () => Buffer.alloc(10, 0x61),
-        }),
-        res,
-      );
+      // [#23174] The 500 answers the route's generic text; the fault's own
+      // sentence reaches the operator in the server-fault line instead.
+      const faultLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await server.handler('PUT', CHUNK)(
+          createMockReq({
+            params: { uploadId, chunkIndex: '0' },
+            headers: { 'x-resume-token': resumeToken },
+            rawBody: async () => Buffer.alloc(10, 0x61),
+          }),
+          res,
+        );
+        expect(faultLog.mock.calls.some((call) => String(call[0]).includes('the write cannot reach the row'))).toBe(true);
+      } finally {
+        faultLog.mockRestore();
+      }
 
       expect(res._status, JSON.stringify(res._json)).toBe(500);
       expect(res._json.error.code).toBe('INTERNAL');
-      expect(res._json.error.message).toContain('the write cannot reach the row');
+      expect(res._json.error.message).toBe('Internal error');
       expect(conditional, 'no retry loop over a write that cannot land').toBe(1);
       expect((await backend.store.getSession(uploadId))!.parts).toBe('[]');
     } finally {

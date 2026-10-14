@@ -1,13 +1,43 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { II18nService } from '@objectstack/spec/contracts';
+import type { II18nService, IJobService, JobRunOutcome } from '@objectstack/spec/contracts';
 import { SysMailAssociation, SysMailbox, SysMailMessage } from './objects/index.js';
 import { installMailReadVisibility, type MailGateEngine } from './mail-read-visibility.js';
 import { MAILBOX_SERVICE, MailIngestService, type MailIngestEngine } from './ingest/index.js';
+import { MailboxSyncService, type MailboxAccountResolver, type MailSyncEngine } from './sync/index.js';
 
 /** The manifest id this plugin registers its objects under. */
 export const MAILBOX_SERVICE_MANIFEST_ID = 'com.objectstack.service.mailbox';
+
+/** The job the IMAP sync runs as, on the composed job service. */
+export const MAILBOX_SYNC_JOB = 'mailbox:imap-sync';
+/** How often every mailbox is polled, by default (ms). */
+export const DEFAULT_MAILBOX_POLL_INTERVAL_MS = 60_000;
+
+/** The IMAP sync of the plugin: off unless the host composes it. */
+export interface MailboxImapSyncOptions {
+  /**
+   * Which IMAP account feeds a mailbox, and with what credential — asked per
+   * mailbox per run. Answer `null` for a mailbox this host does not sync.
+   */
+  accountFor: MailboxAccountResolver;
+  /** How often every mailbox is polled (ms). Default {@link DEFAULT_MAILBOX_POLL_INTERVAL_MS}. */
+  pollIntervalMs?: number;
+  /** Messages fetched per IMAP command. */
+  batchSize?: number;
+  /** Messages handed to ingest per mailbox per run. */
+  maxMessagesPerRun?: number;
+  /** Larger messages are skipped, and logged at `error`. */
+  maxMessageBytes?: number;
+  /** Listed bytes fetched per IMAP command. */
+  maxBatchBytes?: number;
+}
+
+export interface MailboxServicePluginOptions {
+  /** Poll the mailboxes' IMAP folders into the ingest seam. Absent: no mail source is connected. */
+  imap?: MailboxImapSyncOptions;
+}
 
 /**
  * MailboxServicePlugin — the inbound-mail capability (`requires: ['mailbox']`).
@@ -29,15 +59,31 @@ export const MAILBOX_SERVICE_MANIFEST_ID = 'com.objectstack.service.mailbox';
  * mailbox, with automatic mail (auto-replies, bounces) suppressed, and stamps
  * its associations from the email fields an app flags with `mailAssociation`;
  * `rematch` replays a mailbox's stored participant sets against the records
- * that exist now and adds the missing links. Nothing feeds `ingest` yet: the
- * IMAP connector that fetches a mailbox's mail is the next half of the
- * inbound-mail programme.
+ * that exist now and adds the missing links.
+ *
+ * With `imap` composed, it also feeds the seam: the mailbox sync
+ * ({@link MailboxSyncService}) runs as the interval job
+ * {@link MAILBOX_SYNC_JOB} on the composed job service, reading each
+ * mailbox's IMAP folder above its stored cursor through
+ * `@objectstack/connector-imap`. Without `imap` — the capability boot
+ * (`requires: ['mailbox']`) constructs the plugin with no options — no mail
+ * source is connected, and the boot says so once.
  */
 export class MailboxServicePlugin implements Plugin {
   name = MAILBOX_SERVICE_MANIFEST_ID;
   version = '1.0.0';
   type = 'standard' as const;
   dependencies = ['com.objectstack.engine.objectql'];
+
+  private sync?: MailboxSyncService;
+  private jobs?: IJobService;
+
+  constructor(private readonly options: MailboxServicePluginOptions = {}) {}
+
+  /** The IMAP sync, when composed — for a host that runs it on its own schedule. */
+  get syncService(): MailboxSyncService | undefined {
+    return this.sync;
+  }
 
   async init(ctx: PluginContext): Promise<void> {
     ctx.getService<{ register(m: any): void }>('manifest').register({
@@ -52,13 +98,30 @@ export class MailboxServicePlugin implements Plugin {
 
     // The engine is resolved on each call, not here: the seam is reachable
     // as soon as it is registered, and reads the engine only when used.
-    ctx.registerService(
-      MAILBOX_SERVICE,
-      new MailIngestService({
-        engine: () => ctx.getService<MailIngestEngine>('objectql'),
+    const ingest = new MailIngestService({
+      engine: () => ctx.getService<MailIngestEngine>('objectql'),
+      logger: ctx.logger,
+    });
+    ctx.registerService(MAILBOX_SERVICE, ingest);
+
+    const imap = this.options.imap;
+    if (imap) {
+      if (typeof imap.accountFor !== 'function') {
+        throw new TypeError(
+          'MailboxServicePlugin: `imap.accountFor` must be a function answering the IMAP account of a mailbox (or null).',
+        );
+      }
+      this.sync = new MailboxSyncService({
+        engine: () => ctx.getService<MailSyncEngine>('objectql'),
+        ingest,
+        accountFor: imap.accountFor,
         logger: ctx.logger,
-      }),
-    );
+        batchSize: imap.batchSize,
+        maxMessagesPerRun: imap.maxMessagesPerRun,
+        maxMessageBytes: imap.maxMessageBytes,
+        maxBatchBytes: imap.maxBatchBytes,
+      });
+    }
 
     // ADR-0029 D8 — contribute the objects' translations on kernel:ready.
     ctx.hook('kernel:ready', async () => {
@@ -96,5 +159,65 @@ export class MailboxServicePlugin implements Plugin {
       }
       ctx.logger.info('MailboxServicePlugin: sys_mail_message and sys_mail_association read gates installed');
     });
+
+    // The job service may start after this plugin: it is resolved once every
+    // plugin has started, when an absent one is absent for good.
+    ctx.hook('kernel:ready', async () => {
+      await this.scheduleSync(ctx);
+    });
+  }
+
+  /**
+   * The kernel's teardown hook: cancel the sync job and close any IMAP
+   * session a run still holds, so nothing outlives the kernel.
+   */
+  async destroy(): Promise<void> {
+    const jobs = this.jobs;
+    this.jobs = undefined;
+    if (jobs) {
+      try {
+        await jobs.cancel(MAILBOX_SYNC_JOB);
+      } catch {
+        /* the job service is going down too */
+      }
+    }
+    this.sync?.close();
+  }
+
+  private async scheduleSync(ctx: PluginContext): Promise<void> {
+    const sync = this.sync;
+    if (!sync) {
+      ctx.logger.info(
+        'MailboxServicePlugin: no IMAP account source is composed (`imap.accountFor`), so no mailbox is synced; ' +
+          'mail arrives only through the `mailbox` service\'s ingest seam.',
+      );
+      return;
+    }
+    let jobs: IJobService | undefined;
+    try {
+      jobs = ctx.getService<IJobService>('job');
+    } catch {
+      jobs = undefined;
+    }
+    if (!jobs || typeof jobs.schedule !== 'function') {
+      ctx.logger.warn(
+        'MailboxServicePlugin: the IMAP sync is composed but no job service is, so no mailbox is polled. ' +
+          "Compose the job capability (requires: ['job']), or run MailboxServicePlugin.syncService.syncAll() on your own schedule.",
+      );
+      return;
+    }
+    const intervalMs = this.options.imap?.pollIntervalMs ?? DEFAULT_MAILBOX_POLL_INTERVAL_MS;
+    await jobs.schedule(MAILBOX_SYNC_JOB, { type: 'interval', intervalMs }, async (): Promise<JobRunOutcome> => {
+      const { results, failures } = await sync.syncAll({ isSystem: true });
+      for (const failure of failures) {
+        ctx.logger.warn(`MailboxServicePlugin: mailbox '${failure.mailboxId}' was not synced: ${failure.error}`);
+      }
+      if (failures.length > 0) {
+        return { outcome: 'degraded', reason: `${failures.length} of ${failures.length + results.length} mailbox(es) not synced` };
+      }
+      return { outcome: 'completed' };
+    });
+    this.jobs = jobs;
+    ctx.logger.info(`MailboxServicePlugin: IMAP sync scheduled every ${intervalMs} ms (job '${MAILBOX_SYNC_JOB}')`);
   }
 }

@@ -45,7 +45,7 @@
  * ANSWERED, with the wrong envelope. The claim is `status` + `code`.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   AuthzStoreUnavailableError,
   AUTHZ_STORE_UNAVAILABLE_CODE,
@@ -208,12 +208,18 @@ describe('[#15999] §3 — the relay is scoped to the brand; every other arm is 
   });
 
   it.each(DOORS)('$name still answers the untyped 500 INTERNAL_ERROR tail for a plain throw', async (door) => {
-    const routes = mount(() => { throw new Error('some unrelated fault'); });
-    const res = await drive(routes, door);
-    expect(res.status).toBe(500);
-    expect(codeOf(res)).toBe('INTERNAL_ERROR');
-    // The message channel this layer already preserved is preserved still.
-    expect(res.body?.error?.message).toBe('some unrelated fault');
+    const faultLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const routes = mount(() => { throw new Error('some unrelated fault'); });
+      const res = await drive(routes, door);
+      expect(res.status).toBe(500);
+      expect(codeOf(res)).toBe('INTERNAL_ERROR');
+      // [#23174] The tail answers the route's generic text, never the caught
+      // error's own; `settings-routes.server-fault-withheld.test.ts` pins it.
+      expect(JSON.stringify(res.body)).not.toContain('some unrelated fault');
+    } finally {
+      faultLog.mockRestore();
+    }
   });
 
   it('a look-alike carrying the declared status+code but NO brand is not relayed', async () => {

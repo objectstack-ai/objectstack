@@ -26,8 +26,9 @@
  * Where in a message an address was read.
  *
  *  - `outer` — the received message's own From, Sender, Reply-To, To and Cc;
- *  - `attachment` — the same headers of a `message/rfc822` part of the
- *    received message (RFC 2046 §5.2.1: a message forwarded as an attachment);
+ *  - `attachment` — the same headers of a `message/rfc822` (RFC 2046 §5.2.1)
+ *    or `message/global` (RFC 6532 §3.7) part of the received message: a
+ *    message forwarded as an attachment;
  *  - `inline` — a forwarded message quoted in the body text. Declared so a
  *    stored row that carries it replays; this package writes it nowhere yet.
  */

@@ -10,8 +10,10 @@
 // not exist anywhere durable — and `GET /files/:id/url` answered 404
 // FILE_NOT_FOUND during an engine outage, which reports durable business truth
 // as missing. Both now surface through the route handlers' existing
-// `catch → sendError(500, 'INTERNAL')`, so the REST layer needed no change:
-// making the store honest was enough.
+// `catch` → `500 INTERNAL`, so the REST layer needed no change: making the
+// store honest was enough. Since #23174 that `catch` answers through
+// `sendServerFault`, so the store's sentence reaches the operator's fault log
+// and the caller reads the generic text.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IHttpRequest, IHttpResponse, RouteHandler, IDataEngine } from '@objectstack/spec/contracts';
@@ -19,6 +21,7 @@ import { assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objec
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
+import { SERVER_FAULT_LOG_PREFIX } from '@objectstack/types';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -131,6 +134,28 @@ function createFakeEngine(opts: { failing?: EngineMethod[] } = {}) {
 // Tests
 // ---------------------------------------------------------------------------
 
+/**
+ * [#23174] A route's catch-all 500 answers the generic `Internal error`, and the
+ * store's own consequence-and-fix sentence reaches the operator in the
+ * server-fault line rather than the caller. These cases asserted that sentence
+ * in the BODY, which is the text the platform now withholds from a caller;
+ * they keep asserting it, on the side the rule puts it.
+ *
+ * The fault log is `console.error` here: `sendServerFault` takes no logger.
+ */
+let faultLog: { mock: { calls: unknown[][] }; mockRestore(): void };
+beforeEach(() => { faultLog = vi.spyOn(console, 'error').mockImplementation(() => {}); });
+afterEach(() => { faultLog.mockRestore(); });
+
+function expectOutageWithheld(res: { _json: any }, ...storeText: string[]): void {
+  expect(res._json.error.message).toBe('Internal error');
+  const lines = faultLog.mock.calls.filter((c) => String(c[0]).startsWith(SERVER_FAULT_LOG_PREFIX));
+  for (const text of storeText) {
+    expect(JSON.stringify(res._json)).not.toContain(text);
+    expect(lines.some((c) => String(c[0]).includes(text)), `no fault line carries: ${text}`).toBe(true);
+  }
+}
+
 describe('Storage routes: a metadata write that never landed is not a 200 (#5216)', () => {
   let rootDir: string;
   let adapter: LocalStorageAdapter;
@@ -167,7 +192,7 @@ describe('Storage routes: a metadata write that never landed is not a 200 (#5216
     expect(res._status).toBe(500);
     expect(res._json.success).toBe(false);
     expect(res._json.error.code).toBe('INTERNAL');
-    expect(res._json.error.message).toContain('sys_file row was NOT written');
+    expectOutageWithheld(res, 'sys_file row was NOT written');
     expect(engine._rows('sys_file')).toHaveLength(0);
   });
 
@@ -191,7 +216,7 @@ describe('Storage routes: a metadata write that never landed is not a 200 (#5216
 
     expect(res._status).toBe(500);
     expect(res._json.error.code).toBe('INTERNAL');
-    expect(res._json.error.message).toContain('cannot find this upload');
+    expectOutageWithheld(res, 'cannot find this upload');
   });
 
   it('POST /upload/complete answers 500, not 200, when the sys_file update fails', async () => {
@@ -205,7 +230,7 @@ describe('Storage routes: a metadata write that never landed is not a 200 (#5216
     await handler(createMockReq({ body: { fileId: 'f1', eTag: 'abc' } }), res);
 
     expect(res._status).toBe(500);
-    expect(res._json.error.message).toContain('did not land');
+    expectOutageWithheld(res, 'did not land');
     // The row is untouched — which is exactly what the 500 now tells the caller.
     expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'pending' });
   });
@@ -222,7 +247,7 @@ describe('Storage routes: a metadata write that never landed is not a 200 (#5216
 
     expect(res._status).toBe(500);
     expect(res._json.error.code).toBe('INTERNAL');
-    expect(res._json.error.message).toContain('NOT the same as it being absent');
+    expectOutageWithheld(res, 'NOT the same as it being absent');
   });
 
   it('GET /files/:fileId/url still answers 404 on a genuine MISS', async () => {
@@ -261,7 +286,7 @@ describe('Storage routes: a metadata write that never landed is not a 200 (#5216
     const outage = createMockRes();
     await handler(createMockReq({ params: { uploadId: 'u1' } }), outage);
     expect(outage._status).toBe(500);
-    expect(outage._json.error.message).toContain('abort a live upload');
+    expectOutageWithheld(outage, 'abort a live upload');
   });
 
   it('with NO engine wired the routes keep their in-memory behaviour', async () => {
@@ -448,8 +473,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       const res = await drive('POST', COMMIT, 'alice@a', { body: { fileId: 'f1', eTag: 'etag-a' } });
       expect(res._status).toBe(500);
       expect(res._json.error.code).toBe('INTERNAL');
-      expect(res._json.error.message).toContain('did not land');
-      expect(res._json.error.message).toContain('Restore the data engine');
+      expectOutageWithheld(res, 'did not land', 'Restore the data engine');
       expect(engine._rows('sys_file')[0]).toMatchObject({ status: 'pending' });
     });
 
@@ -536,7 +560,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       const res = await drive('POST', CHUNKED_COMPLETE, 'alice@a', { params: { uploadId }, body: { parts: [] } });
       expect(res._status).toBe(500);
       expect(res._json.error.code).toBe('INTERNAL');
-      expect(res._json.error.message).toContain('Restore the data engine');
+      expectOutageWithheld(res, 'Restore the data engine');
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
     });
 
@@ -600,8 +624,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       const res = await sendChunk('alice@a');
       expect(res._status).toBe(500);
       expect(res._json.error.code).toBe('INTERNAL');
-      expect(res._json.error.message).toContain('persisted upload progress is stale');
-      expect(res._json.error.message).toContain('Restore the data engine');
+      expectOutageWithheld(res, 'persisted upload progress is stale', 'Restore the data engine');
       expect(warnings).toEqual([]);
     });
 
@@ -665,7 +688,7 @@ describe('Storage routes: an organization change is not an outage (#22175)', () 
       const res = await drive('GET', PROGRESS, 'alice@a', { params: { uploadId } });
       expect(res._status).toBe(500);
       expect(res._json.error.code).toBe('INTERNAL');
-      expect(res._json.error.message).toContain('Restore the data engine');
+      expectOutageWithheld(res, 'Restore the data engine');
       expect(engine._rows('sys_upload_session')[0]).toMatchObject({ status: 'in_progress' });
     });
 
