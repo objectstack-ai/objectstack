@@ -4,8 +4,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
 import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
-import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
-import type { AnchorBindingContext } from '@objectstack/spec/security';
+import { describeHighPrivilegeBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
@@ -2526,14 +2525,6 @@ export class SecurityPlugin implements Plugin {
       // the CRUD check. System/boot writes carry `isSystem` and
       // short-circuited above, so the curated seeder itself is unaffected.
       await this.assertCuratedCapabilityNameGate(opCtx);
-
-      // [ADR-0090 D5/D9] Audience-anchor binding guard — like the package
-      // gate above, an unconditional data-layer boundary: a permission set
-      // carrying high-privilege bits must never be bound to the `everyone`
-      // or `guest` positions, no matter who asks. (Boot/system writes carry
-      // `isSystem` and short-circuited above; the dev-mode default binding
-      // is validated at seed time by the same predicate.)
-      await this.assertAudienceAnchorBindingGate(opCtx);
 
       // [ADR-0103] Engine-owned write guard. Fail-closed on a user-context
       // generic write to a `system`/`append-only` object whose resolved
@@ -6839,83 +6830,6 @@ export class SecurityPlugin implements Plugin {
    * System/boot writes never reach here (the middleware short-circuits on
    * `isSystem`), so system writes are unaffected.
    */
-  /**
-   * [ADR-0090 D5/D9] Reject binding a HIGH-PRIVILEGE permission set to an
-   * audience anchor (`everyone` / `guest`). The anchors are implicit for
-   * whole principal classes, so a dangerous binding here is an instant
-   * tenant-wide (or anonymous-wide) grant — the one shape the model must
-   * make unrepresentable rather than merely discouraged.
-   */
-  private async assertAudienceAnchorBindingGate(opCtx: any): Promise<void> {
-    if (opCtx?.object !== 'sys_position_permission_set') return;
-    if (!['insert', 'update'].includes(opCtx.operation)) return;
-    const rows = Array.isArray(opCtx.data)
-      ? opCtx.data
-      : (opCtx.data && typeof opCtx.data === 'object' ? [opCtx.data] : []);
-    if (rows.length === 0) return;
-
-    const ql = this.ql;
-    // [#18535, ADR-0090 D5] The stack's declared `capabilities:`, read at most
-    // ONCE per gate pass and only once an anchor row is actually in play — the
-    // common write on this table names an ordinary position and must not pay
-    // for a read it does not use. Same source as the boot binding and as
-    // `confirmAudienceBindingSuggestion`, which is this gate's friendly early
-    // rendition: a second source there would let a confirm pass its own check
-    // and then be refused by the insert it performs.
-    let anchorContext: AnchorBindingContext | undefined;
-    let anchorContextLoaded = false;
-    const declaredCapabilityContext = async (): Promise<AnchorBindingContext | undefined> => {
-      if (!anchorContextLoaded) {
-        anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
-        anchorContextLoaded = true;
-      }
-      return anchorContext;
-    };
-    for (const row of rows) {
-      const positionId = (row as any)?.position_id;
-      if (!positionId || !ql?.find) continue;
-      let positionName = '';
-      try {
-        const posRows = await ql.find('sys_position', { where: { id: positionId }, limit: 1, context: { isSystem: true } });
-        positionName = String((Array.isArray(posRows) && posRows[0] ? (posRows[0] as any).name : '') ?? '');
-      } catch { positionName = ''; }
-      if (positionName !== 'everyone' && positionName !== 'guest') continue;
-
-      // Resolve the target set definition (bootstrap sets by name, else the
-      // sys_permission_set row itself carries the authored definition).
-      const setId = (row as any)?.permission_set_id;
-      let setName = '';
-      let setDef: any = null;
-      try {
-        const setRows = await ql.find('sys_permission_set', { where: { id: setId }, limit: 1, context: { isSystem: true } });
-        const sr: any = Array.isArray(setRows) && setRows[0] ? setRows[0] : null;
-        if (sr) {
-          setName = String(sr.name ?? '');
-          setDef = sr;
-        }
-      } catch { /* fall through to bootstrap lookup below */ }
-      const boot = this.bootstrapPermissionSets.find((p) => p.name === setName);
-      // [ADR-0090 D9] Anchor-tier predicate: `guest` faces the strictest tier
-      // (additionally no edit bit — read-only by default, create is the single
-      // case-by-case write); `everyone` uses the high-privilege predicate.
-      // [#18535] `guest` faces the strictest tier and the predicate DROPS the
-      // context for it (D5's app-token excusal is the `everyone` tier's alone),
-      // so the same call serves both anchors.
-      const offending = describeAnchorForbiddenBits(
-        boot ?? setDef,
-        positionName as 'everyone' | 'guest',
-        await declaredCapabilityContext(),
-      );
-      if (offending) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: permission set '${setName || setId}' cannot be bound to the '${positionName}' audience anchor — it carries ${offending} (ADR-0090 D5/D9). ` +
-            `Audience anchors accept low-privilege sets only; grant powerful sets through ordinary positions instead.`,
-          { operation: opCtx.operation, object: opCtx.object, position: positionName, permissionSet: setName || setId },
-        );
-      }
-    }
-  }
-
   private async assertPackageManagedWriteGate(opCtx: any): Promise<void> {
     if (opCtx?.object !== 'sys_permission_set') return;
     const op = opCtx.operation;
