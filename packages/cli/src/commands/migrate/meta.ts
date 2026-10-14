@@ -1590,9 +1590,29 @@ export default class MigrateMeta extends Command {
             + `${chalk.dim(`(${timer.display()})`)}`,
           );
         } else if (report.failed > 0) {
+          // [#23391] Only what holds for every failed kind, then what does not
+          // work. The stored pass marks a row `failed` four ways: a body that is
+          // not valid JSON, a flow that does not canonicalize, a flow rename
+          // refused over a live name, and (on --apply) a rewrite the store
+          // refused. It writes none of them, so each reads as it did before the
+          // run. This line used to add "they keep reading canonically through
+          // the chain, so nothing is broken", which is false for two of the
+          // four. A body that is not valid JSON loads at no read. A flow that
+          // does not canonicalize fails the same `canonicalizeFlow` parse inside
+          // `AutomationEngine.registerFlow`, so no boot step registers it.
+          // The report names no kind, so the flow sentence is gated on a failed
+          // row's `type`, never on its reason's prose; it names the reason the
+          // operator reads beside the row.
+          const flowFailed = report.rows.some((row) => row.outcome === 'failed' && row.type === 'flow');
           printError(
-            `${report.failed} row(s) could not be rewritten. They keep reading canonically through the `
-            + 'chain, so nothing is broken — but their stored bytes stay legacy until the reason above is fixed.',
+            `${report.failed} row(s) could not be rewritten. Each stays as stored, and reads as it did before `
+            + 'this run, until the reason printed beside it is fixed. That does not mean it works: a row whose '
+            + 'stored body is not valid JSON does not load at all'
+            + (flowFailed
+              ? ', and a flow whose reason says it does not canonicalize is refused by the engine at boot as '
+                + 'well, so it is not registered and does not run'
+              : '')
+            + '.',
           );
         } else {
           printWarning(
