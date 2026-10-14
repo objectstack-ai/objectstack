@@ -1762,10 +1762,16 @@ function sendMetaItemAbsent(res: any): void {
  * unguarded too.
  *
  * Returns the refusal's sentence, or `undefined` when the token is absent or
- * judged. The runtime dispatcher's `/data` domain carries this function
- * statement for statement (`versionTokenRefusal` in
- * `packages/runtime/src/domains/data.ts`), so the two doors answer every token
- * alike; `data-update-expected-version.test.ts` and
+ * judged. Both doors build the refusal with the one constructor,
+ * `validationFailure(sentence, [])` (`@objectstack/types`), and render it with
+ * their own classifier: this file THROWS it into the route's catch
+ * (`mapDataError`, the envelope the protocol's `""` refusal gets here), and the
+ * dispatcher hands it to `deps.errorFromThrown` and RETURNS the answer (a throw
+ * out of `dispatch()` reaches a `createHonoApp` host's catch-all, which reads
+ * only `statusCode` and would answer `500`). The runtime dispatcher's `/data`
+ * domain carries this function statement for statement (`versionTokenRefusal`
+ * in `packages/runtime/src/domains/data.ts`), so the two doors answer every
+ * token alike; `data-update-expected-version.test.ts` and
  * `data-delete-expected-version.test.ts` hold them to it.
  */
 function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
@@ -9118,20 +9124,15 @@ export class RestServer {
                         // [#23492] A token that can never carry a version is
                         // refused here, before anything is asked, and every
                         // other present token is forwarded below: no token the
-                        // caller sent is read as "no token".
+                        // caller sent is read as "no token". THROWN as
+                        // `validationFailure`, so this route's catch answers it
+                        // through `mapDataError`, in the envelope it already
+                        // gives the protocol's own refusal of `""`.
                         const versionRefusal = versionTokenRefusal(
                             expectedVersion,
                             bodyVersion != null ? 'The body\'s `expectedVersion`' : 'The `If-Match` header',
                         );
-                        if (versionRefusal) {
-                            res.status(400).json({
-                                error: versionRefusal,
-                                code: 'VALIDATION_FAILED',
-                                fields: [],
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
+                        if (versionRefusal) throw validationFailure(versionRefusal, []);
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'update')) return;
                         // [#3899] Same gate as create: the wire body is the bare
                         // field patch (`expectedVersion` already stripped above),
@@ -9207,22 +9208,14 @@ export class RestServer {
                             ? (req.query as any).expectedVersion
                             : undefined;
                         const expectedVersion = queryVersion ?? ifMatchHeader;
-                        // [#23492] The `PATCH` above's rule: a token that can
-                        // never carry a version is refused, every other present
-                        // token is forwarded.
+                        // [#23492] The `PATCH` above's rule, thrown the same
+                        // way: a token that can never carry a version is
+                        // refused, every other present token is forwarded.
                         const versionRefusal = versionTokenRefusal(
                             expectedVersion,
                             queryVersion != null ? 'The `expectedVersion` query parameter' : 'The `If-Match` header',
                         );
-                        if (versionRefusal) {
-                            res.status(400).json({
-                                error: versionRefusal,
-                                code: 'VALIDATION_FAILED',
-                                fields: [],
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
+                        if (versionRefusal) throw validationFailure(versionRefusal, []);
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'delete')) return;
                         const deleteRequest: ServerScopedDataRequest<DeleteDataRequest> = {
                             object: req.params.object,
