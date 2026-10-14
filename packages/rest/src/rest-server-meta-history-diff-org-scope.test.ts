@@ -21,7 +21,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation, SysMetadataRepository } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
 const META = '/api/v1/meta';
@@ -313,16 +313,6 @@ function boot() {
     return {
         rows,
         historyRows,
-        /**
-         * A LEGACY organization-scoped write, as a door made one before ADR-0131 D6,
-         * planted at rest — the protocol now refuses it (`403 NOT_OVERRIDABLE`).
-         */
-        plantLegacyOrgRow: async (type: string, name: string, label = MARKER, organizationId = ORG_A) => {
-            const repo = new SysMetadataRepository({ engine, orgLabel: organizationId });
-            const ref = { org: organizationId, type, name } as Parameters<typeof repo.get>[0];
-            const head = await repo.get(ref);
-            return repo.put(ref, bodyFor(type, name, label), { parentVersion: head?.hash ?? null, actor: null });
-        },
         as(tenantId: string | undefined) {
             session = tenantId === undefined
                 ? { userId: 'u1', systemPermissions: ['manage_metadata'] }
@@ -429,22 +419,6 @@ describe('#13406 · ADR-0131 D6 the /history and /diff read doors read the envir
             expect(read.body?.events?.length).toBe(1);
         });
 
-        it('⭐ a LEGACY organization-scoped log is served by neither door, not even to its own organization', async () => {
-            await b.plantLegacyOrgRow('dashboard', 'legacy_logged');
-            await b.plantLegacyOrgRow('dashboard', 'legacy_logged', MARKER_2);
-            expect(
-                b.historyRowsFor('dashboard', 'legacy_logged', ORG_A).length,
-                'the legacy log was not planted; the case proves nothing',
-            ).toBe(2);
-
-            const read = await b.history('dashboard', 'legacy_logged');
-            expect(read.status).toBe(200);
-            expect(read.body?.events ?? [], 'a legacy org change log was served').toEqual([]);
-
-            const diffed = await b.diff('dashboard', 'legacy_logged', { from: '1', to: '2' });
-            expect(diffed.status).toBe(200);
-            expect(diffed.body?.changed ?? [], 'a diff of legacy org revisions was served').toEqual([]);
-        });
     });
 
     describe('the single-item read beside them', () => {

@@ -161,7 +161,7 @@ async function boot(opts: { item?: { type: string; name: string }; permissions?:
     const seed = async (state: 'active' | 'draft', packageId: string | null, body: Record<string, unknown>) => {
         const now = new Date().toISOString();
         await engine.insert('sys_metadata', {
-            id: `seed_${state}_${packageId ?? 'unbound'}`, type: item.type, name: item.name, organization_id: null,
+            id: `seed_${state}_${packageId ?? 'unbound'}`, type: item.type, name: item.name,
             package_id: packageId, state, metadata: JSON.stringify(body), checksum: hashSpec(body, item.type),
             version: 1, created_at: now, updated_at: now,
         }, { context: { isSystem: true } } as any);
