@@ -48,9 +48,13 @@ import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
 // [#22283] The `storage` settings namespace's Limits group — read and resolved
 // in ONE module, called per request by the doors below.
+// [#23306] The size refusal itself lives there too, beside the limit it
+// enforces, because a second door asks it: the server-side attach verb.
 import {
   resolveStorageLimits,
-  BYTES_PER_UPLOAD_MB,
+  uploadSizeRefusal,
+  UPLOAD_TOO_LARGE_CODE,
+  UPLOAD_TOO_LARGE_STATUS,
   type ResolvedStorageLimits,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
@@ -80,38 +84,6 @@ const ORGANIZATION_CHANGED_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 const ORGANIZATION_CHANGED_MESSAGE =
   'This upload was started in a different organization than your active one. ' +
   'Switch your active organization back to the one the upload was started in, then finish the upload.';
-
-/**
- * [#22283] The answer every upload door gives a file over the resolved
- * `max_upload_mb` — before the backend stores a byte and before any row is
- * written.
- *
- * `413` because that is the condition (RFC 9110, content too large).
- * `PAYLOAD_TOO_LARGE` because it is the one registered code for that condition
- * (ADR-0112 ledger, listed under this package's owner key beside
- * `@objectstack/rest`, which answers it for its import row ceilings): a client
- * branches on "too large" by the code alone, at every door that refuses it.
- * Not `VALIDATION_ERROR`, the bucket `standardErrorCodeForHttpStatus` derives
- * for a `413`: the standard catalog names no `413` member, so that code would
- * say only "malformed request" and leave the client to read the status.
- *
- * Typed `RegisteredErrorCode` so a misspelling, or the code leaving the
- * ledger, fails to compile; that this package's own owner key lists it is
- * `check:error-code-provenance`'s to hold. The message names the limit and
- * where it is set.
- */
-const UPLOAD_TOO_LARGE_STATUS = 413;
-const UPLOAD_TOO_LARGE_CODE: RegisteredErrorCode = 'PAYLOAD_TOO_LARGE';
-
-/** The refusal's message: what was measured, the limit, and the one setting that moves it. */
-function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string {
-  const mb = Math.round((maxUploadBytes / BYTES_PER_UPLOAD_MB) * 100) / 100;
-  return (
-    `${measured}, over the maximum upload size of ${mb} MB (${maxUploadBytes} bytes). ` +
-    'The limit is the "Max upload size (MB)" storage setting (max_upload_mb in the storage settings), ' +
-    'which an administrator can change.'
-  );
-}
 
 /**
  * [#22313] The answer the chunked-completion door gives an upload that does
@@ -473,8 +445,9 @@ export function registerStorageFamily(
     measured: (bytes: number) => string,
     res: IHttpResponse,
   ): boolean => {
-    if (maxUploadBytes === undefined || !Number.isFinite(bytes) || bytes <= maxUploadBytes) return true;
-    sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, uploadTooLargeMessage(measured(bytes), maxUploadBytes));
+    const refusal = uploadSizeRefusal(bytes, maxUploadBytes, measured);
+    if (refusal === null) return true;
+    sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, refusal);
     return false;
   };
 
@@ -1840,7 +1813,12 @@ function judgeCompletion(session: UploadSessionRecord, listed: ReadonlyArray<Lis
   };
 }
 
-function buildKey(scope: string, fileId: string, filename: string): string {
+/**
+ * The storage key of a new file: `<scope>/<fileId><.ext>`. Package-internal
+ * (not re-exported from `index.ts`); [#23306] exported so the server-side
+ * attach verb lays its keys out exactly as the upload doors do.
+ */
+export function buildKey(scope: string, fileId: string, filename: string): string {
   const ext = filename.includes('.') ? '.' + filename.split('.').pop() : '';
   return `${scope}/${fileId}${ext}`;
 }
