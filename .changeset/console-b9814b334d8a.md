@@ -47,6 +47,39 @@ Derived from the changesets objectui declared over the range — 31 releasing of
 - _(no changeset)_ ci(spec-main-shape-gate): drop the merge_group trigger now the context is out of the required set (objectui#12252) (#12262) (objectui `a1a917a08`)
 - _(no changeset)_ ci(type-check): the affected speed builds the packages the repo-root setup program imports (objectui#12272) (#12277) (objectui `48fb558d3`)
 
-<!-- adr-0087: TODO — the pin bump cannot answer this; a human must (objectstack#6494) -->
+Clause-②: no
+
+<!-- adr-0087: not-required (no-migration-prescription)
+     This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+     changeset, the re-recorded `scripts/sdui-manifest.record.json` and the regenerated
+     `sdui.manifest.json`, the re-recorded `packages/sdui-parser/objectui-lockstep.json`,
+     the re-measured pin citations in `packages/spec/src`, and the describe and ledger text
+     this hop makes true (`EmptyStateSchema.link`, `interfaceConfig.emptyState`, the
+     `record:details` section `count` and the `object-grid` `emptyState` member), which carry
+     their own `@objectstack/spec` patch changeset. It adds, removes or renames no
+     ObjectStack-authorable key: no Zod shape, no spec declaration and no stored
+     `sys_metadata` shape moves in it, so `objectstack migrate meta` has nothing here to
+     rewrite, and this body carries no FROM/TO prescription of its own.
+     The range carries four declared-breaking objectui changes, each by its author's
+     breaking annotation and none by a declared `major`, and the digest marked all four.
+     Each is answered against this tree:
+     (1) objectui#12030 (`c5406c201`): the `@object-ui/*` packages depend on the
+     `@objectstack/*` 18 prerelease line. This tree is that line (`@objectstack/spec` and
+     `@objectstack/client` are `18.0.0-next.0`, and the console build injects both), and no
+     package or example here depends on any `@object-ui/*` package.
+     (2) objectui#12242 (`5d3f437ab`), `@object-ui/fields`: `buildValidationRules` stops
+     compiling a field-level `pattern` / `pattern_message` / `validate`. `@objectstack/spec`'s
+     `FieldSchema` already refuses all three as unrecognized keys, and no example field
+     authors any of them.
+     (3) objectui#12242 (`5d3f437ab`), `@object-ui/types`: the field metadata types stop
+     declaring host-written and field-level regex keys, and `geolocation` leaves the
+     `FieldMetadata` union. No package or example here depends on `@object-ui/types`, and none
+     declares `type: 'geolocation'`.
+     (4) objectui#12273 (`9f282ef53`), `@object-ui/i18n`: the pack keys
+     `console.breadcrumb.dashboards` and `console.breadcrumb.reports` are retired. Nothing in
+     this tree reads either key.
+     Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
+     per-entry re-measurement of the upstream declared-breaking entries.
+-->
 
 objectui range: `1fb1ced36243...b9814b334d8a`
