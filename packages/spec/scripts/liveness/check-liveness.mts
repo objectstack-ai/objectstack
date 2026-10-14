@@ -794,15 +794,32 @@ const producerEntries: ProducerEntry[] = [];
 const proofFs = { existsSync, readFileSync };
 
 /**
+ * One read per cited file per run (#23180). The walk cites the same consumers
+ * from hundreds of rows — `packages/rest/src/rest-server.ts` alone 142 times —
+ * and reading each citation afresh made one run read 455.8 MB to check 2,367
+ * citations over 828 files: nearly half the run's wall, and the cost the
+ * self-test pays on every one of its gate spawns. Nothing in the repo moves
+ * under one run, so a memo keyed by the repo-relative path changes no verdict;
+ * a missing file is memoized as missing for the same reason.
+ */
+const citedText = new Map<string, string | null>();
+function readCited(p: string): string | null {
+  if (citedText.has(p)) return citedText.get(p) ?? null;
+  const f = join(repoRoot, p);
+  const text = existsSync(f) ? readFileSync(f, 'utf8') : null;
+  citedText.set(p, text);
+  return text;
+}
+
+/**
  * How many lines the cited file has, or `null` when it cannot be read. `null`
  * is not a pass: it means the EXISTENCE check owns this path's verdict already
  * (a rotted `evidence` pointer would otherwise be reported twice, once per
  * check, which teaches a reader to discount both lists).
  */
 function lineCountOf(p: string): number | null {
-  const f = join(repoRoot, p);
-  if (!existsSync(f)) return null;
-  return countLines(readFileSync(f, 'utf8'));
+  const text = readCited(p);
+  return text === null ? null : countLines(text);
 }
 
 /**
@@ -811,9 +828,7 @@ function lineCountOf(p: string): number | null {
  * from the existence check and must not be reported a second time here.
  */
 function contentOf(p: string): string | null {
-  const f = join(repoRoot, p);
-  if (!existsSync(f)) return null;
-  return readFileSync(f, 'utf8');
+  return readCited(p);
 }
 
 /** Unanchored (entry, cited path) pairs the walk observes, reconciled after it. */

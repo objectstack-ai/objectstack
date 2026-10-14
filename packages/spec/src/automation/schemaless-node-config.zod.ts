@@ -79,8 +79,10 @@
  *
  * Undeclared aliases are NOT part of these contracts: `subflow`'s historical
  * `flow` spelling graduated into the ADR-0087 D2 conversion
- * `flow-node-subflow-flow-alias` (the `map.flow` path), so the executor only
- * ever sees `flowName`.
+ * `flow-node-subflow-flow-alias` (the `map.flow` path), which left the load
+ * path at 18 (#23487) and rewrites only stored flows, so an authored `flow`
+ * meets {@link SUBFLOW_KEY_GUIDANCE} and the executor only ever sees
+ * `flowName`.
  *
  * ## Unknown keys — closed as of #4001 批 9, and this class had NO other door
  *
@@ -138,11 +140,13 @@ const SCHEMALESS_NODE_CONFIG_HISTORY =
 /**
  * `script` prescriptions for the two ADR-0087 D2 aliases (#3796).
  *
- * `functionName` and `input` are retired SPELLINGS that
- * `flow-node-script-config-aliases` rewrites at load, so — like the notify
- * family — a config still carrying one at parse time carries the canonical key
- * too, and since #4923 it carries a canonical key holding a DIFFERENT value
- * (an identical twin is deleted by the conversion). `input` earns its entry
+ * `functionName` and `input` are retired SPELLINGS. Their conversion,
+ * `flow-node-script-config-aliases`, left the load path at 18 (#23487), so —
+ * like the notify family — each prescription is the upgrade prescription,
+ * naming the release, for an author; a stored flow reaches this parse after
+ * the rehydration seam replayed the conversion, and still carries one only
+ * beside a canonical key holding a DIFFERENT value (#4923; an identical twin
+ * is deleted by the conversion). `input` earns its entry
  * twice over: edit distance would suggest `inputs` without ever saying that
  * `input` is *canonical* on `connector_action`'s `connectorConfig`, which is
  * where the spelling leaked in from and where it must NOT be changed.
@@ -154,26 +158,29 @@ const SCHEMALESS_NODE_CONFIG_HISTORY =
  */
 const SCRIPT_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   functionName:
-    'The callable reference is `function`. `functionName` was the AI/template-emitted alias, rewritten at '
-    + 'load by the ADR-0087 D2 conversion `flow-node-script-config-aliases`. If `function` is also present, the two '
-    + 'name DIFFERENT callables and the conversion kept both rather than picking which one runs — decide '
-    + 'which it is, put it on `function`, and delete `functionName`.',
+    'The `script` node config key `functionName` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the '
+    + 'AI/template-emitted alias the loader rewrote to `function` until this release. Use `function`. Rename the '
+    + 'key; the value (the callable reference) is unchanged. If `function` is also present, the two name DIFFERENT '
+    + 'callables — decide which one runs, put it on `function`, and delete `functionName`. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   input:
-    'The input map on a `script` node is `inputs` (plural). The singular `input` leaked in from '
-    + "`connector_action`, where `connectorConfig.input` is a DIFFERENT and canonical surface — do not \"fix\" that "
-    + 'one. `flow-node-script-config-aliases` rewrites this key at load; delete it once `inputs` carries the values. '
-    + 'If `inputs` is also present with DIFFERENT values, the conversion kept both rather than choosing — '
-    + 'reconcile them onto `inputs`.',
+    'The `script` node config key `input` was removed in @objectstack/spec 18 (ADR-0087 D2) — the singular '
+    + "spelling leaked in from `connector_action`, where `connectorConfig.input` is a DIFFERENT and canonical "
+    + 'surface (do not "fix" that one), and the loader rewrote it to `inputs` until this release. Use `inputs`. '
+    + 'Rename the key; the value (the input map) is unchanged. If `inputs` is also present with DIFFERENT values, '
+    + 'reconcile them onto `inputs`. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 };
 
 /** `subflow` prescriptions — one retired spelling, one wrong layer. */
 const SUBFLOW_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   flow:
-    'The invoked flow is named by `flowName`. `flow` was an undeclared executor fallback that no schema or form '
-    + 'ever described; it graduated into the ADR-0087 D2 conversion `flow-node-subflow-flow-alias`, which '
-    + 'rewrites it at load. If `flowName` is also present, the two name DIFFERENT flows and the conversion kept '
-    + 'both rather than picking which one this step invokes — decide which it is, put it on `flowName`, '
-    + 'and delete `flow`.',
+    'The `subflow` node config key `flow` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was an undeclared '
+    + 'executor fallback no schema or form ever described, which the loader rewrote to `flowName` until this '
+    + 'release. Use `flowName`. Rename the key; the value (the invoked flow\'s name) is unchanged. If `flowName` '
+    + 'is also present, the two name DIFFERENT flows — decide which one this step invokes, put it on `flowName`, '
+    + 'and delete `flow`. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   timeoutMs:
     "A subflow step's timeout is the engine's per-node guard, so it belongs on the NODE, not in its config: "
     + '`{ id, type: "subflow", timeoutMs: 30000, config: { … } }`. `FlowNodeSchema.timeoutMs` is the declared key.',
@@ -386,9 +393,10 @@ export type ScriptConfigParsed = z.infer<typeof ScriptConfigSchema>;
  * guard (wrong metadata — a rerun cannot supply it) instead of failing through
  * a hand-written check. The historical undeclared `flow` alias is NOT part of
  * this contract: the
- * ADR-0087 D2 conversion `flow-node-subflow-flow-alias` rewrites it at load
- * (#4278 — the `map.flow` graduation path), so the executor only ever sees
- * `flowName`. The node-level `timeoutMs` lives on {@link FlowNodeSchema}, not
+ * ADR-0087 D2 conversion `flow-node-subflow-flow-alias` rewrote it at load for
+ * protocol 17's window (#4278 — the `map.flow` graduation path) and, retired
+ * from the load path at 18 (#23487), rewrites only stored flows, so the
+ * executor only ever sees `flowName`. The node-level `timeoutMs` lives on {@link FlowNodeSchema}, not
  * here — a subflow step's timeout is the engine's per-node guard.
  */
 export const SubflowConfigSchema = lazySchema(() => strictObject({

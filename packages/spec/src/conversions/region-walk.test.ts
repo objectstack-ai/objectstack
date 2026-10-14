@@ -121,6 +121,8 @@ describe('conversions reach nodes inside structured regions', () => {
     // `filters` → `filter` is the highest-stakes entry in the table: the
     // `delete_record` executor reads the canonical key, so leaving the alias
     // unconverted leaves it with NO filter at all. It has to reach a loop body.
+    // Both CRUD aliases left the load path at 18 (#23487), so the walk is
+    // exercised in the posture that still replays them: data at rest.
     const { stack } = collectConversionNotices({
       flows: [{
         name: 'purge',
@@ -135,7 +137,7 @@ describe('conversions reach nodes inside structured regions', () => {
           },
         }],
       }],
-    });
+    }, { includeRetired: true });
 
     expect((stack.flows as any[])[0].nodes[0].config.body.nodes[0].config)
       .toEqual({ objectName: 'lead', filter: { status: 'stale' } });

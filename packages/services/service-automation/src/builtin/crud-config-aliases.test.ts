@@ -98,14 +98,19 @@ describe('CRUD config-key aliases: object→objectName + filters→filter (load-
     expect(calls[0].opts.where).toEqual({ id: 'L1' }); // filter preserved, not dropped
   });
 
-  it('the same conversions run on the build/validate seam too (normalizeStackInput)', async () => {
+  it('the build/validate seam no longer converts them (retired at 18), and the rehydration seam still does', async () => {
     const engine = new AutomationEngine(silentLogger());
     const { data, calls } = fakeData();
     registerCrudNodes(engine, ctxWith(data, silentLogger()));
 
+    // Both conversions left the load path at 18 (#23487): the authoring
+    // funnel hands the aliases on as written, for the node contract's
+    // refusal to name the rename…
     const raw = getRecordFlow({ object: 'crm_lead', filters: { id: 'L1' }, outputVariable: 'lead' });
-    const converted = (normalizeStackInput({ flows: [raw] }).flows as any[])[0];
-    engine.registerFlow('gr', converted);
+    const authored = (normalizeStackInput({ flows: [raw] }).flows as any[])[0];
+    expect(authored.nodes[1].config).toEqual({ object: 'crm_lead', filters: { id: 'L1' }, outputVariable: 'lead' });
+    // …while a flow that reaches the engine as data at rest still heals.
+    engine.registerFlow('gr', authored);
     await engine.execute('gr', { userId: 'u1' });
 
     expect(calls[0].obj).toBe('crm_lead');
