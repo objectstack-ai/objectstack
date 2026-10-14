@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { hashSpec } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 // [#4550 / #5480] The producer's OWN write-verb dispatch decisions, so the
 // engine double below cannot accept a call `ObjectQL.delete` / `ObjectQL.update`
@@ -432,32 +433,50 @@ describe('#6808 — deleteMetaItem stops BOTH registry exits serving a deleted o
  * that row is what is served next, so it is registered again (the boot
  * hydration's order) and nothing is retired.
  *
- * Both save orders: the registry holds ONE owner per object name, so the
- * second package's write-through is refused at save time, and which package
- * the registry holds before the delete depends on the order.
+ * Both orders: the registry holds ONE owner per object name, so which package
+ * the registry holds before the delete depends on which row it registered
+ * first.
  */
 describe('[#23297] a delete naming one package, of an object two packages hold, keeps the other package\'s row registered', () => {
   const P = 'app.pkg_p';
   const Q = 'app.pkg_q';
   const bodyOf = (name: string, label: string) => ({ ...invoiceBody(name), label });
 
+  /**
+   * [#23416, ADR-0029 D9.9] Only the FIRST package's row is saved through the
+   * door: a save into a second package of an object a runtime-authored row owns
+   * is refused before any write, so the door can no longer produce this state.
+   * A store can still hold it (rows written before that refusal existed), and
+   * the heal is pinned for that store. So the second row is seeded directly: the
+   * first row's own shape, rebound and re-labelled, carrying the checksum the
+   * repository computes, and the registry holds the first package's owner,
+   * exactly as the refused write-through left it.
+   */
   async function twoPackageObject(name: string, order: readonly string[], controlPlane: boolean) {
     const harness = makeHarness({ controlPlane });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      for (const packageId of order) {
-        await harness.protocol.saveMetaItem({ type: 'object', name, packageId, item: bodyOf(name, `Invoice ${packageId}`) });
-      }
-    } finally {
-      warn.mockRestore();
-    }
+    const [first, second] = order;
+    await harness.protocol.saveMetaItem({ type: 'object', name, packageId: first, item: bodyOf(name, `Invoice ${first}`) });
+    const [firstRow] = storedRows(harness.rows, name);
+    // The seeded row is one the repository could have written: its checksum
+    // is the repository's own, proved on the row the door just wrote.
+    expect(firstRow.checksum).toBe(hashSpec(JSON.parse(firstRow.metadata), 'object'));
+    const secondBody = bodyOf(name, `Invoice ${second}`);
+    const secondRow = {
+      ...firstRow,
+      id: `r_seeded_${second}`,
+      package_id: second,
+      metadata: JSON.stringify(secondBody),
+      checksum: hashSpec(secondBody, 'object'),
+    };
+    harness.rows.set(rowKey(secondRow), secondRow);
     expect(storedRows(harness.rows, name).map((r) => r.package_id).sort()).toEqual([P, Q].sort());
+    expect(harness.registry.getObjectOwner(name)?.packageId).toBe(first);
     return harness;
   }
 
   for (const controlPlane of [false, true]) {
     for (const order of [[P, Q], [Q, P]] as const) {
-      it(`${controlPlane ? 'control-plane' : 'tenant'} kernel, saved ${order.join(' then ')}: getObject, getItem and data CRUD serve Q's row after DELETE ?package=P`, async () => {
+      it(`${controlPlane ? 'control-plane' : 'tenant'} kernel, stored ${order.join(' then ')}: getObject, getItem and data CRUD serve Q's row after DELETE ?package=P`, async () => {
         const name = 'shared_invoice';
         const { protocol, registry, rows, dataRows } = await twoPackageObject(name, order, controlPlane);
 

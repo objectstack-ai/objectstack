@@ -571,6 +571,7 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     try {
       const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
       const authz = await resolveAuthzContext({
+        userAuthGates: undefined,
         ql: qlWith({ memberships: MEMBER_ROWS }),
         headers,
         getSession: async () => undefined,
@@ -609,6 +610,7 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     try {
       const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
       const authz = await resolveAuthzContext({
+        userAuthGates: undefined,
         ql: qlWith({ memberships: MEMBER_ROWS }),
         headers,
         getSession: async () => undefined,

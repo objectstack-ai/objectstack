@@ -319,6 +319,7 @@ async function observe(variant: keyof typeof VARIANTS): Promise<Observation> {
   const { tables, org, platformAdminEmails } = VARIANTS[variant]!;
   await withPlatformAdminEmails(platformAdminEmails, () =>
     resolveAuthzContext({
+      userAuthGates: undefined,
       ql: makeRecordingQl(tables, seen),
       headers: headers(),
       getSession: sessionFor('usr_1', org),
@@ -366,6 +367,7 @@ describe('[#8734] ADMIN_STANDING_SURFACE is what resolveAuthzContext actually re
   it('reaches the platform-admin derivation — otherwise the observation proves nothing', async () => {
     const ctx = await withPlatformAdminEmails(undefined, () =>
       resolveAuthzContext({
+        userAuthGates: undefined,
         ql: makeRecordingQl(VARIANTS['snake-case rows, standing intact']!.tables, new Map()),
         headers: headers(),
         getSession: sessionFor('usr_1', 'org_1'),
@@ -399,6 +401,7 @@ describe('[#8734] ADMIN_STANDING_SURFACE is what resolveAuthzContext actually re
     const v = VARIANTS['config-anchored platform admin']!;
     const ctx = await withPlatformAdminEmails(v.platformAdminEmails, () =>
       resolveAuthzContext({
+        userAuthGates: undefined,
         ql: makeRecordingQl(v.tables, new Map()),
         headers: headers(),
         getSession: sessionFor('usr_1', v.org),

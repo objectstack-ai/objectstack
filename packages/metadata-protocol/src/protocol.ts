@@ -19219,6 +19219,31 @@ export class ObjectStackProtocolImplementation implements
      * | `P` empty / absent (the `'sys_metadata'` sentinel) | **accepted** — a package-less env-wide overlay is ADR-0005's platform-global shape. Before D9 this THREW `already owned by package "O"`, an artefact of the borrowed `own` slot rather than a decision (#6995, measured as P2). |
      * | `P == Q`, some other package | **mismatch** — refused loudly. |
      *
+     * ## [#23416] …and against a RUNTIME-authored owner's id `R`
+     *
+     * With no packaged owner, the object may still have an owner: the `own`
+     * contributor a package's `sys_metadata` row registered (the write-through
+     * or the boot hydration). That is the contributor `registerObject`'s
+     * single-owner rule compares an incoming `own` claim against, so a row
+     * bound to a different package was written and then refused by the
+     * registry into {@link applyObjectRegistryMutation}'s best-effort warn: the
+     * save answered `200` while `sys_metadata` held a row the registry could
+     * not hold, which is the disagreement {@link overlayPackageMismatchError}
+     * exists to prevent. So the same mismatch arm answers it, judged on the
+     * registry's own fact (`getObjectOwner`, keyed on the object name exactly as
+     * `registerObject` keys its contributors), never on a guess:
+     *
+     * | case | verdict |
+     * |:--|:--|
+     * | `P == R` | `own` — the owner's re-save, an ordinary re-registration. |
+     * | `P` empty / absent | `own`, unchanged — a direct save naming no package is addressed to `R`'s row before this runs ({@link packagelessAddress}). |
+     * | `P == Q`, some other package | **mismatch** — refused loudly, the code owner's refusal and prescription. |
+     *
+     * Only an owner bound to a real package is judged here. An owner keyed by
+     * the `'sys_metadata'` sentinel (a package-less runtime object) or by no
+     * package at all is left to today's `own` verdict: it names no package the
+     * prescription could direct a save to.
+     *
      * Falls back to `'own'` — today's behaviour — for a registry that does not
      * offer the discriminator, so a duck-typed engine double is never made to
      * fail by a question it cannot answer.
@@ -19238,6 +19263,20 @@ export class ObjectStackProtocolImplementation implements
             : undefined;
         const ownerPackageId: unknown = owner?.packageId;
         if (typeof ownerPackageId !== 'string' || ownerPackageId === '') {
+            // [#23416] No packaged owner: the runtime-authored one, if any.
+            const runtimeOwner = typeof registry?.getObjectOwner === 'function'
+                ? registry.getObjectOwner(name)
+                : undefined;
+            const runtimeOwnerPackageId: unknown = runtimeOwner?.packageId;
+            if (
+                binding !== ''
+                && typeof runtimeOwnerPackageId === 'string'
+                && runtimeOwnerPackageId !== ''
+                && runtimeOwnerPackageId !== 'sys_metadata'
+                && binding !== runtimeOwnerPackageId
+            ) {
+                return { kind: 'mismatch', packageId: binding, ownerPackageId: runtimeOwnerPackageId };
+            }
             return { kind: 'own', packageId: binding || 'sys_metadata' };
         }
         if (binding !== '' && binding !== ownerPackageId) {

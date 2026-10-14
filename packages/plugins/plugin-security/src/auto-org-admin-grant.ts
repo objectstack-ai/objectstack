@@ -22,9 +22,9 @@
  *
  * [ADR-0131 D4] A grant names `organization_admin` (or its no-bypass
  * variant) by NAME, and the set is the security catalog's definition of it
- * (D3): no `sys_permission_set` row is read to write a grant, and none needs
- * to exist. The legacy row ids are read only to REVOKE a grant written before
- * the name column existed ({@link resolvePermissionSetIdsForName}).
+ * (D3): no `sys_permission_set` row is read, to write a grant or to revoke
+ * one. A grant written before the name column existed is named by the v18
+ * ceremony's verified rewrite before its id column is dropped (D10, C7b).
  *
  * **Why this isn't done by the better-auth org plugin directly:**
  * better-auth does not know about ObjectStack permission sets — it
@@ -47,8 +47,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { securityCatalogReaderOf } from '@objectstack/core';
 // [#11670] The per-organization catalog's scan budget, which the legacy
 // revoke reach below sizes itself by.
-import { SEED_ORGANIZATION_SCAN_LIMIT } from './organization-scope.js';
-import { GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
+import { GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -316,60 +315,6 @@ export function autoOrgAdminGrantReason(
 }
 
 /**
- * [#11670] Rows a REVOKE is willing to hold for ONE org-admin set name under a
- * walled posture: one per organization the catalog sweep covers, plus the
- * organization-less platform-bucket row.
- *
- * A BUDGET rather than a bound — nothing caps rows-per-name, since the name is
- * unique per organization (ADR-0120 D3). Exceeding it is therefore DETECTED and
- * reported rather than silently truncated: a grant pointing at a row past the
- * budget is a grant no revoke here can reach.
- */
-const ORG_ADMIN_SET_COPY_SCAN_LIMIT = SEED_ORGANIZATION_SCAN_LIMIT + 1;
-
-/**
- * EVERY legacy `sys_permission_set.id` bearing `name`, across the installation
- * — the REVOKE reach of {@link grantsHoldingName} for a grant written before
- * the name column existed (ADR-0131 D4), which names nothing until the
- * one-time backfill names it.
- *
- * Wide, and never posture-keyed (#11670): the grant a revoke has to reach may
- * point at any organization's copy, written under either posture, and a narrow
- * match would leave a capability the platform decided to take away in force
- * (ADR-0105 D4 F2). ⛔ Wide to REVOKE only — nothing is granted through it. A
- * database with no such row answers `[]`, and the revoke then reads by name
- * alone. The leg goes when ADR-0131 D10 drops the id column.
- */
-async function resolvePermissionSetIdsForName(
-  ql: any,
-  name: string,
-  logger?: MaybeLogger,
-  /**
-   * Keep only the rows a grant of this organization may name — organization-
-   * less, or this organization's own — the rule the one-time backfill names a
-   * legacy grant by. Absent: every copy (the revoke reach).
-   */
-  appliesToOrganization?: string,
-): Promise<string[]> {
-  const limit = ORG_ADMIN_SET_COPY_SCAN_LIMIT;
-  const rows = await tryFind(ql, 'sys_permission_set', { name }, limit, logger);
-  if (rows.length >= limit) {
-    logger?.warn?.(
-      '[security] the org-admin permission-set scan hit its bound — a grant pointing at a row past ' +
-        'it is NOT reached by this revoke; the next boot sweep asks again',
-      { object: 'sys_permission_set', name, limit },
-    );
-  }
-  const ids: string[] = [];
-  for (const row of rows) {
-    if (appliesToOrganization !== undefined && row?.organization_id && row.organization_id !== appliesToOrganization) continue;
-    const id = row?.id;
-    if (typeof id === 'string' && id.length > 0 && !ids.includes(id)) ids.push(id);
-  }
-  return ids;
-}
-
-/**
  * [ADR-0131 D3] Why an org-admin grant of `name` cannot be written, or
  * `undefined` when it can: the security catalog — the one place the resolver
  * grants a held set from — must hold the set. A composition with no catalog
@@ -397,51 +342,17 @@ async function orgAdminSetMissingFromCatalog(
 
 /**
  * [ADR-0131 D4] The grant rows of `where` that hold the set `name` — read BY
- * NAME (`sys_user_permission_set.permission_set`), which reaches every copy of
- * the set at once: a name is the reference, whichever organization's row the
- * grant's id was written against.
- *
- * Plus — to RESTRICT only — the rows of `where` that name nothing yet
- * (`grantSetNameOf` is empty) and whose id is one of `unnamedIds`: a grant
- * written before the name column existed, on an upgraded deployment's first
- * boot before the backfill names it (`kernel:ready` runs ahead of the
- * backfill's `kernel:bootstrapped`), or one the backfill could not name (an
- * id on another organization's row). A revocation reaches it, and so does
- * the duplicate check a grant insert makes; nothing is ever GRANTED through
- * it. The id leg goes when ADR-0131 C8 counts the unnamed grants and drops
- * the column.
- *
- * Rows come back once each, named ones first.
+ * NAME (`sys_user_permission_set.permission_set`), the grant's one reference
+ * to its set.
  */
 async function grantsHoldingName(
   ql: any,
   where: Record<string, unknown>,
   name: string,
-  unnamedIds: readonly string[],
   limit: number,
   logger?: MaybeLogger,
 ): Promise<any[]> {
-  const named = await tryFind(ql, 'sys_user_permission_set', { ...where, [GRANT_SET_NAME_FIELD]: name }, limit, logger);
-  const unnamed = unnamedIds.length > 0
-    ? (await tryFind(
-      ql,
-      'sys_user_permission_set',
-      { ...where, [GRANT_SET_ID_FIELD]: { $in: [...unnamedIds] } },
-      limit,
-      logger,
-    )).filter((row) => grantSetNameOf(row) === undefined)
-    : [];
-  const seen = new Set<string>();
-  const out: any[] = [];
-  for (const row of [...named, ...unnamed]) {
-    const key = row?.id === undefined || row?.id === null ? undefined : String(row.id);
-    if (key !== undefined) {
-      if (seen.has(key)) continue;
-      seen.add(key);
-    }
-    out.push(row);
-  }
-  return out;
+  return tryFind(ql, 'sys_user_permission_set', { ...where, [GRANT_SET_NAME_FIELD]: name }, limit, logger);
 }
 
 
@@ -560,15 +471,12 @@ export async function reconcileOrgAdminGrant(
   // nothing and leave the superseded bits in force, which is the F2 outcome
   // this leg is the close-out for.
   //
-  // [ADR-0131 D4] Matched BY NAME, which is every copy at once; the copies'
-  // ids still reach a grant that names nothing yet ({@link grantsHoldingName}).
-  const supersededSetIds = await resolvePermissionSetIdsForName(ql, supersededSetName, logger);
+  // [ADR-0131 D4] Matched BY NAME, which is every copy at once.
   {
     const stale = await grantsHoldingName(
       ql,
       { user_id: userId, organization_id: orgId },
       supersededSetName,
-      supersededSetIds,
       5,
       logger,
     );
@@ -589,12 +497,17 @@ export async function reconcileOrgAdminGrant(
   // [ADR-0131 D4] Granting asks "does the pair already hold the set" BY NAME:
   // a grant holds its set by name, and the new grant names it alone — no
   // `sys_permission_set` row is read to write it, and none needs to exist.
-  // Revoking asks "does the pair hold ANY grant of that name", by name plus the
-  // legacy id reach of {@link grantsHoldingName}, which only ever restricts.
-  // The existence check reaches a legacy unnamed grant too — a duplicate it
-  // must not insert — but only one the backfill will name (its set row is
-  // organization-less or this organization's own): a grant it cannot name
-  // confers nothing, and must not stand in for the one written here.
+  // Revoking asks "does the pair hold ANY grant of that name", by name. A
+  // second grant of one set to one user in one organization cannot be written
+  // (the declared unique index on user, set and organization); one already
+  // stored is the v18 ceremony's to report, never deleted here.
+  //
+  // [C7b, seat answers on #15211 Q-S3b (ii)] A pair holding ANY grant that
+  // names nothing in this organization — a 17.x grant the v18 ceremony's
+  // rewrite has not named yet — is written nothing: the rewrite will name
+  // that grant, and a named grant written beside it would hold the very key
+  // the rewrite needs (the unique index would refuse its rename). The unnamed
+  // grant confers nothing meanwhile, as every 17.x grant does until --apply.
   if (shouldGrant) {
     const missing = await orgAdminSetMissingFromCatalog(ql, grantSetName, logger);
     if (missing) return { action: 'skipped', reason: missing };
@@ -602,26 +515,18 @@ export async function reconcileOrgAdminGrant(
       ql,
       { user_id: userId, organization_id: orgId },
       grantSetName,
-      await resolvePermissionSetIdsForName(ql, grantSetName, logger, orgId),
       5,
       logger,
     );
-    if (existingGrants.length > 0) {
-      // Deduplicate stale duplicates if any slipped through — rows repeating
-      // an earlier row's own legacy id (a grant written by name carries none).
-      // A grant against another legacy copy is a different row and is never
-      // deleted here (#11670).
-      const kept = new Set<string>();
-      for (const row of existingGrants) {
-        const rowSetId = String(row?.[GRANT_SET_ID_FIELD] ?? '');
-        if (!kept.has(rowSetId)) {
-          kept.add(rowSetId);
-          continue;
-        }
-        if (row?.id) await tryDelete(ql, 'sys_user_permission_set', String(row.id), logger);
-      }
-      return { action: 'noop' };
-    }
+    if (existingGrants.length > 0) return { action: 'noop' };
+    const unnamed = await tryFind(
+      ql,
+      'sys_user_permission_set',
+      { user_id: userId, organization_id: orgId, [GRANT_SET_NAME_FIELD]: null },
+      1,
+      logger,
+    );
+    if (unnamed.length > 0) return { action: 'skipped', reason: 'unnamed_grant_awaits_ceremony' };
     const created = await tryInsert(
       ql,
       'sys_user_permission_set',
@@ -662,15 +567,11 @@ export async function reconcileOrgAdminGrant(
   // revokes; it never re-points or adopts a row for someone who still
   // qualifies.
   //
-  // [ADR-0131 D4] By NAME, every copy at once; the copies' ids still reach a
-  // grant that names nothing yet, so no demotion leaves one standing
-  // ({@link grantsHoldingName}).
-  const revocableSetIds = await resolvePermissionSetIdsForName(ql, grantSetName, logger);
+  // [ADR-0131 D4] By NAME, every copy at once.
   const existingGrants = await grantsHoldingName(
     ql,
     { user_id: userId, organization_id: orgId },
     grantSetName,
-    revocableSetIds,
     5,
     logger,
   );
@@ -730,22 +631,7 @@ export async function backfillOrgAdminGrants(
 
   // [#11670] The sweep is installation-wide by construction — it scans every
   // `sys_member` row and every org-admin grant, across organizations. [ADR-0131
-  // D4] Grants are read by name; the legacy row ids resolved here only extend
-  // the orphan sweep's reach to grants that name nothing yet (restrict-only),
-  // so a database with no `sys_permission_set` row is swept all the same.
-  const permSetIds = await resolvePermissionSetIdsForName(
-    ql,
-    orgAdminSetNameForPosture(posture, suppressUnbounded),
-    logger,
-  );
-  // [ADR-0105 D4] The orphan sweep below must see BOTH variants: a boot that
-  // changed posture leaves grants of the superseded set behind, and those are
-  // exactly the rows whose bits must stop applying.
-  const supersededIds = await resolvePermissionSetIdsForName(
-    ql,
-    supersededOrgAdminSetName(posture, suppressUnbounded),
-    logger,
-  );
+  // D4] Grants are read by name.
 
   const members = await tryFind(ql, 'sys_member', {}, limit, logger);
   // De-duplicate by (user_id, organization_id) pair — a user with two
@@ -773,17 +659,12 @@ export async function backfillOrgAdminGrants(
   // pair with NO membership row left (orphaned grants from deletes
   // that fired before this hook existed).
   //
-  // [ADR-0131 D4] The grants of either variant, by NAME — plus, through the
-  // copies' ids, the ones that name nothing yet (this sweep runs at
-  // `kernel:ready`, ahead of the name backfill), so an orphan is reached
-  // either way ({@link grantsHoldingName}).
+  // [ADR-0131 D4] The grants of either variant, by NAME. [ADR-0105 D4] Both
+  // variants: a boot that changed posture leaves grants of the superseded set
+  // behind, and those are exactly the rows whose bits must stop applying.
   const allGrants = [
-    ...(await grantsHoldingName(
-      ql, {}, orgAdminSetNameForPosture(posture, suppressUnbounded), permSetIds, limit, logger,
-    )),
-    ...(await grantsHoldingName(
-      ql, {}, supersededOrgAdminSetName(posture, suppressUnbounded), supersededIds, limit, logger,
-    )),
+    ...(await grantsHoldingName(ql, {}, orgAdminSetNameForPosture(posture, suppressUnbounded), limit, logger)),
+    ...(await grantsHoldingName(ql, {}, supersededOrgAdminSetName(posture, suppressUnbounded), limit, logger)),
   ];
   for (const g of allGrants) {
     const userId = String(g?.user_id ?? '');

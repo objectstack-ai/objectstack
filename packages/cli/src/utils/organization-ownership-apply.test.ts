@@ -38,6 +38,9 @@ import {
   type ReviewedPlan,
   type TemplatePort,
 } from './organization-ownership-apply.js';
+import { buildOrganizationOwnershipPlan } from './organization-ownership-plan.js';
+import { backfillOrgAdminGrants } from '@objectstack/plugin-security';
+import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 
 let dir: string;
 let file: string;
@@ -129,11 +132,11 @@ function ledger(): CeremonyLedgerPort & { checkpoint: CeremonyCheckpoint | null;
 
 /** The schema-drift ceremony, as SQLite answers it: the column goes. */
 const columnDrops: ColumnDropPort = {
-  async drop(tables) {
-    return tables.map((table) => {
-      writes.push(`ALTER TABLE ${table} DROP COLUMN organization_id`);
-      db.exec(`ALTER TABLE "${table}" DROP COLUMN organization_id`);
-      return { table, outcome: 'dropped' as const };
+  async drop(columns) {
+    return columns.map(({ table, column }) => {
+      writes.push(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+      db.exec(`ALTER TABLE "${table}" DROP COLUMN "${column}"`);
+      return { table, column, outcome: 'dropped' as const };
     });
   },
 };
@@ -406,13 +409,15 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
       { id: 'set_secret', namespace: 'ai', key: 'api_key', value: null, encrypted: 1, locked: 0, locked_reason: null, value_enc: 'secret:h_1' },
     ]);
 
-    // Every grant names its set; the id column is still there (C7b's later drop).
-    expect(rows('SELECT id, permission_set, permission_set_id FROM sys_user_permission_set ORDER BY id')).toEqual([
-      { id: 'grant_1', permission_set: 'member_default', permission_set_id: 'ps_org' },
-      { id: 'grant_2', permission_set: 'member_default', permission_set_id: 'ps_null' },
-      { id: 'grant_3', permission_set: 'field_auditor', permission_set_id: 'ps_auth' },
-      { id: 'grant_4', permission_set: 'member_default', permission_set_id: 'ps_null' },
+    // Every grant names its set, and the id column the rewrite read is gone (C7b).
+    expect(rows('SELECT id, permission_set FROM sys_user_permission_set ORDER BY id')).toEqual([
+      { id: 'grant_1', permission_set: 'member_default' },
+      { id: 'grant_2', permission_set: 'member_default' },
+      { id: 'grant_3', permission_set: 'field_auditor' },
+      { id: 'grant_4', permission_set: 'member_default' },
     ]);
+    expect(rows(`SELECT name FROM pragma_table_info('sys_user_permission_set') WHERE name = 'permission_set_id'`)).toEqual([]);
+    expect(writes).toContain('ALTER TABLE sys_user_permission_set DROP COLUMN permission_set_id');
 
     // Attributed rows carry their organization — the anchor's, else the Default Organization.
     expect(rows(`SELECT organization_id FROM sys_file WHERE id = 'file_1'`)).toEqual([{ organization_id: 'org_b' }]);
@@ -815,9 +820,11 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const l = ledger();
     const answering = async (outcome: 'not-declared' | 'not-proposed'): Promise<OrganizationOwnershipApplyReport> => {
       const real = columnDrops.drop;
-      columnDrops.drop = async (tables) => [
-        ...(await real(tables.filter((t) => t !== 'sys_flow_dispatch'))),
-        ...(tables.includes('sys_flow_dispatch') ? [{ table: 'sys_flow_dispatch', outcome }] : []),
+      columnDrops.drop = async (columns) => [
+        ...(await real(columns.filter((c) => c.table !== 'sys_flow_dispatch'))),
+        ...(columns.some((c) => c.table === 'sys_flow_dispatch')
+          ? [{ table: 'sys_flow_dispatch', column: 'organization_id', outcome }]
+          : []),
       ];
       try {
         return await apply(c, l);
@@ -831,7 +838,8 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const notDeclared = await answering('not-declared');
     const drops = notDeclared.steps.find((s) => s.step === 'column-drops')!;
     expect(drops.status).toBe('blocked');
-    expect(drops.summary).toEqual({ dropped: 1, due: 2, notDeclared: 1 });
+    // sys_job.organization_id and the grant's retired permission_set_id drop; sys_flow_dispatch is kept.
+    expect(drops.summary).toEqual({ dropped: 2, due: 3, notDeclared: 1 });
     expect(flowDispatchBlocker(notDeclared)).toHaveLength(1);
     expect(rows(`SELECT name FROM pragma_table_info('sys_flow_dispatch') WHERE name = 'organization_id'`)).toHaveLength(1);
     expect(rows(`SELECT name FROM pragma_table_info('sys_job') WHERE name = 'organization_id'`)).toHaveLength(0);
@@ -859,5 +867,149 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(drops.blockers.join('\n')).toMatch(/sys_metadata\.organization_id is not dropped/);
     expect(rows(`SELECT name FROM pragma_table_info('sys_metadata') WHERE name = 'organization_id'`)).toHaveLength(1);
     expect(rows(`SELECT name FROM pragma_table_info('sys_job') WHERE name = 'organization_id'`)).toHaveLength(0);
+  });
+});
+
+describe('ADR-0131 D10 --apply — the grant\'s retired id column (C7b, seat answers 6162538253 Q5 A)', () => {
+  const plan = () => buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+  const grantsPlan = async () => (await plan()).tables.find((t) => t.object === 'sys_user_permission_set')!.grants!;
+  const idColumn = () => rows(`SELECT name FROM pragma_table_info('sys_user_permission_set') WHERE name = 'permission_set_id'`);
+
+  /**
+   * The engine surface the organization-administrator sweep reads and writes,
+   * over the fixture database. An insert keeps the columns the 17.x table has.
+   */
+  const sqliteQl = {
+    async find(object: string, query: { where?: Record<string, unknown>; limit?: number }) {
+      const where = query?.where ?? {};
+      const keys = Object.keys(where);
+      const text = keys.map((k) => (where[k] === null ? `"${k}" IS NULL` : `"${k}" = ?`)).join(' AND ');
+      return db.prepare(`SELECT * FROM "${object}"${keys.length ? ` WHERE ${text}` : ''}${query?.limit ? ` LIMIT ${query.limit}` : ''}`)
+        .all(...keys.filter((k) => where[k] !== null).map((k) => where[k] as never)) as Record<string, unknown>[];
+    },
+    async insert(object: string, data: Record<string, unknown>) {
+      const columns = new Set(rows(`SELECT name FROM pragma_table_info('${object}')`).map((r) => String(r.name)));
+      const keys = Object.keys(data).filter((k) => columns.has(k));
+      db.prepare(`INSERT INTO "${object}" (${keys.map((k) => `"${k}"`).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`)
+        .run(...keys.map((k) => data[k] as never));
+      return data;
+    },
+    async delete(object: string, options: { where?: { id?: unknown } }) {
+      assertEngineDeleteDispatch(options as never);
+      db.prepare(`DELETE FROM "${object}" WHERE id = ?`).run(options?.where?.id as never);
+      return 1;
+    },
+  };
+
+  /** A 17.x organization owner: a membership, and a legacy grant of the organization-administrator set by id. */
+  function seedOrgAdminLegacyGrant(): void {
+    db.exec(`
+      CREATE UNIQUE INDEX uniq_grant_key ON sys_user_permission_set (user_id, permission_set, COALESCE(organization_id, '__global__'));
+      CREATE TABLE sys_member (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT, role TEXT);
+      INSERT INTO sys_member VALUES ('mem_oa', 'org_default', 'usr_oa', 'owner');
+      INSERT INTO sys_permission_set VALUES ('ps_oa', NULL, 'organization_admin_no_bypass', 'Org Admin', 'platform', 1, '{}', '[]');
+      INSERT INTO sys_user_permission_set VALUES ('grant_oa', 'org_default', 'usr_oa', 'ps_oa', NULL);
+    `);
+  }
+  const withOrgAdminSet = (c: ReturnType<typeof catalog>): ReturnType<typeof catalog> => {
+    const resolve = c.resolve.bind(c);
+    c.resolve = async (type, name) =>
+      type === 'permission' && name === 'organization_admin_no_bypass' ? { definition: { name, label: 'Org Admin' } } : resolve(type, name);
+    return c;
+  };
+
+  it('[Q-S3b (ii)] on a 17.x grant table carrying the declared index, the first boot\'s organization-administrator sweep writes NO row beside the owner\'s legacy grant, so --plan counts no collision and the rewrite names it and completes', async () => {
+    seedOrgAdminLegacyGrant();
+    const swept = await backfillOrgAdminGrants(sqliteQl, { posture: 'single' });
+    expect(swept).toMatchObject({ granted: 0, skipped: 1 });
+    expect(rows(`SELECT id FROM sys_user_permission_set WHERE user_id = 'usr_oa'`)).toEqual([{ id: 'grant_oa' }]);
+    expect((await grantsPlan()).rewriteCollisions).toEqual([]);
+
+    const report = await apply(withOrgAdminSet(catalog()), ledger());
+    const rewrite = report.steps.find((s) => s.step === 'rewrite')!;
+    expect(rewrite.status).toBe('done');
+    expect(rewrite.summary.collisions).toBe(0);
+    expect(rows(`SELECT id, permission_set FROM sys_user_permission_set WHERE user_id = 'usr_oa'`))
+      .toEqual([{ id: 'grant_oa', permission_set: 'organization_admin_no_bypass' }]);
+    // …and once named, the next sweep finds it and writes nothing either.
+    expect(await backfillOrgAdminGrants(sqliteQl, { posture: 'single' })).toMatchObject({ granted: 0 });
+  });
+
+  it('the safety net — a legacy grant whose name its user already holds in its organization (written by any other writer) is not named, on a database carrying the declared index: --plan counts the pair, --apply blocks the rewrite naming both ids, deletes neither, and finishes once the operator removes one', async () => {
+    db.exec(`
+      CREATE UNIQUE INDEX uniq_grant_key ON sys_user_permission_set (user_id, permission_set, COALESCE(organization_id, '__global__'));
+      INSERT INTO sys_user_permission_set VALUES ('grant_named', 'org_default', 'usr_1', NULL, 'member_default');
+    `);
+    expect((await grantsPlan()).rewriteCollisions).toEqual([{ id: 'grant_1', name: 'member_default', heldBy: 'grant_named' }]);
+
+    const report = await apply(catalog(), ledger());
+    const rewrite = report.steps.find((s) => s.step === 'rewrite')!;
+    expect(rewrite.status).toBe('blocked');
+    expect(rewrite.summary.collisions).toBe(1);
+    expect(rewrite.blockers.join('\n')).toMatch(/1 legacy grant\(s\) would name a permission set their user already holds in the same organization \(grant_1 \(member_default, held by grant_named\)\)/);
+    expect(rows(`SELECT id, permission_set FROM sys_user_permission_set WHERE user_id = 'usr_1' ORDER BY id`))
+      .toEqual([{ id: 'grant_1', permission_set: null }, { id: 'grant_named', permission_set: 'member_default' }]);
+    expect(writes.some((w) => /DELETE FROM "sys_user_permission_set"/.test(w))).toBe(false);
+    expect(idColumn()).toHaveLength(1);
+
+    // The operator keeps the named grant; the re-run names the rest and drops the column.
+    db.exec(`DELETE FROM sys_user_permission_set WHERE id = 'grant_1'`);
+    const again = await apply(catalog(), ledger());
+    expect(again.steps.find((s) => s.step === 'rewrite')!.status).toBe('done');
+    expect(again.steps.find((s) => s.step === 'column-drops')!.status).toBe('done');
+    expect(idColumn()).toEqual([]);
+  });
+
+  it('two NAMED grants of one set to one user in one organization (an index that never built) block the id column\'s drop; neither is deleted', async () => {
+    db.exec(`INSERT INTO sys_user_permission_set VALUES
+      ('grant_d1', 'org_default', 'usr_7', NULL, 'member_default'),
+      ('grant_d2', 'org_default', 'usr_7', NULL, 'member_default')`);
+    expect((await grantsPlan()).duplicates).toEqual({ groups: 1, rows: 2 });
+
+    const report = await apply(catalog(), ledger());
+    expect(report.steps.find((s) => s.step === 'rewrite')!.status).toBe('done');
+    const drops = report.steps.find((s) => s.step === 'column-drops')!;
+    expect(drops.status).toBe('blocked');
+    expect(drops.blockers.join('\n')).toMatch(/sys_user_permission_set\.permission_set_id is not dropped: 2 grant\(s\) in 1 group\(s\)/);
+    expect(rows(`SELECT id FROM sys_user_permission_set WHERE user_id = 'usr_7' ORDER BY id`)).toEqual([{ id: 'grant_d1' }, { id: 'grant_d2' }]);
+    expect(idColumn()).toHaveLength(1);
+    expect(writes.some((w) => /DELETE FROM "sys_user_permission_set"/.test(w))).toBe(false);
+
+    db.exec(`DELETE FROM sys_user_permission_set WHERE id = 'grant_d2'`);
+    const again = await apply(catalog(), ledger());
+    expect(again.steps.find((s) => s.step === 'column-drops')!.status).toBe('done');
+    expect(idColumn()).toEqual([]);
+  });
+
+  it('a second platform-wide grant (organization NULL) is a duplicate too: GROUP BY keys NULLs together, unlike the index', async () => {
+    await onlyTemplates(`('tpl_none', NULL, 'crm.none', 'en-US', 'x', 0, 'package')`, async () => {
+      db.exec(`
+        CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT,
+          permission_set_id TEXT, permission_set TEXT);
+        INSERT INTO sys_user_permission_set VALUES
+          ('g1', NULL, 'usr_p', NULL, 'member_default'),
+          ('g2', NULL, 'usr_p', NULL, 'member_default');
+      `);
+      const report = await apply(catalog(), ledger(), { posture: 'isolated' });
+      const drops = report.steps.find((s) => s.step === 'column-drops')!;
+      expect(drops.blockers.join('\n')).toMatch(/permission_set_id is not dropped: 2 grant\(s\) in 1 group\(s\)/);
+    });
+  });
+
+  it('a 17.x database this release has not booted against (no permission_set column): --plan counts zero and names the boot, --apply blocks the rewrite with the same remedy', async () => {
+    await onlyTemplates(`('tpl_none', NULL, 'crm.none', 'en-US', 'x', 0, 'package')`, async () => {
+      db.exec(`
+        CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT, permission_set_id TEXT);
+        INSERT INTO sys_user_permission_set VALUES ('g1', NULL, 'usr_p', 'ps_x');
+      `);
+      const grants = await grantsPlan();
+      expect(grants).toMatchObject({ nameColumn: 'absent', duplicates: { groups: 0, rows: 0 }, rewriteCollisions: [] });
+      expect(grants.note).toMatch(/Boot this release once against the database/);
+
+      const report = await apply(catalog(), ledger(), { posture: 'isolated' });
+      const rewrite = report.steps.find((s) => s.step === 'rewrite')!;
+      expect(rewrite.status).toBe('blocked');
+      expect(rewrite.blockers.join('\n')).toMatch(/has no permission_set column.*Boot this release once against the database/);
+    });
   });
 });

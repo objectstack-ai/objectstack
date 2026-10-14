@@ -132,7 +132,7 @@ async function ceremony(posture: string, db: Database.Database): Promise<Organiz
     catalog,
     door: { save: async (type, name) => { throw new Error(`the door was asked to save ${type} ${name}`); } },
     templates: { find: async () => undefined },
-    columnDrops: { drop: async (tables) => tables.map((table) => ({ table, outcome: 'not-proposed' as const })) },
+    columnDrops: { drop: async (columns) => columns.map((c) => ({ table: c.table, column: c.column, outcome: 'not-proposed' as const })) },
     ledger: { read: async () => checkpoint, write: async (cp) => { checkpoint = cp; } },
   });
 }

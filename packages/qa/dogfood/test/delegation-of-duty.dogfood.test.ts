@@ -128,6 +128,7 @@ describe('delegation of duty (ADR-0091 D3) — end to end', () => {
   // ── RESOLUTION path (L1 validity filter on the delegated grant) ────────────
   it('the delegate RESOLVES the delegated position while inside the window', async () => {
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql, headers: {}, getSession: sessionFor(delegateId), nowMs: Date.now(),
     });
     expect(ctx.positions, 'delegate holds the delegated position during the window').toContain('vacation_approver');
@@ -136,6 +137,7 @@ describe('delegation of duty (ADR-0091 D3) — end to end', () => {
   it('the delegated position STOPS resolving at valid_until — access dies, no cleanup job', async () => {
     const afterExpiry = Date.parse(validUntil) + 1000;
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql, headers: {}, getSession: sessionFor(delegateId), nowMs: afterExpiry,
     });
     expect(ctx.positions, 'the delegated grant is gone the instant its window closes').not.toContain('vacation_approver');
