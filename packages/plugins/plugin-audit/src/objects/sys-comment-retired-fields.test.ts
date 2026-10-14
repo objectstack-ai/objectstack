@@ -26,7 +26,7 @@ const RETIRED_FIELDS: ReadonlyArray<readonly [field: string, prescription: strin
     'visibility',
     'comment visibility derives from the record `thread_id` points at (#4630); '
       + 'a per-row enum would be a second, unenforced source of truth. An external/'
-      + 'portal distinction must be designed against ADR-0090 D11 `externalSharingModel` first.',
+      + 'portal distinction must be designed against the ADR-0095 `EXTERNAL` rung first.',
   ],
   [
     'reply_count',

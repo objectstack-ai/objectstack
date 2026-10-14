@@ -10,7 +10,6 @@
  * |-----------------------------------------|---------------------------------|
  * | security-owd-unset            (error)   | objectui#2348 leave_request 事故 |
  * | security-owd-alias            (error)   | ADR-0090 D4 canonical enum — UNPARSED intakes only, see § Intake |
- * | security-external-wider       (error)   | ADR-0090 D11 external ≤ internal|
  * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
  * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; a `guest`-bound set is outside a package-time linter's sight and is the bind-time gate's alone (#16110) |
  * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310; CLI + runtime publish gate since commit a227afa41 |
@@ -64,7 +63,7 @@
  *
  * - `objects[].security.sharingModel` — **there is no `security` envelope on an
  *   object.** `ObjectSchema` declares the OWD dials flat (`sharingModel`,
- *   `externalSharingModel`, `publicSharing`) and is strict, so a stack nesting
+ *   `publicSharing`) and is strict, so a stack nesting
  *   one under `security` is refused by name rather than stripped. Nothing could
  *   reach that fallback; what it did instead was describe an authorization
  *   surface that does not exist, in the security linter of all places.
@@ -78,8 +77,9 @@
  *
  * ## Intake — which doors can reach `security-owd-alias` at all (#16109)
  *
- * `sharingModel` and `externalSharingModel` are CLOSED enums on `ObjectSchema`
- * (ADR-0090 D4 / D11): every value `OWD_ALIAS_FIX` names — both the D4
+ * `sharingModel` is a CLOSED enum on `ObjectSchema` (ADR-0090 D4; its
+ * external twin `externalSharingModel` is a retired tombstone since #23268,
+ * refused at parse with its own prescription): every value `OWD_ALIAS_FIX` names — both the D4
  * aliases a shipped schema once accepted and the wrong-layer spellings it
  * never did, two histories declared as two maps below — and every other
  * non-canonical string, is refused by the schema with `invalid_value`. So on
@@ -124,7 +124,6 @@ import { indexObjectGraph, nearestName, recordsOf, type ObjectGraph } from './ob
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
-export const SECURITY_EXTERNAL_WIDER = 'security-external-wider-than-internal';
 export const SECURITY_WILDCARD_VAMA = 'security-wildcard-vama';
 export const SECURITY_ANCHOR_HIGH_PRIVILEGE = 'security-anchor-high-privilege';
 export const SECURITY_ROLE_WORD = 'security-role-word';
@@ -196,19 +195,13 @@ const OWD_WRONG_LAYER_FIX: Record<string, string> = {
 
 /** Every value this rule offers a fix-it for — both provenance groups. */
 const OWD_ALIAS_FIX: Record<string, string> = { ...OWD_RETIRED_ALIAS_FIX, ...OWD_WRONG_LAYER_FIX };
-/** D11 ordering for external ≤ internal (controlled_by_parent excluded). */
-const OWD_WIDTH: Record<string, number> = {
-  private: 0,
-  public_read: 1,
-  public_read_write: 2,
-};
 
 /**
  * The object's org-wide default.
  *
  * `sharingModel` is the whole of it. There is no `objects[].security` envelope
  * to fall back to and there never was: `ObjectSchema.shape` carries
- * `sharingModel` / `externalSharingModel` / `publicSharing` flat, declares no
+ * `sharingModel` / `publicSharing` flat, declares no
  * `security` key, and is strict — a stack nesting the OWD under `security` is
  * REFUSED ("Unrecognized key(s) on this object: `security`"), not stripped. So
  * the fallback removed in #5017 could not run for any stack an author can ship;
@@ -434,14 +427,13 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   const anchorContext: AnchorBindingContext | undefined =
     declaredCapabilities.length > 0 ? { declaredCapabilities } : undefined;
 
-  // ── D1/D4/D11: per-object OWD posture ────────────────────────────────
+  // ── D1/D4: per-object OWD posture ───────────────────────────────────
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
     if (!obj || typeof obj !== 'object') continue;
     const objName = typeof obj.name === 'string' ? obj.name : `(object ${i})`;
     const objPath = `objects[${i}]`;
     const owd = owdOf(obj);
-    const external = obj.externalSharingModel;
 
     if (!isSystemObject(obj)) {
       if (owd == null) {
@@ -564,39 +556,6 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           `Keep master_detail on the ONE master this object's rows belong to, and declare every other parent ` +
           `as a lookup field`,
       });
-    }
-
-    // D11: external dial present on any object (system included) must obey
-    // external ≤ internal. controlled_by_parent inherits the master's pair.
-    if (typeof external === 'string') {
-      if (OWD_ALIAS_FIX[external]) {
-        // Same intake note as the `sharingModel` alias branch above: the D11
-        // enum is closed, so only the unparsed doors can deliver this value.
-        findings.push({
-          severity: 'error',
-          rule: SECURITY_OWD_ALIAS,
-          where: `object "${objName}"`,
-          path: `${objPath}.externalSharingModel`,
-          message: `externalSharingModel '${external}' ${owdAliasProvenance(external)}.`,
-          hint: `Replace with the canonical value: externalSharingModel: '${OWD_ALIAS_FIX[external]}'.`,
-        });
-      } else if (
-        typeof owd === 'string' &&
-        external in OWD_WIDTH &&
-        owd in OWD_WIDTH &&
-        OWD_WIDTH[external] > OWD_WIDTH[owd]
-      ) {
-        findings.push({
-          severity: 'error',
-          rule: SECURITY_EXTERNAL_WIDER,
-          where: `object "${objName}"`,
-          path: `${objPath}.externalSharingModel`,
-          message:
-            `externalSharingModel '${external}' is WIDER than the internal sharingModel '${owd}' — ` +
-            `the external baseline must never exceed the internal one (ADR-0090 D11).`,
-          hint: `Narrow externalSharingModel to '${owd}' or below (ordering: private < public_read < public_read_write).`,
-        });
-      }
     }
   }
 

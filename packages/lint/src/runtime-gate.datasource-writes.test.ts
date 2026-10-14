@@ -238,7 +238,8 @@ describe('#19568 — wired, dispatched, and silent by ledger', () => {
     // Without this the zeros above are unreadable: a silent rule and an
     // unresolvable ledger directory look identical from the outside. This asks
     // `lintLivenessProperties` the one question whose answer is non-empty today
-    // (`object.externalSharingModel` is `authorWarn` in tree), so the zeros are
+    // (`object.externalSharingModel` warns in tree — a `dead` tombstone row since
+    // #23268), so the zeros are
     // attributable to the empty warn map and to nothing else.
     expect(authorWarnedProperties('object').size).toBeGreaterThan(0);
     const findings = lintLivenessProperties({

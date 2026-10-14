@@ -2318,6 +2318,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'value is unchanged.',
   },
   {
+    id: 'object-external-sharing-model-retired',
+    order: 96,
+    text:
+      'It also retires the object\'s `externalSharingModel` (ADR-0049 enforce-or-remove): the '
+      + 'external org-wide default ADR-0090 D11 declared for portal and partner principals, which no '
+      + 'request ever resolved and which the authorization kernel\'s `EXTERNAL` rung (ADR-0095) never '
+      + 'consults — that rung admits explicitly shared rows only. The D2 conversion '
+      + '`object-external-sharing-model-removed` STRIPS the key from authored objects and stored '
+      + 'object rows as a pure lossless delete, retired from the load path so authors are refused at '
+      + 'parse; its D3 record is the semantic entry `object-external-sharing-model-retired`.',
+  },
+  {
     id: 'object-grid-default-filters-retired',
     order: 90,
     text:
