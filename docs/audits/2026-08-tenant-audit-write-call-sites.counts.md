@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 226 |
-| Object name statically decidable | 153 |
+| Write call sites | 228 |
+| Object name statically decidable | 155 |
 | Object name chosen at run time | 73 |
-| Against a tenancy-enabled object | 151 |
+| Against a tenancy-enabled object | 153 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 165 |
+| Threading a tenant context | 167 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
 | Threading a decidably elevated context | 121 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 97 |
+| Threading a context of undecidable elevation | 99 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-13 at `c33c6dc67`.
+Measured on 2026-10-14 at `5d4205c6b`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 650 |
-| engine-shaped types recognised | 73 |
+| tracked non-test sources scanned | 652 |
+| engine-shaped types recognised | 75 |
 | declared objects in the registry | 116 |
-| same-named calls subtracted as non-engine | 162 |
+| same-named calls subtracted as non-engine | 163 |
 
 ## Every site
 
@@ -238,6 +238,8 @@ Measured on 2026-10-13 at `c33c6dc67`.
 | `packages/services/service-storage/src/backfill-file-references.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/backfill-sys-file-organizations.ts` | `update` | `sys_file` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/backfill-sys-file-public-scope.ts` | `update` | `sys_file` | enabled | context, elevation undecidable | 1 |
+| `packages/services/service-storage/src/file-attachment-service.ts` | `delete` | `sys_attachment` | enabled | context, elevation undecidable | 1 |
+| `packages/services/service-storage/src/file-attachment-service.ts` | `insert` | `sys_attachment` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/file-reference-lifecycle.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-storage/src/file-reference-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 2 |
 | `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_file` | enabled | options unreadable | 1 |

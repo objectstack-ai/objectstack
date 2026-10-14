@@ -1503,7 +1503,10 @@ export const FlowSchema = lazySchema(() => strictObject(
   //    value carrying a `{token}` included since #23260 (`get_record`
   //    `limit: '{x}'`), never a region slot, a ledger predicate or value slot,
   //    a value or text slot whose own judge refuses its token, or `http`'s
-  //    run-resolved `signingSecret`. A KEY its
+  //    run-resolved `signingSecret`. (#23320) This parse runs neither slot
+  //    judge itself, but for an `end` node's `message` through its contract:
+  //    the doors that do, and the measured reasons the parse is not one, are
+  //    in `flow-value-slot-template.ts` ("The doors that run it"). A KEY its
   //    contract does not declare is refused too (#21982), for every builtin
   //    `builtinNodeConfigKeysJudged` names (every one, `try_catch` included
   //    since #22343), a body-less legacy `loop` included. The one plugin node contract the spec declares, `approval`

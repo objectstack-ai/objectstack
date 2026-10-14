@@ -45,6 +45,8 @@
  * signature), never re-derived.
  */
 
+import type { RegisteredErrorCode } from '@objectstack/spec/api';
+
 /** One limit key as the `storage` settings cascade answered it. */
 export interface StorageLimitReading {
   /** The effective value, in the key's own unit: seconds for the TTLs, MB (MiB) for the size. */
@@ -171,6 +173,60 @@ export function resolveStorageLimits(
     sessionTtl: pickTtl(snapshot?.sessionTtl, host.sessionTtl, DEFAULT_SESSION_TTL),
     maxUploadBytes: maxMb === undefined ? undefined : Math.floor(maxMb * BYTES_PER_UPLOAD_MB),
   };
+}
+
+/**
+ * [#22283] The answer every door that accepts bytes gives a file over the
+ * resolved `max_upload_mb` — before the backend stores a byte and before any
+ * row is written. The REST upload doors (`storage-routes.ts`) send it as their
+ * response; [#23306] the server-side attach verb (`file-attachment-service.ts`)
+ * throws it. One status, one code and one sentence, read from here by both.
+ *
+ * `413` because that is the condition (RFC 9110, content too large).
+ * `PAYLOAD_TOO_LARGE` because it is the one registered code for that condition
+ * (ADR-0112 ledger, listed under this package's owner key beside
+ * `@objectstack/rest`, which answers it for its import row ceilings): a client
+ * branches on "too large" by the code alone, at every door that refuses it.
+ * Not `VALIDATION_ERROR`, the bucket `standardErrorCodeForHttpStatus` derives
+ * for a `413`: the standard catalog names no `413` member, so that code would
+ * say only "malformed request" and leave the client to read the status.
+ *
+ * Typed `RegisteredErrorCode` so a misspelling, or the code leaving the
+ * ledger, fails to compile; that this package's own owner key lists it is
+ * `check:error-code-provenance`'s to hold. The message names the limit and
+ * where it is set.
+ */
+export const UPLOAD_TOO_LARGE_STATUS = 413;
+export const UPLOAD_TOO_LARGE_CODE: RegisteredErrorCode = 'PAYLOAD_TOO_LARGE';
+
+/** The refusal's message: what was measured, the limit, and the one setting that moves it. */
+function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string {
+  const mb = Math.round((maxUploadBytes / BYTES_PER_UPLOAD_MB) * 100) / 100;
+  return (
+    `${measured}, over the maximum upload size of ${mb} MB (${maxUploadBytes} bytes). ` +
+    'The limit is the "Max upload size (MB)" storage setting (max_upload_mb in the storage settings), ' +
+    'which an administrator can change.'
+  );
+}
+
+/**
+ * [#22283, #23306] The ONE size verdict: `null` when `bytes` may be stored,
+ * otherwise the refusal's message (sent or thrown with
+ * {@link UPLOAD_TOO_LARGE_STATUS} / {@link UPLOAD_TOO_LARGE_CODE}).
+ *
+ * No limit (`maxUploadBytes` undefined: no settings namespace bound) admits
+ * any size. `bytes` that is not a finite number cannot be judged and is
+ * admitted — the byte-carrying doors judge what they actually receive.
+ * `measured` words the size for the message ("The declared file size is N
+ * bytes"), because each door knows what it measured.
+ */
+export function uploadSizeRefusal(
+  bytes: number,
+  maxUploadBytes: number | undefined,
+  measured: (bytes: number) => string,
+): string | null {
+  if (maxUploadBytes === undefined || !Number.isFinite(bytes) || bytes <= maxUploadBytes) return null;
+  return uploadTooLargeMessage(measured(bytes), maxUploadBytes);
 }
 
 /** Whether two snapshots say the same thing — so a re-read that changed nothing logs nothing. */
