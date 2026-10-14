@@ -112,6 +112,10 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import {
     resolveAuthzContext,
     isAuthzStoreUnavailableError,
+    // ADR-0069 — the authentication-policy gate's ONE decision, asked of the
+    // session `resolveInstallPrincipal` reads (see `refuseHeldSession`).
+    evaluateAuthGate,
+    type AuthGate,
     // [#16013] The ADMISSION seam's posture derivation, in ONE call — the same
     // symbol `packages/rest`'s seam now imports, for the same reason. It reads
     // the posture IN FORCE off the kernel's `tenancy` service and carries
@@ -155,19 +159,10 @@ import {
     protocolIncompatibleAnswer,
     ProtocolIncompatibleError,
     type ProtocolIncompatibleDiagnostic,
-    // [#15204 W2] ADR-0131 D3's one predicate, asked here per declared catalog
-    // type: the same sentence, the same rung, as every catalog write door.
+    // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate: the
+    // same sentence, the same rung, as every environment-metadata write door.
     walledCatalogWriteVerdict,
-    SECURITY_CATALOG_TYPES,
 } from '@objectstack/metadata-core';
-// [#15204 W2] The engine's own reading of what a manifest declares, and of
-// what the running registry holds under a package, so this door judges the
-// declarations the engine registers and not a second reading of them.
-import {
-    declaredSecurityCatalogNames,
-    findPackageHeldSecurityCatalogNames,
-    type DeclaredSecurityCatalogName,
-} from '@objectstack/objectql';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
 import { join } from 'node:path';
@@ -528,6 +523,42 @@ function organizationWallActive(ctx: PluginContext): boolean {
  */
 const NO_ACTIVE_ORGANIZATION_CODE = 'PERMISSION_DENIED';
 const NO_ACTIVE_ORGANIZATION_STATUS = 403;
+
+/**
+ * The caller one install-local admission resolved: identity and grants off the
+ * shared resolver, plus the two postures the doors read.
+ */
+interface InstallPrincipal {
+    userId: string;
+    systemPermissions: string[];
+    /** [#15204 W2] The ADR-0095 posture rung the resolver derived. */
+    posture?: unknown;
+    /** [#15204 W2] The EFFECTIVE tenancy posture this admission resolved. */
+    tenancyPosture?: TenancyPosture;
+    /**
+     * ADR-0069: the authentication-policy posture of the session this
+     * admission resolved, present only for a session the policy holds.
+     * `refuseHeldSession` refuses on it.
+     */
+    authGate?: AuthGate;
+}
+
+/**
+ * ADR-0069: the refusal every install-local door gives a session the
+ * authentication policy HOLDS (an expired password, enforced MFA not yet
+ * enrolled), right after the 401 and before the caller's capabilities are
+ * consulted or the ledger is read. Such a session is gated out of every
+ * protected resource until it remediates, so it gets REST's answer: `403`
+ * with the gate's own `code` and `message`, in this plugin's envelope. The
+ * consult itself happens once, in `resolveInstallPrincipal`; this only
+ * answers on it, in one place, so a door added later cannot copy a weaker
+ * answer. `null` when the session is not held.
+ */
+function refuseHeldSession(c: any, principal: InstallPrincipal): Response | null {
+    if (!principal.authGate) return null;
+    const { code, message } = principal.authGate;
+    return c.json({ success: false, error: { code, message } }, 403);
+}
 
 /**
  * [#15204 W2] What an admitted mutating request carries past
@@ -1279,16 +1310,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
-        // [#15204 W2] ADR-0131 D3: under a wall, a package whose incoming or
-        // installed version carries a catalog item is the operator's to
-        // install, upgrade or replace. Asked before any later step of this
-        // install reads or writes anything.
+        // [ADR-0131 D12 items 7–8] Under a wall, installing, upgrading or
+        // replacing a package is the operator's. Asked before any later step
+        // of this install reads or writes anything.
         {
-            const installed = this.ledger.read(manifestId).entry?.manifest;
-            const walled = this.refuseWalledCatalogPackage(
-                c, ctx, 'Installing', manifestId, admission,
-                installed === undefined ? [manifest] : [manifest, installed],
-            );
+            const walled = this.refuseWalledCatalogPackage(c, ctx, 'Installing', manifestId, admission);
             if (walled) return walled;
         }
 
@@ -1721,6 +1747,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // installed from timing or from a downstream storage error.
         const principal = await this.resolveInstallPrincipal(c, ctx);
         if (!principal) return this.refuseUnauthenticated(c);
+        const held = refuseHeldSession(c, principal);
+        if (held) return held;
         const operator = principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY);
 
         const { entries, skipped } = this.readAll();
@@ -1883,14 +1911,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!this.ledger.has(manifestId)) {
             return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
         }
-        // [#15204 W2] ADR-0131 D3: under a wall, uninstalling a package that
-        // carries a catalog item is the operator's: it removes those items
-        // from every organization's catalog. Asked before the ledger is touched.
+        // [ADR-0131 D12 items 7–8] Under a wall, uninstalling a package is the
+        // operator's: it removes the package's metadata from every
+        // organization. Asked before the ledger is touched.
         {
-            const walled = this.refuseWalledCatalogPackage(
-                c, ctx, 'Uninstalling', manifestId, admission,
-                [this.ledger.read(manifestId).entry?.manifest],
-            );
+            const walled = this.refuseWalledCatalogPackage(c, ctx, 'Uninstalling', manifestId, admission);
             if (walled) return walled;
         }
         try {
@@ -3280,14 +3305,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private resolveInstallPrincipal = async (
         c: any,
         ctx: PluginContext,
-    ): Promise<{
-        userId: string;
-        systemPermissions: string[];
-        /** [#15204 W2] The ADR-0095 posture rung the resolver derived. */
-        posture?: unknown;
-        /** [#15204 W2] The EFFECTIVE tenancy posture this admission resolved. */
-        tenancyPosture?: TenancyPosture;
-    } | null> => {
+    ): Promise<InstallPrincipal | null> => {
         const headers = c?.req?.raw?.headers;
         if (!headers) return null;
         try {
@@ -3301,6 +3319,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             let ql: IObjectQLEngine | undefined;
             try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
 
+            // The session user the bridge below read, kept so the ADR-0069 gate
+            // is asked about the SAME session the resolver admitted: one read,
+            // both decisions. The resolver calls the bridge only when no API
+            // key admitted the caller, so a key caller leaves it unset and no
+            // policy holds it.
+            let sessionUser: unknown;
+
             // The better-auth session bridge — resolved lazily and defensively,
             // exactly as the previous implementation did, then handed to the
             // shared resolver instead of being trusted on its own.
@@ -3313,7 +3338,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     }
                     // [#22258] The in-process session-read rule, as in
                     // `resolveActiveOrgId` above.
-                    return await api?.getSession?.(inProcessSessionReadInput(h));
+                    const session = await api?.getSession?.(inProcessSessionReadInput(h));
+                    sessionUser = session?.user;
+                    return session;
                 } catch {
                     return undefined;
                 }
@@ -3325,11 +3352,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
             const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
             if (!authz.userId) return null;
+            // ADR-0069: the ONE consult of the authentication-policy gate for
+            // all five doors, on the session read above (the posture rides its
+            // user, computed by plugin-auth's `customSession` enrichment only
+            // while a gate feature is active). No request path is passed, so
+            // the allow-list can grant no exemption (an empty path earns none,
+            // #7898); no install-local route is a remediation or bootstrap route.
+            const authGate = evaluateAuthGate(sessionUser, '');
             return {
                 userId: String(authz.userId),
                 systemPermissions: Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [],
                 posture: authz.posture,
                 tenancyPosture,
+                ...(authGate ? { authGate } : {}),
             };
         } catch (err) {
             // [commit 6a180e42d] `null` here means "nobody is authenticated", which is
@@ -3381,6 +3416,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     ): Promise<InstallAdmission | { ok: false; response: Response }> => {
         const principal = await this.resolveInstallPrincipal(c, ctx);
         if (!principal) return { ok: false, response: this.refuseUnauthenticated(c) };
+        const held = refuseHeldSession(c, principal);
+        if (held) return { ok: false, response: held };
         if (!principal.systemPermissions.includes(INSTALL_LOCAL_CAPABILITY)) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] refused ${action} for ${principal.userId} — `
@@ -3406,31 +3443,27 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * [#15204 W2] ADR-0131 D3 at the package door: under a wall the security
-     * catalog is the platform operator's, and a package that declares a
-     * position, a permission set or a capability is the operator's instrument.
+     * [ADR-0131 D3 · D12 items 7–8 · #23231] The walled refusal at the package
+     * door: under a wall every organization shares the environment's metadata,
+     * and installing, upgrading or uninstalling a package registers or removes
+     * that metadata for every organization, so it is the platform operator's.
      *
-     * Measured on `main` before this refusal: an organization's
-     * `manage_metadata` holder (rung `TENANT_ADMIN`) upgraded an
-     * operator-installed package at a new version, adding `manage_users` to a
-     * permission set another organization's member held, and that member
-     * resolved `manage_users` next; the same holder's uninstall took the set
-     * away from them. `refuseSecurityCatalogNameConflicts` refuses only a
-     * SHADOW of a name another holder has, never a write by the package that
-     * holds it.
+     * Measured before this refusal (ruling A on #23231, record 6145019463),
+     * under `isolated` and `group`: an organization's `manage_metadata` holder
+     * (rung `TENANT_ADMIN`) installed a package carrying an object, upgraded
+     * an operator-installed one and uninstalled it, each `200`, and another
+     * organization's member read the installed object
+     * (`wall-environment-metadata-refusal.dogfood.test.ts`). W2 had refused
+     * only a package that declares a position, a permission set or a
+     * capability (ADR-0131 D3); that reading of the manifests is gone with the
+     * special case.
      *
-     * So the WHOLE package is refused, before any write, when any of
-     * `manifests` (the incoming version, the installed one, or both) declares
-     * a catalog item, or the running registry holds one under `manifestId`.
-     * A partial install is not well-formed: a package is registered whole.
-     * The decision is {@link walledCatalogWriteVerdict}'s, never restated. It
-     * is asked FIRST, for the first catalog type: its answer does not vary
-     * across catalog types, so when it admits this caller (under `single`,
-     * with no `tenancy` service, or for the `PLATFORM_ADMIN` rung) nothing is
-     * read and the door behaves exactly as before. Only a refused caller's
-     * package is read, and the refusal names the first type it declares. A
-     * package with no catalog item is admitted. The answer is the sibling
-     * refusals' envelope, `403 FORBIDDEN`.
+     * The decision is {@link walledCatalogWriteVerdict}'s, never restated:
+     * admitted under `single`, with no `tenancy` service and for the
+     * `PLATFORM_ADMIN` rung, so the door then behaves exactly as before;
+     * refused for everyone else under a wall, before any later step reads or
+     * writes anything. The answer is the sibling refusals' envelope,
+     * `403 FORBIDDEN`.
      */
     private refuseWalledCatalogPackage = (
         c: any,
@@ -3438,60 +3471,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         action: string,
         manifestId: string,
         admission: InstallAdmission,
-        manifests: readonly unknown[],
     ): Response | null => {
-        const verdictFor = (type: string) => walledCatalogWriteVerdict({
-            type,
+        const verdict = walledCatalogWriteVerdict({
+            type: 'package',
             tenancyPosture: admission.tenancyPosture,
             callerPosture: admission.callerPosture,
         });
-        if (verdictFor(SECURITY_CATALOG_TYPES[0]!).allowed) return null;
-        const declared = this.catalogItemsOf(ctx, manifestId, manifests);
-        if (declared.length === 0) return null;
-        for (const type of SECURITY_CATALOG_TYPES) {
-            if (!declared.some((item) => item.type === type)) continue;
-            const verdict = verdictFor(type);
-            if (verdict.allowed) continue;
-            ctx.logger?.warn?.(
-                `[MarketplaceInstallLocal] refused ${action} ${manifestId} for ${admission.userId}: `
-                + `the package carries security catalog items under the '${admission.tenancyPosture}' posture (ADR-0131 D3)`,
-            );
-            return c.json({
-                success: false,
-                error: {
-                    code: 'FORBIDDEN',
-                    message: `${action} "${manifestId}" is refused: the package carries security catalog items. ${verdict.message}`,
-                    details: { manifestId, catalogItems: declared },
-                },
-            }, 403);
-        }
-        return null;
-    };
-
-    /**
-     * [#15204 W2] Every catalog item `manifests` declare, plus every position
-     * and permission-set name the running registry holds under `manifestId`
-     * (a package the registry holds outside this door's ledger, such as a
-     * writable runtime package an operator authored items into). Read-only.
-     */
-    private catalogItemsOf = (
-        ctx: PluginContext,
-        manifestId: string,
-        manifests: readonly unknown[],
-    ): DeclaredSecurityCatalogName[] => {
-        const out = new Map<string, DeclaredSecurityCatalogName>();
-        const add = (item: DeclaredSecurityCatalogName) => out.set(`${item.type}:${item.name}`, item);
-        for (const manifest of manifests) for (const item of declaredSecurityCatalogNames(manifest)) add(item);
-        let registry: Parameters<typeof findPackageHeldSecurityCatalogNames>[0] | undefined;
-        try {
-            registry = (ctx.getService('objectql') as { registry?: typeof registry } | undefined)?.registry;
-        } catch { /* no data engine: the manifests are the whole reading */ }
-        if (registry) {
-            for (const held of findPackageHeldSecurityCatalogNames(registry)) {
-                if (held.packageIds.includes(manifestId)) add({ type: held.catalogType, name: held.name });
-            }
-        }
-        return [...out.values()];
+        if (verdict.allowed) return null;
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] refused ${action} ${manifestId} for ${admission.userId}: `
+            + `the environment's metadata is the platform operator's under the '${admission.tenancyPosture}' posture `
+            + '(ADR-0131 D12 items 7–8)',
+        );
+        return c.json({
+            success: false,
+            error: {
+                code: 'FORBIDDEN',
+                message: `${action} "${manifestId}" is refused. ${verdict.message}`,
+                details: { manifestId },
+            },
+        }, 403);
     };
 
     /**

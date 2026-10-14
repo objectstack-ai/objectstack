@@ -27,8 +27,9 @@
  * organization-scoped flow row is out of the read's reach, and a type in the
  * overlay regime keeps its overlay.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
+import type { FlowRegistration } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const PACKAGE_ID = 'com.example.pkg';
@@ -134,7 +135,7 @@ function registryDouble() {
  * registry. ⛔ No `insert` / `update` / `delete` — the read paths under test
  * issue no write verb.
  */
-function harness(rows: StoredRow[]) {
+function harness(rows: StoredRow[], services: Map<string, unknown> = new Map()) {
     const registry = registryDouble();
     // What the loader registered: one packaged flow and one packaged view.
     registry.registerItem('flow', flowBody(SHIPPED, 'LOADER'), 'name', PACKAGE_ID);
@@ -162,7 +163,8 @@ function harness(rows: StoredRow[]) {
         },
         registry,
     };
-    const protocol = new ObjectStackProtocolImplementation(engine, () => new Map());
+    // [#23316] The kernel's service table — empty unless a case hands one in.
+    const protocol = new ObjectStackProtocolImplementation(engine, () => services as Map<string, any>);
     return { protocol, registry };
 }
 
@@ -268,5 +270,156 @@ describe('[#20946] the by-name read of a shipped flow name serves the loader\'s 
 
         expect(served.label).toBe('OVERLAY VIEW');
         expect(served._packageId).toBe(PACKAGE_ID);
+    });
+});
+
+/**
+ * [#23316] The meta read serves the automation engine's verdict on a stored
+ * flow BESIDE the item, read from the kernel's service table by name:
+ * `registration`, an envelope sibling of `lock` on the item read, and
+ * `registrations`, keyed by name, beside the list's items. Both are the
+ * engine's answer (`IAutomationService.getFlowRegistration`) or nothing — the
+ * protocol never makes one up — so a host with no automation service, or a
+ * type the engine does not judge, reads no field at all, and the stored body,
+ * its `status` included, is served as stored.
+ *
+ * In this file for its engine double (the read paths under test are the ones
+ * above). The real composition — ObjectQL's protocol over SQLite and the real
+ * engine refusing at the `kernel:ready` bind — is pinned in
+ * service-automation's `flow-refused-registration-read.integration.test.ts`.
+ */
+const REFUSED: FlowRegistration = { state: 'refused', reason: { code: 'SOME_ENGINE_CODE', message: 'the engine said no' } };
+const VERDICT_ROWS = [
+    storedRow('flow', 'refused_flow', flowBody('refused_flow', 'REFUSED', { status: 'active' })),
+    storedRow('flow', CUSTOMER, flowBody(CUSTOMER, 'CUSTOMER', { status: 'active' })),
+];
+
+/** The engine's answers, per name; any other name reads `unregistered`. */
+function automationDouble(answers: Record<string, FlowRegistration>) {
+    return {
+        getFlowRegistration: vi.fn((name: string): FlowRegistration => answers[name] ?? { state: 'unregistered' }),
+    };
+}
+
+describe('[#23316] the item read: `registration` beside `lock`, the engine\'s answer or nothing', () => {
+    it('serves what the engine answered for that name, and the stored body unchanged', async () => {
+        const automation = automationDouble({ refused_flow: REFUSED });
+        const { protocol } = harness(VERDICT_ROWS, new Map([['automation', automation]]));
+
+        const read: any = await protocol.getMetaItem({ type: 'flow', name: 'refused_flow' });
+
+        expect(read.registration).toEqual(REFUSED);
+        expect(automation.getFlowRegistration).toHaveBeenCalledWith('refused_flow');
+        // Beside the item, never inside it — and the author's `status` as stored.
+        expect(read.item.status).toBe('active');
+        expect(read.item).not.toHaveProperty('registration');
+        expect(read).toHaveProperty('lock');
+    });
+
+    it('control: no automation service, or one that declares no verdict member — no field at all', async () => {
+        for (const services of [new Map(), new Map([['automation', { getFlow: async () => null }]])]) {
+            const { protocol } = harness(VERDICT_ROWS, services as Map<string, unknown>);
+            const read: any = await protocol.getMetaItem({ type: 'flow', name: 'refused_flow' });
+            expect(read.item.status).toBe('active');
+            expect(read).not.toHaveProperty('registration');
+        }
+    });
+
+    it('a type the automation engine does not judge reads no field, and the engine is never asked', async () => {
+        const automation = automationDouble({});
+        const { protocol } = harness(
+            [storedRow('view', 'pkg_view', { name: 'pkg_view', label: 'OVERLAY VIEW' })],
+            new Map([['automation', automation]]),
+        );
+
+        const read: any = await protocol.getMetaItem({ type: 'view', name: 'pkg_view' });
+
+        expect(read.item.label).toBe('OVERLAY VIEW');
+        expect(read).not.toHaveProperty('registration');
+        expect(automation.getFlowRegistration).not.toHaveBeenCalled();
+    });
+
+    it('a draft read carries none: the pending body is not what the engine holds', async () => {
+        const automation = automationDouble({ refused_flow: REFUSED });
+        const { protocol } = harness(
+            [...VERDICT_ROWS, storedRow('flow', 'refused_flow', flowBody('refused_flow', 'DRAFT'), { state: 'draft' })],
+            new Map([['automation', automation]]),
+        );
+
+        const read: any = await protocol.getMetaItem({ type: 'flow', name: 'refused_flow', state: 'draft' });
+
+        expect(read.item.label).toBe('DRAFT');
+        expect(read).not.toHaveProperty('registration');
+    });
+});
+
+describe('[#23316] the list: `registrations` beside the items, keyed by name', () => {
+    it('one entry per listed item, the engine\'s answer for each — a loader\'s flow included; the items stay bare', async () => {
+        const automation = automationDouble({ refused_flow: REFUSED, [CUSTOMER]: { state: 'registered' } });
+        const { protocol } = harness(VERDICT_ROWS, new Map([['automation', automation]]));
+
+        const list: any = await protocol.getMetaItems({ type: 'flow' });
+
+        expect(list.registrations).toEqual({
+            refused_flow: REFUSED,
+            [CUSTOMER]: { state: 'registered' },
+            [SHIPPED]: { state: 'unregistered' },
+        });
+        for (const item of list.items) expect(item).not.toHaveProperty('registration');
+    });
+
+    it('control: no automation service — no `registrations`; and the execution face never carries one', async () => {
+        const bare: any = await harness(VERDICT_ROWS).protocol.getMetaItems({ type: 'flow' });
+        expect(bare.items.length).toBeGreaterThan(0);
+        expect(bare).not.toHaveProperty('registrations');
+
+        const automation = automationDouble({ refused_flow: REFUSED });
+        const execution: any = await harness(VERDICT_ROWS, new Map([['automation', automation]]))
+            .protocol.getMetaItemsForExecution({ type: 'flow' });
+        expect(execution).not.toHaveProperty('registrations');
+        expect(automation.getFlowRegistration).not.toHaveBeenCalled();
+    });
+
+    it('a pending draft overlaid on the list gets no entry', async () => {
+        const automation = automationDouble({ refused_flow: REFUSED });
+        const { protocol } = harness(
+            [...VERDICT_ROWS, storedRow('flow', 'draft_only', flowBody('draft_only', 'DRAFT'), { state: 'draft' })],
+            new Map([['automation', automation]]),
+        );
+
+        const list: any = await protocol.getMetaItems({ type: 'flow', previewDrafts: true });
+
+        expect(list.items.map((i: any) => i.name)).toContain('draft_only');
+        expect(Object.keys(list.registrations)).not.toContain('draft_only');
+        expect(Object.keys(list.registrations)).toContain('refused_flow');
+    });
+});
+
+describe('[#23316] the cached read — the default door — carries the verdict beside `data`, never in the ETag', () => {
+    it('serves the engine\'s answer live beside the document, with an ETag over the document alone', async () => {
+        const automation = automationDouble({ refused_flow: REFUSED });
+        const services = new Map<string, unknown>([['automation', automation]]);
+        const judged: any = await harness(VERDICT_ROWS, services).protocol.getMetaItemCached({ type: 'flow', name: 'refused_flow' });
+        const unjudged: any = await harness(VERDICT_ROWS).protocol.getMetaItemCached({ type: 'flow', name: 'refused_flow' });
+
+        expect(judged.registration).toEqual(REFUSED);
+        expect(judged.data.status).toBe('active');
+        expect(judged.data).not.toHaveProperty('registration');
+        // The verdict is in no validator: the same document, the same ETag.
+        expect(judged.etag).toEqual(unjudged.etag);
+        expect(unjudged).not.toHaveProperty('registration');
+    });
+
+    it('a read that carries the verdict is never answered 304; control: one with no engine still is', async () => {
+        const services = new Map<string, unknown>([['automation', automationDouble({ refused_flow: REFUSED })]]);
+        const first: any = await harness(VERDICT_ROWS, services).protocol.getMetaItemCached({ type: 'flow', name: 'refused_flow' });
+        const revalidate = { type: 'flow', name: 'refused_flow', cacheRequest: { ifNoneMatch: `"${first.etag.value}"` } };
+
+        const judged: any = await harness(VERDICT_ROWS, services).protocol.getMetaItemCached(revalidate);
+        expect(judged.notModified).toBe(false);
+        expect(judged.registration).toEqual(REFUSED);
+
+        const unjudged: any = await harness(VERDICT_ROWS).protocol.getMetaItemCached(revalidate);
+        expect(unjudged.notModified).toBe(true);
     });
 });

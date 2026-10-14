@@ -8,6 +8,12 @@
  * the receipt keyed `(notification_id, user_id, channel:'inbox')`. The
  * routes are `auth: true`, so an authenticated user is required.
  *
+ * ADR-0138 D2: the anonymous decision is this domain's FIRST statement
+ * (`shouldDenyAnonymous`), taken once for every face — ahead of the inbox
+ * capability probe, so a route added here later is behind it from the day it
+ * lands, and an anonymous caller is answered 401 whether or not the deployment
+ * carries an inbox.
+ *
  * NOTE (cross-repo, see #2462 step-① re-scope): this domain has NO other
  * HTTP owner anywhere — cloud hosts reach it through the `dispatch()`
  * delegation, so this handler must keep working from the registry exactly
@@ -19,6 +25,9 @@
  *   POST /read/all   → markAllRead
  */
 
+import {
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import { CoreServiceName } from '@objectstack/spec/system';
 import { MarkNotificationsReadRequestSchema } from '@objectstack/spec/api';
 import type { INotificationService } from '@objectstack/spec/contracts';
@@ -105,6 +114,27 @@ export async function handleNotificationRequest(
     query: any,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
+    // ANONYMOUS BASELINE — the domain's FIRST statement (ADR-0138 D2: the
+    // decision is taken once per domain, never face by face). It used to sit
+    // below the inbox capability probe as this domain's own `!userId` check,
+    // so a deployment without an inbox answered an anonymous caller the 501
+    // capability disclosure instead of the 401 every domain off the closed
+    // list of doors answers. Decided here, before the slot is even resolved,
+    // an anonymous caller learns nothing about the deployment, and a face added
+    // below inherits the refusal instead of having to remember its own.
+    //
+    // The inbox is per user, so the decision is asked about the user id alone:
+    // this domain has no system-context arm (an internal system context carries
+    // no inbox to read, and was refused here before as it is now), and the
+    // `!userId` arm only narrows the type for the compiler.
+    const userId: string | undefined = context.executionContext?.userId;
+    if (shouldDenyAnonymous({ userId }) || !userId) {
+        return {
+            handled: true,
+            response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+        };
+    }
+
     // [#4127] Typed against the contract instead of `as any`, so a call this
     // file makes that `INotificationService` does not declare is a compile
     // error rather than a runtime discovery. That is the check missing when
@@ -140,11 +170,6 @@ export async function handleNotificationRequest(
     }
     // Narrowed for the routes below: the entry probe established `listInbox`.
     const inbox = service as INotificationService & Required<Pick<INotificationService, 'listInbox'>>;
-
-    const userId: string | undefined = context.executionContext?.userId;
-    if (!userId) {
-        return { handled: true, response: deps.error('Authentication required', 401) };
-    }
 
     const m = method.toUpperCase();
     // split+filter drops leading/trailing/duplicate slashes without a regex

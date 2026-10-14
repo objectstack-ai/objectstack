@@ -9,11 +9,12 @@
 - `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无达档条款②复核 PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**` 非测试,含 error-code-ledger、`*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
-- 交付后复核按面欠 ⛔ 不按车道(三面见 `references/contract-review.md`);双肢命中即 spec 车道。
 - 子代理起不来 ⇒ 复核缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
-- DELIBERATE CORRECTION 红(`check-empty-changeset`):同 head 达档复核 PASS 记录即确认,⛔ 不等维护者。
-- 记录须点名被改 note、逐句判改写句,缺一不算;算即按 SKILL.md 三条件带红入队,门禁不改。
+- DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
+- diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head 复核。
+- 其余(含改代码)照全套:同 head 达档复核 PASS 记录即确认,记录逐句判改写句。
+- 两类缺一不算;算即按 SKILL.md 三条件带红入队,门禁不改。
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
 - 默认分支 push 即触发对外部署的仓,只在验证层存在时才合并;无验证层 ⛔ 不合并。
@@ -48,14 +49,16 @@
 - 车道 PM 的权责三件:验收(复核清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
 - 绿即经中继 op `pr_ready` + `automerge_enable` 落地,拼写见 `rest-channel.md`;未绿按阶梯重挂定点。
+- 直敲 `node scripts/pm/fleet-write/dispatch.mjs --repo OWNER/NAME --actions-file F`,⛔ 套壳:许可逐字匹配。
+- 写节流拒(exit 10) ⇒ 待 `node scripts/pm/write-pace.mjs --status` 现空槽再重试。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
 - undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
 - 落地遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法、不退回 ccr 绕过。
 - 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
+- 落地评论 = 两个读数的探针表 + 一行状态变更(摘标/关卡/收口),⛔ 不复述 `## 席位核对`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
-- 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 - 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>3000 行(含生成物)照 Tier H。
-- 受管路径全在 `.claude/**` 者 Tier S:席内达档复核过落地前检三条即转正式入队。
+- 受管路径全在 `.claude/**` 者 Tier S:席内达档复核过落地前检两条即转正式入队。
 - Tier H(其余受管面)者:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。
@@ -65,7 +68,6 @@
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
 - ③ PR 碰 `.github/workflows/**`:令牌常驻 `workflows: write`(裁决评论 6104822731),仍拒即授权漂移。
 - 确认 MERGED 同一动作里给 `Part of` 卡收口、`Fixes` 卡代关但标也须摘,⛔ 不拆到下轮巡检。
-- 卡以 completed 关闭且带 `Adopts:` 行 ⇒ 同一动作在所指 fork PR 贴致谢与落地链接并关闭它。
 - `Part of` 卡开着不摘 `pm:dispatched`,无在飞物的卡就永远算进 `label:pm:dispatched is:open`。
 - 摘标换回 `pm:queue` 或按剩余物定级,加一条写清交付了什么、剩下归谁的评论。
 - 同刻读相关卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关。
@@ -80,7 +82,6 @@
 - main-red 约定①:p0 fix-forward 允许跳队,限 p0、机械、根因已核实的止血 PR。
 - 也可按既有 governed 例外由维护者人工直合一行修复;仅限 main-red 修复。
 - main-red 约定②:一个失败 check 只锚一张卡,先立者赢,后见者评论到锚卡,⛔ 不另立。
-- main-red 约定③:main 全量电池红是所属车道首要工作;红未消,该车道 PR ⛔ 不挂队。
 
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单
 
@@ -93,7 +94,6 @@
 
 - 每一棒都是一整圈:merge main + A 的四步 + 全套验证 + 兄弟单断言复核。
 - 然后 PM 复核回报 → 转 ready → 挂 auto-merge 或入队;每棒都重走。
-- auto-merge 由 PM 挂,dev 永不碰。
 - 相邻两棒同碰一个文件时,交接的是语义不是文本。
 - 前棒在回报里写明它对共享文件改动的性质:改名、提取变量、增补断言,还是纯追加。
 - PM 原样转告下一棒,并要求两个 PR 的意图叠加,⛔ 禁止机械取一边。

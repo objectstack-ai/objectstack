@@ -2070,11 +2070,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         out.push({
           member: td.dimension,
           field: this.resolveFieldName(cube, td.dimension, 'dimension'),
-          // A window this path RESOLVED states its own upper reading: the ten
-          // calendar presets stop BEFORE their end instant (`$lt`, so two
-          // adjacent windows cannot both count a row stamped on the boundary —
-          // #16179's memory-side repair, same rule on this side), while the
-          // three rolling ones end at NOW, a moment they reach.
+          // A window this path RESOLVED states its own upper reading: every
+          // preset stops BEFORE its end instant (`$lt`, so two adjacent windows
+          // cannot both count a row stamped on the boundary — #16179's
+          // memory-side repair, same rule on this side), the three rolling ones
+          // before tomorrow begins, as `today` does.
           bounds: window.endExclusive
             ? { $gte: window.start, $lt: window.end }
             : { $gte: window.start, $lte: window.end },

@@ -3,7 +3,7 @@
 import { isExpressionEnvelopeShaped } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine } from '../engine.js';
-import { interpolate, type VariableMap } from './template.js';
+import type { VariableMap } from './template.js';
 
 /**
  * Resolve a value-slot MAP — `{ <key>: <value> }`, every value a `value`-role
@@ -43,17 +43,14 @@ import { interpolate, type VariableMap } from './template.js';
  *    is handed on. The result is the raw value, its type kept: a list stays a
  *    list, a record a record.
  *  - every other value is a literal — a string, an array, a plain object, an
- *    envelope-shaped object NESTED inside either — and is handed on as it is.
- *    A `{token}` of the retired template dialect never reaches this point:
- *    each executor's `parseNodeConfig` refuses it through
- *    `FlowValueSlotSchema` (the same judge `registerFlow` and
- *    `objectstack validate` call), so a literal here carries no token, and
- *    `interpolate()` is the identity on its text. The call is the one the
- *    CRUD resolver this generalises already made — it hands on a copy, so a
- *    callee that writes into its input never writes into the node's config —
- *    and it goes with the single-brace resolver's other residual calls
- *    (ADR-0032 Sequencing 6). ⛔ Not a fallback for an envelope: the dispatch
- *    is by shape, and an envelope never reaches the interpolator.
+ *    envelope-shaped object NESTED inside either — and is handed on as it is,
+ *    as a copy ({@link copyLiteral}), so a callee that writes into its input
+ *    never writes into the node's config. A `{token}` of the retired template
+ *    dialect never reaches this point: each executor's `parseNodeConfig`
+ *    refuses it through `FlowValueSlotSchema` (the same judge `registerFlow`
+ *    and `objectstack validate` call), and nothing reads one — the
+ *    single-brace resolver is deleted (ADR-0032 Sequencing 6). ⛔ Not a
+ *    fallback for an envelope: the dispatch is by shape.
  *
  * `context` is the run's: it is what `current_user` is in the CEL scope.
  * `slot` names the map in a refusal (`fields.total`, `input.ownerId`).
@@ -89,7 +86,7 @@ export function resolveValueSlotMap(
  * the dispatch by shape is spelled once: an envelope-shaped value is evaluated
  * by `AutomationEngine.evaluateValueEnvelope` (`where` names it in a refusal
  * or a fault, `fields[0].defaultValue`), and every other value is a literal,
- * handed on as a copy.
+ * handed on as a copy ({@link copyLiteral}).
  */
 export function resolveValueSlot(
     engine: AutomationEngine,
@@ -100,7 +97,32 @@ export function resolveValueSlot(
 ): unknown {
     return isExpressionEnvelopeShaped(value)
         ? engine.evaluateValueEnvelope(value, variables, where, context)
-        : interpolate(value, variables, context);
+        : copyLiteral(value);
+}
+
+/**
+ * A literal value-slot value as the node hands it on: arrays and plain
+ * objects copied at every depth, every other value — a string, a number, a
+ * `Date`, a class instance — as it is. The copy keeps a callee that writes
+ * into its input (a child flow's variable, a function's `input`) from writing
+ * into the node's config, the copy the single-brace interpolator made while
+ * it walked the value.
+ *
+ * Only PLAIN objects are walked (`Object.prototype` or `null` prototype). The
+ * interpolator walked every object's own entries, so a `Date` written in a
+ * code-defined flow (`fields: { due: new Date(…) }`) reached the write as
+ * `{}`; it is handed on as the `Date` it is.
+ */
+export function copyLiteral(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(copyLiteral);
+    if (value !== null && typeof value === 'object') {
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) return value;
+        const out: Record<string, unknown> = {};
+        for (const [key, entry] of Object.entries(value)) out[key] = copyLiteral(entry);
+        return out;
+    }
+    return value;
 }
 
 /**
@@ -112,9 +134,8 @@ export function resolveValueSlot(
  *    `AutomationEngine.evaluateValueEnvelope` in the run's scope and context,
  *    like every value slot's — a malformed one, or one that faults on the live
  *    variables (an absent variable, key or index), throws with its source;
- *  - an inline array is the list AS WRITTEN — never handed to the
- *    interpolator, whose recursion would resolve a `{…}` in a string the
- *    executors never interpolated: an inline list's elements are data.
+ *  - an inline array is the list AS WRITTEN: an inline list's elements are
+ *    data, and the executors never read a `{…}` in one.
  *
  * Nothing else arrives: each executor's `parseNodeConfig` has refused a string
  * — a `{…}` token of the retired dialect, and a variable's bare name, which the

@@ -169,6 +169,9 @@ export {
   // security catalog — the `sys_metadata_activation` ledger, never a catalog
   // row's `active` column — shared with the explainer and the security plugin.
   readDisabledCatalogNames,
+  // [ADR-0138 D4] The guest entry's organization step, shared with the CRUD
+  // gate that raises D4's located refusal — one step, two askers.
+  resolveGuestOrganization,
   resolveLocalizationContext,
   type ResolvedAuthzContext,
   type ResolveAuthzInput,
@@ -176,6 +179,28 @@ export {
   type ResolveUserAuthzGrantsOptions,
   type ResolveLocalizationInput,
 } from './resolve-authz-context.js';
+
+// [ADR-0131 D9, ADR-0138 D4] The ONE "which organization does a caller with no
+// organization of its own act in?" decision. Two askers: the engine's
+// system-context insert (`@objectstack/objectql`, which re-exports these same
+// bindings) and the guest entry's organization step above.
+export {
+  resolveSystemWriteOrganization,
+  type SystemWriteOrganizationDecision,
+  type SystemWriteRefusalReason,
+} from './system-write-organization.js';
+
+// [ADR-0138 D4] The located refusal an anonymous request meets where it needs
+// an organization the deployment cannot resolve for it — a standard-catalog
+// code (`NOT_IMPLEMENTED`), naming the missing site binding (D5).
+export {
+  GuestOrganizationUnresolvedError,
+  isGuestOrganizationUnresolvedError,
+  GUEST_ORGANIZATION_UNRESOLVED_CODE,
+  GUEST_ORGANIZATION_UNRESOLVED_STATUS,
+  GUEST_ORGANIZATION_UNRESOLVED_MESSAGE,
+  type GuestOrganizationRefusalReason,
+} from './guest-organization.js';
 
 // [#18783] The EFFECTIVE object-permission map — ONE function behind both the
 // `/auth/me/permissions` `objects` slot and `ISecurityService.getEffectiveObjectPermissions`
@@ -239,11 +264,6 @@ export {
 // ADR-0091 D1/D2 — grant validity windows, the shared resolution-time predicate.
 export { isGrantActive, isGrantExpired, type GrantValidityWindow } from './grant-validity.js';
 
-// ADR-0049 enforce-or-remove — the `active` flag on the RBAC grant catalogues
-// (`sys_permission_set` / `sys_position`). One predicate for the resolver that
-// enforces it and the break-glass guard that simulates a write to it.
-export { isRowActive, type ActivatableRow } from './row-active.js';
-
 // ADR-0131 D2–D4 — the ONE by-name read of the security catalog (positions,
 // permission sets, capabilities) over the engine registry and the metadata
 // service. It says a definition EXISTS under a name, never that it is in
@@ -290,6 +310,10 @@ export {
   positionDefinitionFromRow,
   type PositionRowForDefinition,
 } from './position-row-definition.js';
+export {
+  emailTemplateDefinitionFromRow,
+  type EmailTemplateRowForDefinition,
+} from './email-template-row-definition.js';
 
 // [commit f8eb73601] The measured read surface of the administrator derivation — the
 // single source `plugin-auth`'s break-glass standing-key lists correspond to.

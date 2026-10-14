@@ -81,6 +81,27 @@ function makeShareId(): string {
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
+ * [ADR-0138 D8] Recipient values `RecordShareRecipientType` no longer declares,
+ * each with the refusal {@link SharingService.grant} answers when one still
+ * arrives at runtime — a REST body, an untyped caller. A retired value is told
+ * where its access actually lives; every other non-`user` value keeps the
+ * generic refusal in `grant()`. Keyed by the value exactly as a caller sends it.
+ */
+const RETIRED_RECIPIENT_TYPE_REFUSALS: Readonly<Record<string, string>> = {
+  guest:
+    "recipientType 'guest' was removed (ADR-0138 D8) — a record share to the anonymous principal "
+    + 'was never honoured, because guest access flows through the guest position and share links '
+    + '(ADR-0090 D11). Expose the record through a public form or a share link instead.',
+};
+
+/** The retired-value refusal for a `recipientType` a caller sent, or `undefined`. */
+function retiredRecipientTypeRefusal(value: unknown): string | undefined {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(RETIRED_RECIPIENT_TYPE_REFUSALS, value)
+    ? RETIRED_RECIPIENT_TYPE_REFUSALS[value]
+    : undefined;
+}
+
+/**
  * Owner field convention. Hard-coded to `owner_id` for MVP — the
  * sharing model in Salesforce / ServiceNow / Dynamics all assume a
  * single owner field, and customising it is a follow-up. Objects
@@ -119,6 +140,15 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
     return isSystem ? 'public' : 'private';
   }
   return 'private';
+}
+
+/**
+ * [ADR-0138 D1/D3] The anonymous principal the guest entry assembles —
+ * `principalKind: 'guest'` with no user id. A system context is never one: the
+ * bypass is asked first wherever this is.
+ */
+function isGuestPrincipal(context: ExecutionContext): boolean {
+  return context?.principalKind === 'guest' && !context?.userId;
 }
 
 /**
@@ -439,10 +469,7 @@ export class SharingService implements ISharingService {
       'sys_user',
       'sys_organization',
       'sys_member',
-      'sys_position',
-      'sys_permission_set',
       'sys_user_permission_set',
-      'sys_position_permission_set',
       ...(options.bypassObjects ?? []),
     ]);
   }
@@ -459,6 +486,19 @@ export class SharingService implements ISharingService {
 
     const schema = this.engine.getSchema?.(object);
     if (!schema) return null;
+    // [ADR-0138 D3 item 6, as the maintainer's ruling C amends it — comment
+    // 6148183570 on #23266] The GUEST never takes the OWD branch below: not the
+    // object's `sharingModel` (a `public_read` or `public_read_write` object, a
+    // `controlled_by_parent` detail), and not its owner-less or phantom-anchor
+    // fall-throughs, which read as OWD-public. `externalSharingModel` is not
+    // read here for anyone (#23268). The guest owns nothing (ADR-0138 D1), so
+    // it reaches rows only through share links — and a link is redeemed at its
+    // own door, which checks the token and `publicSharing.eligibility` and
+    // reads the one linked record itself (`share-link-routes.ts`), never
+    // through this filter. So for the guest, on every object record sharing
+    // scopes, the answer is deny-all, whatever its bound sets admit at the
+    // object level.
+    if (isGuestPrincipal(context)) return { id: '__deny_all__' };
     if (effectiveSharingModel(schema) !== 'private') return null;
     if (!hasOwnerField(schema)) return null;
     // [#7858] …and an `owner_id` the REGISTRY injected into a FEDERATED object
@@ -1346,9 +1386,15 @@ export class SharingService implements ISharingService {
     // (ADR-0078). Group / business-unit principals are delivered via sharing
     // rules, whose evaluator expands them into per-user rows.
     if (recipientType !== 'user') {
+      // [ADR-0138 D8] A retired value no longer typechecks, yet still reaches
+      // here untyped. It is told where guest access lives, never that a sharing
+      // rule delivers it: the rule vocabulary retired the same recipient.
+      const retired = retiredRecipientTypeRefusal(recipientType);
       throw new Error(
-        `VALIDATION_FAILED: recipientType must be 'user' (received ${JSON.stringify(recipientType)}) — `
-        + `group/position recipients are delivered via sharing rules (ADR-0111 D7)`,
+        retired !== undefined
+          ? `VALIDATION_FAILED: ${retired}`
+          : `VALIDATION_FAILED: recipientType must be 'user' (received ${JSON.stringify(recipientType)}) — `
+            + `group/position recipients are delivered via sharing rules (ADR-0111 D7)`,
       );
     }
     // Validate BEFORE any write. Previously anything at all was persisted

@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { applyConversionsToFlow, type ConversionTodoNotice } from '@objectstack/spec';
 import { applyMetaMigrations } from '@objectstack/spec/migrations';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
@@ -818,8 +819,9 @@ describe('migrateStoredMetadata — a site the chain leaves as stored is a TODO,
     it('MEASURED — the write path judges the two door kinds differently, and the TODO rides on either outcome', async () => {
         // `properties.filter` sits in the page component's open `properties` bag:
         // the runtime save door does not parse it by `type` (the props gate is
-        // `@objectstack/lint`'s, advisory). `dataSource.filter` is a declared key
-        // of the strict component schema, so the save door refuses it there.
+        // `@objectstack/lint`'s, an error at the CLI doors only).
+        // `dataSource.filter` is a declared key of the strict component schema,
+        // so the save door refuses it there.
         const bindingMixed = pageRow('deal_room', [
             grid({ stage: 'open' }),
             { type: 'object-kanban', dataSource: { object: 'deal', filter: COMBINATOR }, properties: { objectName: 'deal' } },
@@ -1080,5 +1082,175 @@ describe('migrateStoredMetadata — the decision review list: stored rows take f
 
         expect(report.decisionModeReview).toEqual([]);
         expect(formatStoredMigrationReport(report).join('\n')).not.toMatch(/FIRST matching branch/);
+    });
+});
+
+describe('migrateStoredMetadata — the v18 stored shapes refused with no lossless rewrite are LISTED, never rewritten (#23269, #23270, #23271)', () => {
+    // Each of these rows reads as on protocol to every conversion — nothing
+    // rewrites it — while the parse or the boot refuses it after the upgrade.
+    // Before the refused-shape list, the preview counted each one `canonical`.
+    // The retired view-level provider, spelled through a constant (a tree-scoped
+    // absence pin in @objectstack/spec reads `provider: 'api'` literals).
+    const API = 'api' as const;
+    const cbpObject = (name: string, fields: Record<string, unknown>) => ({
+        type: 'object',
+        name,
+        metadata: { name, label: name, sharingModel: 'controlled_by_parent', fields: { title: { type: 'text', label: 'Title' }, ...fields } },
+    });
+    const md = (reference: string, extra: Record<string, unknown> = {}) => ({ type: 'master_detail', label: reference, reference, ...extra });
+    const crudFlow = (name: string, operand: unknown) => ({
+        type: 'flow',
+        name,
+        metadata: {
+            name,
+            label: name,
+            type: 'autolaunched',
+            status: 'active',
+            nodes: [{ id: 'get', type: 'get_record', label: 'Get', config: { objectName: 'lead', filter: { id: operand } } }],
+            edges: [],
+        },
+    });
+    /** Stands in for `AutomationEngine.canonicalizeStoredFlow`: the same chain, the same TODO sink. */
+    const canonicalizeFlow = (_name: string, body: unknown) => {
+        const todos: ConversionTodoNotice[] = [];
+        const storable = applyConversionsToFlow(body, { includeRetired: true, onTodo: (t) => todos.push(t) });
+        return { storable, notices: [], conflicts: [], todos };
+    };
+
+    it('#23270 — each refused controlled_by_parent shape is listed by object; a conforming object is counted canonical', async () => {
+        const { engine, tables } = makeStubEngine([
+            cbpObject('crm_two', { quote: md('crm_quote', { required: true }), order: md('crm_order', { required: true }) }),
+            cbpObject('crm_none', {}),
+            cbpObject('crm_lookup', { quote: { type: 'lookup', label: 'Quote', reference: 'crm_quote', required: true } }),
+            cbpObject('crm_false', { quote: md('crm_quote', { required: false }) }),
+            cbpObject('crm_ok', { quote: md('crm_quote', { required: true }) }),
+        ]);
+        const before = JSON.stringify(metaRows(tables));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata();
+
+        expect(report.canonical).toBe(1);
+        expect(report.rows.map((r) => [r.name, r.outcome, r.todos.map((t) => [t.conversionId, t.path])])).toEqual([
+            ['crm_two', 'skipped', [['cbp-master-relation-tiers-retired', 'objects[0].fields']]],
+            ['crm_none', 'skipped', [['cbp-master-relation-tiers-retired', 'objects[0].sharingModel']]],
+            ['crm_lookup', 'skipped', [['cbp-master-relation-tiers-retired', 'objects[0].sharingModel']]],
+            ['crm_false', 'skipped', [['cbp-master-relation-tiers-retired', 'objects[0].sharingModel']]],
+        ]);
+        const text = formatStoredMigrationReport(report).join('\n');
+        expect(text).toContain('object/crm_two [env-wide]');
+        expect(text).toContain('TODO cbp-master-relation-tiers-retired:');
+        expect(text).toMatch(/which of them is the master is the owner's choice: the upgrade never picks one/);
+        expect(text).toMatch(/☐ TODO: 4 site\(s\) in 4 row\(s\) are left as stored/);
+        // Listed, never written — on --apply too — and no verdict flips over it.
+        expect(storedMigrationClean(report)).toBe(true);
+        const applied = await protocol.migrateStoredMetadata({ apply: true });
+        expect(applied.rewritten).toBe(0);
+        expect(JSON.stringify(metaRows(tables))).toBe(before);
+        expect(historyRows(tables)).toHaveLength(0);
+    });
+
+    it('#23271 — a view bound to the retired API source is listed by view, without its headers; another provider is canonical', async () => {
+        const apiView = {
+            type: 'view',
+            name: 'partner_cases',
+            metadata: {
+                object: 'crm_case',
+                list: {
+                    type: 'grid',
+                    columns: ['name'],
+                    data: { provider: API, read: { url: 'https://partner.example.com/cases', headers: { Authorization: 'Bearer s3cr3t' } } },
+                },
+            },
+        };
+        const objectView = {
+            type: 'view',
+            name: 'open_cases',
+            metadata: { object: 'crm_case', list: { type: 'grid', columns: ['name'], data: { provider: 'object', object: 'crm_case' } } },
+        };
+        const { engine } = makeStubEngine([apiView, objectView]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata();
+
+        expect(report.canonical).toBe(1);
+        expect(report.rows).toHaveLength(1);
+        const row = report.rows[0]!;
+        expect(row).toMatchObject({ type: 'view', name: 'partner_cases', outcome: 'skipped' });
+        expect(row.todos.map((t) => [t.conversionId, t.path])).toEqual([['view-data-api-provider-retired', 'views[0].list.data']]);
+        const text = formatStoredMigrationReport(report).join('\n');
+        expect(text).toContain('view/partner_cases [env-wide]');
+        expect(text).toMatch(/No mechanical move: the replacement is a `dataSource` binding on a page component/);
+        expect(text).not.toContain('s3cr3t');
+    });
+
+    it('#23317 — a page whose component binds the retired API source in its data prop is listed by page and component, without its headers', async () => {
+        const block = (type: string, data: unknown) => ({ id: 'cases', type, properties: { objectName: 'crm_case', data } });
+        const page = (name: string, data: unknown) => ({
+            type: 'page',
+            name,
+            metadata: { name, label: name, type: 'app', regions: [{ name: 'main', components: [block('object-grid', data)] }] },
+        });
+        const { engine, tables } = makeStubEngine([
+            page('partner_page', { provider: API, read: { url: 'https://partner.example.com/cases', headers: { Authorization: 'Bearer s3cr3t' } } }),
+            page('case_page', { provider: 'object', object: 'crm_case' }),
+        ]);
+        const before = JSON.stringify(metaRows(tables));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata();
+
+        expect(report.canonical).toBe(1);
+        expect(report.rows.map((r) => [r.type, r.name, r.outcome, r.todos.map((t) => [t.conversionId, t.path])])).toEqual([
+            ['page', 'partner_page', 'skipped', [['view-data-api-provider-retired', 'pages[0].regions[0].components[0].properties.data']]],
+        ]);
+        const text = formatStoredMigrationReport(report).join('\n');
+        expect(text).toContain('page/partner_page [env-wide]');
+        expect(text).toContain('The `object-grid` component `cases` of page `partner_page`');
+        expect(text).not.toContain('s3cr3t');
+        // Listed, never written.
+        expect(storedMigrationClean(report)).toBe(true);
+        const applied = await protocol.migrateStoredMetadata({ apply: true });
+        expect(applied.rewritten).toBe(0);
+        expect(JSON.stringify(metaRows(tables))).toBe(before);
+    });
+
+    it('#23269 — a flow whose CRUD filter operand is a {…} token is listed by flow and node; the CEL form is canonical', async () => {
+        const { engine, tables } = makeStubEngine([
+            crudFlow('fd_refused_filter', '{record.id}'),
+            crudFlow('fd_cel_filter', { dialect: 'cel', source: 'record.id' }),
+        ]);
+        const before = JSON.stringify(metaRows(tables));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({ canonicalizeFlow });
+
+        expect(report.canonical).toBe(1);
+        expect(report.rows).toHaveLength(1);
+        const row = report.rows[0]!;
+        expect(row).toMatchObject({ type: 'flow', name: 'fd_refused_filter', outcome: 'skipped', notices: [] });
+        expect(row.todos.map((t) => [t.conversionId, t.path, t.from])).toEqual([
+            ['flow-value-slot-template-dialect-refused', 'flows[0].nodes[0].config.filter.id', JSON.stringify('{record.id}')],
+        ]);
+        const text = formatStoredMigrationReport(report).join('\n');
+        expect(text).toContain('flow/fd_refused_filter [env-wide]');
+        expect(text).toContain("Flow `fd_refused_filter`, node 'get' (get_record), get_record filter operand at config.filter.id");
+        expect(text).toContain('registerFlow refuses the flow: it is not registered at boot and never runs');
+        // Listed, never written.
+        const applied = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow });
+        expect(applied.rewritten).toBe(0);
+        expect(JSON.stringify(metaRows(tables))).toBe(before);
+    });
+
+    it('a flow canonicalizer that reports no `todos` still fits the contract, and reads as none', async () => {
+        const { engine } = makeStubEngine([crudFlow('fd_refused_filter', '{record.id}')]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata({
+            canonicalizeFlow: (_n, body) => ({ storable: body, notices: [], conflicts: [] }),
+        });
+
+        expect(report.canonical).toBe(1);
+        expect(report.rows).toEqual([]);
     });
 });

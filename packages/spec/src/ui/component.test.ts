@@ -288,7 +288,10 @@ describe('PageAccordionProps variant — declared because the accordion renderer
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:1222` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+// builds against — `.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+// every objectui file this record cites is byte-identical across the hop from
+// `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
+// `1fb1ced36`, re-read there 2026-10-12:
 // every objectui file this record cites is byte-identical across the hop from
 // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
 // `7578323a5`, re-read there 2026-10-12:
@@ -472,7 +475,10 @@ describe('PageTabsProps items[].value / items[].count — declared because the t
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:1007` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+// the pin this repo builds against — `.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+// every objectui file this record cites is byte-identical across the hop from
+// `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
+// `1fb1ced36`, re-read there 2026-10-12:
 // every objectui file this record cites is byte-identical across the hop from
 // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
 // `7578323a5`, re-read there 2026-10-12:
@@ -3098,9 +3104,10 @@ describe('批 17 — the carrier stays an open bag; the gate is on the lint side
 
   // Still true after #5068, and it is the sentence that keeps the gate honest:
   // the SCHEMA accepts and retains the key; what changed is that the authoring
-  // gate now REPORTS it (at `warning`). A reader who mistakes the gate for a
-  // closed door would be wrong in the direction that matters — the storage path
-  // (`saveMetaItem` / REST `/meta`) runs no such gate at all.
+  // gate now REFUSES it (an `error` at `os validate` / `os build` / `os lint`,
+  // since #23147). A reader who mistakes the gate for a closed door would be
+  // wrong in the direction that matters — the storage path (`saveMetaItem` /
+  // REST `/meta`) runs no such gate at all.
   it('an unknown key inside `properties` survives the LIVE page parse — with the strict sibling as negative control', () => {
     const page = {
       name: 'batch17_probe',
@@ -3529,7 +3536,16 @@ describe('object-* block props schemas — declared, so the props gate has a sch
 // #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
 // option A: the contract declares the capability that already ships, is
 // documented and is in use). Measured at the objectui pin this repo builds
-// against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+// against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+// `plugin-kanban/src/types.ts`, `ObjectKanban.tsx` and `plugin-kanban.mdx` are
+// byte-identical across the hop from `1fb1ced36` (`git diff --quiet`), so the
+// default `:100`, the `$top` read `:764`, the `limit` row and the `limit: 250`
+// snippet did not move; `plugin-kanban/src/index.tsx` changed only below the
+// mapping (+2/-2, objectui#12030, objectui `c5406c201`: a comment re-cited to
+// `18.0.0-next.0`), which did not move from `488-492`; and `objectql.ts`
+// (+15/-27, the same commit) changed only above the member, which MOVED `4838`
+// -> `4826` byte-identical, still inside `ObjectKanbanSchema`. At `1fb1ced36`,
+// re-read there 2026-10-12:
 // every objectui file this record cites is byte-identical across the hop from
 // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
 // `7578323a5`, re-read there 2026-10-12:
@@ -3696,7 +3712,7 @@ describe('object-* block props schemas — declared, so the props gate has a sch
 // `OBJECT_KANBAN_DATA_SOURCE`, ⚠️ `KanbanSchema` is RETIRED at this pin and
 // `plugin-kanban/src/types.ts` declares the member no more — the published
 // twin is `ObjectKanbanSchema`, declaring `limit?: number` at
-// `packages/types/src/objectql.ts:4838` — and `content/docs/plugins/plugin-kanban.mdx`
+// `packages/types/src/objectql.ts:4826` — and `content/docs/plugins/plugin-kanban.mdx`
 // teaches `limit: 250` with a Properties row. The strict map refused the key by
 // name — the same `unrecognized_keys` verdict as the `bogusProp` control — so an
 // author following the published docs wrote a node the save gate rejected.
@@ -3758,7 +3774,10 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
 // since retired that block, objectui#8257). Unlike `limit` above — a key four
 // objectui faces already implemented, so the spec was the half that was wrong
 // — `quickAdd` was FORWARDED and never read: at the pin this repo builds
-// against (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+// against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+// every objectui file this record cites is byte-identical across the hop from
+// `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
+// `1fb1ced36`, re-read there 2026-10-12:
 // every objectui file this record cites is byte-identical across the hop from
 // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
 // `7578323a5`, re-read there 2026-10-12:
@@ -3976,7 +3995,10 @@ describe('ObjectKanbanPropsSchema quickAdd is retired', () => {
 // #9881 and commit 60e0f900a recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+// `.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+// every objectui file this record cites is byte-identical across the hop from
+// `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
+// `1fb1ced36`, re-read there 2026-10-12:
 // every objectui file this record cites is byte-identical across the hop from
 // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
 // `7578323a5`, re-read there 2026-10-12:
@@ -4177,7 +4199,10 @@ describe('ObjectMetricPropsSchema icon liveness', () => {
 //
 // The acceptance the card names, pinned: each row's KEY SET is the one the
 // renderer's read points support at the pin this repo builds against
-// (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+// (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+// every objectui file this record cites is byte-identical across the hop from
+// `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
+// `1fb1ced36`, re-read there 2026-10-12:
 // every objectui file this record cites is byte-identical across the hop from
 // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
 // `7578323a5`, re-read there 2026-10-12:

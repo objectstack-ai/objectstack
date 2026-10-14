@@ -55,7 +55,7 @@ describe('any authored key is a `component-props-unknown-key` finding, naming th
     expect(findings).toHaveLength(1);
     const [f] = findings;
     expect(f.rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
-    expect(f.severity).toBe('warning');
+    expect(f.severity).toBe('error');
     expect(f.path).toBe(`pages[0].regions[0].components[0].properties.${key}`);
     expect(f.where).toBe('page "approval_request_detail" · record:approval_decision');
     expect(f.message).toContain(`\`${key}\``);

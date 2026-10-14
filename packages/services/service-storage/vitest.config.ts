@@ -65,9 +65,15 @@ export default defineConfig({
     //
     // Anchored patterns in array form, per the note above: a bare key whose
     // replacement is a FILE swallows the package's subpaths.
+    //
+    // `@objectstack/plugin-audit` joins them for the same reason (#23306): the
+    // attach verb's pins run its REAL `enable.files` gate on the
+    // `sys_attachment` insert, and a gate read from `dist/` would make those
+    // pins a verdict about build state.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+      { find: /^@objectstack\/plugin-audit$/, replacement: path.resolve(__dirname, '../../plugins/plugin-audit/src/index.ts') },
     ],
   },
 });

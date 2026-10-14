@@ -158,7 +158,7 @@ unauthored) where the widget declares no binding, and a widget with
 the object behind the widget's dataset, as the stack registers it, and must be
 a `date` or `datetime` field. Each preset of `DATE_RANGE_PRESETS` is handed to
 `POST /analytics/dataset/query` as its `{date-macro}` window from the spec
-(`DATE_RANGE_PRESET_MACRO_WINDOWS`, e.g. `{ $gte: '{7_days_ago}' }`), ANDed
+(`DATE_RANGE_PRESET_MACRO_WINDOWS`, e.g. `{ $gte: '{7_days_ago}', $lte: '{today}' }`), ANDed
 with the widget's own filter as `runtimeFilter`, as the signed-in admin; the
 server resolves the tokens, and the ground truth resolves the same window with
 `@objectstack/core`'s `resolveFilterTokens` on the caller's reference timezone
@@ -500,7 +500,7 @@ fixture rows:
 | `proven` | under every preset the window counted exactly the fixture rows it selects |
 | `contradicted` | under some preset the widget showed nothing where the window selects fixture rows (`blank`), or counted another number of them; a window that answers what no window answers under every preset is also named `inert` **(failure)** |
 | `failed` | the door refused or faulted on a windowed query while the widget's own query answered **(failure)** |
-| `inconclusive` | a fixture row could not be written or did not read back as written (an app hook rewrote it, or the read omits the column), the widget with no window did not count every fixture row (its own selection does not meet the fixtures), its own query is refused, the day turned mid-probe, or the caller's reference timezone is not UTC |
+| `inconclusive` | a fixture row could not be written or did not read back as written (an app hook rewrote it, or the read omits the column), the widget with no window did not count every fixture row (its own selection does not meet the fixtures), its own query is refused, the UTC day turned after the run started, or the caller's reference timezone is not UTC |
 | `unbound` | the widget opts out of the window (`filterBindings: { dateRange: false }`) |
 | `excluded` | the family cannot compare it: no count measure, a filter the ground truth cannot model, a window on a field that is missing or is not `date` / `datetime`, a dataset or dashboard that is undeclared or does not parse, or an object the app does not declare or the CRUD derivation cannot synthesize (`excludedKind` names which) |
 
@@ -556,7 +556,7 @@ run" must never read like "nothing to find".
   a gate reads); `formatParentWriteReachReport(report)`.
 - `deriveDashboardWindowCases(config)` → one case per widget of every dashboard with a `dateRange`: its bound field,
   dataset, object and count measures, or why it is unbound or not compared; `runDashboardWindowProofs(stack, token,
-  config, { now? })` → `DashboardWindowReport` (`presets` names what each preset handed the door and how it resolved;
+  config)` → `DashboardWindowReport` (`presets` names what each preset handed the door and how it resolved;
   `summary.hardFailures` is what a gate reads); `formatDashboardWindowReport(report)`.
 
 `bootStack` options: `admin`, `authSecret`, `security` (a custom `SecurityPlugin`

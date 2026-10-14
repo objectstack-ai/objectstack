@@ -62,18 +62,22 @@
  * would narrow what `os build` accepts, which neither this card nor that ruling
  * asked for.
  *
- * ## The provenance rule, mirrored from the seeder rather than invented
+ * ## The provenance rule: the binding, and nothing else
  *
- * `bootstrapDeclaredPermissions` (retired with ADR-0131 C3 stage 6b-2) owned a
- * set under `ps._packageId ?? ps.packageId` — registry provenance (ADR-0010) first, the
- * author-declared `packageId` (ADR-0086 D3) as fallback. At compile time the
- * artifact's package id IS that registry provenance: `artifactPackages`' id is
- * "the string the runtime registers a package under", so a set inside package
- * P's assembled body is declared by P, and `packageId` on the set is read only
- * where no package ships it. ⛔ The id rule itself is imported, not re-spelled:
- * `artifact-packages.ts` exists because two readers computing "which package is
- * this" slightly differently is how one door comes to judge a different set of
- * packages than the other while both look right.
+ * A set is owned by the package that registers it — registry provenance
+ * (ADR-0010), the `_packageId` the registry stamps. At compile time the
+ * artifact's package id IS that provenance: `artifactPackages`' id is "the
+ * string the runtime registers a package under", so a set inside package P's
+ * assembled body is declared by P. ⛔ The author-declared `packageId` on the set
+ * (ADR-0086 D3) is never read as an owner: every reader of a set's owner reads
+ * the binding, and a body key that disagrees with it is refused at the build
+ * door before this module runs (`judgePermissionSetOwnerBinding`,
+ * `@objectstack/spec/security`). The retired seeder
+ * (`bootstrapDeclaredPermissions`, ADR-0131 C3 stage 6b-2) read it as a
+ * fallback; that fallback is not mirrored. ⛔ The id rule itself is imported,
+ * not re-spelled: `artifact-packages.ts` exists because two readers computing
+ * "which package is this" slightly differently is how one door comes to judge a
+ * different set of packages than the other while both look right.
  *
  * ⚠️ Two bounds, stated because they are where a reading could be wrong rather
  * than merely narrow:
@@ -111,7 +115,7 @@ export interface CompiledPackage {
 export interface DeclaredPermissionSet {
   /** The declared `sys_permission_set.name`. */
   readonly name: string;
-  /** The package that would own the row — the seeder's `_packageId ?? packageId`. */
+  /** The package that would own the set — the package that registers it, never the body's `packageId`. */
   readonly declaredBy: string;
 }
 
@@ -151,10 +155,12 @@ export function collectPermissionSetDeclarations(
     return out;
   }
 
-  // A single-package stack. Its manifest id is the registry provenance the
-  // seeder prefers; `packageId` on the set answers only when there is none.
+  // A single-package stack. Its manifest id is the registry provenance; a stack
+  // with none registers its sets into no package, so they have no owner and are
+  // never a collision (the seeder's `if (!packageId)` arm). ⛔ The body's
+  // `packageId` is not a fallback owner (ADR-0086 D3, the binding only).
   const manifestId = asId(asRec(parsed.manifest)?.id) ?? asId(asRec(parsed.manifest)?.name);
-  add(parsed.permissions, (ps) => manifestId ?? asId(ps.packageId));
+  add(parsed.permissions, () => manifestId);
   return out;
 }
 

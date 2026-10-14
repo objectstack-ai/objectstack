@@ -630,8 +630,8 @@ later node reads `{subject}`, not `{screen_1.subject}`.
 }
 ```
 
-`visibleWhen` is **bare CEL over the screen's own field names** — not the `{var}`
-template dialect the rest of a node's `config` uses. The client re-evaluates it
+`visibleWhen` is **bare CEL over the screen's own field names** — never a
+`{{ }}` template like the screen's `title` / `description`. The client re-evaluates it
 as the user types, against the values collected so far, which is why it cannot
 be a server-interpolated template. Omit it for a field that is always visible.
 
@@ -650,7 +650,7 @@ Two things worth knowing:
   the name is never bound and a downstream condition reading it aborts the run.
 - **A broken predicate fails open** (the field stays visible) rather than hiding
   an input the flow may be waiting on. `registerFlow()` does check the predicate
-  as bare CEL — a `{var}` template or a syntax error is a loud registration
+  as bare CEL — a `{…}` brace or a syntax error is a loud registration
   failure that quotes the source and locates it as
   `config.fields[N].visibleWhen` — but a predicate that *parses* and simply
   names the wrong field still shows up as a field that never hides.
@@ -2133,6 +2133,24 @@ The plugin is a **soft dependency** on `metadata` — it tolerates running
 without `MetadataPlugin` and it logs (not throws) on per-flow registration
 failures so one broken flow does not abort startup.
 
+A flow the engine refuses is not served as running. The metadata read keeps
+the stored `status` as you wrote it, and serves the engine's verdict beside
+the item: `registration` on `GET /api/v1/meta/flow/:name`, and `registrations`,
+keyed by flow name, on `GET /api/v1/meta/flow`. The verdict is one of three:
+
+| `state` | Meaning |
+|:---|:---|
+| `registered` | The engine holds the flow. Whether its trigger is bound is `GET /api/v1/automation/_status`'s answer. |
+| `refused` | The engine refused the stored flow and holds nothing under its name, so it never fires. `reason` is what the engine threw, verbatim: its `message`, and its `code` when it set one. |
+| `unregistered` | The engine holds nothing under the name and refused nothing: the read came during boot, or between a save and the engine following it, or the flow was unregistered on purpose. |
+
+A save, a publish or a reload that registers a corrected body ends the
+`refused` state. The field is absent where no automation service answered the
+read. The item read carries it on the default cached read as well as the
+uncached one: it is read live on every call and kept out of the ETag, so a
+read that carries it is always answered in full, never with `304 Not
+Modified`. It is the verdict of the engine in the process that answered.
+
 ## Expressions in flows
 
 A flow computes with **one expression dialect, CEL**: every condition is bare
@@ -2202,19 +2220,14 @@ a field access on an object variable is not one. Both reported `success`. They
 are bare CEL now, so the spellings in the table above are the correct ones and
 `lead_record.status == 'converted'` resolves the field.
 
-The `{var}` form still works where a condition is a plain authored string — a
-start node's `config.condition`: `{amount} > 100`, `{status} == 'active'`. The
-two ways it used to answer `false` without saying so are now **loud errors**
-naming the reference: a `{…}` hole that matches no flow variable, and a
-substituted value that is neither a boolean, a number, nor part of a comparison
-(#4336).
-
-**A decision's `conditions[].expression` is the exception — it is always CEL.**
-The slot is declared bare CEL and is on the expression ledger as a predicate
-(#4439), so a braced spelling there is not the `{var}` dialect but a build
-failure: `os build` and `registerFlow` reject it, naming
-`config.conditions[N].expression`. That is deliberate — the alternative is a
-build that refuses what run time would happily execute.
+**There is no `{var}` form of a condition.** Every condition is bare CEL — a
+start node's `config.condition`, an edge's `condition`, a decision's
+`conditions[].expression`, a screen field's `visibleWhen` — so a braced
+spelling (`{amount} > 100`) is a build failure: `os build` and `registerFlow`
+reject it, naming the slot (`config.conditions[N].expression`, …). Write
+`amount > 100`, `status == 'active'`. The template path the evaluator kept for a
+braced string is deleted (#19939), so a direct `evaluateCondition` call refuses
+the same spelling as a CEL fault, and a `template` or `flow` envelope with it.
 </Callout>
 
 CEL conditions that fail to evaluate raise an error and stop the run — they

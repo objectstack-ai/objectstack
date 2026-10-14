@@ -57,10 +57,13 @@ The scaffolder does more than copy files. It:
 - derives a **namespace** from the name (`support-desk` → `support_desk`), so
   every object you create is named `support_desk_*`;
 - installs dependencies;
-- runs `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`
-  to install the **AI skills bundle** for one agent runtime — once, into
-  `.claude/skills/`, and it prints the same command for any other runtime you
-  use;
+- installs the **AI skills bundle** for one agent runtime from the
+  `@objectstack/skills` package, at your `@objectstack/spec`'s version — copied
+  once into `.claude/skills/`, to commit with the project — and prints the
+  command for any other runtime you use
+  ([Installing skills](/docs/ai/skills-reference#installing-skills) has the
+  steps, the versions the package is published at, and the one scaffolder
+  version that is an exception);
 - writes an **`AGENTS.md`** (and `.github/copilot-instructions.md`) that teach your
   coding agent the project layout, the naming rules, and — critically — *to run
   `npm run validate` after every metadata change*.
@@ -421,11 +424,13 @@ Three habits keep this reliable as the app grows:
 - **The gate applies to every domain.** Flows, dashboards, permissions, and
   translations all go through the same `npm run validate` — the agent should run
   it after each change, exactly as `AGENTS.md` instructs.
-- **Keep the skills current.** After upgrading `@objectstack/spec`, re-run
-  `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`
-  — name your own runtime after `--agent` — so the agent authors against the
-  schemas you actually run. The full catalog, and the multi-runtime `--all`
-  trade-off, are documented in the
+- **Keep the skills current.** The catalog's version is your installed
+  `@objectstack/spec`'s: when you upgrade, bump `@objectstack/skills` with the
+  other `@objectstack/*` packages, then re-run
+  `npx skills@1.7.2 experimental_sync --agent claude-code --copy -y` — name your
+  own runtime after `--agent` — and commit what it changed, so the agent authors
+  against the schemas you actually run.
+  The install steps, and the versions the package is published at, are in the
   [AI Skills Reference](/docs/ai/skills-reference#installing-skills).
 
 ## 7. Your app is natively AI-operable (MCP)

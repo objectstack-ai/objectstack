@@ -6,8 +6,17 @@
  *
  * Routes (path is the sub-path after `/ui`):
  *   GET /view/:object[/:type]   → getUiView (type also accepted as ?type=)
+ *
+ * ADR-0138 D2: the anonymous decision is this domain's FIRST statement
+ * (`shouldDenyAnonymous`), taken once for every face — ahead of the path
+ * parse and the protocol probe, so a face added here later is behind it from
+ * the day it lands, and an unauthenticated caller is answered 401 whatever it
+ * names. No D2 door class is served from this domain.
  */
 
+import {
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 // [#15238] The DECLARED protocol contract this domain's ONE request literal is
 // compiled against. Imported, never restated: a hand-written `getUiView(...)`
 // signature here would silently drift from the one the spec declares and
@@ -18,6 +27,8 @@ import type { MetadataProtocol } from '@objectstack/spec/api';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { capabilityUnavailable } from './unavailable.js';
+// [#23214] The repo's one sentence for a repeated single-valued parameter.
+import { repeatedQueryParamMessage } from '@objectstack/rest';
 
 /**
  * [#15238] The `protocol` service slot **as this domain reaches it** — one
@@ -92,13 +103,45 @@ export async function handleUiRequest(
     query: any,
     _context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
+    // ANONYMOUS BASELINE — the domain's FIRST statement (ADR-0138 D2: the
+    // decision is taken once per domain, never face by face). This domain made
+    // no anonymous decision of its own, so whether an unauthenticated caller
+    // was refused depended on what the face it reached happened to do. Decided
+    // here, before the path is parsed or the protocol slot resolved, the caller
+    // learns nothing about the object it named or the deployment, and a face
+    // added below inherits the refusal.
+    //
+    // This handler takes no method: every face it serves is a read, and the
+    // registry hands it every verb, so the decision is asked of the caller
+    // alone. Asked about the user id alone, as the `/data` floor is: a caller
+    // on the wire arrives as a user or as the guest, never as `isSystem`.
+    if (shouldDenyAnonymous({ userId: _context.executionContext?.userId })) {
+        return {
+            handled: true,
+            response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+        };
+    }
+
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
     // GET /ui/view/:object (with optional type param)
     if (parts[0] === 'view' && parts[1]) {
         const objectName = parts[1];
         // Support both path param /view/obj/list AND query param /view/obj?type=list
-        const type = parts[2] || query?.type || 'list';
+        // [#23214] `?type=` is read only when the path names no type, and it is
+        // ONE view type: a repeat reached `getUiView` as an array. Refused with
+        // the multiplicity sentence; a one-element array is one occurrence.
+        let queryType = query?.type;
+        if (!parts[2] && Array.isArray(queryType)) {
+            if (queryType.length > 1) {
+                return {
+                    handled: true,
+                    response: deps.error(repeatedQueryParamMessage('type', queryType.length), 400, { code: 'VALIDATION_ERROR' }),
+                };
+            }
+            queryType = queryType[0];
+        }
+        const type = parts[2] || queryType || 'list';
 
         const protocol = await resolveProtocol(deps, _context);
 

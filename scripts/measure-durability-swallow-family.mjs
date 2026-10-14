@@ -391,14 +391,7 @@ const MAX_HELPER_DEPTH = 4;
  * read off the output would only prove the instrument agrees with itself.
  */
 const POSITIVE_CONTROLS = [
-  {
-    file: 'packages/plugins/plugin-security/src/permission-set-projection.ts',
-    why:
-      'The SHARED `tryInsert`/`tryUpdate` #12923 repaired. `catch (e) { refusals?.record(object, e); return null; }` '
-      + '-- silent by the log axis, a write in the try, and answering through the #12923 accumulator. It must be a '
-      + 'member AND it must come back CHANNELLED, or the instrument cannot tell a repair from a swallow.',
-    tier: 'channelled',
-  },
+
   {
     file: 'packages/plugins/plugin-sharing/src/primary-bu-projection.ts',
     why:

@@ -175,7 +175,7 @@ function declaredPackageIdOf(item: any, name: string): string | null {
   // A stored (tenant-authored) row is never a shipped artifact, whatever
   // package it is bound to. See the doc comment.
   if (isTenantAuthored(item)) return null;
-  const packageId = item._packageId ?? item.packageId;
+  const packageId = item._packageId; // [ADR-0086 D3] the binding only: never the body's `packageId`
   if (typeof packageId !== 'string' || packageId === '') return null;
   if (packageId === RUNTIME_SHADOW_PACKAGE_ID) return null;
   return packageId;
@@ -340,8 +340,8 @@ export class PackagedPermissionSetLockedError extends Error {
       + (operation === 'insert'
         ? `Choose a different name for your set, or clone '${name}' (the "Clone" action on the permission `
           + `set) and edit the clone.`
-        : `Clone it instead (the "Clone" action on the permission set, or POST /api/v1/data/sys_permission_set `
-          + `with a new name) and edit the clone — the clone is your organization's own set, and upgrades keep `
+        : `Clone it instead (the "Clone" action on the permission set, or POST `
+          + `/api/v1/security/permission-sets/${name}/clone with a new name) and edit the clone — the clone is your organization's own set, and upgrades keep `
           + `flowing to '${name}' untouched.`),
     );
     this.name = 'PackagedPermissionSetLockedError';

@@ -26,12 +26,31 @@
  * dialect: a single-brace `{…}` token is refused, and the refusal names the
  * `{{ }}` spelling of each token or, for a token no hole can spell, where to
  * compute it. The contracts compose it (`NotifyConfigSchema`,
- * `ScreenConfigSchema`, `EndConfigSchema`), and `AutomationEngine.registerFlow`
- * and `objectstack validate` call it on every slot
+ * `HttpConfigSchema`, `ScreenConfigSchema`, `EndConfigSchema`), and
+ * `AutomationEngine.registerFlow` and the `validateStackExpressions` rule
+ * (`objectstack validate`, `objectstack compile`, the runtime publish gate of
+ * an `active` metadata save) call it on every slot
  * {@link flowNodeTextSlotSources} finds — ⛔ never a second reading of the
- * dialect anywhere. Those two doors then compile each slot's `{{ }}` holes
+ * dialect anywhere. Those doors then compile each slot's `{{ }}` holes
  * (`validateExpression('template', …)`), which the spec cannot do itself: the
  * template engine is a runtime.
+ *
+ * ## Not at `FlowSchema.parse`, but for an `end` node (#23320)
+ *
+ * The flow parse runs this judge on one slot: a top-level `end` node's
+ * `message`, because `end` has no executor, so its contract, `EndConfigSchema`,
+ * has no door but the parse (`parseEndNodeConfig` in `flow.zod.ts`). On every
+ * other text slot the parse leaves the token to the doors above, as it leaves
+ * a value-slot token to the value-slot judge's: `flowNodeConfigRefusals`'
+ * value arm stands aside at the paths this judge refuses
+ * (`slotJudgeRefusedPaths`, #23260), and the parse calls no slot judge of its
+ * own. The reasons are measured once, for both judges, in
+ * `flow-value-slot-template.ts` ("The doors that run it"): a refusal at the
+ * parse would replace `registerFlow`'s located line and `objectstack
+ * validate`'s `expression-invalid` finding with the parse's issue list, and
+ * would fail the row in the stored pass (`os migrate meta --stored`), which
+ * lists a text-slot refusal made after the parse as a TODO under
+ * `registerFlow` and leaves its verdict unmoved.
  *
  * ## Refused, not converted (ADR-0087 D2)
  *
@@ -181,17 +200,16 @@ export interface FlowNodeTextSlot {
  * renderer; and since #19939 `http-nodes.ts` renders `url` and each `headers`
  * value — the 17.x contract, parsed after the interpolation, refused
  * anything but a string there, so a whole token never handed a typed value
- * on either). Every OTHER string the flow
- * interpolator reads keeps its single-brace dialect: a value-like position
- * whose single token hands its resolved value over with its TYPE (a
- * `filter`) is not a text template, and the value slots (`fields.*`,
- * `assignments.*`, the callee maps `subflow.input.*`, `map.input.*`,
- * `script.inputs.*`, a screen's `defaults.*`, field `defaultValue` and
- * `recordId`, the `loop` / `map` `collection`, a notify node's `recipients`,
- * `templateData.*` and `sourceId`, and an http node's `body`) are CEL's
- * (#19939), and a notify node's `sourceObject`, `actorId` and `payload` and an
- * http node's `method`, `durable`, `timeoutMs` and `signingSecret` are
- * literals, read as written (#19939).
+ * on either). Every OTHER position the 17.x flow interpolator read is no
+ * text template: the value slots (`fields.*`, `assignments.*`, the callee
+ * maps `subflow.input.*`, `map.input.*`, `script.inputs.*`, a screen's
+ * `defaults.*`, field `defaultValue` and `recordId`, the `loop` / `map`
+ * `collection`, a notify node's `recipients`, `templateData.*` and
+ * `sourceId`, an http node's `body`, and each operand of a CRUD node's
+ * `filter`) are CEL's (#19939), and a notify node's `sourceObject`, `actorId`
+ * and `payload` and an http node's `method`, `durable`, `timeoutMs` and
+ * `signingSecret` are literals, read as written (#19939). The interpolator
+ * itself is deleted (#19939, ADR-0032 Sequencing 6).
  */
 export const FLOW_NODE_TEXT_SLOTS: readonly FlowNodeTextSlot[] = [
   { nodeType: 'notify', key: 'title', label: 'notify title' },

@@ -196,6 +196,5 @@ export const zhCN: TranslationData = {
     // Platform record pages (#15743) -- see `en.ts` for the key set.
     sys_user_detail: { label: '用户' },
     sys_organization_detail: { label: '组织' },
-    sys_position_detail: { label: '岗位' },
   },
 };

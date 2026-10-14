@@ -114,6 +114,8 @@ describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () =
       'showcase_member_default',
       'member_default',
     ]);
-    expect(await ql.find('sys_position_permission_set', { where: {}, context: SYS }), 'no junction row is written').toEqual([]);
+    if (ql.getObject?.('sys_position_permission_set')) {
+      expect(await ql.find('sys_position_permission_set', { where: {}, context: SYS }), 'no junction row is written').toEqual([]);
+    }
   });
 });

@@ -1,19 +1,24 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '@objectstack/spec/contracts';
-import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
+import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService, RouteHandler } from '@objectstack/spec/contracts';
+import type { ErrorCode, RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 // [#22470] The ONE upload-scope list — the upload requests' `scope` and the
 // `sys_file.scope` select read it too. A value import: the doors ask it.
 import { UploadScopeSchema } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError, logServerFault } from '@objectstack/types';
+// [#23174] A catch-all 5xx answers through `sendServerFault`: the route's
+// generic text on the wire, the caught error with its stack in the fault log.
+import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
 // boundaries and a monorepo resolves the same module through more than one path
 // (`src` under vitest aliases, `dist` under the published `exports`), so two
 // copies of the class make `instanceof` answer FALSE for a genuine instance.
 // See `packages/core/src/security/authz-store-unavailable.ts`.
 import { isAuthzStoreUnavailableError } from '@objectstack/core';
+// ADR-0069 — the authentication-policy gate's ONE decision, asked at this
+// family's door (`registerStorageFamily`), never re-derived here.
+import { evaluateAuthGate } from '@objectstack/core';
 import type {
   StorageMetadataStore,
   FileRecord,
@@ -45,9 +50,13 @@ import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
 // [#22283] The `storage` settings namespace's Limits group — read and resolved
 // in ONE module, called per request by the doors below.
+// [#23306] The size refusal itself lives there too, beside the limit it
+// enforces, because a second door asks it: the server-side attach verb.
 import {
   resolveStorageLimits,
-  BYTES_PER_UPLOAD_MB,
+  uploadSizeRefusal,
+  UPLOAD_TOO_LARGE_CODE,
+  UPLOAD_TOO_LARGE_STATUS,
   type ResolvedStorageLimits,
   type StorageLimitsSnapshot,
 } from './storage-limits.js';
@@ -77,38 +86,6 @@ const ORGANIZATION_CHANGED_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
 const ORGANIZATION_CHANGED_MESSAGE =
   'This upload was started in a different organization than your active one. ' +
   'Switch your active organization back to the one the upload was started in, then finish the upload.';
-
-/**
- * [#22283] The answer every upload door gives a file over the resolved
- * `max_upload_mb` — before the backend stores a byte and before any row is
- * written.
- *
- * `413` because that is the condition (RFC 9110, content too large).
- * `PAYLOAD_TOO_LARGE` because it is the one registered code for that condition
- * (ADR-0112 ledger, listed under this package's owner key beside
- * `@objectstack/rest`, which answers it for its import row ceilings): a client
- * branches on "too large" by the code alone, at every door that refuses it.
- * Not `VALIDATION_ERROR`, the bucket `standardErrorCodeForHttpStatus` derives
- * for a `413`: the standard catalog names no `413` member, so that code would
- * say only "malformed request" and leave the client to read the status.
- *
- * Typed `RegisteredErrorCode` so a misspelling, or the code leaving the
- * ledger, fails to compile; that this package's own owner key lists it is
- * `check:error-code-provenance`'s to hold. The message names the limit and
- * where it is set.
- */
-const UPLOAD_TOO_LARGE_STATUS = 413;
-const UPLOAD_TOO_LARGE_CODE: RegisteredErrorCode = 'PAYLOAD_TOO_LARGE';
-
-/** The refusal's message: what was measured, the limit, and the one setting that moves it. */
-function uploadTooLargeMessage(measured: string, maxUploadBytes: number): string {
-  const mb = Math.round((maxUploadBytes / BYTES_PER_UPLOAD_MB) * 100) / 100;
-  return (
-    `${measured}, over the maximum upload size of ${mb} MB (${maxUploadBytes} bytes). ` +
-    'The limit is the "Max upload size (MB)" storage setting (max_upload_mb in the storage settings), ' +
-    'which an administrator can change.'
-  );
-}
 
 /**
  * [#22313] The answer the chunked-completion door gives an upload that does
@@ -220,13 +197,11 @@ function declaredContentLength(req: IHttpRequest): number | undefined {
  * every case so the answer never says which check failed. Anything else is a
  * genuine fault and stays `500 INTERNAL`, whatever its text says.
  *
- * The fault's own text never reaches the caller — a declared 5xx answers with
- * the route's generic `fallbackMessage`, the platform rule the REST door keeps
- * (`packages/rest/src/error-response.ts`, `logWithheldServerFault`). The
- * operator keeps it: the original error, stack included, goes to the same
- * server-fault funnel `sendError` writes every 5xx line to, logged first the
- * way the package registrar's sandbox branch logs before it answers. `route`
- * is the mounted PATTERN, never the request URL, whose last segment is a live
+ * The fault's own text never reaches the caller: the 500 answers through the
+ * shared caught-fault writer `sendServerFault` (`@objectstack/types`), which
+ * writes the route's generic `fallbackMessage` and hands the original error,
+ * stack included, to the server-fault log as the fault's one line. `route` is
+ * the mounted PATTERN, never the request URL, whose last segment is a live
  * signed token.
  */
 function sendRawByteRouteFailure(
@@ -239,8 +214,7 @@ function sendRawByteRouteFailure(
     sendError(res, 401, 'INVALID_TOKEN', STORAGE_TOKEN_REFUSAL_MESSAGE);
     return;
   }
-  logServerFault({ status: 500, code: 'INTERNAL', error: err, request: route });
-  sendError(res, 500, 'INTERNAL', fallbackMessage);
+  sendServerFault(res, 500, 'INTERNAL', fallbackMessage, err, route);
 }
 
 /**
@@ -412,6 +386,42 @@ export function registerStorageRoutes(
   store: StorageMetadataStore,
   opts: StorageRoutesOptions = {},
 ): void {
+  registerStorageFamily(httpServer, storage, store, opts, undefined);
+}
+
+/**
+ * Package-internal (not re-exported from `index.ts`, and the package's
+ * `exports` map publishes `"."` alone): the session user of a request, read
+ * for the ADR-0069 authentication-policy gate, or `undefined` when there is no
+ * session or no gate feature is active. It throws only the branded
+ * authorization-store outage, when a gate the deployment declared active
+ * cannot read the session (`AuthzStoreUnavailableError`), which the door
+ * relays as its declared `503`.
+ *
+ * Bound by `composeStorageRoutes` (`storage-service-plugin.ts`), the one place
+ * every storage gate is bound — so the plugin's own mount and the host door
+ * `mountStorageRoutes` both carry it.
+ */
+export type StorageGatedSessionReader = (req: IHttpRequest) => Promise<unknown>;
+
+/**
+ * Package-internal: register the storage family through ONE door, which asks
+ * the ADR-0069 gate before any route runs (see `mountFamilyRoute` below).
+ *
+ * {@link registerStorageRoutes} delegates here with no reader, so a direct
+ * caller of the public registrar mounts the family exactly as before: like the
+ * other storage gates, this one is bound by the package's composition, whose
+ * reader is built from the kernel it is handed. `readGatedSessionUser` is a
+ * parameter here rather than a `StorageRoutesOptions` key so that no exported
+ * declaration moves.
+ */
+export function registerStorageFamily(
+  httpServer: IHttpServer,
+  storage: IStorageService,
+  store: StorageMetadataStore,
+  opts: StorageRoutesOptions,
+  readGatedSessionUser: StorageGatedSessionReader | undefined,
+): void {
   const basePath = opts.basePath ?? '/api/v1/storage';
   const downloadTtl = opts.downloadTtl ?? 300;
 
@@ -434,8 +444,9 @@ export function registerStorageRoutes(
     measured: (bytes: number) => string,
     res: IHttpResponse,
   ): boolean => {
-    if (maxUploadBytes === undefined || !Number.isFinite(bytes) || bytes <= maxUploadBytes) return true;
-    sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, uploadTooLargeMessage(measured(bytes), maxUploadBytes));
+    const refusal = uploadSizeRefusal(bytes, maxUploadBytes, measured);
+    if (refusal === null) return true;
+    sendError(res, UPLOAD_TOO_LARGE_STATUS, UPLOAD_TOO_LARGE_CODE, refusal);
     return false;
   };
 
@@ -601,6 +612,61 @@ export function registerStorageRoutes(
       // guard fails in (it vetoes rather than reaps when it cannot tell).
       return false;
     }
+  };
+
+  // ── ADR-0069 authentication-policy gate: the family's ONE door ────────
+  // A session the policy HOLDS (an expired password, enforced MFA not yet
+  // enrolled) is gated out of every protected resource until it remediates,
+  // and every route of this family is one — the two raw-transfer routes
+  // included: a capability token is not on the allow-list, and a held
+  // session is refused there too. Every route below is mounted through
+  // `mountFamilyRoute`, so the gate is asked once for the family, before the
+  // route's own logic, and a route registered on `httpServer` directly would
+  // skip it — which is why the gate's pins enumerate the routes off the
+  // registration itself.
+  //
+  // The answer is REST's `enforceAuth`: `403` with the gate's own `code` and
+  // `message`, in this family's declared envelope. `code` is declared as a
+  // bare string on the session's `authGate`; its one producer (plugin-auth's
+  // `customSession` enrichment) writes only `PASSWORD_EXPIRED` /
+  // `MFA_REQUIRED`, both members of the vocabulary.
+  //
+  // No request path is passed. The allow-list exempts remediation and
+  // bootstrap routes, and none of this family is one; its base path is the
+  // host's option, so passing it would let a family mounted under an
+  // allow-listed prefix inherit an exemption it never declared. An empty path
+  // earns no exemption (the predicate is fail-closed on it, #7898).
+  //
+  // `true` ⇒ the refusal (or the outage relay) was already sent.
+  const refuseHeldSession = async (
+    readSessionUser: StorageGatedSessionReader,
+    req: IHttpRequest,
+    res: IHttpResponse,
+  ): Promise<boolean> => {
+    let sessionUser: unknown;
+    try {
+      sessionUser = await readSessionUser(req);
+    } catch (err) {
+      // A gate the deployment declared active whose session read FAILED is
+      // an outage, not a healthy session: REST answers it `503` (#13906
+      // decision 2 option B), and so does this door, in its own envelope.
+      if (isAuthzStoreUnavailableError(err)) {
+        sendError(res, err.status, err.code, err.message);
+        return true;
+      }
+      throw err;
+    }
+    const gate = evaluateAuthGate(sessionUser, '');
+    if (!gate) return false;
+    sendError(res, 403, gate.code as ErrorCode, gate.message);
+    return true;
+  };
+
+  const mountFamilyRoute = (verb: 'get' | 'post' | 'put', path: string, handler: RouteHandler): void => {
+    httpServer[verb](path, (async (req, res) => {
+      if (readGatedSessionUser && (await refuseHeldSession(readGatedSessionUser, req, res))) return;
+      return handler(req, res);
+    }) satisfies RouteHandler);
   };
 
   // ── Upload auth gate (#2755) ─────────────────────────────────────────
@@ -812,7 +878,7 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   // POST /storage/upload/presigned
   // ---------------------------------------------------------------------------
-  httpServer.post(`${basePath}/upload/presigned`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('post', `${basePath}/upload/presigned`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       const session = await requireUploadSession(req, res);
       if (session === false) return;
@@ -882,14 +948,14 @@ export function registerStorageRoutes(
         downloadUrl: `${basePath}/files/${fileId}/url`,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   // ---------------------------------------------------------------------------
   // POST /storage/upload/complete
   // ---------------------------------------------------------------------------
-  httpServer.post(`${basePath}/upload/complete`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('post', `${basePath}/upload/complete`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       // [commit f087c376f] Bound, not discarded: this handler already resolved the
       // session and threw the value away, which is what left the commit
@@ -938,14 +1004,14 @@ export function registerStorageRoutes(
         etag: updated!.etag,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   // ---------------------------------------------------------------------------
   // POST /storage/upload/chunked
   // ---------------------------------------------------------------------------
-  httpServer.post(`${basePath}/upload/chunked`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('post', `${basePath}/upload/chunked`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       const session = await requireUploadSession(req, res);
       if (session === false) return;
@@ -1037,14 +1103,14 @@ export function registerStorageRoutes(
         expiresAt,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   // ---------------------------------------------------------------------------
   // PUT /storage/upload/chunked/:uploadId/chunk/:chunkIndex
   // ---------------------------------------------------------------------------
-  httpServer.put(`${basePath}/upload/chunked/:uploadId/chunk/:chunkIndex`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('put', `${basePath}/upload/chunked/:uploadId/chunk/:chunkIndex`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       // [commit f087c376f] Bound rather than discarded — see the commit door above.
       // Named `authSession` because `session` below is the sys_upload_session
@@ -1193,14 +1259,14 @@ export function registerStorageRoutes(
         bytesReceived: data.byteLength,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   // ---------------------------------------------------------------------------
   // POST /storage/upload/chunked/:uploadId/complete
   // ---------------------------------------------------------------------------
-  httpServer.post(`${basePath}/upload/chunked/:uploadId/complete`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('post', `${basePath}/upload/chunked/:uploadId/complete`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       // [commit f087c376f] Bound rather than discarded — see the commit door above.
       const authSession = await requireUploadSession(req, res);
@@ -1296,14 +1362,14 @@ export function registerStorageRoutes(
         url: `${basePath}/files/${session.file_id}/url`,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   // ---------------------------------------------------------------------------
   // GET /storage/upload/chunked/:uploadId/progress
   // ---------------------------------------------------------------------------
-  httpServer.get(`${basePath}/upload/chunked/:uploadId/progress`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('get', `${basePath}/upload/chunked/:uploadId/progress`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       // [commit f087c376f] Bound rather than discarded — the progress door can WRITE
       // (`expireIfPastDeadline` statuses the row `expired`), so it owes the
@@ -1355,14 +1421,14 @@ export function registerStorageRoutes(
         expiresAt: session.expires_at,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   // ---------------------------------------------------------------------------
   // GET /storage/files/:fileId/url
   // ---------------------------------------------------------------------------
-  httpServer.get(`${basePath}/files/:fileId/url`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('get', `${basePath}/files/:fileId/url`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       const { fileId } = req.params;
       const file = await store.getFile(fileId);
@@ -1394,7 +1460,7 @@ export function registerStorageRoutes(
       // carried no envelope at all.
       sendOk(res, { url });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
@@ -1412,7 +1478,7 @@ export function registerStorageRoutes(
   // cookie it carries, and only an `acl: 'public_read'` file is served to
   // a caller with none (#22431).
   // ---------------------------------------------------------------------------
-  httpServer.get(`${basePath}/files/:fileId`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('get', `${basePath}/files/:fileId`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       const { fileId } = req.params;
       const file = await store.getFile(fileId);
@@ -1443,14 +1509,14 @@ export function registerStorageRoutes(
 
       res.status(302).header('Location', url).send('');
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
   // ---------------------------------------------------------------------------
   // PUT /storage/_local/raw/:token — presigned raw upload (LocalStorageAdapter)
   // ---------------------------------------------------------------------------
-  httpServer.put(`${basePath}/_local/raw/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('put', `${basePath}/_local/raw/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       const { token } = req.params;
       const localAdapter = storage as LocalStorageAdapter;
@@ -1495,7 +1561,7 @@ export function registerStorageRoutes(
   // ---------------------------------------------------------------------------
   // GET /storage/_local/raw/:token — presigned raw download (LocalStorageAdapter)
   // ---------------------------------------------------------------------------
-  httpServer.get(`${basePath}/_local/raw/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+  mountFamilyRoute('get', `${basePath}/_local/raw/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
     try {
       const { token } = req.params;
       const localAdapter = storage as LocalStorageAdapter;
@@ -1746,7 +1812,12 @@ function judgeCompletion(session: UploadSessionRecord, listed: ReadonlyArray<Lis
   };
 }
 
-function buildKey(scope: string, fileId: string, filename: string): string {
+/**
+ * The storage key of a new file: `<scope>/<fileId><.ext>`. Package-internal
+ * (not re-exported from `index.ts`); [#23306] exported so the server-side
+ * attach verb lays its keys out exactly as the upload doors do.
+ */
+export function buildKey(scope: string, fileId: string, filename: string): string {
   const ext = filename.includes('.') ? '.' + filename.split('.').pop() : '';
   return `${scope}/${fileId}${ext}`;
 }

@@ -1,6 +1,6 @@
 # ADR-0126: The platform customization model for packaged metadata — three regimes, one activation ledger
 
-**Status**: **Amended** (2026-09-04) by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — maintainer, verbatim: 「所以 ADR-0126 不能简单的关掉」「hotcrm 是标准的软件包，客户安装之后能根据业务需求实现具体的定制」「同意」. The three regimes stand at **environment scope only**: O's per-organization reading is retired (ADR-0005 amended), C's activation ledger stays as tenant-less deployment state (D3's reserved `organization_id`, written NULL, is withdrawn — ADR-0131 D1 forbids a nullable tenant column), E stands; the unreleased implementation (#12185, #12190, #12296, #12348, #12419, framework half of #12491) ships in 17.3 with that column dropped. The install mode ADR-0131 D6 adds (managed = sealed definitions + these regimes; template = copied once, fully editable, refused on shared-DB multi-tenant) is the frame the regimes now sit in. Original status line follows.
+**Status**: **Amended** (2026-09-04) by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — maintainer, verbatim: 「所以 ADR-0126 不能简单的关掉」「hotcrm 是标准的软件包，客户安装之后能根据业务需求实现具体的定制」「同意」. The three regimes stand at **environment scope only**: O's per-organization reading is retired (ADR-0005 amended), C's activation ledger stays as tenant-less deployment state (D3's reserved `organization_id`, written NULL, is withdrawn — ADR-0131 D1 forbids a nullable tenant column), E stands; the unreleased implementation (#12185, #12190, #12296, #12348, #12419, framework half of #12491) ships in 17.3 with that column dropped. The install mode ADR-0131 D6 adds (managed = sealed definitions + these regimes; template = copied once, fully editable, refused on shared-DB multi-tenant) is the frame the regimes now sit in. · **Amended** (2026-10-14, ADR-0131 D2/D3/D13): the permission projection §4 and §8 name is retired by #15204 stage 8 (`66949b7729`, 2026-10-13), which unwired the ADR-0094 projector and retired the `sys_permission_set` row object; see the notes in §4 and §8. Original status line follows.
 **Original status**: Proposed (2026-08-25) — awaiting the maintainer's hand-merge, which is itself the
 acceptance act for a governed surface (Prime Directive #14) **and the ruling that settles the
 tentative flow-instance directions in §7** (chartered on
@@ -94,7 +94,7 @@ Three real mechanisms operate across those tiers, each invented separately:
 - **Clone-to-customize** (#11513, permission sets only): server-side lock on the packaged base
   (`packaged-permission-set-lock.ts`), a clone action demanding a new name, and — the piece this
   ADR generalizes — the ruling that **switching a packaged artifact off is row state, not a
-  definition write** (`packages/plugins/plugin-security/src/permission-set-projection.ts`, #4669).
+  definition write** (`packages/plugins/plugin-security/src/permission-set-projection.ts`, #4669; *Path note, 2026-10: #15204 stage 8 retired the `sys_permission_set` row whose `active` column carried that row state, and stage 7a (#23368) deleted the module; the path is kept as the record of what this section measured*).
 - **Extend** (`objectExtensions`, `packages/spec/src/data/object.zod.ts`; navigation
   contributions, ADR-0029 D7): a package adds fields/validations/indexes to another package's
   object, or nav items to another package's app, merged at boot. Package-grain, additive,
@@ -233,6 +233,12 @@ read at each runtime's own consult point; an empty ledger changes nothing anywhe
   seam every entry path crosses); the permission projection keeps its own row-state door until
   convergence (§8). Each consumer documents its consult point; the ledger imposes no global
   dispatch layer.
+
+> **Note (2026-10-14) — the permission projection's row-state door is gone.** #15204 stage 8
+> (`66949b7729`, 2026-10-13) unwired the ADR-0094 projection and retired the `sys_permission_set`
+> row object, by execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D2/D3/D13, so
+> the row-state door the bullet above names no longer exists; per ADR-0131 §4, a permission set's
+> `active` state moves into the environment-authored definition's lifecycle.
 
 ## 5. Decision (D3): scope and write authority
 
@@ -386,6 +392,11 @@ callers first, or don't), and preserves "packaged code calls what it names".
    (active row state + free clone, no linkage). The convergence card decides one thing only: how
    `sys_permission_set.active` and the generic ledger relate (projection vs migration). Nothing
    about it is urgent.
+
+   > **Note (2026-10-14).** The convergence question has no row left to relate:
+   > `sys_permission_set` is retired by #15204 stage 8 (`66949b7729`, 2026-10-13; ADR-0131
+   > D3/D13), and ADR-0131 §4 moves `active` into the environment-authored definition's lifecycle.
+
 4. **The five overlay types are untouched.** No overlay-type work is chartered, implied, or
    permitted by this ADR.
 5. **Docs**: the §1.3 promise pages are corrected to promise what each regime actually delivers

@@ -428,7 +428,7 @@
       "title": "The flow designer's connector picker mirrors GET /automation/connectors: same instances, declarative ones annotated, actions and their input schemas offered per pick",
       "since": "v15.1",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -441,12 +441,12 @@
           "a flow that is EDITABLE in Studio — use a shipped one (showcase_declarative_connector_ping) or create it from the console's own create page; see the knownGap before authoring one over the metadata API"
         ],
         "knownGaps": [
-          "A FLOW AUTHORED OVER THE METADATA API IS NOT EDITABLE IN STUDIO (run #7690, cross-observed by run #7695 / #7753 item 3) — with or without `?package=`, it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', so a run that provisions its fixture flow via PUT /api/v1/meta/flows/... cannot then drive the picker on it. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'`, and `flow` declares allowEnvironmentOverlay:false — so for THIS type the banner is arguably telling the truth (the server would refuse the overlay write anyway). The editable path is the console's own create page. Recorded, not filed: the polarity-reversed case, where the same heuristic locks a WRITABLE-package object it should not, is the real defect and lives at objectui#4308"
+          "A FLOW AUTHORED OVER THE METADATA API IS NOT EDITABLE IN STUDIO (run #7690, cross-observed by run #7695 / #7753 item 3) — with or without `?package=`, it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', so a run that provisions its fixture flow via PUT /api/v1/meta/flows/... cannot then drive the picker on it. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'`, and `flow` declares allowEnvironmentOverlay:false — so for THIS type the banner is arguably telling the truth (the server would refuse the overlay write anyway). The editable path is the console's own create page. MEASURED AGAIN (QA run #23163, objectstack 36b2889c, objectui 1fb1ced36243): an ENV-WIDE flow authored through POST /api/v1/automation opened EDITABLE in Studio with no lock banner, and the picker was driven on it — so that door is a working way to provision the fixture flow. Whether a flow written through PUT /api/v1/meta/flow/… still opens behind the banner was not re-measured Recorded, not filed: the polarity-reversed case, where the same heuristic locks a WRITABLE-package object it should not, is the real defect and lives at objectui#4308"
         ]
       },
       "steps": [
         "before the browser: GET /api/v1/automation/connectors and record { connectors, total } — this is the ground truth the picker must mirror",
-        "in Studio, open a flow (e.g. showcase_declarative_connector_ping) and add/select a connector_action node — if the editor opens behind the 'provided by an installed package' banner, check how the flow was authored before filing anything (see the knownGap: metadata-API-authored flows are read-only in Studio)",
+        "in Studio, open a flow (e.g. showcase_declarative_connector_ping, or a scratch flow authored env-wide through POST /api/v1/automation, which opens editable — knownGaps) and add/select a connector_action node — if the editor opens behind the 'provided by an installed package' banner, check how the flow was authored before filing anything (see the knownGap)",
         "open the connector picker; screenshot; only AFTER the screenshot, read the DOM list",
         "pick showcase_mcp_tools; record which actions are offered and screenshot the action + input form for echo_upper",
         "pick a plugin-registered connector and compare its presentation with the declarative one's annotation"
@@ -502,6 +502,12 @@
           "date": "2026-08-11",
           "change": "recorded the run #7690 route note that a flow authored over the metadata API opens read-only in Studio ('provided by an installed package'): ResourceEditPage's artifact-backed heuristic (layered.code != null && _packageId !== 'sys_metadata') plus flow's allowOrgOverride:false. The fixture now names an editable flow and the step says check the authoring route before filing. Kept as a note, not a defect — the polarity-reversed case is objectui#4308",
           "ref": "#7745"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-13",
+          "change": "knownGaps[0] and steps[1] record that the installed-package lock did not reproduce for an env-wide flow (knownGap stale, #23163 A0; parked on #23121, carried by #23169). QA run #23163 authored the fixture flow through POST /api/v1/automation, and it opened editable with no lock banner; the picker listed exactly the 5 served connectors. The older reading, about flows written over the metadata API, is kept and marked not re-measured",
+          "ref": "#23169"
         }
       ]
     },
@@ -510,18 +516,19 @@
       "title": "Outbound webhooks materialize (spec object→object_name, isActive→active), fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, reject retired trigger kinds, and never clobber admin edits",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a reachable webhook receiver (local echo server on the run's own port range) — point the shipped showcase_task_changed row at it, or author a scratch webhook",
+          "a reachable webhook receiver (local echo server on the run's own port range) and a SCRATCH webhook authored INSIDE the showcase organization that points at it — Setup → Integrations → Webhooks → New as the signed-in admin, or POST /api/v1/data/sys_webhook under that session, so the row carries the organization. ⚠ The shipped showcase_task_changed cannot carry the per-record or bulk delivery legs: it materializes ORG-LESS (a declared webhook belongs to no organization), and the auto-enqueuer hands an organization-walled event only to a subscription of that organization (packages/plugins/plugin-webhooks/src/auto-enqueuer.ts, AutoEnqueuer.admitsOrganization). On the org-walled showcase it therefore never fans out, while Setup reads it active:true (QA run #23166)",
           "the shipped fixture: showcase_task_changed (object showcase_task, triggers create/update/delete, isActive:false ON PURPOSE — flipping it active in Setup is part of the test, examples/app-showcase/src/automation/webhooks/index.ts)",
           "a predicate multi-write path for the bulk variants (update/delete with multi:true on showcase_task) — NOT reachable over REST, see the knownGap below: author a flow with an `update_record` / `delete_record` node carrying multi:true and fire it through the api trigger"
         ],
         "knownGaps": [
-          "PREDICATE (multi:true) WRITES ARE UNREACHABLE OVER REST BY DESIGN (run #7690) — do not re-derive this, and do not file the 400 as a defect. #3897 made the batch routes parse their body against the spec contract, and Zod object schemas STRIP unknown keys: `options.multi` and `options.where` can no longer ride into the engine's delete/update options, and `POST /data/:object/deleteMany` now deletes per id (packages/rest/src/rest-server.ts). That is a security boundary, not a gap. The bulk_update/bulk_delete clause therefore needs a FLOW `update_record` / `delete_record` node authored with multi:true, fired through the api trigger — that is the supported predicate-write door"
+          "PREDICATE (multi:true) WRITES ARE UNREACHABLE OVER REST BY DESIGN (run #7690) — do not re-derive this, and do not file the 400 as a defect. #3897 made the batch routes parse their body against the spec contract, and Zod object schemas STRIP unknown keys: `options.multi` and `options.where` can no longer ride into the engine's delete/update options, and `POST /data/:object/deleteMany` now deletes per id (packages/rest/src/rest-server.ts). That is a security boundary, not a gap. The bulk_update/bulk_delete clause therefore needs a FLOW `update_record` / `delete_record` node authored with multi:true, fired through the api trigger — that is the supported predicate-write door",
+          "acceptance[2], the bulk pair, is BLOCKED(dependency) on the org-walled showcase (QA run #23166): a flow node's predicate multi-write publishes its bulk event with NO organizationId, the org-owned subscription refuses it (auto-enqueuer.ts organization match), and an org-less subscription cannot be authored to receive it. Whether flow-node multi-writes should carry the organization is a maintainer question raised on #23166, not ruled; score acceptance[2] blocked(dependency) until it is. The same run did not attempt negative[1] or negative[2] (time budget): a re-run owes them, and their text is unchanged"
         ]
       },
       "variants": [
@@ -535,8 +542,8 @@
       ],
       "steps": [
         "boot the showcase; verify the materializer bridge: read sys_webhook over /api/v1/data and locate showcase_task_changed with object_name:'showcase_task', active:false, managed_by:'package', and the envelope in definition_json",
-        "in Setup → Integrations → Webhooks flip the row active and point url at the local receiver (an admin edit — it must stamp customized)",
-        "create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId)",
+        "in Setup → Integrations → Webhooks flip the shipped showcase_task_changed row active and point its url at the local receiver (an admin edit — it must stamp customized). This edit is the subject of the seed-not-clobber clause (acceptance[6]) ONLY: the row stays org-less, so it delivers nothing on the org-walled showcase (fixtures.requires[0]). Author the in-organization scratch webhook beside it for the delivery legs",
+        "with the in-organization scratch webhook (fixtures.requires[0]) active and pointed at the receiver, create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId)",
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data: one row per delivery with status/attempts/lastStatusCode",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
@@ -559,7 +566,7 @@
         {
           "clause": "the bulk pair delivers the AGGREGATE shape — { object, matched } with no recordId and no record body — and only to webhooks that opted into bulk_update/bulk_delete; per-record subscribers do NOT receive a fabricated per-record event for a predicate write (#4639/#4626)",
           "oracle": "network",
-          "verify": "bulk delivery bodies + absence of per-record deliveries for the same predicate write on a create/update/delete-only subscription",
+          "verify": "bulk delivery bodies + absence of per-record deliveries for the same predicate write on a create/update/delete-only subscription. On the org-walled showcase this clause scores blocked(dependency): knownGaps[1]",
           "evidence": "receiver logs for both subscriptions"
         },
         {
@@ -640,6 +647,12 @@
           "date": "2026-08-30",
           "change": "coverage sweep: added the redeliver clause — POST /api/v1/webhooks/redeliver (a raw hono mount, webhook-outbox-plugin.ts) had no coverage. Asserts the terminal-row replay (stored HMAC signature re-sent byte-for-byte), the row update and { id, status } answer, and the full refusal matrix: 401 anonymous, 400 INVALID_REQUEST / MISSING_REQUIRED_FIELD, 404 for unknown AND cross-org ids (#10740 tenant threading), 409 DELIVERY_NOT_ELIGIBLE / DELIVERY_NEVER_SENT (the #8069 parked-row and gone-signing-config refusals — never a 500). Pins the deliberate NO-capability posture above the auth floor ('every authenticated user counts' — the plugin's own words) so a run neither files it as a missing gate nor widens it. Step + sources added",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[0], steps[1] and [2] move the delivery legs onto an in-organization scratch webhook (stale spec, #23166 A1), and knownGaps[1] (new) and acceptance[2].verify record the bulk pair as blocked(dependency) with the maintainer question open (#23166 A2); both parked on #23121, carried by #23169. The shipped showcase_task_changed materializes org-less, and the auto-enqueuer gives an organization-walled event only to its own organization's subscriptions, so on the showcase it never fans out while Setup shows it active. QA run #23166 drove the per-record legs on a webhook authored inside the organization and passed them; in-org bulk flow events carry no organizationId, so no tenant subscription can receive them. N1 / N2 were not attempted and are owed by a re-run; the item's text for them is unchanged",
+          "ref": "#23169"
         }
       ],
       "enumSource": {
@@ -757,18 +770,19 @@
     },
     {
       "id": "integration-system.email-template-render",
-      "title": "Email templates materialize to sys_email_template, resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
+      "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the shipped fixture: showcase_task_done_email (category workflow, subject '✅ Task done: {{title}}', variables title required / project optional — examples/app-showcase/src/system/emails/index.ts)",
+          "the shipped fixture: showcase_task_done_email (subject '✅ Task done: {{title}}', variables title required / project optional — examples/app-showcase/src/system/emails/index.ts). It declares no `category`: that key and `isSystem` are RETIRED (#22876, ADR-0049 — retiredKey() tombstones on the template schema), so a template authored with either is refused at parse with the prescription",
           "a capturable email channel (dev transport / log capture — no real SMTP needed)",
-          "a second-locale scratch copy (same name, locale zh-CN) for the i18n-bundle clause"
+          "a second-locale scratch copy (same name, locale zh-CN) for the i18n-bundle clause",
+          "for acceptance[5]'s declared-source half a WRITABLE copy of the showcase (a scratch copy under /tmp, never the tree): the stock app is a read-only code package, so a run cannot edit its declared template source. QA run #23166 scored that half partial for want of one; the admin-edit half runs on stock"
         ],
         "knownGaps": [
           "no stock example exercises an email template end-to-end; needs a small fixture flow with a notify/email step",
@@ -784,21 +798,21 @@
         "rejection: name not dotted snake_case"
       ],
       "steps": [
-        "boot the showcase; read sys_email_template over /api/v1/data and locate showcase_task_done_email: bodyHtml→body_html remap, variables in variables_json, managed_by:'package'",
+        "boot the showcase; GET /api/v1/meta/email_template/showcase_task_done_email and read the served item — subject, bodyHtml, variables, active. The REGISTRY serves it: since ADR-0131 D6/D10 (#22875) a declared template is read by (name, locale) from the registry, and no sys_email_template row backs it — the table holds 0 rows on a stock boot (QA run #23166) and its organization door is closed (packages/plugins/plugin-email/src/email-template-door.ts)",
         "drive a send with full data ({ title, project }) through IEmailService.sendTemplate (or the fixture flow once it exists); capture the rendered subject/body at the dev transport",
         "drive a send MISSING the required `title`; capture the fast failure",
-        "set the row inactive (or author active:false) and send; capture the TEMPLATE_INACTIVE error",
+        "make the template inactive (a Studio save of the item with active:false, or a scratch template authored active:false) and send; capture the TEMPLATE_INACTIVE error",
         "author the zh-CN twin; send to a zh-CN-locale recipient and to an unmatched-locale recipient; capture which row rendered each",
         "author a template with fromOverride + replyTo and verify both on the outbound message",
-        "edit the template wording as an admin in Studio (stamps customized), redeploy/reboot, and re-read the row",
-        "edit the DECLARED source template and metadata-reload WITHOUT a reboot — the single item re-materializes (email_template is allowRuntimeCreate:true; the plugin subscribes to metadata changes)",
+        "edit the template wording as an admin in Studio (an environment overlay over the declared item), redeploy/reboot, and re-read the served item over GET /api/v1/meta/email_template/showcase_task_done_email — the admin's wording must still be served",
+        "on the WRITABLE showcase copy (fixtures.requires[3]), edit the DECLARED source template and metadata-reload WITHOUT a reboot, then GET /api/v1/meta/email_template/<name> — the registry serves the edited item (email_template is allowRuntimeCreate:true; the plugin subscribes to metadata changes). On the stock read-only showcase this half is not drivable: record it partial, as QA run #23166 did",
         "build the two rejection probes (stray key `body`; name 'BadName') and capture the errors",
         "drive the raw send door POST /api/v1/email/send three ways: (a) authed with a well-formed message { to, subject, html } (or `text`; SendEmailInput's body keys are `html`/`text` — `bodyHtml`/`bodyText` are the TEMPLATE authoring fields, not wire keys) → capture status + the dev-transport landing; (b) anonymous (no session) → capture status; (c) a non-object / malformed body → capture the envelope",
         "while you are at the raw door, send the wrong-vocabulary body { to, subject, bodyHtml } deliberately and capture the refusal — 400 VALIDATION_FAILED 'at least one of text or html is required'. This is the shape the checklist itself used to name (run #7690); keeping the probe pins the two vocabularies apart"
       ],
       "acceptance": [
         {
-          "clause": "the authored template is what actually renders: subject/body substitute every {{path}} hole with the run's values, and the AUTHORED wording (not a built-in or stale copy) reaches the transport — the exact three-break disconnect #4509 closed (engine registration + managed_by stamping + bridge write)",
+          "clause": "the authored template is what actually renders: subject/body substitute every {{path}} hole with the run's values, and the AUTHORED wording (not a built-in or stale copy) reaches the transport — the false-compliance disconnect #4509 named, now closed by the registry read: sendTemplate resolves the registry item by (name, locale), with no table row in between (ADR-0131 D6/D10)",
           "oracle": "log",
           "verify": "captured render contains the authored strings with substituted values and zero unresolved {{placeholder}} residue",
           "evidence": "the captured render"
@@ -810,7 +824,7 @@
           "evidence": "the two outcomes"
         },
         {
-          "clause": "active:false is a real gate: sendTemplate returns TEMPLATE_INACTIVE (also the withdrawal mechanism — deleting a declared template deactivates rows rather than destroying them)",
+          "clause": "active:false is a real gate: sendTemplate returns TEMPLATE_INACTIVE",
           "oracle": "log",
           "verify": "the inactive send's error code",
           "evidence": "the error"
@@ -828,10 +842,10 @@
           "evidence": "the captured message"
         },
         {
-          "clause": "both provenance protections hold: an admin-edited (customized) row survives redeploys, AND a declared-source edit re-materializes the single item on metadata reload without a restart",
+          "clause": "both provenance protections hold: an admin's Studio edit (an environment overlay over the declared item) survives redeploys, AND a declared-source edit is served on metadata reload without a restart",
           "oracle": "api",
-          "verify": "post-reboot row keeps the admin wording; the reload path updates the untouched declared row",
-          "evidence": "before/after row reads for both paths"
+          "verify": "post-reboot GET /api/v1/meta/email_template/<name> serves the admin wording; on the writable showcase copy the reload path serves the edited declared item. Read the REGISTRY, never sys_email_template, which holds no row for a declared template (ADR-0131 D6/D10). On the stock read-only showcase the declared-source half is partial (fixtures.requires[3])",
+          "evidence": "before/after item reads for both paths, and which showcase copy the declared-source half ran on"
         },
         {
           "clause": "authoring rejections are loud and prescriptive: a stray key errors naming it with the alias prescription (content→bodyHtml per #5013 — landing on the REQUIRED body so the rename renders); a non-dotted-snake-case name errors at parse",
@@ -861,7 +875,7 @@
       "source": [
         "packages/spec/src/system/email-template.zod.ts#fromOverride (requireds, dotted-name regex, aliases #5013, variables/required, fromOverride/replyTo/active)",
         "packages/spec/liveness/email_template.json#requireVars (the whole surface live via #4509; per-prop evidence incl. requireVars, TEMPLATE_INACTIVE, seed-not-clobber, runtime re-materialization)",
-        "packages/plugins/plugin-email/src/bootstrap-declared-email-templates.ts + email-service.ts (row mapping; (name,locale)+fallback; the gates)",
+        "packages/plugins/plugin-email/src/email-service.ts ((name, locale) + fallback through the registry TemplateLoader; the requireVars and TEMPLATE_INACTIVE gates) + email-template-door.ts (the closed sys_email_template organization door, ADR-0131 D6) — the row projector bootstrap-declared-email-templates.ts was retired with the table projection (#22875)",
         "examples/app-showcase/src/system/emails/index.ts#showcase_task_done_email (showcase_task_done_email fixture)",
         "packages/rest/src/rest-server.ts#registerEmailEndpoints (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
         "packages/rest/src/rest-route-ledger.ts (email family — POST /api/v1/email/send → client email.send)",
@@ -898,6 +912,12 @@
           "date": "2026-09-21",
           "change": "CORRECTION: the locale clause said resolution \"picks the best locale row\", a sentence packages/plugins/plugin-email/src/template-loader.ts enumerates as one of three false declarations. The resolver matches (name, locale) exactly, folds no language subtag, retries the single literal rung en-US for a call that named a locale and then raises TEMPLATE_NOT_FOUND. Corrected the clause and its verify line so the run cannot tick a best-match behaviour the code has never had",
           "ref": "#18499"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-13",
+          "change": "the title, fixtures.requires[0] and [3] (new), steps[0], [3], [6] and [7], acceptance[0], [2] and [5] and source[2] re-pointed from the sys_email_template row to the registry (stale spec, #23166 A0 / A5 / A6; parked on #23121, carried by #23169). Since #22875 (ADR-0131 D6/D10) declared templates resolve from the registry by (name, locale); the row projector is gone, the table holds 0 rows on a stock boot, and its organization door is closed. `category` and `isSystem` are retired (#22876), so the fixture line no longer names a category. The declared-source half of acceptance[5] needs a writable showcase copy: QA run #23166 scored it partial on the read-only stock app and passed the admin half. The pin email-template-materialization.dogfood.test.ts already asserts the registry graph, no row included",
+          "ref": "#23169"
         }
       ]
     },
@@ -906,7 +926,7 @@
       "title": "The flow notify node delivers to the recipient's inbox (sys_inbox_message + receipt), readable and markable over /notifications, recipient-scoped — with unimplemented channels dead-lettering, never faking delivery",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -923,7 +943,8 @@
         ],
         "knownGaps": [
           "channels push/slack/teams/webhook have NO delivery implementation (#3197 — notification.zod.ts says the dispatcher dead-letters them, and the enum's 'in-app' spelling vs the implemented 'inbox' channel is a known naming drift); this item tests inbox only and records the dead-letter behavior as a negative, not as deliverable channels",
-          "THE OLD PERSONA-LOGIN RECIPE IS CLOSED (run #7690): `POST /api/v1/data/sys_account` answers 405, so the trick of inserting a credential row to turn a seeded demo persona into a real login no longer works. It is by design, not drift — sys_account is managedBy:'better-auth' and declares apiMethods ['get','list'] only, so HTTP answers 405 before the identity write guard's 403 (packages/platform-objects/src/identity/sys-account.object.ts, #1591 / ADR-0092 D2). Mint personas through better-auth instead: sign-up, or POST /api/v1/auth/admin/create-user as the platform admin (explicit password wins — #3031/#3033). Recorded here because every multi-persona item in this area pays for re-deriving it"
+          "THE OLD PERSONA-LOGIN RECIPE IS CLOSED (run #7690): `POST /api/v1/data/sys_account` answers 405, so the trick of inserting a credential row to turn a seeded demo persona into a real login no longer works. It is by design, not drift — sys_account is managedBy:'better-auth' and declares apiMethods ['get','list'] only, so HTTP answers 405 before the identity write guard's 403 (packages/platform-objects/src/identity/sys-account.object.ts, #1591 / ADR-0092 D2). Mint personas through better-auth instead: sign-up, or POST /api/v1/auth/admin/create-user as the platform admin (explicit password wins — #3031/#3033). Recorded here because every multi-persona item in this area pays for re-deriving it",
+          "acceptance[3]'s 501 half needs a boot WITHOUT MessagingServicePlugin, and no showcase boot is one: the showcase config lists 'messaging' in `requires` (examples/app-showcase/objectstack.config.ts), so the service is always composed. On a showcase run score the 501 half blocked(fixture) (QA run #23166 A3-501), or cite it from a minimal non-showcase boot without the plugin, naming that boot; the 401 half runs on stock"
         ]
       },
       "variants": [
@@ -1000,6 +1021,12 @@
           "date": "2026-08-11",
           "change": "recorded the run #7690 fixture note that POST /api/v1/data/sys_account now answers 405, closing the old recipe for turning a seeded demo persona into a real login (sys_account is managedBy better-auth with apiMethods ['get','list'] — 405 before the identity write guard's 403, #1591 / ADR-0092 D2). The three-persona requirement now names the supported way to mint them (sign-up / admin create-user). Notes only — no clause changed",
           "ref": "#7745"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "knownGaps[2] (new) names why acceptance[3]'s 501 half cannot run on a showcase boot (fixture gap, #23166 A3-501; parked on #23121, carried by #23169). The clause already allowed citing it from a minimal boot without the messaging plugin, but nothing said the showcase can never be that boot: its config requires 'messaging'. QA run #23166 scored the half blocked(fixture). No clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -1435,7 +1462,7 @@
       "title": "A recipient preference muting the inbox channel for a topic suppresses delivery (no inbox row, no dead-letter fake); flipping it back resumes; a sys_notification_template renders through a delivery",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1450,7 +1477,8 @@
           "two personas with sessions: admin and the assignee"
         ],
         "knownGaps": [
-          "no shipped sys_notification_preference rows nor a sys_notification_template fixture — both authored in-run (both are writable system-data objects); the notify flow fixture itself is shipped. The spec's channel enum spells this 'in-app'; the implemented channel id is 'inbox' (the #3197 naming drift) — the preference row must name the IMPLEMENTED id 'inbox'"
+          "no shipped sys_notification_preference rows nor a sys_notification_template fixture — both authored in-run (both are writable system-data objects); the notify flow fixture itself is shipped. The spec's channel enum spells this 'in-app'; the implemented channel id is 'inbox' (the #3197 naming drift) — the preference row must name the IMPLEMENTED id 'inbox'",
+          "acceptance[3]'s mandatory-topic half is BLOCKED(fixture) on stock (QA run #23166 A3-mandatory): mandatoryTopics is a MessagingServicePlugin CONSTRUCTOR option (packages/services/service-messaging/src/messaging-service-plugin.ts, default []), not metadata and not runtime-writable, and the showcase composes messaging through `requires` with the default — so no topic is mandatory and none can be made so in a run. The bypass itself is unit-pinned in packages/services/service-messaging/src/preference-resolver.test.ts ('bypasses preferences for a mandatory topic (exact match) even when muted', and the prefix case); cite that pin for the mechanism and record the live half blocked(fixture), or drive it on a host that constructs the plugin with mandatoryTopics, naming that host"
         ]
       },
       "steps": [
@@ -1517,6 +1545,12 @@
           "date": "2026-08-08",
           "change": "new — preference-driven inbox suppression (no row, no dead-letter fake), reversal, ADR-0030 Layer-3 precedence, and a sys_notification_template render; distinct from notify-inbox-delivery (happy path). Per PENDING-GAPS §C",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "knownGaps[1] (new) records the mandatory-topic half of acceptance[3] as blocked(fixture) on stock and names its unit pin (fixture gap, #23166 A3-mandatory; parked on #23121, carried by #23169). mandatoryTopics is a MessagingServicePlugin constructor option, default empty, so the stock showcase declares none and a run cannot add one. QA run #23166 passed the rest of the item. No clause changed",
+          "ref": "#23169"
         }
       ]
     },
@@ -1759,7 +1793,7 @@
       "title": "Setup → Datasources federation UI (ADR-0015 §6.4): SchemaBrowser mirrors the remote-table listing, ImportObjectDialog lands a REAL object through the metadata channel, Refresh catalog and ValidationPanel drive the three previously-uncovered federation routes (import / refresh-catalog / validate) behind their capability floors",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1769,13 +1803,13 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the shipped read-only SQLite external datasource showcase_external + its boot-provisioned fixture DB (examples/app-showcase/src/system/datasources/ — customers/orders, 5 columns each; same fixture as external-schema-introspection)",
+          "the shipped read-only SQLite external datasource showcase_external + its boot-provisioned fixture DB (examples/app-showcase/src/system/datasources/ — customers/orders; same fixture as external-schema-introspection). The fixture DDL declares 5 fields per table (external-fixture.ts), but the provisioned tables carry 7 COLUMNS each, and the remote listing and the panel both report 7 (QA run #23166): the columns the managed driver adds sit beside the declared ones. Read the count off the API listing, not off the DDL",
           "the built console mounted (the panel lives in the app-shell metadata-admin engine)"
         ],
         "knownGaps": [
           "the federation-unavailable 503 arm is NOT reachable on a stock boot (serve.ts wires ExternalDatasourceServicePlugin unconditionally — same bound as datasource-admin-lifecycle's 503 clause); it needs a deliberately unwired boot. No CLI flag or preset unwires it: serve.ts wires the plugin whenever @objectstack/service-datasource resolves (QA run #21784, parked on #22017 row 21)",
           "the UI's 503 detector is FIXED at the current pin. objectui 0abd4f9f8769 (objectui#11628, objectui PR #11640) maps the server's 503 envelope { success:false, error:{ code:'SERVICE_UNAVAILABLE', message } } to ExternalServiceUnavailableError (packages/app-shell/src/views/metadata-admin/external/api.ts). Its api.test.ts pins that for all four reads ('%s maps 503 SERVICE_UNAVAILABLE to the typed error') and pins that a 503 naming another code is not read as 'federation not wired'. QA runs #21782 / #21784 ran objectui 2e818d0b51ec, whose detector still matched the retired pre-#3843 string body, so acceptance[6]'s expected-fail was true for them and is stale now (re-pointed on #22017 row 21)",
-          "the 'unreachable' diff kind (spec 2026-08-23, emitted by external-datasource-service.ts) is NEWER than the DIFF_LABEL map objectui compiles against: ValidationPanel.tsx labels 9 kinds and lacks 'unreachable', so a validate run reporting an unreachable remote renders an unlabelled kind cell at head — the exact objectstack#4115 class the map's totality gate exists to catch; it will fail objectui's compile at the next spec pin bump (the panel's own comment documents the mechanism working that way for default_mismatch). Expected-fail if observed live; do not file as new without checking",
+          "FIXED at objectui 1fb1ced36243: ValidationPanel.tsx's label map (DIFF_LABEL_KEY) now labels 'unreachable' (engine.externalDatasource.diff.unreachable) beside the other nine, so every one of the 10 SchemaDiffEntryKind kinds renders labelled, and the panel's comment records the ruling that 'unreachable' reads as 'cannot check', never as 'schema changed'. An unlabelled kind cell is now a regression of the #4115 class, not an expected-fail",
           "diff-kind labels beyond the in-sync fixture need INDUCED drift — reuse external-schema-drift-gate's induced-drift recipe notes (scratch copy, measured column-type change); the stock in-sync fixture proves only the all-green render"
         ]
       },
@@ -1798,7 +1832,7 @@
           "evidence": "the two screenshots (+ the unsaved-draft state if a wizard draft is on hand)"
         },
         {
-          "clause": "SchemaBrowser mirrors the API exactly: the rendered table list equals GET .../external/tables name-for-name with per-table columnCount (customers/orders, 5 each on the stock fixture) — the network response is the authority, not the panel; data loads on mount + explicit Refresh only, never a timer",
+          "clause": "SchemaBrowser mirrors the API exactly: the rendered table list equals GET .../external/tables name-for-name with per-table columnCount (customers/orders, 7 each on the provisioned stock fixture — fixtures.requires[0]) — the network response is the authority, not the panel; data loads on mount + explicit Refresh only, never a timer",
           "oracle": "dom",
           "verify": "screenshot first, then DOM list diffed against the pre-captured listing (SchemaBrowser.tsx — listRemoteTables on mount/refresh; the fixture DDL in external-fixture.ts)",
           "evidence": "screenshot + API read, diffed"
@@ -1816,9 +1850,9 @@
           "evidence": "the network capture + the header screenshot"
         },
         {
-          "clause": "ValidationPanel reports what the server measured: the run fires POST .../external/validate (URL-scoped to this datasource, #10537 — a read, manage_platform_settings floor) and renders one verdict row per federated object matching { ok, results }; every diff kind rendered carries its DIFF_LABEL text — with the head-version caveat that 'unreachable' is not yet in objectui's label map (knownGaps: expected-fail, the #4115 class; the map's totality over the imported spec union is the standing guard)",
+          "clause": "ValidationPanel reports what the server measured: the run fires POST .../external/validate (URL-scoped to this datasource, #10537 — a read, manage_platform_settings floor) and renders one verdict row per federated object matching { ok, results }; every diff kind rendered carries its label text — 'unreachable' included, which objectui's map labels at 1fb1ced36243 (the map's totality over the imported spec union is the standing guard)",
           "oracle": "dom",
-          "verify": "the rendered rows against the captured response (ValidationPanel.tsx DIFF_LABEL; route at external-datasource-routes.ts; kinds at external-errors.ts — 10 at head, 9 labelled in objectui)",
+          "verify": "the rendered rows against the captured response (ValidationPanel.tsx DIFF_LABEL_KEY; route at external-datasource-routes.ts; kinds at external-errors.ts — 10 at head, all 10 labelled in objectui at 1fb1ced36243)",
           "evidence": "the response + the rendered rows (and the unlabelled-kind capture if drift/outage was induced)"
         },
         {
@@ -1853,7 +1887,7 @@
       },
       "source": [
         "objectui packages/app-shell/src/views/metadata-admin/external/api.ts (the five-route client; the 503 detector, which reads the envelope since objectui#11628; listRemoteTables/generateObjectDraft/refreshCatalog/validateDatasource/importObjectDraft — the import door is PUT /api/v1/meta/object/:name)",
-        "objectui packages/app-shell/src/views/metadata-admin/external/{SchemaBrowser,ImportObjectDialog,ValidationPanel,ExternalDatasourcePanel}.tsx (the P5 surfaces; ValidationPanel.tsx DIFF_LABEL total over the imported spec union — the #4115 recurrence guard) + previews/DatasourcePreview.tsx (panel keyed off schemaMode !== 'managed')",
+        "objectui packages/app-shell/src/views/metadata-admin/external/{SchemaBrowser,ImportObjectDialog,ValidationPanel,ExternalDatasourcePanel}.tsx (the P5 surfaces; ValidationPanel.tsx DIFF_LABEL_KEY total over the imported spec union — the #4115 recurrence guard, 'unreachable' included) + previews/DatasourcePreview.tsx (panel keyed off schemaMode !== 'managed')",
         "objectui packages/app-shell/src/views/metadata-admin/datasource/register.ts (Setup → Datasources = the engine route; left-nav names it directly, objectui#3660)",
         "packages/rest/src/external-datasource-routes.ts#refuseFederationRequest (the five-route family), (import → 201 { object }, EXTERNAL_IMPORT_ERROR), (refresh-catalog), (validate, #10537 URL-scoped), (refuseFederationRequest — read=manage_platform_settings, write=manage_metadata, #9686 anonymous floor), (the 503 envelope)",
         "packages/spec/src/shared/external-errors.ts#SchemaDiffEntryKind (SchemaDiffEntryKind — 10 kinds at head incl. index_mismatch/unmapped_index/default_mismatch/unreachable)",
@@ -1872,6 +1906,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 21), re-pointed clause. A7 was blocked: it needs an unwired boot, and its expected-fail rested on objectui's 503 detector matching the retired string body. Measured at the current .objectui-sha 0abd4f9f8769: objectui#11628 (PR #11640) maps the server's SERVICE_UNAVAILABLE envelope to ExternalServiceUnavailableError, pinned by api.test.ts. The run's console (2e818d0b51ec) predates it. A7 flips from expected-fail to the positive assertion, scored from that pin (oracle test); knownGaps[1], step 9, `automated` and source follow. The live render still needs an unwired boot, which no flag or preset gives (knownGaps[0])",
           "ref": "#22017"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-13",
+          "change": "fixtures.requires[0], acceptance[1].clause, knownGaps[2], acceptance[4] (clause and verify) and source[1] (stale spec, #23166 A1 / A4; parked on #23121, carried by #23169). The provisioned fixture tables carry 7 columns each, and the API and the panel agree, while the DDL declares 5 fields; the clause now reads the count off the API. At objectui 1fb1ced36243, still this repo's .objectui-sha, ValidationPanel's label map (now DIFF_LABEL_KEY) labels 'unreachable', so all 10 diff kinds render labelled and the expected-fail caveat is gone. QA run #23166 passed both clauses",
+          "ref": "#23169"
         }
       ]
     }

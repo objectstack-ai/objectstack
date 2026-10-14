@@ -42,6 +42,7 @@ import { SeedSchema } from './data/seed.zod';
 import { AppSchema } from './ui/app.zod';
 import { ViewSchema, isAggregatedViewContainer } from './ui/view.zod';
 import { deriveViewContainerObject } from './ui/view-container-object';
+import { defaultRecordPageObject } from './ui/default-record-page';
 import { PageSchema } from './ui/page.zod';
 import { DashboardSchema } from './ui/dashboard.zod';
 import { ReportSchema } from './ui/report.zod';
@@ -57,11 +58,16 @@ import { JobSchema } from './system/job.zod';
 // Security Protocol
 import { PositionSchema } from './identity/position.zod';
 import { PermissionSetSchema } from './security/permission.zod';
+import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
 import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
 
 import { ApiEndpointSchema, type ApiEndpoint } from './api/endpoint.zod';
-import { validateApiEndpointDeclarations } from './api/endpoint-publish-gate';
+import {
+  validateApiEndpointDeclarations,
+  validateAnonymousElevatedFlows,
+  type ElevatedFlowCandidate,
+} from './api/endpoint-publish-gate';
 import { retiredKey } from './shared/retired-key';
 
 // AI Protocol
@@ -165,16 +171,93 @@ export type DatasourceMappingRule = z.input<typeof DatasourceMappingRuleSchema>;
  * unavoidable: `defineStack`, `os validate`, the lint scorer, the metadata
  * plugin's artifact ingestion and `EnvironmentArtifactSchema.metadata` all run
  * through this one parse, so no publish path can forget to check.
+ *
+ * [ADR-0138 D2b] The same parse also runs the one cross-item gate: an
+ * `authRequired: false` endpoint of `type: 'flow'` whose `target` names a flow
+ * of this stack declaring `runAs: 'system'` is refused, located at the
+ * endpoint's `authRequired`, with the record's prescription. Both items are in
+ * this one input, so the refusal holds whichever of the two was edited last. A
+ * target flow outside the stack is not readable here; the metadata layer's
+ * doors read it there (`validateAnonymousElevatedFlows`' module notes).
  */
 function applyApiEndpointGates(
-  config: { manifest?: { namespace?: string | undefined } | undefined; apis?: ApiEndpoint[] | undefined },
+  config: {
+    manifest?: { namespace?: string | undefined } | undefined;
+    apis?: ApiEndpoint[] | undefined;
+    flows?: readonly ElevatedFlowCandidate[] | undefined;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  for (const issue of validateAnonymousElevatedFlows(config.apis, config.flows)) {
+    ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+  }
+
   for (const issue of validateApiEndpointDeclarations(config.apis, {
     namespace: config.manifest?.namespace,
   })) {
     ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
   }
+}
+
+/**
+ * [ADR-0086 D3] Raise every permission set whose body `packageId` disagrees
+ * with the package that ships it as a Zod issue at that key: the BUILD door of
+ * the owner-binding judge ({@link judgePermissionSetOwnerBinding},
+ * `security/permission-set-owner-binding.ts`, whose header holds the rule and
+ * every other door). A set's owner is the package it is registered under, so a
+ * key naming another package (or any key, on a set no package ships) was
+ * registered over in silence; refused here instead, before anything is built.
+ *
+ * On the SCHEMA rather than inside `defineStack`, for the reason
+ * {@link applyApiEndpointGates} gives: `defineStack`, `os validate`, `os build`,
+ * the lint scorer and the metadata plugin's artifact ingestion all run this one
+ * parse, so no build or load path can skip the judgement. The binding is the id
+ * each set is registered under, and nothing else:
+ *
+ * - **no `packages[]`**: the stack IS its one package, so every top-level set
+ *   ships from `manifest.id`, and from no package when there is no `manifest`;
+ * - **`packages[]`** (ADR-0130 D4): a body's sets ship from that body's own
+ *   `id`. A top-level set that no body declares is the stack's residual,
+ *   registered under `manifest.id` (the residual rule is `unclaimedTopLevel` in
+ *   `@objectstack/metadata`; a permission set's slot there is its name). A
+ *   top-level set that a body declares is a copy of that body's set and is never
+ *   registered from the top level, so the top level does not judge it.
+ */
+function applyPermissionSetOwnerBindingGate(
+  config: { manifest?: { id?: unknown } | undefined; permissions?: unknown; packages?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const nameOf = (set: unknown): unknown => (set as { name?: unknown } | null | undefined)?.name;
+  const judge = (set: unknown, binding: unknown, path: (string | number)[]): void => {
+    const name = nameOf(set);
+    const refusal = judgePermissionSetOwnerBinding(
+      set,
+      typeof name === 'string' ? name : String(name),
+      typeof binding === 'string' ? binding : undefined,
+      'build',
+    );
+    if (refusal) ctx.addIssue({ code: 'custom', path: [...path, 'packageId'], message: refusal.message });
+  };
+  const topLevel = Array.isArray(config.permissions) ? config.permissions : [];
+  if (!Array.isArray(config.packages)) {
+    topLevel.forEach((set, i) => judge(set, config.manifest?.id, ['permissions', i]));
+    return;
+  }
+  const claimed = new Set<string>();
+  config.packages.forEach((entry: unknown, j: number) => {
+    const body = (entry as { manifest?: { id?: unknown; permissions?: unknown } } | null | undefined)?.manifest;
+    if (!body || !Array.isArray(body.permissions)) return;
+    body.permissions.forEach((set: unknown, i: number) => {
+      const name = nameOf(set);
+      if (typeof name === 'string') claimed.add(name);
+      judge(set, body.id, ['packages', j, 'manifest', 'permissions', i]);
+    });
+  });
+  topLevel.forEach((set, i) => {
+    const name = nameOf(set);
+    if (typeof name === 'string' && claimed.has(name)) return;
+    judge(set, config.manifest?.id, ['permissions', i]);
+  });
 }
 
 /**
@@ -1767,7 +1850,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     .describe('Assembled package bodies carried by this release artifact (ADR-0130 D4)'),
 
   ...STACK_DEFINITION_COLLECTIONS_SHAPE,
-}).superRefine(applyApiEndpointGates));
+}).superRefine(applyApiEndpointGates).superRefine(applyPermissionSetOwnerBindingGate));
 
 export type ObjectStackDefinition = z.input<typeof ObjectStackDefinitionSchema>;
 /** Post-parse shape of {@link ObjectStackDefinition} — defaults applied, transforms run (ADR-0122). */
@@ -2573,6 +2656,109 @@ function collectDuplicateEntryErrors(config: ObjectStackDefinition): string[] {
 }
 
 /**
+ * Two or more DEFAULT RECORD PAGES for one object (#23015, maintainer ruling A,
+ * record 6134056653) — one refusal line per object, naming every page and where
+ * each sits.
+ *
+ * At most one `isDefault: true` record page may exist for an object in a
+ * deployment (`PageSchema.isDefault`): the renderer opens an object's record
+ * view on its default record page with no tie-break, so with two the choice
+ * would fall to registration order, which no author wrote. One stack is one
+ * package, so two defaults in it are two defaults in every deployment that
+ * installs it. "Default record page of object X" is the one reading
+ * {@link defaultRecordPageObject} gives — the same one the registry's package
+ * door and the metadata save door ask — so this door cannot pass a stack those
+ * doors refuse, nor refuse one they accept.
+ *
+ * Counted by distinct page NAME within one package: two entries under one name
+ * are the duplicate {@link collectDuplicateEntryErrors} already refuses, and are
+ * not reported a second time here. An entry carrying a `holder` (the package it
+ * lands in) is counted by that package and name, since two packages' pages
+ * under one name are two pages (ADR-0048 §3.4). The object need not be one this stack defines (a stack may
+ * ship the record page of a platform object), so this runs before the
+ * object-count early return.
+ *
+ * `origins` labels each page's position for the finding (`stack.pages[3]`);
+ * {@link collectComposedDefaultRecordPageErrors} reuses the reading over the
+ * pages a composition brings together, with its own labels.
+ */
+function duplicateDefaultRecordPageFindings(
+  entries: Iterable<{ readonly page: unknown; readonly origin: string; readonly holder?: string }>,
+  scope: string,
+): string[] {
+  // object → page identity → { name, origins }. The identity is the page name,
+  // or `holder|name` where the caller says which package an entry lands in.
+  const byObject = new Map<string, Map<string, { name: string; origins: string[] }>>();
+  for (const { page, origin, holder } of entries) {
+    const object = defaultRecordPageObject(page);
+    if (object === undefined) continue;
+    const name = readEntryName(page);
+    if (name === undefined) continue;
+    const pages = byObject.get(object) ?? new Map<string, { name: string; origins: string[] }>();
+    const key = holder === undefined ? name : `${holder}|${name}`;
+    const found = pages.get(key) ?? { name, origins: [] };
+    found.origins.push(origin);
+    pages.set(key, found);
+    byObject.set(object, pages);
+  }
+
+  const errors: string[] = [];
+  for (const [object, pages] of byObject) {
+    if (pages.size < 2) continue;
+    const named = [...pages.values()].map(({ name, origins }) => `'${name}' (${joinDeclarationOrigins(origins)})`);
+    errors.push(
+      `Object '${object}' has ${pages.size === 2 ? 'two' : pages.size} default record pages in ${scope}: ` +
+        `${joinDeclarationOrigins(named)}. Set \`isDefault: false\` on all but one of them. At most one ` +
+        `record page may be \`isDefault: true\` for an object in a deployment: the record view opens that ` +
+        `page with no tie-break, so with two the choice would fall to registration order.`,
+    );
+  }
+  return errors;
+}
+
+/** The one-stack door: {@link duplicateDefaultRecordPageFindings} over `stack.pages`. */
+function collectDuplicateDefaultRecordPageErrors(config: ObjectStackDefinition): string[] {
+  const pages: unknown = config.pages;
+  if (!Array.isArray(pages)) return [];
+  return duplicateDefaultRecordPageFindings(
+    pages.map((page, i) => ({ page, origin: `stack.pages[${i}]` })),
+    '`pages`',
+  );
+}
+
+/**
+ * The composition door: {@link duplicateDefaultRecordPageFindings} over every
+ * INPUT stack's `pages` together. Each input passed the one-stack door on its
+ * own, and the pages they bring together land in one deployment — as one
+ * package (the default manifest strategies, which concatenate `pages`) or as
+ * several packages of one artifact (`manifest: 'preserve'`), where the
+ * registry's package door would refuse the boot. Refused here first, in the
+ * cross-reference envelope, so `os validate` and `os build` of a composed
+ * project say what the boot would. An input whose `pages` is not an array is
+ * skipped here: the concat pass refuses it by its own rule.
+ */
+function collectComposedDefaultRecordPageErrors(
+  stacks: readonly ObjectStackDefinition[],
+  preserve: boolean,
+): string[] {
+  const entries: Array<{ page: unknown; origin: string; holder?: string }> = [];
+  for (const [i, stack] of stacks.entries()) {
+    const pages: unknown = stack.pages;
+    if (!Array.isArray(pages)) continue;
+    for (const [j, page] of pages.entries()) {
+      entries.push({
+        page,
+        origin: `${stackLabel(stack, i)} pages[${j}]`,
+        // Under `preserve` each input stays its own package, so a page name two
+        // inputs share is two pages; merged, it is one package's one name.
+        ...(preserve ? { holder: String(i) } : {}),
+      });
+    }
+  }
+  return duplicateDefaultRecordPageFindings(entries, 'the composed stacks');
+}
+
+/**
  * [ADR-0112 · #15963] The envelope every refusal `defineStack` raises shares:
  * `status: 422` — an unprocessable authored entity, not a server fault, the
  * reading {@link StackCrossReferenceError} took from its two precedents — ONE
@@ -3311,6 +3497,9 @@ function validateCrossReferences(
   // Same placement, same reason: two entries of one named collection under one
   // identity occupy one registry slot whether or not there are objects.
   errors.push(...collectDuplicateEntryErrors(config));
+  // Same placement: two default record pages for one object are two defaults
+  // whether or not this stack defines that object (#23015).
+  errors.push(...collectDuplicateDefaultRecordPageErrors(config));
   // Same placement, same reason: a global `operation: 'update'` action is
   // wrong whether or not the stack declares any objects.
   errors.push(...collectGlobalUpdateActionErrors(config));
@@ -6033,10 +6222,17 @@ function composeBuiltStacks(
   //     and cannot newly refuse: an input that passed the strict parse cannot
   //     newly fail, an input that bypassed it is checked here for the first
   //     time.
-  const artifactCrossRefErrors = collectArtifactCrossReferenceErrors(
-    stacks,
-    objects as readonly { name: string }[] | undefined,
-  );
+  //     [#23015] …and two default record pages for one object across the
+  //     inputs, each legal on its own: one deployment holds them both. It needs
+  //     no object to resolve against, so it is not behind that pass's
+  //     object-count early return.
+  const artifactCrossRefErrors = [
+    ...collectArtifactCrossReferenceErrors(
+      stacks,
+      objects as readonly { name: string }[] | undefined,
+    ),
+    ...collectComposedDefaultRecordPageErrors(stacks, opts.manifest === 'preserve'),
+  ];
   if (artifactCrossRefErrors.length > 0) {
     const count = artifactCrossRefErrors.length;
     const header = `composeStacks artifact cross-reference validation failed (${count} issue${count === 1 ? '' : 's'}):`;

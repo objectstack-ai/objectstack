@@ -598,22 +598,19 @@ const DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION: RuleExplanation = {
   rule: 'security-controlled-by-parent-ambiguous-relation',
-  covers: 'how the master relation is chosen',
+  covers: 'why a controlled_by_parent object takes exactly one master',
   paragraphs: [
     'A `controlled_by_parent` object derives every row\'s record-level access from a master record. ' +
-      'ADR-0055 resolves the master through three tiers, in order — a required master_detail, then any ' +
-      'master_detail, then a required lookup, each of which must also name a `reference` target — and ' +
-      'takes the FIRST match in the tier that wins.',
-    'When two or more fields tie in the winning tier, which object this one derives its access from ' +
-      'is decided by FIELD DECLARATION ORDER. Moving a field up or down the schema reads as a cosmetic ' +
-      'edit in review, and it silently moves that security boundary to another object; the runtime ' +
-      'reports nothing when it does, because it does not refuse, it picks. Author time is the only ' +
-      'place this can surface, so the rule is an error. A tie in a lower tier is masked by a higher ' +
-      'tier\'s single winner and is not reported.',
-    'To fix it, leave exactly ONE candidate in the winning tier: promote the intended master into a ' +
-      'higher tier (make it the object\'s only required master_detail), or demote the others (drop ' +
-      '`required`, or change the relation type). System objects are judged too: the ambiguity is a ' +
-      'property of the document.',
+      'ADR-0055 §1 names that master by exactly one `master_detail` field declared `required: true`, ' +
+      'with a `reference` to the master object.',
+    'With two or more such fields the declaration does not say which master governs the rows, and the ' +
+      'platform derives none: every read is DENIED and every write is refused with 422 INVALID_METADATA, ' +
+      'exactly as for an object with no master at all. Picking one by field declaration order — what ' +
+      'the runtime once did — would let a cosmetic reordering of the schema move a security boundary to ' +
+      'another object. System objects are judged too: the ambiguity is a property of the document.',
+    'To fix it, keep `master_detail` on the ONE master this object\'s rows belong to, and declare every ' +
+      'other parent as a `lookup` field. `ObjectSchema.create()` makes every `master_detail` on such an ' +
+      'object required, so a second parent declared as `master_detail` is always a second master.',
   ],
 };
 
@@ -621,16 +618,18 @@ const SECURITY_CBP_NO_RELATION_EXPLANATION: RuleExplanation = {
   rule: 'security-controlled-by-parent-no-relation',
   covers: 'why the object is unusable without a master',
   paragraphs: [
-    'A `controlled_by_parent` object says its access comes from its master. ADR-0055 resolves the ' +
-      'master through a required master_detail, then any master_detail, then a required lookup — each ' +
-      'of which must also name a `reference` target — and an object that matches none of the three has ' +
-      'nothing to derive access from.',
-    'Both runtime halves refuse it: every read is DENIED, and every write is refused with 422 ' +
-      'INVALID_METADATA — as a metadata defect rather than a permission denial — so the object is ' +
-      'unusable rather than merely locked down. System objects are judged too, because the runtime ' +
+    'A `controlled_by_parent` object says its access comes from its master. ADR-0055 §1 names that ' +
+      'master by exactly one `master_detail` field declared `required: true`, with a `reference` to the ' +
+      'master object, and by nothing else: a `master_detail` without `required: true` and a required ' +
+      '`lookup` derive no access.',
+    'Both runtime halves refuse an object without one: every read is DENIED, and every write is refused ' +
+      'with 422 INVALID_METADATA — as a metadata defect rather than a permission denial — so the object ' +
+      'is unusable rather than merely locked down. System objects are judged too, because the runtime ' +
       'refusal does not exempt them.',
-    'To fix it, add the master relation this object is derived from, a `master_detail` field with a ' +
-      '`reference` and `required: true`. An object with no master decides its own baseline: ' +
+    'To fix it, declare the master relation this object is derived from: a `master_detail` field with a ' +
+      '`reference` and `required: true` (a lookup to the master becomes that field; a detail is deleted ' +
+      'with its master unless it declares `deleteBehavior: \'restrict\'`). An object with no master decides ' +
+      'its own baseline — and so does one whose rows must outlive their parent, which is not a detail: ' +
       '\'private\' (the owner plus explicit shares), \'public_read\' or \'public_read_write\'.',
   ],
 };
@@ -667,7 +666,7 @@ const SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION: RuleExplanation = {
       '(403) before the parent-derived access is ever consulted — the silent "can\'t submit the ' +
       'subtable" trap.',
     'A child is an object with a master_detail field, or a `controlled_by_parent` object that resolves ' +
-      'its master the way the runtime does (a required lookup included). The rule is a warning, and it ' +
+      'its master the way the runtime does (its one required master_detail). The rule is a warning, and it ' +
       'stays silent when the stack authors no permission sets or a `\'*\'` wildcard grant covers every ' +
       'object; one set granting the child while another forgets it is out of scope.',
     'To fix it, grant the object in at least one permission set that already grants its master — ' +
@@ -2296,8 +2295,9 @@ const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
       '`$ne`, `$in` / `$nin` and their spellings — is refused only on a declared `date` / `datetime` ' +
       'field, because a picklist column may store a value named like a preset. A bare value is ' +
       'reported under the operator it lowers to, `$eq`.',
-    'The fix is the preset\'s `{date-macro}` window, which the verdict names — a rolling preset is ' +
-      '`{ $gte: START }`, a calendar one `{ $between: [START, END] }` — or an ISO date. The schema ' +
+    'The fix is the preset\'s `{date-macro}` window, which the verdict names — ' +
+      '`{ $between: [START, END] }`, its first day through its last, and a rolling preset\'s last day ' +
+      'is `{today}` — or an ISO date. The schema ' +
       'door refuses the Mongo-shape ordering positions too, with the whole explanation in its ' +
       'refusal; this rule also reaches view filter rules and filter-array triples, which no condition ' +
       'parse touches, and is the one door for the equality arm.',
@@ -3312,12 +3312,12 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
     'A `requiredPermissions` entry names a capability the caller must hold. It is a free string, so ' +
       'a typo (`mange_users` for `manage_users`) parses and fails CLOSED at run time: the gate denies ' +
       'its callers, the safe direction, and nothing tells the author the capability exists nowhere.',
-    // The four sources are held to the rule by its test, each one silencing it.
+    // The three sources are held to the rule by its test, each one silencing it.
     'A capability is known when it is a built-in platform capability, when the stack declares it ' +
-      'with `defineCapability` (`stack.capabilities`, ADR-0066 D1), when a permission set in the ' +
-      'stack grants it through `systemPermissions` (granting declares it), or when a ' +
-      '`sys_capability` seed row ships it. `systemPermissions` itself is never reported: it is the ' +
-      'declaration side.',
+      'with `defineCapability` (`stack.capabilities`, ADR-0066 D1), or when a permission set in the ' +
+      'stack grants it through `systemPermissions` (granting declares it). A seed row is no source: ' +
+      'no runtime reader consults one, so ship the capability with `defineCapability` instead. ' +
+      '`systemPermissions` itself is never reported: it is the declaration side.',
     // The positions are held to the rule by its test, each fired.
     'Judged at every position the key is declared: an object\'s `requiredPermissions` (the array ' +
       'form, or each operation of the per-operation map), each field\'s, each object action\'s and ' +

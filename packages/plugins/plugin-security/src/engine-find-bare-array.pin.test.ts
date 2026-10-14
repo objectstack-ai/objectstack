@@ -17,7 +17,7 @@
  * Every seam answered `[object Array]`, with no own `records` key, on a
  * populated page and an empty one alike.
  *
- * ⚠️ These are four pins, not one pin repeated. A single reading of "the engine
+ * ⚠️ These are two pins, not one pin repeated. A single reading of "the engine
  * returns an array" would say nothing about whether a given seam is even
  * reachable — some of them sit behind a trigger (a truncated page, a refused
  * bulk write), and a seam nothing reaches is
@@ -25,9 +25,10 @@
  * through the real function and asserts the answer that block produced, and
  * {@link assertBareArrayPage} then reads back the value the engine handed it.
  *
- * Blocks 3 and 6 (the declared-permission seeder's per-name read and the
- * `managed_by` normalizer's scan) retired with their modules (ADR-0131 D3:
- * the boot writes no catalog row). The seventh seam, `security-plugin.ts`'s
+ * Blocks 1 and 2 (`seed-name-lookup`'s batched page and its per-item
+ * degradation read), 3 and 6 (the declared-permission seeder's per-name read
+ * and the `managed_by` normalizer's scan) retired with their modules (ADR-0131
+ * D3: the boot writes no catalog row). The seventh seam, `security-plugin.ts`'s
  * `sys_permission_set` loader, is gone too: the plugin takes a set's body from the security catalog
  * (ADR-0131 D3/D4) and reads no `sys_permission_set` row, so it has no
  * engine page to pin. Its fault direction (a read that did not answer
@@ -39,9 +40,9 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 
-import { SysPosition } from './objects/sys-position.object.js';
-import { SysPermissionSet } from './objects/sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
+import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { SysOrganization, SysUser, SysMember } from '@objectstack/platform-objects/identity';
@@ -52,7 +53,6 @@ import {
   assertEngineDeleteDispatch,
 } from '@objectstack/metadata-core';
 
-import { buildExistingByName } from './seed-name-lookup.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 
@@ -169,79 +169,6 @@ function assertBareArrayPage(seen: Seen, label: string): void {
     }
   }
 }
-
-/** A logger that records what a seeder said, so a fallback can be asserted absent. */
-function recordingLogger() {
-  const warns: string[] = [];
-  const infos: string[] = [];
-  return {
-    warns,
-    infos,
-    logger: {
-      info: (m: string) => { infos.push(m); },
-      warn: (m: string) => { warns.push(m); },
-      debug: () => { /* noop */ },
-      error: (m: string) => { warns.push(m); },
-    },
-  };
-}
-
-describe('[#15598] block 1 — seed-name-lookup readNamePage (the BATCHED page)', () => {
-  it('answers from one bare array, so the batched read is live and does not degrade', async () => {
-    const engine = await boot();
-    await (engine as any).insert(
-      'sys_permission_set',
-      { name: 'ps_batched', label: 'Batched', managed_by: 'admin', organization_id: ORG },
-      SYS,
-    );
-    const seen: Seen = [];
-    const { warns, logger } = recordingLogger();
-
-    const index = await buildExistingByName(
-      observed(engine, seen), 'sys_permission_set', ['ps_batched'], logger as any, ORG,
-    );
-    const found = await index.get('ps_batched');
-
-    assertBareArrayPage(seen, 'readNamePage');
-    // The batched page ANSWERED. This is the discriminating half: a normalizer
-    // that could not read the page degrades to the per-item oracle, which would
-    // still resolve `present` — so the result alone proves nothing here.
-    expect(warns.filter((w) => w.includes('falling back to one read per item'))).toEqual([]);
-    expect(found.status).toBe('present');
-  }, 120_000);
-});
-
-describe('[#15598] block 2 — seed-name-lookup perItemIndex (the DEGRADATION read)', () => {
-  it('answers from one bare array on the per-item path', async () => {
-    const engine = await boot();
-    await (engine as any).insert(
-      'sys_permission_set',
-      { name: 'ps_peritem', label: 'Per item', managed_by: 'admin', organization_id: ORG },
-      SYS,
-    );
-    const seen: Seen = [];
-    // TRIGGER ONLY: the batched read is refused so the per-item path is taken.
-    // The per-item read itself reaches the real engine untouched — it is the
-    // subject, and nothing stands in for it.
-    const batchedRefused = observed(engine, seen, {
-      find: async (o: string, q?: any, opt?: any) => {
-        const name = q?.where?.name;
-        if (name && typeof name === 'object' && '$in' in name) throw new Error('batched read refused (trigger)');
-        const r = await engine.find(o, q, opt);
-        seen.push(r);
-        return r;
-      },
-    });
-
-    const index = await buildExistingByName(batchedRefused, 'sys_permission_set', ['ps_peritem'], undefined, ORG);
-    const found = await index.get('ps_peritem');
-
-    assertBareArrayPage(seen, 'perItemIndex');
-    // `present`, never `unknown`: a seam that cannot read its page reports the
-    // read as un-happened, which is the outcome this pin discriminates against.
-    expect(found.status).toBe('present');
-  }, 120_000);
-});
 
 describe('[#15598] block 4 — auto-org-admin-grant tryFind', () => {
   it('reads the set and the membership out of bare arrays, and grants on them', async () => {

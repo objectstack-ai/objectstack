@@ -13,11 +13,25 @@
  * dispatcher state and restarts the accretion D11 decomposed. Dispatcher
  * facilities are reachable only through `DomainHandlerDeps`. Anchored in
  * scripts/adr-anchors/.
+ *
+ * ADR-0138 D2: the anonymous decision is this domain's FIRST statement
+ * (`shouldDenyAnonymous`), taken once for every face — ahead of the path
+ * parse, the environment check and every CRUD face, so a face added here
+ * later is behind it from the day it lands, and an unauthenticated caller is
+ * answered 401 whichever face it names. No D2 door class runs through this
+ * domain: a declared `object_operation` endpoint (class 4) reaches `callData`
+ * from the transport's fallback seam, never through this handler.
  */
 
+import {
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import * as actionExec from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+// [#23214] The `/data` list's filter-slot arity rule (#7390), the one
+// `RestServer`'s list asks, imported rather than restated.
+import { assertFilterParamSuppliedOnce } from '@objectstack/rest';
 
 export function createDataDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -32,6 +46,28 @@ export function createDataDomain(deps: DomainHandlerDeps): DomainRoute {
  * path: sub-path after /data/ (e.g. "contacts", "contacts/123", "contacts/query")
  */
 export async function handleDataRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
+    // ANONYMOUS BASELINE — the domain's FIRST statement (ADR-0138 D2: the
+    // decision is taken once per domain, never face by face). This domain made
+    // no anonymous decision of its own: an unauthenticated caller reached the
+    // face it named and was answered by that face — the CRUD gate's refusal of
+    // the guest envelope, a validation answer, the environment check — instead
+    // of the 401 every domain off the closed list of doors answers. Decided
+    // here, before the path is even parsed, the caller learns nothing about the
+    // object it named, and a face added below inherits the refusal.
+    //
+    // Asked about the user id alone, as the `/notifications` and `/keys` floors
+    // are: this is a transport for a caller on the wire, and `dispatch()`
+    // re-resolves identity for every request, so a caller arrives here as a
+    // user or as the guest — the system context is never an inbound principal.
+    // `method` rides along so a CORS preflight keeps the pass every other floor
+    // gives it.
+    if (shouldDenyAnonymous({ userId: _context.executionContext?.userId, method })) {
+        return {
+            handled: true,
+            response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+        };
+    }
+
     const parts = path.replace(/^\/+/, '').split('/');
     const objectName = parts[0];
 
@@ -139,8 +175,22 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // condition #3713 described. One fold, one answer; a second copy
             // here could only agree by inspection.
             //
+            // [#23214] …with ONE exception, which is not a fold: the FILTER
+            // slot's arity. A filter AST is an array too, so the normalizer
+            // cannot tell a repeated `?filter=` from one AST; only the
+            // querystring layer can, and `RestServer`'s list asks
+            // `assertFilterParamSuppliedOnce` for exactly that reason. It is
+            // asked here on the copy `findData` receives (it unwraps a
+            // one-element array in place), and its throw is answered in this
+            // transport's envelope with the code and sentence it carries.
+            const listQuery = { ...query };
+            try {
+                assertFilterParamSuppliedOnce(listQuery);
+            } catch (e: any) {
+                return { handled: true, response: deps.error(e.message, 400, { code: e.code }) };
+            }
             // Spec: returns FindDataResponse = { object, records, total?, hasMore? }
-            const result = await actionExec.callData(deps, _context, 'query', { object: objectName, query: { ...query } }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'query', { object: objectName, query: listQuery }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 

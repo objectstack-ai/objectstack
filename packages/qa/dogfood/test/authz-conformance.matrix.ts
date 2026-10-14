@@ -10,7 +10,7 @@
 // file exists and that the row ↔ proof pairing is MUTUAL (#7976 below), AND
 // ratchets completeness at ROUTE-FAMILY AND DISPATCHER-DOMAIN granularity over
 // the two route ledgers, plus a curated table of named gates and transport
-// tripwires (`discover()`: 20 probes over 15 named source files) — a new REST
+// tripwires (`discover()`: 25 probes over 20 named source files) — a new REST
 // route FAMILY or dispatcher DOMAIN is UNCLASSIFIED, a deleted named guard is
 // STALE, and either breaks CI.
 //
@@ -67,10 +67,12 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 41 ledger keys, 11 are classified by rows below (re-derived when the
-// `/webhooks/redeliver` domain arrived classified, #22755, after
-// `/approvals/act` did, #22576, and `/i18n` left the baseline, #22432); the
-// other 30 are enumerated one by one,
+// Of the 41 ledger keys, 17 are classified by rows below (re-derived when the
+// `/ui` and `/data` domains arrived classified under ADR-0138 D2's second
+// slice, after the `forms` family and the `/notifications`, `/keys` and
+// `/share-links` domains did under its first, the `/webhooks/redeliver` domain
+// did, #22755, `/approvals/act` did, #22576, and `/i18n` left the baseline,
+// #22432); the other 24 are enumerated one by one,
 // dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
 // whose MAX note dates every step down from the 34 of 40 it held on the
 // 2026-08-31 adoption day. That list can only get shorter: growth, staleness,
@@ -78,7 +80,7 @@
 // 2026-08-31 those surfaces minted no key at all, so nothing about them was
 // visible in either direction.
 //
-// Each of the 20 probes DECLARES its instrument kind
+// Each of the 25 probes DECLARES its instrument kind
 // (ROUTE_ENUMERATION / GATE_PIN / TRIPWIRE — see the companion test), and a
 // non-tripwire probe that mints ZERO keys fails as a DEAD PROBE. That closes a
 // blind-spot mechanism neither UNCLASSIFIED nor STALE can reach: both are
@@ -100,14 +102,16 @@
 // [commit 2ce1eb41b] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
-// 44 of 56 carry no `covers` key at all (12 rows, 22 keys, every one an
-// HTTP/transport pin), and 38 of the file's 49 `enforced` rows are exactly
-// that in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
+// 49 of 67 carry no `covers` key at all (18 rows, 33 keys, every one an
+// HTTP/transport pin), and 43 of the file's 60 `enforced` rows carry none:
+// the in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
 // grant-validity-window row among them (see their own blocks further down)
-// are the normal case, not an exception. Of the
-// 22 `covers` keys that DO exist, 7 are GATE pins tied to the enforcement call
+// are the normal case, not an exception — plus five ADR-0138 D2 door-class
+// rows whose admission their proof drives on a booted deployment. Of the
+// 33 `covers` keys that DO exist, 12 are GATE pins tied to the enforcement call
 // itself, not merely a function name — delete `shouldDenyAnonymous` from
-// `/actions`, `/automation`, `/packages`, `/analytics` or `/i18n`, or drop the MCP
+// `/actions`, `/automation`, `/packages`, `/analytics`, `/i18n`,
+// `/notifications`, `/keys`, `/share-links`, `/ui` or `/data`, or drop the MCP
 // context-threading / stdio principal binding, and the pinned key vanishes from source, its row
 // goes STALE, and CI catches the regression. That anti-regression property is
 // real and is what this file mechanically delivers. Outside the curated
@@ -310,6 +314,39 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     // pairing the `/packages` and `/analytics` rows make.
     covers: ['i18n:domains/i18n.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/i18n'],
     note: 'Ungated, an unauthenticated caller was served the application\'s translation bundle (the labels of its objects, fields, apps and pages) while the metadata read of the same objects answered it 401 on the same boot; ADR-0056 D2 is default-deny and no ADR-0138 D2 door class names this domain. Gating the DOMAIN rather than each face keeps a newly added face from arriving ungated. The Console renders its sign-in page from its built-in packs and reads this domain once signed in, so the console pin moved past that change in the same landing. The cited proof drives every mounted face anonymously (401, the dispatcher-wrapper envelope, nothing of the bundle served) and with a signed-in member (200, served) on one boot. The per-face unit pins (anonymous 401 with the provider never consulted, a missing locale and an empty slot still 401, signed-in control unchanged) live in runtime/domains/i18n-anonymous-deny.test.ts.' },
+  // ── ADR-0138 D2 (card E2) — "the decision is taken once per domain, as the
+  // domain's first statement, never surface by surface". These three domains
+  // decided it per face — below a capability probe or a method check — until
+  // the decision moved to their entry, the `/analytics` shape above: one
+  // handler body, one domain-wide floor, a gate pin that goes STALE when the
+  // floor is deleted, and the domain's ledger key classified beside it.
+  { id: 'anonymous-deny-notifications', summary: 'anonymous-deny on the in-app notification inbox surface', state: 'enforced',
+    enforcement: 'runtime/domains/notifications.ts handleNotificationRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the inbox capability probe (so a 401-vs-501 difference cannot fingerprint whether the deployment carries an inbox) and ahead of every face; every face, and every path the domain does not serve, answers the dispatcher-wrapper 401 UNAUTHENTICATED, and a signed-in caller is served as before',
+    covers: ['notifications:domains/notifications.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/notifications'],
+    note: 'Before the move the decision was the domain\'s own user-id check, written below the capability probe, so a deployment without an inbox answered an anonymous caller 501 while one with an inbox answered 401 — the booted showcase carries an inbox, which is why the sweep read 401 there. Gating the DOMAIN rather than each face keeps a newly added face from arriving ungated. Unit-proven in runtime/domains/domain-floor-anonymous-deny.test.ts (every face and an unserved path refused 401 before any service is resolved, both anonymous shapes the dispatcher produces, an empty slot still 401, the signed-in control unchanged); on the booted showcase the mounted faces are held to 401 by the anonymous door sweep\'s everything-else class.' },
+  { id: 'anonymous-deny-keys', summary: 'anonymous-deny on the API-key mint surface', state: 'enforced',
+    enforcement: 'runtime/domains/keys.ts handleKeysRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the method check (so an anonymous caller is never answered the 405 describing the route\'s shape) and ahead of the body whitelist and the data-service probe; every verb answers the dispatcher-wrapper 401 UNAUTHENTICATED, and a signed-in caller reaches the mint exactly as before',
+    covers: ['keys:domains/keys.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/keys'],
+    note: 'Before the move the decision was the domain\'s own user-id check, written below the method check, so an anonymous caller using any verb but POST was answered 405. The key is pinned to the caller and never read from the body; that rule is unchanged and runs after this floor. Unit-proven in runtime/domains/domain-floor-anonymous-deny.test.ts (the mint face and every unserved verb refused 401 before any service is resolved; a member still gets the 405 for a wrong verb and reaches the data service on POST); on the booted showcase the mounted face is held to 401 by the anonymous door sweep\'s everything-else class.' },
+  { id: 'anonymous-deny-share-links', summary: 'anonymous-deny on the share-link management surface of the dispatcher (the two token faces are ADR-0138 D2 class 2)', state: 'enforced',
+    enforcement: 'runtime/domains/share-links.ts handleShareLinksRequest — shouldDenyAnonymous DOMAIN-WIDE as the domain\'s first decision, ahead of the share-link service probe and every face, with the ONE exception ADR-0138 D2 names for this domain: the two token faces (GET /:token/resolve, GET /:token/messages), selected by the same isPublicShareLinkRoute predicate that marks them public, which the capability token admits (class 2). Every other face, and every path or verb the domain does not serve, answers the dispatcher-wrapper 401 UNAUTHENTICATED',
+    covers: ['share-links:domains/share-links.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/share-links'],
+    note: 'The DISPATCHER domain only: the dispatcher twin of the plugin-sharing mount, the surface a per-environment kernel serves share links from, and unobservable on the standalone showcase boot, where plugin-sharing mounts its own routes. Before the move the decision was the management faces\' own user-id check, written inside the body below the service probe, so a deployment without the share-link service answered an anonymous caller 501. A new public face here is an amendment of ADR-0138, never an edit to the predicate alone. Unit-proven in runtime/domains/domain-floor-anonymous-deny.test.ts (each management face and every unserved path or verb refused 401 before any service is resolved, both anonymous shapes; the token faces still admitted and judged by the token; the signed-in control unchanged).' },
+  // ── ADR-0138 D2 (card E2), the second slice — the two dispatcher domains
+  // that made NO anonymous decision of their own: an unauthenticated caller
+  // was answered by whichever face it named. Same shape as the three above:
+  // the decision is the handler's first statement, a gate pin goes STALE when
+  // it is deleted, and the domain's ledger key is classified beside it. No D2
+  // door class runs through either domain (class 4 reaches the CRUD pipeline
+  // from the transport's fallback seam, never through `/data`).
+  { id: 'anonymous-deny-ui', summary: 'anonymous-deny on the rendered-view surface of the dispatcher', state: 'enforced',
+    enforcement: 'runtime/domains/ui.ts handleUiRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the path parse, the type-parameter check and the protocol probe; every face, and every path the domain does not serve, answers the dispatcher-wrapper 401 UNAUTHENTICATED, and a signed-in caller is served as before',
+    covers: ['ui:domains/ui.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/ui'],
+    note: 'The DISPATCHER domain only: where @objectstack/rest is mounted, its guarded `ui` family serves the same paths and answers an anonymous caller 401, so the booted showcase never reaches this handler and its pins are unit pins. Before the move this domain made no anonymous decision of its own. Unit-proven in runtime/domains/domain-floor-anonymous-deny.test.ts (every spelling of the view face and every unserved path refused 401 before any service is resolved, both anonymous shapes; no protocol and a repeated type still 401; the signed-in control unchanged: served, 501 without a protocol, 400 for a repeated type); the registry route to the domain through dispatch() is pinned anonymous 401 and signed-in 200 in runtime/domain-handler-registry.test.ts.' },
+  { id: 'anonymous-deny-data', summary: 'anonymous-deny on the CRUD data surface of the dispatcher', state: 'enforced',
+    enforcement: 'runtime/domains/data.ts handleDataRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the path parse, the multi-tenant environment check and every read and write face; every face, and every path or verb the domain does not serve, answers the dispatcher-wrapper 401 UNAUTHENTICATED (a CORS preflight keeps its pass), and a signed-in caller reaches the CRUD pipeline exactly as before',
+    covers: ['data:domains/data.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/data'],
+    note: 'The DISPATCHER domain only: where @objectstack/rest is mounted, its `crud` family serves the same paths behind its own per-route check, so the booted showcase never reaches this handler and its pins are unit pins. Before the move this domain made no anonymous decision of its own, so an anonymous caller was answered by the face it named: the CRUD gate\'s refusal of the guest envelope (403), a validation answer (400) or the environment check (428). D2 class 4 is unaffected: a declared object_operation endpoint reaches callData from the fallback seam, not through this handler, and the anonymous door sweep keeps proving it. Unit-proven in runtime/domains/domain-floor-anonymous-deny.test.ts (every read and write face and every unserved path or verb refused 401 before any service is resolved, both anonymous shapes; the 400 and 428 answers behind the floor; the signed-in control unchanged) and through dispatch() in runtime/domains/data-permission-denied-envelope.test.ts (anonymous 401 before the engine is asked).' },
 
   // #22576 — the `/approvals/act` dispatcher domain (segment 2 of ruling A on
   // #22438, "token-only, aligned with self-hosted"). Unlike every
@@ -351,6 +388,55 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'plugin-webhooks/webhook-outbox-plugin.ts serveRedeliver — the ONE body both faces run: the caller resolved from the request\'s own credentials through the auth service (no signed-in user: 401 UNAUTHENTICATED), the caller\'s active organization threaded into messaging.redeliverHttp as the tenant (a row outside it: 404 RESOURCE_NOT_FOUND), and the redelivery veto installed with messaging before the slot is registered (a row whose subscription or signing secret is gone: 409 DELIVERY_NOT_ELIGIBLE); reached through IWebhookService.handleRedeliver by runtime/domains/webhooks.ts, which forwards the transport\'s request UNREAD, resolves the slot per request and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates apply to the exact path with NO exemption: core/security/auth-gate.ts ALLOW_ROUTES does not list it (a session owing an authentication step is refused 403 first) and runtime/http-dispatcher.ts enforceProjectMembership does not skip it (a signed-in non-member of the environment is refused 403 PROJECT_MEMBERSHIP_REQUIRED first). The self-hosted raw-app mount (plugin-webhooks registerAdminRoutes) runs the same body on the same outbox',
     covers: ['dispatcher-domain:route-ledger.ts:/webhooks/redeliver'],
     note: 'The DISPATCHER domain only: on a self-hosted kernel the same path is served from the raw Hono app and never reaches the dispatcher, which is why the route-ledger row is pinned unobservable on the showcase boot. Unit- and wire-proven, not dogfood-proven: plugin-webhooks webhook-redeliver-member.test.ts drives the member on a real kernel, messaging service and outbox (every refusal the contract declares, the tenant scope, the veto, byte parity with the mount); runtime domains/webhooks-redeliver.test.ts pins the domain on the real HttpDispatcher (the request forwarded unread, POST alone claimed, 501 for an absent slot or member, the slot read per request, a signed-in non-member and a gated session stopped before the member while a member of the environment and an anonymous caller reach it); http-conformance hono-webhooks-redeliver.conformance.test.ts drives the real plugin through createHonoApp and the self-hosted mount, where a replay lands in the outbox and every refusal, anonymous first, answers the same bytes at both doors.' },
+
+  // ── ADR-0138 D2 — THE CLOSED LIST OF DOORS (card E2) ─────────────────────
+  //
+  // "An unauthenticated request is served by exactly these six door classes";
+  // everything else answers 401, decided per domain (the `anonymous-deny-*`
+  // rows above). Each row below is one class, and names its enforcing site as
+  // D2's table does. Naming a seventh class is an amendment of ADR-0138, never
+  // a row appended here alone.
+  //
+  // ONE proof claims all six: `anonymous-door-sweep.dogfood.test.ts`, the
+  // in-tree evidence of the record's criterion 2. It boots the showcase, sends
+  // one unauthenticated request per registered route, and judges each by its
+  // closed classification (`anonymous-door-sweep.classification.ts`); and it
+  // asserts each class on a REAL subject, ADMITTED and REFUSED — the refused
+  // leg is each class's standing negative control (an undeclared form, a
+  // revoked token, an `org`-audience book, a session-gated endpoint of the same
+  // type, a private file). Remove a class's admission and its admitted leg
+  // turns red; a class whose door stopped admitting cannot stay recorded here.
+  //
+  // ⚠️ What the sweep's legs cannot reach is stated where it applies: class 1
+  // is the only class that owns a whole route family (both `forms` routes are
+  // its doors), so it is the only one of the six that classifies a ledger key;
+  // the other five ride families and domains whose other faces are the
+  // everything-else class.
+  { id: 'anonymous-door-public-form', summary: 'ADR-0138 D2 class 1 — the public form doors (resolve and submit), admitted by the form\'s own sharing declaration: enabled, anonymous, a public link naming the slug', state: 'enforced',
+    enforcement: 'rest/rest-server.ts RestServer.registerFormEndpoints — which forms are open is the one anonymous-intake rule shared with publish (the form\'s sharing declaration, a withdrawal in any layer closing it), and an open form runs as the form grant; plugin-security/security-plugin.ts SecurityPlugin, the publicFormGrant branch — insert and read-back on that one object, nothing else, with the server-managed anchors stripped',
+    proof: 'anonymous-door-sweep.dogfood.test.ts',
+    covers: ['rest-family:rest-route-ledger.ts:forms'],
+    note: 'The REST `forms` family is exactly these two routes and both are the class, which is the property a family key needs. The proof resolves and submits a form that declares anonymous sharing (200; the submit answers the created id and nothing it stored) and refuses a slug no form declares. The grant\'s strip is its own row (`public-form-managed-anchors`).' },
+  { id: 'anonymous-door-share-link', summary: 'ADR-0138 D2 class 2 — share links, admitted by the capability token; after validation, a read of that one record', state: 'enforced',
+    enforcement: 'plugin-sharing/share-link-routes.ts registerShareLinkRoutes — the two token faces validate the token (revoked, expired, unknown, password, audience and the object\'s standing publicSharing switch) and then read the one record it names; the dispatcher twin is runtime/domains/share-links.ts, whose every other face stands on the domain floor (`anonymous-deny-share-links`)',
+    proof: 'anonymous-door-sweep.dogfood.test.ts',
+    note: 'The proof mints a link signed in, resolves it anonymously to the one record it names, revokes it and is refused. No ledger key: the plugin mount is in neither of the two route ledgers this matrix reads, and the dispatcher twin\'s domain key is classified by its floor row, because that domain\'s other faces are everything-else.' },
+  { id: 'anonymous-door-public-book', summary: 'ADR-0138 D2 class 3 — the public book and doc metadata reads, admitted by `book.audience: \'public\'`; reachability only, the ADR-0046 §6.7 audience gate authorizes the read', state: 'enforced',
+    enforcement: 'rest/meta-item-read-gate.ts isPublicAudienceRead — the one exception the metadata floor makes: an anonymous GET of the book or doc list or item read skips the deny and the §6.7 audience gate inside that read decides (`public` only), on the REST registrar and on the dispatcher metadata domain alike; every other type, verb and route shape keeps the floor (`anonymous-deny-meta`)',
+    proof: 'anonymous-door-sweep.dogfood.test.ts',
+    note: 'No route of its own: the class rides the shared metadata read routes, so its ledger keys are the metadata floor\'s. The proof reads the public book, its tree and a doc it claims anonymously, and is refused 401 on an org-audience book, a doc only that book claims, and a write to the public book.' },
+  { id: 'anonymous-door-endpoint-object-operation', summary: 'ADR-0138 D2 class 4 — `authRequired: false` endpoints of `type: \'object_operation\'`, admitted by the endpoint declaration with its armed rate limit; the request runs as the guest envelope under the guest\'s grants', state: 'enforced',
+    enforcement: 'runtime/security/resolve-execution-context.ts resolveExecutionContext — the runtime face takes the explicit guest entry (ADR-0138 D9: principalKind guest, positions [guest], never isSystem, no user), so the CRUD gate judges the guest; with nothing bound to the guest, its empty grant set denies (ADR-0138 D3)',
+    proof: 'anonymous-door-sweep.dogfood.test.ts',
+    note: 'Declared endpoints are served from the transport\'s fallback seam and sit in no route table, so the class has no ledger key; the proof reads them from the metadata service. It asserts the engine is asked once, with the guest envelope, and the answer is D3\'s empty-state refusal, and that the showcase\'s own session-gated endpoint of the same type answers 401.' },
+  { id: 'anonymous-door-endpoint-flow', summary: 'ADR-0138 D2 class 5 — `authRequired: false` endpoints of `type: \'flow\'`, admitted by the endpoint declaration with its armed rate limit; the guest envelope at the door, and inside the flow its own declared runAs', state: 'enforced',
+    enforcement: 'runtime/security/resolve-execution-context.ts resolveExecutionContext (the guest envelope at the door), then @objectstack/service-automation, which runs the flow under its own declared runAs',
+    proof: 'anonymous-door-sweep.dogfood.test.ts',
+    note: 'No ledger key, for the reason class 4 states. The proof asserts the flow runs once, started with the guest envelope (positions [guest], no user, not system), and serves its output and nothing else, and that the showcase\'s own session-gated flow endpoint answers 401. The publish refusal of an anonymous flow door whose target runs as system is ADR-0138 D2b, a separate slice of the same card.' },
+  { id: 'anonymous-door-public-read-file', summary: 'ADR-0138 D2 class 6 — the `acl: \'public_read\'` file download (ADR-0104 D3 wave 2), admitted by the file\'s own explicit opt-in; a read of that one file\'s bytes, no principal evaluated', state: 'enforced',
+    enforcement: 'service-storage/storage-routes.ts registerStorageRoutes, at the download gate authorizeDownload that both download routes call — a file whose acl is public_read is served without a principal; the upload routes create every file private, so the door opens only by that explicit opt-in',
+    proof: 'anonymous-door-sweep.dogfood.test.ts',
+    note: 'The storage routes are service-storage\'s own mount, recorded in its own per-package ledger and in neither of the two route ledgers this matrix reads, so the class has no ledger key here. The proof uploads two files signed in, opts one into public_read, serves its own bytes anonymously at both download doors, and is refused 401 at both doors on the private one.' },
 
   // ── #2992 / ADR-0096 D4 — latent execution surfaces (pre-wiring identity
   // admission). Neither surface is reachable by a client today; these rows
@@ -489,7 +575,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     note: 'Unit-proven; an e2e dogfood proof is a follow-on, the same disposition as the ADR-0105 block above and for the same reason — the flag is a predicate inside the grant resolver, not an HTTP surface, so there is no route for a dogfood boot to drive at it directly. core/security/resolve-authz-context.test.ts "the `active` flag on the grant catalogues (ADR-0049)" covers the derivation half, including THE HIGH-BLAST-RADIUS CASE (a deactivated admin_full_access confers no PLATFORM_ADMIN) and that deactivating ONE set leaves the others granting; plugin-security/permission-set-active.test.ts covers the loader half, including THE REACHABILITY CASE (a position name reaching a deactivated set of the same name) plus its non-vacuous twin (the same request with the set ACTIVE does resolve); core/security/row-active.test.ts pins the predicate itself (absent grants, junk does not revoke, 0/1 deactivates). Deliberately NOT in HIGH_RISK: that list marks primitives guarding object data through a sibling HTTP entry point, and this one guards grant DERIVATION. The honest upgrade path is a real proof (seed a deactivated set, drive REST as its holder, observe the refusal), not re-citing a neighbouring file.' },
   { id: 'position-active', summary: '`sys_position.active` — a deactivated position grants nothing, and its name cannot resolve the grant one layer down (ADR-0049)', state: 'enforced',
     enforcement: 'core/security/resolve-authz-context.ts step 6a — isRowActive gates BOTH halves, and only both hold it: (i) only ACTIVE position ids collect their `sys_position_permission_set` linkage, so a deactivated position carries no bound set; (ii) the deactivated NAME is dropped from `grants.positions`, because resolvePermissionSetsForContext requests positions as permission-set NAMES and a name left standing resolves the same grant one layer down',
-    note: 'Only a name whose `sys_position` row is EXPLICITLY deactivated is dropped — a name with no row at all (`org_owner`, a membership-derived role, the built-in `everyone` audience anchor) has no flag to read and is untouched. Deliberately NOT a blanket revocation of the sets themselves: a set held via BOTH a deactivated position AND a direct user grant still resolves, since the direct grant is a different grant (resolve-authz-context.test.ts pins exactly that case). Symmetrically, the WRITE gates and blast-radius reads in plugin-security (assertAudienceAnchorBindingGate, setsBoundToPosition, the delegated-admin surfaces) stay UNFILTERED on purpose — dropping a deactivated row there would make a refused binding permitted, narrow a delegate\'s boundary, and make a deactivated position unmanageable. Unit-proven in core/security/resolve-authz-context.test.ts (a deactivated position stops granting its sets; an active one still grants; an absent column grants; the 0/1 shape deactivates; deactivating ONE position leaves the others granting) + core/security/row-active.test.ts. Not HIGH_RISK for the same reason as `permission-set-active`.' },
+    note: 'Only a name whose `sys_position` row is EXPLICITLY deactivated is dropped — a name with no row at all (`org_owner`, a membership-derived role, the built-in `everyone` audience anchor) has no flag to read and is untouched. Deliberately NOT a blanket revocation of the sets themselves: a set held via BOTH a deactivated position AND a direct user grant still resolves, since the direct grant is a different grant (resolve-authz-context.test.ts pins exactly that case). Symmetrically, the WRITE gates and blast-radius reads in plugin-security (setsBoundToPosition, the delegated-admin surfaces; the audience-anchor binding gate retired with sys_position_permission_set in C3 stage 8) stay UNFILTERED on purpose — dropping a deactivated row there would make a refused binding permitted, narrow a delegate\'s boundary, and make a deactivated position unmanageable. Unit-proven in core/security/resolve-authz-context.test.ts (a deactivated position stops granting its sets; an active one still grants; an absent column grants; the 0/1 shape deactivates; deactivating ONE position leaves the others granting) + core/security/row-active.test.ts. Not HIGH_RISK for the same reason as `permission-set-active`.' },
 
   // ── ADR-0091 D1/D2 — grant validity windows (commit d6e793507) ────────
   //

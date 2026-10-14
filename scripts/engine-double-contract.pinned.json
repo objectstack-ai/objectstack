@@ -1122,6 +1122,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.platform-schedule-org-gate.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1588,6 +1603,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.validate-data.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.view-container-reset-expansions.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3267,6 +3297,11 @@
       "pinned": 2
     },
     {
+      "file": "packages/plugins/plugin-security/src/guest-grants-channel.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/insert-check-post-image.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3307,31 +3342,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3348,21 +3358,6 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/permission-set-active.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-duplicate-name-refusal.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-duplicate-name-refusal.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-projection.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -3413,6 +3408,21 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/row-write-widener-composition.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-catalog-echo.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-catalog-echo.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/security-catalog-echo.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3664,6 +3674,11 @@
     {
       "file": "packages/plugins/plugin-webhooks/src/webhook-drop-durable-record.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-webhooks/src/webhook-redeliver-auth-gate.pin.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

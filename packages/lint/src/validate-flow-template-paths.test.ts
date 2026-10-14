@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
 import {
   validateFlowTemplatePaths,
   FLOW_TEMPLATE_UNKNOWN_FIELD,
@@ -42,9 +43,9 @@ function flowWith(notify: AnyRec, objectName = 'crm_lead'): AnyRec {
 }
 
 describe('validateFlowTemplatePaths', () => {
-  it('flags an unknown field in a {record.<x>} template (typo)', () => {
+  it('flags an unknown field in a {{ record.<x> }} template (typo)', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: 'New lead: {record.full_naem}', body: 'x' }),
+      flowWith({ title: 'New lead: {{ record.full_naem }}', body: 'x' }),
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
@@ -52,9 +53,9 @@ describe('validateFlowTemplatePaths', () => {
     expect(findings[0].message).toContain('full_naem');
   });
 
-  it('flags a lookup cross-object hop {record.<lookup>.<field>}', () => {
+  it('flags a lookup cross-object hop {{ record.<lookup>.<field> }}', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: 'From {record.crm_account.name}', body: 'x' }),
+      flowWith({ title: 'From {{ record.crm_account.name }}', body: 'x' }),
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
@@ -63,49 +64,49 @@ describe('validateFlowTemplatePaths', () => {
 
   it('does NOT flag a formula field (valid, hydrated since #3445)', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: 'New lead: {record.full_name}', body: '{record.company}' }),
+      flowWith({ title: 'New lead: {{ record.full_name }}', body: '{{ record.company }}' }),
     );
     expect(findings).toHaveLength(0);
   });
 
   it('does NOT flag a plain scalar field', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: '{record.first_name} {record.last_name}', body: '{record.company}' }),
+      flowWith({ title: '{{ record.first_name }} {{ record.last_name }}', body: '{{ record.company }}' }),
     );
     expect(findings).toHaveLength(0);
   });
 
   it('does NOT flag a bare lookup id (no sub-path)', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: 'acct {record.crm_account}', body: 'x' }),
+      flowWith({ title: 'acct {{ record.crm_account }}', body: 'x' }),
     );
     expect(findings).toHaveLength(0);
   });
 
   it('does NOT flag a numeric index into a multiple lookup (#1872)', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: 'ch {record.target_channels.0}', body: 'x' }),
+      flowWith({ title: 'ch {{ record.target_channels.0 }}', body: 'x' }),
     );
     expect(findings).toHaveLength(0);
   });
 
   it('does NOT flag a sub-path into a json field', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: '{record.payload.foo}', body: 'x' }),
+      flowWith({ title: '{{ record.payload.foo }}', body: 'x' }),
     );
     expect(findings).toHaveLength(0);
   });
 
   it('does NOT flag system/audit columns', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: '{record.id} {record.created_at} {record.owner}', body: 'x' }),
+      flowWith({ title: '{{ record.id }} {{ record.created_at }} {{ record.owner }}', body: 'x' }),
     );
     expect(findings).toHaveLength(0);
   });
 
   it('ignores non-record tokens (flow vars, NOW(), $User)', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: '{some_var.field} {NOW()} {$User.Email}', body: 'x' }),
+      flowWith({ title: '{{ some_var.field }} {NOW()} {{ $User.Email }}', body: 'x' }),
     );
     expect(findings).toHaveLength(0);
   });
@@ -119,7 +120,7 @@ describe('validateFlowTemplatePaths', () => {
           type: 'record_change',
           nodes: [
             { id: 'start', type: 'start', config: { objectName: 'sys_user', triggerType: 'record-after-create' } },
-            { id: 'n1', type: 'notify', notify: { title: '{record.anything.deep}', body: 'x' } },
+            { id: 'n1', type: 'notify', notify: { title: '{{ record.anything.deep }}', body: 'x' } },
           ],
         },
       ],
@@ -136,7 +137,7 @@ describe('validateFlowTemplatePaths', () => {
           type: 'screen',
           nodes: [
             { id: 'start', type: 'start', config: {} },
-            { id: 'n1', type: 'notify', notify: { title: '{record.full_naem}', body: 'x' } },
+            { id: 'n1', type: 'notify', notify: { title: '{{ record.full_naem }}', body: 'x' } },
           ],
         },
       ],
@@ -146,7 +147,7 @@ describe('validateFlowTemplatePaths', () => {
 
   it('dedupes a repeated bad reference to one finding per node', () => {
     const findings = validateFlowTemplatePaths(
-      flowWith({ title: '{record.full_naem}', body: 'again {record.full_naem}' }),
+      flowWith({ title: '{{ record.full_naem }}', body: 'again {{ record.full_naem }}' }),
     );
     expect(findings).toHaveLength(1);
   });
@@ -160,7 +161,7 @@ describe('validateFlowTemplatePaths', () => {
           type: 'record_change',
           nodes: [
             { id: 'start', type: 'start', start: { objectName: 'crm_lead', triggerType: 'record-after-create' } },
-            { id: 'n1', type: 'notify', notify: { title: '{record.crm_account.name}', body: 'x' } },
+            { id: 'n1', type: 'notify', notify: { title: '{{ record.crm_account.name }}', body: 'x' } },
           ],
         },
       ],
@@ -200,7 +201,7 @@ describe('validateFlowTemplatePaths', () => {
               type: 'start',
               config: { objectName: 'crm_lead', triggerType: 'record-after-create', expand: ['crm_account'] },
             },
-            { id: 'n1', type: 'notify', notify: { title: 'From {record.crm_account.name}', body: 'x' } },
+            { id: 'n1', type: 'notify', notify: { title: 'From {{ record.crm_account.name }}', body: 'x' } },
           ],
         },
       ],
@@ -221,7 +222,7 @@ describe('validateFlowTemplatePaths', () => {
               type: 'start',
               config: { objectName: 'crm_lead', triggerType: 'record-after-create', expand: ['target_channels'] },
             },
-            { id: 'n1', type: 'notify', notify: { title: 'From {record.crm_account.name}', body: 'x' } },
+            { id: 'n1', type: 'notify', notify: { title: 'From {{ record.crm_account.name }}', body: 'x' } },
           ],
         },
       ],
@@ -234,11 +235,13 @@ describe('validateFlowTemplatePaths', () => {
     expect(validateFlowTemplatePaths({ objects: [LEAD_OBJECT] })).toHaveLength(0);
   });
 
-  // ── severity follows position (#3810) ───────────────────────────────────
-  // Outside a filter an unresolved token blanks a value (advisory); inside a
-  // filter-guarded CRUD node's filter it DELETES the condition, so the node
-  // refuses to run — the build must not ship it.
-  describe('filter-position severity (#3810)', () => {
+  // ── a CRUD filter operand is not scanned (#19939) ───────────────────────
+  // Each operand of a get_record / update_record / delete_record `filter` is a
+  // value slot — a CEL envelope or a literal, rendering no template. A `{…}`
+  // token there, a `{{ }}` hole included, is the value-slot judge's refusal at
+  // every build door; this rule reports nothing there. (Until #19939 a token
+  // there erased its condition, and #3810's refusal made the finding an ERROR.)
+  describe('a CRUD filter operand (#19939)', () => {
     /** A record-change flow with one CRUD node carrying the given config. */
     function crudFlow(type: string, config: AnyRec): AnyRec {
       return {
@@ -257,102 +260,47 @@ describe('validateFlowTemplatePaths', () => {
     }
 
     it.each(['get_record', 'update_record', 'delete_record'])(
-      'raises an unknown field inside a %s filter to error',
+      'reports nothing at a %s filter operand — the value-slot judge refuses the hole there',
       (type) => {
-        const findings = validateFlowTemplatePaths(
-          crudFlow(type, { objectName: 'crm_lead', filter: { company: '{record.compnay}' } }),
-        );
-        expect(findings).toHaveLength(1);
-        expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
-        expect(findings[0].severity).toBe('error');
-        expect(findings[0].message).toContain('refuses to run');
+        const config = { objectName: 'crm_lead', filter: { company: '{{ record.compnay }}', owner: { $in: ['{{ record.crm_account.name }}'] } } };
+        expect(validateFlowTemplatePaths(crudFlow(type, config))).toEqual([]);
+        expect(flowNodeValueTemplateRefusals(type, config).map((r) => r.path)).toEqual(['filter.company', 'filter.owner.$in[0]']);
       },
     );
 
-    it('raises a lookup traversal inside a filter to error', () => {
-      const findings = validateFlowTemplatePaths(
-        crudFlow('delete_record', { objectName: 'crm_lead', filter: { company: '{record.crm_account.name}' } }),
-      );
-      expect(findings).toHaveLength(1);
-      expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
-      expect(findings[0].severity).toBe('error');
-    });
-
-    it('keeps a bad reference OUTSIDE the filter advisory on the same node', () => {
+    it('still warns on a bad reference OUTSIDE the filter on the same node', () => {
       const findings = validateFlowTemplatePaths(
         crudFlow('update_record', {
           objectName: 'crm_lead',
-          filter: { company: '{record.company}' },
-          fields: { last_name: '{record.compnay}' },
+          filter: { company: '{{ record.compnay }}' },
+          fields: { last_name: '{{ record.compnay }}' },
         }),
       );
       expect(findings).toHaveLength(1);
       expect(findings[0].severity).toBe('warning');
     });
 
-    it('reports a reference used in BOTH positions once, at error severity', () => {
+    it('scans a `filter` key on create_record, which has no filter operands', () => {
       const findings = validateFlowTemplatePaths(
-        crudFlow('update_record', {
-          objectName: 'crm_lead',
-          filter: { company: '{record.compnay}' },
-          fields: { last_name: 'echo {record.compnay}' },
-        }),
-      );
-      expect(findings).toHaveLength(1);
-      expect(findings[0].severity).toBe('error');
-    });
-
-    it('stays advisory for create_record, which has no filter to widen', () => {
-      const findings = validateFlowTemplatePaths(
-        crudFlow('create_record', { objectName: 'crm_lead', filter: { company: '{record.compnay}' } }),
+        crudFlow('create_record', { objectName: 'crm_lead', filter: { company: '{{ record.compnay }}' } }),
       );
       expect(findings).toHaveLength(1);
       expect(findings[0].severity).toBe('warning');
     });
 
-    it('does NOT flag a valid filter reference', () => {
-      const findings = validateFlowTemplatePaths(
-        crudFlow('delete_record', {
-          objectName: 'crm_lead',
-          filter: { company: '{record.company}', owner: '{record.owner}' },
-        }),
-      );
-      expect(findings).toHaveLength(0);
-    });
-
-    it('respects declared expand for a filter traversal (#3475)', () => {
-      const findings = validateFlowTemplatePaths({
-        objects: [LEAD_OBJECT],
-        flows: [
-          {
-            name: 'expanded_filter',
-            type: 'record_change',
-            nodes: [
-              {
-                id: 'start',
-                type: 'start',
-                config: { objectName: 'crm_lead', triggerType: 'record-after-create', expand: ['crm_account'] },
-              },
-              {
-                id: 'c1',
-                type: 'get_record',
-                config: { objectName: 'crm_lead', filter: { company: '{record.crm_account.name}' } },
-              },
-            ],
-          },
-        ],
-      });
-      expect(findings).toHaveLength(0);
+    it('reads no single-brace token — anywhere', () => {
+      expect(validateFlowTemplatePaths(flowWith({ title: 'New lead: {record.full_naem}', body: 'x' }))).toEqual([]);
+      expect(validateFlowTemplatePaths(
+        crudFlow('get_record', { objectName: 'crm_lead', filter: { company: '{record.compnay}' } }),
+      )).toEqual([]);
     });
   });
   // ── nested regions (#4380) ─────────────────────────────────────────────
   //
-  // This rule was not merely blind to nested nodes — it was WORSE than blind.
-  // The recursive string-leaf scan already saw a nested node's tokens through
-  // its container's `config`, but the `filter` split only looked at the top
-  // level of the node it was handed, so a nested filter token lost its position
-  // and the gating #3810 finding silently degraded to a warning reported
-  // against the wrapping `try_catch`.
+  // The recursive string-leaf scan already saw a nested node's holes through
+  // its container's `config`, but judged them against the wrapping container.
+  // Walking to the real node restores the location (and, since #19939, the
+  // CRUD filter exemption, which a nested CRUD node needs too).
   describe('nested regions', () => {
     const nestedFilterFlow = (container: Record<string, unknown>) => ({
       objects: [LEAD_OBJECT],
@@ -367,29 +315,38 @@ describe('validateFlowTemplatePaths', () => {
         },
       ],
     });
-    const badFilterNode = {
+    const badNoteNode = {
+      id: 'note',
+      type: 'notify',
+      label: 'Note',
+      config: { title: 'Budget: {{ record.budget }}' },
+    };
+    const filterNode = {
       id: 'fetch',
       type: 'get_record',
       label: 'Fetch',
-      config: { objectName: 'crm_lead', filter: { company: '{record.budget}' } },
+      config: { objectName: 'crm_lead', filter: { company: '{{ record.budget }}' } },
     };
 
-    it('keeps the gating filter-position severity inside a region', () => {
+    it('reports a nested hole on the node that carries it', () => {
       const findings = validateFlowTemplatePaths(
-        nestedFilterFlow({ try: { nodes: [badFilterNode], edges: [] } }),
+        nestedFilterFlow({ try: { nodes: [badNoteNode], edges: [] } }),
       );
       expect(findings).toHaveLength(1);
-      // The whole point: `error`, not the `warning` it used to degrade to.
-      expect(findings[0].severity).toBe('error');
+      expect(findings[0].severity).toBe('warning');
       expect(findings[0].path).toBe('flows[0].nodes[1].config.try.nodes[0]');
-      expect(findings[0].where).toBe('flow "guarded" try_catch "Guard" › try node "get_record"');
+      expect(findings[0].where).toBe('flow "guarded" try_catch "Guard" › try node "notify"');
     });
 
     it('reports a nested token once, not also against the container', () => {
       const findings = validateFlowTemplatePaths(
-        nestedFilterFlow({ catch: { nodes: [badFilterNode], edges: [] } }),
+        nestedFilterFlow({ catch: { nodes: [badNoteNode], edges: [] } }),
       );
       expect(findings).toHaveLength(1);
+    });
+
+    it('exempts a nested CRUD node\'s filter operands too, not only a top-level one', () => {
+      expect(validateFlowTemplatePaths(nestedFilterFlow({ try: { nodes: [filterNode], edges: [] } }))).toEqual([]);
     });
 
     it('still checks the container node\'s own config', () => {
@@ -408,7 +365,7 @@ describe('validateFlowTemplatePaths', () => {
                 // The loop's OWN collection token is a non-filter position on
                 // the container itself — warning, and not swallowed by the
                 // region-stripping that prevents double reporting.
-                config: { collection: '{record.budget}', body: { nodes: [], edges: [] } },
+                config: { collection: '{{ record.budget }}', body: { nodes: [], edges: [] } },
               },
             ],
           },
@@ -422,9 +379,9 @@ describe('validateFlowTemplatePaths', () => {
 
   // ── a template outside a node filter ───────────────────────────────────
   //
-  // Both rule ids declare a per-position severity (`inFilter ? 'error' :
-  // 'warning'`) and a second message for the non-filter half, and that half was
-  // unreachable on the shape a real hand-off flow has: `body` is a region slot
+  // Both rule ids used to declare a per-position severity (`error` in a CRUD
+  // filter, `warning` elsewhere) and a second message for the non-filter half,
+  // and that half was unreachable on the shape a real hand-off flow has: `body` is a region slot
   // on `loop`, so the region-stripped view a recursive scan must read deleted
   // `config.body` from EVERY node — including the `http` node whose request
   // payload it is. The `http` executor interpolated its raw config wholesale,
@@ -439,12 +396,12 @@ describe('validateFlowTemplatePaths', () => {
   // keeps an http node's own `config.body` is `flow-walk.test.ts`'s.
   //
   // Four pins, one fixture, matching the four injections the report measured.
-  // The two filter pins are NEGATIVE CONTROLS: they pass before this fix and
-  // must keep passing, or a later refactor could break the gating half while
-  // the warning half stays green. `warning` does not move the exit code, so
+  // [#19939] The two filter pins are re-judged: a filter operand is a value
+  // slot, and this rule no longer scans one, so whatever the filter's hole
+  // names it reports nothing there. `warning` does not move the exit code, so
   // every assertion below reads the findings array, never a pass/fail verdict.
   describe('outside a node filter', () => {
-    const CLEAN_FILTER = '{record.crm_account}';
+    const CLEAN_FILTER = '{{ record.crm_account }}';
     const CLEAN_PAYLOAD = '{{ record.company }}';
 
     /** A billing hand-off: a filter-guarded read, then an http POST carrying the amount in a header. */
@@ -477,21 +434,11 @@ describe('validateFlowTemplatePaths', () => {
       ],
     });
 
-    it('gates an unknown field in a filter (negative control)', () => {
-      const findings = validateFlowTemplatePaths(handoff('{record.crm_account_nope}', CLEAN_PAYLOAD));
-      expect(findings).toHaveLength(1);
-      expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
-      expect(findings[0].severity).toBe('error');
-      expect(findings[0].where).toBe('flow "billing_handoff" node "get_record"');
-    });
-
-    it('gates a lookup traversal in a filter (negative control)', () => {
-      const findings = validateFlowTemplatePaths(handoff('{record.crm_account.owner_id}', CLEAN_PAYLOAD));
-      expect(findings).toHaveLength(1);
-      expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
-      expect(findings[0].severity).toBe('error');
-      expect(findings[0].where).toBe('flow "billing_handoff" node "get_record"');
-    });
+    it.each(['{{ record.crm_account_nope }}', '{{ record.crm_account.owner_id }}'])(
+      'reports nothing at the filter, whose operand %s is a value slot', (filterId) => {
+        expect(validateFlowTemplatePaths(handoff(filterId, CLEAN_PAYLOAD))).toEqual([]);
+      },
+    );
 
     it('warns on an unknown field in a payload outside any filter', () => {
       const findings = validateFlowTemplatePaths(handoff(CLEAN_FILTER, '{{ record.amount_nope }}'));
@@ -516,7 +463,7 @@ describe('validateFlowTemplatePaths', () => {
       expect(validateFlowTemplatePaths(handoff(CLEAN_FILTER, CLEAN_PAYLOAD))).toEqual([]);
     });
 
-    it('resolves one leaf used in both positions of a node at the gating severity', () => {
+    it('reports a leaf used in both positions once, from the position it scans', () => {
       const findings = validateFlowTemplatePaths({
         objects: [LEAD_OBJECT],
         flows: [
@@ -531,8 +478,8 @@ describe('validateFlowTemplatePaths', () => {
                 label: 'Touch',
                 config: {
                   objectName: 'crm_lead',
-                  filter: { company: '{record.full_naem}' },
-                  fields: { company: 'echo {record.full_naem}' },
+                  filter: { company: '{{ record.full_naem }}' },
+                  fields: { company: 'echo {{ record.full_naem }}' },
                 },
               },
             ],
@@ -540,7 +487,7 @@ describe('validateFlowTemplatePaths', () => {
         ],
       });
       expect(findings).toHaveLength(1);
-      expect(findings[0].severity).toBe('error');
+      expect(findings[0].severity).toBe('warning');
     });
 
     it('reports a payload nested in a loop body once, on the node that carries it', () => {
@@ -611,41 +558,37 @@ describe('validateFlowTemplatePaths — unprovisioned injected anchors (#8340)',
   const only = (findings: ReturnType<typeof validateFlowTemplatePaths>) =>
     findings.filter((f) => f.rule === FLOW_TEMPLATE_FIELD_UNPROVISIONED);
 
-  it('warns on a filter token over an unprovisioned anchor — the existence rule stays silent', () => {
+  it('warns on a hole over an unprovisioned anchor, naming the blank-string consequence — the existence rule stays silent', () => {
     const findings = validateFlowTemplatePaths(
-      extFlow('get_record', { objectName: 'ext_customer', filter: { email: '{record.owner_id}' } }),
+      extFlow('notify', { title: 'Owned by {{ record.owner_id }}' }),
     );
     expect(findings.filter((f) => f.rule === FLOW_TEMPLATE_UNKNOWN_FIELD)).toHaveLength(0);
     const warned = only(findings);
     expect(warned).toHaveLength(1);
-    // WARNING even in the filter position, where a typo would be an ERROR:
-    // the provenance question has no closed oracle here (#8116).
+    // A warning: the provenance question has no closed oracle here (#8116).
     expect(warned[0].severity).toBe('warning');
     expect(warned[0].message).toContain('owner_id');
     expect(warned[0].message).toContain('external object (ADR-0015)');
-    expect(warned[0].message).toContain('refuses to run');
+    expect(warned[0].message).toContain('empty string on every run');
     expect(warned[0].hint).toContain('columnMap');
   });
 
-  it('warns outside a filter too, naming the blank-string consequence', () => {
-    const findings = validateFlowTemplatePaths(
-      extFlow('notify', { title: 'Owned by {record.owner_id}' }),
-    );
-    const warned = only(findings);
-    expect(warned).toHaveLength(1);
-    expect(warned[0].message).toContain('empty string on every run');
+  it('reports nothing at a CRUD filter operand over the anchor — a value slot (#19939)', () => {
+    expect(only(validateFlowTemplatePaths(
+      extFlow('get_record', { objectName: 'ext_customer', filter: { email: '{{ record.owner_id }}' } }),
+    ))).toEqual([]);
   });
 
   it('is silent on the local twin — platform storage is real (mutation: drop `external`)', () => {
     const findings = validateFlowTemplatePaths(
-      extFlow('notify', { title: '{record.owner_id}' }, EXT_OBJECT({ external: undefined })),
+      extFlow('notify', { title: '{{ record.owner_id }}' }, EXT_OBJECT({ external: undefined })),
     );
     expect(findings).toEqual([]);
   });
 
   it('is silent when the author DECLARES the column (#7859)', () => {
     const findings = validateFlowTemplatePaths(
-      extFlow('notify', { title: '{record.owner_id}' }, EXT_OBJECT({
+      extFlow('notify', { title: '{{ record.owner_id }}' }, EXT_OBJECT({
         fields: { email: { name: 'email', type: 'text' }, owner_id: { name: 'owner_id', type: 'text' } },
       })),
     );
@@ -653,15 +596,14 @@ describe('validateFlowTemplatePaths — unprovisioned injected anchors (#8340)',
   });
 
   it('is silent on a declared field of the same external object', () => {
-    expect(validateFlowTemplatePaths(extFlow('notify', { title: '{record.email}' }))).toEqual([]);
+    expect(validateFlowTemplatePaths(extFlow('notify', { title: '{{ record.email }}' }))).toEqual([]);
   });
 
   it('reports one finding per node for a token repeated in two positions', () => {
     const findings = validateFlowTemplatePaths(
-      extFlow('update_record', {
-        objectName: 'ext_customer',
-        filter: { email: '{record.owner_id}' },
-        fields: { email: 'echo {record.owner_id}' },
+      extFlow('notify', {
+        title: '{{ record.owner_id }}',
+        message: 'echo {{ record.owner_id }}',
       }),
     );
     expect(only(findings)).toHaveLength(1);
@@ -676,9 +618,9 @@ describe('validateFlowTemplatePaths — unprovisioned injected anchors (#8340)',
 //
 // | token root                      | kind               | seen before #17305 |
 // |---------------------------------|--------------------|--------------------|
-// | `{caseRecord.owner_id.manager}` | `get_record` output| no                 |
-// | `{currentCase.owner_id.manager}`| `loop` iterator    | no                 |
-// | `{record.owner_id.manager}`     | trigger record     | yes                |
+// | `{{ caseRecord.owner_id.manager }}` | `get_record` output| no                 |
+// | `{{ currentCase.owner_id.manager }}`| `loop` iterator    | no                 |
+// | `{{ record.owner_id.manager }}`     | trigger record     | yes                |
 //
 // Both invisible shapes sit on a `schedule` flow in the report, which is the
 // second dimension: the rule skipped a non-record-triggered flow whole. Every
@@ -727,17 +669,17 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     const findings = validateFlowTemplatePaths(
       scheduleFlow([
         FETCH_ONE,
-        { id: 'escalate', type: 'notify', config: { body: 'Escalating to {caseRecord.owner_id.manager}' } },
+        { id: 'escalate', type: 'notify', config: { body: 'Escalating to {{ caseRecord.owner_id.manager }}' } },
       ]),
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].path).toBe('flows[0].nodes[2]');
-    expect(findings[0].message).toContain('{caseRecord.owner_id.manager}');
+    expect(findings[0].message).toContain('{{ caseRecord.owner_id.manager }}');
     // The object is named from the BINDING node, not from a trigger there is none of.
     expect(findings[0].message).toContain("'owner_id'");
-    expect(findings[0].hint).toContain('{caseRecord.owner_id}');
+    expect(findings[0].hint).toContain('{{ caseRecord.owner_id }}');
     // config.expand is the START node's opt-in and must not be prescribed here.
     expect(findings[0].hint).toContain("START node's opt-in");
   });
@@ -746,7 +688,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     const findings = validateFlowTemplatePaths(
       scheduleFlow([
         FETCH_ONE,
-        { id: 'escalate', type: 'notify', config: { body: 'Case {caseRecord.subjcet}' } },
+        { id: 'escalate', type: 'notify', config: { body: 'Case {{ caseRecord.subjcet }}' } },
       ]),
     );
     expect(findings).toHaveLength(1);
@@ -755,20 +697,18 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     expect(findings[0].message).toContain("'subjcet' is not a field on object 'crm_case'");
   });
 
-  it('gates a variable-root hop in a filter-guarded position (#3810 severity split)', () => {
+  it('reports nothing for a variable-root hop at a CRUD filter operand — a value slot (#19939)', () => {
     const findings = validateFlowTemplatePaths(
       scheduleFlow([
         FETCH_ONE,
         {
           id: 'close',
           type: 'delete_record',
-          config: { objectName: 'crm_case', filter: { owner_id: '{caseRecord.owner_id.manager}' } },
+          config: { objectName: 'crm_case', filter: { owner_id: '{{ caseRecord.owner_id.manager }}' } },
         },
       ]),
     );
-    expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('error');
-    expect(findings[0].message).toContain('refuses to run at execution time');
+    expect(findings).toEqual([]);
   });
 
   it('resolves a get_record output on a RECORD-TRIGGERED flow too (the root dimension alone)', () => {
@@ -781,13 +721,13 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
           nodes: [
             { id: 'start', type: 'start', config: { objectName: 'crm_case', triggerType: 'record-after-create' } },
             { id: 'fetch_one', type: 'get_record', config: { objectName: 'crm_case', outputVariable: 'peerCase' } },
-            { id: 'note', type: 'notify', config: { body: '{peerCase.owner_id.manager}' } },
+            { id: 'note', type: 'notify', config: { body: '{{ peerCase.owner_id.manager }}' } },
           ],
         },
       ],
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('{peerCase.owner_id.manager}');
+    expect(findings[0].message).toContain('{{ peerCase.owner_id.manager }}');
   });
 
   // ── shape 2: a `loop` iterator root ───────────────────────────────────────
@@ -804,7 +744,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
             collection: { dialect: 'cel', source: 'staleCases' },
             iteratorVariable: 'currentCase',
             body: {
-              nodes: [{ id: 'ping', type: 'notify', config: { body: 'Ping {currentCase.owner_id.manager}' } }],
+              nodes: [{ id: 'ping', type: 'notify', config: { body: 'Ping {{ currentCase.owner_id.manager }}' } }],
               edges: [],
             },
           },
@@ -815,16 +755,17 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
     expect(findings[0].path).toBe('flows[0].nodes[2].config.body.nodes[0]');
     expect(findings[0].where).toBe('flow "case_sla_monitor" loop "Each stale case" › body node "notify"');
-    expect(findings[0].message).toContain('{currentCase.owner_id.manager}');
+    expect(findings[0].message).toContain('{{ currentCase.owner_id.manager }}');
   });
 
-  // [#19939] RE-JUDGED IN PLACE: this pinned the bare name as "the spelling
-  // loop-node.ts falls back to" — the structured loop never read one (the
-  // interpolator handed the name back and the node failed). Every door refuses
-  // both pre-#19939 spellings now; the rule still reads them, so a flow
-  // carrying one keeps its template-path findings beside that refusal.
+  // [#19939] RE-JUDGED IN PLACE, twice: this pinned the bare name as "the
+  // spelling loop-node.ts falls back to" — the structured loop never read one
+  // (the interpolator handed the name back and the node failed) — and then as a
+  // pre-#19939 spelling the rule kept reading. Every door refuses both, and
+  // since S7 deleted the single-brace dialect's last reader the rule reads
+  // neither: such a loop binds no root, so the body is silent.
   it.each([['a lone token', '{staleCases}'], ['a bare name', 'staleCases']])(
-    'still resolves a pre-#19939 collection spelling, %s', (_label, collection) => {
+    'resolves no root from a pre-#19939 collection spelling, %s', (_label, collection) => {
       const findings = validateFlowTemplatePaths(
         scheduleFlow([
           FETCH_MANY,
@@ -834,13 +775,12 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
             config: {
               collection,
               iteratorVariable: 'currentCase',
-              body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{currentCase.subjcet}' } }], edges: [] },
+              body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{{ currentCase.subjcet }}' } }], edges: [] },
             },
           },
         ]),
       );
-      expect(findings).toHaveLength(1);
-      expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+      expect(findings).toEqual([]);
     },
   );
 
@@ -854,7 +794,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
           config: {
             collection: { dialect: 'cel', source: 'staleCases.filter(c, c.priority == 1)' },
             iteratorVariable: 'currentCase',
-            body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{currentCase.subjcet}' } }], edges: [] },
+            body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{{ currentCase.subjcet }}' } }], edges: [] },
           },
         },
       ]),
@@ -878,23 +818,22 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
         },
       ],
     });
-    const warned = validateFlowTemplatePaths(triggered({ body: '{record.owner_id.manager}' }));
+    const warned = validateFlowTemplatePaths(triggered({ body: '{{ record.owner_id.manager }}' }));
     expect(warned).toHaveLength(1);
     expect(warned[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
     expect(warned[0].severity).toBe('warning');
     expect(warned[0].hint).toContain("config.expand and the engine re-reads it as the run's identity");
 
-    const gated = validateFlowTemplatePaths(
-      triggered({ objectName: 'crm_case', filter: { status: '{record.owner_id.manager}' } }, 'update_record'),
-    );
-    expect(gated).toHaveLength(1);
-    expect(gated[0].severity).toBe('error');
+    // [#19939] A CRUD filter operand is a value slot: no longer scanned, at any root.
+    expect(validateFlowTemplatePaths(
+      triggered({ objectName: 'crm_case', filter: { status: '{{ record.owner_id.manager }}' } }, 'update_record'),
+    )).toEqual([]);
   });
 
   it('keeps {record.…} unjudged on a flow with no record trigger', () => {
     expect(
       validateFlowTemplatePaths(
-        scheduleFlow([{ id: 'note', type: 'notify', config: { body: '{record.subjcet}' } }]),
+        scheduleFlow([{ id: 'note', type: 'notify', config: { body: '{{ record.subjcet }}' } }]),
       ),
     ).toEqual([]);
   });
@@ -904,7 +843,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
   it('is silent on a valid field read off a variable root (no false positive)', () => {
     expect(
       validateFlowTemplatePaths(
-        scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { body: '{caseRecord.subject}' } }]),
+        scheduleFlow([FETCH_ONE, { id: 'note', type: 'notify', config: { body: '{{ caseRecord.subject }}' } }]),
       ),
     ).toEqual([]);
   });
@@ -917,7 +856,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
   it('still resolves the root when the flow DECLARES the variable it binds', () => {
     const findings = validateFlowTemplatePaths(
       scheduleFlow(
-        [FETCH_ONE, { id: 'note', type: 'notify', config: { body: '{caseRecord.subjcet}' } }],
+        [FETCH_ONE, { id: 'note', type: 'notify', config: { body: '{{ caseRecord.subjcet }}' } }],
         { variables: [{ name: 'caseRecord', type: 'object', isInput: false, isOutput: false }] },
       ),
     );
@@ -979,7 +918,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
         [
           FETCH_MANY,
           { id: 'loop_cases', type: 'loop', config: { collection: { dialect: 'cel', source: 'staleCases' }, iteratorVariable: 'currentCase' } },
-          { id: 'note', type: 'notify', config: { title: '{currentCase.subject}', body: '{currentCase.subjcet}' } },
+          { id: 'note', type: 'notify', config: { title: '{{ currentCase.subject }}', body: '{{ currentCase.subjcet }}' } },
         ],
         { variables: [{ name: 'staleCases', type: 'record_collection', isInput: false, isOutput: false }] },
       ),
@@ -987,7 +926,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     // The loop body lives in the EDGE graph, not a region slot — the root map
     // is flow-scoped, so a token on a top-level node still resolves.
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('{currentCase.subjcet}');
+    expect(findings[0].message).toContain('{{ currentCase.subjcet }}');
   });
 
   it('is silent when an assignment node also writes the name', () => {
@@ -996,7 +935,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
         scheduleFlow([
           FETCH_ONE,
           { id: 'seed', type: 'assignment', config: { assignments: { caseRecord: 'x' } } },
-          { id: 'note', type: 'notify', config: { body: '{caseRecord.subjcet}' } },
+          { id: 'note', type: 'notify', config: { body: '{{ caseRecord.subjcet }}' } },
         ]),
       ),
     ).toEqual([]);
@@ -1014,7 +953,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
               { id: 'start', type: 'start', config: { triggerType: 'schedule' } },
               { id: 'a', type: 'get_record', config: { objectName: 'crm_case', outputVariable: 'row' } },
               { id: 'b', type: 'get_record', config: { objectName: 'crm_lead2', outputVariable: 'row' } },
-              { id: 'note', type: 'notify', config: { body: '{row.subjcet}' } },
+              { id: 'note', type: 'notify', config: { body: '{{ row.subjcet }}' } },
             ],
           },
         ],
@@ -1027,7 +966,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
       validateFlowTemplatePaths(
         scheduleFlow([
           { id: 'caseRecord', type: 'get_record', config: { objectName: 'crm_case', outputVariable: 'caseRecord' } },
-          { id: 'note', type: 'notify', config: { body: '{caseRecord.subjcet}' } },
+          { id: 'note', type: 'notify', config: { body: '{{ caseRecord.subjcet }}' } },
         ]),
       ),
     ).toEqual([]);
@@ -1044,7 +983,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
             nodes: [
               { id: 'start', type: 'start', config: { objectName: 'crm_case', triggerType: 'record-after-create' } },
               { id: 'fetch', type: 'get_record', config: { objectName: 'crm_case', outputVariable: 'status' } },
-              { id: 'note', type: 'notify', config: { body: '{status.subjcet}' } },
+              { id: 'note', type: 'notify', config: { body: '{{ status.subjcet }}' } },
             ],
           },
         ],
@@ -1057,7 +996,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
       validateFlowTemplatePaths(
         scheduleFlow([
           { id: 'ask', type: 'screen', config: { objectName: 'crm_case', outputVariable: 'answer' } },
-          { id: 'note', type: 'notify', config: { body: '{answer.subjcet}' } },
+          { id: 'note', type: 'notify', config: { body: '{{ answer.subjcet }}' } },
         ]),
       ),
     ).toEqual([]);
@@ -1066,7 +1005,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
   it('is silent on a multi-record output read as if it were one record', () => {
     expect(
       validateFlowTemplatePaths(
-        scheduleFlow([FETCH_MANY, { id: 'note', type: 'notify', config: { body: '{staleCases.subjcet}' } }]),
+        scheduleFlow([FETCH_MANY, { id: 'note', type: 'notify', config: { body: '{{ staleCases.subjcet }}' } }]),
       ),
     ).toEqual([]);
   });
@@ -1081,7 +1020,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
             config: {
               collection: { dialect: 'cel', source: 'somethingElse' },
               iteratorVariable: 'currentCase',
-              body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{currentCase.subjcet}' } }], edges: [] },
+              body: { nodes: [{ id: 'ping', type: 'notify', config: { body: '{{ currentCase.subjcet }}' } }], edges: [] },
             },
           },
         ]),
@@ -1099,7 +1038,7 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
           nodes: [
             { id: 'start', type: 'start', config: { triggerType: 'schedule' } },
             { id: 'fetch', type: 'get_record', config: { objectName: 'ext_customer', outputVariable: 'customer' } },
-            { id: 'note', type: 'notify', config: { body: '{customer.owner_id}' } },
+            { id: 'note', type: 'notify', config: { body: '{{ customer.owner_id }}' } },
           ],
         },
       ],

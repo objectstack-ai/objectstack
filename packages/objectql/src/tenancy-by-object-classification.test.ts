@@ -105,13 +105,15 @@ const NO_TENANT_FIELD = {
 } as any;
 
 const ORG_OBJECT = { name: 'sys_organization', fields: { name: { type: 'text' } } } as any;
+/** ADMITTED by #23284 — the notification family's event row. */
+const SYS_NOTIFICATION = { name: 'sys_notification', fields: { topic: { type: 'text' } } } as any;
 
 async function makeEngine(opts: { posture?: string; organizations?: string[] } = {}) {
   const observed: ObservedCall[] = [];
   const engine = new ObjectQL();
   engine.registerDriver(makeDriver(observed, opts.organizations ?? [ORG_ID]), true);
   await engine.init();
-  for (const o of [SYS_FILE, SYS_PERMISSION_SET, SYS_UNADJUDICATED, DISPATCH_ORDER, NO_TENANT_FIELD, ORG_OBJECT]) {
+  for (const o of [SYS_FILE, SYS_PERMISSION_SET, SYS_UNADJUDICATED, DISPATCH_ORDER, NO_TENANT_FIELD, ORG_OBJECT, SYS_NOTIFICATION]) {
     engine.registry.registerObject(o, PACKAGE_ID);
   }
   if (opts.posture) engine.setTenancyPostureProvider(() => opts.posture);
@@ -134,12 +136,17 @@ describe('#13491 the inventory — a verdict per object, never a namespace', () 
   });
 
   it('#8672 inherits PER OBJECT — the same namespace holds both verdicts', () => {
-    expect(classifyPlatformObjectTenancy('sys_permission_set')).toBe('global');
     expect(classifyPlatformObjectTenancy('sys_file')).toBe('tenant-scoped');
     // The discriminating half: the old blanket predicate answered the SAME
-    // thing for both of these, which is the exemption the ruling withdrew.
-    expect(isPlatformObjectOutOfTenantAuditScope('sys_permission_set')).toBe(true);
+    // thing for every platform object, which is the exemption the ruling
+    // withdrew. Each verdict the inventory records is honoured as recorded —
+    // read off the inventory, since its one `global` entry
+    // (`sys_permission_set`) retired with its object (C3 stage 8).
     expect(isPlatformObjectOutOfTenantAuditScope('sys_file')).toBe(false);
+    for (const [name, entry] of Object.entries(PLATFORM_OBJECT_TENANCY)) {
+      expect(classifyPlatformObjectTenancy(name), name).toBe(entry.tenancy);
+      expect(isPlatformObjectOutOfTenantAuditScope(name), name).toBe(entry.tenancy !== 'tenant-scoped');
+    }
   });
 
   it('the exemption applies to platform namespaces only — an application object was never in it', () => {
@@ -159,12 +166,19 @@ describe('#13491 the inventory — a verdict per object, never a namespace', () 
     // Pinned as a LIST, not a count: the blast radius of the reclassification
     // IS this set, and a silent arrival here is a behaviour change nobody
     // adjudicated. Growing it is a maintainer decision, not a refactor.
+    //
+    // `sys_notification` (#23284) arrives on the maintainer's 2026-08-24
+    // ruling that names the table — 「11303
+    // sys_inbox_message/sys_notification/sys_email 应该写 organization_id。」 —
+    // once its producers fill the column; its own describe block below pins
+    // what the admission moves.
     expect(tenantScopedPlatformObjects()).toEqual([
       'sys_approval_action',
       'sys_approval_approver',
       'sys_approval_request',
       'sys_automation_run',
       'sys_file',
+      'sys_notification',
       'sys_notification_delivery',
       'sys_record_share',
       'sys_upload_session',
@@ -224,6 +238,48 @@ describe('#13491 gate 1 — an admitted platform object reaches #8844 derive/ref
       { context: { isSystem: true, tenantId: ORG_ID } } as any,
     );
     expect(lastWrite(observed, 'sys_file')?.options?.tenantId).toBe(ORG_ID);
+  });
+});
+
+describe('#23284 — a notification no producer could attribute takes the owner ADR-0131 D9 derives', () => {
+  // The producers thread an organization when they have one (the run's, the
+  // record the notification is about, the approval request's). What is left —
+  // a notification about no record, from a run with no organization — reaches
+  // the engine with none, and admission is what puts it under the system-write
+  // rule instead of landing it with `organization_id` NULL.
+  it('single posture, one organization: the org-less notification takes the sole organization', async () => {
+    const { engine, observed } = await makeEngine({ posture: 'single' });
+    await engine.insert('sys_notification', { topic: 'sweep.breach', organization_id: null }, { context: SYSTEM_CTX } as any);
+    expect(lastWrite(observed, 'sys_notification')?.options?.tenantId).toBe(ORG_ID);
+  });
+
+  it('single posture, two organizations: the org-less notification is REFUSED, loudly, and never written', async () => {
+    const { engine, observed } = await makeEngine({ posture: 'single', organizations: [ORG_ID, 'org_second'] });
+    await expect(
+      engine.insert('sys_notification', { topic: 'sweep.breach', organization_id: null }, { context: SYSTEM_CTX } as any),
+    ).rejects.toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500 });
+    expect(lastWrite(observed, 'sys_notification')).toBeUndefined();
+  });
+
+  it.each(['isolated', 'group'] as const)(
+    '%s posture: the org-less notification is REFUSED, loudly, and never written',
+    async (posture) => {
+      const { engine, observed } = await makeEngine({ posture });
+      await expect(
+        engine.insert('sys_notification', { topic: 'sweep.breach', organization_id: null }, { context: SYSTEM_CTX } as any),
+      ).rejects.toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500 });
+      expect(lastWrite(observed, 'sys_notification')).toBeUndefined();
+    },
+  );
+
+  it('a notification that CARRIES its organization is written as it came, on a walled posture too', async () => {
+    const { engine, observed } = await makeEngine({ posture: 'isolated', organizations: [ORG_ID, 'org_second'] });
+    await engine.insert('sys_notification', { topic: 'sweep.breach', organization_id: 'org_second' }, { context: SYSTEM_CTX } as any);
+    const write = lastWrite(observed, 'sys_notification');
+    expect(write?.method).toBe('create');
+    // Nothing was derived over the producer's answer: the engine resolved no
+    // organization of its own for a row that already names one.
+    expect(write?.options?.tenantId).toBeUndefined();
   });
 });
 

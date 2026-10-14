@@ -32,12 +32,14 @@ Authorization splits into three concerns that stay decoupled:
    via [`defineCapability`](#package-capability-declaration-adr-0066-d1); extended
    by admins in Setup. A capability is **not** a contract and has no `inputs` — a
    resource merely *references* one by name (see Requirement, below).
-2. **Assignment** — *who holds it* — permission sets / positions / user
-   bindings (`sys_permission_set`, `sys_position`, `sys_user_permission_set`,
-   `sys_user_position`, and the sets a position names in its `permissionSets`). Runtime records,
-   maintained by admins in Setup — and, since ADR-0090 D12, a **governed**
-   surface: writing them requires tenant-level administration or a covering
-   delegated `adminScope`, never just CRUD on the tables.
+2. **Assignment** — *who holds it* — permission sets and positions, which are
+   catalog definitions served by name from the environment registry (a
+   position names the sets it distributes in its `permissionSets`; ADR-0131
+   D3), handed to users by the assignment rows `sys_user_permission_set` and
+   `sys_user_position`, which name the set or position. The assignment rows are
+   runtime records, maintained by admins in Setup — and, since ADR-0090 D12, a
+   **governed** surface: writing them requires tenant-level administration or a
+   covering delegated `adminScope`, never just CRUD on the tables.
 3. **Requirement** — *what a resource needs* — an object / field / action
    references a capability as a contract. A resource never bakes in "who",
    only "what is required".
@@ -217,63 +219,53 @@ Remember the three-way separation: a capability is **not** a contract. You
 
 ### Two doors, one metadata (ADR-0086 D6/D7)
 
-The `managedBy` provenance axis is not just descriptive — the platform
-**populates and gates on it**, so editing a permission set flows through exactly
-one of two doors, each writing only what it owns:
+Package provenance is not just descriptive — the registry records the owning
+package on every item it serves and the metadata door **gates on it**, so
+editing a permission set flows through exactly one of two doors, each writing
+only what it owns:
 
 - **Package door** (studio `/studio/:packageId/access`) — a package's own set is
   **metadata**, so edits are saved as a **draft** stamped with the `packageId`
   (`saveMetaItem` `mode:'draft'`) and go live with the package's atomic
   **Publish**, exactly like Data and Interfaces. On publish, the security
   catalog serves the published body from the registry, owned by the package
-  (ADR-0131 D3). The landed publish fires `onMetadataMutation`, which runs the
-  audience-binding suggestion reconcile and re-derives the `everyone` anchor's
-  accepted package defaults. Until stage 7 retires the ADR-0094 projector, the
-  publish (a package-door draft publish, or a writable base's direct publish)
-  also has the projector write a `sys_permission_set` projection row,
-  `managedBy:'admin'` with no `packageId`, and the boot reconcile re-creates it
-  if it is missing. No authorization path reads that row, and uninstalling the
-  package removes it. Enforcement is unaffected while a set is still a draft
-  (drafts never enter the active resolve).
+  (ADR-0131 D3); no row is written for it. The landed publish fires
+  `onMetadataMutation`, which runs the audience-binding suggestion reconcile
+  and re-derives the `everyone` anchor's accepted package defaults.
+  Enforcement is unaffected while a set is still a draft (drafts never enter
+  the active resolve).
 - **Environment-admin door** (`metadata-admin`) — the cross-package all-objects
   matrix plus subject **assignment** (`sys_user_permission_set`), edited
   **live** (config); the sets a position distributes are its definition's
-  `permissionSets`. It owns env-authored
-  sets (`managedBy` `platform`/`user`) and assignments — not package sets.
-  Since ADR-0094 the set **definition** itself has one authoritative store —
-  the metadata layer: an env-door write to `sys_permission_set` (the Setup
-  CRUD) is transparently redirected into an env-scope metadata save
-  (`saveMetaItem`), and the data record is a **pure projection** the platform
-  re-derives on every metadata mutation (awaited — no staleness window) and at
-  boot. A package's published set gets such a row too, until stage 7 — the
-  transitional `managedBy:'admin'` row described in the Package-door bullet
-  above. Under a `group` or `isolated` tenancy posture that Setup write is the
-  platform operator's: anyone else is refused `403 PERMISSION_DENIED` before the
-  redirect (ADR-0131 D3). Deleting an artifact-backed set through this door **resets** it to its
-  declared body rather than removing it; renaming through the data door is
-  rejected (the name is the metadata identity — clone instead). Subject
-  assignments remain plain config rows, unchanged.
-- **Data-layer gate (evolved by ADR-0094)** — the security middleware still
-  **refuses** any payload that forges package provenance (insert or update,
-  single or array) and the lifecycle ops with no overlay translation
-  (`transfer`/`restore`/`purge`) on package rows, failing closed ahead of the
-  CRUD check — even a `modifyAllRecords` super-user is blocked. An ordinary
-  admin-door **edit of a set whose definition ships as a code artifact is
-  refused with `403 not_overridable`**, loudly, at the moment of the write:
-  the ADR-0094 write-through still translates the edit into a metadata save,
-  but `permission` declares `allowEnvironmentOverlay: false` (ADR-0005's security
-  row — overlays of the authorization surface would create silent privilege
-  drift), so the tier gate refuses it and no env-scope overlay is minted. The
-  supported channel is the one ADR-0086 two-doors always named: **edit the
+  `permissionSets`. It owns environment-authored sets and assignments — not
+  package sets. The set **definition** has one authoritative store, the
+  metadata layer (ADR-0094 D1, ADR-0131 D3): Setup → Access Control →
+  Permission Sets opens the catalog list
+  (`/apps/setup/metadata/permission?scope=environment`), and a create or edit
+  there is a metadata save (`PUT /api/v1/meta/permission/:name`) into the
+  environment's definition ledger (`sys_metadata`), served from the registry
+  beside the packages' sets. No row mirrors it: the `sys_permission_set`
+  object is no longer registered, so no data route serves one. The save
+  requires `manage_metadata`; under a `group` or `isolated` tenancy posture it
+  is the platform operator's, and anyone else is refused `403` (ADR-0131 D3).
+  The name is the item's identity, so there is no rename — clone instead. A
+  delete cannot remove a set a package ships: its definition stays served from
+  the package. Subject assignments remain plain config rows, unchanged.
+- **Packaged sets are sealed** — an **edit of a set whose definition ships as a
+  code artifact is refused with `403 NOT_OVERRIDABLE`**, loudly, at the moment
+  of the write: `permission` declares `allowEnvironmentOverlay: false`
+  (ADR-0005's security row — overlays of the authorization surface would
+  create silent privilege drift), so no environment-scope overlay is minted,
+  and the refusal names the clone (the "Clone" action on the set, or
+  `POST /api/v1/security/permission-sets/:name/clone`). Narrowing the packaged
+  set itself takes the channel ADR-0086 two-doors always named: **edit the
   package and re-publish**. (ADR-0094 D5's 2026-07-14 direction — translate
   such an edit into a first-class ADR-0005 env-scope overlay — was **retired
-  on 2026-08-09**; see ADR-0094 D5-R.) A set authored through the data door,
+  on 2026-08-09**; see ADR-0094 D5-R.) A set authored in the environment,
   whose definition lives only in `sys_metadata`, rides the still-open
-  `allowRuntimeCreate` tier and stays editable. A "delete" of a packaged set
-  through this door still degrades to a **reset** to the shipped declaration —
-  the admin door can never remove a packaged definition. System /
-  boot writes carry `isSystem` and bypass it (the ADR-0094 projector's among
-  them), so the platform's own writes are never self-blocked. That bypass is not local to this gate — the full set
+  `allowRuntimeCreate` tier and stays editable. System / boot writes carry
+  `isSystem` and pass the door's capability gate, so the platform's own writes
+  are never self-blocked. That bypass is not local to this gate — the full set
   of behaviours the flag changes is catalogued in
   [System Context (`isSystem`)](/docs/permissions/system-context).
 
@@ -412,10 +404,11 @@ unwinding the assignments" — and it is enforced in the same place, by the same
 discipline: **resolution-time filtering, fail-closed**, in
 `resolveAuthzContext`, with no cleanup job involved.
 
-A catalogue row's own `active` column (`sys_permission_set.active`,
-`sys_position.active`) no longer decides a grant. That column is what Setup's
-Deactivate action writes today, so a Deactivate in Setup does not switch the
-grant off.
+No definition carries the switch, and no row does: the `active` column of the
+retired catalog row objects (`sys_permission_set.active`,
+`sys_position.active`) decides nothing, and neither object is registered any
+more (ADR-0131 D3). Setup's active switch on the Positions and Permission Sets
+catalog lists writes the ledger row, through the door below.
 
 The ledger row is written through
 `POST /api/v1/security/_activation/:type/:name`, with `:type` either
@@ -517,10 +510,13 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
   wider than internal (`security-external-wider-than-internal`), `'*'`
   wildcards carrying View/Modify All outside the platform admin set,
   high-privilege `isDefault` (everyone-suggested) sets, the reserved word
-  "role" in security identifiers, a `controlled_by_parent` object with no
-  relation the platform can derive access from (ADR-0055: no required
-  `master_detail`, no `master_detail` at all, and no required `lookup` — so
-  the runtime denies every read and refuses every write), and the ADR-0091
+  "role" in security identifiers, a `controlled_by_parent` object without
+  exactly one required `master_detail` to derive access from (ADR-0055 §1:
+  `security-controlled-by-parent-no-relation` when it declares none — a
+  `master_detail` without `required: true` and a required `lookup` derive
+  nothing — and `security-controlled-by-parent-ambiguous-relation` when it
+  declares two or more; either way the runtime denies every read and refuses
+  every write), and the ADR-0091
   grant-lifecycle rules (a seed grant already expired at authoring time; a
   delegation row missing its mandatory `reason`) — every error rule mirrors
   a runtime gate.
@@ -601,7 +597,9 @@ The complete, prioritized gap map lives in issue **#2561** (the production
   The authoring lint (ADR-0066 ⑨) is also **landed**: `validateCapabilityReferences`
   (`@objectstack/lint`) warns at author time (`os validate` / `os lint`) when a
   `requiredPermissions` names a capability registered nowhere — no built-in, no
-  permission set grants it via `systemPermissions`, no `sys_capability` seed.
+  `defineCapability` declaration, no permission set grants it via
+  `systemPermissions`. A `sys_capability` seed row is not counted: no runtime
+  reader consults one.
 - **Per-operation `requiredPermissions`** (ADR-0066 ⑤) — **landed**: an
   object's `requiredPermissions` may be a `string[]` (gates all CRUD) or a
   `{ read, create, update, delete }` map (read-open / write-gated), enforced

@@ -5,10 +5,13 @@
  * organization BEFORE it touched the running registry.
  *
  * [ADR-0131 D6/D12] That refusal is RETIRED: an uninstall is environment-wide
- * by construction and names no organization, so every caller who passes the
- * operator gate — with or without an active organization — uninstalls, and
- * `deletePackage` is handed no organization. The history below is kept for
- * the rig's sake.
+ * by construction and names no organization, so every caller the doors admit
+ * — with or without an active organization — uninstalls, and `deletePackage`
+ * is handed no organization. [ADR-0131 D12 items 7–8] Under this rig's
+ * `isolated` posture the doors admit only the platform operator: every caller
+ * below that rung is refused by the walled refusal BEFORE anything moves,
+ * which is this file's original lesson (a refused request changes nothing).
+ * The history below is kept for the rig's sake.
  *
  * ## The defect
  *
@@ -35,9 +38,12 @@
  * `organizationId` / `allTenants` keys the way
  * `@objectstack/metadata-protocol`'s `deletePackage` does.
  *
- * Three populations: a current member, a member removed from the organization
- * whose session still names it (the resolver drops the claim), and a caller who
- * never selected an organization. All three uninstall the same way.
+ * Three populations below the operator rung: a current member, a member
+ * removed from the organization whose session still names it (the resolver
+ * drops the claim), and a caller who never selected an organization. All three
+ * are refused the same way. The platform operator (an unscoped
+ * `admin_full_access` grant) uninstalls, with or without an active
+ * organization, naming none.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -82,23 +88,27 @@ const TABLES: Record<string, any[]> = {
     sys_member: [
         { user_id: 'u_member', organization_id: ALPHA, role: 'member' },
         { user_id: 'u_exmember', organization_id: BETA, role: 'member' },
+        { user_id: 'u_admin', organization_id: ALPHA, role: 'owner' },
     ],
     sys_user: [
         { id: 'u_member', email: 'u_member@example.com' },
         { id: 'u_exmember', email: 'u_exmember@example.com' },
         { id: 'u_orgless', email: 'u_orgless@example.com' },
+        { id: 'u_admin', email: 'u_admin@example.com' },
     ],
     sys_user_permission_set: [
         { user_id: 'u_member', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
         { user_id: 'u_exmember', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
         { user_id: 'u_orgless', permission_set_id: 'ps_shared', permission_set: 'shared_access' },
+        { user_id: 'u_admin', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: null },
     ],
     sys_permission_set: [
         { id: 'ps_shared', name: 'shared_access', system_permissions: ['manage_metadata', 'studio.access'] },
+        { id: 'ps_admin', name: 'admin_full_access', system_permissions: ['manage_metadata', 'studio.access', 'setup.access'] },
     ],
 };
 
-type Who = 'member' | 'exmember' | 'orgless';
+type Who = 'member' | 'exmember' | 'orgless' | 'admin' | 'admin_orgless';
 
 const SESSIONS: Record<Who, { id: string; token: string; userId: string; activeOrganizationId?: string }> = {
     member: { id: 'ses_member', token: 'tok_member', userId: 'u_member', activeOrganizationId: ALPHA },
@@ -106,6 +116,9 @@ const SESSIONS: Record<Who, { id: string; token: string; userId: string; activeO
     exmember: { id: 'ses_exmember', token: 'tok_exmember', userId: 'u_exmember', activeOrganizationId: ALPHA },
     // Signed in, and never selected an organization.
     orgless: { id: 'ses_orgless', token: 'tok_orgless', userId: 'u_orgless' },
+    // The platform operator, with an organization selected and with none.
+    admin: { id: 'ses_admin', token: 'tok_admin', userId: 'u_admin', activeOrganizationId: ALPHA },
+    admin_orgless: { id: 'ses_admin2', token: 'tok_admin2', userId: 'u_admin' },
 };
 
 function authService() {
@@ -226,7 +239,7 @@ let warnSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
 afterEach(() => { warnSpy.mockRestore(); });
 
-// ── The subject: every operator uninstalls, naming no organization ───────────
+// ── The subject: the doors refuse below the operator before anything moves ───
 
 const CALLERS: Array<[Who, string]> = [
     ['member', 'a current member'],
@@ -234,8 +247,27 @@ const CALLERS: Array<[Who, string]> = [
     ['orgless', 'a caller who never selected an organization'],
 ];
 
-describe('[ADR-0131 D6] DELETE /packages/:id names no organization, whoever asks', () => {
+describe('[ADR-0131 D12 items 7–8] DELETE /packages/:id below the operator rung is refused before anything moves', () => {
     for (const [who, label] of CALLERS) {
+        it(`${label}: 403 PERMISSION_DENIED naming the posture; the package, its object and its stored rows stay, and deletePackage is never asked`, async () => {
+            const r = rig();
+            expect(await observed(r), 'precondition: the package is installed').toEqual(UNTOUCHED);
+            const answer = await r.call('DELETE', who, `/packages/${PKG}`);
+            expect({ status: answer.status, code: answer.body?.error?.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+            expect(String(answer.body?.error?.message)).toContain("'isolated' tenancy posture");
+            expect(r.deleteRequests).toEqual([]);
+            expect(await observed(r)).toEqual(UNTOUCHED);
+        });
+    }
+});
+
+const OPERATORS: Array<[Who, string]> = [
+    ['admin', 'the platform operator, with an organization selected'],
+    ['admin_orgless', 'the platform operator, with no organization selected'],
+];
+
+describe('[ADR-0131 D6] DELETE /packages/:id names no organization, whoever the doors admit', () => {
+    for (const [who, label] of OPERATORS) {
         it(`${label}: 200; the package and its object leave the registry, GET answers 404, and deletePackage is handed no organization`, async () => {
             const r = rig();
             expect(await observed(r), 'precondition: the package is installed').toEqual(UNTOUCHED);

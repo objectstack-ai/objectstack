@@ -8471,6 +8471,43 @@ const PATH_JOINER_CALL = /^(?:(?:path|node:path)\.)?(?:join|resolve)\s*\(/;
 const PATH_DIRNAME_CALL = /^(?:(?:path|node:path)\.)?dirname\s*\(/;
 const MKDTEMP_CALL = /^(?:fs\.)?mkdtempSync\s*\(/;
 const SCRATCH_CALL = /\b(?:fs\.)?(mkdtempSync|mkdirSync)\s*\(/g;
+
+/**
+ * ── A DECLARATION is not a directory-creating site (#23294) ─────────────────
+ *
+ * `SCRATCH_CALL` matches a name and an opening paren, and a type declaration
+ * spells exactly that: a module shim's `export function mkdtempSync(prefix:
+ * string): string;`. Read as a call, its "base" is `prefix: string`, which no
+ * resolver can read, so a correct declaration came back UNRESOLVED and redded
+ * the whole-tree case — the reader was wrong, not the declaration. Two shapes
+ * are declarations, both read from the source text as the rest of this scan is:
+ *
+ *   - a declaration FILE. TypeScript admits no statement in an ambient context,
+ *     so nothing in one can run, let alone create a directory: every match in
+ *     it is a signature. `DECLARATION_FILE` names the extensions TypeScript
+ *     reads as declaration files.
+ *   - the `function` keyword's own parameter list, in any source — `declare
+ *     function`, `export function`, an overload, or the head of a same-file
+ *     wrapper. What follows the name there is a parameter list being DECLARED,
+ *     not an argument being passed; `singleCallSiteParameters` already skips
+ *     its own declarations with the same test. A wrapper's BODY is unaffected:
+ *     the calls inside it are calls, and are judged.
+ *
+ * Measured at bae5841bce: of 1764 raw matches across the tracked sources,
+ * exactly two were declarations, and both rules agree on both — the `node:fs`
+ * shim in the showcase example, one `mkdtempSync` and one `mkdirSync` line.
+ * No other declaration shape matched anywhere: no interface method signature,
+ * no object-literal method, no class method named for either call.
+ *
+ * ⛔ Narrow on purpose. Those other shapes, written in an ordinary source, are
+ * still read as sites. This scan's bias is toward reporting a site rather than
+ * clearing it, and the text that would clear a method signature — a name, an
+ * argument list, then `:` — is also the text of a ternary's call. A shape this
+ * rule does not clear fails LOUD (UNRESOLVED, with its file and line), which is
+ * the honest direction; one it wrongly cleared would be silence over a site.
+ */
+const DECLARATION_FILE = /\.d\.[cm]?ts$/;
+const DECLARED_BY_FUNCTION_KEYWORD = /\bfunction\s+$/;
 const QUOTED_LITERAL = /^(['"`])([\s\S]*)\1$/;
 const PLAIN_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
@@ -8898,6 +8935,8 @@ function combineReadings(readings, name) {
  * own repo-relative path — the anchor spellings resolve against it.
  */
 export function scratchDirSitesInSource(rel, source) {
+  // A declaration file holds signatures only (`DECLARATION_FILE` above).
+  if (DECLARATION_FILE.test(rel)) return { inTree: [], unresolved: [], scanned: 0 };
   const masked = maskedComments(String(source));
   // A call spelled inside a STRING is a fixture, not a call — this module's own
   // self-test plants fixture sources as string literals, and read as code they
@@ -8920,6 +8959,8 @@ export function scratchDirSitesInSource(rel, source) {
   let scanned = 0;
   for (const m of masked.matchAll(SCRATCH_CALL)) {
     if (literal[m.index]) continue;
+    // The `function` keyword's parameter list is declared, not passed.
+    if (DECLARED_BY_FUNCTION_KEYWORD.test(masked.slice(Math.max(0, m.index - 64), m.index))) continue;
     const { text } = balancedArgText(masked, m.index + m[0].length);
     const expr = (splitArgList(text)[0] ?? '').trim();
     ctx.seen.clear();
@@ -11648,6 +11689,23 @@ export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
 export const CONTRACT_REVIEW_TIER_NAME = 'CONTRACT_REVIEW_TIER';
 
 /**
+ * The default judgment tier's NAME — the second token a GitHub artefact may
+ * carry for a tier, and only on a review whose FACE maps to it. The tier of an
+ * owed contract review follows the face that made it owed (ruling record
+ * 6159870311 on #23352, letter B′ with C): a published schema or governed rules
+ * text maps to {@link CONTRACT_REVIEW_TIER_NAME}; a review owed ONLY by a
+ * `Clause-②: yes` declaration maps to this one, run as the lane seat's review
+ * of record. `record-recognisers.mjs` owns that mapping (`reviewFace`) and
+ * accepts exactly the name the face maps to — never a floor, since this file
+ * orders no tiers.
+ *
+ * ⛔ The NAME only. The value stays where it is (`TIER_DEFAULT` in
+ * `dispatch-gates.data.mjs`), and nothing about the contract-review tier's
+ * identity moves: the same ruling retires nothing.
+ */
+export const TIER_DEFAULT_NAME = 'TIER_DEFAULT';
+
+/**
  * The clause-① mandate rows are data: `MANDATORY_TIER_GLOB_ROWS` in `dispatch-gates.data.mjs` carries each
  * glob, the NAME of the tier it mandates, its reason and its one-line-exit switch — with the docblock that
  * governs the table. This binding resolves the tier name to the one value site above, and refuses a name
@@ -11781,10 +11839,15 @@ export function tierLines(result) {
         `${hits.length} hit(s) — a mandatory surface must print its mandate`,
     );
   }
+  // Owed by SURFACE, never by lane (the contract-review reference's three faces), and served at the tier of the
+  // face that made it owed (ruling record 6159870311 on #23352, letter B′ with C) — `reviewFace` in
+  // `record-recognisers.mjs` holds the mapping; this note names both tiers by their constant NAMES.
   const clause2 =
     '  Clause ② is NOT reachable from paths: a card that WIDENS a published accept set or the public surface owes a' +
-    ' contract-review-tier REVIEW too (owed in the spec and skills lanes, in-seat at tier or by the at-tier subagent;' +
-    ' default-tier build; a hit outside those lanes is spec-lane work and moves there); a card that only NARROWS one is' +
+    ' REVIEW too — owed by SURFACE, never by lane — at the tier of the face that made it owed:' +
+    ` ${CONTRACT_REVIEW_TIER_NAME} for a published schema or governed rules text (in-seat at tier or by the at-tier` +
+    ` subagent), ${TIER_DEFAULT_NAME} for the \`Clause-②: yes\` declaration alone, the lane seat's own review of record;` +
+    ' default-tier build; a hit outside the spec lane is spec-lane work and moves there. A card that only NARROWS one is' +
     ' `Clause-②: no`, stays in its lane, and owes one contract-review-tier review before the queue — judged from' +
     ' the card CONTENT. This line is a FLOOR, never a clearance.';
   // The suspicion tail prints only on a hit — unlike the clause-② note above,

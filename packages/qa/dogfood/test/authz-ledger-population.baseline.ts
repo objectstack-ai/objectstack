@@ -71,8 +71,9 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   // ── REST families (`packages/rest/src/rest-route-ledger.ts`) ────────────
   // `metadata` is absent because it IS classified — `anonymous-deny-meta`
   // covers it through the guarded registrar — and so is `openapi`, classified
-  // by `anonymous-deny-api-description` since #22430. The other 16 families
-  // are here.
+  // by `anonymous-deny-api-description` since #22430, and `forms`, classified
+  // by `anonymous-door-public-form` (ADR-0138 D2 class 1: both of its routes
+  // are the class). The other 15 families are here.
   'rest-family:rest-route-ledger.ts:analytics',
   'rest-family:rest-route-ledger.ts:approvals',
   'rest-family:rest-route-ledger.ts:batch',
@@ -81,7 +82,6 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   'rest-family:rest-route-ledger.ts:discovery',
   'rest-family:rest-route-ledger.ts:email',
   'rest-family:rest-route-ledger.ts:external-datasource',
-  'rest-family:rest-route-ledger.ts:forms',
   // ⚠️ NOT the same surface as `dispatcher-domain:route-ledger.ts:/packages`,
   // which IS classified: that key names the dispatcher domain whose single
   // handler body carries the domain-wide gate. This one names the four routes
@@ -96,26 +96,25 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
 
   // ── dispatcher domains (`packages/runtime/src/route-ledger.ts`) ─────────
   // Absent because classified: `/meta`, `/actions`, `/automation`,
-  // `/packages`, `/mcp`, `/analytics`, `/i18n` (#22432). The other 14 domains
-  // are here.
+  // `/packages`, `/mcp`, `/analytics`, `/i18n` (#22432), `/notifications`,
+  // `/keys` and `/share-links` (ADR-0138 D2: each domain's anonymous decision
+  // moved to its first statement), and `/ui` and `/data` (ADR-0138 D2's second
+  // slice: each domain's anonymous decision became its first statement).
+  // `/approvals/act` and `/webhooks/redeliver` were never enumerated here: they
+  // arrived classified. The other 9 domains are here.
   'dispatcher-domain:route-ledger.ts:/.well-known/objectstack',
   'dispatcher-domain:route-ledger.ts:/ai',
   'dispatcher-domain:route-ledger.ts:/apps',
   'dispatcher-domain:route-ledger.ts:/auth',
-  'dispatcher-domain:route-ledger.ts:/data',
   'dispatcher-domain:route-ledger.ts:/discovery',
   'dispatcher-domain:route-ledger.ts:/health',
-  'dispatcher-domain:route-ledger.ts:/keys',
   // ⚠️ Separate from `/mcp`, deliberately. The `/mcp` key is classified by
   // `mcp-http-identity`, whose enforcement site is `handleMcp`; `/mcp/skill`
   // is a different handler body (`handleMcpSkillRequest`) that the probe
   // table was already measured not to reach.
   'dispatcher-domain:route-ledger.ts:/mcp/skill',
-  'dispatcher-domain:route-ledger.ts:/notifications',
   'dispatcher-domain:route-ledger.ts:/ready',
   'dispatcher-domain:route-ledger.ts:/security',
-  'dispatcher-domain:route-ledger.ts:/share-links',
-  'dispatcher-domain:route-ledger.ts:/ui',
 ];
 
 /**
@@ -131,6 +130,16 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
  * (#22430): `rest-family:rest-route-ledger.ts:openapi` left classified, by the
  * `anonymous-deny-api-description` row and its booted-showcase proof. 30 at
  * 2026-10-09 (#22432): `dispatcher-domain:route-ledger.ts:/i18n` left
- * classified, by the `anonymous-deny-i18n` row and its domain gate pin.
+ * classified, by the `anonymous-deny-i18n` row and its domain gate pin. 26 at
+ * 2026-10-13 (ADR-0138 card E2): `rest-family:rest-route-ledger.ts:forms` left
+ * classified by `anonymous-door-public-form`, the D2 class 1 row and its
+ * booted proof, and `dispatcher-domain:route-ledger.ts:/notifications`,
+ * `/keys` and `/share-links` left classified by `anonymous-deny-notifications`,
+ * `anonymous-deny-keys` and `anonymous-deny-share-links`, each with its domain
+ * gate pin, once each domain's anonymous decision moved to its first statement.
+ * 24 at 2026-10-14 (ADR-0138 card E2, second slice):
+ * `dispatcher-domain:route-ledger.ts:/ui` and `/data` left classified by
+ * `anonymous-deny-ui` and `anonymous-deny-data`, each with its domain gate pin,
+ * once each domain's anonymous decision became its first statement.
  */
-export const LEDGER_POPULATION_BASELINE_MAX = 30;
+export const LEDGER_POPULATION_BASELINE_MAX = 24;

@@ -69,7 +69,7 @@ import { ObjectSchema, referenceCarrierOf } from '@objectstack/spec/data';
 import { objectPermissionGrants, type PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin, securityDefaultPermissionSets, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { declaredCollection } from './artifact-collections.js';
-import { deriveCrudCases, fillRelationalRefs, type CrudCase } from './derive.js';
+import { deriveCrudCases, fillRelationalRefs, fixtureBody, type CrudCase } from './derive.js';
 import type { VerifyStack } from './harness.js';
 import { declaredPositionNames, provisionRlsPositionPersona } from './rls.js';
 
@@ -477,59 +477,12 @@ const plain = (a: ParentWriteReachAnswer): ParentWriteReachAnswer => ({
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
-const DAY_MS = 86_400_000;
-
-/** A `date` / `datetime` value moved `days` later, in the same spelling. */
-function laterBy(value: string, days: number): string {
-  const at = Date.parse(value);
-  if (Number.isNaN(at) || days === 0) return value;
-  const moved = new Date(at + days * DAY_MS).toISOString();
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? moved.slice(0, 10) : moved;
-}
-
-/** The `k`-th distinct value of a sample `base`. */
-function vary(base: string | number, k: number): string | number {
-  if (typeof base === 'number') return base + k;
-  if (/^\d{4}-\d{2}-\d{2}/.test(base)) return laterBy(base, k);
-  const at = base.indexOf('@');
-  if (at > 0) return `${base.slice(0, at)}-p${k}${base.slice(at)}`;
-  if (/^https?:\/\//.test(base)) return `${base.replace(/\/$/, '')}/p${k}`;
-  if (/^\+\d+$/.test(base)) return `${base}${k}`;
-  return `${base}-p${k}`;
-}
-
-/** The fields of `objectDef` a uniqueness constraint covers: a declared field scope, or a unique index entry. */
-function uniqueFields(objectDef: any): Set<string> {
-  const out = new Set<string>();
-  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
-    if (def?.unique !== undefined && def?.unique !== false) out.add(name);
-  }
-  for (const index of Array.isArray(objectDef?.indexes) ? objectDef.indexes : []) {
-    if (index?.unique) for (const f of Array.isArray(index.fields) ? index.fields : []) out.add(String(f));
-  }
-  return out;
-}
-
 /**
- * The smallest record of `objectDef` the CRUD derivation can offer (the
- * unique-scope family's fixture shape): its values for the fields the object
- * REQUIRES, so every optional field takes the app's own default. Each `date` /
- * `datetime` is one day after the one declared before it, and each
- * unique-constrained value is made distinct by `n`.
+ * This family's letter on every string value it varies. A fixture is the
+ * smallest record the CRUD derivation can offer (`derive.ts`'s `fixtureBody`,
+ * the unique-scope family's shape).
  */
-function fixtureBody(body: Record<string, unknown>, objectDef: any, n: number): Record<string, unknown> {
-  const unique = uniqueFields(objectDef);
-  const out: Record<string, unknown> = {};
-  let dates = 0;
-  for (const [name, def] of Object.entries<any>(objectDef?.fields ?? {})) {
-    if (def?.required !== true || !(name in body)) continue;
-    let value = body[name];
-    if ((def?.type === 'date' || def?.type === 'datetime') && typeof value === 'string') value = laterBy(value, dates++);
-    if (unique.has(name) && (typeof value === 'string' || typeof value === 'number')) value = vary(value, n);
-    out[name] = value;
-  }
-  return out;
-}
+const FIXTURE_TAG = 'p';
 
 // ── The verdict ─────────────────────────────────────────────────────────────
 
@@ -695,7 +648,7 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
     const refs = (c.relationalRefs ?? []).filter((r) => !(r.field in overrides));
     const { body, missing } = fillRelationalRefs({ ...c, relationalRefs: refs }, ids);
     if (missing) return { reason: missing };
-    const row = { ...fixtureBody(body, objectDefs.get(object), ++counter), ...overrides, ...(hasOwnerColumn(object) ? { owner_id: owner } : {}) };
+    const row = { ...fixtureBody(body, objectDefs.get(object), ++counter, FIXTURE_TAG), ...overrides, ...(hasOwnerColumn(object) ? { owner_id: owner } : {}) };
     try {
       const [written] = await stack.seed(object, [row]);
       return written?.id != null ? { id: String(written.id) } : { reason: `the seed of ${object} returned no id` };
@@ -851,7 +804,7 @@ export async function runParentWriteReachProofs(stack: VerifyStack, config: any)
             const refs = (cc.relationalRefs ?? []).filter((r) => r.field !== field);
             const { body } = fillRelationalRefs({ ...cc, relationalRefs: refs }, ids);
             const answer = await write(stack, p.token, c.object, 'insert', {
-              ...fixtureBody(body, objectDefs.get(c.object), ++counter),
+              ...fixtureBody(body, objectDefs.get(c.object), ++counter, FIXTURE_TAG),
               [field]: masterId,
             });
             const made = answer.kind === 'written' && answer.id ? await row(c.object, answer.id) : undefined;

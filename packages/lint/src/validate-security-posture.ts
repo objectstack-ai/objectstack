@@ -20,11 +20,12 @@
  * | security-grant-expired-at-authoring(err)| ADR-0091 D2 resolution filtering|
  * | security-delegation-missing-reason(err) | ADR-0091 D3 dual audit          |
  * | security-cbp-no-relation      (error)   | #7503 (runtime refusal #7474)   |
- * | security-cbp-ambiguous-relation(error)  | #14747 order-dependent master   |
+ * | security-cbp-ambiguous-relation(error)  | #14747 order-dependent master; runtime refusal since #23100 |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
- * BUT ONE mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
- * zod enum + fail-closed evaluator, D5/D9 anchor binding gate, D3 rename wave)
+ * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
+ * zod enum + fail-closed evaluator, D5/D9 anchor binding gate, D3 rename wave,
+ * ADR-0055 §1's one required master_detail)
  * — the lint moves the failure from runtime-deny to author-time fix-it.
  * `security-anchor-high-privilege` mirrors that gate for the one suggestion a
  * package can actually declare (`isDefault: true` → the `everyone` anchor,
@@ -32,17 +33,16 @@
  * an operator binds to `guest` at install time is a decision ADR-0090 D9
  * ("a package may suggest bindings … the admin confirms each individually")
  * puts past authoring, so this rule is not — and cannot be — coverage for an
- * app-authored anchor set bound to `guest` (#16110). That binding is held by
- * the runtime's own `describeAnchorForbiddenBits(set, 'guest')` gate instead.
+ * app-authored anchor set bound to `guest` (#16110). No runtime door binds a
+ * set to `guest` today; ADR-0138 D3 item 5's bind door runs
+ * `describeAnchorForbiddenBits(set, 'guest')` when it is built.
  *
- * The exception INVERTS that argument rather than weakening it.
- * `security-cbp-ambiguous-relation` has no runtime refusal to mirror precisely
- * BECAUSE the runtime does not refuse: it silently PICKS a winner by field
- * declaration order, so there is no later runtime verdict for the author to
- * discover, and author time is the only place the ambiguity can surface at all
- * (#14747). What it does satisfy is the admissibility bar the #7503 push site
- * below states — a self-contained property of the object document, with no
- * per-permission-set nuance to adjudicate and no legitimate reading.
+ * `security-cbp-ambiguous-relation` used to be the one exception: the runtime
+ * did not refuse two candidate masters, it silently PICKED one by field
+ * declaration order (#14747). Since #23100 (maintainer ruling B, ADR-0055 §1)
+ * the runtime derives a master from exactly one required `master_detail` and
+ * from nothing else, so two of them now meet the same runtime refusal as none
+ * — every read denied, every write refused — and both rules mirror it.
  *
  * The non-`error` rules are the ones with NO hard runtime refusal behind them
  * AND no such certainty:
@@ -312,104 +312,70 @@ function firstMasterDetailField(obj: AnyRec): { name: string; parent?: string } 
 interface CbpRelation {
   /** The field that answers. */
   field: string;
-  /** `master_detail` or `lookup`. */
+  /** Always `master_detail` — kept so the ungranted-detail rule's message names the type it reports. */
   type: string;
   /** The object it references. */
   master: string;
 }
 
 /**
- * [#7503] The master-relation precedence, as ONE table both CBP rules read.
+ * [ADR-0055 §1 · #23100, maintainer ruling B] The master candidates of a
+ * `controlled_by_parent` object: every `master_detail` field declared
+ * `required: true` that names a `reference`, in declaration order. The object
+ * derives its master from EXACTLY ONE of them — zero is
+ * `security-controlled-by-parent-no-relation`, two or more is
+ * `security-controlled-by-parent-ambiguous-relation`.
  *
- * A point-for-point mirror of `resolveCbpRelation` in
- * `packages/plugins/plugin-security/src/security-plugin.ts` — the SAME
- * three-step fallback, in the same order, with the same "must also carry a
- * reference target" condition folded into each step (`pick` there requires
- * `pred(f) && ref(f)`, so a `master_detail` naming no target resolves nothing):
+ * This used to be a three-tier table (`CBP_TIERS`, #7503 / #14747) mirroring a
+ * three-tier fallback in the runtime: a required `master_detail`, else ANY
+ * `master_detail`, else a required `lookup`. ADR-0055 §1 never recorded the
+ * second and third tiers, and ruling B retired both, so the table collapsed
+ * to its first row and is spelled as the one predicate it now is. The same
+ * sentence is read three times, each by the seam that owns its input shape —
+ * `ObjectSchema`'s parse (`refuseControlledByParentWithoutOneMaster`,
+ * `packages/spec/src/data/object.zod.ts`), this linter, and the runtime's
+ * `resolveCbpRelation` (`packages/plugins/plugin-security/src/security-plugin.ts`)
+ * — and the tests of this rule hold its verdict equal to the parse's on the
+ * shapes the ruling names. ⛔ Do not re-introduce a fallback tier here: a
+ * linter that accepts what the parse and the runtime refuse reads, to the next
+ * author, as a gate that is watching.
  *
- *   1. a `required` `master_detail` with a reference, else
- *   2. ANY `master_detail` with a reference, else
- *   3. a `required` `lookup` with a reference.
- *
- * `required` is read for truthiness, not `=== true`, because the runtime does
- * (`f?.required`) — mirroring the gate means mirroring its coercions too.
- *
- * The tiers are a table rather than a `??` chain spelled twice because the
- * no-relation rule and the ambiguity rule (#14747) must not be able to disagree
- * about which tier wins: one says "no tier matched", the other says "the tier
- * that matched holds more than one candidate", and those are answers to the
- * same question. The `label` is author-facing — it appears in the ambiguity
- * message, so the tier the author is told about is the tier that was tested.
- *
- * The one DELIBERATE divergence from the runtime is the reference spelling. The
- * runtime accepts `reference ?? reference_to ?? referenceTo`; `refOf` here
- * accepts only `reference`, the sole spelling `FieldSchema` declares. The
- * aliases do not parse (strict schema, #5017), so for any stack an author can
- * ship the two agree; re-introducing the alias fallback here would restore
- * precisely the inert branch #5017 removed, and on the pre-parse path the
- * schema already names the real defect (the alias key) rather than this rule
- * guessing past it.
+ * `required` is read as `=== true`, the spec's own type for it; the runtime
+ * reads the same. The one deliberate divergence from the runtime is the
+ * reference spelling: the runtime accepts `reference ?? reference_to ??
+ * referenceTo` (it reads the unparsed registry, ruling of 2026-08-30), while
+ * `refOf` here accepts only `reference`, the sole spelling `FieldSchema`
+ * declares. The aliases do not parse (strict schema, #5017), so for any stack
+ * an author can ship the two agree; on the pre-parse path the schema already
+ * names the real defect (the alias key) rather than this rule guessing past it.
  */
-const CBP_TIERS: ReadonlyArray<{ label: string; pred: (f: AnyRec) => boolean }> = [
-  { label: 'required master_detail', pred: (f) => f.type === 'master_detail' && !!f.required },
-  { label: 'any master_detail', pred: (f) => f.type === 'master_detail' },
-  { label: 'required lookup', pred: (f) => f.type === 'lookup' && !!f.required },
-];
-
-/**
- * [#7503 / #14747] The WINNING tier and EVERY candidate in it, in declaration
- * order — `undefined` when no tier matches (nothing to derive access from).
- *
- * Only the winning tier is reported on, and that is not a simplification: the
- * runtime's `??` chain stops at the first tier that resolves, so a tie in a
- * lower tier is masked by a higher tier's single winner and is not a decision
- * the platform ever makes. Reordering fields inside a masked tier changes
- * nothing, and reporting it would be reporting a non-defect.
- */
-function cbpMasterCandidates(obj: AnyRec): { tier: string; candidates: CbpRelation[] } | undefined {
-  const entries = recordsOf(obj.fields);
-  for (const { label, pred } of CBP_TIERS) {
-    const matched = entries.filter((f) => pred(f) && refOf(f));
-    if (matched.length > 0) {
-      return {
-        tier: label,
-        candidates: matched.map((f) => ({
-          field: String(f.name ?? '?'),
-          type: String(f.type),
-          master: refOf(f) as string,
-        })),
-      };
-    }
-  }
-  return undefined;
+function cbpMasterCandidates(obj: AnyRec): CbpRelation[] {
+  return recordsOf(obj.fields)
+    .filter((f) => f.type === 'master_detail' && f.required === true && refOf(f))
+    .map((f) => ({ field: String(f.name ?? '?'), type: 'master_detail', master: refOf(f) as string }));
 }
 
 /**
- * [#7503] The relation a `controlled_by_parent` object derives its access from,
- * or `undefined` when the platform has nothing to derive from.
- *
- * The runtime's winner, exactly: `Array.prototype.find` over a tier is the
- * first element `filter` over that same tier keeps, and the first tier with a
- * candidate is the tier the `??` chain stops at — so `candidates[0]` of the
- * winning tier IS `pick(...) ?? pick(...) ?? pick(...)`, with the ambiguity the
- * runtime resolves by position now visible to the caller instead of discarded.
+ * [#7503 · ADR-0055 §1] The relation a `controlled_by_parent` object derives
+ * its access from — its one required `master_detail` — or `undefined` when it
+ * declares none, or more than one (the runtime derives no master from either).
  */
 function resolveCbpRelation(obj: AnyRec): CbpRelation | undefined {
-  return cbpMasterCandidates(obj)?.candidates[0];
+  const candidates = cbpMasterCandidates(obj);
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 /**
  * [#22212] The relation that makes an object a CHILD whose record-level access
  * is derived from a master — the subject of `security-master-detail-ungranted`.
  *
- * A `controlled_by_parent` object is answered by {@link resolveCbpRelation},
- * the runtime's own precedence (required master_detail, then any master_detail,
- * then a required LOOKUP): that is the field the platform derives the child's
- * record access through, so a lookup-bound child is as much a child as a
- * master-detail one. Keyed on `firstMasterDetailField` alone, the rule was
- * silent on exactly that shape — a `controlled_by_parent` object bound through
- * a required lookup and granted in no set — while object-level CRUD is never
- * derived for it either, so the role-bound 403 is the same.
+ * A `controlled_by_parent` object is answered by {@link resolveCbpRelation}:
+ * its one required `master_detail` is the field the platform derives the
+ * child's record access through (ADR-0055 §1). Until #23100 that resolution
+ * also accepted a required LOOKUP, and #22212 widened this rule to it; ruling
+ * B retired that tier, so a lookup-bound `controlled_by_parent` object is now
+ * no child at all — the parse and `security-controlled-by-parent-no-relation`
+ * refuse it, and this rule has nothing to add.
  *
  * Every other object keeps the reading this rule always had: a master_detail
  * field makes it a detail whatever its sharingModel says.
@@ -524,34 +490,38 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     }
 
     // ── [#7503] controlled_by_parent with nothing to derive access FROM ──
-    // The object says "my access comes from my master" and names no master.
-    // Both runtime halves of ADR-0055 already refuse this shape, and neither
+    // The object says "my access comes from my master" and names no master:
+    // no `master_detail` field declared `required: true` (ADR-0055 §1 — since
+    // #23100 a non-required `master_detail` and a required `lookup` no longer
+    // count). Both runtime halves of ADR-0055 refuse this shape, and neither
     // is a judgement call the linter has to second-guess:
     //   - writes → 422 INVALID_METADATA (`MasterDetailRelationMissingError`,
     //     the #7474 split — a metadata defect, explicitly NOT an access verdict)
     //   - reads  → `computeControlledByParentFilter` returns RLS_DENY_FILTER,
-    //     so every read is denied too (defense-in-depth, whose own comment says
-    //     "spec validation should prevent authoring it" — this rule is that).
+    //     so every read is denied too.
     // So it is `error`, not advisory: it mirrors a hard runtime enforcement
     // point exactly (the ADR-0090 D7 / ADR-0049 criterion at the head of this
     // file), and the defect is a self-contained property of the object document
-    // — no per-permission-set nuance to adjudicate, no legitimate reading.
+    // — no per-permission-set nuance to adjudicate, no legitimate reading. The
+    // parse refuses the same shape (`ObjectSchema`); this rule is what an
+    // UNPARSED intake meets.
     //
     // NOT exempted for system objects, unlike the D1 unset-OWD rule above: the
     // runtime refusal does not exempt them either, and an object declaring a
     // derivation it cannot perform is broken on its own terms, independent of
     // who may author it.
-    if (owd === 'controlled_by_parent' && !resolveCbpRelation(obj)) {
+    const cbpCandidates = owd === 'controlled_by_parent' ? cbpMasterCandidates(obj) : undefined;
+    if (cbpCandidates && cbpCandidates.length === 0) {
       findings.push({
         severity: 'error',
         rule: SECURITY_CBP_NO_RELATION,
         where: `object "${objName}"`,
         path: `${objPath}.sharingModel`,
-        // [#22161] One verdict sentence; the ADR-0055 precedence it tested and
-        // why the object is unusable rather than locked down are this id's
+        // [#22161] One verdict sentence; the ADR-0055 rule it tested and why
+        // the object is unusable rather than locked down are this id's
         // `os explain` entry.
         message:
-          `declares sharingModel 'controlled_by_parent' but has no master relation to derive access ` +
+          `declares sharingModel 'controlled_by_parent' but no required master_detail field to derive access ` +
           `from, so every read is denied and every write refused (422 INVALID_METADATA)`,
         // [#22161] One remedy line; that an object with no master decides its
         // own baseline, and what each value means, is this id's `os explain`
@@ -562,48 +532,37 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       });
     }
 
-    // ── [#14747] controlled_by_parent whose master is decided by ORDER ────
-    // The opposite defect to the one above: not zero candidates, but TWO OR
-    // MORE in the tier that wins. `pick` is `find` here and in the runtime, so
-    // the master is whichever candidate the field map happens to list first —
-    // field declaration order, a property that carries no authored meaning.
-    // Moving a field up or down a schema file is a review-invisible edit that
-    // reads as cosmetic, and it silently repoints the record-level security of
-    // every row of the object. Nothing reports it at runtime: the platform does
-    // not refuse, it picks (#14747).
-    //
-    // `error`, not advisory, and for the INVERSE of the usual reason — there is
-    // no runtime refusal to mirror BECAUSE the runtime silently decides, which
-    // makes author time the only place this can ever surface. The
-    // admissibility bar is the one the rule above states and this shape meets
-    // identically: a self-contained property of the object document, no
-    // per-permission-set nuance to adjudicate, and no legitimate reading — two
-    // tied candidates is not an author saying which master they meant. See the
-    // ADR-0049 paragraph in the module header.
+    // ── [#14747 · #23100] controlled_by_parent with TWO OR MORE masters ───
+    // The opposite defect to the one above: not zero candidates, but two or
+    // more required `master_detail` fields. Until #23100 the runtime did not
+    // refuse this — it PICKED the first by field declaration order, so moving
+    // a field up or down a schema file silently repointed the record-level
+    // security of every row (#14747), and this rule was the only place the
+    // tie could surface. Ruling B (ADR-0055 §1: exactly one) made the runtime
+    // derive NO master from two, so the shape now meets the same refusal as
+    // the rule above — every read denied, every write refused — and this rule
+    // mirrors it. Kept a separate id because the remedy differs: not "add a
+    // master" but "keep one".
     //
     // NOT exempted for system objects, for the same reason the rule above is
     // not: the ambiguity is a property of the document, independent of who may
     // author it.
-    const cbpTier = owd === 'controlled_by_parent' ? cbpMasterCandidates(obj) : undefined;
-    if (cbpTier && cbpTier.candidates.length > 1) {
-      const winner = cbpTier.candidates[0];
-      const roster = cbpTier.candidates.map((cand) => `"${cand.field}" → ${cand.master}`).join(', ');
+    if (cbpCandidates && cbpCandidates.length > 1) {
+      const roster = cbpCandidates.map((cand) => `"${cand.field}" → ${cand.master}`).join(', ');
       findings.push({
         severity: 'error',
         rule: SECURITY_CBP_AMBIGUOUS_RELATION,
         where: `object "${objName}"`,
         path: `${objPath}.fields`,
-        // [#22161] One verdict sentence; why a tie is decided by declaration
-        // order, and what reordering does to the security boundary, are this
-        // id's `os explain` entry.
+        // [#22161] One verdict sentence; why exactly one master is the rule is
+        // this id's `os explain` entry.
         message:
-          `the controlled_by_parent master is decided by field order: ${cbpTier.candidates.length} fields ` +
-          `tie in the ${cbpTier.tier} tier (${roster}) and "${winner.field}" wins today`,
-        // [#22161] One remedy line; the tier precedence, and why only a tie in
-        // the winning tier is ambiguous, are this id's `os explain` entry.
+          `declares ${cbpCandidates.length} required master_detail fields (${roster}), so no ` +
+          `controlled_by_parent master is derived: every read denied, every write refused`,
+        // [#22161] One remedy line.
         hint:
-          `Leave ONE candidate in the ${cbpTier.tier} tier: make the intended master the only required ` +
-          `master_detail, or drop required (or change the relation type) on the others`,
+          `Keep master_detail on the ONE master this object's rows belong to, and declare every other parent ` +
+          `as a lookup field`,
       });
     }
 
@@ -934,8 +893,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // silent "can't fill in / can't submit the subtable" trap (framework#2700,
   // downstream os-tianshun-mtc#43). Statically detectable: a detail (has a
   // master_detail field, or — #22212 — is `controlled_by_parent` and resolves
-  // its master the way the runtime does, a required lookup included) that NO
-  // authored permission set grants.
+  // its master the way the runtime does: its one required master_detail,
+  // ADR-0055 §1) that NO authored permission set grants.
   //
   // Advisory `warning` — it does not gate the build. Two deliberate silences
   // keep the false-positive rate near zero: (a) if the package authors no

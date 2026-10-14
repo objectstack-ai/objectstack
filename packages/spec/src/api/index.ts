@@ -24,11 +24,24 @@ export * from './endpoint.zod';
 // The gate therefore becomes public so the metadata layer can reuse the SAME
 // criteria at publish and at index-build time — one judge, three doors, rather
 // than a second implementation that drifts.
+//
+// [ADR-0138 D2b] …and the cross-item judge beside them: the anonymous flow
+// endpoint × `runAs: 'system'` flow pair. The stack parse holds both items; the
+// metadata layer's package publish and the metadata protocol's flow publish each
+// hold one and read the other, so all three call this one judge.
 export {
     validateApiEndpointDeclarations,
     identityFreeEndpointGateFailure,
+    anonymousFlowDoorTarget,
+    anonymousElevatedFlowPairs,
+    anonymousEndpointElevatedFlowMessage,
+    elevatedFlowAnonymousEndpointsMessage,
+    validateAnonymousElevatedFlows,
     type EndpointGateIssue,
     type EndpointGateIdentity,
+    type AnonymousFlowDoorCandidate,
+    type ElevatedFlowCandidate,
+    type AnonymousElevatedFlowPair,
 } from './endpoint-publish-gate';
 export * from './discovery.zod';
 export * from './events.zod';

@@ -10,10 +10,10 @@ description: >
   warnings. Do not use for general i18n library questions unrelated to
   ObjectStack bundles.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "17.7.0"
+  version: "18.0.0-next.0"
   domain: i18n
   tags: i18n, translation, locale, l10n, bundle, coverage
 ---

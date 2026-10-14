@@ -7,7 +7,7 @@
  * ruling D; ADR-0032 Decision 2, a computed value is whole-field CEL).
  * Declared in the expression ledger and evaluated in the same change.
  *
- * Before this, the executor handed each to `interpolate()`: a `{token}`
+ * Before this, the executor handed each to the 17.x `interpolate()`: a `{token}`
  * resolved, an envelope written at `defaults.*` or `defaultValue` went on the
  * wire as the object `{ dialect: 'cel', source: '…' }` it spells, and
  * `recordId` was `String(resolved)` of whatever the token found. Pinned
@@ -32,7 +32,6 @@ import { describe, expect, it } from 'vitest';
 import { VALUE_ENVELOPE_REFUSAL, VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { installBuiltinNodes } from './index.js';
-import { interpolate } from './template.js';
 
 function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
@@ -182,8 +181,8 @@ describe('3. absent and `null` — what each position serves, and where the run 
   const GUARDED = CEL('has(vars.nope) ? vars.nope : null');
 
   it('what the template did: a whole token that resolved to nothing served nothing — the key leaves the wire', () => {
-    const served = interpolate({ account: '{nope}' }, new Map(), {} as any) as Record<string, unknown>;
-    expect(served).toEqual({ account: undefined });
+    // The 17.x interpolator served `{ account: '{nope}' }` as `{ account: undefined }`.
+    const served: Record<string, unknown> = { account: undefined };
     expect(JSON.parse(JSON.stringify(served))).toEqual({});
   });
 
@@ -228,8 +227,8 @@ describe('3. absent and `null` — what each position serves, and where the run 
   });
 
   it('recordId: the template\'s `String(resolved)` is gone — a record the token found is no id', async () => {
-    // The 17.x reader stringified whatever the token resolved to.
-    expect(String(interpolate('{rec}', new Map<string, unknown>([['rec', REC]]), {} as any))).toBe('[object Object]');
+    // The 17.x reader stringified whatever the token resolved to: `[object Object]` for a record.
+    expect(String(REC)).toBe('[object Object]');
     const run = await serve({ objectName: 'account', mode: 'edit', recordId: CEL('rec') });
     expect(run.success).toBe(false);
   });

@@ -1057,10 +1057,10 @@
     },
     {
       "id": "api-backend.api-console-discovery-execute",
-      "title": "Studio Developer API Console: the endpoint tree mirrors /discovery, a seeded-object GET executes with live JSON + status + timing, and a malformed body surfaces the server error envelope verbatim",
+      "title": "Developer API Console (a deep link on a stock boot): the endpoint tree mirrors /discovery, a seeded-object GET executes with live JSON + status + timing, and a malformed body surfaces the server error envelope verbatim",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1069,12 +1069,12 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the console Developer hub reachable (objectui apps/console/src/pages/developer/ApiConsolePage.tsx, developer:api-console route)",
+          "the console Developer hub reachable (objectui apps/console/src/pages/developer/ApiConsolePage.tsx, developer:api-console route) — on a stock boot BY DEEP LINK: /_console/apps/setup/developer/api-console. Its only nav entry, nav_api_console (componentRef developer:api-console), is declared in packages/platform-objects/src/apps/studio.app.ts#nav_api_console, the Studio app, which a stock boot does not serve (GET /api/v1/meta/app lists showcase_app, setup and account — RUNNER.md environment facts), so 'Studio → Developer → API Console' is not on screen",
           "stock showcase seed with showcase_task rows (the seeded object the GET executes against)"
         ]
       },
       "steps": [
-        "boot showcase isolated; sign in as admin; open Studio → Developer → API Console",
+        "boot showcase isolated; sign in as admin; open /_console/apps/setup/developer/api-console directly (the Studio → Developer → API Console nav lives only in the Studio app, which a stock boot does not serve — fixtures.requires[0])",
         "GET /api/v1/discovery out of band and record its services + routes maps — the ground truth the tree is gated on (useApiDiscovery gates each service group on isServiceUsable(discovery.services[name]), ADR-0076 D12)",
         "screenshot the endpoint tree AFTER the 'Discovering APIs' spinner settles; only then read the DOM",
         "spot-check the tree against REST_ROUTE_LEDGER families: a seeded object (showcase_task) shows its CRUD family (GET/POST/PATCH/DELETE /api/v1/data/showcase_task) under a Data group, the Metadata group lists /api/v1/meta/object/showcase_task, System lists discovery/packages/health",
@@ -1135,6 +1135,12 @@
           "date": "2026-08-08",
           "change": "new — Studio Developer API Console: discovery-mirrored tree, live GET execution (JSON+status+timing), malformed-body envelope passthrough; per PENDING-GAPS §C",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "steps[0], fixtures.requires[0] and the title reach the page by deep link (stale step, #23163 C0; parked on #23121, carried by #23169). The 'Studio → Developer → API Console' nav entry, nav_api_console, is declared only in packages/platform-objects/src/apps/studio.app.ts, and a stock boot does not serve the Studio app. QA run #23163 reached /_console/apps/setup/developer/api-console by URL and passed every clause there",
+          "ref": "#23169"
         }
       ]
     },
@@ -1602,7 +1608,7 @@
       ],
       "acceptance": [
         {
-          "clause": "AUTHORITY RUNS FIRST and a refused caller learns nothing: the non-admin's mis-bodied undeclared-action probe answers 403 PERMISSION_DENIED with the manage_metadata sentence ('switching a shipped artifact off is functionally equivalent to deleting it', #10243) — NOT the 400 the body deserves and NOT the 404 the lookup would give, so neither the body contract nor the action namespace is disclosed. The refusal recommends NO clone (action-clone is deliberately unchartered — ACTION_ACTIVATION_SUBJECT's remedy names the operator and authoring a sibling action)",
+          "clause": "AUTHORITY RUNS FIRST and a refused caller learns nothing: the non-admin's mis-bodied undeclared-action probe answers 403 PERMISSION_DENIED with the manage_metadata sentence ('switching a shipped artifact off is functionally equivalent to deleting it', #10243) — NOT the 400 the body deserves and NOT the 404 the lookup would give, so neither the body contract nor the action namespace is disclosed. The refusal recommends NO clone (action-clone is deliberately unchartered — ACTION_ACTIVATION_SUBJECT's remedy names the operator alone: under a wall, where this refusal is answered, authoring a sibling action is the operator's too, ADR-0131 D12 items 7–8)",
           "oracle": "api",
           "verify": "step-2 non-admin trace: 403 + code PERMISSION_DENIED + the capability-naming message with no clone recommendation; the anonymous twin answers the 401 UNAUTHENTICATED baseline (the ADR-0056 floor sits ahead of even this)",
           "evidence": "both traces"

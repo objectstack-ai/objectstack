@@ -73,8 +73,8 @@ import {
     // environment-wide and every read resolves environment → code.
     metaWriteCapabilityVerdict,
     type MetaWriteCapabilityVerdict,
-    // [ADR-0131 D3] The walled catalog refusal the same four doors ask next.
-    isSecurityCatalogType,
+    // [ADR-0131 D3 · D12 items 7–8] The walled refusal the same four doors ask
+    // next, for every type they write.
     walledCatalogWriteVerdict,
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
@@ -211,6 +211,15 @@ import type {
 // to the implementation is a governed-surface edit, so it is left to the
 // maintainer; this line goes when that row moves.
 export { filterAppForUser } from './meta-item-read-gate.js';
+// [#23072] What the by-name `/meta` doors read beside the query decision both
+// transports ask (`metaItemQueryRefusal`) — see the re-export above the sets.
+import {
+    META_ITEM_LAYERS_PARAMS,
+    META_ITEM_MEMBER_PARAM,
+    META_ITEM_PUBLISHED_PARAMS,
+    META_ITEM_SAVE_PARAMS,
+    metaMemberSelector,
+} from './meta-item-read-gate.js';
 // [#22141] The `PUT /meta/:type/:name` door's precondition and lifecycle, read
 // through the ONE mapping the runtime dispatcher's `/meta` domain asks too.
 import { metaSaveRequestOptions } from './meta-save-request.js';
@@ -641,40 +650,32 @@ export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
     'q', 'query', 'objects', 'limit', 'perObject',
 ];
 
-/**
- * [#22877] The bundle member selector's query parameter on the by-name `/meta`
- * doors (ruling 6116165299, Q2 i): GET, DELETE, `/history`, `/publish` and
- * `/rollback` on `/meta/:type/:name` each carry it in their closed set below.
- * Named after the discriminator's concept (`sys_metadata.bundle_member`) and
- * type-neutral — ⛔ never `locale`, which on `/meta` already names the
- * response translation locale (`extractLocale`).
- */
-export const META_ITEM_MEMBER_PARAM = 'member';
-
-/**
- * [#22877] The closed query-parameter set of `GET {metaPath}/:type/:name`,
- * which declared none before the selector joined it.
- *
- * **Measured** from the handler's read points and the helpers it calls:
- * `layers` (the deprecated layered spelling, `wantsMetaItemLayers`), `state`
- * and `preview` (the two admitted draft switches), `package` (the cache bypass,
- * `metaItemPackageBinding`, and the layered read's `serveMetaItemLayered`),
- * and `locale` — read a frame down, by `extractLocale` behind the cached arm's
- * validator and every `translateMetaEnvelope` / `createMetaItemAnswer`
- * translation, never in the handler body; omitting it would 400 every
- * `?locale=zh-CN` read that works today. Plus {@link META_ITEM_MEMBER_PARAM}.
- */
-export const META_ITEM_READ_PARAMS: readonly string[] = [
-    'layers', 'state', 'preview', 'package', 'locale', META_ITEM_MEMBER_PARAM,
-];
+// [#22877 · #23072] The member selector's name (`META_ITEM_MEMBER_PARAM`), its
+// one reading (`metaMemberSelector`), the item read's closed set
+// (`META_ITEM_READ_PARAMS`) and the save, `/layers` and `/published` sets
+// (`META_ITEM_SAVE_PARAMS`, `META_ITEM_LAYERS_PARAMS`,
+// `META_ITEM_PUBLISHED_PARAMS`) live in `./meta-item-read-gate.ts`, beside the
+// by-name doors' query decision both transports ask (`metaItemQueryRefusal`,
+// ruling 6138588561). Imported for the doors below, which read them by the
+// names they always did, and re-exported from here unchanged.
+export {
+    META_ITEM_MEMBER_PARAM,
+    META_ITEM_READ_PARAMS,
+    META_ITEM_SAVE_PARAMS,
+    META_ITEM_LAYERS_PARAMS,
+    META_ITEM_PUBLISHED_PARAMS,
+} from './meta-item-read-gate.js';
 
 /**
  * [#22877] The closed set of `DELETE {metaPath}/:type/:name` (the reset).
  * **Measured**: `state` (the draft discard) and `dropStorage` (the opt-in
  * table teardown); the OCC pin and the actor ride headers and the session.
- * Plus {@link META_ITEM_MEMBER_PARAM}.
+ * Plus {@link META_ITEM_MEMBER_PARAM}. [#23165, ADR-0048] Plus `package`, the
+ * row the delete removes, read through {@link metaItemPackageBinding} as the
+ * other doors of the item read it: a delete naming no package of an item two
+ * packages hold is refused `409`, and naming the package is its remedy.
  */
-export const META_ITEM_RESET_PARAMS: readonly string[] = ['state', 'dropStorage', META_ITEM_MEMBER_PARAM];
+export const META_ITEM_RESET_PARAMS: readonly string[] = ['state', 'dropStorage', 'package', META_ITEM_MEMBER_PARAM];
 
 /**
  * [#22877] The closed set of `GET {metaPath}/:type/:name/history`.
@@ -706,24 +707,8 @@ export const META_ITEM_ROLLBACK_PARAMS: readonly string[] = ['toVersion', META_I
 // each declares no member selector, so `?member=` is refused with the located
 // 400 like any other name the door does not read — never dropped, which
 // answered the canonical member (or, on `PUT`, wrote the body's) to a request
-// that named another.
-
-/**
- * [#23072] The closed set of `PUT {metaPath}/:type/:name` (the save).
- * **Measured** from the handler and the helper it calls: `force` (the
- * destructive-change acknowledgement), `package` (the saved row's binding,
- * {@link metaItemPackageBinding}) and `mode` — read a frame down, by
- * `metaSaveRequestOptions` (`./meta-save-request.ts`), beside the `If-Match` /
- * `If-None-Match` headers it reads. The capability, walled-catalog and actor
- * gates read the session, not the query. The same three names the door's
- * multiplicity guard declares.
- *
- * ⛔ No member selector: the save is BODY-addressed (ruling 6116165299) — the
- * member it writes is named by the body's own discriminator field
- * (`email_template`'s `locale`), and `SaveMetaItemRequest` declares no
- * selector. A `?member=zh-CN` beside an `en-US` body is refused, not read.
- */
-export const META_ITEM_SAVE_PARAMS: readonly string[] = ['force', 'package', 'mode'];
+// that named another. `PUT`'s, `/layers`' and `/published`' sets are re-exported
+// above, from the module the runtime dispatcher's copies of those doors read.
 
 /**
  * [#23072] The closed set of `GET {metaPath}/:type/:name/references`: EMPTY.
@@ -734,16 +719,6 @@ export const META_ITEM_SAVE_PARAMS: readonly string[] = ['force', 'package', 'mo
  * the reverse sweep has no member to select.
  */
 export const META_ITEM_REFERENCES_PARAMS: readonly string[] = [];
-
-/**
- * [#23072] The closed set of `GET {metaPath}/:type/:name/layers`.
- * **Measured**: `package`, read a frame down by `serveMetaItemLayered` (the
- * layered read's package scope, {@link metaItemPackageBinding}); the masker and
- * the read gate read the session. The layered view shows the canonical
- * member's layers, as the deprecated `?layers=` spelling's refusal of a member
- * on the item read already says.
- */
-export const META_ITEM_LAYERS_PARAMS: readonly string[] = ['package'];
 
 /**
  * [#23072] The closed set of `GET {metaPath}/:type/:name/audit`.
@@ -762,33 +737,6 @@ export const META_ITEM_AUDIT_PARAMS: readonly string[] = ['limit'];
  * per-caller refusals read the session.
  */
 export const META_ITEM_DIFF_PARAMS: readonly string[] = ['from', 'fromVersion', 'to', 'toVersion'];
-
-/**
- * [#23072] The closed set of `GET {metaPath}/:type/:name/published`: EMPTY.
- * **Measured**: the handler reads no query parameter, and neither do the
- * helpers it calls (`resolveObjectMasker`, `resolveProtocol`,
- * `resolveMetadataService`, the read gate); the published document is asked of
- * the type and the name alone.
- */
-export const META_ITEM_PUBLISHED_PARAMS: readonly string[] = [];
-
-/**
- * [#22877] THE reading of the bundle member selector on every by-name `/meta`
- * door, as the spread each door's protocol request takes: `{ member }` when
- * the caller named one, `{}` when not, which the protocol reads as the
- * canonical member. The VALUE is the protocol's to judge, once, for every
- * transport (`resolveBundleMemberSelector` in `@objectstack/metadata-protocol`):
- * a selector on a type with no members, a blank one or an overlong one is
- * answered there with the located 400. A value that is not a string (an
- * adapter's nested-object parse) is handed over as received, so that one
- * reading refuses it — ⛔ never dropped here, which would answer the canonical
- * member to a request that named something. Recognition of the NAME is each
- * route's closed set above; repetition, `refuseRepeatedQueryParams`.
- */
-function metaMemberSelector(query: unknown): { member?: string } {
-    const raw = (query as Record<string, unknown> | null | undefined)?.[META_ITEM_MEMBER_PARAM];
-    return raw === undefined ? {} : { member: raw as string };
-}
 
 /**
  * [#20062 / #20139] The reading of a numeric query parameter on a door whose
@@ -3709,12 +3657,14 @@ export class RestServer {
     private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = metaReadGate.STORED_VERSION_DOOR_POLICY;
 
     /**
-     * [ADR-0131 D3] The walled catalog refusal for one `/meta` item write: the
-     * shared `walledCatalogWriteVerdict` (`@objectstack/metadata-core`), asked
-     * by this transport's four write doors (save, reset, publish, rollback)
-     * after {@link metaSaveVerdict}'s capability gate. A type outside the
-     * security catalog is admitted without reading the posture. The posture is
-     * read through {@link resolveAnonymousFormTenancy}, the wiring that mirrors
+     * [ADR-0131 D3 · D12 items 7–8] The walled refusal for one `/meta` write:
+     * the shared `walledCatalogWriteVerdict` (`@objectstack/metadata-core`),
+     * asked by this transport's four item write doors (save, reset, publish,
+     * rollback) after {@link metaSaveVerdict}'s capability gate, and by
+     * `POST /meta/_migrate-stored` after its own, for every type
+     * (ruling A on #23231: the catalog is no longer a special case, so this
+     * method no longer pre-filters on it). The posture is read through
+     * {@link resolveAnonymousFormTenancy}, the wiring that mirrors
      * `resolveProtocol`, so the posture judged and the protocol that writes
      * always come from the same kernel; a `tenancy` service that is registered
      * and cannot answer raises `AuthzStoreUnavailableError` (the door's 503),
@@ -3726,7 +3676,6 @@ export class RestServer {
         environmentId: string | undefined,
         req: any,
     ): Promise<MetaWriteCapabilityVerdict> {
-        if (!isSecurityCatalogType(type)) return { allowed: true };
         return walledCatalogWriteVerdict({
             type,
             tenancyPosture: effectiveTenancyPosture(await this.resolveAnonymousFormTenancy(environmentId, req)),
@@ -5913,7 +5862,9 @@ export class RestServer {
                         }
                         // [#6877] Both narrow the draft list to one package /
                         // one type; an array reached `listDrafts` untouched.
-                        if (refuseRepeatedQueryParams(req, res, ['packageId', 'type'])) return;
+                        // [#23214] The list lives beside the shared decision, so the
+                        // runtime dispatcher's twin refuses the same names.
+                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.drafts)) return;
                         // [ADR-0131 D6] No organization: a draft is saved
                         // environment-wide, so the list reads the environment
                         // partition, symmetric with the save door. A legacy
@@ -5991,6 +5942,26 @@ export class RestServer {
                             });
                             return;
                         }
+                        // [ADR-0131 D12 items 7–8] The walled refusal, after the
+                        // capability gate and before the protocol is resolved or
+                        // a row is read: this rewrites every stored row of the
+                        // environment's metadata, which under `isolated` /
+                        // `group` is the platform operator's (ruling A on
+                        // #23231). A preview is refused too: it is the same
+                        // install-wide pass, without the write. Inert under
+                        // `single`. See {@link walledCatalogRefusal}.
+                        {
+                            const walled = await this.walledCatalogRefusal('sys_metadata', ctx, environmentId, req);
+                            if (!walled.allowed) {
+                                res.status(403).json({
+                                    error: {
+                                        code: 'FORBIDDEN',
+                                        message: walled.message,
+                                    },
+                                });
+                                return;
+                            }
+                        }
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).migrateStoredMetadata !== 'function') {
                             res.status(501).json({
@@ -6065,7 +6036,9 @@ export class RestServer {
                         // against. Refused, not resolved — see
                         // `query-multiplicity.ts` for why picking one of two
                         // conflicting intents is worse than a 400.
-                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include', 'id'])) return;
+                        // [#23214] The list lives beside the shared decision, so the
+                        // runtime dispatcher's twin refuses the same names.
+                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.list)) return;
                         // [#22188] Read through {@link metaItemPackageBinding}:
                         // `all`, this list's "show everything" scope, names no package.
                         const packageId = metaItemPackageBinding(req.query?.package);
@@ -6339,8 +6312,9 @@ export class RestServer {
                     try {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const prot = await this.resolveProtocol(environmentId, req);
-                        // [#6877] One package scopes the book lookup.
-                        if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+                        // [#6877] One package scopes the book lookup. [#23214] The
+                        // list lives beside the shared decision, as the list door's.
+                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS['book-tree'])) return;
                         // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
                         const packageId = metaItemPackageBinding(req.query?.package);
                         // [#20408] The route's whole answer is
@@ -6395,8 +6369,22 @@ export class RestServer {
                         // [#22877] …and RECOGNITION first, over the route's
                         // measured closed set (AGENTS.md route rule 5), which
                         // the bundle member selector joined.
-                        if (refuseUnknownQueryParams(req, res, META_ITEM_READ_PARAMS)) return;
-                        if (refuseRepeatedQueryParams(req, res, ['layers', 'state', 'preview', 'package', META_ITEM_MEMBER_PARAM])) return;
+                        // [#23072] All three of the route's query rules —
+                        // recognition, arity and a member on the layered view —
+                        // are ONE decision, `metaItemQueryRefusal` in
+                        // `./meta-item-read-gate.ts`, which the runtime
+                        // dispatcher's item read asks too (ruling 6138588561).
+                        // The first two are answered here, in the nested body
+                        // their gates always wrote; the third where the layered
+                        // view is chosen, below. ⛔ A rule is added there, never
+                        // here.
+                        const queryRefusal = metaReadGate.metaItemQueryRefusal('item', req.query);
+                        if (queryRefusal && queryRefusal.rule !== 'layered-member') {
+                            res.status(queryRefusal.status).json({
+                                error: { code: queryRefusal.code, message: queryRefusal.message },
+                            });
+                            return;
+                        }
                         const memberSelector = metaMemberSelector(req.query);
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
@@ -6497,13 +6485,15 @@ export class RestServer {
                         const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
                         // [#22877] The layered view reads no member, so a member
                         // named on it is refused rather than answered with the
-                        // canonical member's layers.
-                        if (wantLayered && memberSelector.member !== undefined) {
-                            throw Object.assign(new Error(
-                                `The "${META_ITEM_MEMBER_PARAM}" selector is not served by the layered view `
-                                + `(\`?layers=\`), which shows the canonical member's layers. Read one member with `
-                                + `\`?${META_ITEM_MEMBER_PARAM}=\` alone.`,
-                            ), { code: 'VALIDATION_ERROR', status: 400 });
+                        // canonical member's layers. [#23072] The decision's
+                        // third rule (`layered-member`), the only one that can
+                        // still be pending here; thrown to `handleRouteError` as
+                        // it always was.
+                        if (queryRefusal) {
+                            throw Object.assign(new Error(queryRefusal.message), {
+                                code: queryRefusal.code,
+                                status: queryRefusal.status,
+                            });
                         }
                         if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
                             const requestPath: unknown = req.path;
@@ -6692,6 +6682,20 @@ export class RestServer {
                                 // [#9454] The cached door is the `view` arm, and
                             };
                             const result = await p.getMetaItemCached(cachedRequest);
+                            // [#23316] The automation engine's verdict on a
+                            // FLOW, beside the document and never inside it:
+                            // this branch is the default door of
+                            // `GET /meta/flow/:name`, so without it a flow the
+                            // engine refused was served here as its stored
+                            // `status` alone. The protocol reads it live from
+                            // its delegate read on every call; it is in no
+                            // validator, so a read carrying it is never
+                            // answered 304 (`getMetaItemCached` says why).
+                            // Flow only — every other type's cached envelope
+                            // is unchanged.
+                            const cachedRegistration = metaType === 'flow' && result.registration !== undefined
+                                ? { registration: result.registration }
+                                : {};
 
                             if (result.notModified) {
                                 res.status(304).send();
@@ -6762,7 +6766,7 @@ export class RestServer {
                                 res.header('Vary', 'Accept-Language');
                                 res.json(await this.translateMetaEnvelope(
                                     req, req.params.type, environmentId,
-                                    { type: metaType, name: req.params.name },
+                                    { type: metaType, name: req.params.name, ...cachedRegistration },
                                     cachedDocument, cacheI18n, runtimeView.document,
                                 ));
                                 return;
@@ -6848,6 +6852,7 @@ export class RestServer {
                             const cachedEnvelope = {
                                 type: metaType,
                                 name: req.params.name,
+                                ...cachedRegistration,
                             };
                             res.json(await this.translateMetaEnvelope(
                                 req, req.params.type, environmentId, cachedEnvelope, cachedDocument, cacheI18n,
@@ -7080,13 +7085,12 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
                     // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` the security catalog is shared by every
-                    // organization, so only the platform operator rung (or the
-                    // engine itself) writes it. Inert under `single`, and no
-                    // posture is read for any other type. See
-                    // {@link walledCatalogRefusal}.
+                    // `isolated` / `group` every organization shares the
+                    // environment's metadata, so only the platform operator rung
+                    // (or the engine itself) writes it, whatever the type. Inert
+                    // under `single`. See {@link walledCatalogRefusal}.
                     {
                         const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
                         if (!walled.allowed) {
@@ -7306,13 +7310,12 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
                     // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` the security catalog is shared by every
-                    // organization, so only the platform operator rung (or the
-                    // engine itself) writes it. Inert under `single`, and no
-                    // posture is read for any other type. See
-                    // {@link walledCatalogRefusal}.
+                    // `isolated` / `group` every organization shares the
+                    // environment's metadata, so only the platform operator rung
+                    // (or the engine itself) writes it, whatever the type. Inert
+                    // under `single`. See {@link walledCatalogRefusal}.
                     {
                         const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
                         if (!walled.allowed) {
@@ -7363,7 +7366,7 @@ export class RestServer {
                     // is not what the request asked for.
                     // [#22877] Recognition first, over the measured closed set.
                     if (refuseUnknownQueryParams(req, res, META_ITEM_RESET_PARAMS)) return;
-                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage', META_ITEM_MEMBER_PARAM])) return;
+                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage', 'package', META_ITEM_MEMBER_PARAM])) return;
                     const stateParam = typeof req.query?.state === 'string'
                         && req.query.state.toLowerCase() === 'draft'
                         ? 'draft' as const
@@ -7374,6 +7377,7 @@ export class RestServer {
                     // previewed object" flow so a publish-to-preview leaves no
                     // orphan table. Destructive — opt-in, defaults off.
                     const dropStorage = req.query?.dropStorage === 'true' || req.query?.dropStorage === '1';
+                    const deletePackageId = metaItemPackageBinding(req.query?.package);
 
                     // [ADR-0131 D6] No organization, as on the `PUT` twin: the
                     // reset reaches the environment-wide row.
@@ -7403,6 +7407,10 @@ export class RestServer {
                         ...(dropStorage ? { dropStorage: true } : {}),
                         // [#22877] Resets ONE member of a bundled type.
                         ...metaMemberSelector(req.query),
+                        // [#23165, ADR-0048] The package whose row the delete
+                        // removes; `all` and an empty value name none, as on
+                        // the save door, and the protocol then resolves it.
+                        ...(deletePackageId ? { packageId: deletePackageId } : {}),
                     };
                     const result = await p.deleteMetaItem(deleteRequest);
                     res.json(result);
@@ -7771,13 +7779,12 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
                     // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` the security catalog is shared by every
-                    // organization, so only the platform operator rung (or the
-                    // engine itself) writes it. Inert under `single`, and no
-                    // posture is read for any other type. See
-                    // {@link walledCatalogRefusal}.
+                    // `isolated` / `group` every organization shares the
+                    // environment's metadata, so only the platform operator rung
+                    // (or the engine itself) writes it, whatever the type. Inert
+                    // under `single`. See {@link walledCatalogRefusal}.
                     {
                         const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
                         if (!walled.allowed) {
@@ -7956,13 +7963,12 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
                     // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` the security catalog is shared by every
-                    // organization, so only the platform operator rung (or the
-                    // engine itself) writes it. Inert under `single`, and no
-                    // posture is read for any other type. See
-                    // {@link walledCatalogRefusal}.
+                    // `isolated` / `group` every organization shares the
+                    // environment's metadata, so only the platform operator rung
+                    // (or the engine itself) writes it, whatever the type. Inert
+                    // under `single`. See {@link walledCatalogRefusal}.
                     {
                         const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
                         if (!walled.allowed) {
@@ -8261,7 +8267,9 @@ export class RestServer {
                     // [#6877 shape] `?from=` narrows to ONE current state;
                     // an array would reach `legalNextStates` as a
                     // stringified pair and match no transition key.
-                    if (refuseRepeatedQueryParams(req, res, ['from'])) return;
+                    // [#23214] The list lives beside the shared decision, so the
+                    // runtime dispatcher's twin refuses the same name.
+                    if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.state)) return;
                     const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
                     // [#15405] The engine seam, reached the way its SIBLING at
                     // `computeExecCtx` already reaches it — `wiredEngineOrLoud`

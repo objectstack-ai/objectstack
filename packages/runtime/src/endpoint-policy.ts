@@ -24,6 +24,13 @@
  * ("Response cache TTL in seconds") is how a runtime dialect is born. A header
  * is the part of the meaning the vocabulary actually fixes.
  *
+ * ## …and one platform floor that is not a key: the ADR-0069 gate
+ *
+ * A session the authentication policy holds is refused here as on every other
+ * protected seam, with `evaluateAuthGate` (`@objectstack/core`) as the one
+ * decision and REST's `403` as the answer. It runs between the meter and
+ * `authRequired`; see ② in {@link applyEndpointPolicies}.
+ *
  * ## Why this is a pure function over explicit deps
  *
  * No service lookup happens in here — the caller passes what it resolved. That
@@ -62,7 +69,9 @@ import {
     ANONYMOUS_DENY_CODE,
     ANONYMOUS_DENY_MESSAGE,
     ANONYMOUS_DENY_STATUS,
+    evaluateAuthGate,
     shouldDenyAnonymous,
+    type AuthGate,
 } from '@objectstack/core';
 import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import type { ApiEndpoint } from '@objectstack/spec/api';
@@ -188,6 +197,26 @@ export interface EndpointPolicyContext {
      * normal outcome, never an error.
      */
     resolvePrincipalId?: (headers: HeaderBag) => Promise<string | undefined>;
+    /**
+     * ADR-0069: the session USER the authentication-policy gate is asked about.
+     *
+     * Resolves `undefined` when no gate feature is active (no session is read
+     * then) or when there is no session to hold, which is the API-key and the
+     * anonymous caller. Otherwise it resolves the session's user, whose
+     * `authGate` the policy decides on.
+     *
+     * It THROWS the branded authorization-store outage
+     * (`AuthzStoreUnavailableError`, `@objectstack/core`) when an active gate
+     * cannot read the session. That throw is not caught here: it reaches the
+     * dispatcher's error exit as a `matchEndpoint` throw does, and is answered
+     * `503 SERVICE_UNAVAILABLE`. That is REST's answer in the same window
+     * (`RestServer.computeExecCtx`).
+     *
+     * Optional for the reason {@link resolvePrincipalId} is: without a session
+     * reader no session can be held. The composed runtime threads both
+     * (`dispatcher-plugin`).
+     */
+    resolveGatedSessionUser?: (headers: HeaderBag) => Promise<unknown>;
     /** Per-endpoint limiters. Required: an armed budget with nowhere to count is a wiring bug, not a config. */
     limiters: EndpointRateLimiterRegistry;
     /** `server.trustProxy` — believe forwarded headers when keying by address. */
@@ -297,6 +326,17 @@ function anonymousDenial(): EndpointPolicyVerdict {
 }
 
 /**
+ * The ADR-0069 refusal this seam answers: REST's answer (`403` with the gate's
+ * own `code` and `message`, as `enforceAuth` writes it), in this seam's
+ * envelope. It is the body `HttpDispatcher.enforceAuthGate` writes for the same
+ * session on every other dispatcher route.
+ */
+function authGateDenial(gate: AuthGate): EndpointPolicyVerdict {
+    const { status, body } = apiErrorResponse({ code: gate.code, httpStatus: 403, message: gate.message });
+    return { verdict: 'deny', status, body };
+}
+
+/**
  * Run the policy chain for one matched endpoint.
  *
  * Returns `pass` (with the headers the eventual answer should carry) or the
@@ -359,26 +399,51 @@ export async function applyEndpointPolicies(input: EndpointPolicyInput): Promise
         }
     }
 
-    // ── ② authRequired ──────────────────────────────────────────────────
+    // ── ② the ADR-0069 authentication-policy gate ─────────────────────────
+    // A session the policy HOLDS (an expired password, enforced MFA not yet
+    // enrolled) is gated out of every protected resource until it remediates,
+    // and a declared endpoint is one WHATEVER its `authRequired`: the target
+    // runs as the caller's execution context, so on an `authRequired: false`
+    // endpoint a held session would still read and write as its own user. The
+    // two model seams answer the same way on their public routes (REST's
+    // public-audience read still runs `enforceAuth` for a signed-in caller; the
+    // dispatcher gates before any domain resolves). Asked before the anonymous
+    // floor, as `enforceAuth` asks it. A held session is signed in, so the
+    // order between the two changes no answer.
+    //
+    // ⛔ No request path is passed, so the allow-list can grant no exemption: an
+    // empty path earns none (the predicate is fail-closed on it, #7898). No
+    // app-declared endpoint is a remediation or bootstrap route, and a declared
+    // path sits under the dispatcher prefix the HOST chooses, so handing it in
+    // would let a prefix that lands on an allow-listed boundary exempt every
+    // endpoint under it. This is the same reasoning as ③'s.
+    if (input.resolveGatedSessionUser) {
+        const gate = evaluateAuthGate(await input.resolveGatedSessionUser(input.headers ?? {}), '');
+        if (gate) return authGateDenial(gate);
+    }
+
+    // ── ③ authRequired ──────────────────────────────────────────────────
     // The key arrives MATERIALIZED (`ApiEndpointSchema` defaults it to `true`),
     // so there is no "omitted" state to read here: forgetting the key gets the
     // safe answer, and `authRequired: false` — the only way to open an endpoint
     // — is a visible line in a diff.
     //
     // ⚠️ The request PATH is deliberately not passed to `shouldDenyAnonymous`.
-    // Its optional path argument exempts control-plane paths, and
-    // `isAuthGateAllowlisted` treats ANY path containing an `/auth/` segment as
-    // one. An app-declared `/api/v1/apps/<ns>/auth/callback` would therefore
-    // exempt itself from its own `authRequired: true` — an authoring-time
-    // bypass of the platform's default deny. Omitting the argument means no
-    // exemption can be reached from a declared path at all.
+    // Its optional path argument exempts the allow-listed control-plane routes
+    // (`isAuthGateAllowlisted`), anchored at a mount boundary since #16839, and
+    // a declared path sits under the dispatcher prefix the HOST chooses. A
+    // prefix that lands on an allow-listed boundary (an `auth` segment) would
+    // therefore let every endpoint under it exempt itself from its own
+    // `authRequired: true`, an authoring-time bypass of the platform's default
+    // deny. Omitting the argument means no exemption can be reached from a
+    // declared path at all.
     if (endpoint.authRequired !== false) {
         if (shouldDenyAnonymous({ userId: principalId, isSystem: false, method })) {
             return anonymousDenial();
         }
     }
 
-    // ── ③ cacheTtlSeconds ──────────────────────────────────────────────────────
+    // ── ④ cacheTtlSeconds ──────────────────────────────────────────────────────
     const cacheControl = computeCacheControl(endpoint, method, logger);
 
     return {

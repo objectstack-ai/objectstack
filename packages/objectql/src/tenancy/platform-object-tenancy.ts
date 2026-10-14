@@ -180,6 +180,28 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       '`recordOrgResolver.organizationOf(...)` and stamps it (`suspended-run-store.ts`); unattributed run ' +
       'history was the measured symptom, and the same 2026-08-23 order covers its backfill.',
   },
+  // #23284 (writer) + the 2026-08-24 #11303 ruling, verbatim:
+  // 「11303 sys_inbox_message/sys_notification/sys_email 应该写 organization_id。」
+  // The table is NAMED by the ruling, and this card made every producer fill
+  // it: the `notify` node threads the run's organization, else the organization
+  // of the record the notification is about; the approvals service threads the
+  // request's. Admitting it is what hands a notification no producer could
+  // attribute to ADR-0131 D9 — the sole organization under `single`, a refusal
+  // where none is derivable — instead of the NULL row the HotCRM v18 pass
+  // measured on every system-context emit. Only the event row: its delivery
+  // was admitted already (below), and `emit()` threads the event row's stored
+  // organization onto the delivery, the inbox row and the receipt, so the
+  // family follows its notification on both the inline and the outbox path.
+  sys_notification: {
+    tenancy: 'tenant-scoped',
+    evidence:
+      '`MessagingService.writeEvent` (`messaging-service.ts`) stamps `organization_id` from the organization ' +
+      'its producer threads: the flow `notify` node passes the run\'s organization, else the organization of ' +
+      'the record the notification is about (`notify-node.ts`), and the approvals service passes the ' +
+      'request\'s (`approval-service.ts`). The maintainer ruled on 2026-08-24 that this table must carry ' +
+      '`organization_id`. An org-less row here is invisible to every report and cleanup that filters by ' +
+      'organization, so it is a defect, not a design.',
+  },
   // #11698
   sys_notification_delivery: {
     tenancy: 'tenant-scoped',
@@ -203,22 +225,6 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       'a grant belongs to is a defect, not a design: under a wall, a tenant-scoped read would AND ' +
       "plugin-security's strict `organization_id = :tenant` over the driver's NULL-tolerant arm and every " +
       'organization-less grant would silently disappear.',
-  },
-
-  // ── global ───────────────────────────────────────────────────────────────
-  // Commit ff08691e6's example, named verbatim by the 2026-08-31 ruling; the driver predicate is #2734.
-  // ⚠️ `ensure-default-organization.ts` DOES stamp org-scoped permission sets, so
-  // this object holds BOTH populations. It is `global` on the maintainer naming
-  // it, not on an absence of org-scoped writes — flagged for the adjudicating
-  // batch rather than smoothed over.
-  sys_permission_set: {
-    tenancy: 'global',
-    evidence:
-      "The case the 2026-08-31 ruling names verbatim as the one whose reasoning inherits: 'an org-less " +
-      "row is defensible for `sys_permission_set`'. The SQL driver's own tenant predicate is written for " +
-      'this population — a NULL organization marks a GLOBAL/platform row, and with strict equality every ' +
-      'tenant admin saw ZERO RBAC rows on a fresh deployment. It also holds org-scoped rows, so the ' +
-      'verdict rests on the maintainer naming it, not on an absence of org-scoped writes.',
   },
 };
 

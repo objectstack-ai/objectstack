@@ -231,11 +231,11 @@ describe('[#9111] the manifest map is tolerant AND incomplete where the URL map 
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[#9111] `hydrateOverlayIntoRegistry` asserts its type is canonical', () => {
-    it('refuses a manifest-BLIND plural with code + status, and mints nothing', () => {
+    it('refuses a manifest-BLIND plural with code + status, and mints nothing', async () => {
         const { protocol, registeredItems } = makeUnscopedProtocol([]);
         let caught: any;
         try {
-            protocol.hydrateOverlayIntoRegistry('fields', { name: 'showcase_task.title' }, {
+            await protocol.hydrateOverlayIntoRegistry('fields', { name: 'showcase_task.title' }, {
                 packageId: null,
                 organizationId: null,
             });
@@ -248,45 +248,45 @@ describe('[#9111] `hydrateOverlayIntoRegistry` asserts its type is canonical', (
         expect(registeredItems).toHaveLength(0);
     });
 
-    it('refuses a manifest-PRESENT plural too — the #8862 residue this card was filed on', () => {
+    it('refuses a manifest-PRESENT plural too — the #8862 residue this card was filed on', async () => {
         // `'objects'` folds in both maps, so no producer delivers it today.
         // The assert is the COMPLETE contract rather than the narrow
         // at-rest predicate, so a future unfolded caller is refused whichever
         // plural it holds. Ablation 3 is what keeps this distinct from §3.
         const { protocol, registeredItems } = makeUnscopedProtocol([]);
-        expect(() => protocol.hydrateOverlayIntoRegistry('objects', { name: 'ticket' }, {
+        await expect(protocol.hydrateOverlayIntoRegistry('objects', { name: 'ticket' }, {
             packageId: null,
             organizationId: null,
-        })).toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
+        })).rejects.toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
         expect(registeredItems).toHaveLength(0);
     });
 
-    it('is judged on the SPELLING, ahead of every no-op return', () => {
+    it('is judged on the SPELLING, ahead of every no-op return', async () => {
         // An org-scoped row returns `false` without registering. The assert
         // still fires: a caller that stopped folding must not be able to hide
         // behind a body this call happened not to register anyway.
         const { protocol } = makeUnscopedProtocol([]);
-        expect(() => protocol.hydrateOverlayIntoRegistry('fields', { name: 'x' }, {
+        await expect(protocol.hydrateOverlayIntoRegistry('fields', { name: 'x' }, {
             packageId: null,
             organizationId: 'org_alpha',
-        })).toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
+        })).rejects.toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
         // …and a body with no `name` at all.
-        expect(() => protocol.hydrateOverlayIntoRegistry('fields', { label: 'no name' }, {
+        await expect(protocol.hydrateOverlayIntoRegistry('fields', { label: 'no name' }, {
             packageId: null,
             organizationId: null,
-        })).toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
+        })).rejects.toThrowError(/Refusing to register a SchemaRegistry overlay entry/);
     });
 
-    it('cannot refuse a canonical type or a plugin-registered kind', () => {
+    it('cannot refuse a canonical type or a plugin-registered kind', async () => {
         const { protocol, registeredItems } = makeUnscopedProtocol([]);
         // Canonical — registers, as before.
-        expect(protocol.hydrateOverlayIntoRegistry('view', { name: 'grid' }, {
+        expect(await protocol.hydrateOverlayIntoRegistry('view', { name: 'grid' }, {
             packageId: null, organizationId: null,
         })).toBe(true);
         // A kind the platform has never heard of: `canonicalMetaType` is the
         // identity for anything the static map does not carry, so this gate is
         // positive-control-by-construction and can never fire on a plugin kind.
-        expect(protocol.hydrateOverlayIntoRegistry('acme_widget', { name: 'w' }, {
+        expect(await protocol.hydrateOverlayIntoRegistry('acme_widget', { name: 'w' }, {
             packageId: null, organizationId: null,
         })).toBe(true);
         expect(registeredItems.map((r) => r.type)).toEqual(['view', 'acme_widget']);

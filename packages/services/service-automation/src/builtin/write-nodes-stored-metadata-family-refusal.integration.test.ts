@@ -49,7 +49,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
@@ -161,6 +161,17 @@ function writeFlow(name: string, runAs: RunAs, node: Record<string, unknown>) {
 
 async function boot(secured: boolean) {
   const kernel = new ObjectKernel({ logger: { level: 'fatal' } });
+  // The driver is published before the boot, as a datasource plugin does: under
+  // `single` the identity objects' `start()` reads and writes `sys_organization`.
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+  await kernel.use({
+    name: 'test.driver.sqlite',
+    type: 'standard',
+    version: '1.0.0',
+    async init(ctx: PluginContext) {
+      ctx.registerService('driver.default', driver);
+    },
+  });
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
   if (secured) {
@@ -173,9 +184,6 @@ async function boot(secured: boolean) {
   await kernel.bootstrap();
   const ql = kernel.getService<ObjectQL>('objectql');
   const automation = kernel.getService<AutomationEngine>('automation');
-  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
-  await driver.connect();
-  ql.registerDriver(driver, true);
   ql.registry.registerObject(PLAIN_OBJECT as any, 'pin-21624', 'pin-21624');
   await ql.syncSchemas();
   return { kernel, ql, automation };

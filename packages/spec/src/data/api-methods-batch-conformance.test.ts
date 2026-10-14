@@ -61,7 +61,21 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `1fb1ced36`, re-read there 2026-10-12:
+  // (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+  // in `packages/plugin-grid`, on the hop off `1fb1ced36`, `ObjectGrid.tsx`
+  // changed again (327 insertions, 80 deletions: objectui#12292's per-row
+  // If-Match saves, objectui#12303's save feedback, objectui#12030's spec 18
+  // contract and objectui#12270's empty-state link), none of it inside the
+  // selection block, which only MOVED by +48: `ObjectGrid.tsx:5045-5072` here
+  // (`4997-5024` at `1fb1ced36`), still hashing to
+  // `c88443302d40c2db739ddb235470bafa29056e2e` (hash-object of the block),
+  // re-READ with the same reading below. No hunk sits beside that reading: the
+  // `delete` verdict line MOVED `:1793` -> `:1873` and the promoted def's
+  // params `:5181-5200` -> `:5229-5248` (called at `:5216` -> `:5264`), each
+  // byte-identical. `hooks/useBulkExecutor.ts` is byte-identical to `1fb1ced36`
+  // and its `:298-303` still hashes to
+  // `01083348330f10a201cdf1078b4c21c236402b6a`. At `1fb1ced36`, re-read there
+  // 2026-10-12:
   // every objectui file this record cites is byte-identical across the hop from
   // `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
   // `7578323a5`, re-read there 2026-10-12:

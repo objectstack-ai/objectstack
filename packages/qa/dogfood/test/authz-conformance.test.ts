@@ -260,6 +260,45 @@ const PROBES: readonly Probe[] = [
     re: /shouldDenyAnonymous\s*\(/g,
     key: () => 'i18n:domains/i18n.ts:anonymous-gate',
   },
+  // ADR-0138 D2 (card E2) — the three domains whose anonymous decision moved
+  // from a face to the domain's first statement. Same GATE-pin shape: the key
+  // exists only while the handler still consults `shouldDenyAnonymous`. Delete
+  // a domain floor and its key vanishes → the covering `anonymous-deny-*` row
+  // goes STALE → red CI.
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/notifications.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'notifications:domains/notifications.ts:anonymous-gate',
+  },
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/keys.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'keys:domains/keys.ts:anonymous-gate',
+  },
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/share-links.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'share-links:domains/share-links.ts:anonymous-gate',
+  },
+  // ADR-0138 D2 (card E2), the second slice — the two domains that made no
+  // anonymous decision of their own until it became their first statement.
+  // Same GATE-pin shape: delete a floor and its key vanishes → the covering
+  // `anonymous-deny-ui` / `anonymous-deny-data` row goes STALE → red CI.
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/ui.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'ui:domains/ui.ts:anonymous-gate',
+  },
+  {
+    kind: 'GATE_PIN',
+    file: 'packages/runtime/src/domains/data.ts',
+    re: /shouldDenyAnonymous\s*\(/g,
+    key: () => 'data:domains/data.ts:anonymous-gate',
+  },
 
   // ── a probe whose POPULATION WAS DELETED, re-declared for what it is ────
   //
@@ -781,6 +820,25 @@ function checkAuthzLedger(
   return [...checkLedger(rows, opts), ...checkTransportWiredAdmission(rows)];
 }
 
+/**
+ * ADR-0138 D2's six door classes, in the record's order, as the matrix rows
+ * that record them (card E2). The list is CLOSED: "an unauthenticated request
+ * is served by exactly these six door classes", and naming a seventh is an
+ * amendment of the record — so a row added beside these without one, or one of
+ * these removed, is red below.
+ */
+const ADR_0138_D2_DOOR_CLASS_ROWS = [
+  'anonymous-door-public-form',
+  'anonymous-door-share-link',
+  'anonymous-door-public-book',
+  'anonymous-door-endpoint-object-operation',
+  'anonymous-door-endpoint-flow',
+  'anonymous-door-public-read-file',
+] as const;
+
+/** The proof every door-class row cites: the record's criterion-2 sweep. */
+const ADR_0138_D2_DOOR_PROOF = 'anonymous-door-sweep.dogfood.test.ts';
+
 const HIGH_RISK = [
   'owd-private', 'owd-public-read', 'controlled-by-parent', 'anonymous-deny', 'default-profile',
   // #2567 — every anonymous-deny HTTP surface is high-risk: it guards the
@@ -809,6 +867,10 @@ const HIGH_RISK = [
   // through a sibling execution surface (tool dispatch); proven e2e that a
   // member's MCP tools/call is RLS-scoped and anonymous is denied.
   'mcp-http-identity',
+  // ADR-0138 D2 — the six door classes. Each SERVES object data, or a file's
+  // bytes, to a caller with no session, so each owes the end-to-end proof
+  // that it admits exactly its declared subject and refuses the rest.
+  ...ADR_0138_D2_DOOR_CLASS_ROWS,
 ];
 
 describe('ADR-0056 D10 — authorization conformance matrix', () => {
@@ -985,13 +1047,25 @@ describe('the ledger-sourced population and its baseline bite', () => {
       // [#22576] classified by `approval-action-token`.
       'dispatcher-domain:route-ledger.ts:/approvals/act',
       'dispatcher-domain:route-ledger.ts:/automation',
+      // [ADR-0138 D2, second slice] classified by `anonymous-deny-data`.
+      'dispatcher-domain:route-ledger.ts:/data',
       // [#22432] classified by `anonymous-deny-i18n`.
       'dispatcher-domain:route-ledger.ts:/i18n',
+      // [ADR-0138 D2] classified by `anonymous-deny-keys`.
+      'dispatcher-domain:route-ledger.ts:/keys',
       'dispatcher-domain:route-ledger.ts:/mcp',
       'dispatcher-domain:route-ledger.ts:/meta',
+      // [ADR-0138 D2] classified by `anonymous-deny-notifications`.
+      'dispatcher-domain:route-ledger.ts:/notifications',
       'dispatcher-domain:route-ledger.ts:/packages',
+      // [ADR-0138 D2] classified by `anonymous-deny-share-links`.
+      'dispatcher-domain:route-ledger.ts:/share-links',
+      // [ADR-0138 D2, second slice] classified by `anonymous-deny-ui`.
+      'dispatcher-domain:route-ledger.ts:/ui',
       // [#22755] classified by `webhook-redeliver-session`.
       'dispatcher-domain:route-ledger.ts:/webhooks/redeliver',
+      // [ADR-0138 D2] classified by `anonymous-door-public-form` (class 1).
+      'rest-family:rest-route-ledger.ts:forms',
       'rest-family:rest-route-ledger.ts:metadata',
       // [#22430] classified by `anonymous-deny-api-description`.
       'rest-family:rest-route-ledger.ts:openapi',
@@ -1180,6 +1254,167 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
       );
       expect(problems.some((p) => /STALE covers/.test(p) && p.includes(gate))).toBe(true);
     }
+  });
+});
+
+// ── ADR-0138 D2 (card E2) — the closed list of doors, and denial by domain ──
+//
+// The record: "An unauthenticated request is served by exactly these six door
+// classes … Everything else answers 401. The decision is taken once per
+// domain, as the domain's first statement … A new surface is therefore 401
+// until this list names it." Enforced by "the authorization conformance
+// matrix, whose rows already fail on a deleted deny call or an unclassified
+// route. Card E2 records the six classes there."
+//
+// What this block holds, and at which granularity:
+//
+//  - THE LIST. Exactly six door-class rows, each `enforced`, each naming its
+//    D2 enforcing site, each proven end to end by the sweep, which claims
+//    exactly those six. A seventh row, a missing one, or a row that stops
+//    citing its proof is red.
+//  - A NEW ROUTE IN A GOVERNED DOMAIN ANSWERS 401, by the two mechanisms the
+//    matrix has. A new route FAMILY or dispatcher DOMAIN mints a ledger key and
+//    is UNCLASSIFIED until a row covers it (pinned in the population block
+//    above, for both ledgers). A route added INSIDE an existing domain mints no
+//    key (the matrix header's own measured bound) and is held instead by the
+//    domain's floor being its first statement: deleting that floor makes the
+//    domain's gate pin STALE (pinned here, for every gate-pinned domain), and
+//    each moved domain's unit suite asserts that a path no face serves yet is
+//    refused 401 before route selection
+//    (`runtime/src/domains/domain-floor-anonymous-deny.test.ts`). On a booted
+//    deployment, the sweep's everything-else class turns red for any route
+//    that serves an anonymous caller without a door class.
+
+/**
+ * D2's enforcing site for each class, by function name, as the record's table
+ * names it. A row whose enforcement text stops naming these has stopped
+ * describing the door D2 lists.
+ */
+const ADR_0138_D2_ENFORCING_SITES: Readonly<Record<(typeof ADR_0138_D2_DOOR_CLASS_ROWS)[number], readonly string[]>> = {
+  'anonymous-door-public-form': ['RestServer.registerFormEndpoints', 'publicFormGrant'],
+  'anonymous-door-share-link': ['registerShareLinkRoutes'],
+  'anonymous-door-public-book': ['isPublicAudienceRead'],
+  'anonymous-door-endpoint-object-operation': ['resolveExecutionContext', 'CRUD gate'],
+  'anonymous-door-endpoint-flow': ['resolveExecutionContext', '@objectstack/service-automation'],
+  'anonymous-door-public-read-file': ['registerStorageRoutes', 'authorizeDownload'],
+};
+
+/** The gate-pinned dispatcher domains: deleting any one floor goes STALE. */
+const DOMAIN_FLOOR_GATE_KEYS = [
+  'actions:domains/actions.ts:anonymous-gate',
+  'automation:domains/automation.ts:anonymous-gate',
+  'packages:domains/packages.ts:anonymous-gate',
+  'analytics:domains/analytics.ts:anonymous-gate',
+  'i18n:domains/i18n.ts:anonymous-gate',
+  'notifications:domains/notifications.ts:anonymous-gate',
+  'keys:domains/keys.ts:anonymous-gate',
+  'share-links:domains/share-links.ts:anonymous-gate',
+  'ui:domains/ui.ts:anonymous-gate',
+  'data:domains/data.ts:anonymous-gate',
+] as const;
+
+/** Every row recording a door class carries this id prefix, and no other row may. */
+const DOOR_CLASS_ROW_PREFIX = 'anonymous-door-';
+
+function checkDoorClassList(rows: readonly AuthzPrimitive[], highRisk: readonly string[]): string[] {
+  const problems: string[] = [];
+  const listed: readonly string[] = ADR_0138_D2_DOOR_CLASS_ROWS;
+  for (const r of rows) {
+    if (r.id.startsWith(DOOR_CLASS_ROW_PREFIX) && !listed.includes(r.id)) {
+      problems.push(
+        `${r.id}: a door-class row ADR-0138 D2 does not list. The list is closed; naming a new door class is an ` +
+          'amendment of ADR-0138, and the row follows that amendment, never the reverse.',
+      );
+    }
+  }
+  for (const id of ADR_0138_D2_DOOR_CLASS_ROWS) {
+    const row = rows.find((r) => r.id === id);
+    if (!row) {
+      problems.push(`${id}: ADR-0138 D2 lists this door class and no matrix row records it.`);
+      continue;
+    }
+    if (row.state !== 'enforced') problems.push(`${id}: a door class is recorded \`enforced\`, not '${row.state}'.`);
+    if (row.proof !== ADR_0138_D2_DOOR_PROOF) {
+      problems.push(
+        `${id}: cites ${row.proof ? `\`${row.proof}\`` : 'no proof'}; a door class is proven by ${ADR_0138_D2_DOOR_PROOF}.`,
+      );
+    }
+    if (!highRisk.includes(id)) problems.push(`${id}: a door class serves data with no session and must be HIGH_RISK.`);
+    for (const site of ADR_0138_D2_ENFORCING_SITES[id]) {
+      if (!(row.enforcement ?? '').includes(site)) {
+        problems.push(`${id}: the enforcement site no longer names \`${site}\`, which ADR-0138 D2's table names for this class.`);
+      }
+    }
+  }
+  return problems;
+}
+
+describe('ADR-0138 D2 — the closed list of doors is recorded, and denial is by domain', () => {
+  const clone = (): AuthzPrimitive[] => JSON.parse(JSON.stringify(AUTHZ_CONFORMANCE));
+  const opts = (discover: () => Iterable<string>) => ({
+    proofRoot: HERE,
+    highRisk: HIGH_RISK,
+    discover,
+    attribution: ATTRIBUTION,
+  });
+
+  it('records exactly the six door classes, each enforced, named as D2 names it, high-risk and proven by the sweep', () => {
+    expect(ADR_0138_D2_DOOR_CLASS_ROWS).toHaveLength(6);
+    expect(checkDoorClassList(AUTHZ_CONFORMANCE, HIGH_RISK)).toEqual([]);
+  });
+
+  it('the sweep claims exactly the six door-class rows, and nothing else', () => {
+    // Mutuality is `checkLedger`'s; this pins the SET, so the proof cannot
+    // quietly start or stop speaking for a class.
+    const sweep = readFileSync(join(HERE, ADR_0138_D2_DOOR_PROOF), 'utf8');
+    const claims = [...sweep.matchAll(/^\/\/ authz-row: (\S+)$/gm)].map((m) => m[1]).sort();
+    expect(claims).toEqual([...ADR_0138_D2_DOOR_CLASS_ROWS].sort());
+  });
+
+  it('NEGATIVE CONTROL — a seventh door-class row is red, and so is a missing one', () => {
+    const seventh = clone();
+    seventh.push({
+      id: `${DOOR_CLASS_ROW_PREFIX}unlisted`, summary: 'a door ADR-0138 D2 does not list', state: 'enforced',
+      enforcement: 'somewhere', proof: ADR_0138_D2_DOOR_PROOF,
+    });
+    expect(checkDoorClassList(seventh, HIGH_RISK).some((p) => p.includes('does not list'))).toBe(true);
+
+    const missing = clone().filter((r) => r.id !== 'anonymous-door-public-read-file');
+    expect(checkDoorClassList(missing, HIGH_RISK).some((p) => p.includes('no matrix row records it'))).toBe(true);
+    // …and the ledger itself reds on the same edit: the sweep's claim is orphaned.
+    expect(
+      checkAuthzLedger(missing, opts(() => discoverAnonymousDenySurfaces())).some((p) => /orphaned claim/.test(p)),
+    ).toBe(true);
+  });
+
+  it('NEGATIVE CONTROL — a door class that stops citing its proof, or stops naming its site, is red', () => {
+    const unproven = clone();
+    unproven.find((r) => r.id === 'anonymous-door-endpoint-flow')!.proof = undefined;
+    expect(checkDoorClassList(unproven, HIGH_RISK).some((p) => p.includes('cites no proof'))).toBe(true);
+    const ledger = checkAuthzLedger(unproven, opts(() => discoverAnonymousDenySurfaces()));
+    expect(ledger.some((p) => p.includes('high-risk anonymous-door-endpoint-flow must carry a proof'))).toBe(true);
+    expect(ledger.some((p) => /attribution is not mutual/.test(p))).toBe(true);
+
+    const reworded = clone();
+    reworded.find((r) => r.id === 'anonymous-door-public-book')!.enforcement = 'a reworded site';
+    expect(checkDoorClassList(reworded, HIGH_RISK).some((p) => p.includes('isPublicAudienceRead'))).toBe(true);
+  });
+
+  it('NEGATIVE CONTROL — deleting ANY gate-pinned domain floor goes STALE (a route inside it would arrive ungated)', () => {
+    for (const gate of DOMAIN_FLOOR_GATE_KEYS) {
+      // Baseline sanity: each floor is in source TODAY.
+      expect(discoverAnonymousDenySurfaces().has(gate), `${gate} must be in source`).toBe(true);
+      const problems = checkAuthzLedger(
+        AUTHZ_CONFORMANCE,
+        opts(() => new Set([...discoverAnonymousDenySurfaces()].filter((k) => k !== gate))),
+      );
+      expect(problems.some((p) => /STALE covers/.test(p) && p.includes(gate)), gate).toBe(true);
+    }
+  });
+
+  it('every domain-floor gate pin the table mints is one of the pinned floors above — none is left out', () => {
+    const minted = [...mintAllSurfaceKeys()].filter((k) => k.endsWith(':anonymous-gate')).sort();
+    expect(minted).toEqual([...DOMAIN_FLOOR_GATE_KEYS].sort());
   });
 });
 

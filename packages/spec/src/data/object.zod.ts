@@ -22,6 +22,10 @@ import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
 import { isMaskedOnReadFieldType } from './masked-field-types';
+// The one-required-master predicate, shared with the v18 stored-row listing
+// (`conversions/refused-shapes.ts`) so the parse and the upgrade's preview
+// refuse one set. Internal: not re-exported by `data/index.ts`.
+import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -1927,6 +1931,69 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
   }
 }
 
+/**
+ * [ADR-0055 §1 · #23100, maintainer ruling B] A `controlled_by_parent` object
+ * derives its master from EXACTLY ONE `master_detail` field declared
+ * `required: true`. The parse refuses the object otherwise — zero such fields,
+ * or two or more — naming the object and the rule, at
+ * `['sharingModel']` (nothing to derive from) or `['fields']` (more than one
+ * candidate), the same two locations `os lint` reports
+ * `security-controlled-by-parent-no-relation` /
+ * `security-controlled-by-parent-ambiguous-relation` at.
+ *
+ * Why the parse and not only the builder: the shapes this refuses were
+ * reachable through every door that does not run `ObjectSchema.create()` — a
+ * plain object literal handed to `defineStack`, a raw `.parse()`, a stored
+ * `sys_metadata` row — and the security runtime used to derive a master from
+ * them anyway, through two fallbacks ADR-0055 §1 never recorded: ANY
+ * `master_detail` (required or not), then a required `lookup`. Both retired
+ * with this rule (ADR-0049 enforce-or-remove; the step-18 semantic migration
+ * `cbp-master-relation-tiers-retired`), so the runtime now derives a master
+ * from exactly the field this rule accepts and from nothing else, and an
+ * object this rule refuses is denied every read and refused every write by the
+ * runtime too. The parse says so where an author is present to act.
+ *
+ * Read on the PARSED field map: `required` is `z.boolean().default(false)`, so
+ * an omitted `required` here is `false` — and is refused. That is the builder's
+ * own contract seen from the other side: `ObjectSchema.create()` forces an
+ * omitted `required` to `true` on every `master_detail` under this sharing
+ * model ({@link forceCbpMasterDetailRequired}), so an object authored through
+ * the builder with one `master_detail` always passes, and one authored with two
+ * always has two required ones and is refused. A field's `reference` needs no
+ * test here: `FieldSchema` already refuses a `master_detail` without one.
+ *
+ * Metadata at rest still LOADS. The stored-row seams first replay the ADR-0087
+ * D2 conversion `cbp-master-detail-required-defaulted`, which gives an OMITTED
+ * `required` on an object's one `master_detail` the builder's own `true`. That
+ * is the one lossless shape, and objectui's Studio writes it. An object that
+ * still fails this parse registers anyway, under a `[metadata_spec_invalid]`
+ * diagnostic carrying this message (ADR-0087's 2026-07-31 addendum, "reads
+ * diagnose, never drop"), and the save door refuses it with 422. The other
+ * shapes are not converted:
+ *   - an explicit `required: false` — the builder refuses it, too;
+ *   - two masters — choosing one is the pick §1 refuses;
+ *   - a required `lookup` — turning it into a `master_detail` changes what
+ *     deleting the master does to every row, and whether the object should
+ *     rather leave `controlled_by_parent` is the author's decision.
+ * The conversion is retired from the authoring load path, so a live author
+ * still meets this refusal.
+ *
+ * The predicate and the message live in `controlled-by-parent-master.ts`
+ * ({@link controlledByParentMasterRefusal}), which the v18 upgrade's stored-row
+ * listing reads too: `os migrate meta --stored` lists each stored object this
+ * refinement refuses, by object, with the fate of its shape (#23270).
+ */
+function refuseControlledByParentWithoutOneMaster(
+  objectName: unknown,
+  sharingModel: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  const refusal = controlledByParentMasterRefusal(objectName, sharingModel, fields);
+  if (refusal === undefined) return;
+  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
+}
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -2845,6 +2912,10 @@ const ObjectSchemaBase = strictObject(
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
+  // [ADR-0055 §1 · #23100 ruling B] Exactly one required `master_detail`
+  // under `controlled_by_parent` — the one master relation the runtime derives
+  // access from. See the helper's docblock.
+  refuseControlledByParentWithoutOneMaster(object.name, object.sharingModel, object.fields, ctx);
 }).overwrite((object) => {
   // [#23065] A `tree` that names no `reference` references this object, and the
   // parse writes that down after the refinements above judged what the author
@@ -3173,10 +3244,14 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  *
  * Lives at `create()` — the authoring surface (ADR-0077) — beside
  * {@link assertSystemDataIsWritable}, and deliberately NOT in raw
- * `.parse()`/`.safeParse()`: metadata already at rest must keep loading.
- * Runtime tolerance is the other half of commit 75b7c240a's ruling — the security
- * gate's fallbacks stay, and the lint rule stays `warning` until v18 — so
- * publish-time refuses new declarations while runtime tolerates old ones.
+ * `.parse()`/`.safeParse()`: a parse must not rewrite what it reads. The force
+ * is the builder's convenience, not the rule: the RULE — exactly one required
+ * `master_detail` under this sharing model — is judged on the parse itself by
+ * {@link refuseControlledByParentWithoutOneMaster} (#23100, maintainer ruling
+ * B), so a raw parse of a `master_detail` without `required: true` is refused
+ * rather than forced, and the security gate's fallbacks this paragraph used to
+ * call "runtime tolerance" (any `master_detail`, then a required `lookup`) are
+ * retired.
  *
  * Alias spellings (`isRequired` / `mandatory` / `notNull`) need no handling
  * here: `FieldSchema` is a `strictObject`, so those keys are refused at parse
@@ -3343,8 +3418,9 @@ export const ObjectSchema = lazySchema(() => {
     // [#9138 — commit 75b7c240a, ruling Direction 2] A `controlled_by_parent` object's
     // `master_detail` reference is forced `required: true` (an explicit
     // `required: false` throws, loudly) so the unsafe shape cannot be newly
-    // declared. Raw `.parse()`/`.safeParse()` stay tolerant for metadata at
-    // rest — see the function's docblock.
+    // declared. Raw `.parse()`/`.safeParse()` do not force it — they refuse a
+    // `controlled_by_parent` object without exactly one required
+    // `master_detail` instead (#23100 ruling B) — see the function's docblock.
     const forcedFields = forceCbpMasterDetailRequired(cfg.name, cfg.sharingModel, cfg.fields);
     const withDefaults = {
       ...cfg,

@@ -1,26 +1,27 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// Build-time guardrail for `{record.<path>}` template references in a
+// Build-time guardrail for `{{ record.<path> }}` template references in a
 // record-change flow's node config (#3426).
 //
-// A `notify` / `update_record` / `http` / ... node resolves `{record.<field>}`
-// references against the triggering record — a `{{ }}` hole in a text slot, a
-// single-brace token where that dialect still reads. Two authoring
-// mistakes render a SILENT empty string at runtime, with no design-time
-// signal — exactly the failure #3426 reported:
+// A `notify` / `http` / `screen` / ... node renders `{{ record.<field> }}`
+// holes against the triggering record — the `{{ }}` holes of its text slots
+// (ADR-0032 D3; the single-brace `{…}` dialect is retired from every flow
+// position and its interpolator deleted, #19939). Two authoring mistakes
+// render a SILENT empty string at runtime, with no design-time signal —
+// exactly the failure #3426 reported:
 //
-//   1. `{record.<unknown>}` — the path head is neither a declared field nor a
-//      system column. Almost always a typo (`{record.full_naem}`). The template
+//   1. `{{ record.<unknown> }}` — the path head is neither a declared field nor a
+//      system column. Almost always a typo (`{{ record.full_naem }}`). The template
 //      engine resolves it to `undefined` -> '' with no warning.
 //
-//   2. `{record.<lookup>.<subfield>}` — a cross-object hop through a lookup /
+//   2. `{{ record.<lookup>.<subfield> }}` — a cross-object hop through a lookup /
 //      master_detail / user / tree relation. The seeded flow record carries the
 //      relation as a SCALAR foreign-key id, not an expanded object (a default
 //      data-API read does not expand relations either — see #3426's hydration
 //      note and #1872). So `record.account.name` walks `.name` on a string id
 //      and yields '' silently. Not resolved today; tracked on #3426.
 //
-//   3. `{record.<injected anchor>}` on an ADR-0015 `external` trigger object
+//   3. `{{ record.<injected anchor> }}` on an ADR-0015 `external` trigger object
 //      (#8340) — the head RESOLVES (it is a registry-injected system column, so
 //      case 1 rightly stays silent), but the remote database owns the table and
 //      the platform provisions no storage behind the anchor. The value is empty
@@ -35,25 +36,17 @@
 // A pure `(stack) => Finding[]` rule (ADR-0019), run from `os validate` and
 // reusable by AI authoring.
 //
-// SEVERITY FOLLOWS THE RUNTIME CONSEQUENCE, which differs by POSITION:
+// SEVERITY: WARNING. An unresolved hole renders a blank: the output is wrong
+// but the run completes, and the head object may legitimately come from
+// another installed package (skipped — see below).
 //
-//   - Everywhere else (a message body, an http url, a write payload) an
-//     unresolved token renders a blank. The output is wrong but the run
-//     completes, and the head object may legitimately come from another
-//     installed package (skipped — see below). Advisory: WARNING.
-//
-//   - Inside a filter-guarded CRUD node's `filter`, an unresolved token used to
-//     DELETE the condition from the query, and a removed condition matches MORE
-//     rows — `delete_record` with its only condition gone matched every row.
-//     Since framework#3810 those nodes REFUSE TO EXECUTE. So a finding here is
-//     not "the output will be blank", it is "this node cannot run": the build
-//     is shipping a flow whose runtime is already decided. Gating: ERROR.
-//
-// The split is the same shift-left `validateReadonlyFlowWrites` makes — a
-// certain runtime failure gates the build, a state-dependent one advises — and
-// it keeps this rule honest about what it found. Catching the typo at build
-// time beats a failed run at 3am; catching it and calling it advisory, when the
-// runtime has already committed to refusing, understates it.
+// A CRUD node's `filter` is NOT scanned (#19939). Each of its operands is a
+// value slot — a CEL value envelope evaluated before the query, or a literal
+// handed to it as written — which renders no template in either dialect, and
+// a `{…}` token there (a `{{ }}` hole included) is refused at every build door
+// by the value-slot judge. The ERROR severity this rule gave a filter token —
+// the token used to erase its condition, and framework#3810 refuses such a
+// node — went with the dialect that read one there.
 //
 // Deliberately conservative to keep false positives near zero:
 //   - A token is checked only when its ROOT resolves to an object THIS stack
@@ -159,14 +152,11 @@ const RELATION_TYPES: ReadonlySet<string> = new Set([
   'tree',
 ]);
 
-// The CRUD nodes whose `filter` the runtime guards (framework#3810): each calls
-// `resolveNodeFilter`, which refuses the node when an authored operand
-// evaluated to nothing. (Since #19939 a single-brace token at a filter operand
-// is refused before any run, by the value-slot judge; this rule still reads
-// one there until the single-brace reading retires.) `create_record` is deliberately absent — it writes a
-// payload and has no filter, so an unresolved token there is a blank value on
-// the new row, not a widened query.
-const FILTER_GUARDED_NODE_TYPES: ReadonlySet<string> = new Set([
+// The CRUD nodes whose `filter` operands are value slots (#19939): a CEL value
+// envelope or a literal, which renders no template, so this rule does not scan
+// the `filter` of these nodes. `create_record` is deliberately absent — it has
+// no filter, and a `filter` key on it is no operand.
+const FILTER_VALUE_SLOT_NODE_TYPES: ReadonlySet<string> = new Set([
   'get_record',
   'update_record',
   'delete_record',
@@ -183,35 +173,29 @@ function fieldTypesOf(obj: AnyRec): Map<string, string> {
   return types;
 }
 
-/** One dotted `{root.seg…}` reference found in a template string. */
+/** One dotted `{{ root.seg… }}` reference found in a template string. */
 interface TemplateRef {
-  /** The token's first segment — the name the run resolves in its variable map. */
+  /** The hole's first segment — the name the run resolves in its variable map. */
   root: string;
-  /** The segments AFTER the root, e.g. `{record.account.name}` -> `['account', 'name']`. */
+  /** The segments AFTER the root, e.g. `{{ record.account.name }}` -> `['account', 'name']`. */
   rest: string[];
 }
 
 /**
- * Extract the dotted `{root.<path>}` references from a template string, in
- * either of the two dialects a flow config string carries:
+ * Extract the dotted `{{ root.<path> }}` references from a template string —
+ * the `{{ ... }}` holes of the formula template engine, which the text slots
+ * render (#22110: a notify `title` / `message` and, since #19939, its
+ * `actionUrl` and an http `url` and `headers` values, a screen `title` /
+ * `description`, an `end` `message`): a path with an optional
+ * `| formatter[:arg]`, whose segments may be bracket-indexed
+ * (`{{ rows[0].subject }}`). The path before the pipe, with each `[i]` read as
+ * `.i` the way the engine resolves it, is judged exactly like a bare one, so
+ * neither a formatter nor an index hides a misspelt field.
  *
- *  - a single-brace `{...}` token — the grammar of the flow interpolator that
- *    still renders every value-like position (service-automation
- *    `builtin/template.ts`, `interpolate`): a token whose body is a plain
- *    dotted path;
- *  - a `{{ ... }}` hole — the formula template engine's grammar, which the
- *    text slots render since #22110 (a notify `title` / `message` and, since
- *    #19939, its `actionUrl` and an http `url` and `headers` values, a screen
- *    `title` / `description`, an `end` `message`): a path with an optional
- *    `| formatter[:arg]`, whose segments may be bracket-indexed
- *    (`{{ rows[0].subject }}`). The path before the pipe, with each `[i]`
- *    read as `.i` the way the engine resolves it, is judged exactly like a
- *    bare one, so neither a formatter nor an index hides a misspelt field —
- *    before #22110 a text slot had neither syntax, and every path in one was
- *    judged.
- *
- * Arithmetic / function tokens (`{NOW()}`, `{a + b}`) are ignored, and so is a
- * single-segment token — there is no `.<field>` hop in it to judge.
+ * A single-brace `{...}` token is NOT read (#19939): no flow position renders
+ * that dialect any more — its interpolator is deleted — and every door refuses
+ * it with its replacement. A hole holding anything but a path, and a
+ * single-segment hole, are ignored: there is no `.<field>` hop in it to judge.
  *
  * The ROOT is returned rather than filtered here (#17305): which roots are
  * resolvable is the caller's per-flow question, and it is no longer the single
@@ -219,21 +203,17 @@ interface TemplateRef {
  */
 function templateRefsIn(text: string): TemplateRef[] {
   const refs: TemplateRef[] = [];
-  const tokenRe = /\{([^{}]+)\}/g;
+  const holeRe = /\{\{([^{}]+)\}\}/g;
   let m: RegExpExecArray | null;
-  while ((m = tokenRe.exec(text)) !== null) {
+  while ((m = holeRe.exec(text)) !== null) {
     let body = m[1].trim();
-    // Inside a `{{ }}` hole — a brace on both sides — the path is the text
-    // before an optional `| formatter`. (In a single-brace token a `|` is the
-    // interpolator's arithmetic, so it stays unjudged there, as before.)
-    const inHole = text[m.index - 1] === '{' && text[m.index + m[0].length] === '}';
-    if (inHole && body.includes('|')) body = body.slice(0, body.indexOf('|')).trim();
+    // The path is the text before an optional `| formatter`…
+    if (body.includes('|')) body = body.slice(0, body.indexOf('|')).trim();
     // …and an index segment is the engine's `[i]` → `.i` (formula's
     // `template-engine.ts` `resolvePath` normalises the same way).
-    if (inHole) body = body.replace(/\[(\w+)\]/g, '.$1');
-    // Pure dotted path only (same shape the interpolator's fast path accepts):
-    // identifier head, then identifier-or-numeric segments. Anything with
-    // operators / spaces / quotes is an arithmetic token — not a bare field ref.
+    body = body.replace(/\[(\w+)\]/g, '.$1');
+    // Pure dotted path only: identifier head, then identifier-or-numeric
+    // segments. Anything with operators / spaces / quotes is no field ref.
     if (!/^[A-Za-z_$][\w$]*(?:\.(?:[A-Za-z_$][\w$]*|\d+))*$/.test(body)) continue;
     const segments = body.split('.');
     const rest = segments.slice(1);
@@ -257,10 +237,9 @@ function stringLeaves(value: unknown, out: string[]): void {
   }
 }
 
-// The typed config blocks + freeform `config` a node interpolates at runtime.
-// We scan every string leaf under these (the runtime `interpolate()` walks the
-// whole config recursively), NOT `id` / `type` / `label` / `position`, which are
-// never templated.
+// The typed config blocks + freeform `config` a node's templates live in. We
+// scan every string leaf under these, NOT `id` / `type` / `label` /
+// `position`, which are never templated.
 const NODE_CONFIG_KEYS = [
   'config',
   'notify',
@@ -277,47 +256,24 @@ const NODE_CONFIG_KEYS = [
   'start',
 ];
 
-/** A templated string leaf plus the one thing severity depends on: where it sits. */
-interface TemplateLeaf {
-  text: string;
-  /** Inside a filter-guarded CRUD node's `filter` — an unresolved token there is refused at runtime. */
-  inFilter: boolean;
-}
-
 /**
- * Collect a node's templated string leaves, tagging those that sit under a
- * `filter` key when the node type is one the runtime guards.
- *
- * `guarded` leaves are returned FIRST so the per-node dedupe below resolves a
- * reference that appears in both positions at its higher severity: one typo
- * used in a filter and echoed in a message is an error, not a warning.
+ * Collect a node's templated string leaves — every one but those under a
+ * `filter` key when the node type's filter operands are value slots
+ * ({@link FILTER_VALUE_SLOT_NODE_TYPES}), which render no template.
  */
-function collectNodeLeaves(node: AnyRec, guarded: boolean): TemplateLeaf[] {
-  const filterLeaves: TemplateLeaf[] = [];
-  const otherLeaves: TemplateLeaf[] = [];
-
+function collectNodeLeaves(node: AnyRec, skipFilter: boolean): string[] {
+  const leaves: string[] = [];
   for (const key of NODE_CONFIG_KEYS) {
     if (!(key in node)) continue;
     const block = node[key];
-    const splitFilter = guarded && !!block && typeof block === 'object' && !Array.isArray(block);
-
-    if (splitFilter) {
-      const { filter, ...rest } = block as AnyRec;
-      const inFilter: string[] = [];
-      stringLeaves(filter, inFilter);
-      for (const text of inFilter) filterLeaves.push({ text, inFilter: true });
-      const outside: string[] = [];
-      stringLeaves(rest, outside);
-      for (const text of outside) otherLeaves.push({ text, inFilter: false });
+    if (skipFilter && !!block && typeof block === 'object' && !Array.isArray(block)) {
+      const { filter: _operands, ...rest } = block as AnyRec;
+      stringLeaves(rest, leaves);
       continue;
     }
-
-    const plain: string[] = [];
-    stringLeaves(block, plain);
-    for (const text of plain) otherLeaves.push({ text, inFilter: false });
+    stringLeaves(block, leaves);
   }
-
-  return [...filterLeaves, ...otherLeaves];
+  return leaves;
 }
 
 /** True when the flow is armed by a record lifecycle event. */
@@ -385,33 +341,18 @@ interface TemplateRoot {
 }
 
 /**
- * The text a `loop`'s `config.collection` names its list by: since #19939 a CEL
- * value envelope's `source` (`{ dialect: 'cel', source: 'staleCases' }`, the
- * spelling the structured `loop` evaluates), and in a source written before
- * that, the body of a lone `{…}` token or a bare name ({@link loneTokenBody};
- * every door refuses both now, so reading them only keeps this rule's
- * findings on such a flow). The caller resolves it only when it is a bare
- * variable name.
+ * The text a `loop`'s `config.collection` names its list by: a CEL value
+ * envelope's `source` (`{ dialect: 'cel', source: 'staleCases' }`, the
+ * spelling the structured `loop` evaluates, #19939). A string there — a lone
+ * `{…}` token of the retired dialect, or a variable's bare name, which the
+ * structured `loop` never read — is refused at every door and resolves no
+ * root here. The caller resolves the source only when it is a bare variable
+ * name.
  */
 function collectionListText(raw: unknown): string | undefined {
-  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
-    const envelope = raw as AnyRec;
-    return envelope.dialect === 'cel' && typeof envelope.source === 'string' ? envelope.source.trim() : undefined;
-  }
-  return loneTokenBody(raw);
-}
-
-/**
- * The body of a string that is EXACTLY one `{…}` token, or the string itself
- * when it carries no braces — the two spellings a `loop`'s `config.collection`
- * took before #19939 made it a CEL value envelope.
- */
-function loneTokenBody(raw: unknown): string | undefined {
-  if (typeof raw !== 'string') return undefined;
-  const trimmed = raw.trim();
-  if (!trimmed) return undefined;
-  const braced = /^\{([^{}]+)\}$/.exec(trimmed);
-  return (braced ? braced[1] : trimmed).trim();
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const envelope = raw as AnyRec;
+  return envelope.dialect === 'cel' && typeof envelope.source === 'string' ? envelope.source.trim() : undefined;
 }
 
 /**
@@ -598,13 +539,11 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
     }
 
     // Every node, INCLUDING those nested in try_catch / loop / parallel regions
-    // (#4380). This rule was not merely blind to them — it was WORSE than
-    // blind: the recursive string-leaf scan already saw a nested node's tokens
-    // through its container's `config`, but `collectNodeLeaves` splits `filter`
-    // only at the top level of the node it is handed, so a nested filter token
-    // lost its position and the gating #3810 finding silently degraded to a
-    // warning reported against the wrapping `try_catch`. Walking to the real
-    // node restores both the severity and the location.
+    // (#4380). The recursive string-leaf scan already saw a nested node's
+    // holes through its container's `config`, but judged them against the
+    // wrapping container: `collectNodeLeaves` reads only the node it is
+    // handed. Walking to the real node restores the location — and the
+    // per-node-type `filter` exemption, which a nested CRUD node needs too.
     const walked = walkFlowNodes(flow, `flows[${flowIndex}]`);
 
     // ── Roots 2..n: flow variables a node binds to a record (#17305). The
@@ -637,9 +576,9 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
         : `flow "${flowName}" node "${nodeLabel}"`;
 
       // Collect templated string leaves from the config-bearing blocks only,
-      // tagging filter positions when this node type guards its filter (#3810).
+      // leaving out a CRUD node's filter operands — value slots (#19939).
       const nodeType = typeof node.type === 'string' ? node.type : '';
-      const guarded = FILTER_GUARDED_NODE_TYPES.has(nodeType);
+      const skipFilter = FILTER_VALUE_SLOT_NODE_TYPES.has(nodeType);
       // Scan the container's config WITHOUT its region slots: their nodes are
       // walked in their own right, and leaving them in would report every
       // nested finding a second time against the container.
@@ -647,7 +586,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
         localConfig !== undefined && localConfig !== node.config
           ? ({ ...node, config: localConfig } as AnyRec)
           : (node as AnyRec);
-      const leaves = collectNodeLeaves(scanNode, guarded);
+      const leaves = collectNodeLeaves(scanNode, skipFilter);
       if (leaves.length === 0) return;
 
       // Dedupe references so one repeated typo yields one finding per node.
@@ -658,14 +597,14 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
       const seenUnprovisioned = new Set<string>();
 
       for (const leaf of leaves) {
-        const inFilter = leaf.inFilter;
-        for (const { root: rootName, rest } of templateRefsIn(leaf.text)) {
+        for (const { root: rootName, rest } of templateRefsIn(leaf)) {
           const root = roots.get(rootName);
           // An unresolvable root — a flow variable nothing binds statically, an
-          // ambiguous one, `{record.…}` on a flow with no record trigger.
+          // ambiguous one, `{{ record.… }}` on a flow with no record trigger.
           if (!root) continue;
           const objectName = root.objectName;
           const token = `${rootName}.${rest.join('.')}`;
+          const hole = `{{ ${token} }}`;
           const head = rest[0];
           const hasSubPath = rest.length > 1;
           // A trailing numeric segment is an array index (#1872), not a hop.
@@ -676,10 +615,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
           // [#8340] The head RESOLVES — `IMPLICIT_HEADS` keeps owning that
           // decision, exactly as before — but on an ADR-0015 `external` trigger
           // object the platform registers this anchor and stores nothing in it,
-          // so the interpolator reads an empty value from the flow record. In a
-          // filter position that is #3810's own failure reached by a second
-          // route: the token erases the authored condition and `resolveNodeFilter`
-          // refuses the node at run time. Warning, not error, on both positions:
+          // so the hole renders an empty value from the flow record. A warning:
           // unlike a typo (a closed oracle — the field is simply absent) this
           // pass cannot see whether the remote schema resolves the column.
           if (root.unprovisionedAnchors.has(head)) {
@@ -691,13 +627,8 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                 where,
                 path: nodePath,
                 message:
-                  (inFilter ? `${nodeType} filter references ` : 'template references ') +
-                  `'{${token}}', and ${unprovisionedAnchorCause(objectName, head)} — ` +
-                  (inFilter
-                    ? `the token resolves to nothing on every run, which DROPS the condition from ` +
-                      `the query instead of narrowing it; the node then refuses to run at execution ` +
-                      `time.`
-                    : `the token resolves to an empty string on every run (silently).`),
+                  `template references '${hole}', and ${unprovisionedAnchorCause(objectName, head)} — ` +
+                  `the hole renders an empty string on every run (silently).`,
                 hint: unprovisionedAnchorHint(objectName, head),
               });
             }
@@ -707,32 +638,19 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
             if (seenUnknown.has(token)) continue;
             seenUnknown.add(token);
             findings.push({
-              severity: inFilter ? 'error' : 'warning',
+              severity: 'warning',
               rule: FLOW_TEMPLATE_UNKNOWN_FIELD,
               where,
               path: nodePath,
-              message: inFilter
-                ? `${nodeType} filter references '{${token}}', but '${head}' is not a field on ` +
-                  `object '${objectName}' — the token resolves to nothing, which DROPS the condition from the ` +
-                  `query instead of narrowing it. The node refuses to run at execution time.`
-                : `template references '{${token}}', but '${head}' is not a field on ` +
-                  `object '${objectName}' — it resolves to an empty string at runtime (silently).`,
+              message:
+                `template references '${hole}', but '${head}' is not a field on ` +
+                `object '${objectName}' — it resolves to an empty string at runtime (silently).`,
               hint: root.isTrigger
-                ? inFilter
-                  ? `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
-                    `not '{record.full_naem}'); system columns like id/created_at/owner are also addressable. ` +
-                    `This gates the build rather than warning: an absent condition WIDENS the query, so the ` +
-                    `runtime has already decided to refuse this node.`
-                  : `Check the field name against the object's field definitions (e.g. '{record.full_name}', ` +
-                    `not '{record.full_naem}'). System columns like id/created_at/owner are also addressable.`
-                : inFilter
-                  ? `Check the field name against object '${objectName}'s field definitions — '${rootName}' is ` +
-                    `bound to a '${objectName}' record by this flow; system columns like id/created_at/owner ` +
-                    `are also addressable. This gates the build rather than warning: an absent condition ` +
-                    `WIDENS the query, so the runtime has already decided to refuse this node.`
-                  : `Check the field name against object '${objectName}'s field definitions — '${rootName}' is ` +
-                    `bound to a '${objectName}' record by this flow. System columns like id/created_at/owner ` +
-                    `are also addressable.`,
+                ? `Check the field name against the object's field definitions (e.g. '{{ record.full_name }}', ` +
+                  `not '{{ record.full_naem }}'). System columns like id/created_at/owner are also addressable.`
+                : `Check the field name against object '${objectName}'s field definitions — '${rootName}' is ` +
+                  `bound to a '${objectName}' record by this flow. System columns like id/created_at/owner ` +
+                  `are also addressable.`,
             });
             continue;
           }
@@ -743,39 +661,23 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
               if (seenTraversal.has(token)) continue;
               seenTraversal.add(token);
               findings.push({
-                severity: inFilter ? 'error' : 'warning',
+                severity: 'warning',
                 rule: FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
                 where,
                 path: nodePath,
-                message: inFilter
-                  ? `${nodeType} filter references '{${token}}', a cross-object hop through the ` +
-                    `${headType} field '${head}' — the ${root.isTrigger ? 'flow record' : `'${rootName}' record`} ` +
-                    `carries '${head}' as a scalar id, not an ` +
-                    `expanded object, so the token resolves to nothing and the condition is DROPPED from the ` +
-                    `query instead of narrowing it. The node refuses to run at execution time.`
-                  : `template references '{${token}}', a cross-object hop through the ${headType} field ` +
-                    `'${head}' — the ${root.isTrigger ? 'flow record' : `'${rootName}' record`} carries ` +
-                    `'${head}' as a scalar id, not an expanded object, so ` +
-                    `this resolves to an empty string at runtime (silently).`,
+                message:
+                  `template references '${hole}', a cross-object hop through the ${headType} field ` +
+                  `'${head}' — the ${root.isTrigger ? 'flow record' : `'${rootName}' record`} carries ` +
+                  `'${head}' as a scalar id, not an expanded object, so ` +
+                  `this resolves to an empty string at runtime (silently).`,
                 hint: root.isTrigger
-                  ? inFilter
-                    ? `Opt in to resolve it: add '${head}' to the start node's config.expand and the ` +
-                      `engine re-reads it as the run's identity. Otherwise filter on the foreign-key id directly ` +
-                      `('{record.${head}}'), or project the value via a formula field on '${objectName}'. This ` +
-                      `gates the build rather than warning: an absent condition WIDENS the query.`
-                    : `Opt in to resolve it: add '${head}' to the start node's config.expand and the ` +
-                      `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
-                      `('{record.${head}}'), or project the value via a formula field on '${objectName}'.`
-                  : inFilter
-                    ? `A record read into a flow variable is not expanded either — config.expand is the ` +
-                      `START node's opt-in and covers the trigger record alone. Filter on the foreign-key id ` +
-                      `directly ('{${rootName}.${head}}'), project the value via a formula field on ` +
-                      `'${objectName}', or add a get_record node that reads the related record. This gates the ` +
-                      `build rather than warning: an absent condition WIDENS the query.`
-                    : `A record read into a flow variable is not expanded either — config.expand is the ` +
-                      `START node's opt-in and covers the trigger record alone. Reference the foreign-key id ` +
-                      `directly ('{${rootName}.${head}}'), project the value via a formula field on ` +
-                      `'${objectName}', or add a get_record node that reads the related record.`,
+                  ? `Opt in to resolve it: add '${head}' to the start node's config.expand and the ` +
+                    `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
+                    `('{{ record.${head} }}'), or project the value via a formula field on '${objectName}'.`
+                  : `A record read into a flow variable is not expanded either — config.expand is the ` +
+                    `START node's opt-in and covers the trigger record alone. Reference the foreign-key id ` +
+                    `directly ('{{ ${rootName}.${head} }}'), project the value via a formula field on ` +
+                    `'${objectName}', or add a get_record node that reads the related record.`,
               });
             }
             // STRUCTURED_TYPES + any other scalar `.sub` access is left alone:

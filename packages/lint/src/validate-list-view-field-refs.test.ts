@@ -879,7 +879,9 @@ describe('#14107 — the skips', () => {
   });
 
   it('skips a list view whose provider is not `object`', () => {
-    const stack = stackWith(mutate({ data: { provider: 'api', endpoint: '/x' }, columns: ['nope'] }));
+    // A `value` source: the one non-`object` provider a list view can still
+    // bind (the `api` arm is retired, and `schema` is form-only).
+    const stack = stackWith(mutate({ data: { provider: 'value', items: [] }, columns: ['nope'] }));
     expect(validateListViewFieldRefs(stack)).toEqual([]);
   });
 

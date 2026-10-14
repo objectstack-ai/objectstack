@@ -1,7 +1,7 @@
 ---
 title: Protocol schema — API Protocol reference
 navTitle: Protocol
-description: "Protocol schemas of the ObjectStack API Protocol: AiAgentCapabilities and 134 more — each property with its type, default and a TypeScript example."
+description: "Protocol schemas of the ObjectStack API Protocol: AiAgentCapabilities and 136 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Protocol schemas of the ObjectStack API Protocol: AiAgentCapabilit
 ## TypeScript Usage
 
 ```typescript
-import { AiAgentCapabilitiesSchema, AiAgentChatRequestSchema, AiAgentSummarySchema, AiAgentsResponseSchema, AiChatRequestSchema, AiChatResponseSchema, AiCompleteRequestSchema, AiConversationSchema, AiMessageSchema, AiModelsResponseSchema, AiPendingActionSchema, AiPendingActionStatusSchema, AiStreamChunkSchema, ApproveAiPendingActionResponseSchema, AuditMetaItemRequestSchema, AuditMetaItemResponseSchema, AutomationActionsResponseSchema, AutomationTriggerRequestSchema, AutomationTriggerResponseSchema, BatchDataRequestSchema, BatchDataResponseSchema, CheckPermissionRequestSchema, CheckPermissionResponseSchema, CloneDataResponseSchema, CreateAiConversationRequestSchema, CreateDataRequestSchema, CreateDataResponseSchema, CreateManyDataRequestSchema, CreateManyDataResponseSchema, DeleteDataRequestSchema, DeleteDataResponseSchema, DeleteManyDataRequestSchema, DeleteManyDataResponseSchema, DeleteMetaItemRequestSchema, DeleteMetaItemResponseSchema, DiffMetaItemResponseSchema, DisablePackageRequestSchema, DisablePackageResponseSchema, EnablePackageRequestSchema, EnablePackageResponseSchema, FindDataRequestSchema, FindDataResponseSchema, FindReferencesToMetaResponseSchema, GetDataRequestSchema, GetDataResponseSchema, GetDiscoveryRequestSchema, GetDiscoveryResponseSchema, GetEffectivePermissionsRequestSchema, GetEffectivePermissionsResponseSchema, GetFieldLabelsRequestSchema, GetFieldLabelsResponseSchema, GetLocalesRequestSchema, GetLocalesResponseSchema, GetMetaDiagnosticsResponseSchema, GetMetaItemCachedRequestSchema, GetMetaItemCachedResponseSchema, GetMetaItemLayeredRequestSchema, GetMetaItemLayeredResponseSchema, GetMetaItemRequestSchema, GetMetaItemResponseSchema, GetMetaItemsRequestSchema, GetMetaItemsResponseSchema, GetMetaTypesRequestSchema, GetMetaTypesResponseSchema, GetNotificationPreferencesRequestSchema, GetNotificationPreferencesResponseSchema, GetObjectPermissionsRequestSchema, GetObjectPermissionsResponseSchema, GetPackageRequestSchema, GetPackageResponseSchema, GetPresenceRequestSchema, GetPresenceResponseSchema, GetPublishedMetaItemResponseSchema, GetTranslationsRequestSchema, GetTranslationsResponseSchema, GetUiViewRequestSchema, GetUiViewResponseSchema, HistoryMetaItemRequestSchema, HistoryMetaItemResponseSchema, HttpFindQueryParamsSchema, InstallPackageRequestSchema, InstallPackageResponseSchema, ListAiConversationsRequestSchema, ListAiConversationsResponseSchema, ListAiPendingActionsRequestSchema, ListAiPendingActionsResponseSchema, ListDraftsResponseSchema, ListNotificationsRequestSchema, ListNotificationsResponseSchema, ListPackagesRequestSchema, ListPackagesResponseSchema, MarkAllNotificationsReadRequestSchema, MarkAllNotificationsReadResponseSchema, MarkNotificationsReadRequestSchema, MarkNotificationsReadResponseSchema, MetadataConflictErrorSchema, NotificationSchema, NotificationPreferencesSchema, PublishMetaItemRequestSchema, PublishMetaItemResponseSchema, PublishPackageDraftsResponseSchema, RealtimeConnectRequestSchema, RealtimeConnectResponseSchema, RealtimeDisconnectRequestSchema, RealtimeDisconnectResponseSchema, RealtimeSubscribeRequestSchema, RealtimeSubscribeResponseSchema, RealtimeUnsubscribeRequestSchema, RealtimeUnsubscribeResponseSchema, RegisterDeviceRequestSchema, RegisterDeviceResponseSchema, RejectAiPendingActionResponseSchema, RollbackMetaItemResponseSchema, RuntimeAuthoringIssueSchema, SaveMetaItemRequestSchema, SaveMetaItemResponseSchema, SearchAllHitSchema, SearchAllPageHitSchema, SearchAllResponseSchema, SetPresenceRequestSchema, SetPresenceResponseSchema, UninstallPackageRequestSchema, UninstallPackageResponseSchema, UnregisterDeviceRequestSchema, UnregisterDeviceResponseSchema, UpdateAiConversationRequestSchema, UpdateDataRequestSchema, UpdateDataResponseSchema, UpdateManyDataRequestSchema, UpdateManyDataResponseSchema, UpdateNotificationPreferencesRequestSchema, UpdateNotificationPreferencesResponseSchema, ValidateDataIssueSchema, ValidateDataRequestSchema, ValidateDataResponseSchema } from '@objectstack/spec/api';
-import type { AiAgentCapabilities, AiAgentChatRequest, AiAgentSummary, AiAgentsResponse, AiChatRequest, AiChatResponse, AiCompleteRequest, AiConversation, AiMessage, AiModelsResponse, AiPendingAction, AiPendingActionStatus, AiStreamChunk, ApproveAiPendingActionResponse, AuditMetaItemRequest, AuditMetaItemResponse, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CloneDataResponse, CreateAiConversationRequest, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DiffMetaItemResponse, DisablePackageRequest, DisablePackageResponse, EnablePackageRequest, EnablePackageResponse, FindDataRequest, FindDataResponse, FindReferencesToMetaResponse, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaDiagnosticsResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemLayeredRequest, GetMetaItemLayeredResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPackageRequest, GetPackageResponse, GetPresenceRequest, GetPresenceResponse, GetPublishedMetaItemResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetUiViewResponse, HistoryMetaItemRequest, HistoryMetaItemResponse, InstallPackageRequest, InstallPackageResponse, ListAiConversationsRequest, ListAiConversationsResponse, ListAiPendingActionsRequest, ListAiPendingActionsResponse, ListDraftsResponse, ListNotificationsRequest, ListNotificationsResponse, ListPackagesRequest, ListPackagesResponse, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, MetadataConflictError, Notification, NotificationPreferences, PublishMetaItemRequest, PublishMetaItemResponse, PublishPackageDraftsResponse, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, RejectAiPendingActionResponse, RollbackMetaItemResponse, RuntimeAuthoringIssue, SaveMetaItemRequest, SaveMetaItemResponse, SearchAllHit, SearchAllPageHit, SearchAllResponse, SetPresenceRequest, SetPresenceResponse, UninstallPackageRequest, UninstallPackageResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateAiConversationRequest, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
+import { AiAgentCapabilitiesSchema, AiAgentChatRequestSchema, AiAgentSummarySchema, AiAgentsResponseSchema, AiChatRequestSchema, AiChatResponseSchema, AiCompleteRequestSchema, AiConversationSchema, AiMessageSchema, AiModelsResponseSchema, AiPendingActionSchema, AiPendingActionStatusSchema, AiStreamChunkSchema, ApproveAiPendingActionResponseSchema, AuditMetaItemRequestSchema, AuditMetaItemResponseSchema, AutomationActionsResponseSchema, AutomationTriggerRequestSchema, AutomationTriggerResponseSchema, BatchDataRequestSchema, BatchDataResponseSchema, CheckPermissionRequestSchema, CheckPermissionResponseSchema, CloneDataResponseSchema, CreateAiConversationRequestSchema, CreateDataRequestSchema, CreateDataResponseSchema, CreateManyDataRequestSchema, CreateManyDataResponseSchema, DeleteDataRequestSchema, DeleteDataResponseSchema, DeleteManyDataRequestSchema, DeleteManyDataResponseSchema, DeleteMetaItemRequestSchema, DeleteMetaItemResponseSchema, DiffMetaItemResponseSchema, DisablePackageRequestSchema, DisablePackageResponseSchema, EnablePackageRequestSchema, EnablePackageResponseSchema, FindDataRequestSchema, FindDataResponseSchema, FindReferencesToMetaResponseSchema, FlowRegistrationSchema, FlowRegistrationRefusalSchema, GetDataRequestSchema, GetDataResponseSchema, GetDiscoveryRequestSchema, GetDiscoveryResponseSchema, GetEffectivePermissionsRequestSchema, GetEffectivePermissionsResponseSchema, GetFieldLabelsRequestSchema, GetFieldLabelsResponseSchema, GetLocalesRequestSchema, GetLocalesResponseSchema, GetMetaDiagnosticsResponseSchema, GetMetaItemCachedRequestSchema, GetMetaItemCachedResponseSchema, GetMetaItemLayeredRequestSchema, GetMetaItemLayeredResponseSchema, GetMetaItemRequestSchema, GetMetaItemResponseSchema, GetMetaItemsRequestSchema, GetMetaItemsResponseSchema, GetMetaTypesRequestSchema, GetMetaTypesResponseSchema, GetNotificationPreferencesRequestSchema, GetNotificationPreferencesResponseSchema, GetObjectPermissionsRequestSchema, GetObjectPermissionsResponseSchema, GetPackageRequestSchema, GetPackageResponseSchema, GetPresenceRequestSchema, GetPresenceResponseSchema, GetPublishedMetaItemResponseSchema, GetTranslationsRequestSchema, GetTranslationsResponseSchema, GetUiViewRequestSchema, GetUiViewResponseSchema, HistoryMetaItemRequestSchema, HistoryMetaItemResponseSchema, HttpFindQueryParamsSchema, InstallPackageRequestSchema, InstallPackageResponseSchema, ListAiConversationsRequestSchema, ListAiConversationsResponseSchema, ListAiPendingActionsRequestSchema, ListAiPendingActionsResponseSchema, ListDraftsResponseSchema, ListNotificationsRequestSchema, ListNotificationsResponseSchema, ListPackagesRequestSchema, ListPackagesResponseSchema, MarkAllNotificationsReadRequestSchema, MarkAllNotificationsReadResponseSchema, MarkNotificationsReadRequestSchema, MarkNotificationsReadResponseSchema, MetadataConflictErrorSchema, NotificationSchema, NotificationPreferencesSchema, PublishMetaItemRequestSchema, PublishMetaItemResponseSchema, PublishPackageDraftsResponseSchema, RealtimeConnectRequestSchema, RealtimeConnectResponseSchema, RealtimeDisconnectRequestSchema, RealtimeDisconnectResponseSchema, RealtimeSubscribeRequestSchema, RealtimeSubscribeResponseSchema, RealtimeUnsubscribeRequestSchema, RealtimeUnsubscribeResponseSchema, RegisterDeviceRequestSchema, RegisterDeviceResponseSchema, RejectAiPendingActionResponseSchema, RollbackMetaItemResponseSchema, RuntimeAuthoringIssueSchema, SaveMetaItemRequestSchema, SaveMetaItemResponseSchema, SearchAllHitSchema, SearchAllPageHitSchema, SearchAllResponseSchema, SetPresenceRequestSchema, SetPresenceResponseSchema, UninstallPackageRequestSchema, UninstallPackageResponseSchema, UnregisterDeviceRequestSchema, UnregisterDeviceResponseSchema, UpdateAiConversationRequestSchema, UpdateDataRequestSchema, UpdateDataResponseSchema, UpdateManyDataRequestSchema, UpdateManyDataResponseSchema, UpdateNotificationPreferencesRequestSchema, UpdateNotificationPreferencesResponseSchema, ValidateDataIssueSchema, ValidateDataRequestSchema, ValidateDataResponseSchema } from '@objectstack/spec/api';
+import type { AiAgentCapabilities, AiAgentChatRequest, AiAgentSummary, AiAgentsResponse, AiChatRequest, AiChatResponse, AiCompleteRequest, AiConversation, AiMessage, AiModelsResponse, AiPendingAction, AiPendingActionStatus, AiStreamChunk, ApproveAiPendingActionResponse, AuditMetaItemRequest, AuditMetaItemResponse, AutomationActionsResponse, AutomationTriggerRequest, AutomationTriggerResponse, BatchDataRequest, BatchDataResponse, CheckPermissionRequest, CheckPermissionResponse, CloneDataResponse, CreateAiConversationRequest, CreateDataRequest, CreateDataResponse, CreateManyDataRequest, CreateManyDataResponse, DeleteDataRequest, DeleteDataResponse, DeleteManyDataRequest, DeleteManyDataResponse, DeleteMetaItemRequest, DeleteMetaItemResponse, DiffMetaItemResponse, DisablePackageRequest, DisablePackageResponse, EnablePackageRequest, EnablePackageResponse, FindDataRequest, FindDataResponse, FindReferencesToMetaResponse, FlowRegistration, FlowRegistrationRefusal, GetDataRequest, GetDataResponse, GetDiscoveryRequest, GetDiscoveryResponse, GetEffectivePermissionsRequest, GetEffectivePermissionsResponse, GetFieldLabelsRequest, GetFieldLabelsResponse, GetLocalesRequest, GetLocalesResponse, GetMetaDiagnosticsResponse, GetMetaItemCachedRequest, GetMetaItemCachedResponse, GetMetaItemLayeredRequest, GetMetaItemLayeredResponse, GetMetaItemRequest, GetMetaItemResponse, GetMetaItemsRequest, GetMetaItemsResponse, GetMetaTypesRequest, GetMetaTypesResponse, GetNotificationPreferencesRequest, GetNotificationPreferencesResponse, GetObjectPermissionsRequest, GetObjectPermissionsResponse, GetPackageRequest, GetPackageResponse, GetPresenceRequest, GetPresenceResponse, GetPublishedMetaItemResponse, GetTranslationsRequest, GetTranslationsResponse, GetUiViewRequest, GetUiViewResponse, HistoryMetaItemRequest, HistoryMetaItemResponse, InstallPackageRequest, InstallPackageResponse, ListAiConversationsRequest, ListAiConversationsResponse, ListAiPendingActionsRequest, ListAiPendingActionsResponse, ListDraftsResponse, ListNotificationsRequest, ListNotificationsResponse, ListPackagesRequest, ListPackagesResponse, MarkAllNotificationsReadRequest, MarkAllNotificationsReadResponse, MarkNotificationsReadRequest, MarkNotificationsReadResponse, MetadataConflictError, Notification, NotificationPreferences, PublishMetaItemRequest, PublishMetaItemResponse, PublishPackageDraftsResponse, RealtimeConnectRequest, RealtimeConnectResponse, RealtimeDisconnectRequest, RealtimeDisconnectResponse, RealtimeSubscribeRequest, RealtimeSubscribeResponse, RealtimeUnsubscribeRequest, RealtimeUnsubscribeResponse, RegisterDeviceRequest, RegisterDeviceResponse, RejectAiPendingActionResponse, RollbackMetaItemResponse, RuntimeAuthoringIssue, SaveMetaItemRequest, SaveMetaItemResponse, SearchAllHit, SearchAllPageHit, SearchAllResponse, SetPresenceRequest, SetPresenceResponse, UninstallPackageRequest, UninstallPackageResponse, UnregisterDeviceRequest, UnregisterDeviceResponse, UpdateAiConversationRequest, UpdateDataRequest, UpdateDataResponse, UpdateManyDataRequest, UpdateManyDataResponse, UpdateNotificationPreferencesRequest, UpdateNotificationPreferencesResponse, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = AiAgentCapabilitiesSchema.parse(data);
@@ -729,6 +729,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **state** | `Enum<'active' \| 'draft'>` | optional | Which lifecycle row to discard: `draft` discards the pending draft overlay only (the still-active overlay, if any, keeps serving); `active` or absent resets the live row. Absent defaults to `active`. |
 | **dropStorage** | `boolean` | optional | Destructive opt-in, default false: also drop the object's physical table after the metadata row is removed (`object` type + `active` state only; never `sys_` tables). Used by the "discard a previewed object" flow so a publish-to-preview leaves no orphan table. |
 | **member** | `string` | optional | Bundle member selector, for a metadata type whose identity is a pair (today only `email_template`, identified by `(name, locale)`): the member this request addresses, spelled as its discriminator value (`zh-CN`). Absent, the canonical member (`en-US` for `email_template`), which is what a bare-name read answers; naming the canonical value is the same request. It is not the response translation locale, which `?locale=` and `Accept-Language` choose. Refused with 400 `VALIDATION_ERROR` on a type that has no members, and for a blank value or one longer than a stored member can be (100 characters). A well-formed member with nothing stored or shipped answers as that door answers an absent item. |
+| **packageId** | `string \| null` | optional | ADR-0048 — the software package whose row this delete removes (`sys_metadata.package_id`; `?package=<id>` on the REST door, where `all` and an empty value name no package), as a save names the row it writes. Named, the delete removes that package's row and no other; a package that holds no row removes nothing. Absent or `null` names no package: the delete then removes the row of the one package the item's rows at the deleted `state` are bound to, is refused `409 RESOURCE_CONFLICT` when they are bound to two or more, and with none removes the env-local row (no package stamp). That row is the one `parentVersion` is judged against. When another row of the item is still stored afterwards, the receipt `message` names it. |
 
 
 ---
@@ -964,6 +965,65 @@ Enable package response
 | **label** | `string` | optional | Display label of the referring item, when it has one. |
 | **path** | `string` | ✅ | Where inside the referring item the reference sits (dot path). |
 | **kind** | `string` | ✅ | What kind of reference this is (e.g. which key carries it). |
+
+
+---
+
+## FlowRegistration
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'registered'` | ✅ | The engine holds a registration under the flow's name. |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'refused'` | ✅ | The engine refused to register the stored flow and holds nothing under its name: it never runs. |
+| **reason** | `{ code?: string; message: string }` | ✅ | What the engine threw, verbatim. |
+
+### Nested Shape: `FlowRegistration[state='refused'].reason`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | optional | The machine code the engine's refusal carried, verbatim. Absent when the thrown error carried none. |
+| **message** | `string` | ✅ | The engine's refusal message, verbatim. Render it as sent; do not parse it. |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
+
+---
+
+
+---
+
+## FlowRegistrationRefusal
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | optional | The machine code the engine's refusal carried, verbatim. Absent when the thrown error carried none. |
+| **message** | `string` | ✅ | The engine's refusal message, verbatim. Render it as sent; do not parse it. |
 
 
 ---
@@ -1269,6 +1329,7 @@ Enable package response
 | **cacheControl** | `{ directives: Enum<'public' \| 'private' \| 'no-cache' \| 'no-store' \| 'must-revalidate' \| 'max-age'>[]; maxAge?: number; staleWhileRevalidate?: number; staleIfError?: number }` | optional | Cache control directives |
 | **notModified** | `boolean` | optional (default: `false`) | True if resource has not been modified (304 response) |
 | **version** | `string` | optional | Metadata version identifier |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on the flow in `data`, read live on every call and never part of `etag` (see `FlowRegistrationSchema`). Present only for a `flow` read answered by a process that runs an automation service; a read that carries it is never answered `notModified`. Absent otherwise, and absence means no engine judged it, never `registered`. |
 
 ### Nested Shape: `GetMetaItemCachedResponse.etag`
 
@@ -1285,6 +1346,25 @@ Enable package response
 | **maxAge** | `number` | optional | Maximum cache age in seconds (unit per HTTP Cache-Control `max-age` (RFC 9111 §5.2.2.1)) |
 | **staleWhileRevalidate** | `number` | optional | Allow serving stale content while revalidating (seconds) (unit per HTTP Cache-Control `stale-while-revalidate` (RFC 5861 §3)) |
 | **staleIfError** | `number` | optional | Allow serving stale content on error (seconds) (unit per HTTP Cache-Control `stale-if-error` (RFC 5861 §4)) |
+
+### Nested Shape: `GetMetaItemCachedResponse.registration[state='registered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'registered'` | ✅ | The engine holds a registration under the flow's name. |
+
+### Nested Shape: `GetMetaItemCachedResponse.registration[state='refused']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'refused'` | ✅ | The engine refused to register the stored flow and holds nothing under its name: it never runs. |
+| **reason** | `{ code?: string; message: string }` | ✅ | What the engine threw, verbatim. |
+
+### Nested Shape: `GetMetaItemCachedResponse.registration[state='unregistered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
 
 
 ---
@@ -1374,12 +1454,32 @@ Enable package response
 | **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
 | **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
 | **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Unlike the protection keys it is published by the cached branch too, read live and never part of the ETag, so a cached read that carries it is never answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
 
 ### Nested Shape: `GetMetaItemResponse.sortability`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **fields** | `Record<string, { sortable: boolean; reason?: 'virtual-type'; caveat?: 'unprovisioned-anchor' }>` | ✅ | Verdict per sortable-addressable column, keyed by field name. The domain is the served field map plus the always-provisioned `id`, less any field the caller's own field permission withholds: a caller exempt from the object-schema mask (ADR-0106 D4) is served such fields in `item` and gets no entry for them; for every other caller the served map already excludes them. A name absent from this map (an unknown field, a dotted path, an unprovisioned audit column, a field the caller may not read) has no platform sort behind it and must get no sort affordance. |
+
+### Nested Shape: `GetMetaItemResponse.registration[state='registered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'registered'` | ✅ | The engine holds a registration under the flow's name. |
+
+### Nested Shape: `GetMetaItemResponse.registration[state='refused']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'refused'` | ✅ | The engine refused to register the stored flow and holds nothing under its name: it never runs. |
+| **reason** | `{ code?: string; message: string }` | ✅ | What the engine threw, verbatim. |
+
+### Nested Shape: `GetMetaItemResponse.registration[state='unregistered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
 
 
 ---
@@ -1405,6 +1505,26 @@ Enable package response
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Metadata type name |
 | **items** | `any[]` | ✅ | Array of metadata items |
+| **registrations** | `Record<string, { state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }>` | optional | The automation engine's verdict on each listed flow, keyed by the item's `name`: one entry per listed item that is not a pending draft. Present only on a `flow` list answered by a process that runs an automation service; absent otherwise, and absence means no engine judged them, never `registered`. The verdict is the answering process's engine. Beside the items, never inside one: an item's `status` stays what its author declared. |
+
+### Nested Shape: `GetMetaItemsResponse.registrations[string][state='registered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'registered'` | ✅ | The engine holds a registration under the flow's name. |
+
+### Nested Shape: `GetMetaItemsResponse.registrations[string][state='refused']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'refused'` | ✅ | The engine refused to register the stored flow and holds nothing under its name: it never runs. |
+| **reason** | `{ code?: string; message: string }` | ✅ | What the engine threw, verbatim. |
+
+### Nested Shape: `GetMetaItemsResponse.registrations[string][state='unregistered']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **state** | `'unregistered'` | ✅ | The engine holds nothing under the flow's name and recorded no refusal for it. |
 
 
 ---
@@ -1671,9 +1791,9 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **name** | `string` | optional | Item name — supplied by the metadata door; for an object-scoped container it is the object name. |
 | **label** | `string \| Record<string, string>` | optional | Human-readable label shown in metadata lists. |
 | **object** | `string` | optional | Object this container binds to — how a stack-level `views: [...]` entry says which object its views belong to; read by `getViewsByObject()` / `GET /meta/view?object=`. |
-| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }` | optional |  |
+| **list** | `{ name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object; … }` | optional |  |
 | **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }` | optional |  |
-| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| … +3 more; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
+| **listViews** | `Record<string, { name?: string; label?: string \| Record<string, string>; type?: Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>; data?: object \| object \| object; … }>` | optional | Additional named list views (views mode — dropdown userFilters allowed, no tabs; ADR-0047) |
 | **formViews** | `Record<string, { type?: Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }>` | optional | Additional named form views |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this view. |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
@@ -1691,7 +1811,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -1759,7 +1879,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
@@ -1777,7 +1897,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **name** | `string` | optional | Internal view name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
 | **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
@@ -1845,7 +1965,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer forms) |
 | **drawerWidth** | `string` | optional | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal forms) |
-| **data** | `{ provider: 'object'; object: string } \| { provider: 'api'; read?: object; write?: object } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
 | **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
 | **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
@@ -2622,7 +2742,7 @@ Installed package with runtime lifecycle state
 | **actor** | `string` | optional | Identity recorded on the write's history event (`recorded_by`, a lookup into `sys_user`) and audit row. On the REST door this is the request's authenticated identity (one producer) — never a caller-supplied header. Absent, the event is recorded actor-less (null), deliberately not attributed to "system". |
 | **force** | `boolean` | optional | Destructive-change acknowledgement (`?force=true` on the REST door): skips the safety diff that refuses an `object` save whose body drops fields or narrows types the stored item still carries (409 with the findings otherwise). Only `object` saves reach that diff, so the flag is inert for every other type. Absent = the guard runs. |
 | **mode** | `Enum<'draft' \| 'publish'>` | optional | Per-item lifecycle (ADR-0005 drafts): `draft` stages the body as a pending draft overlay (`?mode=draft` on the REST door; the publish door promotes it later); `publish` or ABSENT writes straight to the live `active` row — the legacy default, kept so callers that predate the draft/publish split keep working. Any value other than `draft` is read as `publish`. |
-| **packageId** | `string \| null` | optional | ADR-0048 — the software package to bind the saved row to (`sys_metadata.package_id`; `?package=<id>` on the REST door, where `all` and an empty value name no package). Set when authoring inside a Studio package workspace; a named read-only base package is refused. On create the row is stamped with this id; on update an existing binding is preserved, never silently re-bound. Absent or `null` names no package: an `active` save writes the env-local overlay (no package stamp), and a `draft` save writes the draft of the package the item's active row is bound to when it is package-bound (a pending change stays in the package it edits), else the env-local draft. That row is also the one the parent-version resolution reads: an unpinned save takes its version as the parent (last-write-wins), a pinned one is judged against it, and the item read at the same scope serves it as `version`. |
+| **packageId** | `string \| null` | optional | ADR-0048 — the software package to bind the saved row to (`sys_metadata.package_id`; `?package=<id>` on the REST door, where `all` and an empty value name no package). Set when authoring inside a Studio package workspace; a named read-only base package is refused. On create the row is stamped with this id; on update an existing binding is preserved, never silently re-bound. Absent or `null` names no package. An `active` save then writes the row of the one package the item's active rows are bound to, as a save naming that package does, is refused `409 RESOURCE_CONFLICT` when they are bound to two or more, and with none writes the env-local overlay (no package stamp); a `draft` save writes the draft of the package the item's active row is bound to when it is package-bound (a pending change stays in the package it edits), else the env-local draft. The row written is also the one the parent-version resolution reads: an unpinned save takes its version as the parent (last-write-wins), a pinned one is judged against it, and the item read at the same scope serves it as `version`. |
 | **writeFace** | `Enum<'package-duplicate' \| 'meta-envelope' \| 'meta-dispatch' \| 'external-import'>` | optional | Which write door a refusal is being rendered FOR — stated by the SERVER, never by a remote caller: every door builds this request field by field and never spreads a request body into it, so there is no path for a client to smuggle a face in, and a face arriving in a wire body is simply never read. Two refusals branch on it, for different questions: the 409 destructive-change remedy names the acknowledgement mechanism that actually exists on the refusing door (`?force=true` on the REST doors; the dispatcher, the duplicate-package door and the external-table import have none), and the 422 invalid-metadata message adapts to whether a structured `issues[]` channel reaches the consumer beside it. Absent = the conservative default wording. |
 
 

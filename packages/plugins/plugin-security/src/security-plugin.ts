@@ -4,8 +4,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
 import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
-import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
-import type { AnchorBindingContext } from '@objectstack/spec/security';
+import { describeHighPrivilegeBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
@@ -41,9 +40,6 @@ import {
   unregisterGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
 import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
-import { createPositionWriteThrough } from './position-write-through.js';
-import { createWalledCatalogDataDoorRefusal, WALLED_CATALOG_OBJECT_TYPES } from './walled-catalog-data-door.js';
-import { runOneTimePositionEnvironmentBackfill } from './position-environment-backfill.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
   explainAccessForAsker,
@@ -59,14 +55,10 @@ import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/securi
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 
 import { applyManagedWriteDenies } from './managed-object-write-denies.js';
-import {
-  createPermissionSetWriteThrough,
-  registerPermissionSetProjection,
-  reconcilePermissionSetProjection,
-} from './permission-set-projection.js';
 import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
+import { registerSecurityCatalogEcho, echoStoredSecurityCatalogOverlays } from './security-catalog-echo.js';
 import {
   reconcileAudienceBindingSuggestions,
   listAudienceBindingSuggestions,
@@ -146,6 +138,9 @@ import {
   MasterReferenceMissingError,
   MaskedValueWriteError,
 } from './errors.js';
+// [ADR-0138 D4] The guest entry's organization step, and the located refusal
+// the CRUD gate raises where it refuses.
+import { GuestOrganizationUnresolvedError, resolveGuestOrganization } from '@objectstack/core';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
@@ -159,7 +154,6 @@ import {
   readDeploymentOrgScopingEntitlement,
   type DeploymentOrgScopingEntitlementReading,
 } from '@objectstack/core';
-import { SysPositionDetailPage } from '@objectstack/platform-objects/pages';
 import {
   securityObjects,
   securityDefaultPermissionSets,
@@ -168,6 +162,18 @@ import {
 } from './manifest.js';
 import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-positions.js';
 import { registerBuiltinCapabilities } from './builtin-capabilities.js';
+
+/**
+ * [ADR-0138 D9, D1] Whether `context` is the GUEST envelope — the anonymous
+ * principal the explicit guest entry assembles: `principalKind: 'guest'` and no
+ * `userId`. The one reading of that fact in this file: the set resolution (D3),
+ * the organization refusal (D4) and the owner-anchor stamp's guest branch (D1)
+ * all ask it here.
+ */
+function isGuestEnvelope(context: unknown): boolean {
+  const c = context as { principalKind?: unknown; userId?: unknown } | null | undefined;
+  return c?.principalKind === 'guest' && !c?.userId;
+}
 
 /**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
@@ -1464,6 +1470,14 @@ export class SecurityPlugin implements Plugin {
   private readonly nameFoldWarned = new Set<string>();
 
   /**
+   * [ADR-0138 D4] The refusal reasons {@link refuseGuestWithoutOrganization}
+   * has already reported to the operator — once per reason per instance, for
+   * the reason {@link nameFoldWarned} gives: the condition is a deployment
+   * fact, and a per-request line is a filtered one.
+   */
+  private readonly guestOrganizationRefusalWarned = new Set<string>();
+
+  /**
    * [#21729] Alternate matches other plugins contributed to the platform's
    * ownership floor, keyed by contributing plugin — read on every
    * {@link collectRLSPolicies} call, never copied into a resolved set, so a
@@ -1534,26 +1548,24 @@ export class SecurityPlugin implements Plugin {
     ctx.getService<{ register(m: any): void }>('manifest').register({
       ...securityPluginManifestHeader,
       objects: securityObjects,
-      // [ADR-0090] SDUI detail page for sys_position — Holders (assignments,
-      // name-keyed junction) + Permission Sets (bindings) as pure
-      // record:related_list declarations; no bespoke UI.
-      pages: [SysPositionDetailPage],
       // Permission sets ride along on the manifest so the metadata service
       // can resolve them by name when SecurityPlugin middleware queries
       // `metadata.list('permissions')`.
       permissions: this.bootstrapPermissionSets,
       // ADR-0029 D7 — contribute the RBAC entries into the Setup app's
-      // `group_access_control` slot. This plugin owns these objects (K2), so it
-      // ships their menu too; when the plugin is absent the entries don't appear.
+      // `group_access_control` slot. This plugin owns the security catalog, so
+      // it ships its menu too; when the plugin is absent the entries don't
+      // appear. [ADR-0131 D3/D7] Each entry opens Setup's list of the registry
+      // type in its environment scope — the catalog has no object behind it.
       navigationContributions: [
         {
           app: 'setup',
           group: 'group_access_control',
           priority: 100,
           items: [
-            { id: 'nav_positions', type: 'object', label: 'Positions', objectName: 'sys_position', icon: 'shield-check' },
-            { id: 'nav_capabilities', type: 'object', label: 'Capabilities', objectName: 'sys_capability', icon: 'badge-check' },
-            { id: 'nav_permission_sets', type: 'object', label: 'Permission Sets', objectName: 'sys_permission_set', icon: 'lock' },
+            { id: 'nav_positions', type: 'url', label: 'Positions', url: '/apps/setup/metadata/position?scope=environment', icon: 'shield-check' },
+            { id: 'nav_capabilities', type: 'url', label: 'Capabilities', url: '/apps/setup/metadata/capability?scope=environment', icon: 'badge-check' },
+            { id: 'nav_permission_sets', type: 'url', label: 'Permission Sets', url: '/apps/setup/metadata/permission?scope=environment', icon: 'lock' },
           ],
         },
       ],
@@ -2307,14 +2319,6 @@ export class SecurityPlugin implements Plugin {
       });
     }
 
-    // [#20013] The writes the ADR-0094 permission-set data door executed
-    // ITSELF — it returned without calling `next()`, so no engine write ran.
-    // Filled by the wrapper that registers the door (below), read by the
-    // security middleware's post-`next()` assertion. Keyed by the operation
-    // context the two middlewares share, and private to this plugin, so no
-    // other middleware can put a write in it.
-    const writesExecutedByDataDoor = new WeakSet<object>();
-
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, chainNext: () => Promise<void>) => {
       // [#21771] Whether THIS operation was issued from inside another engine
@@ -2405,6 +2409,9 @@ export class SecurityPlugin implements Plugin {
           // a zero-section form falls open to — one of these columns).
           // Ownership stays NULL for object hooks / the first-admin
           // bootstrap to assign, exactly like other anonymous-seeded rows.
+          // [ADR-0138 D1] This is the form doors' half of "the guest never
+          // owns"; the endpoint doors' half is the owner-anchor stamp's guest
+          // branch (step 3.5), which a grant context never reaches.
           if (opCtx.operation === 'insert' && opCtx.data && typeof opCtx.data === 'object') {
             const rows = Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data];
             const stripped = new Set<string>();
@@ -2510,14 +2517,6 @@ export class SecurityPlugin implements Plugin {
       // the CRUD check. System/boot writes carry `isSystem` and
       // short-circuited above, so the curated seeder itself is unaffected.
       await this.assertCuratedCapabilityNameGate(opCtx);
-
-      // [ADR-0090 D5/D9] Audience-anchor binding guard — like the package
-      // gate above, an unconditional data-layer boundary: a permission set
-      // carrying high-privilege bits must never be bound to the `everyone`
-      // or `guest` positions, no matter who asks. (Boot/system writes carry
-      // `isSystem` and short-circuited above; the dev-mode default binding
-      // is validated at seed time by the same predicate.)
-      await this.assertAudienceAnchorBindingGate(opCtx);
 
       // [ADR-0103] Engine-owned write guard. Fail-closed on a user-context
       // generic write to a `system`/`append-only` object whose resolved
@@ -3342,6 +3341,21 @@ export class SecurityPlugin implements Plugin {
       //     back) is tolerated by comparing against the pre-image; a bulk
       //     change-set carrying `owner_id` has no pre-image to compare and
       //     fails CLOSED.
+      //   • GUEST — [ADR-0138 D1] the guest is a principal, never an owner. For
+      //     the anonymous principal ({@link isGuestEnvelope}) the step stamps
+      //     nothing: there is no user id to stamp, and nothing stands in for
+      //     one — never the guest, never the system principal — so an absent or
+      //     empty owner is left unset. A guest-SUPPLIED owner, on insert or on
+      //     update, is a forgery and is refused WHATEVER the guest is granted:
+      //     the transfer grant is never consulted for it (the anchor tier keeps
+      //     the transfer bit off a guest binding, and this branch does not lean
+      //     on that). Who owns a guest-written row is the scenario's own
+      //     metadata, and its writers never meet this step as the guest's
+      //     value: a `beforeInsert` hook runs inside the engine's operation,
+      //     after this middleware, and a record-change flow writes as itself.
+      //     So "supplied" is told apart from "set by the scenario" by where the
+      //     value came from — the payload the guest's write arrived with — and
+      //     never by what the value is.
       //
       // System/boot writes carry `isSystem` and short-circuited the whole
       // middleware above — imports, OAuth provisioning, cron snapshots and
@@ -3395,6 +3409,18 @@ export class SecurityPlugin implements Plugin {
                 { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
               );
             };
+            // [ADR-0138 D1] The guest branch (see the step's header). Its refusal
+            // names no grant to acquire, because none admits a guest's owner.
+            const guest = isGuestEnvelope(opCtx.context);
+            const denyGuestOwnerWrite = (): never => {
+              throw new PermissionDeniedError(
+                `[Security] Access denied: 'owner_id' on '${opCtx.object}' cannot be set by an anonymous caller — ` +
+                  `a guest never owns a record and never assigns one, whatever it is granted. Leave 'owner_id' out ` +
+                  `of the request: the owner of a row a guest writes is set by the object's own hooks or ` +
+                  `record-change flows, and stays unset when none sets it (ADR-0138 D1)`,
+                { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+              );
+            };
             // Lazily evaluated + memoized (incl. a `false` result): the common
             // path pays nothing, and ADR-0090 D10 — under delegation BOTH
             // principals must independently hold the transfer grant.
@@ -3416,6 +3442,12 @@ export class SecurityPlugin implements Plugin {
                   // single-record-only stamp left bulk-inserted rows NULL-owned
                   // and invisible to their creator).
                   if (userId) row.owner_id = userId;
+                  // [ADR-0138 D1 item 5] A guest is stamped with nothing, and
+                  // its empty owner is left UNSET: an empty string would land
+                  // in the anchor as a value that is neither an owner nor none.
+                  else if (guest && row.owner_id === '') row.owner_id = null;
+                } else if (guest) {
+                  denyGuestOwnerWrite();
                 } else if (
                   !(isScalarId(row.owner_id) && userId != null && String(row.owner_id) === String(userId)) &&
                   !hasTransferGrant()
@@ -3433,6 +3465,9 @@ export class SecurityPlugin implements Plugin {
               const single = !Array.isArray(opCtx.data);
               for (const row of rows) {
                 if (!writesOwner(row)) continue;
+                // [ADR-0138 D1] A guest assigns no ownership — not a transfer,
+                // not a disown, not an echo — and no grant changes that.
+                if (guest) denyGuestOwnerWrite();
                 if (hasTransferGrant()) break; // authorized transfer — allow every row
                 let unchanged = false;
                 if (single && isScalarId(row.owner_id)) {
@@ -4269,27 +4304,7 @@ export class SecurityPlugin implements Plugin {
       // that silently stops gating and a deployment that never finds out.
       // ⛔ Do not soften this into a warning: a middleware that cannot say a
       // write was checked must not report that it was.
-      //
-      // [#20013] It covers the Layer 0 tenant wall's stored-row judgement too,
-      // with ONE stand-down, and only for a seam that carries the wall alone:
-      // the ADR-0094 permission-set data door (registered below, inside this
-      // middleware) executes an insert or update of `sys_permission_set`
-      // ITSELF, through the metadata protocol, and never calls `next()`. No
-      // engine write runs there, so no hook chain runs, and the only
-      // `organization_id` such a write can carry is the one the payload
-      // judgement above already cleared; the stored-row half has nothing left
-      // to judge. Measured on the base: a platform administrator's insert
-      // there, under the `isolated` posture, is admitted while Layer 0 walls
-      // the object, so without this stand-down the guard would refuse a write
-      // it has no reason to. The fact is OBSERVED by the wrapper that
-      // registers the data door (it records a write the door never passed on
-      // to `next()`), never declared by an operation field another middleware
-      // could set. A seam carrying a row-level `check` is NOT stood down: that
-      // judgement has no payload half for an insert, and the data door keeps
-      // failing closed under one exactly as before.
-      const standsDown =
-        !businessCheckSeamInstalled && tenantWallSeamInstalled && writesExecutedByDataDoor.has(opCtx);
-      if (writeImageCheckSeam && writeImageCheckSeam.honoured !== true && !standsDown) {
+      if (writeImageCheckSeam && writeImageCheckSeam.honoured !== true) {
         const developerMessage = businessCheckSeamInstalled
           ? `[Security] Access denied: the ${opCtx.operation} on '${opCtx.object}' was executed without the row-level CHECK ` +
             `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck. ` +
@@ -4355,75 +4370,14 @@ export class SecurityPlugin implements Plugin {
       );
     }
 
-    // [ADR-0131 D3] Under a wall the security catalog is the platform
-    // operator's: a non-system write on `sys_position`, `sys_permission_set` or
-    // `sys_capability` by anyone below the `PLATFORM_ADMIN` rung is refused
-    // `403 PERMISSION_DENIED`, with the metadata door's own verdict and
-    // sentence. Registered AFTER the security middleware (a caller who may not
-    // write the table keeps its CRUD refusal) and BEFORE the permission-set
-    // write-through below (a refused write is never translated into a metadata
-    // save). Inert under `single`. See `walled-catalog-data-door.ts`.
-    {
-      const walledCatalogDataDoor = createWalledCatalogDataDoorRefusal({ getPosture: () => this.tenancyPosture });
-      for (const object of Object.keys(WALLED_CATALOG_OBJECT_TYPES)) {
-        ql.registerMiddleware(walledCatalogDataDoor, { object });
-      }
-    }
-
-    // [ADR-0094] Data-door write-through: every non-system CRUD write on
-    // `sys_permission_set` is redirected into the metadata store (the ONE
-    // authoritative store for definitions); the record is projector-owned.
-    // Registered AFTER the security middleware, so it runs INSIDE it — the
-    // two-doors gate, the delegated-admin gate, and the CRUD/FLS checks have
-    // all passed before a write is translated. Kernels without a capable
-    // metadata protocol pass through to the legacy direct write (single
-    // store — no split brain to prevent).
-    //
-    // [#20013] Wrapped so the security middleware can tell a write the door
-    // executed itself from one it passed on: the wrapper hands the door a
-    // `next` that records the pass-on, and a write that returns without it is
-    // recorded in `writesExecutedByDataDoor`. Observed, not declared — the
-    // door's own code is unchanged.
-    const permissionSetWriteThrough = createPermissionSetWriteThrough({
-      ql,
-      metadata,
-      getProtocol: () => {
-        try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
-      },
-      logger: ctx.logger,
-    });
-    ql.registerMiddleware(
-      async (opCtx: any, next: () => Promise<void>) => {
-        let passedOn = false;
-        await permissionSetWriteThrough(opCtx, async () => {
-          passedOn = true;
-          await next();
-        });
-        if (!passedOn && opCtx && typeof opCtx === 'object') writesExecutedByDataDoor.add(opCtx);
-      },
-      { object: 'sys_permission_set' },
-    );
-
-    // [ADR-0131 D3, C2 stage S7] Under `single`, a non-system create, edit,
-    // rename or delete of a position also writes its DEFINITION through the
-    // metadata door at environment scope — the row first, then the
-    // definition; a refused definition undoes the row. Registered AFTER the
-    // security middleware, so it runs INSIDE it. A create or a rename into a
-    // name a package or built-in holds answers the metadata door's own
-    // refusal (C2 stage S10). Stands down for a walled posture, an edit that
-    // keeps or a delete of such a name, and a kernel without a capable
-    // metadata protocol. See `position-write-through.ts`.
-    ql.registerMiddleware(
-      createPositionWriteThrough({
-        ql,
-        getProtocol: () => {
-          try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
-        },
-        getPosture: () => this.tenancyPosture,
-        logger: ctx.logger,
-      }),
-      { object: 'sys_position' },
-    );
+    // [ADR-0131 D3, C3 stage 8] No data-door write-through and no walled
+    // catalog data-door refusal is registered: the catalog objects are
+    // retired, so no `sys_position`, `sys_permission_set` or `sys_capability`
+    // write reaches the engine at all. A position, permission set or
+    // capability is written through the metadata door alone, which registers
+    // it in the security catalog (on an environment kernel through the echo
+    // `runBootstrap` wires, `security-catalog-echo.ts`) and, under a wall,
+    // refuses a tenant with the same verdict (`walledCatalogWriteVerdict`).
 
     // Defer platform admin bootstrap until all plugins finish starting —
     // sys_user / sys_user_permission_set objects must be registered (by
@@ -4432,15 +4386,14 @@ export class SecurityPlugin implements Plugin {
     // kernel does not expose `hook` (test stubs).
     let bootstrapRanOnce = false;
     const readSeedSettlement = (): SeedSettlementSnapshot | undefined => readSeedSettlementSnapshot(ctx);
-    // [ADR-0094] Guard so the env-projection wiring runs exactly once even
-    // though runBootstrap re-runs (e.g. after the first user insert) —
-    // registerMutationProjector replaces idempotently, but the legacy
-    // onMetadataMutation fallback appends listeners, and re-wiring that would
-    // project each save N times.
-    let envProjectionWired = false;
     // [#22801 → A] Same once-guard for the `permission` mutation listener
     // that re-derives `everyone` (registered in `runBootstrap`).
     let everyoneMutationWired = false;
+    // The security catalog's echo is wired once and its boot pass runs once,
+    // though runBootstrap re-runs (e.g. after the first user insert): the
+    // projector replaces idempotently, and the pass would only repeat work.
+    let catalogEchoWired = false;
+    let catalogEchoBooted = false;
     // [#3325 / ADR-0092] Union the better-auth managed-object write denies into
     // the default sets from the LIVE registry, replacing the hand-maintained
     // baseline as the source of truth (a newly-declared identity table is then
@@ -4520,23 +4473,34 @@ export class SecurityPlugin implements Plugin {
                 await this.declareEveryone(ctx.logger);
                 return {
                   success: true,
-                  removed: r.sets + r.positionBindings + r.userGrants + r.suggestions,
+                  removed: r.userGrants + r.suggestions,
                 };
               },
             );
           }
-          // [ADR-0094] Environment door — the `permission` mutation projector.
-          // The protocol AWAITS it inside saveMetaItem / publishMetaItem /
-          // deleteMetaItem, so the sys_permission_set record (and the metadata
-          // manager's in-memory entry, which the evaluator's registry-first
-          // list('permission') resolution reads) already reflects a Studio
-          // save when it returns — no projection race. Falls back to the
-          // fire-and-forget onMetadataMutation subscription (#2857/#2867) on
-          // protocols that predate registerMutationProjector.
-          if (!envProjectionWired) {
-            envProjectionWired = registerPermissionSetProjection(protocol, {
+          // [ADR-0131 D3] The security catalog's echo: the awaited mutation
+          // projector for `permission` and `position`, then one pass over the
+          // stored env-wide overlays. On an ENVIRONMENT kernel the metadata
+          // door registers no stored row in the engine registry, so the
+          // catalog finds a metadata-door set or position only in the
+          // metadata service, and this is what puts it there. It writes no
+          // row (C3 stage 8 retired them) and decides nothing. Before the
+          // suggestion reconcile below, which reads the catalog. See
+          // `security-catalog-echo.ts`.
+          if (!catalogEchoWired) {
+            catalogEchoWired = registerSecurityCatalogEcho(protocol, {
               ql, metadata: this.metadata, logger: ctx.logger,
             });
+          }
+          if (catalogEchoWired && !catalogEchoBooted) {
+            catalogEchoBooted = true;
+            try {
+              await echoStoredSecurityCatalogOverlays(protocol, {
+                ql, metadata: this.metadata, logger: ctx.logger,
+              });
+            } catch (e) {
+              ctx.logger.warn('[security] the security-catalog echo of stored overlays failed at boot', { error: (e as Error).message });
+            }
           }
           // [#3050] OWD posture authoring gate — pre-persistence veto on
           // runtime-authored `object` bodies: env-tighten-only over packaged
@@ -4555,17 +4519,6 @@ export class SecurityPlugin implements Plugin {
           // non-packaged names keep the documented hatch behavior. One
           // spelling of "package-declared", two doors, one refusal.
           registerPackagedPermissionSetLockGate(protocol, ql);
-          // [ADR-0094 D4] Converge record ↔ metadata: project env overlays
-          // onto records (creating missing ones), backfill legacy data-door
-          // creations into the metadata store once, and heal drifted records
-          // from the effective body (metadata wins). Idempotent per boot.
-          try {
-            await reconcilePermissionSetProjection(protocol, {
-              ql, metadata: this.metadata, logger: ctx.logger,
-            });
-          } catch (e) {
-            ctx.logger.warn('[security] permission-set projection reconciliation failed (ADR-0094)', { error: (e as Error).message });
-          }
           // [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce
           // 式)」, item 3] The DETECTION READING for sets that were already
           // silently forked before the save door was locked: count + NAMES,
@@ -4638,52 +4591,18 @@ export class SecurityPlugin implements Plugin {
       void runGrantNameBackfill();
     }
 
-    // [ADR-0131 D3, C2 stage S7] Give every row-only position — written in
-    // Setup before the write-through above existed — its environment
-    // definition, once per `single` deployment, recorded in `sys_migration`.
-    // At `kernel:bootstrapped` for the reason the grant-name backfill gives,
-    // and one more: an environment definition minted ahead of a package's
-    // declaration of the same name would refuse that package. See
-    // `position-environment-backfill.ts`.
-    const runPositionBackfill = async (): Promise<void> => {
-      try {
-        let door: unknown = null;
-        try { door = (ctx as any).getService?.('protocol') ?? null; } catch { door = null; }
-        await runOneTimePositionEnvironmentBackfill(ql as any, {
-          posture: this.tenancyPosture,
-          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
-          door,
-          logger: ctx.logger,
-        });
-      } catch (e) {
-        ctx.logger.warn(
-          '[security] the row-only position backfill did not run — positions created in Setup before the ' +
-            'environment write-through keep no environment definition until a later boot runs it',
-          { error: (e as Error)?.message },
-        );
-      }
-    };
-    if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('kernel:bootstrapped', runPositionBackfill);
-    } else {
-      void runPositionBackfill();
-    }
-
     // [ADR-0131 D3/D4] The catalog reference report: per organization, every
     // assignment and grant whose name the security catalog does not resolve,
-    // every grant that names nothing, every position row with no definition
-    // (by name and organization), and under `single` every position name more
-    // than one row carries. A reference that resolves nowhere confers nothing;
-    // this is what makes that loud. Registered AFTER the two backfills above,
-    // so it runs after them (handlers run in registration order) and does not
-    // report a name either one resolved this boot. It writes nothing. Only at
-    // `kernel:bootstrapped`: run any earlier, it would judge a catalog that is
-    // still being filled. See `catalog-reference-report.ts`.
+    // and every grant that names nothing. A reference that resolves nowhere
+    // confers nothing; this is what makes that loud. Registered AFTER the
+    // grant-name backfill above, so it runs after it (handlers run in
+    // registration order) and does not report a name it resolved this boot.
+    // It writes nothing. Only at `kernel:bootstrapped`: run any earlier, it
+    // would judge a catalog that is still being filled. See `catalog-reference-report.ts`.
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
         try {
           await reportCatalogReferences(ql as any, {
-            posture: this.tenancyPosture,
             catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
             logger: ctx.logger,
           });
@@ -6227,9 +6146,10 @@ export class SecurityPlugin implements Plugin {
    *  - **The remaining PRE-RESOLUTION gates, which run beside arms 2 and 3 and
    *    are not asked here.** Two judge a row's PROVENANCE, which a preview
    *    holds no row to carry: the ADR-0086/0094 package-managed write gate and
-   *    the ADR-0066 system-row write gate. Two judge a payload VALUE: the
-   *    ADR-0066 D1 curated-capability-name refusal and the ADR-0090 D5/D9
-   *    audience-anchor binding guard. And the ADR-0056 `publicFormGrant` scope,
+   *    the ADR-0066 system-row write gate. One judges a payload VALUE: the
+   *    ADR-0066 D1 curated-capability-name refusal. (The ADR-0090 D5/D9
+   *    audience-anchor binding guard is gone: it judged `sys_position_permission_set`
+   *    writes, an object C3 stage 8 retired.) And the ADR-0056 `publicFormGrant` scope,
    *    which admits create plus read-back on exactly the granted object and
    *    refuses everything else pre-resolution — not asked because no wire
    *    caller and no constructor in the tree presents the grant here (it is
@@ -6597,7 +6517,17 @@ export class SecurityPlugin implements Plugin {
   private async resolvePermissionSetsForContextUnmemoized(
     context: any,
   ): Promise<PermissionSet[]> {
-    const positions = context?.positions ?? [];
+    // [ADR-0138 D3] The GUEST requests exactly the sets its envelope carries —
+    // the `guest` anchor's bindings, which `resolveAuthzContext` resolved in
+    // the organization D4 derived — and they are treated as any requested set
+    // below. Its position is NOT folded into the request: the position-name
+    // fold (#13419's ruling retires it) would hand an anonymous caller any set
+    // that merely shares the anchor's name, the one channel D3 item 3 says
+    // never reaches the guest. The baseline does not reach it either (applied
+    // only to a caller with a user id, below), and `everyone` is never among
+    // its positions.
+    const isGuest = isGuestEnvelope(context);
+    const positions = isGuest ? [] : (context?.positions ?? []);
     const explicitPermissionSets = context?.permissions ?? [];
     const requested = [...positions, ...explicitPermissionSets];
     // [ADR-0090 D10] An AGENT principal's grants are EXACTLY its scope-derived
@@ -6873,83 +6803,6 @@ export class SecurityPlugin implements Plugin {
    * System/boot writes never reach here (the middleware short-circuits on
    * `isSystem`), so system writes are unaffected.
    */
-  /**
-   * [ADR-0090 D5/D9] Reject binding a HIGH-PRIVILEGE permission set to an
-   * audience anchor (`everyone` / `guest`). The anchors are implicit for
-   * whole principal classes, so a dangerous binding here is an instant
-   * tenant-wide (or anonymous-wide) grant — the one shape the model must
-   * make unrepresentable rather than merely discouraged.
-   */
-  private async assertAudienceAnchorBindingGate(opCtx: any): Promise<void> {
-    if (opCtx?.object !== 'sys_position_permission_set') return;
-    if (!['insert', 'update'].includes(opCtx.operation)) return;
-    const rows = Array.isArray(opCtx.data)
-      ? opCtx.data
-      : (opCtx.data && typeof opCtx.data === 'object' ? [opCtx.data] : []);
-    if (rows.length === 0) return;
-
-    const ql = this.ql;
-    // [#18535, ADR-0090 D5] The stack's declared `capabilities:`, read at most
-    // ONCE per gate pass and only once an anchor row is actually in play — the
-    // common write on this table names an ordinary position and must not pay
-    // for a read it does not use. Same source as the boot binding and as
-    // `confirmAudienceBindingSuggestion`, which is this gate's friendly early
-    // rendition: a second source there would let a confirm pass its own check
-    // and then be refused by the insert it performs.
-    let anchorContext: AnchorBindingContext | undefined;
-    let anchorContextLoaded = false;
-    const declaredCapabilityContext = async (): Promise<AnchorBindingContext | undefined> => {
-      if (!anchorContextLoaded) {
-        anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
-        anchorContextLoaded = true;
-      }
-      return anchorContext;
-    };
-    for (const row of rows) {
-      const positionId = (row as any)?.position_id;
-      if (!positionId || !ql?.find) continue;
-      let positionName = '';
-      try {
-        const posRows = await ql.find('sys_position', { where: { id: positionId }, limit: 1, context: { isSystem: true } });
-        positionName = String((Array.isArray(posRows) && posRows[0] ? (posRows[0] as any).name : '') ?? '');
-      } catch { positionName = ''; }
-      if (positionName !== 'everyone' && positionName !== 'guest') continue;
-
-      // Resolve the target set definition (bootstrap sets by name, else the
-      // sys_permission_set row itself carries the authored definition).
-      const setId = (row as any)?.permission_set_id;
-      let setName = '';
-      let setDef: any = null;
-      try {
-        const setRows = await ql.find('sys_permission_set', { where: { id: setId }, limit: 1, context: { isSystem: true } });
-        const sr: any = Array.isArray(setRows) && setRows[0] ? setRows[0] : null;
-        if (sr) {
-          setName = String(sr.name ?? '');
-          setDef = sr;
-        }
-      } catch { /* fall through to bootstrap lookup below */ }
-      const boot = this.bootstrapPermissionSets.find((p) => p.name === setName);
-      // [ADR-0090 D9] Anchor-tier predicate: `guest` faces the strictest tier
-      // (additionally no edit bit — read-only by default, create is the single
-      // case-by-case write); `everyone` uses the high-privilege predicate.
-      // [#18535] `guest` faces the strictest tier and the predicate DROPS the
-      // context for it (D5's app-token excusal is the `everyone` tier's alone),
-      // so the same call serves both anchors.
-      const offending = describeAnchorForbiddenBits(
-        boot ?? setDef,
-        positionName as 'everyone' | 'guest',
-        await declaredCapabilityContext(),
-      );
-      if (offending) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: permission set '${setName || setId}' cannot be bound to the '${positionName}' audience anchor — it carries ${offending} (ADR-0090 D5/D9). ` +
-            `Audience anchors accept low-privilege sets only; grant powerful sets through ordinary positions instead.`,
-          { operation: opCtx.operation, object: opCtx.object, position: positionName, permissionSet: setName || setId },
-        );
-      }
-    }
-  }
-
   private async assertPackageManagedWriteGate(opCtx: any): Promise<void> {
     if (opCtx?.object !== 'sys_permission_set') return;
     const op = opCtx.operation;
@@ -8344,8 +8197,31 @@ export class SecurityPlugin implements Plugin {
 
   /**
    * Resolve a controlled_by_parent object's master-detail relation (the FK field
-   * key + the master object name), or null. Prefers a required `master_detail`
-   * field; falls back to any `master_detail`, then a required `lookup`. Cached.
+   * key + the master object name), or null. Cached.
+   *
+   * [ADR-0055 §1 · #23100, maintainer ruling B] The master is the object's ONE
+   * `master_detail` field declared `required: true` that names a reference — and
+   * nothing else. Zero such fields, or two or more, resolve `null`, which both
+   * halves already treat as fail-closed: the read leg answers `RLS_DENY_FILTER`
+   * and the write leg throws `MasterDetailRelationMissingError` (422
+   * INVALID_METADATA). This used to be a three-tier fallback — a required
+   * `master_detail`, else ANY `master_detail`, else a required `lookup`, the
+   * first match by field order within a tier — and ADR-0055 §1 recorded only
+   * the first tier. Ruling B retired the second and third (ADR-0049
+   * enforce-or-remove; step-18 semantic migration
+   * `cbp-master-relation-tiers-retired`) and refused two candidates rather than
+   * picking one by declaration order. The same sentence is judged by
+   * `ObjectSchema`'s parse (`refuseControlledByParentWithoutOneMaster`) and by
+   * `os lint` (`cbpMasterCandidates` in
+   * `packages/lint/src/validate-security-posture.ts`); this reader keeps its own
+   * read of it because it reads the unparsed registry — the reference-spelling
+   * tolerance below is why — and ⛔ it must not grow a fallback tier back: a
+   * relation the parse refuses must not be one this gate derives access from.
+   *
+   * A `controlled_by_parent` object that resolves no relation is REPORTED, once
+   * per object per cache generation ({@link SecurityPlugin.reportCbpMasterUnresolved}),
+   * so a stored or raw-registered object that relied on a retired tier is not
+   * denied in silence.
    *
    * [#8688] Also carries {@link CbpRelation.omissionRefusedByValidation} — the
    * one bit the insert leg's conditional stand-down turns on. It is resolved
@@ -8412,11 +8288,14 @@ export class SecurityPlugin implements Plugin {
       const k = refKey(f);
       return k === undefined ? undefined : f[k];
     };
-    const pick = (pred: (f: any) => boolean) => entries.find(([, f]) => pred(f) && ref(f));
-    const found =
-      pick((f) => f?.type === 'master_detail' && f?.required) ??
-      pick((f) => f?.type === 'master_detail') ??
-      pick((f) => f?.type === 'lookup' && f?.required);
+    // [ADR-0055 §1 · #23100 ruling B] Exactly one required `master_detail`
+    // naming a reference — see the docblock. `required === true` is the spec's
+    // own type for the key and the lint's reading of it.
+    const candidates = entries.filter(([, f]) => f?.type === 'master_detail' && f?.required === true && ref(f));
+    const found = candidates.length === 1 ? candidates[0] : undefined;
+    if (!found && masterGovernsRowWrites(schema)) {
+      this.reportCbpMasterUnresolved(object, entries, candidates.map(([k]) => String(k)));
+    }
     if (found) {
       const def = found[1];
       // Resolved from the SAME field def the relation itself came from, and
@@ -8438,16 +8317,73 @@ export class SecurityPlugin implements Plugin {
         // — it is the licence for the guard to stand down, and every shape it
         // reports `true` for is a shape validation provably refuses.
         //
-        // `master_detail` is required on top of the validator's own test: the
-        // relation resolver's third fallback accepts a required `lookup`, and
-        // the ruling covers `master_detail` only. Narrower than the validator
-        // is the safe direction — the guard keeps answering.
+        // `master_detail` + `required` are the resolver's own predicate above
+        // (since #23100 nothing else resolves), so they always hold here; they
+        // stay spelled out so this licence reads as the validator's test it
+        // mirrors and cannot widen if the resolver ever changes.
         omissionRefusedByValidation:
           def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,
       };
     }
     this.cbpRelCache.set(object, rel);
     return rel;
+  }
+
+  /**
+   * [ADR-0055 §1 · #23100] Report that a `controlled_by_parent` object resolved NO
+   * master relation, so every read of it is denied and every write refused — and
+   * say why, naming the retired tier the object relied on when that is the cause.
+   *
+   * The parse refuses the same shape (`ObjectSchema`, with the same prescription),
+   * so an object reaching here unresolved came through a door that does not
+   * parse — a raw `registerObject`, or a stored row the boot registered anyway
+   * under its `[metadata_spec_invalid]` diagnostic. The read leg's denial is an
+   * EMPTY result, indistinguishable from "no rows" to its caller, which is why
+   * the reason is stated once here rather than left to be inferred.
+   *
+   * `warn`, not `error`, by the degradation-log-level question (AGENTS.md):
+   * nothing claimed persisted is lost — the object is visibly unusable, every
+   * write is refused to its caller with 422 INVALID_METADATA, and the denial is
+   * the fail-closed answer, not a fall-back. Same granularity and channel as
+   * {@link SecurityPlugin.reportRejectedReferenceAlias}: the only call site is
+   * `resolveCbpRelation`'s resolution body, which runs on a `cbpRelCache` miss
+   * alone, so it fires once per object and re-arms when metadata changes.
+   */
+  private reportCbpMasterUnresolved(
+    object: string,
+    entries: ReadonlyArray<readonly [string, any]>,
+    requiredMasters: readonly string[],
+  ): void {
+    const optionalMasters = entries
+      .filter(([, f]) => f?.type === 'master_detail' && f?.required !== true)
+      .map(([k]) => String(k));
+    const requiredLookups = entries
+      .filter(([, f]) => f?.type === 'lookup' && f?.required === true)
+      .map(([k]) => String(k));
+    const why =
+      requiredMasters.length > 1
+        ? `it declares ${requiredMasters.length} required master_detail fields (${requiredMasters.join(', ')}) ` +
+          'and derives its master from exactly one'
+        : [
+            'it declares no required master_detail field',
+            ...(optionalMasters.length > 0
+              ? [`master_detail without required: true: ${optionalMasters.join(', ')} (add required: true)`]
+              : []),
+            ...(requiredLookups.length > 0
+              ? [
+                  `required lookup: ${requiredLookups.join(', ')} (a lookup derives no access — declare the ` +
+                    "master as type: 'master_detail', or give the object its own sharingModel)",
+                ]
+              : []),
+          ].join('; ');
+    this.logger.warn?.(
+      `[security/controlled-by-parent] object "${object}" declares sharingModel 'controlled_by_parent' but ` +
+        `resolves no master relation — ${why}. Every read of it is DENIED and every write refused ` +
+        '(422 INVALID_METADATA): ADR-0055 §1 derives the master from exactly one master_detail field declared ' +
+        'required: true, and from nothing else. A non-required master_detail and a required lookup no longer ' +
+        'derive access.',
+      { object, requiredMasters, optionalMasters, requiredLookups },
+    );
   }
 
   /**
@@ -8548,9 +8484,9 @@ export class SecurityPlugin implements Plugin {
    *
    * An empty set yields `{ masterFK: { $in: [] } }`, which matches no rows (fail
    * closed), as does a failure to resolve the sharing half. A misconfigured
-   * object (no master_detail/lookup to derive from) denies all reads
-   * (defense-in-depth; spec validation should prevent authoring it). Returns null
-   * when the object is not controlled_by_parent.
+   * object (not exactly one required master_detail to derive from, ADR-0055 §1)
+   * denies all reads (defense-in-depth; the spec's parse refuses authoring it
+   * since #23100). Returns null when the object is not controlled_by_parent.
    *
    * [ADR-0055 amendment] The derivation COMPOSES ACROSS A CHAIN. It used to resolve the
    * master set from the two halves above and nothing else, which made a master
@@ -8730,6 +8666,7 @@ export class SecurityPlugin implements Plugin {
     if (isPrincipalLessContext(context)) {
       throw principalLessDenial(operation, object);
     }
+    await this.refuseGuestWithoutOrganization(context, operation, object);
 
     let permissionSets: PermissionSet[] = [];
     try {
@@ -8764,6 +8701,56 @@ export class SecurityPlugin implements Plugin {
       }
     }
     return { permissionSets, delegatorSets, delegatorContext };
+  }
+
+  /**
+   * [ADR-0138 D4] The located refusal: a GUEST that reaches a data operation
+   * acting in no organization, on a deployment where the guest entry's
+   * organization step refuses — a wall, several organizations, or none.
+   *
+   * Raised HERE, at the CRUD gate, because this is where the guest's
+   * organization matters (D4 item 3: to resolve its grants and to scope its
+   * data operation). The guest entry cannot raise it: the runtime face
+   * assembles the guest envelope for every sessionless request before any
+   * route is matched, so a refusal there would replace every anonymous 401 and
+   * reach the flow door D4 leaves alone. The entry instead records nothing it
+   * cannot use — no organization and no set (`resolveAuthzContext`) — and this
+   * gate asks the SAME step (`resolveGuestOrganization`, one step, two askers)
+   * for a guest that carries no organization. Before any set is resolved: where
+   * D4 refuses, D3 is never reached (D3 item 7). And ahead of the prologue's
+   * fail-closed `catch` on purpose: that net turns every throw of the set
+   * resolution into a generic `PERMISSION_DENIED`, which is the disguise the
+   * located refusal removes.
+   *
+   * A guest that carries an organization was derived one by the entry, and a
+   * decision other than `refuse` (`derived`, or a composition with no
+   * organization object) leaves the guest to the gate as it is — denied while
+   * it holds no set (D3 item 2).
+   */
+  private async refuseGuestWithoutOrganization(context: any, operation: string, object: string): Promise<void> {
+    // A system context never reaches here: both callers of
+    // {@link resolveOperationPrincipals} return before it for one (the
+    // middleware's system short-circuit, and `checkControlledByParentWrite`'s
+    // first exit), so this rule reads no elevation of its own.
+    if (!isGuestEnvelope(context)) return;
+    const tenantId = context?.tenantId;
+    if (typeof tenantId === 'string' && tenantId !== '') return;
+    const decision = await resolveGuestOrganization(this.ql, this.tenancyPosture);
+    if (decision.kind !== 'refuse') return;
+    if (!this.guestOrganizationRefusalWarned.has(decision.reason)) {
+      this.guestOrganizationRefusalWarned.add(decision.reason);
+      this.logger.warn?.(
+        `[security] an anonymous request reached '${operation}' on '${object}' and was refused: this deployment ` +
+          `resolves no organization for the guest (${decision.reason}, tenancy posture '${this.tenancyPosture}'` +
+          `${decision.organizationCount !== undefined ? `, ${decision.organizationCount} organization(s)` : ''}). ` +
+          `ADR-0138 D4 derives the guest's organization only on a single-organization deployment, and no site ` +
+          `binding (D5) exists yet to name one per request, so every anonymous data operation here answers ` +
+          `501 NOT_IMPLEMENTED. Serve the endpoint to signed-in callers (authRequired: true), or run it on a ` +
+          `single-organization deployment. Reported once per reason.`,
+        { operation, object, reason: decision.reason },
+      );
+    }
+    throw new GuestOrganizationUnresolvedError(decision.reason);
   }
 
   /**
@@ -9031,6 +9018,11 @@ export class SecurityPlugin implements Plugin {
       //     PURPOSE so metadata already at rest keeps loading (its docblock
       //     says so). Measured: `safeParse` of a `controlled_by_parent` object
       //     takes both an omitted `required` and an explicit `required: false`.
+      //     ⚠️ [#23100, ruling B] SUPERSEDED for this shape: the parse now
+      //     refuses it, and `resolveCbpRelation` resolves only a required
+      //     `master_detail`, so a non-required one never becomes `rel` and this
+      //     branch is unreachable for it (the object meets the `!rel` 422
+      //     above instead). The freeze below still binds the other two shapes.
       //   • `required` + `readonly` and `required` + `system` — STILL newly
       //     authorable through `ObjectSchema.create()` itself: the force
       //     returns early on `required === true` and never inspects

@@ -53,6 +53,7 @@ import type {
     ToolSet,
 } from 'ai';
 import type { z } from 'zod';
+import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 
 /**
  * @deprecated Use `ModelMessage` from `ai` instead.
@@ -443,13 +444,30 @@ export interface IAIService {
     /**
      * Inbox query: list pending (or filtered) action proposals. Used by
      * Studio's pending-actions view.
+     *
+     * @param filter - Status, conversation, object and row-count filters
+     * @param context - The caller's execution context, the trailing
+     *                parameter the other store contracts take. When it is
+     *                supplied, the implementation passes it unchanged as the
+     *                `context` of the engine read it makes
+     *                (`BaseEngineOptions.context`), so the read runs as that
+     *                caller: under ADR-0096 D5 strict mode an engine read
+     *                with no principal is refused with 403, so without it an
+     *                implementation can only read as system. When it is
+     *                omitted, the read is the one the implementation made
+     *                before this parameter existed. Whether a caller is
+     *                admitted to the rows depends on the stored object's
+     *                access and sharing, which this contract does not declare.
      */
-    listPendingActions?(filter?: {
-        status?: PendingActionStatus | PendingActionStatus[];
-        conversationId?: string;
-        objectName?: string;
-        limit?: number;
-    }): Promise<PendingActionRow[]>;
+    listPendingActions?(
+        filter?: {
+            status?: PendingActionStatus | PendingActionStatus[];
+            conversationId?: string;
+            objectName?: string;
+            limit?: number;
+        },
+        context?: ExecutionContext,
+    ): Promise<PendingActionRow[]>;
 }
 
 /** Lifecycle of a pending action proposal. */
@@ -749,6 +767,25 @@ export interface MessageObservability {
  * IAIConversationService - Manages persistent AI conversations
  *
  * Provides CRUD operations for conversations and their messages.
+ *
+ * ## The caller's execution context on reads (ADR-0096 D5)
+ *
+ * {@link IAIConversationService.get} and {@link IAIConversationService.list}
+ * take an optional trailing `context`: the caller's {@link ExecutionContext},
+ * the type and position the other store contracts use (`ISharingService`,
+ * `IApprovalService`, `IShareLinkService`, `IAnalyticsService`).
+ *
+ * - **Supplied:** the implementation passes it unchanged as the `context` of
+ *   every engine read the method makes (`BaseEngineOptions.context` on
+ *   `IDataEngine.find` / `findOne`), so the read runs as that caller. Under
+ *   ADR-0096 D5 strict mode an engine read with no principal is refused with
+ *   403, so without a caller an implementation can only read as system.
+ * - **Omitted:** the read is the one the implementation made before this
+ *   parameter existed, and a caller written against the shorter signature
+ *   keeps compiling.
+ *
+ * Whether a caller is admitted to the rows depends on the stored objects'
+ * access and sharing, which this contract does not declare.
  */
 export interface IAIConversationService {
     /**
@@ -770,21 +807,30 @@ export interface IAIConversationService {
      * ObjectQL data endpoint directly — that's the canonical query layer.
      *
      * @param conversationId - Conversation identifier
+     * @param context - The caller's execution context, passed to every
+     *                engine read this method makes (see the interface doc)
      * @returns The conversation, or null if not found
      */
-    get(conversationId: string): Promise<AIConversation | null>;
+    get(conversationId: string, context?: ExecutionContext): Promise<AIConversation | null>;
 
     /**
      * List conversations with optional filters
-     * @param options - Filter and pagination options
+     * @param options - Filter and pagination options. `userId` filters on
+     *                the conversation's owner; it is not the caller's
+     *                identity and does not stand in for `context`.
+     * @param context - The caller's execution context, passed to every
+     *                engine read this method makes (see the interface doc)
      * @returns Array of matching conversations
      */
-    list(options?: {
-        userId?: string;
-        agentId?: string;
-        limit?: number;
-        cursor?: string;
-    }): Promise<AIConversation[]>;
+    list(
+        options?: {
+            userId?: string;
+            agentId?: string;
+            limit?: number;
+            cursor?: string;
+        },
+        context?: ExecutionContext,
+    ): Promise<AIConversation[]>;
 
     /**
      * Add a message to a conversation

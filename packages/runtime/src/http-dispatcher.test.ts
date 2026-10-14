@@ -1569,13 +1569,13 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleData(
                 '/order_item/oi_1', 'GET', {},
                 { expand: 'order,product', select: 'name,total' },
-                { request: {} }
+                AUTHED_CALLER()
             );
 
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(200);
             expect(mockProtocol.getData).toHaveBeenCalledWith(
-                { object: 'order_item', id: 'oi_1', expand: 'order,product', select: 'name,total' }
+                { object: 'order_item', id: 'oi_1', expand: 'order,product', select: 'name,total', context: AUTHED_CALLER().executionContext }
             );
         });
 
@@ -1585,12 +1585,12 @@ describe('HttpDispatcher', () => {
             await dispatcher.handleData(
                 '/task/t1', 'GET', {},
                 { expand: 'assignee', malicious: 'drop_table', filter: 'hack' },
-                { request: {} }
+                AUTHED_CALLER()
             );
 
             // Only expand is passed; malicious and filter are dropped
             expect(mockProtocol.getData).toHaveBeenCalledWith(
-                { object: 'task', id: 't1', expand: 'assignee' }
+                { object: 'task', id: 't1', expand: 'assignee', context: AUTHED_CALLER().executionContext }
             );
         });
 
@@ -1601,7 +1601,7 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleData(
                 '/task', 'GET', {},
                 query,
-                { request: {} }
+                AUTHED_CALLER()
             );
 
             expect(result.handled).toBe(true);
@@ -1610,7 +1610,7 @@ describe('HttpDispatcher', () => {
             // two copies of one precedence, disagreeing on three alias pairs.
             // Folding is owned by the protocol normalizer alone now.
             expect(mockProtocol.findData).toHaveBeenCalledWith(
-                { object: 'task', query: { populate: 'assignee,project', top: '10', skip: '0' } }
+                { object: 'task', query: { populate: 'assignee,project', top: '10', skip: '0' }, context: AUTHED_CALLER().executionContext }
             );
         });
 
@@ -1618,17 +1618,33 @@ describe('HttpDispatcher', () => {
             mockProtocol.findData.mockResolvedValue({ object: 'order', records: [], total: 0 });
 
             const query = { expand: 'customer,products' };
-            await dispatcher.handleData('/order', 'GET', {}, query, { request: {} });
+            await dispatcher.handleData('/order', 'GET', {}, query, AUTHED_CALLER());
 
             expect(mockProtocol.findData).toHaveBeenCalledWith(
-                { object: 'order', query: { expand: 'customer,products' } }
+                { object: 'order', query: { expand: 'customer,products' }, context: AUTHED_CALLER().executionContext }
             );
         });
 
         it('should return error if object name is missing', async () => {
-            const result = await dispatcher.handleData('/', 'GET', {}, {}, { request: {} });
+            const result = await dispatcher.handleData('/', 'GET', {}, {}, AUTHED_CALLER());
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(400);
+        });
+
+        // ADR-0138 D2: the anonymous decision is the domain's FIRST statement,
+        // so every case above signs its caller in — they are about which
+        // protocol verb a face reaches and with which arguments, and were only
+        // ever anonymous incidentally. The anonymous answer is pinned here, and
+        // per face in `domains/domain-floor-anonymous-deny.test.ts`.
+        it('refuses an anonymous caller 401 UNAUTHENTICATED before any face, the 400 included', async () => {
+            for (const [path, method] of [['/order_item/oi_1', 'GET'], ['/task', 'GET'], ['/', 'GET'], ['/task/query', 'POST']] as const) {
+                const result = await dispatcher.handleData(path, method, {}, {}, { request: {} });
+                expect(result.handled).toBe(true);
+                expect(result.response?.status).toBe(401);
+                expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
+            }
+            expect(mockProtocol.getData).not.toHaveBeenCalled();
+            expect(mockProtocol.findData).not.toHaveBeenCalled();
         });
 
         it('should handle POST /data/:object/query with body containing expand', async () => {
@@ -1638,11 +1654,11 @@ describe('HttpDispatcher', () => {
                 '/task/query', 'POST',
                 { filter: { status: 'active' }, populate: ['assignee'] },
                 {},
-                { request: {} }
+                AUTHED_CALLER()
             );
 
             expect(mockProtocol.findData).toHaveBeenCalledWith(
-                { object: 'task', query: { filter: { status: 'active' }, populate: ['assignee'] } }
+                { object: 'task', query: { filter: { status: 'active' }, populate: ['assignee'] }, context: AUTHED_CALLER().executionContext }
             );
         });
     });
@@ -3614,10 +3630,17 @@ describe('HttpDispatcher', () => {
             expect(info.services.ui.provider).toBe('metadata-protocol');
 
             // The advertised route really answers — same predicate, same fact.
-            const served = await dispatcher.handleUi('/view/account', {}, { request: {} });
+            // Signed in: since ADR-0138 D2 the domain refuses an anonymous
+            // caller 401 as its first statement — asserted beside it.
+            const served = await dispatcher.handleUi('/view/account', {}, AUTHED_CALLER());
             expect(served.handled).toBe(true);
             expect(served.response?.status).toBe(200);
             expect(protocol.getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
+
+            const anonymous = await dispatcher.handleUi('/view/account', {}, { request: {} });
+            expect(anonymous.response?.status).toBe(401);
+            expect(anonymous.response?.body?.error?.code).toBe('UNAUTHENTICATED');
+            expect(protocol.getUiView).toHaveBeenCalledTimes(1);
         });
 
         it('does not advertise /ui without a protocol, and names the actual remedy', async () => {
@@ -3642,7 +3665,7 @@ describe('HttpDispatcher', () => {
             expect(info.routes.ui).toBeUndefined();
             expect(info.services.ui.enabled).toBe(false);
 
-            const served = await dispatcher.handleUi('/view/account', {}, { request: {} });
+            const served = await dispatcher.handleUi('/view/account', {}, AUTHED_CALLER());
             expect(served.handled).toBe(true);
             expect(served.response?.status).toBe(501);
         });

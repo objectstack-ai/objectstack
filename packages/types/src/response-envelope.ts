@@ -51,7 +51,7 @@
  */
 
 import type { ApiError, ErrorCode } from '@objectstack/spec/api';
-import { logServerFault } from './server-fault-log.js';
+import { logServerFault, type ServerFaultRequest } from './server-fault-log.js';
 
 /**
  * The only thing an envelope builder needs from a response object.
@@ -208,11 +208,12 @@ export function sendError(
   message: string,
   extra?: Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId' | 'declaredCode' | 'userMessage'>,
 ): void {
-  // [#14310] A 5xx is never silent. This writer is the single exit for every
-  // nested-envelope error in the repo, so the rule is applied ONCE here rather
-  // than at each registrar's catch block — a per-door call is a thing a new
-  // door can forget, and the `/api/v1/packages` 500 that motivated the card
-  // went unlogged for a week through exactly such a door.
+  // [#14310] A 5xx is never silent. This writer and {@link sendServerFault}
+  // are the two exits for every nested-envelope error in the repo, and each
+  // logs the line itself, so the rule is applied at the writer rather than at
+  // each registrar's catch block — a per-door call is a thing a new door can
+  // forget, and the `/api/v1/packages` 500 that motivated the card went
+  // unlogged for a week through exactly such a door.
   //
   // ⛔ Not a second opinion about the answer: `logServerFault` reads the same
   // `status` this call is about to write, and its own 5xx gate keeps every
@@ -221,9 +222,80 @@ export function sendError(
   //
   // The thrown value is not available here (callers resolve it into `message`
   // before arriving), so this line carries the message and code rather than a
-  // stack. A door still holding the throw can call `logServerFault` itself for
-  // the stack-bearing line; none does today, and the transports that DO hold
-  // it log at their own exits instead.
+  // stack. A door still holding a CAUGHT fault answers through
+  // {@link sendServerFault} instead, which logs the throw with its stack and
+  // writes the route's generic text — one line, not this one plus its own.
   logServerFault({ status, code, message, ...(extra?.requestId ? { request: { requestId: extra.requestId } } : {}) });
+  writeErrorEnvelope(res, status, code, message, extra);
+}
+
+/**
+ * [#23174] Answer a CAUGHT fault: the route's own generic text on the wire,
+ * and the caught error, stack included, in the fault log, as one line.
+ *
+ * ## The hole this closes
+ *
+ * {@link sendError} writes the `message` it is handed, verbatim, at every
+ * status. That is right for a 4xx, and right for an AUTHORED 5xx: product copy
+ * a consumer renders, or a branded error relaying the code and message its
+ * producer declared. It is wrong for a route's catch-all arm,
+ * `sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error')`, whose
+ * `message` is whatever the caught error happened to say. For an adapter or a
+ * driver error that text names server internals. The REST door has withheld it
+ * since #5437 ("a declared 5xx never ships its own message text"), but that
+ * door writes the FLAT dialect and lives in a package the route families
+ * answering THIS envelope cannot import, and no export they could reach carried
+ * the decision. So each family's catch-all shipped the caught text.
+ *
+ * ## What it decides
+ *
+ *  - **The wire carries `message`, the route's generic text, and nothing of
+ *    `thrown`.** The thrown value has no path into the body: it is handed to
+ *    the log and nowhere else.
+ *  - **The operator keeps the text.** `thrown` goes to {@link logServerFault}
+ *    with its stack, as the ONE line this fault costs. Calling
+ *    `logServerFault` and then `sendError` logs that line plus `sendError`'s
+ *    own stackless one; this writer shares `sendError`'s envelope write and
+ *    not its log call, so a converted arm logs once.
+ *  - **`request` names the MOUNTED route pattern, when a door passes one.**
+ *    ⛔ Never the request URL: on a token route the last path segment is a
+ *    live capability token, and a log line is no place for it.
+ *
+ * ## What the caller decides
+ *
+ * Which arm is a catch-all. ⛔ The rule withholds only text that came from a
+ * caught error; it is not widened to authored copy. An authored 5xx stays on
+ * `sendError` with its text: a refusal the console renders as the operator's
+ * prescription, a branded outage relaying its own declared code and message.
+ * So does every 4xx, where a caller-facing message is the answer by design.
+ *
+ * `status` is expected to be a 5xx, the band {@link logServerFault} logs. The
+ * same funnel rules apply as for `sendError`, unchanged: one record per fault,
+ * and the #14656 capability-absence quieting reads the `code` passed here.
+ */
+export function sendServerFault(
+  res: EnvelopeResponse,
+  status: number,
+  code: ErrorCode,
+  message: string,
+  thrown: unknown,
+  request?: ServerFaultRequest,
+): void {
+  logServerFault({ status, code, error: thrown, message, ...(request ? { request } : {}) });
+  writeErrorEnvelope(res, status, code, message);
+}
+
+/**
+ * The ONE write of the declared error envelope. Module-private: the exported
+ * writers above decide what is logged and what text is written, and this only
+ * writes it, so the envelope's error shape still lives in one place.
+ */
+function writeErrorEnvelope(
+  res: EnvelopeResponse,
+  status: number,
+  code: ErrorCode,
+  message: string,
+  extra?: Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId' | 'declaredCode' | 'userMessage'>,
+): void {
   res.status(status).json({ success: false, error: { code, message, ...extra } });
 }

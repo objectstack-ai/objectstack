@@ -1039,21 +1039,21 @@ export const CHANGE_KIND_ROWS = [
  *     a file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
  *     accept/reject behaviour or widens the public surface is built at the
- *     default tier and REVIEWED at `CONTRACT_REVIEW_TIER`. WHO owes that
- *     review is keyed by LANE — the maintainer's lane rule, keyed by seat on
- *     2026-09-10, re-keyed by served tier on 2026-09-16 and restated as the
- *     lane rule on 2026-09-17 (「曾经要求只有 spec 和 skills 需要 fable,其他
- *     opus 就够了,理论上其他车道不需要契约复审」): the spec and skills lanes
- *     owe it on every round they deliver — in-seat when the seat's served
- *     tier is that tier, otherwise by the at-tier review subagent the seat
- *     spawns (the fastest route, per the maintainer) — and every other lane
- *     owes NO contract review: its whole bar is the three landing pre-checks
- *     and the gates, ⛔ no default-tier "self-review" record is demanded of
- *     it and ⛔ no at-tier subagent is spawned from it (neither the triage
- *     seat nor the maintainer-summoned director spawns one for anything). A
- *     clause-② hit outside those two lanes is lane ROUTING, never a review
- *     demand on the lane that found it: the work is the spec lane's,
- *     whichever seat found it, and moves there. Clause ② itself is judged
+ *     default tier and REVIEWED. WHETHER that review is owed is keyed by
+ *     SURFACE, never by lane — the three contract faces of the PM skill's
+ *     contract-review reference (a published schema, governed rules text, the
+ *     `Clause-②: yes` declaration). The key was a seat on 2026-09-10, the
+ *     served tier on 2026-09-16 and the lane on 2026-09-17; the surface has
+ *     held it since 2026-09-21 (#19496 R5). The TIER the review is served at
+ *     follows the face that made it owed (ruling record 6159870311 on #23352,
+ *     letter B′ with C; `reviewFace` in `record-recognisers.mjs` holds the
+ *     mapping): a published schema or governed rules text ⇒
+ *     `CONTRACT_REVIEW_TIER` — in-seat when the seat's served tier is that
+ *     tier, otherwise by the at-tier review subagent the seat spawns — and
+ *     the declaration alone ⇒ `TIER_DEFAULT`, the lane seat's own review of
+ *     record. A clause-② hit outside the spec lane is lane ROUTING as well:
+ *     the work is the spec lane's, whichever seat found it, and moves there.
+ *     Clause ② itself is judged
  *     from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②

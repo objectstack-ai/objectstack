@@ -6,7 +6,7 @@
  * stage; #11182 ruling D; ADR-0032 Decision 2, a computed value is whole-field
  * CEL). Declared in the expression ledger and evaluated in the same change.
  *
- * Before this, each executor handed its map to `interpolate()` whole: a
+ * Before this, each executor handed its map to the 17.x `interpolate()` whole: a
  * `{token}` resolved, and an envelope written there reached the callee as the
  * object `{ dialect: 'cel', source: '…' }` it spells, with the run reporting
  * success. Pinned through the shipped `AutomationEngine`:
@@ -30,7 +30,6 @@ import { describe, expect, it } from 'vitest';
 import { VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { installBuiltinNodes } from './index.js';
-import { interpolate } from './template.js';
 
 function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
@@ -206,8 +205,8 @@ describe('3. the callee\'s default: the guarded form SUPPLIES `null`, which wins
     return (run.output as { out: { d: unknown } }).out.d;
   }
 
+  // What the 17.x interpolator handed for `{ d: '{nope}' }` was `{ d: undefined }`.
   it('what the template did: a whole token that resolved to nothing handed `undefined`, so the default applied', async () => {
-    expect(interpolate({ d: '{nope}' }, new Map(), {} as any)).toEqual({ d: undefined });
     const engine = makeEngine();
     engine.registerFlow('child', echoChild('child', [{ name: 'd', defaultValue: 'dflt' }]));
     const run = await engine.execute('child', { params: { d: undefined } } as any);
@@ -241,9 +240,8 @@ describe('3. the callee\'s default: the guarded form SUPPLIES `null`, which wins
       id: 'n', type: 'script', config: { function: 'echo', inputs: { k: GUARDED } },
     }, PARENT_VARIABLES));
     expect((await engine.execute('parent', {} as any)).success).toBe(true);
+    // (The 17.x interpolator handed `{ k: '{nope}' }` on as `{ k: undefined }`.)
     expect(seen).toEqual([{ k: null }]);
-    expect('k' in interpolate({ k: '{nope}' }, new Map(), {} as any)).toBe(true);
-    expect(interpolate({ k: '{nope}' }, new Map(), {} as any).k).toBeUndefined();
   });
 
   it('the registration refusal says so, at the position', () => {

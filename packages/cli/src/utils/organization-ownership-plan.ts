@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHash } from 'node:crypto';
+import { emailTemplateDefinitionFromRow } from '@objectstack/core';
 import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import {
   APPLICATION_OBJECT_FATE,
@@ -85,6 +86,27 @@ export interface UnattributableRow {
   shard?: string;
 }
 
+/**
+ * One NULL-organization row the walk derived an owner for. The plan only
+ * counts these; `--apply` hands a sink to the same walk so the owner it writes
+ * is the owner the plan reported, derived once ({@link AttributionSink}).
+ */
+export interface AttributionAssignment {
+  id: string;
+  /** The physical table the row lives in (a rotation shard, or the object's own table). */
+  table: string;
+  organizationId: string;
+  /** The anchor that answered, as the plan's `attribution` counts label it. */
+  via: string;
+}
+
+/**
+ * Receives each page of derived owners, after the page is classified and
+ * before the walk reads the next. The plan itself never writes; a sink is the
+ * one place a caller may.
+ */
+export type AttributionSink = (batch: { object: string; assignments: AttributionAssignment[] }) => Promise<void>;
+
 export interface PlannedCategory {
   id: string;
   label: string;
@@ -126,6 +148,100 @@ export interface TablePlan {
   cloudCarried?: true;
   external?: true;
   note?: string;
+  /**
+   * `sys_email_template` only: the `(name, locale)` groups of the promotion
+   * population whose candidate rows define the template differently. Fate 4
+   * until the operator chooses one row per group; nothing is guessed.
+   */
+  templateConflicts?: TemplateConflict[];
+}
+
+/** One `(name, locale)` the promotion cannot carry without the operator's choice. */
+export interface TemplateConflict {
+  name: string;
+  locale: string;
+  candidates: Array<{ id: string; organizationId: string | null }>;
+}
+
+/** The table whose customized and authored rows the ceremony promotes (ruling C on ADR-0131 §6 Q1). */
+export const TEMPLATE_OBJECT = 'sys_email_template';
+
+/** Provenance the seeders stamped: only such a row can be a copy of code. */
+export const SEEDED_BY: readonly string[] = ['package', 'platform', 'system'];
+
+/**
+ * The `sys_email_template` rows the promotion carries: a customized row (or one
+ * whose `customized` is unknown), and every row no seeder wrote (`managed_by`
+ * NULL or outside package / platform / system), with or without an
+ * organization. Every other row — seeded and uncustomized, NULL residue or an
+ * organization's copy — is a copy of code: a mirror, never promoted.
+ */
+export function templatePromotionSql(sql: Sql, cols: ReadonlySet<string>): { text: string; params: unknown[] } {
+  const t = TEMPLATE_OBJECT;
+  const c = sql.q('customized', t);
+  const customized = cols.has('customized') ? `${c} = ? OR ${c} IS NULL` : '1 = 0';
+  const params: unknown[] = cols.has('customized') ? [sql.bind(true)] : [];
+  if (!cols.has('managed_by')) return { text: '1 = 1', params: [] };
+  const managed = sql.q('managed_by', t);
+  return {
+    text: `${customized} OR ${managed} IS NULL OR ${managed} NOT IN (${SEEDED_BY.map(() => '?').join(', ')})`,
+    params: [...params, ...SEEDED_BY],
+  };
+}
+
+/** The JSON of a definition's own keys, for comparing two bodies. */
+export const definitionKey = (body: Readonly<Record<string, unknown>>, keys: readonly string[]): string =>
+  JSON.stringify(keys.map((k) => [k, body[k] ?? null]));
+
+/** One `(name, locale)` of the promotion population, its rows and the bodies they define. */
+export interface TemplateGroup {
+  name: string;
+  locale: string;
+  rows: Record<string, unknown>[];
+  bodies: Record<string, unknown>[];
+  /** The rows define the template differently. */
+  conflict: boolean;
+}
+
+/** Group population rows by `(name, locale)`; a row whose mapped body carries no name is listed apart. */
+export function groupTemplateRows(rows: readonly Record<string, unknown>[]): { groups: TemplateGroup[]; nameless: string[] } {
+  const byKey = new Map<string, TemplateGroup>();
+  const nameless: string[] = [];
+  for (const row of rows) {
+    const body = emailTemplateDefinitionFromRow(row);
+    const name = typeof body.name === 'string' && body.name !== '' ? body.name : null;
+    if (name === null) {
+      nameless.push(String(row.id));
+      continue;
+    }
+    const locale = String(body.locale);
+    const key = `${name}\u0000${locale}`;
+    const group = byKey.get(key) ?? { name, locale, rows: [], bodies: [], conflict: false };
+    group.rows.push(row);
+    group.bodies.push(body);
+    byKey.set(key, group);
+  }
+  for (const group of byKey.values()) {
+    const keys = [...new Set(group.bodies.flatMap(Object.keys))];
+    group.conflict = new Set(group.bodies.map((b) => definitionKey(b, keys))).size > 1;
+  }
+  return { groups: [...byKey.values()], nameless };
+}
+
+const nonEmptyId = (value: unknown): string | null =>
+  value === null || value === undefined || String(value) === '' ? null : String(value);
+
+/** The conflicts among the promotion population of one physical template table. */
+async function readTemplateConflicts(sql: Sql, table: string, columns: ReadonlySet<string>): Promise<TemplateConflict[]> {
+  const where = templatePromotionSql(sql, columns);
+  const rows = await sql.read(table, `SELECT * FROM ${sql.q(table, table)} WHERE ${where.text} ORDER BY ${sql.q('id', table)}`, where.params);
+  return groupTemplateRows(rows)
+    .groups.filter((g) => g.conflict)
+    .map((g) => ({
+      name: g.name,
+      locale: g.locale,
+      candidates: g.rows.map((r) => ({ id: String(r.id), organizationId: nonEmptyId(r[ORG]) })),
+    }));
 }
 
 export interface OrganizationOwnershipPlan {
@@ -176,7 +292,8 @@ export function inventoryDigest(inventory: readonly InventoryEntry[] = ORGANIZAT
   return createHash('sha256').update(JSON.stringify(inventory)).digest('hex');
 }
 
-class Sql {
+/** Identifier quoting, value binding and refusing reads, shared with the apply step. */
+export class Sql {
   constructor(
     private readonly reader: PlanReader,
     readonly dialect: PlanDialect,
@@ -231,7 +348,7 @@ function firstValue(row: Record<string, unknown>): unknown {
   return Object.values(row)[0];
 }
 
-function columnNameOf(row: Record<string, unknown>): string | null {
+export function columnNameOf(row: Record<string, unknown>): string | null {
   for (const key of ['column_name', 'COLUMN_NAME', 'name']) {
     const value = row[key];
     if (typeof value === 'string' && value) return value;
@@ -247,7 +364,7 @@ function tableNameOf(row: Record<string, unknown>): string | null {
   return null;
 }
 
-function columnListSql(dialect: PlanDialect): string {
+export function columnListSql(dialect: PlanDialect): string {
   if (dialect === 'sqlite') return 'SELECT name AS column_name FROM pragma_table_info(?)';
   if (dialect === 'postgres') {
     return 'SELECT column_name FROM information_schema.columns WHERE table_schema = ANY (current_schemas(false)) AND table_name = ?';
@@ -256,7 +373,7 @@ function columnListSql(dialect: PlanDialect): string {
 }
 
 /** The SQL of one predicate, its columns required present on `table`. */
-function predicateSql(sql: Sql, table: string, columns: ReadonlySet<string>, predicate: RowPredicate): { text: string; params: unknown[] } {
+export function predicateSql(sql: Sql, table: string, columns: ReadonlySet<string>, predicate: RowPredicate): { text: string; params: unknown[] } {
   const parts: string[] = [];
   const params: unknown[] = [];
   for (const condition of predicate) {
@@ -281,7 +398,7 @@ function predicateSql(sql: Sql, table: string, columns: ReadonlySet<string>, pre
   return { text: parts.length ? parts.join(' AND ') : '1 = 1', params };
 }
 
-function requireColumn(table: string, columns: ReadonlySet<string>, column: string): void {
+export function requireColumn(table: string, columns: ReadonlySet<string>, column: string): void {
   if (!columns.has(column)) {
     throw new OrganizationOwnershipPlanRefusal(
       'missing-column',
@@ -378,6 +495,7 @@ interface PlanContext {
   catalog: Catalog;
   posture: string;
   defaultOrganizationId: string | null;
+  onAttribution?: AttributionSink;
 }
 
 /** The organization of each id in `ids` on `object`'s own table, or a reason it cannot be read. */
@@ -412,9 +530,19 @@ interface PendingRow {
 }
 
 /** Resolve rows through one anchor; returns the rows it could not derive. */
-async function applyAnchor(ctx: PlanContext, anchor: Anchor, rows: PendingRow[], derived: Record<string, number>): Promise<PendingRow[]> {
+async function applyAnchor(
+  ctx: PlanContext,
+  anchor: Anchor,
+  rows: PendingRow[],
+  derived: Record<string, number>,
+  assigned: AttributionAssignment[],
+): Promise<PendingRow[]> {
   const label = anchorLabel(anchor);
   const left: PendingRow[] = [];
+  const derive = (row: PendingRow, organizationId: string): void => {
+    derived[label] = (derived[label] ?? 0) + 1;
+    assigned.push({ id: row.id, table: row.shard, organizationId, via: label });
+  };
   if (anchor.kind === 'parent') {
     const keys = [...new Set(rows.map((r) => nonEmpty(r.values[anchor.childKey])).filter((k): k is string => k !== null))];
     const orgs = keys.length ? await organizationsById(ctx, anchor.parentObject, keys) : new Map<string, string | null>();
@@ -424,7 +552,7 @@ async function applyAnchor(ctx: PlanContext, anchor: Anchor, rows: PendingRow[],
       else if (typeof orgs === 'string') left.push({ ...row, reason: orgs });
       else if (!orgs.has(key)) left.push({ ...row, reason: `${anchor.parentObject} row ${key} not found` });
       else if (orgs.get(key) === null) left.push({ ...row, reason: `${anchor.parentObject} row ${key} has no organization` });
-      else derived[label] = (derived[label] ?? 0) + 1;
+      else derive(row, orgs.get(key)!);
     }
     return left;
   }
@@ -450,7 +578,7 @@ async function applyAnchor(ctx: PlanContext, anchor: Anchor, rows: PendingRow[],
         if (typeof orgs === 'string') left.push({ ...row, reason: orgs });
         else if (!orgs.has(id)) left.push({ ...row, reason: `${object} row ${id} not found` });
         else if (orgs.get(id) === null) left.push({ ...row, reason: `${object} row ${id} has no organization` });
-        else derived[label] = (derived[label] ?? 0) + 1;
+        else derive(row, orgs.get(id)!);
       }
     }
     return left;
@@ -482,7 +610,7 @@ async function applyAnchor(ctx: PlanContext, anchor: Anchor, rows: PendingRow[],
     const orgs = holders.get(row.id);
     if (!orgs) left.push({ ...row, reason: `no stamped ${anchor.holderObject} holder` });
     else if (orgs.size > 1) left.push({ ...row, reason: `${anchor.holderObject} holders disagree (${orgs.size} organizations)` });
-    else derived[label] = (derived[label] ?? 0) + 1;
+    else derive(row, [...orgs][0]!);
   }
   return left;
 }
@@ -589,6 +717,11 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
     }
     plan.categories.push({ id: category.id, label: category.label, citation: category.citation, rows, ...(groups !== undefined ? { groups } : {}) });
   }
+  if (entry.object === TEMPLATE_OBJECT) {
+    const conflicts: TemplateConflict[] = [];
+    for (const table of tables) conflicts.push(...(await readTemplateConflicts(sql, table, ctx.catalog.columns.get(table)!)));
+    plan.templateConflicts = conflicts;
+  }
 
   const rows = plan.rows!;
   const departing = plan.departures.reduce((n, d) => n + d.rows, 0);
@@ -669,16 +802,21 @@ async function walkNullRows(
       }
       pending.push({ id: String(row.row_id), values: row, reason: entry.fate === 'report' ? 'fate 4: reported, never guessed' : 'no anchor names the owner', shard: table });
     }
+    const assigned: AttributionAssignment[] = [];
     if (entry.fate === 'attribution') {
       for (const anchor of entry.anchors ?? []) {
         if (pending.length === 0) break;
-        pending = await applyAnchor(ctx, anchor, pending, derived);
+        pending = await applyAnchor(ctx, anchor, pending, derived, assigned);
       }
       if (pending.length > 0 && ctx.posture === 'single' && ctx.defaultOrganizationId !== null) {
         derived['default-organization'] = (derived['default-organization'] ?? 0) + pending.length;
+        for (const row of pending) {
+          assigned.push({ id: row.id, table: row.shard, organizationId: ctx.defaultOrganizationId, via: 'default-organization' });
+        }
         pending = [];
       }
     }
+    if (ctx.onAttribution && assigned.length > 0) await ctx.onAttribution({ object: entry.object, assignments: assigned });
     for (const row of pending) {
       plan.unattributable.push({
         id: row.id,
@@ -725,6 +863,11 @@ export async function buildOrganizationOwnershipPlan(opts: {
   database: string;
   now?: Date;
   inventory?: readonly InventoryEntry[];
+  /**
+   * `--apply`'s attribution step: receives every owner the walk derives. The
+   * plan's own run passes none and stays SELECT-only.
+   */
+  onAttribution?: AttributionSink;
 }): Promise<OrganizationOwnershipPlan> {
   const inventory = opts.inventory ?? ORGANIZATION_OWNERSHIP_INVENTORY;
   const dialect = dialectOf(opts.reader.client);
@@ -754,7 +897,13 @@ export async function buildOrganizationOwnershipPlan(opts: {
     );
     defaultOrganizationId = rows.length > 0 ? nonEmpty(rows[0]!.id) : null;
   }
-  const ctx: PlanContext = { sql, catalog, posture: opts.posture, defaultOrganizationId };
+  const ctx: PlanContext = {
+    sql,
+    catalog,
+    posture: opts.posture,
+    defaultOrganizationId,
+    ...(opts.onAttribution ? { onAttribution: opts.onAttribution } : {}),
+  };
 
   const tables: TablePlan[] = [];
   let outsideCeremony = 0;
@@ -770,7 +919,9 @@ export async function buildOrganizationOwnershipPlan(opts: {
         throw new OrganizationOwnershipPlanRefusal(
           'uninventoried-platform-table',
           `${base} carries ${ORG} but the ADR-0131 D10 inventory gives it no fate. The plan refuses rather than ` +
-            'guess one: the inventory (packages/cli/src/utils/organization-ownership-inventory.ts) owes it a row.',
+            'guess one: the inventory (packages/cli/src/utils/organization-ownership-inventory.ts) owes it a row, or, ' +
+            'when the host provides the object, the host declares its fate in a fate supplement passed with ' +
+            '--fate-supplement FILE.',
           base,
         );
       }

@@ -1,6 +1,7 @@
 # ADR-0091: Grant lifecycle — effective-dated assignments, delegation, break-glass, recertification substrate
 
 - **Status:** Accepted
+  · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13): `sys_position_permission_set`, which D1 and the non-goals leave undated, and the `sys_position` row L2 adds `delegatable` to, are retired by #15204 stage 8 (`66949b7729`, 2026-10-13); a position's sets and its `delegatable` flag are its metadata-registry definition. D1's dated assignment rows stand.
 - **Date:** 2026-07-09 (proposed) · 2026-07-10 (accepted)
 - **Deciders:** jack@objectstack.ai
 - **Relates to:** ADR-0090 (Permission Model v2 — named follow-up #1), ADR-0057 (assignment tables), ADR-0049 (no unenforced security properties), ADR-0016 (open-core boundary)
@@ -75,6 +76,12 @@ compose capability — a binding that flips on a date is a scheduled *publish*,
 which belongs to the D7 human-gated publish track, not to per-person grants)
 and `sys_record_share` (time-boxed record access is what share links already
 do). Existing rows carry nulls — zero migration.
+
+> **Note (2026-10-14) — the binding table is retired; the reasoning stands.**
+> `sys_position_permission_set` is retired by #15204 stage 8 (`66949b7729`, 2026-10-13), by
+> execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13: a position's sets
+> are part of its definition (`PositionSchema.permissionSets`), so a dated binding change is a
+> definition change, the publish track this paragraph already sends it to.
 
 ### D2 — Correctness = resolution-time filtering, fail-closed
 
@@ -195,6 +202,9 @@ every edition); *convenience and compliance workflow* are the product.
   request-approval flows belong to the existing approvals plugin composed at
   the product layer.
 
+> **Note (2026-10-14).** The first non-goal's table is retired (see the note under D1); a scheduled
+> binding change is a scheduled change to a position's definition and stays out of scope here.
+
 ## Phasing
 
 1. **L1 (spec + filtering)** — columns, zod shapes, resolver filtering + tests
@@ -215,6 +225,10 @@ every edition); *convenience and compliance workflow* are the product.
    (D7); its community *shape* is L1 (a time-boxed direct grant with a reason).
 3. **L3 (enterprise)** — cloud-side campaign/notification/activation product
    design doc, consuming L1/L2 substrate only.
+
+> **Note (2026-10-14) — L2's `sys_position.delegatable` left with its object.** `sys_position` is
+> retired by #15204 stage 8 (`66949b7729`, 2026-10-13; [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
+> D3/D13); the D12 gate reads `PositionSchema.delegatable` from the security catalog by name.
 
 ## References
 

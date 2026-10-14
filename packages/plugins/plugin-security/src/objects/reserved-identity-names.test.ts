@@ -35,10 +35,7 @@ import { ObjectQL, VALIDATION_FAILED_CODE } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { BUILTIN_IDENTITY_NAMES } from '@objectstack/spec';
 
-import { SysPosition } from './sys-position.object.js';
 import { SysUserPosition } from './sys-user-position.object.js';
-import { SysPermissionSet } from './sys-permission-set.object.js';
-import { SysPositionPermissionSet } from './sys-position-permission-set.object.js';
 import {
   RESERVED_IDENTITY_NAMES,
   isReservedIdentityName,
@@ -67,7 +64,7 @@ async function boot(): Promise<ObjectQL> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet],
+    objects: [SysUserPosition],
   } as any);
   await engine.syncSchemas();
   engines.push(engine);
@@ -130,104 +127,26 @@ describe('#15972 the reserved set is IMPORTED from the spec constant, never rety
   });
 });
 
-describe('#15972 both write doors read the GENERATED list — one predicate, no second copy', () => {
-  const positionRule: any = (SysPosition.validations ?? []).find((v: any) => v.name === 'reserved_identity_name');
+describe('#15972 the assignment door reads the GENERATED list — one predicate, no second copy', () => {
+  // [C3 stage 8] The `sys_position` row object and its copy of the rule are
+  // retired (ADR-0131 D3): a position is a catalog definition, refused by the
+  // metadata door. The assignment row keeps the rule.
   const assignmentRule: any = (SysUserPosition.validations ?? []).find((v: any) => v.name === 'reserved_identity_position');
-
-  it('sys_position declares the rule, at `error` severity', () => {
-    expect(positionRule).toBeDefined();
-    // ⛔ `warning` / `info` are LOGGED and never throw — a reserved-name rule at
-    // either level is a rule that refuses nothing.
-    expect(positionRule.severity).toBe('error');
-    expect(positionRule.condition.source).toContain(reservedIdentityNamesCelList());
-  });
 
   it('sys_user_position declares the rule, at `error` severity', () => {
     expect(assignmentRule).toBeDefined();
+    // ⛔ `warning` / `info` are LOGGED and never throw — a reserved-name rule at
+    // either level is a rule that refuses nothing.
     expect(assignmentRule.severity).toBe('error');
     expect(assignmentRule.condition.source).toContain(reservedIdentityNamesCelList());
   });
 
-  it('both carry the SAME wording, parameterised only by the column', () => {
-    expect(positionRule.message).toBe(reservedIdentityNameMessage('name'));
+  it('carries the shared wording, parameterised by the column', () => {
     expect(assignmentRule.message).toBe(reservedIdentityNameMessage('position'));
   });
 
-  it('only sys_position takes a provenance exemption — the assignment door takes none', () => {
-    // The asymmetry is the design: `sys_position` has a legitimate platform
-    // seeder for exactly these names; `sys_user_position` has none, in any
-    // package, so its refusal is unconditional.
-    expect(positionRule.condition.source).toContain('managed_by');
+  it('takes no provenance exemption', () => {
     expect(assignmentRule.condition.source).not.toContain('managed_by');
-  });
-});
-
-describe('#15972 sys_position — the object layer refuses the reserved names on a real engine', () => {
-  it.each([...BUILTIN_IDENTITY_NAMES])('refuses a tenant-authored position named %s', async (name) => {
-    const engine = await boot();
-    const err = await refusalOf(() => (engine as any).insert(
-      'sys_position',
-      { id: `pos_${name}`, name, label: 'Impostor' },
-      { context: TENANT_CTX },
-    ));
-    expect(err.code).toBe(VALIDATION_FAILED_CODE);
-    expect(err.message).toContain('framework-reserved built-in identity name');
-  });
-
-  it('NEGATIVE CONTROL — every other name still writes', async () => {
-    const engine = await boot();
-    // Including the shapes a pattern-based guard would have swallowed.
-    for (const name of ['sales_manager', 'org_manager', 'platform_admin_deputy', 'hr_specialist']) {
-      await expect((engine as any).insert(
-        'sys_position',
-        { id: `pos_${name}`, name, label: name },
-        { context: TENANT_CTX },
-      )).resolves.toBeTruthy();
-    }
-  });
-
-  it('refuses a RENAME into a reserved name (the update door, not just insert)', async () => {
-    const engine = await boot();
-    await (engine as any).insert(
-      'sys_position', { id: 'pos_rename', name: 'sales_manager', label: 'Sales' }, { context: TENANT_CTX },
-    );
-    const err = await refusalOf(() => (engine as any).update(
-      'sys_position', { id: 'pos_rename', name: 'platform_admin' }, { context: TENANT_CTX },
-    ));
-    expect(err.code).toBe(VALIDATION_FAILED_CODE);
-  });
-
-  it('refuses a PACKAGE-provenance row too — a stack may not repurpose one either', async () => {
-    const engine = await boot();
-    const err = await refusalOf(() => (engine as any).insert(
-      'sys_position',
-      { id: 'pos_pkg', name: 'org_admin', label: 'Impostor', managed_by: 'package' },
-      { context: { isSystem: true } },
-    ));
-    expect(err.code).toBe(VALIDATION_FAILED_CODE);
-  });
-
-  it("a PLATFORM-provenance row spelling a reserved name still writes — the exemption's one holder", async () => {
-    const engine = await boot();
-    // [ADR-0131 D2] The built-in seeder that wrote these rows is retired: the
-    // six built-ins are declared metadata and the boot writes no row. Rows it
-    // wrote stay on existing databases (C7 owns their removal), stamped
-    // `managed_by: 'platform'` under an `isSystem` context, and the exemption
-    // keeps them writable — an insert of that shape, and the UPDATE leg over a
-    // row that already spells a reserved name, must not start refusing.
-    for (const name of BUILTIN_IDENTITY_NAMES) {
-      await (engine as any).insert(
-        'sys_position',
-        { id: `pos_${name}`, name, label: name, managed_by: 'platform', active: true, is_default: false },
-        { context: { isSystem: true } },
-      );
-    }
-    const rows = await (engine as any).find('sys_position', { where: {}, context: { isSystem: true } });
-    const written = rows.map((r: any) => r.name);
-    for (const name of BUILTIN_IDENTITY_NAMES) expect(written).toContain(name);
-    await expect((engine as any).update(
-      'sys_position', { id: 'pos_org_admin', label: 'Organization Admin' }, { context: { isSystem: true } },
-    )).resolves.toBeTruthy();
   });
 });
 

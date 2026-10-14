@@ -24,6 +24,15 @@
  * context (per-env RLS is bypassed because the token gates access), and
  * `redactFields` are stripped before the record leaves the server.
  *
+ * Those two faces are ADR-0138 D2's class 2 (share links), on this, the
+ * dispatcher twin of the plugin-sharing mount. Every OTHER face is behind the
+ * domain's anonymous decision, taken once as the domain's first statement
+ * (`handleShareLinksRequest`): the one exception it makes is named by the same
+ * predicate that marks the two public faces (`isPublicShareLinkRoute`), so a
+ * face added here later is refused to an anonymous caller from the day it
+ * lands, and a new public face is an amendment of that record, never an edit
+ * here alone.
+ *
  * Every route answers the declared `{ success: true, data }` envelope with `data`
  * carrying the payload directly. Create and list used to emit a duplicate
  * top-level `link` / `links` beside `data` — a producer-side shim for readers
@@ -35,6 +44,9 @@
  * value whichever one served the request.
  */
 
+import {
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 // [#14637 -> #14935] The standing `publicSharing.enabled` switch, read through
 // the ONE predicate the package that DECLARES the key exports. This file used
@@ -109,6 +121,24 @@ export async function handleShareLinksRequest(
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
     const isPublic = isPublicShareLinkRoute(subPath, method);
+    // ANONYMOUS BASELINE — the domain's first decision (ADR-0138 D2: taken once
+    // per domain, never face by face), with the one exception the record names
+    // for this domain: the two token faces of class 2, which the capability
+    // token admits. It used to sit inside the body, below the service probe, as
+    // the management faces' own `!userId` check, so a deployment without the
+    // share-link service answered an anonymous caller the 501 capability
+    // disclosure instead of the 401. A link is managed BY a user, so the
+    // decision is asked about the user id alone: these faces have no
+    // system-context arm (an internal system context was refused here before
+    // as it is now).
+    if (!isPublic) {
+        if (shouldDenyAnonymous({ userId: context.executionContext?.userId })) {
+            return {
+                handled: true,
+                response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+            };
+        }
+    }
     let result: HttpDispatcherResult;
     try {
         result = await handleShareLinksRequestBody(deps, subPath, method, body, query, context);
@@ -276,6 +306,23 @@ async function handleShareLinksRequestBody(
                     if (!isPublicSharingEnabled(schema)) return invalidOrExpired();
                 }
                 const live = row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now());
+                // [#23328] The audience is judged BEFORE the password. Before
+                // sign-in this probe asks the audience and never the password:
+                // `resolveToken` refuses an anonymous caller of a `signed_in`
+                // link on the audience before it verifies any password, so the
+                // password arm below knows only whether a password was SENT —
+                // answered first, it told the holder of the CORRECT password
+                // `WRONG_PASSWORD`, and the console never offered sign-in.
+                // Asked first, an anonymous caller reads one answer whatever it
+                // sent, so nothing here can tell it whether a guessed password
+                // is right. A signed-in caller keeps the password arms. The
+                // plugin-sharing twin carries the same order; this copy cannot
+                // import it (`@objectstack/plugin-sharing` is a DEV dependency
+                // here), so one table holds both mounts to it:
+                // `share-links-refusal-order.test.ts` beside this file.
+                if (live && row.audience === 'signed_in' && !signedInUserId) {
+                    return sendErr(401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
+                }
                 // [#21197] `sys_share_link.password_hash` is `internal: true`, so the
                 // probe row above comes back WITHOUT it; read off the row, every
                 // protected link would answer the unknown-token shape and the
@@ -290,9 +337,6 @@ async function handleShareLinksRequestBody(
                 if (live && passwordHash) {
                     return sendErr(401, providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
                         providedPassword ? 'Incorrect password' : 'This link requires a password');
-                }
-                if (live && row.audience === 'signed_in' && !signedInUserId) {
-                    return sendErr(401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
                 }
                 if (row && (row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now()))) {
                     return sendErr(410, 'EXPIRED_OR_REVOKED', 'Share link has expired or been revoked');
@@ -350,7 +394,11 @@ async function handleShareLinksRequestBody(
         }
 
         // ── AUTHENTICATED: create / list / revoke ─────────────────────
-        if (!ec?.userId) return sendErr(401, 'UNAUTHENTICATED', 'Sign in to manage share links');
+        // Not a decision: the domain's anonymous baseline in
+        // `handleShareLinksRequest` refused every caller without a user id
+        // before this body ran. This narrows `ec` for the compiler, and answers
+        // exactly what that baseline answers if it is ever reached.
+        if (!ec?.userId) return sendErr(ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
 
         // POST /share-links → create
         if (parts.length === 0 && m === 'POST') {

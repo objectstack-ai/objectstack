@@ -13,9 +13,11 @@
  * `SettingsService`.
  *
  * Every route of the family is mounted through ONE door (`mountFamilyRoute`
- * inside {@link registerSettingsRoutes}), which resolves the caller, refuses an
- * anonymous one with the platform's shared `401 UNAUTHENTICATED` (ADR-0056 D2,
- * ADR-0138 D2), and only then hands the request to the route.
+ * inside {@link registerSettingsRoutes}), which resolves the caller, refuses a
+ * session the authentication policy holds with `403` and the gate's code
+ * (ADR-0069), refuses an anonymous caller with the platform's shared
+ * `401 UNAUTHENTICATED` (ADR-0056 D2, ADR-0138 D2), and only then hands the
+ * request to the route.
  */
 
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
@@ -28,17 +30,26 @@ import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@ob
 // ADR-0056 D2 — the anonymous floor is the platform's ONE shared decision and
 // its ONE status / code / message, imported rather than restated, so this
 // family cannot drift from the other HTTP seams on who is refused or how.
+//
+// ADR-0069 — the authentication-policy gate's ONE decision (`evaluateAuthGate`)
+// is asked at the same door, never re-derived here.
 import {
   ANONYMOUS_DENY_CODE,
   ANONYMOUS_DENY_MESSAGE,
   ANONYMOUS_DENY_STATUS,
+  evaluateAuthGate,
   isAuthzStoreUnavailableError,
   shouldDenyAnonymous,
 } from '@objectstack/core';
+import type { ErrorCode } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // Its `extra` is `ApiError`'s own optional fields, so the undeclared siblings
 // #4224 retired from this module cannot come back through it either.
-import { sendOk, sendError } from '@objectstack/types';
+// [#23174] Each route's catch-all 5xx answers through `sendServerFault`: the
+// route's generic text on the wire, the caught error with its stack in the
+// fault log. The authored `SETTINGS_CRYPTO_UNAVAILABLE` refusal and the
+// authorization-store outage relay keep their own text on `sendError`.
+import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 import { SettingsService } from './settings-service.js';
 // #7522 — the REST boundary is where an encrypted setting stops being cleartext.
 // The service decrypts on purpose (in-process plugins need the real secret);
@@ -139,6 +150,39 @@ function relayAuthzStoreOutage(res: IHttpResponse, err: unknown): boolean {
   return true;
 }
 
+/**
+ * ADR-0069 — refuse a session the authentication policy HOLDS (an expired
+ * password, enforced MFA not yet enrolled), which is gated out of every
+ * protected resource until it remediates. Returns `true` when the refusal was
+ * answered and the request must stop.
+ *
+ * The posture is the context's declared `authGate` (`SettingsContext`), put
+ * there by the context resolver from the session it read — in production
+ * `SettingsServicePlugin`'s verified resolver, through `normalizeAuthGate`.
+ * The decision is the platform's shared one, `evaluateAuthGate`, which reads
+ * the `authGate` its first argument carries; the answer is REST's `enforceAuth`
+ * answer, `403` with the gate's own `code` and `message`, in this family's
+ * declared envelope. A context with no `authGate` passes unchanged, so a host
+ * resolver that never sets the field mounts the family exactly as before.
+ *
+ * No request path is passed: the empty path is the shared allow-list's declared
+ * fail-closed input, so no settings route can earn an exemption. None is a
+ * remediation or bootstrap route, and the family's base path is the host's
+ * option — passing it would let a family mounted under an allow-listed prefix
+ * inherit an exemption it never declared. The anonymous floor below is asked
+ * without the path for the same reason.
+ *
+ * `code` is declared as a bare string on the posture; its one producer
+ * (plugin-auth's `customSession` enrichment) writes only `PASSWORD_EXPIRED` /
+ * `MFA_REQUIRED`, both members of the error-code vocabulary.
+ */
+function refuseHeldSession(res: IHttpResponse, ctx: SettingsContext | undefined): boolean {
+  const gate = evaluateAuthGate(ctx, '');
+  if (!gate) return false;
+  sendError(res, 403, gate.code as ErrorCode, gate.message);
+  return true;
+}
+
 export function registerSettingsRoutes(
   http: IHttpServer,
   service: SettingsService,
@@ -159,12 +203,16 @@ export function registerSettingsRoutes(
    *     not settings logic; an authorization-store outage it raises is relayed
    *     as its own `503` (#15999), and any other throw takes the route's own
    *     `refuse` arm exactly as it did before the door existed.
-   *  2. ADR-0056 D2 / ADR-0138 D2: the shared `!userId && !isSystem → 401`
+   *  2. ADR-0069: a held session is refused `403` with the gate's code
+   *     ({@link refuseHeldSession}), asked first as REST's `enforceAuth` asks
+   *     it. Like the anonymous caller below, it learns nothing about the
+   *     family, only what it must remediate.
+   *  3. ADR-0056 D2 / ADR-0138 D2: the shared `!userId && !isSystem → 401`
    *     decision, BEFORE any settings logic runs. An anonymous caller learns
    *     nothing about the family — not which namespaces exist (the `404` it
    *     used to get for an unknown one), not which are protected (the `403`),
    *     not that the index is empty (the `200`).
-   *  3. The route's own work (`serve`), with that same context.
+   *  4. The route's own work (`serve`), with that same context.
    *
    * `isSystem` is deliberately not read: `SettingsContext` carries no such
    * field and inbound HTTP never holds one, so the only way past the floor is a
@@ -176,6 +224,7 @@ export function registerSettingsRoutes(
     http[verb](path, (async (req, res) => {
       try {
         const ctx = await ctxOf(req);
+        if (refuseHeldSession(res, ctx)) return;
         if (shouldDenyAnonymous({ userId: ctx?.userId, method: req.method })) {
           sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
           return;
@@ -197,7 +246,7 @@ export function registerSettingsRoutes(
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else {
-        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to list manifests');
+        sendServerFault(res, 500, 'INTERNAL_ERROR', 'Failed to list manifests', err);
       }
     },
   });
@@ -218,7 +267,7 @@ export function registerSettingsRoutes(
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else {
-        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to read namespace');
+        sendServerFault(res, 500, 'INTERNAL_ERROR', 'Failed to read namespace', err);
       }
     },
   });
@@ -300,7 +349,7 @@ export function registerSettingsRoutes(
           details: { namespace: err.namespace, key: err.key },
         });
       } else {
-        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to write namespace');
+        sendServerFault(res, 500, 'INTERNAL_ERROR', 'Failed to write namespace', err);
       }
     },
   });
@@ -333,7 +382,7 @@ export function registerSettingsRoutes(
       } else if (err instanceof UnknownNamespaceError) {
         sendError(res, 404, 'UNKNOWN_NAMESPACE', err.message);
       } else {
-        sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Action failed');
+        sendServerFault(res, 500, 'INTERNAL_ERROR', 'Action failed', err);
       }
     },
   });

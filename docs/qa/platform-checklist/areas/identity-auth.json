@@ -1827,7 +1827,7 @@
       "title": "Email verification loop: a challenged sign-up lands a captured verification mail, unverified sign-in is refused EMAIL_NOT_VERIFIED server-side, the link admits, resend works — and the default boot never challenges",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a fresh registrant (unverified, then verified)", "admin (reads state)", "env owner (configures the verification boot)"],
@@ -1847,7 +1847,7 @@
         "on the verification boot, sign up a fresh admissible address: the console routes to /verify-email-prompt after sign-up (RegisterPage header contract) and the verification mail lands at the log transport via template auth.verify_email — capture the link/token (sendVerificationEmail, auth-manager.ts: template failures THROW into the log rather than silently dropping)",
         "attempt POST /api/v1/auth/sign-in/email for the unverified user: capture the refusal carrying EMAIL_NOT_VERIFIED, and in the browser confirm the login page redirects that error into /verify-email-prompt (LoginPage.tsx,346,360)",
         "resend from the prompt page (useAuth().sendVerificationEmail → POST /api/v1/auth/send-verification-email, ledgered auth-route-ledger.ts) and capture the second mail at the transport",
-        "follow the captured link: the console's /verify-email consumes ?token= via POST /api/v1/auth/verify-email — the page deliberately uses the POST variant for JSON control; the GET variant 302-redirects (VerifyEmailPage.tsx; ledger row GET /api/v1/auth/verify-email) — and renders the success state",
+        "follow the captured link: the console's /verify-email consumes ?token= via GET /api/v1/auth/verify-email?token=… — better-auth serves the route as GET ONLY (a POST answers 404, objectui#11633), and sent WITHOUT callbackURL it answers JSON ({status: true, user} once the token verifies, 401 {code, message} for a garbage or expired one) instead of a 302, which is how the SPA keeps the post-verify UX (VerifyEmailPage.tsx; ledger row GET /api/v1/auth/verify-email) — and renders the success state",
         "sign in again with the same credentials: admitted; get-session identifies the user",
         "feed a garbage/expired token to /verify-email: the page renders its designed error state (named message, retry path), and the user's verification state is unchanged (sign-in still refused)",
         "default-boot contrast (stock showcase, no verification config): an admitted creation (seeded persona or invited registrant) signs in immediately with NO challenge — and /auth/config advertises emailPassword.requireEmailVerification false",
@@ -1867,7 +1867,7 @@
           "evidence": "the captured transport output"
         },
         {
-          "clause": "the captured token verifies and flips admission: POST /api/v1/auth/verify-email with the token succeeds, and the previously-refused sign-in now returns a session",
+          "clause": "the captured token verifies and flips admission: GET /api/v1/auth/verify-email?token=… (no callbackURL) answers {status: true}, and the previously-refused sign-in now returns a session. There is no POST variant: it answers 404",
           "oracle": "api",
           "verify": "verify-email 2xx → sign-in 2xx → get-session identifies the user",
           "evidence": "the verify + sign-in + session trace"
@@ -1904,14 +1904,15 @@
         "packages/plugins/plugin-auth/src/audience-posture.ts#entry (entry validation, assertAudienceConfig: an explicit requireEmailVerification false is refused under email_domain from any source, and under open when only the settings console stored it)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST /api/v1/auth/send-verification-email = auth.sendVerificationEmail) + (GET /api/v1/auth/verify-email = auth.verifyEmail) — re-pointed #18104: sendVerificationEmail is a CLIENT METHOD name, carried in this file only inside a dotted string value",
         "objectui apps/console/src/App.tsx (/verify-email + /verify-email-prompt routes)",
-        "objectui apps/console/src/pages/auth/VerifyEmailPage.tsx (consumes ?token= via the POST variant — GET 302s, POST returns JSON so the SPA controls the post-verify UX)",
+        "objectui apps/console/src/pages/auth/VerifyEmailPage.tsx (consumes ?token= via GET with no callbackURL, which answers JSON so the SPA controls the post-verify UX; better-auth serves no POST variant — it answers 404, objectui#11633)",
         "objectui apps/console/src/pages/auth/VerifyEmailPromptPage.tsx (shown after sign-up or an EMAIL_NOT_VERIFIED-blocked sign-in; resend via useAuth().sendVerificationEmail)",
         "objectui apps/console/src/pages/auth/LoginPage.tsx,346,360 (EMAIL_NOT_VERIFIED → /verify-email-prompt redirect + the named error copy)",
         "packages/plugins/plugin-email/src/transports/index.ts (the dev `log` capture transport — same harness as identity-auth.self-service-password-reset)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 4): the verification loop (challenge, capture, verify, resend, default-never-challenges) had no item. Grounded the #11739 posture-forces-verification invariant and its advertised mirror, the console's three surfaces (/verify-email POST-variant consumption, /verify-email-prompt resend, LoginPage's EMAIL_NOT_VERIFIED redirect), and the admissibility precondition the audience wall adds to the fixture", "ref": "#sweep-2026-08-30" },
-        { "revision": 2, "date": "2026-09-28", "change": "restated the forced-verification wording to the shipped rule: email_domain always forces verification on; open forces it on unless the deployment declares it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false stored only through the settings console is refused under open. The (b) fixture, clause 6, the mirror negative and two source notes said every permitting posture forces it; the negative now names the open opt-out boot, which advertises false correctly, as not a FAIL. Steps, oracles and the other clauses are unchanged", "ref": "#20413" }
+        { "revision": 2, "date": "2026-09-28", "change": "restated the forced-verification wording to the shipped rule: email_domain always forces verification on; open forces it on unless the deployment declares it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false stored only through the settings console is refused under open. The (b) fixture, clause 6, the mirror negative and two source notes said every permitting posture forces it; the negative now names the open opt-out boot, which advertises false correctly, as not a FAIL. Steps, oracles and the other clauses are unchanged", "ref": "#20413" },
+        { "revision": 3, "date": "2026-10-13", "change": "steps[3], acceptance[2].clause and source[4] name the GET verify-email the console uses (stale step, #23166 C2; parked on #23121, carried by #23169). POST /api/v1/auth/verify-email answers 404 — better-auth serves the route as GET only — and the console's VerifyEmailPage calls GET ?token= without a callbackURL, which answers JSON (objectui#11633, at 1fb1ced36243, still this repo's .objectui-sha). The route ledger already books only the GET row. QA run #23166 verified through GET and passed", "ref": "#23169" }
       ]
     },
     {
@@ -1919,15 +1920,15 @@
       "title": "Workspace switcher: org chrome follows posture × membership count (nothing under single; read-only indicator at one membership; switcher at two), and a switch is a full-document reload after which every tenant-scoped read answers from the new org",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a member with one org membership", "the same member after gaining a second membership", "admin (provisions the second org)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a WALL-ENFORCING tenancy posture boot: OS_TENANCY_POSTURE=group (or isolated) — the stock default resolves to `single` (resolveTenancyPosture, packages/types/src/env.ts), where multiOrgEnabled is false and NO org chrome may render at all (postureEnforcesWall drives both the flag and the UI predicate — auth-manager.ts)",
-          "a second organization + membership for the test user — runtime-creatable on the posture boot via the better-auth org endpoints (POST /api/v1/auth/organization/create, then the platform-admin-gated POST /api/v1/auth/organization/add-member — auth-route-ledger.ts organization family); the org-create gate follows the SAME posture derivation as the advertised flag, so it admits on this boot"
+          "a WALL-ENFORCING tenancy posture boot: OS_TENANCY_POSTURE=group (or isolated) — the stock default resolves to `single` (resolveTenancyPosture, packages/types/src/env.ts), where multiOrgEnabled is false and NO org chrome may render at all (postureEnforcesWall drives both the flag and the UI predicate — auth-manager.ts). A walled posture REFUSES TO BOOT the stock showcase without three more things, measured by QA run #23166 from a scratch copy: (1) `@objectstack/organizations` declared in the host app's package.json — the multi-org runtime a walled posture needs (ADR-0093 D5); (2) OS_PLATFORM_OWNER_EMAIL, the declared platform owner (set it to the seeded admin's address, whose seed stamps it verified so it can be elevated); (3) a declared membership policy, OS_AUTH_MEMBERSHIP_POLICY (packages/plugins/organizations/src/membership-policy-gate.ts#MEMBERSHIP_POLICY_ERROR_CODE — WALLED_MEMBERSHIP_POLICY_UNDECLARED). Boot it from a scratch copy, never the tree",
+          "a second organization + membership for the test user — runtime-creatable on the posture boot via the better-auth org endpoints (POST /api/v1/auth/organization/create, then the platform-admin-gated POST /api/v1/auth/organization/add-member — auth-route-ledger.ts organization family); the org-create gate follows the SAME posture derivation as the advertised flag, so it admits on this boot. Under OS_AUTH_MEMBERSHIP_POLICY=invite-only the invited test user must also ACCEPT the invitation (POST /api/v1/auth/organization/accept-invitation) before the membership exists"
         ],
         "knownGaps": [
           "not runnable on the stock boot: `single` posture renders no switcher and no indicator BY DESIGN (that absence is itself this item's clause 1, runnable on stock) — every other clause needs the OS_TENANCY_POSTURE boot and is blocked(fixture) without it"
@@ -1940,7 +1941,7 @@
         "provision the second org + membership; reload: the switcher renders (data-testid workspace-switcher) and the indicator yields (it renders ONLY at exactly one membership, CurrentOrganizationIndicator.tsx)",
         "under `group` posture, open the dropdown and capture the labeling: 'Working organization' + the writes-here/reads-span-all hint (data-testid workspace-switcher-group-hint, WorkspaceSwitcher.tsx); under `isolated` it reads 'Switch organization'",
         "switch to the second org: the client calls switchOrganization (POST /api/v1/auth/organization/set-active, auth-route-ledger.ts) and then performs a FULL-DOCUMENT navigation to the console root (window.location.href = resolveRootUrl(), WorkspaceSwitcher.tsx) — capture that it is a document reload, not a SPA transition",
-        "after the reload: GET /api/v1/auth/organization/get-active-member confirms the new active org; re-drive one tenant-scoped data read and one /meta read and confirm they answer from the NEW org — pick one row/app id that exists only in the OLD org and prove its absence (the org change drops the whole metadata cache, objectui#4486, MetadataProvider.tsx)",
+        "after the reload: GET /api/v1/auth/organization/get-active-member confirms the new active org; re-drive one tenant-scoped data read and confirm it answers from the NEW org — pick one ROW id that exists only in the OLD org and prove its absence. Re-drive one /meta read too: it must answer the SAME as before the switch. Since ADR-0131 D6/D7 metadata is deployment-level — no metadata write is organization-scoped (packages/metadata-protocol/src/protocol.ts) — so no org-only metadata id exists to use as a sentinel; what the switch must still do on the meta side is drop the console's metadata cache (objectui#4486, MetadataProvider.tsx) so nothing stale is served",
         "failure leg: as the member, forge POST /api/v1/auth/organization/set-active with an org id they hold NO membership in; capture the server refusal (403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION) and read get-active-member: the foreign org is never active. better-auth clears the session's active org on this refusal, so 'none' is an expected reading, not a fault. Confirm the UI never renders the foreign org as active"
       ],
       "acceptance": [
@@ -1963,9 +1964,9 @@
           "evidence": "the navigation trace"
         },
         {
-          "clause": "tenant-scoped reads follow the switch: after the reload, data and /meta reads answer from the new org — an id that exists only in the previous org is ABSENT (one organization's metadata never survives into another's reads, objectui#4486)",
+          "clause": "tenant-scoped reads follow the switch: after the reload, data reads answer from the new org — a row id that exists only in the previous org is ABSENT — and /meta reads answer exactly as before the switch, because metadata is deployment-level since ADR-0131 D6/D7 (no organization-scoped metadata write exists, so there is no org-only metadata id to be absent); the console drops its metadata cache on the change (objectui#4486)",
           "oracle": "api",
-          "verify": "the post-switch data read + meta read; the old-org sentinel id is not in either response",
+          "verify": "the post-switch data read: the old-org sentinel row id is not in it; the post-switch /meta read equals the pre-switch one. A metadata id that differs between the two orgs would itself be a finding against ADR-0131 D6, not this clause's pass",
           "evidence": "the before/after reads + the sentinel id"
         },
         {
@@ -2000,7 +2001,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "authored in the 2026-08-30 coverage sweep (angle 1): the workspace-switch surface had no item. CORRECTED against source from the register's 'single membership → indicator' hypothesis: the indicator is posture-gated (postureHasOrgWall — group/isolated only), so the stock `single` boot renders NO org chrome at all and the whole matrix needs an OS_TENANCY_POSTURE boot; encoded the three-cell affordance matrix, the deliberate full-document reload, the #4486 cache-drop read-follow proof, group-posture labeling, and the forged-switch refusal", "ref": "#sweep-2026-08-30" },
-        { "revision": 2, "date": "2026-10-05", "change": "clause 6 and step 8 re-pointed (assertion defect, #21784 VF4). The switch fails closed, and the defect is not of the authorization class. better-auth 1.7.3's setActiveOrganization (plugins/organization/routes/crud-org) calls adapter.setActiveOrganization(token, null) before it throws 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION, and plugin-auth mounts the route unwrapped (auth-route-ledger 'sdk'). So the active org becomes none, never the foreign org, and 'unchanged' was the wrong assertion. The verifier's wording is used. The verifier's optional follow-up, wrapping the vendor call to keep the previous org, would be a product enhancement, not this item's concern", "ref": "#21797" }
+        { "revision": 2, "date": "2026-10-05", "change": "clause 6 and step 8 re-pointed (assertion defect, #21784 VF4). The switch fails closed, and the defect is not of the authorization class. better-auth 1.7.3's setActiveOrganization (plugins/organization/routes/crud-org) calls adapter.setActiveOrganization(token, null) before it throws 403 USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION, and plugin-auth mounts the route unwrapped (auth-route-ledger 'sdk'). So the active org becomes none, never the foreign org, and 'unchanged' was the wrong assertion. The verifier's wording is used. The verifier's optional follow-up, wrapping the vendor call to keep the previous org, would be a product enhancement, not this item's concern", "ref": "#21797" },
+        { "revision": 3, "date": "2026-10-13", "change": "fixtures.requires[0] and [1] name the walled-posture boot prerequisites (fixture gap, #23166), and steps[6] and acceptance[3] re-ground the meta half (stale spec, #23166 C3b); both parked on #23121, carried by #23169. QA run #23166 found a walled posture refuses to boot the stock showcase without @objectstack/organizations in the host package.json (ADR-0093 D5), OS_PLATFORM_OWNER_EMAIL and OS_AUTH_MEMBERSHIP_POLICY, and that under invite-only the invitee must accept the invitation. It skipped C3b because its premise is retired: metadata writes are deployment-level (ADR-0131 D6/D7), so no metadata id exists in one org only. The clause keeps the data sentinel and now expects the /meta answer to be identical across the switch", "ref": "#23169" }
       ]
     },
     {
@@ -2008,7 +2010,7 @@
       "title": "Implicit account linking on external sign-in: no implicit link to an unverified local user; after an unlink, implicit sign-in does not re-link; an explicit, signed-in link still works and lifts the refusal; the platform identity provider's exception holds only on its OAuth path",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2038,7 +2040,7 @@
         "verify U's email through the product (fixtures.requires), then repeat the implicit sign-in: it lands signed in as U, and a sys_account row for the provider exists",
         "as U, signed in: unlink the provider (POST /api/v1/auth/unlink-account { accountId: the sys_account row id }) and confirm the row is gone. Sign out, then repeat the implicit sign-in from a fresh context",
         "as U, signed in: link the provider EXPLICITLY (POST /api/v1/auth/link-social { provider, callbackURL } with U's session, then navigate to the returned URL). Confirm the sys_account row is back. Sign out and repeat the implicit sign-in once more",
-        "explicit link for an unverified user: sign up a second unverified local user W (same provider identity re-pointed to W's email), sign in as W and link the provider explicitly through link-social; then re-read W's emailVerified",
+        "explicit link for an unverified user: sign up a second unverified local user W, give the fixture provider an identity for W's email, sign in as W and link the provider explicitly through link-social; then re-read W's emailVerified. The local fixture IdP derives its `sub` from the email, so W's identity is a DISTINCT provider account: W's explicit link writes W's own sys_account row and does not re-point or touch U's (QA run #23166)",
         "run the pin: pnpm --filter @objectstack/plugin-auth exec vitest run src/implicit-account-linking.test.ts"
       ],
       "acceptance": [
@@ -2106,6 +2108,12 @@
           "date": "2026-10-06",
           "change": "new: the checklist had only the explicit link round-trip (identity-auth.linked-accounts-social), which predates the rule. PR #21872 tightened implicit linking on external sign-in. This item asserts the four rules the published docs state: no implicit link to an unverified local user, an unlink honoured, the explicit signed-in link kept, and the platform IdP exception bound to its OAuth path. It reuses linked-accounts-social's local OIDC provider recipe rather than forking one. The platform-IdP clause and the operator override are pin-scored, and knownGaps says why",
           "ref": "#21932"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-13",
+          "change": "steps[6] says W's provider identity is a distinct sub (fixture note, #23166 C3; parked on #23121, carried by #23169). The step read 'the same provider identity re-pointed to W's email', but the local OIDC fixture derives `sub` from the email, so W's identity is a different provider account, and W's explicit link writes W's own sys_account row. QA run #23166 drove it that way and passed acceptance[3]. No clause changed",
+          "ref": "#23169"
         }
       ]
     }

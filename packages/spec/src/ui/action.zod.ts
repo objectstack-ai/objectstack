@@ -35,6 +35,11 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
+import {
+  ON_SUCCESS_EXECUTORS,
+  onSuccessBesideExecutorRefusal,
+  onSuccessBesideUpdateOperationRefusal,
+} from './action-on-success-executor';
 import { navigationTargetRefusal } from './navigation-target';
 
 /**
@@ -1373,6 +1378,9 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
+   * `b9814b334`, re-read there 2026-10-14:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
@@ -1884,10 +1892,9 @@ const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<readonly [key: string, why:
   ['recordIdField',
     "`recordIdField` seeds `recordIdParam` — an `operation: 'update'` action binds the current record from "
     + 'the invocation context and injects nothing. Drop `recordIdField`.'],
-  ['onSuccess',
-    "`onSuccess` is not defined for an `operation: 'update'` action yet — its `${result.*}` scope is a "
-    + "handler's return value, and a declarative update has no handler. Drop it; post-success navigation "
-    + 'for the declarative write is a spec proposal, not a silent key.'],
+  // One text with the page action rows' refusal of the same pairing
+  // (`action-on-success-executor.ts`).
+  ['onSuccess', onSuccessBesideUpdateOperationRefusal("An `operation: 'update'` action's `onSuccess`")],
   ['outcomeMessages',
     "`outcomeMessages` picks success copy by the `outcome` a handler returns — an `operation: 'update'` "
     + 'action has no handler: the platform performs the write and reports no outcome, so no entry could '
@@ -2190,27 +2197,24 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
     + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
   path: ['confirmText'],
-}).refine((data) => {
-  // #9566/#9474 — `onSuccess` is scoped to the two action types that HAVE a
-  // success event carrying a server response for `${result.*}` to read:
-  // `api` (the `target` call's response body) and `script` (the handler's
-  // return value). Same enforcement shape as the `body`-on-non-script
-  // refinement above (#4352): a declared key the dispatch path never reads is
-  // the invisible-failure class this file rejects at author time.
-  if (data.onSuccess && data.type !== 'api' && data.type !== 'script') {
-    return false;
+}).superRefine((data, ctx) => {
+  // #9566/#9474 — `onSuccess` is scoped to the two action types whose success
+  // carries a result for `${result.*}` to read: `api` (the `target` call's
+  // response body) and `script` (the handler's return value). The console's
+  // action runner performs the hop after EVERY executor that succeeds, so on
+  // `url` / `modal` / `flow` / `form` the key is read, not dead: it navigates
+  // a second time, or follows a result the contract does not declare. The
+  // pair and the refusal text live in `action-on-success-executor.ts`, which
+  // the page action rows (`component.zod.ts`) read too, so an action and a
+  // row give one verdict in one wording. `type` is the closed `ActionType`
+  // enum with a `script` default, so the reach is exactly the four.
+  if (data.onSuccess && !ON_SUCCESS_EXECUTORS.has(data.type)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['onSuccess'],
+      message: onSuccessBesideExecutorRefusal(`A \`type: '${data.type}'\` action's \`onSuccess\``, data.type, 'type'),
+    });
   }
-  return true;
-}, {
-  message:
-    "`onSuccess` declares POST-SUCCESS navigation for a server-executing action, and only "
-    + "`type: 'api'` and `type: 'script'` have a success event (a server response) it can ride — "
-    + "on any other type the key would parse clean and never run (ADR-0078). For a `type:'url'` "
-    + "action the navigation IS the action: put the destination in `target` and pick the tab with "
-    + "the top-level `openIn`. For `modal`/`flow`/`form`, the action dispatches on `target` and no "
-    + 'renderer reads a post-success hop today — if that capability is needed, it is a spec '
-    + 'proposal, not a silent key.',
-  path: ['onSuccess'],
 }).refine((data) => {
   // #11519 (maintainer ruling 2026-08-24) — refuse the DOUBLED post-success
   // navigation channel where the schema can see it. Two channels can name a

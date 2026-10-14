@@ -29,6 +29,7 @@
   "src/api/error-catalog-docs.test.ts",
   "src/api/export-job-family-retirement.test.ts",
   "src/api/rest-api-config-dead-keys-retirement.test.ts",
+  "src/contracts/record-share-guest-recipient-census.test.ts",
   "src/data/api-methods-batch-conformance.test.ts",
   "src/data/cube-member-inner-name-retirement.test.ts",
   "src/data/cube-refresh-key-retirement.test.ts",
@@ -54,6 +55,7 @@
   "src/ui/master-detail-detail-sort-field-retirement.test.ts",
   "src/ui/object-grid-resizable-columns-retirement.test.ts",
   "src/ui/page-header-breadcrumb-retirement.test.ts",
+  "src/ui/view-data-api-provider-retirement.test.ts",
   "src/ui/view-item-owner-hidden-retirement.test.ts",
   "src/ui/view-list-tabs-retirement.test.ts"
 ]

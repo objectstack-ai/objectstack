@@ -68,9 +68,9 @@ const TEMPLATE = {
 // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
 // the key-first house convention is asserted on the issue message itself below.
 const CATEGORY_PRESCRIPTION =
-  /`email_template\.category` was removed in @objectstack\/spec 17 \(ADR-0049 enforce-or-remove\) — nothing read it.*Delete the key\. A template is found by its `name`, so group templates with a dotted namespace prefix instead.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
+  /`email_template\.category` was removed in @objectstack\/spec 18 \(ADR-0049 enforce-or-remove\) — nothing read it.*Delete the key\. A template is found by its `name`, so group templates with a dotted namespace prefix instead.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 const IS_SYSTEM_PRESCRIPTION =
-  /`email_template\.isSystem` was removed in @objectstack\/spec 17 \(ADR-0049 enforce-or-remove\) — nothing enforced it.*Delete the key\. A built-in template is a code package's declaration.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
+  /`email_template\.isSystem` was removed in @objectstack\/spec 18 \(ADR-0049 enforce-or-remove\) — nothing enforced it.*Delete the key\. A built-in template is a code package's declaration.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand\./s;
 
 const RETIRED = [
   { key: 'category', prescription: CATEGORY_PRESCRIPTION, values: ['auth', 'notification', 'workflow', 'marketing', 'custom'] },

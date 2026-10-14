@@ -29,8 +29,8 @@ export const entry: SemanticMigration = {
     + 'gate, and the rail drew an empty, unlabelled entry. The row now takes objectui\'s two ruled kinds, closed, '
     + 'and pairs each entry with the kind its `variant` selects; a feed entry\'s `content` (child components) is '
     + 'held unjudged until a writer appears. It is read where every page component\'s props are: the '
-    + 'component-props gate reports a refused value as an advisory `component-props-invalid` / '
-    + '`component-props-unknown-key` finding on `objectstack validate`, `objectstack build` and `objectstack lint`, '
+    + 'component-props gate reports a refused value as a `component-props-invalid` / '
+    + '`component-props-unknown-key` error on `objectstack validate`, `objectstack build` and `objectstack lint`, '
     + 'and a stored page still saves and loads, because a page component\'s `properties` is not parsed on the '
     + 'metadata save or load path. No conversion is registered: nothing on the load path refuses the shape, and '
     + 'the authored census found no drawn entry to respell. Deployed metadata NOT MEASURED.',

@@ -298,7 +298,7 @@ export function presetComparandVerdict(preset: DateRangePreset, operator: string
   const stop = refusal.indexOf('. ');
   const head = stop > 0 ? refusal.slice(0, stop) : refusal;
   const [start, end] = DATE_RANGE_PRESET_MACRO_WINDOWS[preset];
-  const window = end === null ? `{ $gte: '${start}' }` : `{ $between: ['${start}', '${end}'] }`;
+  const window = `{ $between: ['${start}', '${end}'] }`;
   return `${head} as a bare "${operator}" comparand; its window is ${window}`;
 }
 

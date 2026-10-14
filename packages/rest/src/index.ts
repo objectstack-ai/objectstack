@@ -67,7 +67,13 @@ export type { ExportFieldMeta } from './export-format.js';
 // `@objectstack/runtime`'s `buildApiError` adds (measured on #17672 — the gate's
 // body fails `BaseResponseSchema` with `success is missing, must be a boolean`).
 // ⛔ A dispatcher domain takes the message and builds its own body.
-export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-multiplicity.js';
+//
+// [#23214] `assertFilterParamSuppliedOnce` is the `/data` list's filter-slot
+// arity rule (#7390), published so the runtime dispatcher's `/data` domain asks
+// THIS rule rather than a copy. It throws instead of writing a body, so a
+// dispatcher domain catches it and writes the `code` and message it carries in
+// its own envelope.
+export { assertFilterParamSuppliedOnce, refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-multiplicity.js';
 
 // [#20193] THE per-caller read gate of one `/meta/:type/:name` document — the
 // ADR-0046 §6.7 docs audience, the app nav filter (`requiredPermissions`, the
@@ -123,6 +129,18 @@ export { refuseRepeatedQueryParams, repeatedQueryParamMessage } from './query-mu
 // `META_TYPE_WRITE_CAPABILITIES`), asked at the same two entries before any
 // store write: a datasource definition is written under the capability the
 // datasource admin door requires.
+//
+// [#23072] …and the by-name doors' QUERY decision (`metaItemQueryRefusal`,
+// ruling 6138588561): each door's closed set, the arity of its single-valued
+// names and the item read's refusal of a member on the layered view, answered
+// as DATA that each transport writes in its own envelope — with the member
+// selector's one reading beside it (`metaMemberSelector`). The sets and their
+// sentences travel inside the decision, never separately.
+//
+// [#23214] …and the arity of the two `/meta` doors that are not by-name (the
+// list and the book tree): one list per door (`META_QUERY_ARITY_DOORS`), which
+// `RestServer` hands `refuseRepeatedQueryParams` and the dispatcher asks
+// through `metaQueryArityRefusal`.
 export {
     createMetaBookTreeAnswer,
     createMetaItemAnswer,
@@ -135,6 +153,10 @@ export {
     META_TYPE_WRITE_CAPABILITIES,
     metaCallerOrganizationId,
     metaItemLayersDeprecationHeaders,
+    metaItemQueryRefusal,
+    metaMemberSelector,
+    META_QUERY_ARITY_DOORS,
+    metaQueryArityRefusal,
     metaRequestLocale,
     metaTypeReadRefusal,
     metaTypeWriteRefusal,

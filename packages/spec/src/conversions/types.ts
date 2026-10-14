@@ -49,6 +49,12 @@ export const CONVERSION_CONFLICT_CODE = 'OS_METADATA_CONVERSION_CONFLICT' as con
  * reads the notices would count the site as already canonical. The TODO is
  * what lets an operator answer "did it convert my row" from the pass's own
  * output.
+ *
+ * The same code carries a shape NO conversion covers: a stored shape a
+ * protocol refuses with no lossless rewrite at all (`refused-shapes.ts`,
+ * #23269 / #23270 / #23271). Such a TODO names, in place of a conversion, the
+ * D3 semantic entry that refuses the shape — see
+ * {@link ConversionTodoNotice.conversionId}.
  */
 export const CONVERSION_TODO_CODE = 'OS_METADATA_CONVERSION_TODO' as const;
 
@@ -135,7 +141,14 @@ export interface ConversionTodoDetail {
  */
 export interface ConversionTodoNotice {
   code: typeof CONVERSION_TODO_CODE;
-  /** The {@link MetadataConversion.id} whose surface the site is on. */
+  /**
+   * The {@link MetadataConversion.id} whose surface the site is on — or, for a
+   * stored shape no conversion covers (a refused shape, see
+   * {@link CONVERSION_TODO_CODE}), the id of the D3 semantic entry that
+   * refuses it. A TODO the automation engine adds for a site its flow
+   * registration refuses and neither covers names that door instead:
+   * `'registerFlow'` (`IAutomationService.canonicalizeStoredFlow`).
+   */
   conversionId: string;
   /** Dotted surface the conversion governs. */
   surface: string;

@@ -34,6 +34,22 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       owner_user_id: {
         label: "所有者",
         help: "このメールボックスを所有するユーザー。所有者には、未関連付けのものを含め、ここに届いたすべてのメッセージが表示されます。"
+      },
+      imap_folder: {
+        label: "同期フォルダー",
+        help: "同期カーソルが属する IMAP フォルダー。別のフォルダーから同期すると、カーソルは最初からやり直します。"
+      },
+      imap_uid_validity: {
+        label: "UIDVALIDITY",
+        help: "カーソルを取得したときのフォルダーの UIDVALIDITY。サーバーが別の値を報告した場合、その UID は別のメッセージを指すため、カーソルは最初からやり直します。"
+      },
+      imap_last_uid: {
+        label: "最終同期 UID",
+        help: "取り込みに渡したフォルダーの最大 UID(保存済み、保存済みの重複、抑止、スキップを含む)。次回の同期はそれより大きい UID を取得します。"
+      },
+      imap_synced_at: {
+        label: "最終同期日時",
+        help: "同期がフォルダーの読み取りを最後に完了した日時。"
       }
     }
   },

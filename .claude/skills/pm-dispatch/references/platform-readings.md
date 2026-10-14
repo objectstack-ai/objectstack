@@ -392,7 +392,6 @@
   `Build Core` · `Governed Surface Queue Guard`。
 - ⭐ 本表的 `mustName` 声明 `statesTheSet` ⇒ 必须逐字等于注册表,加注册行不跟改本表即红。
 - ⇒ 门绿即名单逐字齐全的读数;⛔ 但数量词未钉:实测 七→六 照绿,只能手跟改。
-- `in_progress` 不是过;advisory 门禁红进 main 是共享损伤,照样止血立单。
 - ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。
 - `check:i18n` 以 PREREQUISITE NOT MET(workspace CLI 未 build)退 3,不是漂移。
 - 退出码是字段字面值:判据取门禁印的判定行,⛔ 不取码 —— 同一脚本里一个码可两义。
@@ -401,6 +400,7 @@
 - 计数答至今发生过没有,不答机制在不在:零计数只作弱先验。
 - 判 required 集为空要读 ruleset 的 required 集本身,或看队列合并是否真在等检查。
 - ⛔ 别处写下的计数值一律先复测再用。
+- 租户普查 `reach: in` 只说有租户列;D9 系统写盖章只认 `PLATFORM_OBJECT_TENANCY` 的 `tenant-scoped`。
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
 - MCP `issue_write` update 送尾部横线加页脚块则两者同被吃掉,而调用照常回 id 与 url。
 - 建卡走 REST `POST /issues`:带页脚存活,无页脚合成恰一条(+58);回读后 `PATCH` 重送逐字节存下。

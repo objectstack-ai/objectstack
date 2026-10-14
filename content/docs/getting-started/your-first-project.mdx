@@ -43,11 +43,14 @@ The scaffolder (`create-objectstack`) does four things:
    renamed to carry that prefix (`my_app_note`), which is what
    `os validate` later enforces.
 2. **Installs dependencies** (pnpm if available, otherwise npm).
-3. **Installs the AI skills bundle for one coding agent** — it runs
-   `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`,
-   so the bundle lands **once**, in `.claude/skills/`, and a coding agent is
-   productive in the project from the first prompt. The closing summary prints
-   the same command with a different agent name for any other runtime you use.
+3. **Installs the AI skills bundle for one coding agent** from the
+   `@objectstack/skills` package, at your installed `@objectstack/spec`'s
+   version — copied once into `.claude/skills/`, to commit with the project — so
+   a coding agent is productive in the project from the first prompt. The
+   closing summary prints the command for any other runtime you use
+   ([Installing skills](/docs/ai/skills-reference#installing-skills) has the
+   steps, the versions the package is published at, and the one scaffolder
+   version that is an exception).
 4. **Writes `AGENTS.md`** (and `.github/copilot-instructions.md`) with the
    project conventions — including the rule to run `npm run validate` after
    every metadata change.
@@ -349,11 +352,12 @@ Each of those lands in a different metadata domain (UI, dashboards,
 automation) — the agent loads the matching skill per task. The full loop, and a
 per-domain prompt catalog, is on
 [Build with Claude Code](/docs/getting-started/build-with-claude-code#beyond-the-first-app--one-skill-per-metadata-domain).
-If you upgrade `@objectstack/spec` later, re-run
-`npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`
-— the same command the scaffolder ran, so it refreshes the one directory it
-installed — to keep the agent in sync with the schemas you run. Name your own
-runtime after `--agent` if it is not Claude Code.
+The catalog's version is your installed `@objectstack/spec`'s (step 1.3): when
+you upgrade, bump `@objectstack/skills` with the other `@objectstack/*`
+packages, then re-run
+`npx skills@1.7.2 experimental_sync --agent claude-code --copy -y` and commit
+what it changed, to keep the agent in sync with the schemas you run. Name your
+own runtime after `--agent` if it is not Claude Code.
 
 ## Next steps
 

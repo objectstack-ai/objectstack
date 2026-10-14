@@ -62,6 +62,7 @@ import {
   COMPOUND_ANCHOR_KEYS,
   CONTRACT_REVIEW_TIER,
   CONTRACT_REVIEW_TIER_NAME,
+  TIER_DEFAULT_NAME,
   DEFAULT_BASE_BRANCH,
   DEFAULT_BASE_REF,
   DEFAULT_BASE_REMOTE,
@@ -9841,13 +9842,19 @@ export function selfTest({ tier = 'full' } = {}) {
   t('the no-mandate rendering claims no mandate', !plainLines.includes('MANDATORY'));
   t('the no-mandate rendering names the floor and the default, so the judgment call has its band', plainLines.includes(TIER_FLOOR) && plainLines.includes(TIER_DEFAULT));
   t('BOTH renderings state that clause ② is out of reach of paths — a no-mandate line is not a clearance', plainLines.includes('Clause ②') && mandLines.includes('Clause ②'));
-  // The lane key (#18536): the maintainer's lane rule restated — the review is
-  // owed in the spec and skills lanes, in-seat at tier or by the at-tier
-  // subagent, and in no other lane; the 2026-09-10 SEAT key and the
-  // 2026-09-16 TIER key are both retired spellings and must not come back.
-  t('BOTH renderings key the clause-② review by LANE — the spec and skills lanes, in-seat at tier or by the at-tier subagent', [plainLines, mandLines].every((l) => l.includes('spec and skills lanes') && l.includes('at-tier subagent')));
-  t('…and neither spells a retired key — no "spec seat" (2026-09-10) and no default-tier review or self-review (2026-09-16)', [plainLines, mandLines].every((l) => !l.includes('spec seat') && !l.includes('default-tier review') && !l.includes('self-review')));
-  t('…and both say a clause-② hit outside those lanes is spec-lane work that MOVES there — lane routing, never a review demand on the lane that found it', [plainLines, mandLines].every((l) => l.includes('spec-lane work and moves there')));
+  // The SURFACE key (#19496 R5, restated by ruling record 6159870311 on #23352): whether the clause-②
+  // review is owed is keyed by surface — the three contract faces — and never by lane, and the
+  // contract-review tier keeps its two routes, in-seat at tier or by the at-tier subagent. Retired
+  // spellings must not come back: the 2026-09-10 SEAT key, the 2026-09-16 TIER key ("default-tier
+  // review", "self-review") and the 2026-09-17 LANE key ("owed in the spec and skills lanes").
+  t('BOTH renderings key whether the clause-② review is OWED by SURFACE, never by lane — and keep the contract-review tier\'s at-tier subagent route', [plainLines, mandLines].every((l) => l.includes('owed by SURFACE, never by lane') && l.includes('at-tier subagent')));
+  t('…and neither spells a retired key — no "spec seat" (2026-09-10), no default-tier review or self-review (2026-09-16), no owed-by-lane (2026-09-17)', [plainLines, mandLines].every((l) => !l.includes('spec seat') && !l.includes('default-tier review') && !l.includes('self-review') && !l.includes('owed in the spec and skills lanes')));
+  t('…and both say a clause-② hit outside the spec lane is spec-lane work that MOVES there — lane routing, never a review demand on the lane that found it', [plainLines, mandLines].every((l) => l.includes('a hit outside the spec lane is spec-lane work and moves there')));
+  // The tier follows the face that made the review owed (ruling record 6159870311 on #23352, letter B′ with C):
+  // the note names BOTH tiers by their constant NAMES, each beside the face it serves, so a no-mandate
+  // line can no longer read as "every clause-② review is at the contract-review tier".
+  t('⭐ BOTH renderings key the clause-② review TIER by FACE — CONTRACT_REVIEW_TIER for a schema or governed rules text, TIER_DEFAULT for the declaration alone', [plainLines, mandLines].every((l) => l.includes(`${CONTRACT_REVIEW_TIER_NAME} for a published schema or governed rules text`) && l.includes(`${TIER_DEFAULT_NAME} for the \`Clause-②: yes\` declaration alone`)));
+  t('the default tier is exported by its NAME beside the contract-review tier\'s, and the name is not the value', TIER_DEFAULT_NAME === 'TIER_DEFAULT' && TIER_DEFAULT_NAME !== TIER_DEFAULT && TIER_DEFAULT_NAME !== CONTRACT_REVIEW_TIER_NAME);
   t('the no-mandate rendering says how many globs it checked, so an empty table cannot read as a clearance', plainLines.includes(`${MANDATORY_TIER_GLOBS.length} declared glob`));
   // Refusals: a contradiction is not printed, and an ambiguity is not guessed.
   let tierRefused = false;
@@ -10204,6 +10211,91 @@ export function selfTest({ tier = 'full' } = {}) {
       tierScan.sites[0] === `${tierOwnRel}:${tierDefLine}`,
   );
 
+  // ── A DECLARATION is not a directory-creating site (#23294) ───────────────
+  //
+  // The class sweep in the slow section below reads every directory-creating
+  // name followed by a paren as a call, and resolves its first argument as the
+  // base of a directory. A module shim's type declaration spells the same name
+  // and the same paren, and read as a call its base is a parameter with a type
+  // annotation, which nothing can resolve — so a correct declaration redded the
+  // whole-tree case on main. These are in-process fixtures, so they sit in the
+  // FAST tier, the one a pull request's lane runs; the live-tree reading they
+  // protect stays where it is, in the slow tier.
+  //
+  // Each rule is pinned on a fixture only it can clear, so neither one passes
+  // on the strength of the other; the CONTROLS after them keep both honest.
+  const shimDeclarationScan = scratchDirSitesInSource(
+    'examples/thing/types/node-shim.d.ts',
+    [
+      "declare module 'node:fs' {",
+      '  export function mkdirSync(path: string, options: { recursive: true }): string | undefined;',
+      '  export function mkdtempSync(prefix: string): string;',
+      '}',
+    ].join('\n'),
+  );
+  t(
+    "a module shim's two signatures in a .d.ts are no directory-creating site at all",
+    shimDeclarationScan.scanned === 0 && shimDeclarationScan.unresolved.length === 0 && shimDeclarationScan.inTree.length === 0,
+    shimDeclarationScan,
+  );
+  const ambientMethodScan = scratchDirSitesInSource(
+    'packages/thing/src/fs-like.d.mts',
+    ['export interface FsLike {', '  mkdtempSync(prefix: string): string;', '}'].join('\n'),
+  );
+  t(
+    'the FILE rule alone: a declaration file is read for no site, even where no function keyword marks the signature',
+    ambientMethodScan.scanned === 0,
+    ambientMethodScan,
+  );
+  const keywordDeclarationScan = scratchDirSitesInSource(
+    'packages/thing/src/fs-shim.ts',
+    [
+      'declare function mkdtempSync(prefix: string): string;',
+      'export function mkdirSync(path: string): void;',
+      'export function mkdirSync(path: string, options: { recursive: true }): void;',
+    ].join('\n'),
+  );
+  t(
+    'the KEYWORD rule alone: in a .ts source, a name the function keyword declares (ambient, exported, overloaded) is no site',
+    keywordDeclarationScan.scanned === 0,
+    keywordDeclarationScan,
+  );
+  // The CONTROLS. A real call whose base the scan cannot read is UNRESOLVED in
+  // a .ts source — alone, beside a declaration of the very same name, and in
+  // the body of a wrapper that shares the name. Without them both rules above
+  // pass just as happily against a scan that clears every site in the file.
+  const realCallScan = scratchDirSitesInSource('packages/thing/test/f.test.ts', 'const dir = mkdtempSync(someUnreadableBase);');
+  t(
+    'CONTROL: a real mkdtempSync(someUnreadableBase) call in a .ts source is still UNRESOLVED',
+    realCallScan.scanned === 1
+      && realCallScan.unresolved.length === 1
+      && realCallScan.unresolved[0].call === 'mkdtempSync'
+      && realCallScan.unresolved[0].expr === 'someUnreadableBase',
+    realCallScan,
+  );
+  const besideDeclarationScan = scratchDirSitesInSource(
+    'packages/thing/test/g.test.ts',
+    ['declare function mkdtempSync(prefix: string): string;', 'const dir = mkdtempSync(someUnreadableBase);'].join('\n'),
+  );
+  t(
+    'and beside a declaration of the same name, that call is still the one site, UNRESOLVED on its own line',
+    besideDeclarationScan.scanned === 1
+      && besideDeclarationScan.unresolved.length === 1
+      && besideDeclarationScan.unresolved[0].line === 2,
+    besideDeclarationScan,
+  );
+  const wrapperBodyScan = scratchDirSitesInSource(
+    'packages/thing/test/h.test.ts',
+    ['function mkdirSync(dir) {', '  fs.mkdirSync(dir, { recursive: true });', '}'].join('\n'),
+  );
+  t(
+    "and a wrapper's head is a declaration while the call in its body is a site, UNRESOLVED on the body's line",
+    wrapperBodyScan.scanned === 1
+      && wrapperBodyScan.unresolved.length === 1
+      && wrapperBodyScan.unresolved[0].line === 2,
+    wrapperBodyScan,
+  );
+
   slow("the change set derived from git — temporary repositories with real history", () => {
   // ── The change set derived from git (#9320) ───────────────────────────────
   //
@@ -10460,6 +10552,9 @@ export function selfTest({ tier = 'full' } = {}) {
       'nor is one spelled inside a string — which is what this very self-test plants',
       scratchDirSitesInSource('packages/thing/test/e.test.ts', 'const src = "fs.mkdtempSync(join(HERE, x))";\n').scanned === 0,
     );
+    // Nor is a DECLARATION a site — a `.d.ts` signature or the `function`
+    // keyword's own parameter list. Those cases and their controls are in the
+    // fast tier, above this section, so a pull request's lane runs them (#23294).
 
     // The CONTROL for the whole verdict, on a repo carrying the REAL ignore file
     // — an excerpt would pin the excerpt. Two fixture sources are planted, one

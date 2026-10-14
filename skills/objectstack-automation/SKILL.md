@@ -10,10 +10,10 @@ description: >
   / plugin events (see objectstack-platform). CEL expressions in flow
   conditions / edge guards: load objectstack-formula alongside.
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "17.7.0"
+  version: "18.0.0-next.0"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -62,10 +62,10 @@ Flows are built from **20 built-in node types** (plugins register more via
 | `start` | Entry point — every flow has exactly one |
 | `end` | Exit point — can have multiple (early exit, error exit) |
 | `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config (see the approval example below) |
-| `loop` | Iterate a **nested `config.body` region** once per item of `config.collection`; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
+| `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope (`{ dialect: 'cel', source: 'rows' }`) or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
 | `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end — no split/join pair to mis-wire |
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first. **No `finally`** — the container's ordinary out-edges are the continuation |
-| `map` | Sequential multi-instance — invoke a subflow once per item of a collection; each iteration may pause (batch approvals) |
+| `map` | Sequential multi-instance — invoke a subflow once per item of `config.collection` (shaped as `loop`'s); each iteration may pause (batch approvals) |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
 | `subflow` | Invoke another flow (reusable composition) |
 | `parallel_gateway` / `join_gateway` / `boundary_event` | **Not author-facing** — BPMN-interop forms the mapper lowers a `parallel` / `try_catch` container INTO (`automation/control-flow.zod.ts`). Author the container |
@@ -99,20 +99,20 @@ Flows are built from **20 built-in node types** (plugins register more via
 ### `notify` — the most-used node type
 
 `NotifyConfigSchema` (`automation/io-node-config.zod.ts`) is `strictObject` — an
-undeclared key is a named parse error. **RAW** keys never interpolate: a
-`{token}` in one is forwarded verbatim, never resolved.
+undeclared key is a named parse error. **RAW** keys are read as written: a
+`{token}` in one is refused.
 
 ```ts
 { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
-    recipients: '{record.assignee}',   // REQUIRED — id, CSV, or string[]
+    recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id
     title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
     message: 'Closed {{ record.closed_at | date:long }}', // body; only with inline `title`
     topic: 'task',                     // RAW; default 'notify'
     severity: 'warning',               // RAW; CLOSED enum info|warning|critical
     channels: ['inbox'],               // RAW; default inbox
     sourceObject: 'task',              // click-through: a PAIR, else dropped
-    sourceId: '{record.id}',           //   at execute time
-    actionUrl: 'https://…/tasks/123',  // overrides the synthesized link
+    sourceId: { dialect: 'cel', source: 'record.id' }, // (a value slot)
+    actionUrl: '/tasks/{{ record.id }}', // text slot; overrides the synthesized link
 } }
 ```
 
@@ -151,16 +151,13 @@ variables: [
 > (`objectstack validate` reports `flow-error-label-not-fault`).
 > A handled failure does NOT consume a flow-level `errorHandling.retry`, which
 > replays the flow from the start — prefer a fault edge when the failure is
-> local. The handler reads `{<nodeId>.error}` (or run-wide `{$error}`). The run
-> then reports success, and the failed step stays in the trace.
+> local. The handler reads `{{ <nodeId>.error }}` (or run-wide
+> `{{ $error.message }}`; in CEL, `vars["$error"]`). The run then reports
+> success, and the failed step stays in the trace.
 
 | ROUTES (runtime failure) | Does NOT route (fatal either way) |
 |:--|:--|
-| 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter token that resolved to nothing; graph past the nesting ceiling; unscoped run |
-
-Routing a guard refusal is worse than the failure: a dropped filter condition
-**widens** the query, so a routed `delete_record` empties the object while the
-run reports success. `objectstack validate` names the offending template.
+| 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter operand that evaluated to `null`; graph past the nesting ceiling; unscoped run |
 
 > **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
 > governs the end-user surface: under the default `runAs: 'user'`, the engine
@@ -194,22 +191,23 @@ run reports success. `objectstack validate` names the offending template.
 > (`HOOK_UNSCOPED_DATA_ACCESS`, 403) rather than run unscoped — declare
 > `runAs: 'system'` when the elevation is intended. `sudo` is not a hook key.
 
-### Filter tokens (`config.filter`)
+### Filter operands (`config.filter`)
 
-- **Precedence — flow variables win, placeholders pass through.** The flow
-  template engine runs first. A whole-string token it resolves is a flow value;
-  one it does **not** resolve that IS a recognised filter placeholder
-  (`{current_user_id}`, `{current_year_start}`) passes through **verbatim** for
-  the query engine to expand. So a flow variable named after a placeholder
-  **shadows** it. Only `filter` gets this hand-off — in `url` a bare
-  `{current_year_start}` is a nonsense reference.
-- **Static checkability splits by position.** A `{record.…}` token **inside a
-  filter** naming an unknown field, or hopping a relation the start node does not
-  list in `config.expand`, is an **ERROR** at `objectstack validate`: it resolves
-  to nothing, the condition is DROPPED, and the node refuses to execute. The
-  *same* reference **outside** a filter (a `{{ }}` hole, `http` url) only
-  renders an empty string — a **warning**. A `{var}` naming a flow variable
-  or node output is **not statically checkable at all**.
+- **Each operand is a value slot** — a literal, or a CEL value envelope
+  evaluated before the query (`filter: { id: { dialect: 'cel', source:
+  'record.id' } }`). A whole-string **query placeholder** (`{current_user_id}`,
+  `{today}`, `{current_year_start}`) passes through verbatim for the query
+  engine to expand; every other `{…}` token is refused (`expression-invalid`)
+  with its envelope, and a flow variable never shadows a placeholder. Only
+  `filter` gets this hand-off — in a text slot `{{ current_year_start }}` is a
+  nonsense reference.
+- **An operand that evaluates to `null` refuses the node** (not
+  `fault`-routable): a dropped condition does not narrow a query, it widens
+  it, so a routed `delete_record` would empty the object while the run reports
+  success. Where the value may be absent, route around the node with a
+  `decision`; to match an empty field, write the literal `null`. A relation
+  hop (`record.owner.email`) needs the start node's `config.expand` to list
+  the field — else the fault names the missing hop, not the remedy.
 
 ---
 
@@ -218,29 +216,34 @@ run reports success. `objectstack validate` names the offending template.
 Legal metadata that authors — AI especially — get wrong; most are caught by
 `objectstack build`, but write them right the first time:
 
-1. **A `fields` / `assignment` VALUE is a literal or a CEL envelope.** In
-   `create_record` / `update_record` `fields.*` and an `assignment` value (its
-   two legacy shapes too) a string is the literal text it spells, and a `{…}`
-   token is **refused** — at `objectstack validate` (`expression-invalid`),
+1. **A value slot takes a literal or a CEL envelope — never a `{…}` token.**
+   In `assignments.*`, `fields.*`, `subflow` / `map` `input.*`, `script`
+   `inputs.*`, `loop` / `map` `collection`, notify `recipients` /
+   `templateData.*` / `sourceId`, `http` `body` and every CRUD `filter`
+   operand, a string is the literal text it spells, and a `{…}` token is
+   **refused** — at `objectstack validate` (`expression-invalid`),
    `registerFlow` and the executor — naming its CEL spelling. Compute with
    `{ dialect: 'cel', source: '…' }`:
    - `'{record.owner}'` → `source: 'has(record.owner) ? record.owner : null'` —
      CEL refuses an absent key where the template wrote nothing, so nothing /
-     `null` / a default is now YOUR call; `'{record.tags.0}'` → `'record.tags[0]'`
+     `null` / a default is now YOUR call; `'{record.tags.0}'` → `'record.tags[0]'`;
+     a deep path guards each step: `has(vars.source) && has(vars.source.id) ? vars.source.id : null`
    - money: `source: 'round(x * 100) / 100.0'` — CEL divides two integers as
      integers, so `/ 100` turns `123.46` into `123`
-   - still accepted there until CEL can write them: `{NOW()}` / `{TODAY() ± N}`
-     and `{$User.<path>}`
+   - dates: `{TODAY()}` → `isoDate(today())`, `{TODAY() ± N}` →
+     `isoDate(daysFromNow(N))` / `isoDate(daysAgo(N))`, `{NOW()}` →
+     `isoDatetime(now())`, `{NOW() ± N}` → `isoDatetime(addDays(now(), N))`
+   - run user: `{$User.Id}` → `current_user.id`; a flow that can run without a
+     user guards it, `current_user != null ? current_user.id : null`.
+     `current_user` holds `id`, `positions`, `organizationId`, `isPlatformAdmin`
+     only — an email or a name is a `sys_user` read by that id
 
-   Text slots (notify `title` / `message`, screen `title` / `description`, end
-   `message`) render `{{ }}` holes — a variable path, optional formatter, no
-   logic; `os validate` / `registerFlow` refuse a `{…}` token there with its
-   `{{ }}` spelling. `{$User.Id}` / `{NOW()}` have no hole (`{{ $User.Id }}`
-   renders blank): assign them to a variable first. Every other slot
-   (`recipients`, `inputs`, `http`, `filter`) keeps the SINGLE-brace template:
-   `{record.tags.0}`, `{TODAY() + 30}`, `{round(x)}`; no `{…}` ⇒ literal.
-   ❌ `'{ROUND(x, 2)}'` — an unknown name in call position **fails the node**
-   at run time, unchecked at build, not `fault`-routable.
+   Text slots (notify `title` / `message` / `actionUrl`, screen `title` /
+   `description`, end `message`, `http` `url` / `headers`) render `{{ }}`
+   holes — a variable path, optional formatter, no logic; a `{…}` token there
+   is refused with its `{{ }}` spelling. A date or the run user has no hole:
+   assign it first (`assignments: { v: { dialect: 'cel', source:
+   'current_user.id' } }`), then write `{{ v }}`.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    Reference a field explicitly.
@@ -265,12 +268,12 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
    // ✅ function returns values → outputVariable → update_record persists
    { id: 'ai', type: 'script', config: {
        function: 'helpdesk.aiTriageStub',     // returns { ai_category, ai_sentiment, … }
-       inputs: { ticketId: '{record.id}' },   // inputs are interpolated
+       inputs: { ticketId: { dialect: 'cel', source: 'record.id' } }, // CEL values or literals
        outputVariable: 'ai',
    } },
    { id: 'apply', type: 'update_record', config: {
        objectName: 'helpdesk_ticket',
-       filter: { id: '{record.id}' },
+       filter: { id: { dialect: 'cel', source: 'record.id' } },
        fields: { ai_category: { dialect: 'cel', source: 'ai.ai_category' } },
    } },
    ```
@@ -288,12 +291,9 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
    } });
    ```
 
-4. **Conditions are bare CEL — the stdlib is what you may call bare.** `now()`,
-   `today()`, `daysFromNow(n)`, `daysAgo(n)`, `daysBetween(a, b)`, `isBlank(v)`,
-   `coalesce(a, b)`, `abs/round/min/max`, `upper/lower/contains/matches`, plus CEL
-   built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for that
-   table: it is `CEL_STDLIB_FUNCTIONS`, the bare-callable public subset, so receiver
-   methods (called on a value, never bare) are not in it.
+4. **Conditions are bare CEL — the stdlib is what you may call bare.** The table
+   is **objectstack-formula**'s `CEL_STDLIB_FUNCTIONS`, the bare-callable public
+   subset; receiver methods (called on a value, never bare) are not in it.
    An UNKNOWN function (`PRIOR()`, a typo'd name) and a `{…}`-wrapped field ref
    both **fail the build**: a brace is a template, not CEL — write `record.x`,
    not `{record.x}`.
@@ -305,7 +305,7 @@ Legal metadata that authors — AI especially — get wrong; most are caught by
 
 ---
 
-→ State Machines & Approvals moved to [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) (State Machine — a `state_machine` validation rule · Approvals (Flow Nodes) · Send-back for revision · Recording a decision · Approver Types · Dynamic approvers (`type: 'expression'`) · Node Config (`ApprovalNodeConfigSchema`) · Branching, side-effects & rejection · Approval Best Practices) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
+→ State Machines & Approvals moved to [references/state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state`.
 
 ---
 

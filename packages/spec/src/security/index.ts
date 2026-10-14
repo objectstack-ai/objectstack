@@ -15,6 +15,7 @@
  */
 
 export * from './permission.zod';
+export * from './permission-set-owner-binding';
 export * from './permission.form';
 export * from './capabilities';
 export * from './high-privilege';

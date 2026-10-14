@@ -34,6 +34,22 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       owner_user_id: {
         label: "Owner",
         help: "The user who owns this mailbox. The owner is served every message that arrived in it, unassociated ones included."
+      },
+      imap_folder: {
+        label: "Synced Folder",
+        help: "The IMAP folder the sync cursor belongs to. When the mailbox is synced from another folder, the cursor starts over."
+      },
+      imap_uid_validity: {
+        label: "UIDVALIDITY",
+        help: "The folder UIDVALIDITY the cursor was taken under. When the server reports another value, its UIDs name other messages and the cursor starts over."
+      },
+      imap_last_uid: {
+        label: "Last Synced UID",
+        help: "The highest UID of the folder already handed to ingest (stored, found already stored, suppressed or skipped). The next sync fetches the UIDs above it."
+      },
+      imap_synced_at: {
+        label: "Last Synced At",
+        help: "When the sync last finished a pass over the folder."
       }
     }
   },

@@ -593,6 +593,154 @@ describe('SecurityPlugin', () => {
   });
 
   // -------------------------------------------------------------------------
+  // [ADR-0138 D1] The owner-anchor stamp's GUEST branch: the guest is a
+  // principal, never an owner. The anonymous principal is stamped with
+  // nothing, its empty owner stays unset, and an owner it supplies is refused
+  // on insert and on update WHATEVER it is granted — the sets below carry the
+  // transfer bit and `modifyAllRecords`, which the anchor tier keeps off a real
+  // guest binding, precisely so the refusal is shown not to lean on that tier.
+  // Every refusal carries its control: the same write by a signed-in member,
+  // and the same guest write without the owner. The door-level pins, on a
+  // booted stack, are `packages/qa/dogfood/test/guest-owner-stamp.dogfood.test.ts`.
+  // -------------------------------------------------------------------------
+  describe('owner_id anchor guard — the guest branch (ADR-0138 D1)', () => {
+    const guestWriter: PermissionSet = {
+      name: 'synth_guest_writer',
+      label: 'Guest writer',
+      objects: { task: { allowRead: true, allowCreate: true } },
+    } as any;
+    const guestTransfer: PermissionSet = {
+      name: 'synth_guest_transfer',
+      label: 'Guest writer with transfer',
+      objects: { task: { allowRead: true, allowCreate: true, allowEdit: true, allowTransfer: true } },
+    } as any;
+    const guestModifyAll: PermissionSet = {
+      name: 'synth_guest_modify_all',
+      label: 'Guest writer with modify-all',
+      objects: { task: { allowRead: true, allowCreate: true, allowEdit: true, modifyAllRecords: true } },
+    } as any;
+    const memberSet: PermissionSet = {
+      name: 'member_default',
+      label: 'Member',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true } },
+    } as any;
+    const memberTransfer: PermissionSet = {
+      name: 'can_transfer',
+      label: 'Transfer',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowTransfer: true } },
+    } as any;
+    const ALL = [guestWriter, guestTransfer, guestModifyAll, memberSet, memberTransfer];
+
+    const boot = async (findOneImpl?: (query: any) => any) => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({ permissionSets: ALL, findOneImpl });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      return harness;
+    };
+    const guestCtx = (permissions: string[]) =>
+      ({ principalKind: 'guest', positions: ['guest'], isSystem: false, permissions, tenantId: 'org-1' });
+    const memberCtx = (permissions: string[] = []) =>
+      ({ principalKind: 'human', userId: 'u1', tenantId: 'org-1', positions: [], permissions });
+
+    /** The middleware's verdict: admitted, or the refusal's ADR-0112 `code` + `status`. */
+    const verdict = async (harness: { run(opCtx: any): Promise<any> }, opCtx: any) => {
+      try {
+        await harness.run(opCtx);
+        return { admitted: true } as const;
+      } catch (e) {
+        const err = e as { code?: unknown; status?: unknown };
+        return { admitted: false, code: err.code, status: err.status } as const;
+      }
+    };
+    const REFUSED = { admitted: false, code: 'PERMISSION_DENIED', status: 403 } as const;
+    const GUEST_GRANTS: Array<[string, string[]]> = [
+      ['create only', [guestWriter.name]],
+      ['the transfer bit', [guestTransfer.name]],
+      ['modifyAllRecords', [guestModifyAll.name]],
+    ];
+    const FORGED_OWNERS = ['u_victim', 'usr_system', 'guest'];
+
+    it('a guest insert with no owner is stamped with nothing — the row stays unset', async () => {
+      const harness = await boot();
+      const opCtx: any = { object: 'task', operation: 'insert', data: { name: 'A' }, context: guestCtx([guestWriter.name]) };
+      expect(await verdict(harness, opCtx)).toEqual({ admitted: true });
+      expect(opCtx.data).not.toHaveProperty('owner_id');
+      // Control: the stamp is live — a signed-in member's same insert is stamped.
+      const member: any = { object: 'task', operation: 'insert', data: { name: 'A' }, context: memberCtx() };
+      expect(await verdict(harness, member)).toEqual({ admitted: true });
+      expect(member.data.owner_id).toBe('u1');
+    });
+
+    it('a guest\'s empty owner (null or an empty string) is left unset, never a value', async () => {
+      const harness = await boot();
+      for (const empty of [null, '']) {
+        const opCtx: any = {
+          object: 'task', operation: 'insert', data: { name: 'A', owner_id: empty }, context: guestCtx([guestWriter.name]),
+        };
+        expect(await verdict(harness, opCtx), JSON.stringify(empty)).toEqual({ admitted: true });
+        expect(opCtx.data.owner_id, JSON.stringify(empty)).toBeNull();
+      }
+    });
+
+    it('a guest-supplied owner is refused 403 PERMISSION_DENIED on insert, whatever the guest holds', async () => {
+      const harness = await boot();
+      for (const [grant, permissions] of GUEST_GRANTS) {
+        for (const owner of FORGED_OWNERS) {
+          const opCtx: any = {
+            object: 'task', operation: 'insert', data: { name: 'A', owner_id: owner }, context: guestCtx(permissions),
+          };
+          expect(await verdict(harness, opCtx), `${grant} / ${owner}`).toEqual(REFUSED);
+        }
+        // Control: the same guest, the same grant, no owner — admitted.
+        const plain: any = { object: 'task', operation: 'insert', data: { name: 'A' }, context: guestCtx(permissions) };
+        expect(await verdict(harness, plain), grant).toEqual({ admitted: true });
+      }
+      // Control: a member holding the transfer grant sets the same owner.
+      const member: any = {
+        object: 'task', operation: 'insert', data: { name: 'A', owner_id: 'u_victim' }, context: memberCtx([memberTransfer.name]),
+      };
+      expect(await verdict(harness, member)).toEqual({ admitted: true });
+      expect(member.data.owner_id).toBe('u_victim');
+    });
+
+    it('batch: one guest-supplied owner refuses the whole batch, and empty rows stay unset', async () => {
+      const harness = await boot();
+      const forged: any = {
+        object: 'task', operation: 'insert', data: [{ name: 'a' }, { name: 'b', owner_id: 'u_victim' }],
+        context: guestCtx([guestTransfer.name]),
+      };
+      expect(await verdict(harness, forged)).toEqual(REFUSED);
+      const clean: any = {
+        object: 'task', operation: 'insert', data: [{ name: 'a' }, { name: 'b', owner_id: '' }],
+        context: guestCtx([guestTransfer.name]),
+      };
+      expect(await verdict(harness, clean)).toEqual({ admitted: true });
+      expect(clean.data.map((r: any) => r.owner_id ?? null)).toEqual([null, null]);
+    });
+
+    it('a guest update carrying an owner is refused — a transfer, a disown and an echo alike — whatever it holds', async () => {
+      const harness = await boot(() => ({ id: 't1', owner_id: 'u_victim' }));
+      for (const [grant, permissions] of GUEST_GRANTS.slice(1)) {
+        for (const owner of ['u_other', null, 'u_victim']) {
+          const opCtx: any = {
+            object: 'task', operation: 'update', data: { id: 't1', owner_id: owner }, context: guestCtx(permissions),
+          };
+          expect(await verdict(harness, opCtx), `${grant} / ${JSON.stringify(owner)}`).toEqual(REFUSED);
+        }
+        // Control: the same guest's update without the owner is admitted.
+        const plain: any = { object: 'task', operation: 'update', data: { id: 't1', name: 'renamed' }, context: guestCtx(permissions) };
+        expect(await verdict(harness, plain), grant).toEqual({ admitted: true });
+      }
+      // Control: a member holding the transfer grant transfers the same row.
+      const member: any = {
+        object: 'task', operation: 'update', data: { id: 't1', owner_id: 'u_other' }, context: memberCtx([memberTransfer.name]),
+      };
+      expect(await verdict(harness, member)).toEqual({ admitted: true });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // [ADR-0095 D1 / #2937 Finding 1] step 3.7 — the Layer 0 tenant wall on the
   // WRITE post-image. A SUPPLIED (non-empty) `organization_id` in an insert /
   // update payload must satisfy the same Layer 0 filter the read side uses;
@@ -4545,42 +4693,5 @@ describe('audience-anchor bindings read the stack\'s declared capabilities (#185
       const { bindings } = await boot(token, [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
       expect(bindings).toEqual([]);
     }
-  });
-
-  // ── The engine-side write gate (`sys_position_permission_set` insert) ──
-  //
-  // Same three cases at the door an ADMIN comes through. It must agree with the
-  // boot binding above and with `confirmAudienceBindingSuggestion`'s early
-  // rendition — all three now read one source, so a set that binds at boot
-  // cannot be refused when an admin re-binds it by hand.
-  const anchorInsert = {
-    object: 'sys_position_permission_set',
-    operation: 'insert',
-    data: { position_id: 'pos_everyone', permission_set_id: 'ps_app' },
-  };
-
-  it('write gate: admits a binding whose token the stack declares', async () => {
-    const { plugin } = await boot('crm.export_pipeline', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
-    await expect((plugin as any).assertAudienceAnchorBindingGate(anchorInsert)).resolves.toBeUndefined();
-  });
-
-  it('write gate: still refuses an undeclared token, with the ADR-0112 envelope', async () => {
-    const { plugin } = await boot('crm.settle_ledger', [{ name: 'crm.export_pipeline', label: 'Export Pipeline' }]);
-    const err = await (plugin as any)
-      .assertAudienceAnchorBindingGate(anchorInsert)
-      .then(() => null, (e: any) => e);
-    expect(err).toBeTruthy();
-    expect(err.code).toBe('PERMISSION_DENIED');
-    expect(err.statusCode).toBe(403);
-    expect(err.message).toContain('system permissions');
-  });
-
-  it('write gate: still refuses a platform capability of that name', async () => {
-    const { plugin } = await boot('manage_users', [{ name: 'manage_users', label: 'Not Yours' }]);
-    const err = await (plugin as any)
-      .assertAudienceAnchorBindingGate(anchorInsert)
-      .then(() => null, (e: any) => e);
-    expect(err?.code).toBe('PERMISSION_DENIED');
-    expect(err?.statusCode).toBe(403);
   });
 });

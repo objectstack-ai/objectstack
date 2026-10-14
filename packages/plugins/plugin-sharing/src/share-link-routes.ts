@@ -32,12 +32,16 @@
 
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError } from '@objectstack/types';
+// [#23174] The door's catch-all fault answers through `sendServerFault`: the
+// route's `failure` text on the wire, the caught error with its stack in the
+// fault log.
+import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // [#22049] The one reading of the password header pair, shared with the
 // dispatcher twin — see `presentedPassword` below.
 import { readSharePasswordHeader, SHARE_PASSWORD_VARY, type SharePasswordHeaderReading } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { ErrorCode } from '@objectstack/spec/api';
 // [#14637 -> #14935] `isPublicSharingEnabled` is the CANONICAL reading of the
 // standing switch, imported rather than restated here. A second spelling of
 // `publicSharing.enabled` at this layer is how the probe below came to
@@ -93,6 +97,54 @@ const defaultContext = (_req: IHttpRequest): ExecutionContext => ({});
  */
 function isAuthenticated(ctx: ShareLinkExecutionContext): boolean {
   return Boolean(ctx.userId);
+}
+
+/**
+ * ADR-0069 — refuse a session the authentication policy HOLDS (an expired
+ * password, enforced MFA not yet enrolled), which is gated out of every
+ * protected resource until it remediates. Returns `true` when the refusal was
+ * answered and the request must stop.
+ *
+ * The posture is the envelope's declared `authGate`, put there by the context
+ * resolver from the session it read (`normalizeAuthGate`, `@objectstack/core`,
+ * in `SharingServicePlugin`), and read here exactly as REST's `enforceAuth`
+ * reads `context.authGate`. The answer is REST's too: `403` with the gate's
+ * own `code` and `message`, in this family's declared envelope.
+ *
+ * No request path is asked of the shared allow-list. Its exemptions are the
+ * remediation and bootstrap routes, and no route of this family is one; the
+ * family's base path is the host's option, so passing it would let a family
+ * mounted under an allow-listed prefix inherit an exemption it never
+ * declared. The two token routes are no exception: they are not on the
+ * allow-list, and the dispatcher's twin of the same routes already refuses a
+ * held session there.
+ *
+ * `code` is declared as a bare string on the envelope; its one producer
+ * (plugin-auth's `customSession` enrichment) writes only `PASSWORD_EXPIRED` /
+ * `MFA_REQUIRED`, both members of the error-code vocabulary.
+ */
+function refuseHeldSession(res: IHttpResponse, ctx: ExecutionContext): boolean {
+  const gate = ctx.authGate;
+  if (!gate) return false;
+  sendError(res, 403, gate.code as ErrorCode, gate.message);
+  return true;
+}
+
+/**
+ * One route of the share-link family, split at the seam the family door needs.
+ *
+ * - `serve` is the route's own work, handed the caller's resolved context. It
+ *   runs only for a caller the door admitted.
+ * - `failure` is the message of the route's own `catch` arm, which the door
+ *   writes for a throw — by the context resolver or by `serve` — that declares
+ *   no status of its own, in place of the caught error's text (#23174).
+ * - `publicRoute` marks a token route: its no-store response headers are set
+ *   on every outcome, the door's own refusal included.
+ */
+interface ShareLinkFamilyRoute {
+  serve(req: IHttpRequest, res: IHttpResponse, ctx: ExecutionContext): Promise<void>;
+  failure: string;
+  publicRoute?: boolean;
 }
 
 /**
@@ -212,10 +264,56 @@ export function registerShareLinkRoutes(
   const base = opts.basePath ?? '/api/v1/share-links';
   const ctxOf = opts.contextFromRequest ?? defaultContext;
 
+  /**
+   * The family's ONE door — every route below is mounted through it, so the
+   * ADR-0069 gate is consulted once for the family rather than copied into each
+   * handler. A route registered on `http` directly would skip it, which is why
+   * the gate's pins enumerate the routes off the registration itself.
+   *
+   * In order, for every request: the token routes' response headers; the
+   * caller's context (`contextFromRequest`); the held-session refusal
+   * ({@link refuseHeldSession}); then the route's own work with that context.
+   * A throw from any of them is answered by the route's own `catch` arm, as
+   * before — an authorization-store outage the resolver raises keeps its
+   * declared status and code. A throw that declares no status answers
+   * `500 INTERNAL` with the route's `failure` text, never its own text or
+   * code (#23174).
+   */
+  const mountFamilyRoute = (verb: 'get' | 'post' | 'delete', path: string, route: ShareLinkFamilyRoute): void => {
+    http[verb](path, (async (req, res) => {
+      if (route.publicRoute) setPublicResponseHeaders(res);
+      try {
+        const ctx = await ctxOf(req);
+        if (refuseHeldSession(res, ctx)) return;
+        await route.serve(req, res, ctx);
+      } catch (err: any) {
+        // [#23174] A throw that declares its own status keeps the envelope its
+        // producer declared: a coded 4xx refusal, the branded authorization-
+        // store outage, an authored 5xx. A throw that declares none is the
+        // catch-all fault, and neither its text nor its `code` is the caller's
+        // to read: the route's `failure` text and the family's `INTERNAL` go on
+        // the wire, and the caught error, with its stack, to the fault log.
+        //
+        // The code is the literal, never `err.code`. The throws that reach
+        // this arm are engine and driver throws, whose string `code` names the
+        // backend (`42P01`, `SQLITE_ERROR`, `ECONNREFUSED`) and lies outside
+        // the closed `error.code` vocabulary (ADR-0112) — `err` is `any`, so
+        // the parameter type cannot refuse it. Nor `resolveThrownHttpError`'s
+        // code: it keeps a registered spelling, and a caught `NOT_IMPLEMENTED`
+        // or `SERVICE_UNAVAILABLE` passed here would take `logServerFault`'s
+        // capability-absence branch and cost the fault its `error` line.
+        if (err?.status === undefined || err?.status === null) {
+          sendServerFault(res, 500, 'INTERNAL', route.failure, err);
+          return;
+        }
+        sendError(res, err.status, err?.code ?? 'INTERNAL', err?.message ?? route.failure);
+      }
+    }) satisfies RouteHandler);
+  };
+
   // ── CREATE ─────────────────────────────────────────────────────
-  http.post(base, (async (req, res) => {
-    try {
-      const ctx = await ctxOf(req);
+  mountFamilyRoute('post', base, {
+    async serve(req, res, ctx) {
       // [Finding-2] Managing links requires a verified principal.
       if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to create share links');
       const body: any = req.body ?? {};
@@ -241,15 +339,13 @@ export function registerShareLinkRoutes(
       // but downstream API consumers typically derive the public URL
       // from `link.token` immediately.
       sendOk(res, link, 201);
-    } catch (err: any) {
-      sendError(res, err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Failed to create link');
-    }
-  }) satisfies RouteHandler);
+    },
+    failure: 'Failed to create link',
+  });
 
   // ── LIST ───────────────────────────────────────────────────────
-  http.get(base, (async (req, res) => {
-    try {
-      const ctx = await ctxOf(req);
+  mountFamilyRoute('get', base, {
+    async serve(req, res, ctx) {
       if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to list share links');
       const q = req.query ?? {};
       const links = await service.listLinks(
@@ -264,15 +360,13 @@ export function registerShareLinkRoutes(
         ctx,
       );
       sendOk(res, links);
-    } catch (err: any) {
-      sendError(res, err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Failed to list links');
-    }
-  }) satisfies RouteHandler);
+    },
+    failure: 'Failed to list links',
+  });
 
   // ── REVOKE ─────────────────────────────────────────────────────
-  http.delete(`${base}/:idOrToken`, (async (req, res) => {
-    try {
-      const ctx = await ctxOf(req);
+  mountFamilyRoute('delete', `${base}/:idOrToken`, {
+    async serve(req, res, ctx) {
       if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to revoke share links');
       await service.revokeLink(req.params.idOrToken, ctx);
       // `{ ok: true }` moves from BEING the body to being its `data`. It was a
@@ -280,23 +374,22 @@ export function registerShareLinkRoutes(
       // storage); inside `data` it is just the payload, and it is the payload the
       // dispatcher twin and `admin-surfaces.test.ts` both already use.
       sendOk(res, { ok: true });
-    } catch (err: any) {
-      sendError(res, err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Failed to revoke link');
-    }
-  }) satisfies RouteHandler);
+    },
+    failure: 'Failed to revoke link',
+  });
 
   // ── PUBLIC RESOLVE ────────────────────────────────────────────
   //
-  // No `ctxOf` here — the token IS the authorisation. We still allow
-  // probes from a signed-in user so audience=signed_in is satisfiable.
-  http.get(`${base}/:token/resolve`, (async (req, res) => {
-    setPublicResponseHeaders(res);
-    try {
+  // The token IS the authorisation. The door still resolves the caller, so
+  // audience=signed_in is satisfiable and a held session is refused (ADR-0069).
+  mountFamilyRoute('get', `${base}/:token/resolve`, {
+    publicRoute: true,
+    async serve(req, res, ctx) {
       const q = req.query ?? {};
       // [Finding-2] The `audience: 'signed_in'` gate must key off the VERIFIED
       // session, not a spoofable `x-user-id` header — otherwise anyone can pass
       // the "must be signed in" check by inventing a user id.
-      const signedInUserId = (await ctxOf(req)).userId;
+      const signedInUserId = ctx.userId;
       const recipientEmail = typeof q.email === 'string' ? q.email : undefined;
       const presented = presentedPassword(req);
       if (!presented.ok) return sendError(res, 400, 'VALIDATION_FAILED', presented.message);
@@ -354,6 +447,22 @@ export function registerShareLinkRoutes(
           return invalidOrExpired();
         }
         if (row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now())) {
+          // [#23328] The audience is judged BEFORE the password. Before sign-in
+          // the probe asks the audience and never the password: `resolveToken`
+          // refuses an anonymous caller of a `signed_in` link on the audience
+          // before it verifies any password, so the password arm below knows
+          // only whether a password was SENT — answered first, it told the
+          // holder of the CORRECT password `WRONG_PASSWORD`, and the console
+          // never offered sign-in. Asked first, an anonymous caller reads one
+          // answer whatever it sent, so nothing here can tell it whether a
+          // guessed password is right. A signed-in caller keeps the password
+          // arms. The dispatcher twin (`runtime/src/domains/share-links.ts`)
+          // carries the same order — it cannot import this package, which is
+          // a dev dependency there — and one table holds both mounts to it:
+          // `runtime/src/domains/share-links-refusal-order.test.ts`.
+          if (row.audience === 'signed_in' && !signedInUserId) {
+            return sendError(res, 401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
+          }
           // [#21197] `password_hash` is `internal`, so the probe row comes back
           // without it; read off the row, every protected link would answer
           // "invalid" here instead of prompting for its password. Recovered
@@ -366,9 +475,6 @@ export function registerShareLinkRoutes(
               providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
               providedPassword ? 'Incorrect password' : 'This link requires a password',
             );
-          }
-          if (row.audience === 'signed_in' && !signedInUserId) {
-            return sendError(res, 401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
           }
         }
         if (row && (row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now()))) {
@@ -404,10 +510,9 @@ export function registerShareLinkRoutes(
         },
         redactFields: resolved.redactFields,
       });
-    } catch (err: any) {
-      sendError(res, err?.status ?? 500, err?.code ?? 'INTERNAL', err?.message ?? 'Failed to resolve link');
-    }
-  }) satisfies RouteHandler);
+    },
+    failure: 'Failed to resolve link',
+  });
 
   // ──────────────────────────────────────────────────────────────
   // Object-specific related-records lookup.
@@ -425,9 +530,9 @@ export function registerShareLinkRoutes(
   // Other object kinds can register additional public endpoints
   // following the same pattern.
   // ──────────────────────────────────────────────────────────────
-  http.get(`${base}/:token/messages`, (async (req, res) => {
-    setPublicResponseHeaders(res);
-    try {
+  mountFamilyRoute('get', `${base}/:token/messages`, {
+    publicRoute: true,
+    async serve(req, res) {
       const presented = presentedPassword(req);
       if (!presented.ok) return sendError(res, 400, 'VALIDATION_FAILED', presented.message);
       const resolved = await service.resolveToken(req.params.token, {
@@ -452,13 +557,7 @@ export function registerShareLinkRoutes(
       // returned the WRAPPER `{ data: rows }` rather than `rows`. Adding the flag
       // is what makes the same read (`body.data`) work through the SDK too.
       sendOk(res, rows ?? []);
-    } catch (err: any) {
-      sendError(
-        res,
-        err?.status ?? 500,
-        err?.code ?? 'INTERNAL',
-        err?.message ?? 'Failed to load messages',
-      );
-    }
-  }) satisfies RouteHandler);
+    },
+    failure: 'Failed to load messages',
+  });
 }
