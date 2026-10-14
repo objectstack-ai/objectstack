@@ -247,7 +247,7 @@ describe('environment kernel: a metadata-door permission set or position is in t
     // The overlays are stored rows now, read through a connection of our own.
     const probe = new SqlDriver({ client: 'better-sqlite3', connection: { filename: s.dbFile }, useNullAsDefault: true });
     try {
-      const rows = await (probe as any).knex('sys_metadata').select('type', 'name').where({ state: 'active' }).whereNull('organization_id');
+      const rows = await (probe as any).knex('sys_metadata').select('type', 'name').where({ state: 'active' }); // every row is the environment's (ADR-0131 D7)
       const stored = rows.map((r: any) => `${r.type}/${r.name}`);
       expect(stored).toEqual(expect.arrayContaining([`permission/${PKG_SET}`, `permission/${LOOSE_SET}`, `position/${POSITION}`]));
     } finally {

@@ -7,8 +7,10 @@
  *
  * ## The population
  *
- * Every active `sys_metadata` row (every row is the environment's, ADR-0131 D6;
- * `state = 'active'`) of type `permission` or `position` — the legacy plurals
+ * Every active environment `sys_metadata` row (`state = 'active'`; on a
+ * database the organization-ownership ceremony has not migrated, a row whose
+ * physical `organization_id` holds a value is a legacy organization's and is
+ * left out, ADR-0131 D6/D7) of type `permission` or `position` — the legacy plurals
  * `permissions` / `positions` included, which the boot's load folds to the same
  * types — whose name a configured package holds. That is exactly what the cold
  * boot's catalog check refuses (ADR-0048 N.3): the check meets the package-held
@@ -45,6 +47,8 @@
  */
 
 import type { SecurityCatalogType } from '@objectstack/core';
+import { columnListSql, columnNameOf, dialectOf } from './organization-ownership-plan.js';
+import { resolvePlannedDriverExec } from './unmanaged-tables.js';
 
 /** The command's own name, the `actor` its deletions record. */
 export const SECURITY_CATALOG_OVERLAYS_ACTOR = 'os migrate security-catalog-overlays';
@@ -102,7 +106,7 @@ function engineOf(kernel: { getService(name: string): unknown }): EngineLike {
   return engine;
 }
 
-/** Every active environment-wide row of one stored spelling, ordered by name then id. */
+/** Every active row of one stored spelling, ordered by name then id. */
 async function storedRows(engine: EngineLike, storedType: string): Promise<any[]> {
   const rows = await engine.find(
     'sys_metadata',
@@ -114,14 +118,47 @@ async function storedRows(engine: EngineLike, storedType: string): Promise<any[]
 }
 
 /**
+ * The ids of a legacy organization's `sys_metadata` rows, read off the
+ * physical column.
+ *
+ * The family declares no `organization_id` (ADR-0131 D7), so the engine can
+ * neither filter on it nor return it. On a database the organization-ownership
+ * ceremony has not migrated yet the column is still there, and a row with a
+ * value in it is an organization's, not the environment's: the cold boot never
+ * loads one, so it is never a conflict, and this step must not list or delete
+ * it. No raw-SQL seam (a driver without physical columns) or no column (a
+ * migrated or fresh database) means there is no such row. A read that fails is
+ * thrown, never taken for "none".
+ */
+async function legacyOrganizationRowIds(driver: unknown): Promise<ReadonlySet<string>> {
+  const exec = resolvePlannedDriverExec(driver);
+  if (!exec) return new Set();
+  const { normalizeRows } = await import('@objectstack/metadata-protocol');
+  const d = driver as { dialectName?: unknown; config?: { client?: unknown } };
+  const named = typeof d.dialectName === 'string' ? d.dialectName : undefined;
+  const client = d.config?.client;
+  const dialect = dialectOf(named ?? (typeof client === 'string' ? client : undefined)) ?? 'sqlite';
+  const columns = normalizeRows(await exec(columnListSql(dialect), ['sys_metadata']));
+  if (!columns.some((row) => columnNameOf(row) === 'organization_id')) return new Set();
+  const rows = normalizeRows(await exec(
+    "SELECT id FROM sys_metadata WHERE organization_id IS NOT NULL AND organization_id <> ''",
+    [],
+  ));
+  return new Set(rows.map((row) => String(row.id)));
+}
+
+/**
  * The listed rows (module header, "The population"), positions first, then by
  * name, then by stored spelling (canonical first).
  *
  * @param kernel a kernel booted with the deployment's composition and WITHOUT
  *   `sys_metadata` hydration, its packages registered.
+ * @param driver the stack's SQL driver, through which a legacy organization's
+ *   rows are told apart on a database not yet migrated.
  */
 export async function listSecurityCatalogOverlayRows(
   kernel: { getService(name: string): unknown },
+  driver?: unknown,
 ): Promise<SecurityCatalogOverlayRow[]> {
   const engine = engineOf(kernel);
   const { findPackageHeldSecurityCatalogNames } = await import('@objectstack/objectql');
@@ -131,9 +168,11 @@ export async function listSecurityCatalogOverlayRows(
   }
   if (held.size === 0) return [];
 
+  const legacy = await legacyOrganizationRowIds(driver);
   const listed: SecurityCatalogOverlayRow[] = [];
   for (const [storedType, catalogType] of STORED_TYPE_SPELLINGS) {
     for (const row of await storedRows(engine, storedType)) {
+      if (legacy.has(String(row.id))) continue;
       const name = String(row.name);
       const heldBy = held.get(`${catalogType}|${name}`);
       if (!heldBy) continue;
