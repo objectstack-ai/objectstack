@@ -188,6 +188,11 @@ export type { HttpMethodSubset } from '../shared/http.zod';
  * silently change what the view shows. An author or a stored row still carrying
  * the arm is refused at parse with this prescription; the D3 semantic entry
  * `view-data-api-provider-retired` carries the judgement an upgrader owes.
+ *
+ * A page component whose `data` prop is this schema (`object-grid`,
+ * `object-map`, `object-gantt`, `object-tree`) is refused by the page parse
+ * with this prescription, read off this union's own issue rather than copied
+ * (`checkPageComponentViewData`, `ui/page.zod.ts`, #23357).
  */
 const VIEW_DATA_API_PROVIDER_RETIRED =
   "`view.data.provider: 'api'` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — "
