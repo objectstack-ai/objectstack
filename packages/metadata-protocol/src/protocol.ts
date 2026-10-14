@@ -20772,6 +20772,57 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23415, ADR-0048] The refusal of a delete that asks to drop an object's
+     * table ({@link shouldDropStorage} says yes) while another stored row of
+     * the object stays after it. A `sys_metadata` row is keyed by its package,
+     * so one object can hold one row per package (and a package-less row), and
+     * every such row serves the object over the ONE table its name maps to.
+     * Dropping the table with one of them left the others' object served
+     * with its records gone: measured at `DELETE
+     * /api/v1/meta/object/NAME?package=P&dropStorage=true` on a booted
+     * showcase, `200` with a receipt naming Q's remaining row, then `500` on
+     * the object's next data read.
+     *
+     * Refused, not skipped: an explicit `dropStorage` that drops nothing would
+     * be an opt-in the runtime does not honour while the receipt answers
+     * success. Refused before any write, so nothing is deleted and the request
+     * succeeds once the remedy is applied: without `dropStorage` (this row
+     * goes, the table stays), or with the object's last row.
+     *
+     * The rows that count are the ones the delete's own address read
+     * ({@link packagelessAddress}) holds: the environment's ACTIVE rows of the
+     * object. A draft row is not one: a draft is never materialised and never
+     * served, so it holds no records, and the last active row's delete still
+     * drops the table it was the last to serve.
+     *
+     * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member
+     * for a refusal that comes from environment state rather than the request
+     * (the same request is accepted once the other rows are gone), as
+     * {@link packagelessAddressAmbiguityRefusal} answers for the same rows.
+     * The prescription first, because a 4xx message crosses the REST boundary
+     * bounded at 500 characters with its tail truncated.
+     */
+    private static dropStorageRemainingRowsRefusal(
+        type: string,
+        name: string,
+        deletedPackage: string | null,
+        remainingPackages: readonly string[],
+        unboundRemains: boolean,
+    ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+        const which = deletedPackage !== null ? ` (package=${deletedPackage})` : '';
+        const err = new Error(
+            'Send the delete again without dropStorage to remove this row and keep the table, or delete the '
+            + "object's other rows first and drop the table with the last one. Nothing was deleted. "
+            + `After this delete${which}, ${type} '${name}' is still served: `
+            + `${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}, and the object's records are in its table. `
+            + "dropStorage drops an object's table only with the object's last row.",
+        ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+        err.code = 'RESOURCE_CONFLICT';
+        err.status = 409;
+        return err;
+    }
+
+    /**
      * [commit 311433f6b] The item-name grammar verdict — stage 1 of the
      * maintainer-ruled retirement of compound `<section>/<name>` addressing
      * (2026-08-25). Refuse, on the doors that MINT or PROMOTE a `sys_metadata`
@@ -28391,6 +28442,9 @@ export class ObjectStackProtocolImplementation implements
          * is removed (object + active only; never `sys_`). Default false keeps
          * delete non-destructive to data. Used by the "discard a previewed
          * object" flow so a publish-to-preview leaves no orphan table.
+         * [#23415] Only with the object's last stored row: while another row
+         * of it stays stored, the delete is refused `409 RESOURCE_CONFLICT`
+         * ({@link dropStorageRemainingRowsRefusal}).
          */
         dropStorage?: boolean;
         /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
@@ -28584,6 +28638,9 @@ export class ObjectStackProtocolImplementation implements
             // more packages hold: the door's own verdict, rethrown as it is by
             // the `catch` below, never re-wrapped as a delete that failed.
             let addressRefusal: Error | undefined;
+            // [#23415] The refusal of a table drop another stored row of the
+            // object still needs: rethrown as it is, as `addressRefusal` is.
+            let dropRefusal: Error | undefined;
 
             try {
                 const targetState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
@@ -28680,6 +28737,25 @@ export class ObjectStackProtocolImplementation implements
                     };
                 }
 
+                // [#23165] What is still stored at this address once this row
+                // is gone, from the rows the address read already holds. Read
+                // by the table drop's verdict just below and by the receipt.
+                const remainingPackages = rowsAtAddress.candidates.filter((id) => id !== packageId);
+                const unboundRemains = rowsAtAddress.unbound && packageId !== null;
+                const remains = remainingPackages.length > 0 || unboundRemains;
+                // [#23415] The table drop, decided ONCE, before anything is
+                // written: an object's table goes only with its last stored
+                // row. A `dropStorage` delete that would leave another row of
+                // the object stored, and served over this table, is refused
+                // whole — see {@link dropStorageRemainingRowsRefusal}.
+                const dropsStorage = this.shouldDropStorage(request.type, request.name, request.dropStorage, targetState);
+                if (dropsStorage && remains) {
+                    dropRefusal = ObjectStackProtocolImplementation.dropStorageRemainingRowsRefusal(
+                        singularTypeForRepo, request.name, packageId, remainingPackages, unboundRemains,
+                    );
+                    throw dropRefusal;
+                }
+
                 // Last-write-wins parent resolution unless the caller pinned
                 // an explicit version (Studio's "Reset" button is unpinned;
                 // a future "delete vN" flow can pass parentVersion).
@@ -28731,7 +28807,9 @@ export class ObjectStackProtocolImplementation implements
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
                 // for a discarded object so a publish-to-preview leaves no residue.
-                if (this.shouldDropStorage(request.type, request.name, request.dropStorage, targetState)) {
+                // [#23415] Decided above; reached only when this was the
+                // object's last stored row.
+                if (dropsStorage) {
                     await this.dropObjectStorage(singularTypeForRepo, request.name);
                 }
 
@@ -28764,11 +28842,6 @@ export class ObjectStackProtocolImplementation implements
                     organizationId: orgId,
                     ...mutationEventMember(singularTypeForRepo, member),
                 });
-                // [#23165] What is still stored at this address once this row
-                // is gone, from the rows the address read already holds.
-                const remainingPackages = rowsAtAddress.candidates.filter((id) => id !== packageId);
-                const unboundRemains = rowsAtAddress.unbound && packageId !== null;
-                const remains = remainingPackages.length > 0 || unboundRemains;
                 const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
                 return {
                     success: true,
@@ -28818,7 +28891,11 @@ export class ObjectStackProtocolImplementation implements
                 // [#21899] The door's own verdict, not a store failure: it
                 // leaves with its envelope and sentence, never re-wrapped as an
                 // overlay delete that failed.
-                if (err === originGatedRefusal || (addressRefusal !== undefined && err === addressRefusal)) throw err;
+                if (
+                    err === originGatedRefusal
+                    || (addressRefusal !== undefined && err === addressRefusal)
+                    || (dropRefusal !== undefined && err === dropRefusal)
+                ) throw err;
                 if (err instanceof ConflictError) {
                     // [#21207] Keyed values or none in the text and attributes.
                     const conflict = await this.metadataConflictRefusal(
