@@ -591,9 +591,11 @@ export const PageHeaderProps = strictObject({
   aliases: {
     /**
      * The ADR-0087 D2 conversion `page-header-subtitle-alias` (#4827,
-     * objectui#3226) renames this on load and on stored-row rehydration, so the
-     * canonical paths never reach here. What DOES reach here is the source an
-     * author is typing right now — and until this shape closed, that was the
+     * objectui#3226) renamed this on load for protocol 17's window; retired
+     * from the load path at 18, it renames only data at rest (stored-row
+     * rehydration, artifacts inside the ingestion window, `os migrate meta`).
+     * What reaches here is the source an author is typing right now — every
+     * authored `description`, since the retirement — and until this shape closed, that was the
      * one path with no diagnostic at all: `conversions/walk.ts` records the
      * hole in as many words, that `description` "is tombstoned nowhere
      * (`description` is a live declared prop on other components), got no

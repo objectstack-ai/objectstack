@@ -1255,9 +1255,12 @@ const actionObject = () => strictObject({
    * The maintainer's 2026-08-06 ruling on #5777 took direction A (a separate
    * key, no same-name union), so this key keeps ONE meaning and the object form
    * is REFUSED here — with a message that names `bodyExtra` rather than the
-   * bare "expected array, received object" an author cannot act on. Sources
-   * still carrying the object form are rewritten at load by the
-   * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2).
+   * bare "expected array, received object" an author cannot act on. The
+   * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2) rewrote
+   * the object form at load for protocol 17's window; retired from the load
+   * path at 18, it now rewrites only data at rest (stored rows, artifacts
+   * inside the ingestion window, `os migrate meta`), so an authored object
+   * form meets this refusal.
    *
    * **The api prescription is not universal, which #6828 measured and the
    * maintainer's 2026-08-10 ruling closed.** On a `type:'url'` action the
