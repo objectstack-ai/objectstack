@@ -35,6 +35,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { EngineAggregateOptions } from '@objectstack/spec/data';
+// [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
+// `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
+import { StandardErrorCode } from '@objectstack/spec/api';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -302,16 +305,35 @@ function errorResult(message: string) {
  * nobody and the agent is back to guessing the member's spelling from
  * documentation.
  *
- * Uncoded throws fall through to `errorResult` unchanged, so this widens what a
- * caller can read and narrows nothing.
+ * Uncoded throws fall through to `errorResult` unchanged.
  *
  * `run_action` and `resume_run` only. The other catches render through
  * {@link errorResultWithCode}, which serves the same envelope WITHOUT `details`;
  * that function says why.
+ *
+ * [#23529] ⛔ A `PERMISSION_DENIED` is the exception: it renders through
+ * {@link errorResultWithCode}, so its `details` are WITHHELD here too. The
+ * security gate puts the caller's `positions` and `permissionSets` in those
+ * `details`; the ruling on #7450 keeps them off the wire, and the runtime
+ * dispatcher and the REST actions door both drop them. These two tools are
+ * reachable by that refusal: a declarative update action writes as the caller,
+ * so a caller who may read the row but not update it meets the gate's
+ * write-side refusal, and a host script handler can rethrow one. The answer is
+ * a tool result inside a JSON-RPC 200, which the dispatcher's withholding never
+ * sees, so it is withheld at this renderer.
+ *
+ * The question is asked on the DECLARED code, spelled from the spec's standard
+ * catalogue rather than restated, and answered with the data tools' own
+ * function rather than a second filter of `details`. Every `PermissionDeniedError`
+ * declares this code (it is a class constant), and a throw with no code never
+ * reaches the `details` read at all. Every other coded refusal keeps its
+ * `details` as before, so #15942's confirmation contract and `resume_run`'s
+ * REST-built `details` are unchanged.
  */
 function errorResultFromThrown(err: unknown) {
   const envelope = thrownRefusalEnvelope(err);
   if (!envelope) return errorResult(messageOf(err));
+  if (envelope.code === StandardErrorCode.enum.PERMISSION_DENIED) return errorResultWithCode(err);
   const details = (err as { details?: unknown }).details;
   return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
 }

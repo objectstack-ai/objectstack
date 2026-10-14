@@ -68,6 +68,8 @@ beforeEach(() => {
             : undefined,
     },
     tableAbsent: () => false,
+    // What the boot's auth gate answered for the security plugin, as a boot with no auth secret records it.
+    composition: { securityPlugin: { composed: false, reason: 'no-secret' } },
     shutdown: async () => {},
   }));
   apply.mockImplementation(async () => ({
@@ -172,6 +174,14 @@ describe('--apply hands the merged inventory to the apply step', () => {
     await runJson(['--apply', '--backup-taken', '--plan-file', writePlan(), ...out('apply.json')]);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(apply.mock.calls[0]![0]).not.toHaveProperty('inventory');
+  }, CASE_TIMEOUT_MS);
+});
+
+describe('--apply hands the boot\'s security-plugin composition to the apply step', () => {
+  it('the apply step receives what the boot\'s auth gate answered, so a name only that plugin declares is reported with it', async () => {
+    await runJson(['--apply', '--backup-taken', '--plan-file', writePlan(), ...out('apply.json')]);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply.mock.calls[0]![0]).toMatchObject({ securityPlugin: { composed: false, reason: 'no-secret' } });
   }, CASE_TIMEOUT_MS);
 });
 

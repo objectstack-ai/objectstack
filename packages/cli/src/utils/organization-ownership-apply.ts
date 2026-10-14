@@ -41,6 +41,7 @@ import {
   type LegacySetRow,
   type UnnamedReason,
 } from './organization-ownership-grants.js';
+import { describeSecurityPluginComposition, type SchemaMigrationComposition } from './schema-migration-plugins.js';
 
 /**
  * The ADR-0131 D10 ceremony's apply step — ceremony items 2 to 4: the backup
@@ -471,6 +472,17 @@ export interface ApplyOptions {
   reviewedPlan: ReviewedPlan;
   inventory?: readonly InventoryEntry[];
   /**
+   * [#23359] What the boot's auth gate answered for the security plugin
+   * (`bootSchemaStack`'s `composition.securityPlugin`). The plugin declares the
+   * platform's shipped permission sets and the built-in positions, so when the
+   * boot did not compose it, a grant or binding naming one of them does not
+   * resolve for that reason alone: the step's blocker says so in the
+   * composition's own sentence and never prescribes removing it
+   * ({@link uncomposedSecurityRemedy}). Absent, every unresolved name keeps its
+   * remedy. It resolves nothing: the step still refuses.
+   */
+  securityPlugin?: SchemaMigrationComposition['securityPlugin'];
+  /**
    * The operator's choice for each template conflict: one candidate row id per
    * `(name, locale)` whose customized or authored rows differ. Validated before
    * anything is written ({@link TemplateChoiceRefusal}).
@@ -724,6 +736,34 @@ async function declaredPositionSets(run: Run, names: Iterable<string>): Promise<
   return declared;
 }
 
+/**
+ * [#23359] The remedy for a permission set or position the catalog does not
+ * resolve because the boot did not compose the security plugin — or
+ * `undefined`, and the caller keeps its own remedy, when the boot composed it
+ * (or did not say), or when the name is not one the plugin declares.
+ *
+ * The composition is the boot's answer ({@link ApplyOptions.securityPlugin}),
+ * never inferred from the missing name. The names are read from their owners:
+ * the plugin's shipped sets (`securityDefaultPermissionSets`), and the built-in
+ * positions its `init()` declares — the spec's identity names and audience
+ * anchors, the two lists its declarations are built from. The sentence is the
+ * composition's own (`describeSecurityPluginComposition`), followed by the one
+ * instruction that holds whatever the gate's reason: keep the rows, and re-run
+ * where the plugin is composed. ⛔ Never "remove" for such a name: removing a
+ * shipped grant strips the standing the platform seeded. Nothing is resolved
+ * here; the step still refuses.
+ */
+async function uncomposedSecurityRemedy(run: Run, type: 'permission' | 'position', name: string): Promise<string | undefined> {
+  const status = run.opts.securityPlugin;
+  if (!status || status.composed) return undefined;
+  const declared: readonly string[] = type === 'permission'
+    ? (await import('@objectstack/plugin-security')).securityDefaultPermissionSets.map((set) => set.name)
+    : await import('@objectstack/spec').then((spec) => [...spec.BUILTIN_IDENTITY_NAMES, ...spec.AUDIENCE_ANCHOR_POSITIONS]);
+  if (!declared.includes(name)) return undefined;
+  const kept = type === 'permission' ? 'permission sets it ships: keep the grants' : 'built-in positions it declares: keep the bindings';
+  return `${describeSecurityPluginComposition(status)} ${name} is one of the ${kept}, and re-run where the security plugin is composed.`;
+}
+
 async function runAuthoredConversion(run: Run): Promise<StepReport> {
   const blockers: string[] = [];
   const notes: string[] = [];
@@ -858,7 +898,7 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
     if (!existing) {
       blockers.push(
         `Binding rows give position ${name} the sets ${permissionSets.join(', ')}, and the catalog holds no position of ` +
-          'that name to carry them. Declare the position (or remove the bindings), then re-run.',
+          `that name to carry them. ${(await uncomposedSecurityRemedy(run, 'position', name)) ?? 'Declare the position (or remove the bindings), then re-run.'}`,
       );
       continue;
     }
@@ -1892,6 +1932,44 @@ interface Verification {
   verified: number;
 }
 
+/**
+ * [#23359] Of the grants still unnamed (`ids`), those the rewrite leaves
+ * unnamed for one reason alone — their set row names a permission set the
+ * security plugin ships, which the catalog does not resolve because the boot
+ * did not compose that plugin — by that set's name, each with
+ * {@link uncomposedSecurityRemedy}'s sentence. Which grants those are is the
+ * rewrite's own decision (`planGrantRewrite`'s `unresolved` reason, over the
+ * same set rows and catalog), so a grant unnamed for any other reason (no id, a
+ * missing row, another organization's row) keeps the general blocker.
+ */
+async function unnamedForComposition(run: Run, ids: readonly string[]): Promise<Map<string, { ids: string[]; remedy: string }>> {
+  const out = new Map<string, { ids: string[]; remedy: string }>();
+  const grantCols = await columnsOf(run, GRANTS);
+  const setCols = await columnsOf(run, SETS);
+  if (!ids.length || run.opts.securityPlugin?.composed !== false || !setCols || !grantCols?.has('permission_set_id')) return out;
+  const sets = new Map<string, LegacySetRow>();
+  for (const row of await readAll(run, SETS, ['name', ...(setCols.has(ORG) ? [ORG] : [])])) {
+    sets.set(String(row.id), { name: text(row.name), organizationId: text(row[ORG]) });
+  }
+  const unnamed = new Set(ids);
+  const legacy = (await readAll(run, GRANTS, ['permission_set_id', 'user_id', ...(grantCols.has(ORG) ? [ORG] : [])]))
+    .filter((g) => unnamed.has(String(g.id)))
+    .map((g) => ({ id: String(g.id), userId: text(g.user_id), organizationId: text(g[ORG]), setId: text(g.permission_set_id) }));
+  const resolvable = new Map<string, boolean>();
+  for (const grant of legacy) {
+    const name = grant.setId ? sets.get(grant.setId)?.name : null;
+    if (name && !resolvable.has(name)) resolvable.set(name, (await resolveName(run, 'permission', name)) !== undefined);
+  }
+  const setNameOf = new Map(legacy.map((g) => [g.id, g.setId ? sets.get(g.setId)?.name : null]));
+  for (const id of planGrantRewrite(legacy, [], sets, (name) => resolvable.get(name) === true).reasons.unresolved) {
+    const name = setNameOf.get(id);
+    const remedy = name ? await uncomposedSecurityRemedy(run, 'permission', name) : undefined;
+    if (!name || remedy === undefined) continue;
+    out.set(name, { ids: [...(out.get(name)?.ids ?? []), id], remedy });
+  }
+  return out;
+}
+
 /** Read-only: does every reference resolve by name? The gate of fate 2. */
 async function verifyReferences(run: Run): Promise<Verification> {
   const out: Verification = { blockers: [], notes: [], grants: 0, verified: 0 };
@@ -1931,16 +2009,26 @@ async function verifyReferences(run: Run): Promise<Verification> {
       }
       out.verified++;
     }
-    if (unnamed.length) {
+    const forComposition = await unnamedForComposition(run, unnamed);
+    const held = new Set([...forComposition.values()].flatMap((g) => g.ids));
+    const rest = unnamed.filter((id) => !held.has(id));
+    if (rest.length) {
       out.blockers.push(
-        `${unnamed.length} grant(s) still name no permission set (${unnamed.slice(0, 20).join(', ')}${unnamed.length > 20 ? ', …' : ''}). ` +
+        `${rest.length} grant(s) still name no permission set (${rest.slice(0, 20).join(', ')}${rest.length > 20 ? ', …' : ''}). ` +
           'The rewrite could not derive their name (see its notes); name or remove each, then re-run.',
+      );
+    }
+    for (const [name, { ids, remedy }] of forComposition) {
+      out.blockers.push(
+        `${ids.length} grant(s) still name no permission set (${ids.slice(0, 20).join(', ')}${ids.length > 20 ? ', …' : ''}): ` +
+          `their set row is ${name}, which the security catalog does not resolve. ${remedy}`,
       );
     }
     for (const [name, ids] of unresolved) {
       out.blockers.push(
         `${ids.length} grant(s) name the permission set ${name}, which the security catalog does not resolve ` +
-          `(${ids.slice(0, 20).join(', ')}${ids.length > 20 ? ', …' : ''}). Declare or author the set, or remove the grants, then re-run.`,
+          `(${ids.slice(0, 20).join(', ')}${ids.length > 20 ? ', …' : ''}). ` +
+          ((await uncomposedSecurityRemedy(run, 'permission', name)) ?? 'Declare or author the set, or remove the grants, then re-run.'),
       );
     }
     if (disagree.length) {
@@ -1964,7 +2052,7 @@ async function verifyReferences(run: Run): Promise<Verification> {
         position.fate === 'conflicting'
           ? `Position ${position.name}: organizations bind different permission sets to it; the bindings cannot be carried into one definition.`
           : `Binding rows give position ${position.name} sets its catalog definition does not name (${position.permissionSets.join(', ')}); ` +
-            'deleting them would lose a grant. The authored-conversion step carries them; resolve its blocker, then re-run.',
+            `deleting them would lose a grant. ${(await uncomposedSecurityRemedy(run, 'position', position.name)) ?? 'The authored-conversion step carries them; resolve its blocker, then re-run.'}`,
       );
     }
   }
