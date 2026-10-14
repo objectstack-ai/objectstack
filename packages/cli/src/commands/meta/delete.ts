@@ -2,7 +2,7 @@
 
 import { Args, Command, Flags } from '@oclif/core';
 import type { DeleteMetaItemOptions } from '@objectstack/client';
-import { printError, printSuccess, emitJson, errorCodeFields } from '../../utils/format.js';
+import { printError, printSuccess, printWarning, emitJson, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -103,6 +103,29 @@ export function metaDeleteOptions(flags: {
   // [#23350] Verbatim, as the SDK takes it: `packageId` → `?package=`.
   if (packageId !== undefined) options.packageId = packageId;
   return Object.keys(options).length > 0 ? options : undefined;
+}
+
+/**
+ * [#23479] The human line for a reset the door answered `reset: false` — the
+ * delete's address held no row, so nothing was removed.
+ *
+ * Each sentence claims only what the door's own no-op receipt claims for the
+ * address this command sent: nothing to delete; with `--package P`, that P
+ * holds no row of the item — no pending draft, under `--draft`. It names no
+ * cause the command did not read: not "already at artifact default", and not
+ * which package holds the row instead. The package id is quoted verbatim, as
+ * it was sent.
+ */
+function noOpLine(ref: string, flags: { draft?: boolean; package?: string }): string {
+  const pkg = flags.package;
+  if (flags.draft) {
+    return pkg !== undefined
+      ? `Nothing discarded: package '${pkg}' holds no pending draft of ${ref}`
+      : `Nothing discarded: ${ref} has no pending draft`;
+  }
+  return pkg !== undefined
+    ? `Nothing deleted: package '${pkg}' holds no row of ${ref}`
+    : `Nothing deleted: ${ref} — the server found nothing to delete`;
 }
 
 export default class MetaDelete extends Command {
@@ -215,15 +238,40 @@ export default class MetaDelete extends Command {
       } else if (flags.format === 'yaml') {
         await formatOutput({ success: true, type: args.type, name: args.name, deleted: result.reset }, 'yaml');
       } else {
-        // [#13024] `--draft` discards the pending draft and leaves the
-        // published overlay serving, so the full-reset sentence would be a
-        // false report of what just happened — on the run where the operator
-        // deliberately chose the narrower verb.
-        printSuccess(
-          flags.draft
-            ? `Pending draft discarded: ${args.type}/${args.name}`
-            : `Metadata deleted: ${args.type}/${args.name}`,
-        );
+        const ref = `${args.type}/${args.name}`;
+        // [#23479] The human arm reads the SAME `result.reset` the two machine
+        // arms lower into `deleted` above. It used to print its success
+        // sentence unconditionally, so `os meta delete view nothing_here`
+        // printed "✓ Metadata deleted" on the run whose `--format json` said
+        // `deleted: false` — one call, two opposite facts, depending only on
+        // `--format`. The sibling `os data delete` arm had the same defect
+        // and took the same fix (#19413).
+        //
+        // Read as `=== false`, NOT as falsiness: `false` is the door's
+        // positive "the delete's address held no row" (see
+        // `DeleteMetaItemResponseSchema`), while an absent flag is no signal,
+        // and turning no signal into "nothing deleted" would deny a deletion
+        // that really happened.
+        //
+        // The exit code does NOT move, on either value. The machine arms
+        // publish `success: true` (the command completed) beside
+        // `deleted: false` and exit `0`: that is the no-op exit this command
+        // already declares. Moving only this arm off `0` would re-create the
+        // disagreement one layer down; moving all three would narrow a
+        // published CLI accept set. `delete-noop-line.test.ts` pins both.
+        if (result.reset === false) {
+          printWarning(noOpLine(ref, flags));
+        } else {
+          // [#13024] `--draft` discards the pending draft and leaves the
+          // published overlay serving, so the full-reset sentence would be a
+          // false report of what just happened — on the run where the
+          // operator deliberately chose the narrower verb.
+          printSuccess(
+            flags.draft
+              ? `Pending draft discarded: ${ref}`
+              : `Metadata deleted: ${ref}`,
+          );
+        }
       }
     } catch (error: any) {
       if (flags.format === 'json') {
