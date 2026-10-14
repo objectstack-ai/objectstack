@@ -93,7 +93,11 @@ describe('[ADR-0086 D3] a release artifact\'s sets are judged against the packag
   const twoPackages = (coreKey?: string) => composeStacks([
     defineStack({ manifest: manifest(CRM), permissions: [set('crm_member', coreKey)] } as never, { strict: false }),
     defineStack({ manifest: manifest('com.acme.orders', { type: 'module' }), permissions: [set('orders_member')] } as never),
-  ], { manifest: 'preserve' }) as unknown as Record<string, unknown> & { packages: Array<{ manifest: Record<string, unknown> }> };
+  ], { manifest: 'preserve' }) as unknown as {
+    manifest: { id: string };
+    packages: Array<{ manifest: Record<string, unknown> }>;
+    [key: string]: unknown;
+  };
 
   it('a body\'s set is judged against that body\'s own id', () => {
     const artifact = twoPackages(OTHER);
@@ -106,7 +110,7 @@ describe('[ADR-0086 D3] a release artifact\'s sets are judged against the packag
 
   it('a top-level set no body declares is the residual, judged against the artifact\'s `manifest.id`', () => {
     const artifact = { ...twoPackages(), permissions: [set('stray_member', OTHER)] };
-    const owner = String((artifact.manifest as { id: string }).id);
+    const owner = artifact.manifest.id;
     expect(ownerIssues(artifact)).toEqual([['permissions.0.packageId', expect.stringContaining(`from package '${owner}'`)]]);
     // CONTROL: the residual declaring the artifact's own id.
     expect(ownerIssues({ ...twoPackages(), permissions: [set('stray_member', owner)] })).toEqual([]);
@@ -119,7 +123,7 @@ describe('[ADR-0086 D3] a release artifact\'s sets are judged against the packag
     // names the body that ships it — is no disagreement.
     const artifact = twoPackages(CRM);
     const flattened = { ...artifact, permissions: [set('crm_member', CRM), set('orders_member')] };
-    expect(String((flattened.manifest as { id: string }).id)).not.toBe(CRM);
+    expect(flattened.manifest.id).not.toBe(CRM);
     expect(ownerIssues(flattened)).toEqual([]);
   });
 });
