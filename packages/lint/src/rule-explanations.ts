@@ -330,6 +330,28 @@ const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION: RuleExplanation = {
+  rule: 'widget-legacy-analytics-shape',
+  covers: 'why the legacy analytics keys are ignored',
+  paragraphs: [
+    'The ADR-0021 single-form cutover removed the inline analytics shape — `categoryField`, ' +
+      '`valueField`, `xAxisField`, `yAxisFields`, `aggregate`, `aggregation`, `rowField` and ' +
+      '`columnField`. Dataset-bound widgets render through DatasetWidget, which reads only the ' +
+      'semantic dataset: pivot rows and columns come from `dimensions`, cell values from `values`. ' +
+      'These inline keys are a no-op.',
+    'This id is the warning case: the widget also has a data source (`dataset`, `object`, or inline ' +
+      '`data`, top-level or under `options`), so it still renders and the legacy keys are only ignored ' +
+      'noise. With no data source the widget renders nothing, and that is the error ' +
+      '`widget-legacy-analytics-unrenderable`.',
+    'On the schema-parsed paths (`compile`, `validate`) the strict widget schema refuses these keys as ' +
+      'a parse error before this rule runs; the rule is the steer on the raw-config paths (`lint`, ' +
+      '`doctor`).',
+    'To fix it, delete the legacy keys and select fields by name through the widget\'s dataset. ' +
+      'Suppress with `suppressWarnings: [\'widget-legacy-analytics-shape\']` if the keys are ' +
+      'intentional.',
+  ],
+};
+
 const DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'dashboard-filter-field-unknown',
   covers: 'how a dashboard filter reaches every widget',
@@ -348,6 +370,12 @@ const DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'a typo to correct, an inherited default is one the widget may opt out of. Not reported: a ' +
       'widget that opts out, an object this stack does not define, and an object with no readable ' +
       'field map (an ADR-0015 external object, an introspected datasource).',
+    'A re-target may be a field of the dataset\'s object or a `relationship[.relationship].field` ' +
+      'path. Every hop of such a path must be a relationship field (lookup, master_detail, user or ' +
+      'tree; ADR-0021 derives every join from the object graph, so there is no ON clause to write), ' +
+      'and its prefix must be declared in the dataset\'s `include` ' +
+      '(`dashboard-filter-field-not-included` otherwise). The verdict\'s "Did you mean" names the ' +
+      'nearest field of the object the miss landed on.',
   ],
 };
 
@@ -384,8 +412,8 @@ const UNPROVISIONED_ANCHOR_CAUSE =
  * The three ways out of an unprovisioned anchor, which the one-line `fix:` of
  * the converted anchor ids (`unprovisionedAnchorFix()`) names without the how:
  * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
- * `react-chart-field-unprovisioned` and the hook, action and flow-node
- * write-anchor ids write it out.
+ * `react-chart-field-unprovisioned`, `dashboard-filter-field-unprovisioned`
+ * and the hook, action and flow-node write-anchor ids write it out.
  */
 const UNPROVISIONED_ANCHOR_REMEDY =
   'To fix it, check the remote table. If it really carries the column, declare it in the object\'s ' +
@@ -409,6 +437,7 @@ const DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
       '`filterBindings: { NAME: false }`, or suppress with ' +
       '`suppressWarnings: [\'dashboard-filter-field-unprovisioned\']` if the remote schema resolves ' +
       'the column some other way.',
+    UNPROVISIONED_ANCHOR_REMEDY,
   ],
 };
 
@@ -424,6 +453,11 @@ const WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'columns — and the verdict names the hop that failed. This rule judges the KEYS; ' +
       '`filter-token-unknown` judges the values in the same subtree. Not reported: an object this ' +
       'stack does not define, or one with no readable field map.',
+    'To fix it, filter on a field of the dataset\'s object, or on a `relationship[.relationship].field` ' +
+      'path: every hop must be a relationship field (lookup, master_detail, user or tree; ADR-0021 ' +
+      'derives every join from the object graph), and the prefix must be declared in the dataset\'s ' +
+      '`include` (`widget-filter-field-not-included` otherwise). The verdict\'s "Did you mean" names ' +
+      'the nearest field of the object the miss landed on.',
   ],
 };
 
@@ -476,6 +510,12 @@ const CHART_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'refused on a dataset-bound widget (ADR-0021). Post-cutover data is keyed by the dataset\'s ' +
       'measure NAME, not the base column. Suppress with `suppressWarnings: [\'chart-field-unknown\']` ' +
       'if the inert key is intentional.',
+    'What replaces each key: the x-axis is the widget\'s first `dimensions` entry; the y-axis ' +
+      'bindings come from `values`, one entry per mark; series membership follows `values` (and a ' +
+      'second `dimensions` entry to split). A measure named by a refused key that the dataset declares ' +
+      'but the widget does not select is plotted by adding it to `values`. For existing sources, ' +
+      '`os migrate meta --from 17` lists the mechanical edits; `--write` applies the ones it can prove, ' +
+      'and you apply the rest by hand.',
   ],
 };
 
@@ -490,7 +530,8 @@ const CHART_MEASURES_MISSING_EXPLANATION: RuleExplanation = {
       'tabular widget. A chart with no measures is reported once, here, even when it also selects no ' +
       'dimensions: the placeholder returns before the renderer ever tests for dimensions. A chart ' +
       'family still needs a dimension to plot against (`chart-dimensions-missing`).',
-    'To fix it, select at least one measure of the dataset by name in `values`. Suppress with ' +
+    'To fix it, select at least one measure of the dataset by name in `values` (the `fix:` line ' +
+      'names up to three the dataset declares). Suppress with ' +
       '`suppressWarnings: [\'chart-measures-missing\']` while the widget is still being authored.',
   ],
 };
@@ -505,8 +546,9 @@ const WIDGET_MEASURES_MISSING_EXPLANATION: RuleExplanation = {
       '`kpi`, `gauge`, `solid-gauge`, `bullet`) loses the one KPI number the tile exists to show; a ' +
       'tabular one (`table`, `pivot`) loses its grid.',
     'Such a widget needs no `dimensions`, so measures are the whole fix: select at least one measure ' +
-      'of the dataset by name in `values`. Suppress with `suppressWarnings: [\'widget-measures-missing\']` ' +
-      'while the widget is still being authored.',
+      'of the dataset by name in `values` (the `fix:` line names up to three the dataset declares). ' +
+      'Suppress with `suppressWarnings: [\'widget-measures-missing\']` while the widget is still being ' +
+      'authored.',
   ],
 };
 
@@ -518,9 +560,27 @@ const CHART_DIMENSIONS_MISSING_EXPLANATION: RuleExplanation = {
       'a chart-family widget that selects measures but no dimensions draws a single KPI number instead ' +
       'of its declared chart. The number is real, so nothing looks broken — the declared chart family ' +
       'is simply gone.',
-    'To fix it, plot the chart against a dataset dimension (`dimensions`), or, if a single value IS ' +
-      'what the tile should show, declare it as a `metric` or `kpi` widget so the type matches what ' +
-      'renders. Suppress with `suppressWarnings: [\'chart-dimensions-missing\']`.',
+    'To fix it, plot the chart against a dataset dimension (`dimensions`; the `fix:` line names up to ' +
+      'three the dataset declares), or, if a single value IS what the tile should show, declare it as ' +
+      'a `metric` or `kpi` widget so the type matches what renders. Suppress with ' +
+      '`suppressWarnings: [\'chart-dimensions-missing\']`.',
+  ],
+};
+
+const TABLE_COUNT_ONLY_EXPLANATION: RuleExplanation = {
+  rule: 'table-count-only',
+  covers: 'why a count-only table renders one summary row',
+  paragraphs: [
+    'A `table` or `pivot` widget bound to a dataset runs an analytics query: rows are the groups of ' +
+      'its `dimensions`, cells the aggregates of its `values`. With no dimensions and only count ' +
+      'measures (a derived measure is never counted as one), there is nothing to group by, so the ' +
+      'widget renders a single summary row — not a per-record list.',
+    'A flat record listing is not an analytics dataset. Model it as an object-bound ListView ' +
+      '(ADR-0017) surfaced through app navigation, and use a `metric` widget on the dashboard if only ' +
+      'the count is needed. If a single-row table is intentional, add an explicit dimension or ' +
+      'suppress with `suppressWarnings: [\'table-count-only\']`.',
+    'Not reported: a widget that selects a dimension, selects no measures (`widget-measures-missing`), ' +
+      'or names a measure the dataset does not declare (`widget-measure-unknown`).',
   ],
 };
 
@@ -4009,6 +4069,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VIEW_ROW_COLOR_UNRESOLVABLE_VALUE_EXPLANATION.rule]: VIEW_ROW_COLOR_UNRESOLVABLE_VALUE_EXPLANATION,
   [WEBHOOK_WITHOUT_TRIGGERS_EXPLANATION.rule]: WEBHOOK_WITHOUT_TRIGGERS_EXPLANATION,
   [WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION.rule]: WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION,
+  [WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION.rule]: WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION,
@@ -4019,6 +4080,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [CHART_MEASURES_MISSING_EXPLANATION.rule]: CHART_MEASURES_MISSING_EXPLANATION,
   [WIDGET_MEASURES_MISSING_EXPLANATION.rule]: WIDGET_MEASURES_MISSING_EXPLANATION,
   [CHART_DIMENSIONS_MISSING_EXPLANATION.rule]: CHART_DIMENSIONS_MISSING_EXPLANATION,
+  [TABLE_COUNT_ONLY_EXPLANATION.rule]: TABLE_COUNT_ONLY_EXPLANATION,
   [DATASET_INCLUDE_UNKNOWN_EXPLANATION.rule]: DATASET_INCLUDE_UNKNOWN_EXPLANATION,
   [DATASET_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FIELD_UNKNOWN_EXPLANATION,
   [DATASET_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DATASET_FIELD_NOT_INCLUDED_EXPLANATION,
