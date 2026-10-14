@@ -19,7 +19,7 @@ import {
     // The registry's "never registered" brand, asked directly by the public
     // form doors' tenancy read (see `registerFormEndpoints`).
     isServiceNotRegisteredError,
-    assembleExecutionContext, normalizeAuthGate, type AuthGate,
+    assembleExecutionContext, normalizeAuthGate, userAuthGateSourceOf, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
     // owner, shared with the runtime dispatcher's `/security` domain.
@@ -3196,7 +3196,17 @@ export class RestServer {
                     () => this.tenancyServiceProvider!(environmentId) as any,
                 );
             }
-            const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
+            // [#23287, ruling C′ item 3] The auth service's per-user posture
+            // computation rides into the shared resolver, where the API-key
+            // admission seam asks it for a key's owner: ONE judgment for every
+            // face, this one included.
+            const authz = await resolveAuthzContext({
+                ql,
+                headers,
+                getSession,
+                tenancyPosture,
+                userAuthGates: userAuthGateSourceOf(authService),
+            });
             // [commit f586f1a89] The anonymous contract IS the shared assembler's default
             // entry: no resolved principal → no context → 401. Taken early here
             // only so an anonymous request does not pay for the localization and
@@ -3247,13 +3257,28 @@ export class RestServer {
             // narrowness the ruling asked for: a host whose probe faults never
             // answered `true`, so it never declared a gate, and refusing on it
             // would block deployments that never asked for one.
+            //
+            // [#23287 — ruling C′ item 3] The cookie re-read below is the
+            // SESSION's gate, and it runs only for a principal a session
+            // admitted. A principal an API KEY admitted is judged by the key's
+            // own answer, decided once at the shared key-admission seam
+            // (`authz.authGate`: the key owner's account-scope posture). It
+            // used to re-read the cookie here whatever had admitted the
+            // caller, so a key sent beside a held cookie was refused with the
+            // COOKIE's posture — another credential's, possibly another user's
+            // — while the same key sent alone was admitted with no question
+            // asked of its owner at all.
             let authGate: AuthGate | undefined;
             let gateActive = false;
-            try {
-                gateActive = typeof authService.isAuthGateActive === 'function'
-                    && authService.isAuthGateActive() === true;
-            } catch {
-                gateActive = false;
+            if (authz.credential === 'api_key') {
+                authGate = authz.authGate;
+            } else {
+                try {
+                    gateActive = typeof authService.isAuthGateActive === 'function'
+                        && authService.isAuthGateActive() === true;
+                } catch {
+                    gateActive = false;
+                }
             }
             if (gateActive) {
                 let gatedSession: any;

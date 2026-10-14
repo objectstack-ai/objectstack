@@ -2033,11 +2033,20 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                 // ADR-0069: the session the authentication-policy
                                 // gate is asked about, read only while a gate feature
                                 // is active. Same `auth` occupant as the lookup above.
+                                //
+                                // [#23287 — ruling C′ item 3] A principal an API KEY
+                                // admitted (`resolveRequestScope` above) is judged by
+                                // the key's own answer from the shared key-admission
+                                // seam, as the dispatcher's gate judges it: the
+                                // owner's account-scope posture, or none. ⛔ No cookie
+                                // re-read for it.
                                 resolveGatedSessionUser: (headers) =>
-                                    readGatedSessionUser(
-                                        safeGetService<IAuthService>(ctx, 'auth'),
-                                        headers as Record<string, unknown>,
-                                    ),
+                                    protocolContext.admission?.credential === 'api_key'
+                                        ? Promise.resolve({ authGate: protocolContext.admission.authGate })
+                                        : readGatedSessionUser(
+                                            safeGetService<IAuthService>(ctx, 'auth'),
+                                            headers as Record<string, unknown>,
+                                        ),
                                 limiters: endpointLimiters,
                                 // The authored `server.trustProxy`, read from the
                                 // same declaration the server-level limiter reads.

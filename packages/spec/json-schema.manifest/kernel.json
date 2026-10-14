@@ -5,6 +5,8 @@
     "kernel/ArtifactChecksum",
     "kernel/ArtifactFileEntry",
     "kernel/ArtifactSignature",
+    "kernel/AuthGateCode",
+    "kernel/AuthGateScope",
     "kernel/BreakingChange",
     "kernel/CapabilityConformanceLevel",
     "kernel/ClusterCapabilityConfig",

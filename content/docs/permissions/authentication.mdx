@@ -602,8 +602,17 @@ often before the account-level lock engages.
 > HTTP endpoint), and every route family that a plugin or service mounts
 > directly on the host server and that resolves its own caller, at the family's
 > own door. A gated session gets `403` with the gate's own code
-> (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) at whichever of them serves the
-> request. The auth endpoints (sign-in, change-password, two-factor enrollment
+> (`PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` for an administrator-forced
+> change, or `MFA_REQUIRED`) at whichever of them serves the request.
+>
+> **API keys answer for the account, not for the password.** Each code has a
+> scope. `MFA_REQUIRED` holds the *account*: an API key whose owner owes MFA
+> enrollment is refused with the same `403 MFA_REQUIRED` and message on every
+> face that admits keys. `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` hold
+> *password sign-in* only, so the owner's API keys keep working. The refusal is
+> not a revocation: the same key works again the moment its owner enrolls. A
+> request is judged by the credential that admitted it, so a session cookie
+> sent beside an API key never answers for the key. The auth endpoints (sign-in, change-password, two-factor enrollment
 > and sign-out among them) and a short allow-list kept with that decision
 > (health and discovery among them) still pass, so the user can remediate. Platform administration is not part of that exemption: the
 > platform-admin actions refuse a gated session with the same `403`, a platform
@@ -961,8 +970,10 @@ const response = await fetch('http://localhost:3000/api/v1/auth/admin/create-use
 A generated temporary password is returned **once** in the response (the
 Users-list action reveals it in a one-shot dialog) and is never persisted or
 logged. While `mustChangePassword` is set, the user is blocked with
-`403 PASSWORD_EXPIRED` on every protected route until they complete a
-password change — the same gate and Console redirect as password expiry.
+`403 PASSWORD_RESET_REQUIRED` on every protected route until they complete a
+password change. It is the same gate as password expiry, under its own code,
+and like expiry it holds password sign-in only: the user's API keys are not
+held by it.
 
 #### Set / Reset a Password
 
@@ -970,6 +981,13 @@ password change — the same gate and Console redirect as password expiry.
 `{ userId, newPassword }` or `{ userId, generatePassword: true }` plus the
 same `mustChangePassword` flag. It also provisions a credential account for
 SSO-onboarded users who never had a local password.
+
+The forced reset also carries `revokeSessionsAndKeys`, **on by default**: it
+ends every session of the user and revokes every API key they own, so a
+suspected compromise leaves no live credential behind. Pass
+`revokeSessionsAndKeys: false` for a routine reset. The response reports what
+was revoked (`revoked: { sessions, apiKeys, failed, complete }`), and revoked
+keys stay revoked after the password change.
 
 #### Bulk Import Users
 

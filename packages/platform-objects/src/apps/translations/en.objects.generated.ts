@@ -70,7 +70,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "Must Change Password",
-        help: "When true, the user is blocked (403 PASSWORD_EXPIRED) until they change their password. Stamped by the admin user-management routes; system-managed."
+        help: "When true, the user is blocked (403 PASSWORD_RESET_REQUIRED) until they change their password. Stamped by the admin user-management routes; system-managed."
       },
       mfa_required_at: {
         label: "MFA Required At",
@@ -197,6 +197,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "Require Password Change On Next Login"
+          },
+          revokeSessionsAndKeys: {
+            label: "Sign Out Everywhere and Revoke API Keys",
+            helpText: "Ends every session of this user and revokes every API key they own. Leave on when the account may be compromised; turn off for a routine reset. Revoked keys stay revoked after the password change."
           }
         },
         resultDialog: {

@@ -15,6 +15,11 @@ import {
   // is what every other rejection becomes.
   classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
+  // [#23287, ruling C′ item 3] The shared key-admission seam and the auth
+  // service's per-user posture computation it asks, so the family's door
+  // judges a key-admitted request by the KEY's answer.
+  resolveApiKeyAdmission,
+  userAuthGateSourceOf,
 } from '@objectstack/core';
 import type {
   IHttpServer,
@@ -1061,7 +1066,7 @@ export function composeStorageRoutes(
   const engine = composition.engine;
   const store = new StorageMetadataStore(engine);
   const resolveSession = buildAuthSessionResolver(registry);
-  const readGatedSessionUser = buildAuthGateSessionReader(registry);
+  const readGatedSessionUser = buildAuthGateSessionReader(registry, engine);
   const authorizeFileRead = buildFileReadAuthorizer(registry, engine);
   const resolveFileHolder =
     engine && typeof (engine as any).find === 'function'
@@ -1169,11 +1174,29 @@ function buildAuthSessionResolver(
  * This is a second session read beside {@link buildAuthSessionResolver}'s,
  * accepted so that the posture travels without moving any exported
  * declaration (`StorageUploadSession` stays as it is).
+ *
+ * [#23287 — ruling C′ item 3] A request carrying an API key is judged by the
+ * KEY's answer, from the shared key-admission seam (`resolveApiKeyAdmission`)
+ * with the auth service's per-user posture computation: a key whose owner
+ * holds an `account`-scope posture answers that posture, and the door refuses
+ * it with the session's `403`; an admitted key answers no posture, and the
+ * session is NOT read for it — a cookie beside a key never answers for the
+ * key. A key the seam does not recognise (`none`) leaves the session's own
+ * gate to answer, exactly as the identity resolution falls through to the
+ * session for it. Asked with the door's tenancy posture, so a key the posture
+ * refuses is refused before its owner is asked, as on every other face.
  */
-function buildAuthGateSessionReader(registry: StorageGateRegistry): StorageGatedSessionReader | undefined {
-  let authService: { isAuthGateActive?(): boolean } | undefined;
+function buildAuthGateSessionReader(
+  registry: StorageGateRegistry,
+  engine: IDataEngine | null,
+): StorageGatedSessionReader | undefined {
+  type GateAuthService = {
+    isAuthGateActive?(): boolean;
+    resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
+  };
+  let authService: GateAuthService | undefined;
   try {
-    authService = registry.getService<{ isAuthGateActive?(): boolean }>('auth');
+    authService = registry.getService<GateAuthService>('auth');
   } catch {
     return undefined;
   }
@@ -1191,6 +1214,19 @@ function buildAuthGateSessionReader(registry: StorageGateRegistry): StorageGated
     if (!active) return undefined;
     const headers = toWebHeaders(req);
     if (!headers) return undefined;
+    // [#23287] The key arm. A rejection of the tenancy read or of the posture
+    // computation is the branded outage, which the door relays as its `503`.
+    if (engine && typeof (engine as any).find === 'function') {
+      const admission = await resolveApiKeyAdmission(
+        engine,
+        headers,
+        Date.now(),
+        await resolveAdmissionTenancyPosture(registry),
+        userAuthGateSourceOf(auth),
+      );
+      if (admission.outcome === 'held') return { authGate: admission.gate };
+      if (admission.outcome !== 'none') return undefined;
+    }
     let session: any;
     try {
       session = await getSession(headers);
