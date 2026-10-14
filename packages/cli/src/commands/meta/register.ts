@@ -2,7 +2,7 @@
 
 import { Args, Command, Flags } from '@oclif/core';
 import type { SaveMetaItemOptions } from '@objectstack/client';
-import { printError, printSuccess, emitJson, errorCodeFields } from '../../utils/format.js';
+import { printError, printSuccess, printWarning, emitJson, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
@@ -26,6 +26,35 @@ export const EMPTY_PACKAGE_SAVE_REFUSAL =
   + 'the server resolves when the item belongs to one package.';
 
 /**
+ * [#23480] The line this command adds under the save door's
+ * `409 DESTRUCTIVE_CHANGE` refusal: the door's message ends with its own
+ * remedy, "re-submit with ?force=true", and this command's spelling of that
+ * query parameter is `--force`. The server's message is passed through
+ * verbatim and this line stands beside it, in the text face and as `hint` in
+ * the `--format json` envelope. It is added only to a run that did not send
+ * `--force`: one that did has nothing left to re-run with.
+ */
+export const DESTRUCTIVE_CHANGE_FORCE_HINT =
+  'On this command, ?force=true is --force. Re-run with --force to apply the change and '
+  + 'accept the data it drops or transforms.';
+
+/**
+ * [#23480] The remedy line a failed save earns, or `undefined` when it earns
+ * none. Only a refusal carrying the ADR-0112 code `DESTRUCTIVE_CHANGE`, on a
+ * run without `--force`, has one; every other failure is reported exactly as
+ * before.
+ */
+export function metaRegisterRefusalHint(
+  error: unknown,
+  flags: { force?: boolean },
+): string | undefined {
+  if (flags.force === true) return undefined;
+  return errorCodeFields(error).code === 'DESTRUCTIVE_CHANGE'
+    ? DESTRUCTIVE_CHANGE_FORCE_HINT
+    : undefined;
+}
+
+/**
  * [#23350] The `SaveMetaItemOptions` bag this command's flags mean — the one
  * place the command decides what goes on the wire, as `metaDeleteOptions` is
  * for `os meta delete`. Exported so the wire claim is measured on this value.
@@ -35,20 +64,33 @@ export const EMPTY_PACKAGE_SAVE_REFUSAL =
  * request stays byte-identical to what it sent before the flag existed: an
  * active (published) save, `PUT /meta/:type/:name` with no query string.
  *
- * Only `packageId` is mapped. `SaveMetaItemOptions` also carries `ifMatch`,
- * `force` and `mode`; this command declares no flag for them, and adding one
- * is a separate widening.
+ * Two members are mapped:
+ *  - `--package` → `packageId` (`?package=`), [#23350];
+ *  - `--force` → `force: true` (`?force=true`), [#23480], the acknowledgement
+ *    the door's `409 DESTRUCTIVE_CHANGE` names as its remedy. Mapped only when
+ *    the flag is given: an absent `--force` (oclif hands `false`) adds no
+ *    member, so the SDK sends no `force` at all rather than an opt-out
+ *    spelling.
+ *
+ * `SaveMetaItemOptions` also carries `ifMatch` and `mode`; this command
+ * declares no flag for them, and adding one is a separate widening.
  */
 export function metaRegisterOptions(flags: {
   package?: string;
+  force?: boolean;
 }): SaveMetaItemOptions | undefined {
+  const options: SaveMetaItemOptions = {};
   const packageId = flags.package;
-  if (packageId === undefined) return undefined;
-  if (packageId.trim() === '') {
-    throw new Error(EMPTY_PACKAGE_SAVE_REFUSAL);
+  if (packageId !== undefined) {
+    if (packageId.trim() === '') {
+      throw new Error(EMPTY_PACKAGE_SAVE_REFUSAL);
+    }
+    // Verbatim, as the SDK takes it: `packageId` → `?package=`.
+    options.packageId = packageId;
   }
-  // Verbatim, as the SDK takes it: `packageId` → `?package=`.
-  return { packageId };
+  // The opt-in only, as the SDK spells it: `force: true` → `?force=true`.
+  if (flags.force === true) options.force = true;
+  return Object.keys(options).length > 0 ? options : undefined;
 }
 
 export default class MetaRegister extends Command {
@@ -58,6 +100,7 @@ export default class MetaRegister extends Command {
     '$ os meta register object --data object-def.json',
     '$ os meta register plugin --data plugin-manifest.json',
     '$ os meta register view --data view-def.json --package com.acme.crm',
+    '$ os meta register object --data object-def.json --force',
   ];
 
   static override args = {
@@ -97,6 +140,18 @@ export default class MetaRegister extends Command {
         'Save into this package\'s row (a package id, e.g. com.acme.crm). Required when two or '
         + 'more packages hold the item: without it the server refuses with 409 RESOURCE_CONFLICT '
         + 'and names the packages.',
+    }),
+    // [#23480] The acknowledgement the save door's `409 DESTRUCTIVE_CHANGE`
+    // names as its remedy, forwarded as `SaveMetaItemOptions.force`
+    // (`?force=true`) only when given. Boolean, off by default and with no
+    // short alias, like this CLI's other `--force` flags: it lets the server
+    // drop data, so it is spelled out in full on every run that uses it.
+    force: Flags.boolean({
+      description:
+        'Apply the save even when it drops or transforms existing data (a removed field, an '
+        + 'incompatible field type change). Without it the server refuses such a change with '
+        + '409 DESTRUCTIVE_CHANGE and writes nothing.',
+      default: false,
     }),
   };
 
@@ -144,15 +199,20 @@ export default class MetaRegister extends Command {
         printSuccess(`Metadata registered: ${args.type}/${name}`);
       }
     } catch (error: any) {
+      // [#23480] The server's message stays verbatim; the hint, when there is
+      // one, stands beside it and names this command's spelling of its remedy.
+      const hint = metaRegisterRefusalHint(error, flags);
       if (flags.format === 'json') {
         await emitJson({
           success: false,
           error: error.message,
           ...errorCodeFields(error),
+          ...(hint ? { hint } : {}),
         });
         this.exit(1);
       }
       printError(error.message || String(error));
+      if (hint) printWarning(hint);
       this.exit(1);
     }
   }

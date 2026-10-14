@@ -5,6 +5,7 @@ import {
   permissionSetDefinitionFromRow,
   positionDefinitionFromRow,
 } from '@objectstack/core';
+import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, hashSpec } from '@objectstack/metadata-core';
 import {
   inventoryEntryFor,
   type InventoryEntry,
@@ -15,6 +16,9 @@ import {
   columnListSql,
   definitionKey,
   groupTemplateRows,
+  groupMetadataKeyRows,
+  readMetadataKeyRows,
+  METADATA_OBJECT,
   templatePromotionSql,
   SEEDED_BY,
   TEMPLATE_OBJECT,
@@ -23,6 +27,8 @@ import {
   predicateSql,
   Sql,
   type AttributionSink,
+  type MetadataConflict,
+  type MetadataKeyRow,
   type TemplateConflict,
   type OrganizationOwnershipPlan,
   type PlanReader,
@@ -54,6 +60,27 @@ import {
  *     (`convertPositionBindingRows`). Only under `single` (ADR-0131 D3: a
  *     Setup catalog write is an environment metadata write under `single` and
  *     refused under a wall); under a wall the rows are reported.
+ *  2a. `metadata-promotion` — rulings A on #22011 and #22008 (records
+ *     6020163868, 6020151485): first every public-form withdrawal an
+ *     organization saved is carried onto the environment, fail-closed (any
+ *     organization's withdrawal wins), by writing it onto each active
+ *     environment `view` of that name that still serves the form open,
+ *     through the metadata door; the same predicate the anonymous doors
+ *     judge by (`anonymousFormIntakeWithdrawnIn`) decides. Then, under
+ *     `single`, each organization-scoped `sys_metadata` row of the five
+ *     presentational types whose overlay key no other row holds becomes an
+ *     environment row in place, its history with it (its `organization_id`
+ *     cleared). A key held by more than one row is a conflict: listed, kept,
+ *     and blocking under `single` until the operator chooses one row with
+ *     `--metadata-choice ROW_ID`. The key then ends with exactly ONE
+ *     environment row defining the chosen body (the key's environment row
+ *     takes it through the door, in place; with none, the chosen row is
+ *     promoted in place), with every withdrawal another row holds kept; it is
+ *     read back, and only then are the key's organization rows deleted, in
+ *     one statement, by id (ruling B on #23413 Q1). Under a wall nothing is
+ *     promoted unless the operator names the row, and nothing is deleted
+ *     (ruling A on #23413 Q6, ruling 6163114098): the rest are reported and
+ *     hold the column.
  *  2b. `template-promotion` — ruling C on ADR-0131 §6 Q1: every
  *     `sys_email_template` row an organization customized or authored becomes
  *     an environment `email_template` item through the metadata door (core's
@@ -78,6 +105,14 @@ import {
  *     named categories are deleted. Templates: the promotion runs again first,
  *     and beyond the seeded mirrors only the rows whose environment copy that
  *     pass verified are deleted, by id.
+ *  4h. `history-renumber` — seat answer Q2 A: `sys_metadata_history`'s
+ *     `event_seq` and every `(type, name, version)` unique environment-wide
+ *     before the column goes. Every lineage still tagged to an organization
+ *     is laid out above the environment's (each organization's event range by
+ *     ONE offset, its commit ranges with it; each item's version lineage, the
+ *     organization's rows with it); under `single` that history then becomes
+ *     the environment's. It runs on every apply, even when checkpointed, so an
+ *     environment save made since is covered. Numbers only, no delete.
  *  5. `column-drops` (fate 1) — `organization_id` leaves the D7 objects
  *     through the schema-drift ceremony ({@link ColumnDropPort}), never a hand
  *     `ALTER`; so does the retired `sys_user_permission_set.permission_set_id`
@@ -108,6 +143,10 @@ import {
  * recorded, the posture it runs under is not the one the plan was computed
  * under (the posture decides what attribution and the authored conversion
  * write), or the file names another database ({@link ReviewedPlanRefusal}).
+ * A choice deletes the other rows of its conflict, so the reviewed plan also
+ * binds what a `--metadata-choice` or `--template-choice` may delete: the
+ * chosen conflict must hold exactly the rows the file listed for it
+ * ({@link ReviewedConflict}), or the apply refuses (`plan-conflict-mismatch`).
  * The remedy is always the same: plan again, review it, hand the new file in.
  * A checkpoint recorded under another digest is therefore one the reviewed
  * plan supersedes: the run starts over (each step is idempotent), and the
@@ -126,10 +165,12 @@ export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-owners
 export const CEREMONY_STEPS = [
   'attribution',
   'authored-conversion',
+  'metadata-promotion',
   'template-promotion',
   'settings-move',
   'rewrite',
   'mirror-deletion',
+  'history-renumber',
   'column-drops',
 ] as const;
 export type CeremonyStep = (typeof CEREMONY_STEPS)[number];
@@ -146,7 +187,26 @@ export interface CatalogPort {
 
 /** The metadata door: an environment metadata save. Throws when the door refuses. */
 export interface MetadataDoorPort {
-  save(type: 'position' | 'permission' | 'email_template', name: string, body: Record<string, unknown>): Promise<void>;
+  save(
+    type: 'position' | 'permission' | 'email_template' | 'view' | 'dashboard' | 'report' | 'translation',
+    name: string,
+    body: Record<string, unknown>,
+    target?: { packageId: string | null },
+  ): Promise<void>;
+}
+
+/** The env-wide `view` list the anonymous form doors read (every package's item of a name). */
+export interface ServedViewsPort {
+  list(): Promise<ReadonlyArray<Readonly<Record<string, unknown>>>>;
+}
+
+/**
+ * The metadata door's own verdict on a write to an item (ADR-0010 §3.3): the
+ * item read's `editable`, which reports the save door's lock gate. A write the
+ * ceremony makes in place, not through the door, asks it first.
+ */
+export interface MetadataLockPort {
+  verdict(type: string, name: string, packageId: string | null): Promise<{ editable: boolean; lock?: string; lockReason?: string }>;
 }
 
 /** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
@@ -191,6 +251,12 @@ export interface CeremonyCheckpoint {
   ceremony: 'ADR-0131 D10';
   inventoryDigest: string;
   completed: Partial<Record<CeremonyStep, { at: string; summary: Record<string, number> }>>;
+  /**
+   * The `--metadata-choice` rows whose conflict this ceremony resolved, recorded
+   * before the conflict's organization rows are deleted: a rerun after a crash
+   * between the two accepts the same choice and finishes.
+   */
+  metadataChoicesApplied?: string[];
 }
 
 /** Where the checkpoint lives (the command: the `sys_migration` row). */
@@ -211,6 +277,48 @@ export interface ReviewedPlan {
   inventoryDigest: string;
   /** The tenancy posture the plan was computed under. */
   posture: string;
+  /**
+   * The conflict groups the plan listed, by key: the only rows a
+   * `--metadata-choice` or `--template-choice` may delete. Absent means the
+   * file listed none.
+   */
+  conflicts?: ReviewedConflict[];
+}
+
+/** One conflict group a plan lists: the rows a choice there resolves. */
+export interface ReviewedConflict {
+  kind: 'metadata' | 'template';
+  /** The group's key as the operator reads it: `view deal_list (package p)`, `crm.note (en-US)`. */
+  key: string;
+  /** Its rows, by id, sorted. */
+  candidates: string[];
+}
+
+/**
+ * The conflict groups of a plan, from the plan the apply computes or from the
+ * kept file (both carry `tables[].metadataConflicts` and
+ * `tables[].templateConflicts`), normalized so the two compare.
+ */
+export function reviewedConflictsOf(plan: unknown): ReviewedConflict[] {
+  const tables = (plan as { tables?: unknown } | null)?.tables;
+  if (!Array.isArray(tables)) return [];
+  const ids = (candidates: unknown): string[] =>
+    Array.isArray(candidates) ? candidates.map((c) => String((c as { id?: unknown })?.id)).sort() : [];
+  const out: ReviewedConflict[] = [];
+  for (const table of tables as Array<Record<string, unknown>>) {
+    for (const c of Array.isArray(table?.metadataConflicts) ? (table.metadataConflicts as Array<Record<string, unknown>>) : []) {
+      out.push({
+        kind: 'metadata',
+        key: `${String(c.type)} ${String(c.name)}${c.packageId ? ` (package ${String(c.packageId)})` : ''}` +
+          `${c.bundleMember ? ` [${String(c.bundleMember)}]` : ''}`,
+        candidates: ids(c.candidates),
+      });
+    }
+    for (const c of Array.isArray(table?.templateConflicts) ? (table.templateConflicts as Array<Record<string, unknown>>) : []) {
+      out.push({ kind: 'template', key: `${String(c.name)} (${String(c.locale)})`, candidates: ids(c.candidates) });
+    }
+  }
+  return out;
 }
 
 /**
@@ -220,7 +328,12 @@ export interface ReviewedPlan {
  */
 export class ReviewedPlanRefusal extends Error {
   constructor(
-    readonly reason: 'plan-file-unusable' | 'plan-digest-mismatch' | 'plan-posture-mismatch' | 'plan-database-mismatch',
+    readonly reason:
+      | 'plan-file-unusable'
+      | 'plan-digest-mismatch'
+      | 'plan-posture-mismatch'
+      | 'plan-database-mismatch'
+      | 'plan-conflict-mismatch',
     message: string,
     readonly detail: Readonly<Record<string, string>> = {},
   ) {
@@ -266,7 +379,14 @@ export function reviewedPlanFromFile(file: string, text: string): ReviewedPlan {
       { file },
     );
   }
-  return { file, generatedAt: p.generatedAt, database: p.database, inventoryDigest: p.inventoryDigest, posture: p.posture };
+  return {
+    file,
+    generatedAt: p.generatedAt,
+    database: p.database,
+    inventoryDigest: p.inventoryDigest,
+    posture: p.posture,
+    conflicts: reviewedConflictsOf(p),
+  };
 }
 
 export interface StepReport {
@@ -341,6 +461,10 @@ export interface ApplyOptions {
   catalog: CatalogPort;
   door: MetadataDoorPort;
   templates: TemplatePort;
+  /** The served views, for carrying form withdrawals. */
+  views: ServedViewsPort;
+  /** The door's lock verdict, for the one write the ceremony makes in place. */
+  lock: MetadataLockPort;
   columnDrops: ColumnDropPort;
   ledger: CeremonyLedgerPort;
   /** The kept plan file the operator reviewed; the run refuses unless it matches (see the module doc). */
@@ -352,6 +476,13 @@ export interface ApplyOptions {
    * anything is written ({@link TemplateChoiceRefusal}).
    */
   templateChoices?: readonly string[];
+  /**
+   * The operator's choice per `sys_metadata` conflict (the row the environment
+   * keeps; the others are deleted once it is promoted and read back), and under
+   * a wall the organization rows promoted knowingly. Validated before anything
+   * is written ({@link MetadataChoiceRefusal}).
+   */
+  metadataChoices?: readonly string[];
   now?: () => Date;
   /** One line per milestone, for the command's human face. */
   onProgress?: (message: string) => void;
@@ -406,6 +537,18 @@ interface Run {
    * promotion pass mirror deletion re-runs, so a resumed run verifies afresh.
    */
   verifiedTemplateIds: Set<string>;
+  /** The checkpoint this run writes into (set once the ledger is read). */
+  checkpoint?: CeremonyCheckpoint;
+  /** This apply's `history-renumber` verified `event_seq` and version uniqueness environment-wide. */
+  historyVerified?: boolean;
+}
+
+/** A `--metadata-choice` that names no row awaiting a choice, or two of one conflict. Nothing is written. */
+export class MetadataChoiceRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MetadataChoiceRefusal';
+  }
 }
 
 /** A `--template-choice` that names no candidate of a listed conflict, or two of one. Nothing is written. */
@@ -737,6 +880,817 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
     );
   }
   return { step: 'authored-conversion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+}
+
+// ── History numbering (seat answer Q2 A) ────────────────────────────────────
+//
+// The metadata door numbers a save from history in its OWN scope: `event_seq`
+// and an item's `version` are each `MAX + 1` over the rows whose
+// `organization_id` is the writer's. While the column stands, the environment
+// and each organization therefore count independently, and once it goes,
+// `event_seq` and every `(type, name, version)` must be unique. Two rules make
+// them so:
+//
+// - **A promoted row takes its history with it** ({@link foldLineage}). Before
+//   a row leaves its organization, that organization's lineage of the item is
+//   moved above the environment's numbers and becomes environment history. The
+//   door then counts it, so every later environment save of the item, the
+//   ceremony's or the runtime's, numbers above it, and the row's own version
+//   still names its own snapshot.
+// - **Every other organization lineage is laid out above the environment's
+//   just before the column goes** ({@link runHistoryRenumber}, on every apply).
+//   Those lineages belong to rows that stay organization rows (reported under
+//   a wall) or are gone (unchosen rows), so no environment row's version points
+//   into them; the step moves each organization row's version with its own.
+
+const HISTORY = 'sys_metadata_history';
+const COMMITS = 'sys_metadata_commit';
+const OVERLAYS = 'sys_metadata';
+
+const num = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * One range of numbers, moved above `base` without a transaction and safely
+ * re-runnable. The offset puts the new range wholly ABOVE both `base` and the
+ * old range, so a row's own number says whether it moved: the dependents
+ * (commit ranges, overlay rows' versions) move first, each only where it still
+ * lies inside the old range, and the history rows last, in ONE statement. A
+ * re-run finds the history above `base` and moves nothing. Returns the new
+ * top of the range.
+ */
+async function shiftRange(
+  range: { min: number; max: number },
+  base: number,
+  dependents: (offset: number, oldMax: number) => Promise<void>,
+  history: (offset: number) => Promise<void>,
+): Promise<{ top: number; moved: boolean }> {
+  if (range.min > base) return { top: Math.max(base, range.max), moved: false };
+  const offset = Math.max(base, range.max) - range.min + 1;
+  await dependents(offset, range.max);
+  await history(offset);
+  return { top: range.max + offset, moved: true };
+}
+
+/** The history columns the numbering reads, or `null` when the table carries no organization column. */
+async function historyShape(run: Run): Promise<{ version: boolean; seq: boolean } | null> {
+  const hcols = await columnsOf(run, HISTORY);
+  if (!hcols?.has(ORG)) return null;
+  return { version: hcols.has('version'), seq: hcols.has('event_seq') };
+}
+
+/**
+ * Make one organization's lineage of `(type, name)` environment history, so the
+ * row about to be promoted keeps it: its versions and its events each moved, by
+ * one offset that keeps their order, above BOTH the environment's numbers and
+ * every other number the same organization holds, then the rows re-tagged. The
+ * organization's whole history is the base because 17.x numbered `event_seq`
+ * per organization across all its items and holds it under a unique
+ * `(organization_id, event_seq)` index, checked row by row: an offset measured
+ * on the item alone lands on the organization's own other events. Versions take
+ * the same base, as ruled. The base excludes the lineage being moved, so once
+ * moved it sits above the base, and a rerun after a crash anywhere in this moves
+ * nothing twice. Commit ranges are not moved (no reader resolves history
+ * through them).
+ */
+async function foldLineage(run: Run, organizationId: string, type: string, name: string): Promise<void> {
+  const shape = await historyShape(run);
+  if (!shape) return;
+  const sql = run.sql;
+  const h = sql.q(HISTORY, HISTORY);
+  const o = sql.q(ORG, HISTORY);
+  const ty = sql.q('type', HISTORY);
+  const nm = sql.q('name', HISTORY);
+  const mine = `${o} = ? AND ${ty} = ? AND ${nm} = ?`;
+  const args = [organizationId, type, name];
+  if (shape.version) {
+    const v = sql.q('version', HISTORY);
+    const [own] = await sql.read(HISTORY, `SELECT MIN(${v}) AS lo, MAX(${v}) AS hi, COUNT(*) AS n FROM ${h} WHERE ${mine}`, args);
+    if (num(own?.n) > 0) {
+      const [env] = await sql.read(HISTORY, `SELECT MAX(${v}) AS m FROM ${h} WHERE ${o} IS NULL AND ${ty} = ? AND ${nm} = ?`, [type, name]);
+      const [others] = await sql.read(
+        HISTORY,
+        `SELECT MAX(${v}) AS m FROM ${h} WHERE ${o} = ? AND NOT (${ty} = ? AND ${nm} = ?)`,
+        args,
+      );
+      const mcols = await columnsOf(run, OVERLAYS);
+      await shiftRange(
+        { min: num(own!.lo), max: num(own!.hi) },
+        Math.max(num(env?.m), num(others?.m)),
+        async (offset, oldMax) => {
+          if (!mcols?.has(ORG) || !mcols.has('version')) return;
+          const m = sql.q(OVERLAYS, OVERLAYS);
+          const mv = sql.q('version', OVERLAYS);
+          await execute(
+            run,
+            OVERLAYS,
+            `UPDATE ${m} SET ${mv} = ${mv} + ? WHERE ${sql.q(ORG, OVERLAYS)} = ? AND ${sql.q('type', OVERLAYS)} = ? ` +
+              `AND ${sql.q('name', OVERLAYS)} = ? AND ${mv} <= ?`,
+            [offset, ...args, oldMax],
+          );
+        },
+        async (offset) => {
+          await execute(run, HISTORY, `UPDATE ${h} SET ${v} = ${v} + ? WHERE ${mine}`, [offset, ...args]);
+        },
+      );
+    }
+  }
+  if (shape.seq) {
+    const seq = sql.q('event_seq', HISTORY);
+    const [own] = await sql.read(HISTORY, `SELECT MIN(${seq}) AS lo, MAX(${seq}) AS hi, COUNT(*) AS n FROM ${h} WHERE ${mine}`, args);
+    const [env] = await sql.read(HISTORY, `SELECT MAX(${seq}) AS m FROM ${h} WHERE ${o} IS NULL`);
+    const [others] = await sql.read(
+      HISTORY,
+      `SELECT MAX(${seq}) AS m FROM ${h} WHERE ${o} = ? AND NOT (${ty} = ? AND ${nm} = ?)`,
+      args,
+    );
+    const base = Math.max(num(env?.m), num(others?.m));
+    if (num(own?.n) > 0 && num(own!.lo) <= base) {
+      // Wholly above the base and the old range: no row may land on the
+      // environment's numbers, the organization's other events, or a sibling's.
+      const offset = Math.max(base, num(own!.hi)) - num(own!.lo) + 1;
+      await execute(run, HISTORY, `UPDATE ${h} SET ${seq} = ${seq} + ? WHERE ${mine}`, [offset, ...args]);
+    }
+  }
+  await execute(run, HISTORY, `UPDATE ${h} SET ${o} = NULL WHERE ${mine}`, args);
+}
+
+/**
+ * `event_seq` and every `(type, name, version)` unique environment-wide over
+ * the history still tagged to an organization: each organization's event range
+ * moved above the environment's (and the organizations' before it) by ONE
+ * offset, its commit ranges with it; each organization lineage of an item laid
+ * out above the environment's lineage of it (and the ones before it), the
+ * organization's overlay rows of the item with it. Order within an
+ * organization, and the snapshot each row's version names, are unchanged.
+ */
+async function runHistoryRenumber(run: Run): Promise<StepReport> {
+  run.historyVerified = false;
+  const report = await renumberHistory(run);
+  const blockers = await historyDuplicates(run);
+  if (blockers.length) return { ...report, status: 'blocked', blockers };
+  run.historyVerified = true;
+  return report;
+}
+
+/**
+ * `event_seq` and `(type, name, version)` duplicated anywhere in history, as
+ * blockers: `column-drops` runs only once this reads none (the seat's ruling on
+ * uniqueness under a wall). The layout above leaves none between scopes; a
+ * duplicate within one scope is a database's own, and is named, never guessed.
+ */
+async function historyDuplicates(run: Run): Promise<string[]> {
+  const hcols = await columnsOf(run, HISTORY);
+  if (!hcols) return [];
+  const sql = run.sql;
+  const h = sql.q(HISTORY, HISTORY);
+  const out: string[] = [];
+  if (hcols.has('event_seq')) {
+    const seq = sql.q('event_seq', HISTORY);
+    const dup = await sql.read(HISTORY, `SELECT ${seq} AS s FROM ${h} GROUP BY ${seq} HAVING COUNT(*) > 1 ORDER BY ${seq}`);
+    if (dup.length) {
+      const shown = dup.slice(0, 10).map((d) => d.s);
+      const [ty, nm] = ['type', 'name'].map((c) => sql.q(c, HISTORY));
+      const holders = await sql.read(
+        HISTORY,
+        `SELECT ${seq} AS s, ${sql.q('id', HISTORY)} AS id, ${ty} AS t, ${nm} AS n FROM ${h} ` +
+          `WHERE ${seq} IN (${shown.map(() => '?').join(', ')}) ORDER BY ${seq}, ${sql.q('id', HISTORY)}`,
+        shown,
+      );
+      const byNumber = shown.map(
+        (n) => `event_seq ${String(n)}: ${holders.filter((r) => String(r.s) === String(n)).map((r) => `${String(r.t)} ${String(r.n)} (row ${String(r.id)})`).join(', ')}`,
+      );
+      out.push(
+        `${HISTORY}: event_seq is not unique environment-wide — ${byNumber.join('; ')}` +
+          `${dup.length > 10 ? `; and ${dup.length - 10} more number(s)` : ''}. The ceremony never renumbers history ` +
+          'a database numbered twice: the organization_id column is not dropped until every event has its own number. ' +
+          'Remedy: give each of these rows a number no other row holds (or remove the duplicate), then re-run --apply.',
+      );
+    }
+  }
+  if (hcols.has('version')) {
+    const [ty, nm, v] = ['type', 'name', 'version'].map((c) => sql.q(c, HISTORY));
+    const dup = await sql.read(
+      HISTORY,
+      `SELECT ${ty} AS t, ${nm} AS n, ${v} AS v, COUNT(*) AS c FROM ${h} GROUP BY ${ty}, ${nm}, ${v} HAVING COUNT(*) > 1 ORDER BY ${ty}, ${nm}, ${v}`,
+    );
+    if (dup.length) {
+      out.push(
+        `${HISTORY}: a version of an item is held more than once — ` +
+          `${dup.slice(0, 10).map((d) => `${String(d.t)} ${String(d.n)} version ${String(d.v)} (${String(d.c)} rows)`).join('; ')}` +
+          `${dup.length > 10 ? `; and ${dup.length - 10} more` : ''}. The ceremony never renumbers history a database ` +
+          'numbered twice: the organization_id column is not dropped until every version names one snapshot. Remedy: give ' +
+          'each of these rows a version no other row of the item holds (or remove the duplicate), then re-run --apply.',
+      );
+    }
+  }
+  return out;
+}
+
+async function renumberHistory(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { organizationsShifted: 0, lineagesShifted: 0 };
+  const shape = await historyShape(run);
+  if (!shape) return { step: 'history-renumber', status: 'done', summary, blockers: [], notes: [] };
+  const sql = run.sql;
+  const h = sql.q(HISTORY, HISTORY);
+  const o = sql.q(ORG, HISTORY);
+
+  if (shape.version) {
+    const v = sql.q('version', HISTORY);
+    const ty = sql.q('type', HISTORY);
+    const nm = sql.q('name', HISTORY);
+    const mcols = await columnsOf(run, OVERLAYS);
+    const overlaysCarry = !!mcols?.has(ORG) && mcols.has('version');
+    const lineages = await sql.read(
+      HISTORY,
+      `SELECT ${ty} AS t, ${nm} AS n, ${o} AS org, MIN(${v}) AS lo, MAX(${v}) AS hi FROM ${h} ` +
+        `GROUP BY ${ty}, ${nm}, ${o} ORDER BY ${ty}, ${nm}, ${o}`,
+    );
+    const isEnv = (l: Record<string, unknown>): boolean => l.org === null || l.org === undefined || l.org === '';
+    const byItem = new Map<string, Array<Record<string, unknown>>>();
+    for (const l of lineages) {
+      const key = `${String(l.t)}\u0000${String(l.n)}`;
+      byItem.set(key, [...(byItem.get(key) ?? []), l]);
+    }
+    for (const group of byItem.values()) {
+      const env = group.find(isEnv);
+      const orgs = group.filter((l) => !isEnv(l));
+      if (orgs.length === 0 || (!env && orgs.length === 1)) continue;
+      // Above the environment's lineage; with none, the first organization keeps its numbers.
+      let vbase = env ? num(env.hi) : num(orgs[0]!.hi);
+      for (const l of env ? orgs : orgs.slice(1)) {
+        const org = String(l.org);
+        const shifted = await shiftRange(
+          { min: num(l.lo), max: num(l.hi) },
+          vbase,
+          async (offset, oldMax) => {
+            if (!overlaysCarry) return;
+            const m = sql.q(OVERLAYS, OVERLAYS);
+            const mv = sql.q('version', OVERLAYS);
+            await execute(
+              run,
+              OVERLAYS,
+              `UPDATE ${m} SET ${mv} = ${mv} + ? WHERE ${sql.q(ORG, OVERLAYS)} = ? AND ${sql.q('type', OVERLAYS)} = ? ` +
+                `AND ${sql.q('name', OVERLAYS)} = ? AND ${mv} <= ?`,
+              [offset, org, l.t, l.n, oldMax],
+            );
+          },
+          async (offset) => {
+            await execute(run, HISTORY, `UPDATE ${h} SET ${v} = ${v} + ? WHERE ${o} = ? AND ${ty} = ? AND ${nm} = ?`, [
+              offset,
+              org,
+              l.t,
+              l.n,
+            ]);
+          },
+        );
+        vbase = shifted.top;
+        if (shifted.moved) summary.lineagesShifted++;
+      }
+    }
+  }
+
+  if (shape.seq) {
+    const seq = sql.q('event_seq', HISTORY);
+    const ccols = await columnsOf(run, COMMITS);
+    const commitsCarry = !!ccols?.has(ORG) && ccols.has('event_seq_start') && ccols.has('event_seq_end');
+    const envTop = num((await sql.read(HISTORY, `SELECT MAX(${seq}) AS m FROM ${h} WHERE ${o} IS NULL`))[0]?.m);
+    const ranges = await sql.read(
+      HISTORY,
+      `SELECT ${o} AS org, MIN(${seq}) AS lo, MAX(${seq}) AS hi FROM ${h} WHERE ${o} IS NOT NULL GROUP BY ${o} ORDER BY ${o}`,
+    );
+    let base = envTop;
+    for (const r of ranges) {
+      const org = String(r.org);
+      const shifted = await shiftRange(
+        { min: num(r.lo), max: num(r.hi) },
+        base,
+        async (offset, oldMax) => {
+          if (!commitsCarry) return;
+          const c = sql.q(COMMITS, COMMITS);
+          const s0 = sql.q('event_seq_start', COMMITS);
+          const s1 = sql.q('event_seq_end', COMMITS);
+          await execute(
+            run,
+            COMMITS,
+            `UPDATE ${c} SET ${s0} = ${s0} + ?, ${s1} = ${s1} + ? WHERE ${sql.q(ORG, COMMITS)} = ? AND ${s0} <= ?`,
+            [offset, offset, org, oldMax],
+          );
+        },
+        async (offset) => {
+          await execute(run, HISTORY, `UPDATE ${h} SET ${seq} = ${seq} + ? WHERE ${o} = ?`, [offset, org]);
+        },
+      );
+      base = shifted.top;
+      if (shifted.moved) summary.organizationsShifted++;
+    }
+  }
+  // Under `single` the environment is the one tenant: what history is left
+  // tagged to an organization (rows reported or deleted) becomes the
+  // environment's too, so the door counts it and no later save collides.
+  // Under a wall it stays its organization's, renumbered here on every apply.
+  if (run.opts.posture === 'single') {
+    const [left] = await sql.read(HISTORY, `SELECT COUNT(*) AS n FROM ${h} WHERE ${o} IS NOT NULL`);
+    if (num(left?.n) > 0) {
+      await execute(run, HISTORY, `UPDATE ${h} SET ${o} = NULL WHERE ${o} IS NOT NULL`, []);
+      summary.folded = num(left?.n);
+    }
+    const ccols = await columnsOf(run, COMMITS);
+    if (ccols?.has(ORG)) {
+      const c = sql.q(COMMITS, COMMITS);
+      await execute(run, COMMITS, `UPDATE ${c} SET ${sql.q(ORG, COMMITS)} = NULL WHERE ${sql.q(ORG, COMMITS)} IS NOT NULL`, []);
+    }
+  }
+  if (summary.organizationsShifted || summary.lineagesShifted) {
+    run.opts.onProgress?.(
+      `history renumbered: ${summary.organizationsShifted} organization event range(s), ${summary.lineagesShifted} version lineage(s)`,
+    );
+  }
+  return { step: 'history-renumber', status: 'done', summary, blockers: [], notes: [] };
+}
+
+// ── Step 2a: organization customizations and form withdrawals (rulings A) ──
+
+const parseBody = (row: Record<string, unknown>): Record<string, unknown> | null => {
+  const raw = row.metadata;
+  try {
+    const body = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+    // A stored body names its item; the doors judge withdrawals by that name.
+    return { ...(body as Record<string, unknown>), name: (body as Record<string, unknown>).name ?? row.name };
+  } catch {
+    return null;
+  }
+};
+
+/** The served item's own package (`_packageId`), or `null` for a package-less item. */
+const servedPackageOf = (item: Readonly<Record<string, unknown>>): string | null => {
+  const pkg = item._packageId;
+  return typeof pkg === 'string' && pkg !== '' && pkg !== METADATA_OBJECT ? pkg : null;
+};
+
+/** A served item as a body the door accepts: its runtime annotations (`_`-prefixed keys) dropped. */
+const authoredBodyOf = (item: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+  JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(item).filter(([k]) => !k.startsWith('_'))))) as Record<string, unknown>;
+
+/**
+ * Carry every organization-layer withdrawal onto the environment, fail-closed:
+ * each view the environment serves (stored or from code, in every package)
+ * whose name a withdrawing organization row shares, and which still serves the
+ * withdrawn form open, takes the withdrawal (`sharing.enabled: false` on that
+ * form), saved through the metadata door into its own package. The judgement
+ * is the anonymous doors' own (`anonymousFormIntakeWithdrawnIn`), with the
+ * organization rows as the layer: a 17.x organization row replaced the served
+ * body whole, so its stored body is exactly what the doors judged.
+ *
+ * Under `single` a view whose own key an organization row holds is skipped:
+ * that row is promoted in place (its withdrawal travels with it) or is a
+ * conflict the operator resolves, and a door save there would make a conflict
+ * of a promotion.
+ */
+async function carryFormWithdrawals(run: Run, rows: readonly MetadataKeyRow[], summary: Record<string, number>, blockers: string[]): Promise<void> {
+  const t = METADATA_OBJECT;
+  const sql = run.sql;
+  const orgViews = rows.filter((r) => r.type === 'view' && r.organizationId !== null && (r.state ?? 'active') === 'active');
+  if (orgViews.length === 0) return;
+  const layerOf = new Map<string, Record<string, unknown>[]>();
+  const ids = orgViews.map((r) => r.id);
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    const found = await sql.read(
+      t,
+      `SELECT ${['id', 'name', 'metadata'].map((c) => `${sql.q(c, t)} AS ${sql.q(c, t)}`).join(', ')} ` +
+        `FROM ${sql.q(t, t)} WHERE ${sql.q('id', t)} IN (${chunk.map(() => '?').join(', ')})`,
+      chunk,
+    );
+    for (const row of found) {
+      const body = parseBody(row);
+      if (body) layerOf.set(String(row.name), [...(layerOf.get(String(row.name)) ?? []), body]);
+    }
+  }
+  if (layerOf.size === 0) return;
+  const heldByOrganization = new Set(orgViews.map((r) => `${r.name}\u0000${r.packageId ?? ''}`));
+  for (const served of await run.opts.views.list()) {
+    const name = typeof served.name === 'string' ? served.name : undefined;
+    const layer = name === undefined ? undefined : layerOf.get(name);
+    if (!name || !layer) continue;
+    const packageId = servedPackageOf(served);
+    if (run.opts.posture === 'single' && heldByOrganization.has(`${name}\u0000${packageId ?? ''}`)) continue;
+    const body = authoredBodyOf(served);
+    const closing = anonymousFormIntakeCandidates(body).filter((c) => anonymousFormIntakeWithdrawnIn(layer, body, c));
+    if (closing.length === 0) continue;
+    for (const candidate of closing) {
+      candidate.form.sharing = { ...(candidate.form.sharing as Record<string, unknown>), enabled: false };
+    }
+    try {
+      await run.opts.door.save('view', name, body, { packageId });
+      summary.withdrawalsCarried += closing.length;
+      run.opts.onProgress?.(`carried ${closing.length} public-form withdrawal(s) onto the environment view ${name}`);
+    } catch (error) {
+      blockers.push(
+        `An organization withdrew the public form(s) ${closing.map((c) => c.slug).join(', ')} of the view ${name}` +
+          `${packageId ? ` (package ${packageId})` : ''}, and the metadata door refused to carry that withdrawal onto ` +
+          `the environment: ${error instanceof Error ? error.message : String(error)}. Withdraw the form there ` +
+          '(sharing.enabled false), then re-run. An upgrade never reopens a withdrawn form (ruling record 6020151485).',
+      );
+    }
+  }
+}
+
+/** One conflict the operator chose a row for. */
+interface MetadataResolution {
+  conflict: MetadataConflict;
+  chosen: MetadataConflict['candidates'][number];
+}
+
+/** The `metadata` bodies of the given `sys_metadata` rows, by id. */
+async function metadataBodies(run: Run, ids: readonly string[]): Promise<Map<string, Record<string, unknown> | null>> {
+  const t = METADATA_OBJECT;
+  const sql = run.sql;
+  const out = new Map<string, Record<string, unknown> | null>();
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    const found = await sql.read(
+      t,
+      `SELECT ${['id', 'name', 'metadata'].map((c) => `${sql.q(c, t)} AS ${sql.q(c, t)}`).join(', ')} ` +
+        `FROM ${sql.q(t, t)} WHERE ${sql.q('id', t)} IN (${chunk.map(() => '?').join(', ')})`,
+      chunk,
+    );
+    for (const row of found) out.set(String(row.id), parseBody(row));
+  }
+  return out;
+}
+
+/**
+ * Promote one organization's rows in place: each row's lineage becomes
+ * environment history first ({@link foldLineage}), then its `organization_id`
+ * is cleared. Conditioned on the owner, so a rerun promotes nothing twice.
+ */
+async function promoteRows(run: Run, organizationId: string, rows: ReadonlyArray<{ id: string; type: string; name: string }>): Promise<void> {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const item = `${row.type}\u0000${row.name}`;
+    if (seen.has(item)) continue;
+    seen.add(item);
+    await foldLineage(run, organizationId, row.type, row.name);
+  }
+  const t = run.sql.q(METADATA_OBJECT, METADATA_OBJECT);
+  const org = run.sql.q(ORG, METADATA_OBJECT);
+  const id = run.sql.q('id', METADATA_OBJECT);
+  const ids = rows.map((r) => r.id);
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    await execute(
+      run,
+      METADATA_OBJECT,
+      `UPDATE ${t} SET ${org} = NULL WHERE ${org} = ? AND ${id} IN (${chunk.map(() => '?').join(', ')})`,
+      [organizationId, ...chunk],
+    );
+  }
+}
+
+/** The environment row of one overlay key, read by key (the doors' view of it). */
+async function environmentRowOf(run: Run, conflict: MetadataConflict): Promise<Array<{ id: string; body: Record<string, unknown> | null }>> {
+  const sql = run.sql;
+  const t = METADATA_OBJECT;
+  const cols = (await columnsOf(run, t)) ?? new Set<string>();
+  const where = [`${sql.q(ORG, t)} IS NULL`, `${sql.q('type', t)} = ?`, `${sql.q('name', t)} = ?`];
+  const params: unknown[] = [conflict.type, conflict.name];
+  for (const [column, value] of [['package_id', conflict.packageId], ['bundle_member', conflict.bundleMember]] as const) {
+    if (!cols.has(column)) continue;
+    if (value === null) where.push(`(${sql.q(column, t)} IS NULL OR ${sql.q(column, t)} = '')`);
+    else {
+      where.push(`${sql.q(column, t)} = ?`);
+      params.push(value);
+    }
+  }
+  if (cols.has('state')) where.push(`${sql.q('state', t)} = 'active'`);
+  const found = await sql.read(
+    t,
+    `SELECT ${['id', 'name', 'metadata'].map((c) => `${sql.q(c, t)} AS ${sql.q(c, t)}`).join(', ')} FROM ${sql.q(t, t)} ` +
+      `WHERE ${where.join(' AND ')}`,
+    params,
+  );
+  return found.map((row) => ({ id: String(row.id), body: parseBody(row) }));
+}
+
+/**
+ * One `sys_metadata` row takes a body in place, by ONE statement, doing to the
+ * row what the metadata door does on a save (its caller has asked the door's
+ * lock gate first, before any write of the resolution); the row's
+ * stored `_lock` family kept (the door never sets, changes or removes it,
+ * ADR-0010 §3.5), whatever the body carries; and `checksum` restamped from the
+ * written body (`hashSpec`, the door's own), which the repository serves as
+ * the row's version and etag and the view save's no-op check compares. The
+ * version moves too, when given and stored. Returns the body written.
+ */
+async function writeBody(
+  run: Run,
+  row: { id: string; stored: Readonly<Record<string, unknown>> | null | undefined },
+  body: Record<string, unknown>,
+  address: { type: string; name: string; packageId: string | null },
+  version?: number,
+): Promise<Record<string, unknown>> {
+  const written: Record<string, unknown> = Object.fromEntries(Object.entries(body).filter(([k]) => !k.startsWith('_lock')));
+  for (const [k, v] of Object.entries(row.stored ?? {})) if (k.startsWith('_lock')) written[k] = v;
+  const sql = run.sql;
+  const t = METADATA_OBJECT;
+  const cols = (await columnsOf(run, t)) ?? new Set<string>();
+  const sets = [`${sql.q('metadata', t)} = ?`];
+  const params: unknown[] = [JSON.stringify(written)];
+  if (cols.has('checksum')) {
+    sets.push(`${sql.q('checksum', t)} = ?`);
+    params.push(hashSpec(written, address.type));
+  }
+  if (version !== undefined && cols.has('version')) {
+    sets.push(`${sql.q('version', t)} = ?`);
+    params.push(version);
+  }
+  await execute(run, t, `UPDATE ${sql.q(t, t)} SET ${sets.join(', ')} WHERE ${sql.q('id', t)} = ?`, [...params, row.id]);
+  return written;
+}
+
+/** A `sys_metadata` row's stored version, when the table stores one. */
+async function versionOf(run: Run, rowId: string): Promise<number | undefined> {
+  const cols = (await columnsOf(run, METADATA_OBJECT)) ?? new Set<string>();
+  if (!cols.has('version')) return undefined;
+  const [row] = await run.sql.read(
+    METADATA_OBJECT,
+    `SELECT ${run.sql.q('version', METADATA_OBJECT)} AS v FROM ${run.sql.q(METADATA_OBJECT, METADATA_OBJECT)} WHERE ${run.sql.q('id', METADATA_OBJECT)} = ?`,
+    [rowId],
+  );
+  const v = Number(row?.v);
+  return Number.isFinite(v) ? v : undefined;
+}
+
+/** Two bodies define the same item (key order aside). */
+const sameBody = (a: Readonly<Record<string, unknown>>, b: Readonly<Record<string, unknown>>): boolean => {
+  const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
+  return definitionKey(a, keys) === definitionKey(b, keys);
+};
+
+/**
+ * Resolve one chosen conflict so that the key holds exactly ONE environment
+ * row at every point, and a rerun after a crash anywhere in it finishes it:
+ *
+ * 1. The body the environment keeps: the chosen row's, with every public-form
+ *    withdrawal an unchosen row holds applied (fail-closed: a choice never
+ *    reopens a form).
+ * 2. Where the key has an environment row, that row takes the body in place,
+ *    by one UPDATE, even when an organization's row was chosen: the chosen
+ *    row's lineage becomes environment history first ({@link foldLineage}) and
+ *    the environment row takes the chosen row's version, which names that
+ *    body's snapshot. Where the key has none, the chosen organization row is
+ *    promoted in place, its history with it. Not through the door: for an item
+ *    a package ships, the door writes the environment's customization into that
+ *    package's slot, never onto a package-less row of the key. A withdrawal the
+ *    body keeps is then saved through the door as well, which records it in
+ *    history and, for a packaged item, closes the form in the package's slot.
+ * 3. The environment row is read back and must define that body.
+ * 4. The choice is recorded in the checkpoint.
+ * 5. Under `single`, the conflict's organization rows that remain are deleted,
+ *    in ONE statement, by id (ruling B on #23413 Q1). Under a wall nothing is
+ *    deleted: they stay organization rows, reported, and hold the column
+ *    (ruling A on #23413 Q6).
+ *
+ * Returns a blocker, or `null` once resolved.
+ */
+async function resolveMetadataConflict(run: Run, r: MetadataResolution, notes: string[]): Promise<string | null> {
+  const { conflict, chosen } = r;
+  const sql = run.sql;
+  const t = sql.q(METADATA_OBJECT, METADATA_OBJECT);
+  const id = sql.q('id', METADATA_OBJECT);
+  const what = `the ${conflict.type} ${conflict.name}${conflict.packageId ? ` (package ${conflict.packageId})` : ''}`;
+  const others = conflict.candidates.filter((c) => c.id !== chosen.id);
+  const bodies = await metadataBodies(run, conflict.candidates.map((c) => c.id));
+  const chosenBody = bodies.get(chosen.id);
+  if (!chosenBody) {
+    return `The row ${chosen.id} chosen for ${what} has no readable body, so the environment cannot keep it. Choose another row, or repair it, then re-run.`;
+  }
+  const body = JSON.parse(JSON.stringify(chosenBody)) as Record<string, unknown>;
+  let closing: string[] = [];
+  if (conflict.type === 'view') {
+    const layer = others.map((o) => bodies.get(o.id)).filter((b): b is Record<string, unknown> => !!b);
+    const forms = anonymousFormIntakeCandidates(body).filter((c) => anonymousFormIntakeWithdrawnIn(layer, body, c));
+    for (const candidate of forms) {
+      candidate.form.sharing = { ...(candidate.form.sharing as Record<string, unknown>), enabled: false };
+    }
+    closing = forms.map((c) => c.slug);
+  }
+
+  const environment = await environmentRowOf(run, conflict);
+  if (environment.length > 1) {
+    return (
+      `${what} has ${environment.length} active environment rows (${environment.map((e) => e.id).join(', ')}), so no ` +
+      'single row can take the chosen body. Delete all but one, then re-run.'
+    );
+  }
+  const env = environment[0];
+  const address = { type: conflict.type, name: conflict.name, packageId: conflict.packageId };
+  // The door's lock gate, asked ONCE and before any write of this resolution
+  // (the history fold, the promotion, the in-place write): a locked item stays
+  // locked, and a refusal leaves nothing written.
+  const writes = env ? !(env.body && sameBody(env.body, body)) : chosen.organizationId !== null;
+  if (writes) {
+    const verdict = await run.opts.lock.verdict(address.type, address.name, address.packageId);
+    if (!verdict.editable) {
+      return (
+        `${what} could not take the body of the chosen row ${chosen.id}: the item is locked (_lock=${verdict.lock ?? 'unknown'}` +
+        `${verdict.lockReason ? `: ${verdict.lockReason}` : ''}), so the metadata door would refuse the write, and the ` +
+        'ceremony does not make it. Nothing was written or deleted; unlock the item, or choose the row the environment ' +
+        'already holds, then re-run.'
+      );
+    }
+  }
+  // The body the key's environment row must read back with: the chosen body, as written.
+  let expected: Record<string, unknown> = env?.body && sameBody(env.body, body) ? env.body : body;
+  try {
+    if (!env) {
+      if (chosen.organizationId !== null) {
+        await promoteRows(run, chosen.organizationId, [{ id: chosen.id, type: conflict.type, name: conflict.name }]);
+        if (closing.length) {
+          expected = await writeBody(run, { id: chosen.id, stored: chosenBody }, body, address);
+        }
+      }
+    } else if (!(env.body && sameBody(env.body, body))) {
+      let version: number | undefined;
+      if (chosen.organizationId !== null) {
+        await foldLineage(run, chosen.organizationId, conflict.type, conflict.name);
+        version = await versionOf(run, chosen.id);
+      }
+      expected = await writeBody(run, { id: env.id, stored: env.body }, body, address, version);
+    }
+    // The row as written (its stored lock family kept), so a rerun's door save meets the same body.
+    if (closing.length) await run.opts.door.save(conflict.type as never, conflict.name, expected, { packageId: conflict.packageId });
+  } catch (error) {
+    return (
+      `${what} could not take the body of the chosen row ${chosen.id}` +
+      `${closing.length ? ` (with the public form(s) ${closing.join(', ')} an unchosen row withdraws, withdrawn)` : ''}: ` +
+      `${error instanceof Error ? error.message : String(error)}. Nothing was deleted; fix the cause, then re-run.`
+    );
+  }
+  const after = await environmentRowOf(run, conflict);
+  if (after.length !== 1 || !after[0]!.body || !sameBody(after[0]!.body, expected)) {
+    throw new Error(
+      `${what} did not read back as one environment row defining the chosen row ${chosen.id}'s body; none of the ` +
+        `rows ${others.map((o) => o.id).join(', ')} was deleted.`,
+    );
+  }
+  if (run.checkpoint) {
+    run.checkpoint.metadataChoicesApplied = [...new Set([...(run.checkpoint.metadataChoicesApplied ?? []), chosen.id])];
+    await run.opts.ledger.write(run.checkpoint, { complete: false, blocking: 0, advisory: 0 });
+  }
+
+  const keeper = after[0]!.id;
+  const leaving = conflict.candidates.filter((c) => c.organizationId !== null && c.id !== keeper).map((c) => c.id);
+  if (run.opts.posture !== 'single') {
+    for (const remaining of conflict.candidates.filter((c) => c.organizationId !== null && c.id !== keeper)) {
+      notes.push(
+        `Remaining: ${METADATA_OBJECT} row ${remaining.id} (organization ${remaining.organizationId}` +
+          `${remaining.id === chosen.id ? `, the chosen row, whose body the environment row ${keeper} now holds` : ''}) ` +
+          `of ${what} blocks column-drops on ${METADATA_OBJECT}: under the ${run.opts.posture} posture the ceremony ` +
+          'never deletes it. Remedy: check the environment row, then delete this row yourself, or keep it and the ' +
+          'column stays; re-run --apply.',
+      );
+    }
+    run.opts.onProgress?.(`promotion: ${what} is defined by row ${chosen.id}'s body; nothing deleted under a wall`);
+    return null;
+  }
+  if (leaving.length) {
+    const where = `${id} IN (${leaving.map(() => '?').join(', ')})`;
+    await execute(run, METADATA_OBJECT, `DELETE FROM ${t} WHERE ${where}`, leaving);
+    if ((await sql.count(METADATA_OBJECT, `SELECT COUNT(*) AS n FROM ${t} WHERE ${where}`, leaving)) !== 0) {
+      throw new Error(`The delete of the organization rows of ${what} left rows behind.`);
+    }
+    run.deleted.set(METADATA_OBJECT, (run.deleted.get(METADATA_OBJECT) ?? 0) + leaving.length);
+  }
+  run.opts.onProgress?.(`promotion: ${what} is defined by row ${chosen.id}'s body; ${leaving.length} organization row(s) deleted`);
+  return null;
+}
+
+async function runMetadataPromotion(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { withdrawalsCarried: 0, promoted: 0, conflicts: 0, chosen: 0, organizationRowsDeleted: 0, reported: 0 };
+  const blockers: string[] = [];
+  const notes: string[] = [];
+  const cols = await columnsOf(run, METADATA_OBJECT);
+  if (!cols?.has(ORG)) return { step: 'metadata-promotion', status: 'done', summary, blockers, notes };
+  const rows = await readMetadataKeyRows(run.sql, METADATA_OBJECT, cols);
+  const orgRows = rows.filter((r) => r.organizationId !== null);
+  if (orgRows.length === 0) return { step: 'metadata-promotion', status: 'done', summary, blockers, notes };
+
+  // Withdrawals first, under every posture: closing a form is never a leak.
+  await carryFormWithdrawals(run, rows, summary, blockers);
+
+  // Under a wall nothing is promoted unless the operator names the row
+  // (--metadata-choice): one organization's customization is not the
+  // environment's, and only a knowing choice makes it so (ruling A on #23413 Q6).
+  const walled = run.opts.posture !== 'single';
+  const choices = new Set(run.opts.metadataChoices ?? []);
+  const { promotable, conflicts } = groupMetadataKeyRows(rows);
+
+  const resolutions: MetadataResolution[] = [];
+  let heldInConflicts = 0;
+  for (const conflict of conflicts) {
+    const chosen = conflict.candidates.find((c) => choices.has(c.id));
+    if (chosen) {
+      resolutions.push({ conflict, chosen });
+      continue;
+    }
+    summary.conflicts++;
+    const listing =
+      `The ${conflict.type} ${conflict.name}` +
+      `${conflict.packageId ? ` (package ${conflict.packageId})` : ''}${conflict.bundleMember ? ` [${conflict.bundleMember}]` : ''} ` +
+      `is held by ${conflict.candidates.length} rows once the organization leaves its key: ` +
+      conflict.candidates.map((c) => `${c.id} (${c.organizationId ? `organization ${c.organizationId}` : 'environment'}, ${c.state ?? 'no state'})`).join(', ');
+    if (walled) {
+      // Under a wall the organization rows stay where they are, reported;
+      // they hold the column, and a choice promotes one knowingly.
+      heldInConflicts += conflict.candidates.filter((c) => c.organizationId !== null).length;
+      notes.push(`${listing}. Under the ${run.opts.posture} posture they stay organization rows; choose one with --metadata-choice ROW_ID to make it the environment's.`);
+      continue;
+    }
+    blockers.push(
+      `${listing}. Which one the environment keeps is never guessed: choose one with --metadata-choice ROW_ID, then re-run. ` +
+        'The organization rows are deleted only once the environment row defines the chosen body and reads back' +
+        (conflict.type === 'view' ? ', and a public form any of them withdraws stays withdrawn there.' : '.'),
+    );
+  }
+
+  const lone = promotable.filter((row) => !walled || choices.has(row.id));
+  const byOrganization = new Map<string, MetadataKeyRow[]>();
+  for (const row of lone) byOrganization.set(row.organizationId!, [...(byOrganization.get(row.organizationId!) ?? []), row]);
+  for (const [organizationId, own] of byOrganization) {
+    await promoteRows(run, organizationId, own);
+    summary.promoted += own.length;
+  }
+  for (const resolution of resolutions) {
+    const deletedBefore = run.deleted.get(METADATA_OBJECT) ?? 0;
+    const blocker = await resolveMetadataConflict(run, resolution, notes);
+    if (blocker) {
+      blockers.push(blocker);
+      continue;
+    }
+    summary.chosen++;
+    summary.organizationRowsDeleted += (run.deleted.get(METADATA_OBJECT) ?? 0) - deletedBefore;
+  }
+
+  if (walled) {
+    const held = promotable.length - lone.length;
+    summary.reported = held + heldInConflicts;
+    if (held > 0) {
+      notes.push(
+        `${held} organization-scoped presentational ${METADATA_OBJECT} row(s) are reported, not promoted: under the ` +
+          `${run.opts.posture} posture one organization's customization is not the environment's. Promote one ` +
+          `knowingly with --metadata-choice ROW_ID; until then they keep the ${METADATA_OBJECT} column from being dropped.`,
+      );
+    }
+  }
+  if (summary.promoted) run.opts.onProgress?.(`promotion: ${summary.promoted} organization customization(s) are environment rows now`);
+  return { step: 'metadata-promotion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+}
+
+/**
+ * Refuse, before anything is written, a `--metadata-choice` that names no row
+ * awaiting a choice, or two candidates of one conflict. A row awaits a choice
+ * when it is a candidate of a listed conflict or an organization's row its key
+ * alone holds. So that a rerun after a crash finishes with the same flags, a
+ * choice this ceremony already applied is accepted too: its row is now the
+ * key's only environment row, or it is gone and the checkpoint records it.
+ */
+async function validateMetadataChoices(run: Run, applied: ReadonlySet<string>): Promise<void> {
+  const choices = run.opts.metadataChoices ?? [];
+  if (choices.length === 0) return;
+  const cols = await columnsOf(run, METADATA_OBJECT);
+  const rows = cols?.has(ORG) ? await readMetadataKeyRows(run.sql, METADATA_OBJECT, cols) : [];
+  const { promotable, conflicts } = groupMetadataKeyRows(rows);
+  const keyOf = (c: MetadataConflict): string =>
+    `${c.type} ${c.name}${c.packageId ? ` (package ${c.packageId})` : ''}${c.bundleMember ? ` [${c.bundleMember}]` : ''}`;
+  const groupOf = new Map<string, string>();
+  for (const c of conflicts) for (const cand of c.candidates) groupOf.set(cand.id, keyOf(c));
+  for (const row of promotable) groupOf.set(row.id, `the ${row.type} ${row.name} (row ${row.id})`);
+  const present = new Set(rows.map((r) => r.id));
+  const listed = conflicts.length
+    ? conflicts.map((c) => `${keyOf(c)}: ${c.candidates.map((cand) => cand.id).join(', ')}`).join('; ')
+    : 'none';
+  const seen = new Map<string, string>();
+  for (const id of choices) {
+    const group = groupOf.get(id);
+    if (!group) {
+      const resolved = rows.some((r) => r.id === id && r.organizationId === null) || (applied.has(id) && !present.has(id));
+      if (resolved) continue;
+      throw new MetadataChoiceRefusal(
+        `--metadata-choice ${id} names no row awaiting a choice. The conflicts are: ${listed}; or any organization ` +
+          'row of a presentational type its key alone holds.',
+      );
+    }
+    const other = seen.get(group);
+    if (other !== undefined && other !== id) {
+      throw new MetadataChoiceRefusal(`--metadata-choice ${other} and ${id} both choose for ${group}; choose exactly one row per conflict.`);
+    }
+    seen.set(group, id);
+  }
 }
 
 // ── Step 2b: template promotion (ruling C) ──────────────────────────────────
@@ -1234,6 +2188,18 @@ const GRANT_SET_ID_INDEXES: readonly RetiredIndex[] = [
 ];
 
 async function runColumnDrops(run: Run): Promise<StepReport> {
+  if (!run.historyVerified) {
+    return {
+      step: 'column-drops',
+      status: 'blocked',
+      summary: { dropped: 0, due: 0 },
+      blockers: [
+        'column-drops runs only after this apply\'s history-renumber verified sys_metadata_history\'s event_seq and ' +
+          'versions unique environment-wide, and it did not. Re-run --apply.',
+      ],
+      notes: [],
+    };
+  }
   const plan = await planFor(run);
   const blockers: string[] = [];
   const due: ColumnDrop[] = [];
@@ -1308,10 +2274,12 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
 const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   attribution: runAttribution,
   'authored-conversion': runAuthoredConversion,
+  'metadata-promotion': runMetadataPromotion,
   'template-promotion': runTemplatePromotion,
   'settings-move': runSettingsMove,
   rewrite: runRewrite,
   'mirror-deletion': runMirrorDeletion,
+  'history-renumber': runHistoryRenumber,
   'column-drops': runColumnDrops,
 };
 
@@ -1386,6 +2354,51 @@ function refuseUnreviewedPlan(plan: OrganizationOwnershipPlan, reviewed: Reviewe
 }
 
 /**
+ * Refuse, before anything is written, a choice whose conflict group is not the
+ * one the reviewed plan listed. A `--metadata-choice` or `--template-choice`
+ * deletes the other rows of its group, so the apply deletes only within a group
+ * the operator reviewed, and only while it holds exactly the reviewed rows: a
+ * row that joined the group since, or one gone from it, refuses the apply with
+ * the group, the rows added and the rows gone. A choice in no group (a lone
+ * row, or a conflict an earlier run resolved) deletes nothing and is not judged.
+ */
+function refuseUnreviewedChoices(plan: OrganizationOwnershipPlan, opts: ApplyOptions): void {
+  const current = reviewedConflictsOf(plan);
+  const reviewed = opts.reviewedPlan.conflicts ?? [];
+  const flagOf = { metadata: '--metadata-choice', template: '--template-choice' } as const;
+  for (const [kind, choices] of [['metadata', opts.metadataChoices ?? []], ['template', opts.templateChoices ?? []]] as const) {
+    for (const choice of choices) {
+      const group = current.find((g) => g.kind === kind && g.candidates.includes(choice));
+      if (!group) continue;
+      const listed = reviewed.find((g) => g.kind === kind && g.key === group.key);
+      const was = new Set(listed?.candidates ?? []);
+      const added = group.candidates.filter((id) => !was.has(id));
+      const gone = [...was].filter((id) => !group.candidates.includes(id));
+      if (listed && added.length === 0 && gone.length === 0) continue;
+      throw new ReviewedPlanRefusal(
+        'plan-conflict-mismatch',
+        `${flagOf[kind]} ${choice} resolves the ${kind === 'metadata' ? 'customization' : 'template'} conflict ` +
+          `${group.key}, which now holds ${group.candidates.join(', ')}` +
+          (listed
+            ? `, while the plan file ${opts.reviewedPlan.file} reviewed ${listed.candidates.join(', ')}` +
+              `${added.length ? ` (added since: ${added.join(', ')})` : ''}${gone.length ? ` (gone since: ${gone.join(', ')})` : ''}`
+            : `, and the plan file ${opts.reviewedPlan.file} lists no such conflict`) +
+          '. A choice deletes the other rows of its conflict, so it deletes only rows the reviewed plan listed. ' +
+          'Nothing was written. Run the plan again, review the conflict, and pass the new file with --plan-file.',
+        {
+          file: opts.reviewedPlan.file,
+          flag: flagOf[kind],
+          choice,
+          conflict: group.key,
+          reviewed: listed ? listed.candidates.join(',') : '',
+          current: group.candidates.join(','),
+        },
+      );
+    }
+  }
+}
+
+/**
  * Run the ceremony's apply: the fates in order, resuming from the checkpoint,
  * then the post-check. Throws only for a failure mid-write (the checkpoint
  * holds every step finished before it) or a plan refusal; every blocker is in
@@ -1413,10 +2426,15 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
   const before = run.plan;
 
   const stored = await opts.ledger.read();
+  // The applied choices outlive a new digest: their rows are already resolved.
+  const applied = stored?.metadataChoicesApplied?.length ? { metadataChoicesApplied: [...stored.metadataChoicesApplied] } : {};
   const checkpoint: CeremonyCheckpoint =
     stored && stored.ceremony === 'ADR-0131 D10' && stored.inventoryDigest === before.inventoryDigest
-      ? { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, completed: { ...stored.completed } }
-      : { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, completed: {} };
+      ? { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, completed: { ...stored.completed }, ...applied }
+      : { ceremony: 'ADR-0131 D10', inventoryDigest: before.inventoryDigest, completed: {}, ...applied };
+  await validateMetadataChoices(run, new Set(checkpoint.metadataChoicesApplied ?? []));
+  refuseUnreviewedChoices(run.plan, opts);
+  run.checkpoint = checkpoint;
   const resumedFrom = CEREMONY_STEPS.filter((s) => checkpoint.completed[s]);
   const steps: StepReport[] = [];
   const superseded = stored && stored.inventoryDigest !== before.inventoryDigest
@@ -1437,6 +2455,24 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     }
     const done = checkpoint.completed[step];
     if (done) {
+      // `history-renumber` runs again even when checkpointed: it is
+      // idempotent, and an environment write made since the earlier run must
+      // not keep a number that run handed an organization.
+      if (step === 'history-renumber') {
+        const again = await RUNNERS[step](run);
+        if (again.status !== 'done') {
+          steps.push(again);
+          stopped = true;
+          continue;
+        }
+        if (Object.values(again.summary).some((n) => n > 0)) {
+          steps.push(again);
+          checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };
+          await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+          run.columns.clear();
+          continue;
+        }
+      }
       steps.push({ step, status: 'checkpointed', summary: done.summary, blockers: [], notes: [] });
       continue;
     }
@@ -1535,5 +2571,11 @@ export function checkpointFromDetails(details: unknown): CeremonyCheckpoint | nu
   }
   const cp = (parsed as { checkpoint?: unknown } | null)?.checkpoint as CeremonyCheckpoint | undefined;
   if (!cp || cp.ceremony !== 'ADR-0131 D10' || typeof cp.inventoryDigest !== 'string' || typeof cp.completed !== 'object') return null;
-  return { ceremony: cp.ceremony, inventoryDigest: cp.inventoryDigest, completed: { ...cp.completed } };
+  const applied = Array.isArray(cp.metadataChoicesApplied) ? cp.metadataChoicesApplied.filter((x): x is string => typeof x === 'string') : [];
+  return {
+    ceremony: cp.ceremony,
+    inventoryDigest: cp.inventoryDigest,
+    completed: { ...cp.completed },
+    ...(applied.length ? { metadataChoicesApplied: applied } : {}),
+  };
 }
