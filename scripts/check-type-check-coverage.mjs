@@ -6991,10 +6991,14 @@ function selfTest() {
       if (!(free.verdict.kind === 'ran' && free.verdict.exit === 0 && free.run.status === 0 && existsSync(marker('free')))) {
         failures.push(`verify lock — a free lock must run the build and pass 0 out: got ${JSON.stringify(free.verdict)}, status ${free.run.status}`);
       }
-      // Whether this host can lock at all is the entry point's own judgement,
-      // read off the run above -- a host with no usable flock runs every command
-      // in its declared unlocked mode, where there is no contention to observe.
-      const hostLocks = free.verdict.kind === 'ran' && free.verdict.mode === 'locked';
+      // Whether this host can lock at all is the entry point's own judgement --
+      // a host with no usable flock runs every command in its declared unlocked
+      // mode, where there is no contention to observe. Asked of the entry point
+      // DIRECTLY, never through the wrapper under test: a wrapper that stopped
+      // taking the lock must not be able to talk this battery out of its
+      // contention cases by reading as a host without flock.
+      const probe = spawnSync('bash', [join(ROOT, VERIFY_LOCK_ENTRY), '--', 'true'], { encoding: 'utf8', env: lockEnv });
+      const hostLocks = readLockVerdict(probe.stderr).mode === 'locked';
 
       const failed = runUnderVerifyLock(standIn('failed', 7), { env: lockEnv });
       registerCase('verify-lock cases (#23470)');
