@@ -142,7 +142,9 @@ function servedViews(c: ReturnType<typeof catalog>, code: Array<Record<string, u
       for (const item of code) put(item, (item._packageId as string | undefined) ?? null);
       const hasTable = rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sys_metadata'`).length > 0;
       if (hasTable) {
-        for (const row of rows(`SELECT * FROM sys_metadata WHERE type = 'view' AND organization_id IS NULL AND state = 'active'`)) {
+        // Once column-drops has run, every row left is the environment's.
+        const scoped = rows(`SELECT name FROM pragma_table_info('sys_metadata') WHERE name = 'organization_id'`).length > 0;
+        for (const row of rows(`SELECT * FROM sys_metadata WHERE type = 'view' AND state = 'active'${scoped ? ' AND organization_id IS NULL' : ''}`)) {
           put(JSON.parse(String(row.metadata)) as Record<string, unknown>, (row.package_id as string | null) ?? null);
         }
       }
@@ -406,6 +408,7 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(report.steps.map((s) => [s.step, s.status])).toEqual([
       ['attribution', 'done'],
       ['authored-conversion', 'done'],
+      ['metadata-promotion', 'done'],
       ['template-promotion', 'done'],
       ['settings-move', 'done'],
       ['rewrite', 'done'],
@@ -772,8 +775,11 @@ describe('ADR-0131 D10 --apply — organization customizations and form withdraw
   const md = (id: string, org: string | null, type: string, name: string, body: Record<string, unknown>, pkg: string | null = null): string =>
     `('${id}', ${org === null ? 'NULL' : `'${org}'`}, '${type}', '${name}', 'active', ${pkg === null ? 'NULL' : `'${pkg}'`}, NULL, '${JSON.stringify(body)}')`;
   const step = (report: OrganizationOwnershipApplyReport) => report.steps.find((s) => s.step === 'metadata-promotion')!;
-  const owners = (): Array<[unknown, unknown]> =>
-    rows('SELECT id, organization_id FROM sys_metadata ORDER BY id').map((r) => [r.id, r.organization_id]);
+  /** Each row's owner; once column-drops has dropped the column, every row reads as the environment's (`null`). */
+  const owners = (): Array<[unknown, unknown]> => {
+    const scoped = rows(`SELECT name FROM pragma_table_info('sys_metadata') WHERE name = 'organization_id'`).length > 0;
+    return rows(`SELECT id${scoped ? ', organization_id' : ''} FROM sys_metadata ORDER BY id`).map((r) => [r.id, r.organization_id ?? null]);
+  };
 
   it('under single, an organization customization no other row holds becomes an environment row in place', async () => {
     metadataTable([
@@ -799,7 +805,7 @@ describe('ADR-0131 D10 --apply — organization customizations and form withdraw
     const report = await apply(c, ledger());
 
     expect(step(report).status).toBe('blocked');
-    expect(step(report).blockers.join('\n')).toMatch(/view deal_list is held by 2 rows .*md_org \(organization org_default, active\), md_env \(environment, active\)/);
+    expect(step(report).blockers.join('\n')).toMatch(/view deal_list is held by 2 rows .*md_env \(environment, active\), md_org \(organization org_default, active\)/);
     expect(writes.filter((w) => /sys_metadata/.test(w))).toEqual([]);
     expect(owners()).toEqual([['md_env', null], ['md_org', 'org_default']]);
     expect(c.viewSaves).toEqual([]);

@@ -727,6 +727,11 @@ async function applyAnchor(
 }
 
 async function planCategory(sql: Sql, table: string, columns: ReadonlySet<string>, category: InventoryCategory): Promise<{ rows: number; groups?: number }> {
+  // A category that selects on the organization column has no rows left once
+  // the column is gone (the ceremony's post-check reads a dropped table too).
+  if (!columns.has(ORG) && conditionColumns(category.where).includes(ORG)) {
+    return category.conflictBy ? { rows: 0, groups: 0 } : { rows: 0 };
+  }
   const t = sql.q(table, table);
   const where = predicateSql(sql, table, columns, category.where ?? []);
   if (!category.conflictBy) {

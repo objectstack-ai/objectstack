@@ -140,6 +140,19 @@ describe('ADR-0131 D10 preflight — the per-table plan', () => {
       'organization-scoped-other-types': 1,
       'environment-overlay-duplicates': 1, // (view, deal_list, no package) twice once the organization leaves the key
     });
+    // The conflict list the promotion blocks on, by row id (rulings A on #22011 / #22008).
+    expect(metadata.metadataConflicts).toEqual([
+      {
+        type: 'view',
+        name: 'deal_list',
+        packageId: null,
+        bundleMember: null,
+        candidates: [
+          { id: 'md_2', organizationId: 'org_default', state: 'active' },
+          { id: 'md_3', organizationId: 'org_b', state: 'active' },
+        ],
+      },
+    ]);
 
     expect(table(p, 'sys_position')).toMatchObject({
       fate: 'mirror-deletion',

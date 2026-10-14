@@ -88,7 +88,7 @@ import {
     stripInjectedSystemColumns,
     // [#7774] The i18n-bundle identity table (#7730) and its reader. A type
     // listed here is identified by `(name, <field>)`, so every merge in the
-    // unscoped `/meta` list keys on the pair — see {@link metaItemKey}.
+    // unscoped `/meta` list keys on the pair — see {@link mergePackageAwareOverlay}.
     ITEM_KEY_DISCRIMINATORS,
     itemDiscriminator,
     type MetadataItem,
@@ -2387,62 +2387,6 @@ function isShippedViewItem(artifact: unknown): boolean {
     if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) return false;
     const viewKind = (artifact as { viewKind?: unknown }).viewKind;
     return typeof viewKind === 'string' && viewKind !== '';
-}
-
-/**
- * ADR-0048 (#1828) — composite dedup identity for the unscoped metadata list.
- *
- * Two installed packages may legitimately ship the same `type`/`name`
- * (e.g. `page/home`); the SchemaRegistry already stores them under distinct
- * `${packageId}:${name}` keys. Any list-merge that deduplicates by bare `name`
- * collapses the two packages' rows into one (last-write-wins), which is the
- * bug this key closes. A `NUL` separator keeps names containing `:` unambiguous.
- *
- * [#7774] `discriminator` is a third component, and it is OPTIONAL on purpose:
- * omitting it produces the exact two-component string this function has always
- * produced, so every type identified by `(package, name)` keeps a
- * byte-identical key and this change's blast radius is provable rather than
- * argued. It is supplied only for a type listed in `ITEM_KEY_DISCRIMINATORS`
- * (`email_template` today), whose identity the spec declares as
- * `(name, locale)` — an i18n bundle. Without it the second locale's
- * `Map.set` overwrote the first and `GET /meta/email_template` served one
- * member of a bundle it had every member of.
- */
-function metaItemKey(
-    packageId: string | null | undefined,
-    name: unknown,
-    discriminator?: string,
-): string {
-    const base = `${packageId ?? ''}\u0000${String(name)}`;
-    return discriminator === undefined ? base : `${base}\u0000${discriminator}`;
-}
-
-/**
- * [#7774] The bundle discriminator a STORED `sys_metadata` row declares, read
- * off the row's serialized body.
- *
- * The row's own COLUMNS cannot answer this: `sys_metadata`'s overlay
- * uniqueness is `(type, name, organization_id, package_id)` — declared on
- * `idx_sys_metadata_overlay_active` in `sys-metadata.object.ts` — and the
- * table has no locale column at all. An `email_template` overlay's locale
- * lives inside the `metadata` JSON payload, which is where its identity is.
- * So a row-level merge keying on columns alone cannot tell two members of one
- * bundle apart, and the body has to be consulted.
- *
- * The parse is skipped entirely for an undiscriminated type (all but one
- * today): `undefined` comes back before any JSON work, so this costs nothing
- * on the paths it does not serve. A body that fails to parse falls back to the
- * canonical member instead of throwing — the caller a few lines on parses it
- * again for real, and that failure is the one that should surface.
- */
-function storedRowDiscriminator(type: string, record: unknown): string | undefined {
-    if (!ITEM_KEY_DISCRIMINATORS[type]) return undefined;
-    const raw = (record as { metadata?: unknown } | null | undefined)?.metadata;
-    let body: unknown = raw;
-    if (typeof raw === 'string') {
-        try { body = JSON.parse(raw); } catch { body = undefined; }
-    }
-    return itemDiscriminator(type, body);
 }
 
 /**
