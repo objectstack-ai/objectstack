@@ -17,5 +17,5 @@ The v18 organization-ownership ceremony refuses any platform-prefixed table that
 
 ```bash
 os migrate organization-ownership --fate-supplement host-fates.json --out plan.json
-os migrate organization-ownership --fate-supplement host-fates.json --apply --backup-taken --plan-file plan.json
+os migrate organization-ownership --fate-supplement host-fates.json --apply --backup-taken
 ```
