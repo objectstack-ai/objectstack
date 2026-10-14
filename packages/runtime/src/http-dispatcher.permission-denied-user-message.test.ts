@@ -155,9 +155,16 @@ describe('[#13623] the dispatcher denial door carries `userMessage`', () => {
             getObjects: vi.fn().mockReturnValue({}),
             registry: { getObject: vi.fn().mockReturnValue({ name: 'app_parent_object' }) },
         };
+        // ADR-0138 D2: `/data` refuses an anonymous caller 401 as its first
+        // statement, and `dispatch()` re-resolves the caller from the request —
+        // so the kernel answers a session for it in the shape
+        // `resolveExecutionContext` reads. Only identity is stubbed; the route,
+        // the engine's denial and every expectation are unchanged. Anonymity is
+        // pinned in `domains/domain-floor-anonymous-deny.test.ts`.
+        const auth = { api: { getSession: async () => ({ user: { id: 'u_test' } }) } };
         const kernel = {
             context: {
-                getService: (name: string) => (name === 'objectql' ? mockObjectQL : null),
+                getService: (name: string) => (name === 'objectql' ? mockObjectQL : name === 'auth' ? auth : null),
             },
         } as any;
         dispatcher = new HttpDispatcher(kernel);

@@ -63,7 +63,9 @@ function subPathAsTheCatchAllDerivesIt(url: string): string {
  * A kernel that provides NO services at all.
  *
  * Deliberate: it makes "which domain claimed the path" the only variable. A
- * claimed `/data` answers 503 SERVICE_UNAVAILABLE (the domain ran and found no
+ * claimed `/data` answers the domain's own first statement — since ADR-0138 D2
+ * the anonymous floor, 401 UNAUTHENTICATED, for this caller with no session
+ * (it answered 503 SERVICE_UNAVAILABLE before, from the body, which found no
  * data service); an unclaimed path answers 404 ROUTE_NOT_FOUND. Those two are
  * the whole signal, and a kernel with services wired would blur them.
  */
@@ -104,9 +106,12 @@ describe('scoped-URL prefix — the environment-scoped URL reaches a dispatcher 
         expect((await get(`${PREFIX}/health`)).status).toBe(200);
 
         // `/data` has no exact/short-circuit answer, so it proves the DOMAIN ran
-        // rather than merely that some route matched: the domain body is what
-        // raises 503 on a missing data service.
-        await expect(get(`${PREFIX}/data/task`)).rejects.toMatchObject({ statusCode: 503 });
+        // rather than merely that some route matched: the domain's first
+        // statement is what answers 401 UNAUTHENTICATED to a caller with no
+        // session — no dispatcher stage ahead of the registry answers it.
+        const data = await get(`${PREFIX}/data/task`);
+        expect(data.status).toBe(401);
+        expect(data.code).toBe('UNAUTHENTICATED');
     });
 
     it('NEGATIVE CONTROL: an unclaimed path answers 404 ROUTE_NOT_FOUND — the shape "matched no domain" takes', async () => {
@@ -117,7 +122,9 @@ describe('scoped-URL prefix — the environment-scoped URL reaches a dispatcher 
 
     it('the environment-scoped URL is stripped and reaches the same domain as the unscoped one', async () => {
         expect((await get(`${PREFIX}/environments/${ENV_ID}/health`)).status).toBe(200);
-        await expect(get(`${PREFIX}/environments/${ENV_ID}/data/task`)).rejects.toMatchObject({ statusCode: 503 });
+        const data = await get(`${PREFIX}/environments/${ENV_ID}/data/task`);
+        expect(data.status).toBe(401);
+        expect(data.code).toBe('UNAUTHENTICATED');
     });
 
     it('parses the environment id off the SAME prefix it strips — the two readings must not drift again', async () => {
