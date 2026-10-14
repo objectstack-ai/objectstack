@@ -2115,20 +2115,27 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     expect(deletes()).toEqual([]);
   });
 
-  it('control: composed, or not said, every unresolved name keeps its remedy — the composition is the boot\'s answer, never inferred', async () => {
+  it.each([
+    ['composed', { composed: true } as const],
+    ['not said', undefined],
+  ])('control (%s): authored-conversion keeps the remedy — the composition is the boot\'s answer, never inferred', async (_label, securityPlugin) => {
+    db.exec(v17Bindings);
+    const conversion = step(await apply(catalog(), ledger(), { securityPlugin }), 'authored-conversion');
+    expect(blockerOf(conversion, 'position everyone ')).toMatch(/or remove the bindings/);
+    expect(conversion.blockers.join('\n')).not.toContain(COMPOSITION);
+  });
+
+  it.each([
+    ['composed', { composed: true } as const],
+    ['not said', undefined],
+  ])('control (%s), under a wall: the rewrite keeps every remedy', async (_label, securityPlugin) => {
     db.exec(`
       INSERT INTO sys_user_permission_set VALUES ('grant_admin', 'org_default', 'usr_admin', NULL, 'admin_full_access');
       ${v17Bindings}
     `);
-    for (const securityPlugin of [{ composed: true } as const, undefined]) {
-      writes = [];
-      const conversion = step(await apply(catalog(), ledger(), { securityPlugin }), 'authored-conversion');
-      expect(blockerOf(conversion, 'position everyone ')).toMatch(/or remove the bindings/);
-      const walled = await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin });
-      const rewrite = step(walled, 'rewrite');
-      expect(blockerOf(rewrite, 'the permission set admin_full_access,')).toMatch(/or remove the grants/);
-      expect(blockerOf(rewrite, 'position everyone ')).toMatch(/resolve its blocker/);
-      expect(rewrite.blockers.join('\n')).not.toContain('Did not compose the security plugin');
-    }
+    const rewrite = step(await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin }), 'rewrite');
+    expect(blockerOf(rewrite, 'the permission set admin_full_access,')).toMatch(/or remove the grants/);
+    expect(blockerOf(rewrite, 'position everyone ')).toMatch(/resolve its blocker/);
+    expect(rewrite.blockers.join('\n')).not.toContain(COMPOSITION);
   });
 });
