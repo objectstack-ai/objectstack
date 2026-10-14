@@ -47,9 +47,9 @@
  *
  * Three platform-admin doors are served by better-auth itself rather than by a
  * raw mount, so this judge never runs there: the re-authorized impersonation
- * endpoint (`admin-impersonate-endpoint.ts`), the SSO-provider registration
- * before-hook, and the `admin` plugin's own role-scalar actions (both in
- * `auth-manager.ts`'s global before-hook). Their session is a raw better-auth
+ * endpoint (`admin-impersonate-endpoint.ts`), SSO-provider administration
+ * (registration, and an owner's update and delete), and the `admin` plugin's
+ * own role-scalar actions (both in `auth-manager.ts`'s global before-hook). Their session is a raw better-auth
  * read that `customSession` never decorates, so it carries no `authGate`.
  * Each door therefore asks the auth service for the acting user's posture —
  * the same computation, and the same first entry, that `customSession` puts on

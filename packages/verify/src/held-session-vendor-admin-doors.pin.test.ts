@@ -17,7 +17,9 @@
  *    with a session for the target, and that session is not held, so the hold
  *    was bypassed outright;
  *  - **SSO-provider registration** (`/sso/register`'s before-hook): a held
- *    platform admin answered `200` and the provider row landed;
+ *    platform admin answered `200` and the provider row landed; and the
+ *    provider's owner (a platform admin) could still rewrite its issuer
+ *    (`/sso/update-provider`) and delete it (`/sso/delete-provider`);
  *  - **the `admin` plugin's role-scalar actions** (`VENDOR_ROLE_SCALAR_ADMIN_PATHS`):
  *    a held caller carrying the legacy `role = 'admin'` scalar was admitted to
  *    every one, writes included.
@@ -82,6 +84,8 @@ let adminId: string;
 let memberId: string;
 let scalarId: string;
 let providerSeq = 0;
+/** A provider the platform admin registered while unheld, so the admin OWNS it. */
+let ownedProviderId: string;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
@@ -97,6 +101,10 @@ beforeAll(async () => {
   scalarId = (await sessionOf(await stack.signUp(SCALAR_EMAIL, SCALAR_PASSWORD))).userId;
   // A pre-ADR-0068 deployment's admin: the legacy scalar the vendor reads.
   await ql.update('sys_user', { id: scalarId, role: 'admin' }, SYS);
+  const owned = registerProvider(await stack.signIn());
+  ownedProviderId = owned.providerId;
+  const landed = await owned.res;
+  if (landed.status !== 200) throw new Error(`the owned provider did not register: ${landed.status} ${await landed.text()}`);
 }, BOOT_TIMEOUT);
 
 afterAll(async () => {
@@ -151,6 +159,19 @@ async function providerRows(providerId: string): Promise<number> {
   return ql.count('sys_sso_provider', { where: { provider_id: providerId } }, SYS);
 }
 
+async function providerIssuer(providerId: string): Promise<unknown> {
+  const row = await ql.findOne('sys_sso_provider', { where: { provider_id: providerId }, fields: ['issuer'] }, SYS);
+  return row?.issuer ?? null;
+}
+
+function updateProviderIssuer(token: string, issuer: string) {
+  return stack.apiAs(token, 'POST', '/auth/sso/update-provider', { providerId: ownedProviderId, issuer });
+}
+
+function deleteOwnedProvider(token: string) {
+  return stack.apiAs(token, 'POST', '/auth/sso/delete-provider', { providerId: ownedProviderId });
+}
+
 async function memberName(): Promise<unknown> {
   const row = await ql.findOne('sys_user', { where: { id: memberId }, fields: ['name'] }, SYS);
   return row?.name ?? null;
@@ -196,6 +217,12 @@ describe('controls: unheld callers still pass every door', () => {
     const { providerId, res } = registerProvider(await stack.signIn());
     expect((await res).status).toBe(200);
     expect(await providerRows(providerId)).toBe(1);
+  });
+
+  it("a provider's owner rewrites its issuer (200, the write lands)", async () => {
+    const res = await updateProviderIssuer(await stack.signIn(), 'https://idp-rotated.example.com');
+    expect(res.status).toBe(200);
+    expect(await providerIssuer(ownedProviderId)).toBe('https://idp-rotated.example.com');
   });
 
   it('a role-scalar admin updates a user (200, the write lands)', async () => {
@@ -269,6 +296,15 @@ for (const state of HELD_STATES) {
       const { providerId, res } = registerProvider(await stack.signIn());
       await expectHeldRefusal(await res, state.code);
       expect(await providerRows(providerId)).toBe(0);
+    });
+
+    it(`refuses a provider owner's issuer rewrite and delete 403 ${state.code}; the provider stays`, async () => {
+      const token = await stack.signIn();
+      const before = await providerIssuer(ownedProviderId);
+      await expectHeldRefusal(await updateProviderIssuer(token, 'https://idp.attacker.example.net'), state.code);
+      expect(await providerIssuer(ownedProviderId)).toBe(before);
+      await expectHeldRefusal(await deleteOwnedProvider(token), state.code);
+      expect(await providerRows(ownedProviderId)).toBe(1);
     });
 
     it(`refuses a role-scalar admin's user update 403 ${state.code}, and the write never lands`, async () => {

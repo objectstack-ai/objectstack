@@ -2142,6 +2142,24 @@ export class AuthManager {
             // fall through — the vendor still performs the revoke itself
           }
 
+          // ── ADR-0069 D3: nor may a held caller rewrite or delete one ──────
+          // `@better-auth/sso` lets a provider's OWNER (who, past the
+          // registration gate below, is a platform admin) update its issuer,
+          // endpoints and secrets or delete it, on a session alone. Measured on
+          // a real boot: a held platform admin who owned a provider rewrote its
+          // issuer to another host (200, landed) and deleted another (200, row
+          // gone) — login routing, rewritten by a caller the policy holds. The
+          // same refusal as registration, asked the same way; the vendor still
+          // decides who may manage the provider.
+          if (
+            (ctx?.path === '/sso/update-provider' || ctx?.path === '/sso/delete-provider') &&
+            this.isAuthGateActive()
+          ) {
+            const actor = await this.resolveActor(ctx);
+            if (actor?.userId) await this.assertActorNotHeld(actor);
+            // fall through — the vendor's own provider-access check still runs
+          }
+
           // ── ADR-0135 D6 + ADR-0068 D4: registering an identity provider is ──
           // a PLATFORM-OPERATOR action.
           //
@@ -7223,8 +7241,9 @@ export class AuthManager {
   }
 
   /**
-   * ADR-0069 D3 at a vendor-served platform-admin door (the SSO-provider
-   * registration hook, the `admin` plugin's role-scalar actions): refuse
+   * ADR-0069 D3 at a vendor-served platform-admin door (SSO-provider
+   * registration, update and delete; the `admin` plugin's role-scalar
+   * actions): refuse
    * `actor` when the authentication policy holds them, with the refusal the
    * session gate gives, and return otherwise.
    *
