@@ -306,6 +306,23 @@ async function handleShareLinksRequestBody(
                     if (!isPublicSharingEnabled(schema)) return invalidOrExpired();
                 }
                 const live = row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now());
+                // [#23328] The audience is judged BEFORE the password. Before
+                // sign-in this probe asks the audience and never the password:
+                // `resolveToken` refuses an anonymous caller of a `signed_in`
+                // link on the audience before it verifies any password, so the
+                // password arm below knows only whether a password was SENT —
+                // answered first, it told the holder of the CORRECT password
+                // `WRONG_PASSWORD`, and the console never offered sign-in.
+                // Asked first, an anonymous caller reads one answer whatever it
+                // sent, so nothing here can tell it whether a guessed password
+                // is right. A signed-in caller keeps the password arms. The
+                // plugin-sharing twin carries the same order; this copy cannot
+                // import it (`@objectstack/plugin-sharing` is a DEV dependency
+                // here), so one table holds both mounts to it:
+                // `share-links-refusal-order.test.ts` beside this file.
+                if (live && row.audience === 'signed_in' && !signedInUserId) {
+                    return sendErr(401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
+                }
                 // [#21197] `sys_share_link.password_hash` is `internal: true`, so the
                 // probe row above comes back WITHOUT it; read off the row, every
                 // protected link would answer the unknown-token shape and the
@@ -320,9 +337,6 @@ async function handleShareLinksRequestBody(
                 if (live && passwordHash) {
                     return sendErr(401, providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
                         providedPassword ? 'Incorrect password' : 'This link requires a password');
-                }
-                if (live && row.audience === 'signed_in' && !signedInUserId) {
-                    return sendErr(401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
                 }
                 if (row && (row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now()))) {
                     return sendErr(410, 'EXPIRED_OR_REVOKED', 'Share link has expired or been revoked');

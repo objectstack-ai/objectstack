@@ -21,11 +21,19 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  FlowRegistrationSchema,
   GetMetaItemResponseSchema,
+  GetMetaItemsResponseSchema,
   GetMetaItemLayeredResponseSchema,
   MetadataConflictErrorSchema,
 } from './protocol.zod';
-import type { GetMetaItemResponse, GetMetaItemLayeredResponse, MetadataConflictError } from './protocol.zod';
+import type {
+  FlowRegistration,
+  GetMetaItemResponse,
+  GetMetaItemsResponse,
+  GetMetaItemLayeredResponse,
+  MetadataConflictError,
+} from './protocol.zod';
 import type { MetadataLock } from '../kernel/metadata-protection.zod';
 
 /** Type-level identity / assignability helpers. */
@@ -252,5 +260,48 @@ describe('the read serves the version token; the conflict carries the current on
     const body = { error: 'view/grid has been modified since you loaded it.', code: 'METADATA_CONFLICT' };
     expect(MetadataConflictErrorSchema.safeParse(body).success).toBe(false);
     expect(MetadataConflictErrorSchema.safeParse({ ...body, currentVersion: null, code: 'CONCURRENT_UPDATE' }).success).toBe(false);
+  });
+});
+
+/**
+ * #23316 — the automation engine's verdict on a stored flow is reachable and
+ * typed on both reads, as a closed set: what an SDK caller branches on without
+ * a cast, and the `refused` reason a reader renders.
+ */
+export type RegistrationIsTheVerdictOrAbsent = Assert< Eq< GetMetaItemResponse['registration'], FlowRegistration | undefined > >;
+export type ListRegistrationsAreKeyedVerdicts = Assert< Eq< GetMetaItemsResponse['registrations'], Record<string, FlowRegistration> | undefined > >;
+
+describe('the engine\'s verdict on a stored flow: `registration` beside the item, `registrations` beside the list', () => {
+  const FLOW = { name: 'nightly_sync', status: 'active' };
+  const REFUSED = { state: 'refused', reason: { message: "Flow 'nightly_sync' rejected: 1 undeclared config key(s)." } };
+
+  it('keeps each verdict through a parse — the `refused` reason with or without the engine\'s code', () => {
+    for (const registration of [
+      { state: 'registered' },
+      { state: 'unregistered' },
+      REFUSED,
+      { state: 'refused', reason: { code: 'VALIDATION_ERROR', message: 'invalid flow' } },
+    ]) {
+      expect(GetMetaItemResponseSchema.parse({ type: 'flow', name: 'nightly_sync', item: FLOW, registration }).registration)
+        .toEqual(registration);
+    }
+    // Absent stays absent: no engine judged it, which is never `registered`.
+    expect('registration' in GetMetaItemResponseSchema.parse({ type: 'flow', name: 'nightly_sync', item: FLOW })).toBe(false);
+  });
+
+  it('is a closed set: no fourth state, and `refused` REQUIRES the reason', () => {
+    expect(FlowRegistrationSchema.safeParse({ state: 'running' }).success).toBe(false);
+    expect(FlowRegistrationSchema.safeParse({ state: 'refused' }).success).toBe(false);
+    expect(FlowRegistrationSchema.safeParse({ state: 'refused', reason: { code: 'X' } }).success).toBe(false);
+  });
+
+  it('the list keeps `registrations` keyed by name through a parse', () => {
+    const parsed = GetMetaItemsResponseSchema.parse({
+      type: 'flow',
+      items: [FLOW],
+      registrations: { nightly_sync: REFUSED },
+    });
+    expect(parsed.registrations).toEqual({ nightly_sync: REFUSED });
+    expect('registrations' in GetMetaItemsResponseSchema.parse({ type: 'flow', items: [FLOW] })).toBe(false);
   });
 });

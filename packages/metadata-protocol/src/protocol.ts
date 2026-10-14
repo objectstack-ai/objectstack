@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type {
-    DataProtocol, MetadataProtocol, PackageProtocol,
+    DataProtocol, FlowRegistration, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
 import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
@@ -6570,6 +6570,54 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23316] The automation engine's verdict reader for a `flow` read — the
+     * `registration` beside the item read's envelope and the `registrations`
+     * beside the list's items (`FlowRegistrationSchema` in `@objectstack/spec`).
+     *
+     * The same seam as {@link resolveFlowCanonicalizer}: the kernel's service
+     * table, read by name and per call, for the member the automation service
+     * declares on `IAutomationService` (`getFlowRegistration`). This package
+     * never imports the automation service, and resolution stays lazy for the
+     * reason that docblock gives.
+     *
+     * `undefined` — so the read serves NO verdict — for every other type, and
+     * where no reachable service declares the member: a control-plane or
+     * metadata-only host judges no flow, and an absent field is how that is
+     * said. ⛔ Never a third state the protocol makes up: the field is the
+     * engine's answer or nothing. The answer is the engine of THIS process; no
+     * cross-process store is read.
+     */
+    private resolveFlowRegistrationReader(type: string): ((name: string) => FlowRegistration) | undefined {
+        if (canonicalMetaType(type) !== 'flow') return undefined;
+        const automation = this.getServicesRegistry?.().get('automation') as
+            | { getFlowRegistration?: (name: string) => FlowRegistration }
+            | undefined;
+        const read = automation?.getFlowRegistration;
+        if (typeof read !== 'function') return undefined;
+        return (name) => read.call(automation, name);
+    }
+
+    /**
+     * [#23316] The list's `registrations`: the engine's verdict per listed
+     * item, keyed by its `name` — or nothing, where
+     * {@link resolveFlowRegistrationReader} resolves no reader. A pending draft
+     * (`_draft: true`, the `previewDrafts` overlay) gets no entry: no engine
+     * holds a draft, exactly as the lock resolution above skips one.
+     * `Object.fromEntries`, so a name is an own key whatever it spells.
+     */
+    private flowRegistrationsOf(type: string, items: readonly unknown[]): { registrations?: Record<string, FlowRegistration> } {
+        const read = this.resolveFlowRegistrationReader(type);
+        if (!read) return {};
+        const entries: Array<[string, FlowRegistration]> = [];
+        for (const it of items) {
+            const name = (it as { name?: unknown } | null | undefined)?.name;
+            if (typeof name !== 'string' || (it as { _draft?: unknown })._draft === true) continue;
+            entries.push([name, read(name)]);
+        }
+        return { registrations: Object.fromEntries(entries) };
+    }
+
+    /**
      * [#20312] The deployment's ADR-0080 SDUI component manifest, when the host
      * registered one under {@link SDUI_MANIFEST_SERVICE} — `os serve` does, from
      * the CLI's `resolveSduiManifest`. Read per publish, exactly as
@@ -10263,6 +10311,10 @@ export class ObjectStackProtocolImplementation implements
             // [#20552] Served: diagnostics + per-type credential redaction.
             // Execution: the stored bodies — see `getMetaItemsForExecution`.
             items: audience === 'served' ? decorateMetadataItems(request.type, governed) : governed,
+            // [#23316] Served only: the engine's verdict on each listed flow —
+            // see {@link flowRegistrationsOf}. The execution face is the
+            // engine's own read, so it carries none.
+            ...(audience === 'served' ? this.flowRegistrationsOf(request.type, governed) : {}),
         };
     }
 
@@ -11093,6 +11145,13 @@ export class ObjectStackProtocolImplementation implements
         const lockState = this.servedLockState(
             request.type, request.name, decorated, artifactBacked, itemLock, storedRowServed,
         );
+        // [#23316] Beside `lock`, never inside `item`: the automation engine's
+        // verdict on this flow ({@link resolveFlowRegistrationReader}), for an
+        // item this read serves. The draft returns above carry none — a
+        // pending body is not what the engine holds.
+        const readRegistration = decorated !== undefined && decorated !== null
+            ? this.resolveFlowRegistrationReader(request.type)
+            : undefined;
         return {
             type: request.type,
             name: request.name,
@@ -11117,6 +11176,7 @@ export class ObjectStackProtocolImplementation implements
             ...(request.previewDrafts
                 ? {}
                 : { version: storedRowServed ? await this.readVersionToken({ ...request, member }, 'active') : null }),
+            ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
         };
     }
 
@@ -15409,7 +15469,7 @@ export class ObjectStackProtocolImplementation implements
      * environment → code read order (ADR-0131 D6) — the whole reason this
      * method delegates rather than re-reading.
      */
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse> {
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration }> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -15423,6 +15483,11 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
             });
             const item = (result as any)?.item;
+            // [#23316] The automation engine's verdict on a flow, as the
+            // delegate read above just resolved it — live, on every call. It
+            // rides beside `data` for the REST layer's default door, and is
+            // never hashed into the ETag below (see the 304 note there).
+            const registration = (result as { registration?: FlowRegistration } | undefined)?.registration;
 
             if (!item) {
                 // [#5532] Structured: 404 + the catalog's `RESOURCE_NOT_FOUND`.
@@ -15476,7 +15541,16 @@ export class ObjectStackProtocolImplementation implements
             const etag = { value: hash, weak: false };
 
             // Check If-None-Match header
-            if (request.cacheRequest?.ifNoneMatch) {
+            //
+            // [#23316] …except for a read that carries `registration`: the
+            // served body holds the engine's verdict and this validator does
+            // not (it hashes the document alone, and the verdict stays out of
+            // it), so a 304 here would pin the caller to the verdict it was
+            // served before — after the engine re-registered or refused the
+            // flow under an unchanged body. Such a read is always answered in
+            // full; the work is the same either way, since this method always
+            // performs the delegate read.
+            if (request.cacheRequest?.ifNoneMatch && registration === undefined) {
                 const clientEtag = request.cacheRequest.ifNoneMatch.replace(/^"(.*)"$/, '$1').replace(/^W\/"(.*)"$/, '$1');
                 if (clientEtag === hash) {
                     // Return 304 Not Modified
@@ -15490,6 +15564,7 @@ export class ObjectStackProtocolImplementation implements
             // Return full metadata with cache headers
             return {
                 data: item,
+                ...(registration !== undefined ? { registration } : {}),
                 etag,
                 lastModified: new Date().toISOString(),
                 cacheControl: {
