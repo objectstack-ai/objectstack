@@ -32,10 +32,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Usuario",
         help: "Clave foránea a sys_user."
       },
-      permission_set_id: {
-        label: "Conjunto de permisos (id heredado)",
-        help: "[ADR-0131 D10] Referencia heredada por id a una fila de sys_permission_set, que se eliminará con sus datos en una etapa posterior. No se escribe ni se lee para otorgar nada: la asignación nombra su conjunto mediante permission_set."
-      },
       permission_set: {
         label: "Conjunto de permisos",
         help: "[ADR-0131 D4] Nombre de máquina del conjunto de permisos que otorga esta asignación, tal como lo nombra el catálogo de seguridad. Un nombre que el catálogo no contiene se rechaza. NULL solo en una asignación escrita antes de que existiera la columna."

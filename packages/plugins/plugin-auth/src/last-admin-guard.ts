@@ -641,8 +641,8 @@ export const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
  * snake_case and camelCase spellings the readers already tolerate.
  *
  * [ADR-0131 D4] The enumeration reads WHICH set by the grant's name,
- * `permission_set`, and only by it: `permission_set_id` moves nothing, so a
- * write touching it alone is skipped like any other non-standing column.
+ * `permission_set`, and only by it (the legacy `permission_set_id` is retired,
+ * C7b, and a write naming it is refused as an undeclared field).
  */
 export const GRANT_STANDING_KEYS = [
   'permission_set',
@@ -1111,7 +1111,7 @@ export function registerLastAdminGuard(
    * install every grant names a set the platform ships, so the fresh answer is
    * unchanged; such a grant is left behind by a set definition that went away
    * (an uninstalled package, a removed environment definition), or is an
-   * upgraded deployment's grant before the one-time backfill names it.
+   * legacy grant the v18 ceremony's rewrite has not named (ADR-0131 D10).
    *
    * Deliberately an OVER-approximation of "the `admin_full_access` definition
    * went away": a dangling unscoped grant to some other set trips it too. The
