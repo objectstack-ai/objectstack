@@ -106,8 +106,9 @@ export default defineStack({
     // doc findings ride as OBJECTS, unknown-key and structural advisories as
     // STRINGS. This fixture puts one of each in the same run, so the parity
     // check is exercised across both representations rather than only over the
-    // string ones. `externalSharingModel` is ledger-marked `authorWarn`, which
-    // is what raises the registry-side advisory.
+    // string ones. `tool.outputSchema` is ledger-marked `experimental`, which
+    // is what raises the registry-side advisory (it was the object's
+    // `externalSharingModel` until #23268 retired that key).
     source: `
 import { defineStack } from '@objectstack/spec';
 
@@ -117,8 +118,14 @@ export default defineStack({
     name: 'parity_ticket',
     label: 'Ticket',
     sharingModel: 'private',
-    externalSharingModel: 'private',
     fields: { title: { type: 'text', label: 'Title' } },
+  }],
+  tools: [{
+    name: 'parity_lookup',
+    label: 'Lookup',
+    description: 'Look up a ticket',
+    parameters: { type: 'object', properties: {} },
+    outputSchema: { type: 'object' },
   }],
 }, { strict: false });
 `,

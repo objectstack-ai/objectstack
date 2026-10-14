@@ -258,19 +258,19 @@ describe('SolutionBlueprintSchema', () => {
     // The pin that keeps the accept above non-vacuous: this schema strips
     // undeclared keys, so "sharingModel survives the parse" is evidence the key
     // is DECLARED, only as long as an undeclared sibling provably does not
-    // survive. `externalSharingModel` is a real key on the full ObjectSchema
-    // (ADR-0090 D11) that the blueprint deliberately does not author.
+    // survive. `publicSharing` is a real key on the full ObjectSchema (the
+    // share-link policy) that the blueprint deliberately does not author.
     const parsed = SolutionBlueprintSchema.parse({
       summary: 's',
       objects: [{
         name: 'review',
         sharingModel: 'private',
-        externalSharingModel: 'private',
+        publicSharing: { enabled: true },
         fields: [{ name: 'name', type: 'text' }],
       }],
     });
     expect(parsed.objects[0].sharingModel).toBe('private');
-    expect('externalSharingModel' in parsed.objects[0]).toBe(false);
+    expect('publicSharing' in parsed.objects[0]).toBe(false);
   });
 
   it('rejects a non-canonical sharingModel value (legacy aliases are not part of the vocabulary)', () => {

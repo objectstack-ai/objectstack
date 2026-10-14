@@ -132,8 +132,8 @@ describe('the liveness gate on the i18n coverage walk', () => {
   it('can say no and yes: the reader under the census still answers for a type with a warned row', () => {
     // A zero-hit result only counts once the same instrument returns a positive
     // on a term known present. The census above is now the zero, so the positive
-    // comes from the ledger reader it wraps, on the one planned + authorWarn row
-    // still in tree; the negatives are the groups the walker emits.
+    // comes from the ledger reader it wraps, on the object's `dead` tombstone
+    // row (#23268 — a dead verdict warns); the negatives are the groups the walker emits.
     expect(authorWarnedProperties('object').has('externalSharingModel')).toBe(true);
     const warned = authorWarnedTranslationGroups();
     for (const live of ['objects', 'apps', 'pages', 'dashboards', 'globalActions', 'metadataForms', 'flows']) {

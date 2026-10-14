@@ -415,14 +415,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     why: '`[LEGACY ALIAS → sections]` accepted for back-compat and folded onto `sections` at parse (`sections` wins when both are present), deliberately not offered to new authors',
   },
 
-  // Declared, not enforced yet — no offer until it is enforced.
-  {
-    kind: 'omit',
-    type: 'object',
-    path: ROOT_PATH,
-    key: 'externalSharingModel',
-    why: 'declared, not enforced yet — liveness verdict `planned` (ADR-0090 D11: validated at authoring time only; the audience-aware evaluator branch that would honour it is scheduled, not built). No offer until it is enforced; whether to offer it then is a ruling for the enforcement, not for this gate',
-  },
   // #22611 — the audience gate on a list view and a dashboard lands spec-first:
   // `planned` + `authorWarn` in the liveness ledger, read by no server until the
   // `/meta` read gate applies it (#22639). The app and action forms offer their

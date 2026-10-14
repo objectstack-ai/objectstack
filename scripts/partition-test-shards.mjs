@@ -97,7 +97,9 @@
 // <turbo-ls.json> is the output of `turbo ls [--affected] --output=json`
 // (shape: {packages:{count,items:[{name,path}]}}; `turbo ls` is marked
 // experimental, so the payload is asserted loudly in readPackageItems() below
-// rather than defaulted around).
+// rather than defaulted around). A document from another writer may also
+// state its own slicing in a `sliceAcrossShards` key that `turbo ls` never
+// writes -- the nightly tiers' does; see readSliceAcrossShards() below.
 // Prints the selected shard's package names, one per line -- possibly zero
 // lines, which the caller must treat as "nothing to run", NOT as "no filter":
 // a `turbo run test` with no --filter args runs the entire workspace.
@@ -110,6 +112,7 @@ import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
 import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { samplesFromSummary } from './measure-test-shard-timings.mjs';
+import { packageListDocument } from './nightly-tiers.mjs';
 import { workspacePackages } from './workspace-enumerator.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1281,6 +1284,102 @@ export function readPackageItems(parsed, listPath) {
   return items;
 }
 
+// ── A DOCUMENT MAY STATE ITS OWN SLICING: `sliceAcrossShards` ────────────────
+//
+// FILE_SHARDED_PACKAGES is Test Core's map: its count is derived against Test
+// Core's six shards and its queue-tier dataset (pin 3c), and the timing
+// generator decodes Test Core's slices against it. A run that is NOT Test Core,
+// with a shard count of its own, states its slicing in the document it hands
+// this script instead:
+//
+//   { "packages": { "count": 1, "items": [...] }, "sliceAcrossShards": ["@objectstack/cli"] }
+//
+// Each named package is cut into as many slices as the run has shards -- the N
+// of the run's own `--shard k/N` -- and FILE_SHARDED_PACKAGES does not apply to
+// that run at all: the document states the run's slicing in full. planShards()
+// still decides every named package per run (NEEDED / SPREADS / WITHIN CAP) and
+// weighItems() still enforces the vitest file floor, so a named package that
+// cannot be cut runs whole or is refused, never cut into slices vitest cannot
+// run.
+//
+// The one writer today is `scripts/nightly-tiers.mjs --packages`, for the
+// nightly tiers (test-nightly-tiers.yml), whose single tier-owning package must
+// land one slice on every shard or the shards past the first run nothing. Why
+// the count is the run's N and never a number carried here or a borrowed map:
+// while the nightly read Test Core's map it lost its second shard twice, with
+// no step red either time. 9ff74285 retired the CLI's entry, and from the next
+// night the second shard ran nothing while the first carried the whole e2e
+// tier (one slice each ran 1196s / 1168s on 2026-10-01; from 2026-10-04 the
+// one shard's test step ran 2361-2615s on seven of eight green nights).
+// 59194834 brought the entry back at 3, which cannot spread over two shards,
+// so the CLI stayed whole until the first shard was killed at its 45-minute
+// limit. A count derived from the run's own N cannot drift from the matrix
+// that runs it.
+//
+// `turbo ls` never writes this key, so a Test Core document reads `null` here
+// and its run slices by FILE_SHARDED_PACKAGES byte for byte as before. Present,
+// the key is asserted loudly -- an array of distinct package names, each one an
+// item of the same document -- because a name that matches no item would slice
+// nothing while reading as configured.
+export const SLICE_ACROSS_SHARDS_KEY = 'sliceAcrossShards';
+
+export function readSliceAcrossShards(parsed, items, listPath) {
+  if (parsed === null || typeof parsed !== 'object' || !Object.hasOwn(parsed, SLICE_ACROSS_SHARDS_KEY)) {
+    return null;
+  }
+  const names = parsed[SLICE_ACROSS_SHARDS_KEY];
+  if (!Array.isArray(names) || names.some((n) => typeof n !== 'string' || n === '')) {
+    throw new Error(
+      `${listPath}: ${SLICE_ACROSS_SHARDS_KEY} must be an array of package names, got ` +
+        `${JSON.stringify(names)}. Refusing to shard on a slicing nobody can read.`
+    );
+  }
+  const listed = new Set(items.map((it) => it?.name));
+  const seen = new Set();
+  for (const name of names) {
+    if (seen.has(name)) {
+      throw new Error(`${listPath}: ${SLICE_ACROSS_SHARDS_KEY} names ${name} twice. Refusing to shard.`);
+    }
+    if (!listed.has(name)) {
+      throw new Error(
+        `${listPath}: ${SLICE_ACROSS_SHARDS_KEY} names ${name}, which packages.items does not list -- ` +
+          'a slicing that matches no package slices nothing. Refusing to shard.'
+      );
+    }
+    seen.add(name);
+  }
+  return names;
+}
+
+// The run's slice map from the document's names: N ways each, where N is the
+// run's shard count. A one-shard run cuts nothing -- every package runs whole on
+// the one shard there is.
+export function sliceMapForRun(names, shardCount) {
+  if (shardCount < 2) return Object.freeze({});
+  return Object.freeze(Object.fromEntries(names.map((name) => [name, shardCount])));
+}
+
+// The split a real run computes, and the ONE path that computes it: main() runs
+// it and prints the result, and the self-test drives the same function on the
+// nightly's live document, so a pin on it cannot be a pin on a second copy of
+// main()'s logic. Its steps run in main()'s historical order -- the document's
+// shape, then the dataset, the weights, the density cap and the plan -- so a run
+// that refuses still refuses with the same message it always did.
+export function planRun(parsed, listPath, shardCount, { excluded = new Set(), timings = null } = {}) {
+  const items = readPackageItems(parsed, listPath);
+  const acrossShards = readSliceAcrossShards(parsed, items, listPath);
+  const dataset = timings ?? loadTimings();
+  const sliced = acrossShards === null ? FILE_SHARDED_PACKAGES : sliceMapForRun(acrossShards, shardCount);
+  const { weighed, estimated, packages } = weighItems(items, excluded, dataset, listPath, sliced);
+  // The cap is the whole-package split of the dataset's full list, not of this
+  // run's list (densityCap): the density proven green is a fact about the
+  // dataset, and the run's own list is what is graded against it.
+  const cap = densityCapOf(dataset, excluded, shardCount);
+  const { items: weighted, bins: placed, decisions } = planShards(weighed, shardCount, { cap });
+  const bins = assertSlicesSpread(placed);
+  return { bins, weighted, decisions, estimated, packages, cap, acrossShards };
+}
+
 // -- The self-test's own battery roster and floor (#13489) ------------------
 //
 // `--self-test` reaching its verdict used to be this self-test's ONLY success
@@ -1325,11 +1424,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 11,
   'density cap and the per-run slice decision (#22075)': 14,
   'the drift step reports on every event, `schedule` included, and refuses a missing event': 8,
+  // The nightly tiers state their own slicing (`sliceAcrossShards`). 5 of these
+  // 16 read the live tree: 2 read test-nightly-tiers.yml back, and 3 drive the
+  // nightly's own document at that workflow's shard count.
+  'a document states its own slicing: the nightly tiers': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2560,7 +2663,9 @@ function selfTest() {
   });
 
   // Slices that cannot spread do not run in parallel, so they are not taken:
-  // three slices across two shards (the nightly tier run's shape) stay whole.
+  // three slices across two shards stay whole. That is the shape that left the
+  // nightly tiers' second shard empty while they read Test Core's map; they now
+  // state their own slicing, pinned in the nightly battery below.
   check(() => {
     const [d] = planShards([{ name: 'big', weight: 1700, sliceCount: 3 }, mk('other', 100)], 2).decisions;
     if (!d.needed || d.spreads || d.count !== 1 || !renderSliceDecision(d).includes('cannot spread')) {
@@ -2586,6 +2691,148 @@ function selfTest() {
     const n = FILE_SHARDED_PACKAGES['@objectstack/cli'];
     if (items.length !== n || !items.every((i) => i.slice && i.pkg === '@objectstack/cli')) {
       throw new Error(`plan: the CLI alone on ${SHARD_COUNT} shards reached partition() as ${items.map((i) => i.name).join(', ')} (${decisions.map(renderSliceDecision).join('; ')})`);
+    }
+  });
+
+  // -- A DOCUMENT STATES ITS OWN SLICING: THE NIGHTLY TIERS -----------------
+  //
+  // The nightly tiers' shard count is their own (test-nightly-tiers.yml), and
+  // their one tier-owning package must land a slice on EVERY shard: a shard the
+  // split leaves empty runs nothing and reads green, while the other carries the
+  // whole tier toward its timeout. The live pins at the end drive the nightly's
+  // own document, read from the live tree, through planRun() -- the function
+  // main() runs -- at the shard count the nightly workflow declares, so a change
+  // on either side that empties a shard again reds here, on its own pull
+  // request, instead of on the night the first shard is killed.
+  battery('a document states its own slicing: the nightly tiers');
+
+  const emptyShardsOf = (bins) => bins.flatMap((b, i) => (b.names.length === 0 ? [i + 1] : []));
+  const cliItems = [{ name: '@objectstack/cli', path: 'packages/cli' }];
+
+  // Absent, the key changes nothing: a Test Core document slices by
+  // FILE_SHARDED_PACKAGES through the same planRun() main() runs.
+  check(() => {
+    if (readSliceAcrossShards({ packages: { items: cliItems } }, cliItems, 'no key') !== null) {
+      throw new Error('slice across shards: a document without the key read as stating a slicing');
+    }
+    const plan = planRun({ packages: { count: 1, items: cliItems } }, 'test core shape', SHARD_COUNT, { timings });
+    const n = FILE_SHARDED_PACKAGES['@objectstack/cli'] ?? 1;
+    if (plan.acrossShards !== null || plan.weighted.length !== n) {
+      throw new Error(
+        `slice across shards: a document without the key no longer slices by FILE_SHARDED_PACKAGES ` +
+          `(${plan.weighted.map((i) => i.name).join(', ')}, expected ${n} item(s))`
+      );
+    }
+  });
+
+  // Present, it is asserted: each malformed shape is refused, naming the key
+  // and, where there is one, the offending package.
+  for (const [label, value, subject] of [
+    ['not an array', '@objectstack/cli', null],
+    ['a non-string entry', [7], null],
+    ['an empty name', [''], null],
+    ['a duplicate name', ['@objectstack/cli', '@objectstack/cli'], '@objectstack/cli'],
+    ['a package the document does not list', ['@objectstack/spec'], '@objectstack/spec'],
+  ]) {
+    check(() => {
+      let message = null;
+      try {
+        readSliceAcrossShards({ packages: { items: cliItems }, [SLICE_ACROSS_SHARDS_KEY]: value }, cliItems, 'bad doc');
+      } catch (e) {
+        message = e.message;
+      }
+      if (message === null || !message.includes(SLICE_ACROSS_SHARDS_KEY) || (subject && !message.includes(subject))) {
+        throw new Error(`slice across shards: ${label} was not refused by name (${JSON.stringify(message ?? 'no throw')})`);
+      }
+    });
+  }
+
+  // N ways, N the run's shard count; a one-shard run cuts nothing.
+  check(() => {
+    const one = sliceMapForRun(['a'], 1);
+    const two = sliceMapForRun(['a', 'b'], 2);
+    if (Object.keys(one).length !== 0 || Object.keys(two).length !== 2 || two.a !== 2 || two.b !== 2) {
+      throw new Error(`slice across shards: the run map read ${JSON.stringify(one)} at 1 shard, ${JSON.stringify(two)} at 2`);
+    }
+  });
+
+  // One heavy package named, at several shard counts: every shard carries
+  // exactly one slice, and the slices are the 1..N of one cut.
+  for (const n of [2, 3, 4]) {
+    check(() => {
+      const map = sliceMapForRun(['big'], n);
+      const { bins } = planShards([{ name: 'big', weight: 1700, sliceCount: map.big }], n);
+      const got = bins.map((b) => b.names.join(',')).sort();
+      const want = Array.from({ length: n }, (_, i) => formatShardItem('big', { index: i + 1, count: n })).sort();
+      if (emptyShardsOf(bins).length > 0 || got.join('|') !== want.join('|')) {
+        throw new Error(`slice across shards: one package over ${n} shards split as [${got.join(' | ')}]`);
+      }
+    });
+  }
+
+  // The control: the predicate above SEES the failure shape. A configured 3
+  // over 2 shards -- the nightly while it read Test Core's map -- leaves one
+  // shard empty, so the live pins below can go red.
+  check(() => {
+    const { bins } = planShards([{ name: 'big', weight: 1700, sliceCount: 3 }], 2);
+    if (emptyShardsOf(bins).length !== 1) {
+      throw new Error(`slice across shards: the control split [${bins.map((b) => b.names.join(',')).join(' | ')}] shows no empty shard`);
+    }
+  });
+
+  // The nightly workflow's shard count, read back the way pin 4 reads ci.yml's,
+  // and the invocation the live pins stand in for: the shards are partitioned
+  // from `nightly-tiers.mjs --packages` at `--shard <k>/<matrix size>`.
+  const nightlyYml = readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'test-nightly-tiers.yml'), 'utf8');
+  const nightlyMatrix = /^\s*shard:\s*\[([^\]]*)\]/m.exec(nightlyYml);
+  check(() => {
+    if (!nightlyMatrix) throw new Error('test-nightly-tiers.yml: could not find the nightly shard matrix to compare against');
+  });
+  const nightlyShards = nightlyMatrix[1].split(',').filter((s) => s.trim() !== '').length;
+  check(() => {
+    if (!nightlyYml.includes(`--shard \${{ matrix.shard }}/${nightlyShards}`)) {
+      throw new Error(`test-nightly-tiers.yml: the partitioner is not invoked with --shard <n>/${nightlyShards}, the matrix's size`);
+    }
+    if (!nightlyYml.includes('node scripts/nightly-tiers.mjs --packages')) {
+      throw new Error('test-nightly-tiers.yml: the shards are no longer partitioned from `nightly-tiers.mjs --packages`, the document these pins drive');
+    }
+  });
+
+  // THE LIVE PINS: the nightly's document from the live tree, at the workflow's
+  // shard count, through the path main() runs.
+  const nightlyDoc = packageListDocument();
+  const nightlyPlan = planRun(nightlyDoc, 'the nightly document', nightlyShards, { timings });
+  check(() => {
+    const listed = nightlyDoc.packages.items.map((i) => i.name);
+    const named = nightlyDoc[SLICE_ACROSS_SHARDS_KEY];
+    if (!Array.isArray(named) || named.join('|') !== listed.join('|') || !listed.includes('@objectstack/cli')) {
+      throw new Error(
+        `nightly document: ${SLICE_ACROSS_SHARDS_KEY} is ${JSON.stringify(named)} for the tier-owning packages ` +
+          `${JSON.stringify(listed)} -- it must name every one of them, the CLI among them`
+      );
+    }
+  });
+  check(() => {
+    const empty = emptyShardsOf(nightlyPlan.bins);
+    if (empty.length > 0) {
+      throw new Error(
+        `nightly: the live document at the workflow's ${nightlyShards} shards leaves shard(s) ${empty.join(', ')} ` +
+          `with nothing to run, while the split is [${nightlyPlan.bins.map((b) => b.names.join(',')).join(' | ')}] ` +
+          `(${nightlyPlan.decisions.map(renderSliceDecision).join('; ') || 'no slicing decision'})`
+      );
+    }
+  });
+  check(() => {
+    const perShard = nightlyPlan.bins.map((b) =>
+      b.names.map(parseShardItem).filter((it) => it.name === '@objectstack/cli' && it.slice)
+    );
+    const indexes = perShard.map((s) => (s.length === 1 && s[0].slice.count === nightlyShards ? s[0].slice.index : null));
+    const want = Array.from({ length: nightlyShards }, (_, i) => i + 1);
+    if (nightlyShards >= 2 && [...indexes].sort((a, b) => a - b).join(',') !== want.join(',')) {
+      throw new Error(
+        `nightly: the CLI does not reach the workflow's ${nightlyShards} shards as one distinct slice each ` +
+          `([${nightlyPlan.bins.map((b) => b.names.join(',')).join(' | ')}])`
+      );
     }
   });
 
@@ -2755,15 +3002,12 @@ function main() {
   if (shardIndex > shardCount) throw new Error(`--shard ${shardSpec}: index exceeds count`);
 
   const parsed = JSON.parse(readFileSync(listPath, 'utf8'));
-  const items = readPackageItems(parsed, listPath);
-  const timings = loadTimings();
-  const { weighed, estimated, packages } = weighItems(items, excluded, timings, listPath);
-  // The cap is the whole-package split of the dataset's full list, not of this
-  // run's list (densityCap): the density proven green is a fact about the
-  // dataset, and the run's own list is what is graded against it.
-  const cap = densityCapOf(timings, excluded, shardCount);
-  const { items: weighted, bins: placed, decisions } = planShards(weighed, shardCount, { cap });
-  const bins = assertSlicesSpread(placed);
+  const { bins, weighted, decisions, estimated, packages, cap, acrossShards } = planRun(
+    parsed,
+    listPath,
+    shardCount,
+    { excluded }
+  );
   const mine = bins[shardIndex - 1];
   const { max, mean, ratio } = balanceOf(bins);
   // Printed on every shard, not just the imbalanced one, and printed as the
@@ -2779,6 +3023,18 @@ function main() {
       `density cap ${cap.toFixed(2)}s; ` +
       `${packages - estimated} measured, ${estimated} estimated from test-file count)`
   );
+  // Only a document that states its own slicing prints this, so a Test Core
+  // shard's log is unchanged; the nightly's says where its slice count came from.
+  if (acrossShards !== null) {
+    let what;
+    if (acrossShards.length === 0) what = 'names no package';
+    else if (shardCount < 2) what = `${acrossShards.join(', ')}, but a one-shard run cuts nothing`;
+    else what = `${acrossShards.join(', ')} cut ${shardCount} ways, one slice per shard of this run`;
+    console.error(
+      `  slicing map: the document's ${SLICE_ACROSS_SHARDS_KEY} -- ${what}; ` +
+        "FILE_SHARDED_PACKAGES (Test Core's map) does not apply to this run"
+    );
+  }
   for (const d of decisions) console.error(`  slicing: ${renderSliceDecision(d)}`);
   for (const name of mine.names) console.log(name);
 }

@@ -493,9 +493,25 @@ export default class MigrateOrganizationOwnership extends Command {
             const columnOf = (d: unknown): string => String((d as { op?: { column?: string } }).op?.column);
             const outcomes: ColumnDropOutcome[] = [];
             const proposed = new Set(entries.map((d) => key(String(d.table), columnOf(d))));
+            // The tables this booted composition declares, keyed as the driver
+            // keys its managed set. A table outside it can never be proposed,
+            // whatever a release declares: `not-declared`, and `not-proposed`
+            // only for a declared one. A rotation shard is judged by its base.
+            const { StorageNameMapping } = await import('@objectstack/spec/system');
+            const { rotationBaseOf } = await import('../../utils/unmanaged-tables.js');
+            const declared = new Set(
+              (liveStack.allObjects() as Array<{ name?: unknown } | null>)
+                .map((o) => o?.name)
+                .filter((name): name is string => typeof name === 'string' && name.length > 0)
+                .map((name) => StorageNameMapping.resolveTableName({ name })),
+            );
             for (const c of columns) {
               if (!proposed.has(key(c.table, c.column))) {
-                outcomes.push({ ...c, outcome: 'not-proposed', detail: 'the drift differ proposed no drop for it' });
+                outcomes.push(
+                  declared.has(rotationBaseOf(c.table) ?? c.table)
+                    ? { ...c, outcome: 'not-proposed', detail: 'the drift differ proposed no drop for it' }
+                    : { ...c, outcome: 'not-declared' },
+                );
               }
             }
             if (entries.length === 0) return outcomes;

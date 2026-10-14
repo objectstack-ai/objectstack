@@ -1,5 +1,90 @@
 # @objectstack/service-mailbox
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 3d830b7: Inbound mail has a mail source: the new `@objectstack/connector-imap` reads a mailbox over IMAP, and `@objectstack/service-mailbox` polls each mailbox's folder into its ingest seam, keeping a UID cursor on `sys_mailbox`
+  
+  Clause-②: yes (a new published package, `@objectstack/connector-imap`, and its exports; new exports and plugin options in `@objectstack/service-mailbox`, and four new fields on its published `sys_mailbox` object)
+  
+  - **`@objectstack/connector-imap` (new) — protocol and authentication only.**
+    - `openImapSession({ account, credentials, timeoutMs?, maxLiteralBytes?, maxCommandBytes? })` opens a read-only IMAP4rev1 session: `examine(folder)` (`EXAMINE`, never `SELECT`; answers `uidValidity`, `uidNext`, `exists`), `listMessages(fromUid)`, `fetchMessages(uids)` (`BODY.PEEK[]`, so no message is marked `\Seen`), `logout()` and `close()`. A folder opened without a UIDVALIDITY is refused.
+    - The account and credential abstraction is shaped for the per-user mailbox: a `MailAccount` (`{ id, username, imap: { host, port?, security? } }`) and a `MailCredentialProvider` that resolves the account's credential each time a session opens. `staticCredentials(credential)` answers one fixed credential.
+    - A `password` credential is sent with `AUTHENTICATE PLAIN` when the server offers it, otherwise `LOGIN`; an `oauth2` access token with `AUTHENTICATE XOAUTH2`. A server that refuses `LOGIN` and offers no `PLAIN` is refused before anything is sent.
+    - `security: 'tls'` (the default) is implicit TLS with the certificate verified. A plaintext connection (`security: 'none'`) is refused to any host but loopback, before a socket opens.
+    - Failures are `ImapError` with a `kind`: `configuration`, `connection`, `timeout`, `authentication`, `refused`, `protocol` or `oversized`.
+    - An IMAP server is treated as an untrusted peer. A line above 4 MiB, a literal above `maxLiteralBytes` (64 MiB by default), a response of more than `IMAP_MAX_RESPONSE_LITERALS` (32) literals, and more than `maxCommandBytes` of responses to one command (128 MiB by default) are refused as `oversized` before the excess is kept, and the connection is closed.
+    - `@objectstack/connector-imap/testing` exports `ImapServerDouble`, an in-process IMAP server on loopback for tests.
+    - No runtime dependencies.
+  - **`@objectstack/service-mailbox` — the IMAP sync.**
+    - `new MailboxServicePlugin({ imap: { accountFor, pollIntervalMs?, batchSize?, maxMessagesPerRun?, maxMessageBytes?, maxBatchBytes? } })` schedules the interval job `mailbox:imap-sync` on the composed job service. For each mailbox `accountFor` answers (asked per mailbox per run; `null` for a mailbox the host does not sync), it fetches the messages above the stored cursor, in UID order, and hands each one to `ingest` under the system context. Dedupe, association, the pool and auto-reply suppression are unchanged.
+    - Without `imap` — the capability boot constructs the plugin with no options — no mailbox is synced, and the boot says so once. With `imap` but no job service, the boot warns, and `plugin.syncService.syncAll({ isSystem: true })` runs a pass on the host's own schedule. A run in which a mailbox could not be synced reports `degraded` to the job service.
+    - `sys_mailbox` gains the cursor, written by the sync only: `imap_folder`, `imap_uid_validity`, `imap_last_uid` and `imap_synced_at`. A cursor taken under another UIDVALIDITY, or in another folder, is discarded and the folder is read from its start; the messages already stored answer `duplicate`. No credential is stored on the object: the account and its credential come from `accountFor`.
+    - The cursor moves after each batch past every message stored, already stored, suppressed or skipped. A store failure stops the run below the failed message, so the next run retries it. A message above `maxMessageBytes` (32 MiB by default) or one the seam refuses as unreadable is skipped and logged at `error` with its UID.
+    - A batch is bounded by count (`batchSize`, 25) and by listed bytes (`maxBatchBytes`, 64 MiB). The session's literal bound is `maxMessageBytes` plus a 64 KiB framing envelope, so a server that omits or understates a message's size cannot hand over more. That message is skipped as `too_large`, after the batch is read again one message at a time on a fresh session, and the rest of the mailbox keeps arriving.
+    - A forwarded `message/global` part (RFC 6532, the internationalized `message/rfc822`) is now read as an `attachment` source, the same as `message/rfc822`.
+    - New exports: `MailboxSyncService`, `MAILBOX_SYNC_JOB`, `DEFAULT_MAILBOX_POLL_INTERVAL_MS`, `DEFAULT_SYNC_FOLDER`, `DEFAULT_SYNC_BATCH_SIZE`, `DEFAULT_SYNC_MAX_MESSAGES_PER_RUN`, `DEFAULT_SYNC_MAX_MESSAGE_BYTES`, `DEFAULT_SYNC_MAX_BATCH_BYTES`, `SYNC_LITERAL_ENVELOPE_BYTES`, and the types `MailboxServicePluginOptions`, `MailboxImapSyncOptions`, `MailboxAccountResolver`, `MailboxImapAccount`, `MailboxSyncTarget`, `MailboxSyncResult`, `MailboxSyncAllResult`, `MailboxSyncSkipReason`, `MailboxSyncServiceOptions`, `MailSyncEngine` and `MailSyncLogger`.
+    - This supersedes the ingest seam entry's "no mail source feeds the seam": the IMAP sync does. Attachments are still not stored.
+- 8258181: Inbound mail has an ingest seam: `MailIngestService`, the kernel service `mailbox`, turns one raw RFC 822 message into one `sys_mail_message` row, associates it at ingest with the records whose `mailAssociation` email fields hold a participant's address, and re-matches a mailbox on request
+  
+  Clause-②: yes (the package gains an exported ingest entry point it does not export today; a widening of the public surface)
+  
+  - **`ingest({ mailboxId, raw, receivedAt? }, context)`** reads one message and answers `stored`, `duplicate` or `suppressed`. Only the system context may call it: a message enters a mailbox from its mail source, never from a user.
+    - **Participants.** The addresses of From, Sender, Reply-To, To and Cc, plus the same five headers of a message forwarded as an attachment (a `message/rfc822` part of the received message). The mailbox's own address is left out. The set is stored on the row in `match_addresses`, a JSON list of `{ address, source }` where `source` is `outer` or `attachment`. A forward quoted inline in the body is not read yet, and `inline` is declared so a later reader of it can store its addresses.
+    - **Association.** The message is linked, one `sys_mail_association` row each (`matched_by: 'ingest'`), to every record of every object with an `email` field declaring `mailAssociation: true` whose value equals a participant address (ASCII case-insensitive), inside the mailbox's organization only. A flagged object with no organization column is skipped and logged once. No app code and no resolver service is involved. A message nothing matches is stored `association_state: 'unassociated'`: the restricted pool.
+    - **Dedupe.** One row per message per mailbox. The key is `mid:` plus the SHA-256 of the Message-ID, or `hdr:` plus the SHA-256 of the header block as received for a message without one. A second fetch answers `duplicate` and writes nothing, and the unique key settles a concurrent pair.
+    - **Threading.** `message_id`, `in_reply_to` and `reference_ids` hold the RFC 5322 ids with their angle brackets stripped.
+    - **Suppression.** No row is written for an auto-reply (`Auto-Submitted` other than `no`, `Precedence: bulk`, `junk` or `list`, `X-Autoreply` or `X-Autorespond` other than `no`) or a bounce (`multipart/report; report-type=delivery-status`).
+  - **`rematch({ mailboxId, messageIds? }, context)`** replays each message's stored participant set against the records that exist now. It adds the missing links (`matched_by: 'rematch'`) and moves a pool message to `associated` once it has one. It never removes a link. A stored set that is not the stored shape is reported in `unreadable` and not matched. The system context may run it, and so may the mailbox's owner and a `manage_mailboxes` holder in the mailbox's organization. Anyone else is refused with `PERMISSION_DENIED` (403), and another organization's mailbox answers `RECORD_NOT_FOUND` (404).
+  - **New exports:** `MailIngestService`, `MAILBOX_SERVICE`, `MailboxServiceError` (`code` and `status`), `MAIL_MATCH_ADDRESS_SOURCES`, `MAIL_SUPPRESSION_REASONS`, and the types `MailIngestInput`, `MailIngestResult`, `MailRematchInput`, `MailRematchResult`, `MailboxCallerContext`, `MailIngestEngine`, `MailIngestLogger`, `MailAssociationMatch`, `MailMatchAddress`, `MailMatchAddressSource`, `MailSuppressionReason`, `MailboxServiceErrorCode` and `RawMailMessage`. `MailboxServicePlugin` registers the service in `init()`.
+  - **New dependencies:** `postal-mime` (MIT-0, no dependencies of its own, ES module and CommonJS builds) reads the MIME structure, the encoded words and the address lists. `@objectstack/types`, already installed through `@objectstack/core`, supplies the keyset walk the re-match pages with.
+  - **Not yet:** no mail source feeds the seam (the IMAP connector ships separately), and attachments are not stored, so a message forwarded as an attachment keeps the forwarder's own text and not the forwarded message's body.
+
+### Patch Changes
+
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [3d830b7]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/connector-imap@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes

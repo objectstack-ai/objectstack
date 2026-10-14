@@ -1,5 +1,160 @@
 # @objectstack/service-automation
 
+## 18.0.0-next.1
+
+### Major Changes
+
+- 7958bdf: No flow position reads the single-brace `{…}` template dialect any more, and its resolver is deleted (ADR-0032 Sequencing 6: "delete the single-brace resolver"). `AutomationEngine.evaluateCondition` evaluates every condition as CEL: a condition carrying a `{var}` hole is refused as the CEL brace trap, naming its source, and a `template` or `flow` envelope is refused before evaluation, where the deleted path substituted the variables and compared the text. A literal in a value slot is handed on as written: a `Date` in a code-defined flow reaches the write as the `Date`, where the deleted interpolator wrote `{}`.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused) The two step-18 D3 entries, registered on this line before this change, record the retirement of the single-brace dialect from every value and text position; this change deletes the resolver behind those positions and the condition path no registered flow reached. No authorable flow surface changes: registerFlow and objectstack validate already refused a braced condition and a template or flow envelope at every condition slot (ADR-0032 §1a), and the residual calls the resolver kept saw literals only. No new D3 entry and no D2 conversion. -->
+  
+  **BREAKING**: a narrowing of a published runtime method and of published lint exports, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 3 keeps one template delimiter, `{{ }}`, and its Sequencing 6 deletes the single-brace resolver. The earlier changes on this line retired the dialect position by position — every value slot, the text slots, each CRUD filter operand — so the resolver's last readers were two calls that saw literals only and a condition path that only a direct call reached.
+  
+  **What changes.**
+  
+  - **Conditions.** `AutomationEngine.evaluateCondition(condition, variables, context?)` reads every condition as CEL — bare text, an envelope with `dialect: 'cel'`, or one naming no dialect. The template path it kept for a string carrying a `{var}` hole is deleted: such a string is refused as a CEL fault that names its source and says not to wrap field references in `{…}`, and an envelope with `dialect: 'template'` or `dialect: 'flow'` is refused before evaluation. `registerFlow` already refused both at every condition slot (a start node's `condition`, an edge `condition`, a `decision` branch's `expression`, a screen field's `visibleWhen`), so no registered flow changes. What changes is a direct caller: a plugin calling the method, or `@objectstack/verify`'s `stack.automation.evaluateCondition`, which hands the condition over as given.
+  - **Value-slot literals.** A literal in a value slot — a `fields`, `input` or `templateData` value, an `assignment` value in any of its three shapes, a `notify` recipient, an `http` `body`, a screen's `defaults`, `defaultValue` or `recordId` — is handed on as a copy of what was written (arrays and plain objects copied, every other value as it is). The deleted interpolator walked every object's own entries, so a `Date` written in a code-defined flow reached the write as `{}`; it reaches it as the `Date`.
+  - **`@objectstack/lint`.** `validateFlowTemplatePaths` reads the `{{ }}` holes of a node's strings and no single-brace token; a CRUD node's `filter` is not scanned, since each operand is a value slot that renders no template. So `flow-template-unknown-field` and `flow-template-lookup-traversal` report only `warning` now: their `error` at a filter operand, and every finding on a single-brace token, are gone, and the value-slot and text-slot judges refuse those tokens at the same doors as `expression-invalid`. Messages and hints spell a hole `{{ record.x }}`. `flow-double-brace-interpolation` and `flow-bare-dollar-reference`, at a string outside every value slot, text slot and declared literal (a plugin node's own config, a `connector_action` input), say the value is read as written, where they prescribed a `{var}` token nothing reads. The lint's mirror of the retired grammar is removed with its exports.
+  - **`@objectstack/spec`.** The `FlowSchema` example's `connector_action` input holds a literal, since nothing reads a token there. The upgrade guide's step-18 text-slot entry says no other flow string reads the single-brace dialect, where it said every other one kept it, and its value-slot entry names every value slot the retirement reached on this line, where it named only the `assignment` values and the CRUD `fields` map.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `engine.evaluateCondition('{amount} > 100', vars)` | `engine.evaluateCondition('amount > 100', vars)` | the template substituted text and compared it; CEL compares the values and fails the run on an absent variable |
+  | `"{status} == 'open'"`, `'{status} == open'` | `"status == 'open'"` | a string literal is quoted |
+  | `{ dialect: 'template', source: "{flag} == true" }`, `dialect: 'flow'` | `{ dialect: 'cel', source: 'flag == true' }` | — |
+  | `classifyFlowTemplateToken(inner)` (`@objectstack/lint`) | `valueSlotTemplateRefusals(value)` / `textSlotTemplateRefusal(text)` (`@objectstack/spec/automation`), which refuse a token with the spelling that replaces it | the grammar it classified is read by nothing |
+  | `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` | the CEL stdlib: `isoDate(today())`, `isoDatetime(now())`, `round`, `floor`, `ceil`, `abs`, `min`, `max` | — |
+  | `FlowTemplateTokenVerdict` | nothing: the judges' reading of the retired grammar is internal to `@objectstack/spec` | — |
+  
+  **The one-line fix: write a condition as CEL, without `{…}` around a reference.**
+  
+  **Who is affected, measured.** In this repository at the base: no braced condition and no `template` or `flow` condition envelope in `examples/`, the docs or any package source; the deleted path's own pins in `@objectstack/service-automation` (`engine.test.ts`, `nested-region-parity.test.ts`) and `@objectstack/verify`'s door test are re-pinned to the refusal here. No authored `Date` literal in a flow was found; a compiled artifact serialises one to text, so only a flow handed to `registerFlow` in code carried one. Neither repository imports the removed lint exports. hotcrm at `0f84c9c` carries no braced condition and no `connector_action` input; its flows still author the single-brace dialect at value and text positions earlier changes on this line refuse, which its own upgrade migrates.
+  
+  ### The kit
+  
+  - **The engine.** `AutomationEngine.evaluateCondition` (`@objectstack/service-automation`): the template path, its hole discriminator and its text comparison are deleted. The value-slot resolvers' literal arm and the `assignment` executor copy a literal (`copyLiteral`, `builtin/value-slot-map.ts`). The single-brace interpolator (`interpolate`, `interpolateString`, `resolveToken`, its function table and `FlowExpressionFunctionError`), which the package did not export, is deleted with its tests.
+  - **The lint.** `validateFlowTemplatePaths` and the two wrong-syntax hints (`lint-flow-patterns.ts`); `classifyFlowTemplateToken`, `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` and `FlowTemplateTokenVerdict` are removed.
+  - **The verify handle.** `stack.automation.evaluateCondition`'s documentation states the engine's reading: CEL, a `{var}` hole refused.
+  - **ADR-0087.** No new entry: the step-18 D3 entries `flow-value-slot-template-dialect-refused` and `flow-text-slot-single-brace-refused` record the retirement.
+
+### Minor Changes
+
+- 572ecfb: fix: `os migrate meta --stored` lists every stored row that protocol 18 refuses and no conversion rewrites. Before, the preview counted each such row as already on protocol.
+  
+  Clause-②: yes (widening: `IAutomationService.canonicalizeStoredFlow(...).todos?` in `@objectstack/spec`, `AutomationEngine.canonicalizeStoredFlow(...).todos` in `@objectstack/service-automation` and `StoredFlowCanonicalization.todos?` in `@objectstack/metadata-protocol`, each a new output member; nothing narrows, and no door accepts or refuses anything it did not before)
+  
+  Three step-18 retirements refuse a stored shape that has no lossless rewrite. Upgrading a v17 database left those rows refused at load or at boot, and the stored preview read them as `canonical`. Each shape now has exactly one fate: **refused and listed**. The preview and `--apply` print one `TODO` line per site under its row. The line names the step-18 entry that refuses the shape, the site, and the choice the owner has to make. Nothing is rewritten, and the run's verdict does not change, because no run of the pass could clear these rows.
+  
+  **#23269, a flow value slot carrying a `{…}` token, including a `get_record` / `update_record` / `delete_record` filter operand: refuse and list.** A whole-path token maps mechanically to `{ dialect: 'cel', source: '<path>' }`, but the rewrite is not lossless. A token the template resolved to nothing (an erased condition, so the node was refused) is a CEL fault on an absent root, and a flow variable named like a query placeholder used to shadow it. ADR-0087 D2 conversions run on the load path and must be lossless, so this one is not a D2. The chain also has no operator-applied rewrite of stored rows separate from the load path: `--stored` writes back the read path's own pass, and `--from 17` rewrites authored sources, not rows. So the flow is listed by flow, node and path (`flow-value-slot-template-dialect-refused`), and `registerFlow` goes on refusing it until the value is rewritten as its CEL envelope. A flow already in the CEL form, or using a query placeholder such as `{current_user_id}`, is not listed.
+  
+  **#23270, a `controlled_by_parent` object without exactly one required `master_detail`: refuse and list, by object (`cbp-master-relation-tiers-retired`).** No shape here converts losslessly. The upgrade never picks between two masters, either both required or neither. An explicit `required: false` is a contradiction the builder refuses. Turning a required `lookup` into a `master_detail` changes what deleting the master does. An object with no master has nothing to convert. Leaving `controlled_by_parent` changes who can read the rows, so that is the owner's choice and never a silent rewrite. The listing reads the same predicate `ObjectSchema` refuses with, so the preview and the parse refuse one set. The one lossless shape, a single `master_detail` with `required` omitted, is still converted by `cbp-master-detail-required-defaulted` and is not listed.
+  
+  **#23271, a view whose `data` binds the retired view-level API source: refuse and list, by view (`view-data-api-provider-retired`).** There is no mechanical move. The replacement is a page component's `dataSource`, so a page must exist to carry it. Deleting the view's `data` would make the view query its object instead. Views in every stored body spelling are covered, and so are an object's own `listViews`. The line shows the request URL and method and withholds every other request key, so a credential stored in a view's headers never reaches the report. A view on the `object`, `value` or `schema` provider is not listed.
+  
+  How it is wired: `applyConversions` reports these shapes through its existing `onTodo` sink, after the conversions run. Each TODO's `conversionId` is the id of the D3 entry that refuses the shape, so the published `ConversionTodoNotice.conversionId` now names either a conversion or a D3 entry. The published flow-canonicalization result gains one member, a widening in three packages:
+  
+  - `@objectstack/spec`: the contract `IAutomationService.canonicalizeStoredFlow(...)` declares an optional `todos?: ConversionTodoNotice[]` beside `notices` and `conflicts`. An implementation that reports none still conforms.
+  - `@objectstack/service-automation`: `AutomationEngine.canonicalizeStoredFlow(...)` returns `todos`. `registerFlow` ignores them, because its own refusal names the same sites.
+  - `@objectstack/metadata-protocol`: `StoredFlowCanonicalization` gains the matching optional `todos?`, and the stored pass lists a flow row's TODOs the way it lists any other row's.
+  
+  The authoring funnel and the read seams pass no sink, so nothing changes for them.
+- 24e064f: fix(objectql,service-messaging,service-automation,plugin-approvals)!: a notification carries the organization of what it is about, and one no organization owns is refused instead of stored with `organization_id` NULL
+  
+  Clause-②: no (narrowing) — notification rows gain the organization they should already carry; what narrows is an emit that names no organization on an install where none is derivable, which the engine now refuses where it used to store the event row with `organization_id` NULL.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime narrowing of which notification writes the engine accepts, not a metadata change. No spec key, authorable spelling, export, option, config field or stored shape is added, removed, renamed or re-shaped, and no stored row is rewritten: rows already stored with organization_id NULL keep it until the v18 ownership ceremony attributes them, which already lists sys_notification with the attribution fate. The only type change is an additive optional `organizationId` on the input of `ApprovalMessagingSurface.emit`, the approvals service's messaging surface: the interface is not listed in the package index, but it is published surface, reachable through the exported `ApprovalServiceOptions.messaging` and the public `ApprovalService.attachMessaging`, so it is an additive widening that no existing implementation has to change for. The other categories are closed on facts: the four packages publish (not unpublished); no ADR-0087 id covers notification ownership and this diff adds none (not registered / already-registered); nothing is removed or narrowed on an interface or type (not runtime-interface-only / type-surface-only); and no runtime export is retired (not runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Every notification emitted from a system-context run — a scheduled flow, a record change written by a system context, an approval node — was stored in `sys_notification` with `organization_id` NULL, so reports and cleanup that filter by organization did not see it. Each emit also logged a `[notify] no organization in scope` warning. On an install holding several organizations, the deliveries of the same emit were refused while the flow step reported success, so nothing reached the inbox.
+  
+  **Who owns a notification now:**
+  
+  - **The run's organization.** A run that carries one emits exactly as before.
+  - **Else the record it is about.** A `notify` node in a run with no organization reads the organization of the record the notification is about. That is the declared click-through record (`sourceObject` + `sourceId`), else the run's trigger record. It is read from the stored row by id, never from the record snapshot the run carries.
+  - **Approvals.** Every approval notification carries its request's organization: `approval.requested`, reminders, comments, send-backs, reassignments, escalations and out-of-office notices.
+  - **Else the owner the engine derives for a system write** (ADR-0131 D9). `sys_notification` is now in the platform-object tenancy ledger, so an emit that names no organization gets the install's sole organization under the `single` posture.
+  - **The rows below follow the event.** `emit()` stamps the stored event row's organization on its delivery, inbox row and receipt, on both the inline and the outbox path.
+  
+  **Refused now:** where no organization is derivable (a walled posture, or a `single` install holding more than one organization), an emit that names none is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`. Nothing is written for it. A `notify` step that hits the refusal fails with `notify failed: ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED: …` instead of succeeding. `MessagingService.emit()` rejects with the engine's error for any other producer.
+  
+  **What to do when it refuses:** give the notification an owner. Name the record it is about on the `notify` node (`sourceObject` + `sourceId`), declare the scheduled flow's acting organization (`organization` on its start node), or pass `organizationId` to `emit()` from your own code.
+  
+  The `[notify] no organization in scope` warning is gone, because the NULL row it predicted is no longer written. Rows already stored with `organization_id` NULL are not rewritten here. The v18 organization-ownership ceremony attributes them from their source record.
+- d89f491: A stored flow the automation engine refuses is no longer served as running: the flow meta read serves the engine's verdict beside the item as `registration`, an envelope sibling of `lock`, and the flow list serves it as `registrations` keyed by flow name, so a refused flow reads `{ state: 'refused', reason: { code?, message } }` beside its stored `status`, which stays as authored.
+  
+  Clause-②: yes (widening)
+  
+  - **The shape** (`@objectstack/spec`). `FlowRegistrationSchema` is a closed set: `registered` (the engine holds the flow), `refused` (it refused the stored flow and holds nothing under the name; `reason` carries the engine's own `message` and, when the thrown error set one, its `code`, verbatim), and `unregistered` (it holds nothing and refused nothing: a read during boot, between a save and the engine following it, or after a deliberate unregister). `GetMetaItemResponseSchema` gains `registration` and `GetMetaItemsResponseSchema` gains `registrations`, both optional. New exports: `FlowRegistrationSchema`, `FlowRegistrationRefusalSchema` and the types `FlowRegistration` and `FlowRegistrationRefusal`. `IAutomationService` gains the optional member `getFlowRegistration(name)`.
+  - **Where the verdict comes from** (`@objectstack/service-automation`). The `kernel:ready` cold-boot bind records each flow it refuses, with what the engine threw, after it withdraws the flow; the `metadata:reloaded` re-sync and the metadata-change sync record a refusal that leaves the name unregistered. A later successful registration of the name, or its withdrawal, ends the record. `AutomationEngine` answers `getFlowRegistration(name)` and takes `recordFlowRefusal(name, error)`. The refusal's warn line, its level and the withdrawal are unchanged.
+  - **Where it is served** (`@objectstack/metadata-protocol`). The protocol reads the engine through the kernel's service table by name, as it already reads the engine's stored-flow canonicalizer; it does not import the automation service. The field is absent where no automation service declares the member, on every type other than `flow`, on a draft read and on the execution face the engine binds from: absence means no engine judged the flow, never `registered`. The verdict is the engine of the process that answered the read.
+  - **The default door** (`@objectstack/rest`, `@objectstack/metadata-protocol`, `@objectstack/spec`). `GET /api/v1/meta/flow/:name` on a default deployment (`metadata.enableCache: true`) is answered by the cached item branch, which now carries `registration` too. `getMetaItemCached` returns it beside `data`, read live from its delegate read on every call, and `GetMetaItemCachedResponseSchema` declares it. It is never part of the ETag, so a cached read that carries it is never answered `304 Not Modified`: a judged flow is always served in full. The cached branch's other envelope keys are unchanged.
+- dc39326: fix: `os migrate meta --stored` lists the two families of stored rows it still read as on protocol: a page component whose `data` prop binds the retired view-level API source, and every other site `registerFlow` refuses in a stored flow the parse accepts.
+  
+  Clause-②: yes (widening: `ConversionTodoNotice.conversionId` in `@objectstack/spec` may now name `registerFlow`, the refusing door; `IAutomationService.canonicalizeStoredFlow(...).todos?` in `@objectstack/spec` and `AutomationEngine.canonicalizeStoredFlow(...).todos` in `@objectstack/service-automation` now also carry each site flow registration refuses; the `onTodo` sink of `applyConversions` now also receives a page component bound to the retired API source; nothing narrows, and no door accepts or refuses anything it did not before)
+  
+  **A page component bound to the retired view-level API source: refuse and list, by page and component (`view-data-api-provider-retired`).** `object-grid`, `object-map`, `object-gantt` and `object-tree` take a view data source in their `data` prop, so the step-18 retirement of the `provider: 'api'` arm reaches them through the same schema. The listing judges each stored page component with its own props row, the one the component-props gate parses, and lists it only when that row refuses the binding with the retirement's prescription; a component whose `data` is a row array, a custom type and a component's own `dataSource` binding are not listed. The line names the page, the component and its position, shows the request URL and method, and withholds every other request key. Nothing is rewritten: deleting `data` would make the component query its object instead. Left as stored, the page still loads and saves, because the page parse does not judge a component's properties, while `os validate`, `os build` and `os lint` refuse the binding in source. The D3 entry `view-data-api-provider-retired` now names these components in its scope.
+  
+  **A stored flow refused by `registerFlow` after the parse: refuse and list, by site (`registerFlow`).** The stored pass ran only one of registration's judges, the value-slot one. `canonicalizeStoredFlow` now runs registration's whole validation without registering: every check `registerFlow` runs once the parse has accepted the flow, through the one list `registerFlow` itself throws from. Each refused site is a `TODO registerFlow` line under its row, in the check's own words: a text slot still on the single-brace dialect or with a hole that does not compile, a decision's `mode`, a malformed node or edge predicate, a plugin node's undeclared config key, an `api` flow with no secret. A check added to registration later is listed the same way, with no second change. A site the chain already lists under a step-18 entry is not repeated. What the parse itself refuses, the builtin config contracts' value arm among it, is not a TODO: `canonicalizeStoredFlow` throws it, and the preview reports the row among those that could not be rewritten, in the parse's words.
+  
+  `registerFlow` refuses exactly what it refused before, with the same message: its checks now return their refusal instead of throwing it, and `registerFlow` throws the first one. The doors that canonicalize a flow without registering it (the metadata save door, a package duplication) read no `todos`, and the stored pass's run of the checks logs nothing, so they behave as before.
+
+### Patch Changes
+
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [c6139f2]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [78c13bd]
+- Updated dependencies [9543e9c]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [2de9c03]
+- Updated dependencies [5b68524]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/metadata-protocol@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/metadata-core@18.0.0-next.1
+  - @objectstack/formula@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Major Changes

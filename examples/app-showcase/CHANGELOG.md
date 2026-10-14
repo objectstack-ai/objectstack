@@ -1,5 +1,63 @@
 # @objectstack/example-showcase
 
+## 0.3.22-next.1
+
+### Patch Changes
+
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [777eed2]
+- Updated dependencies [5f37d36]
+- Updated dependencies [8024e12]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [d4aaeaf]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [08b38cb]
+- Updated dependencies [917b1a0]
+- Updated dependencies [d9d7edd]
+- Updated dependencies [d45d0e9]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [01d5034]
+- Updated dependencies [f24574a]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [5d3018d]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [28e294f]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/runtime@18.0.0-next.1
+  - @objectstack/service-i18n@18.0.0-next.1
+  - @objectstack/service-datasource@18.0.0-next.1
+  - @objectstack/cloud-connection@18.0.0-next.1
+  - @objectstack/connector-mcp@18.0.0-next.1
+  - @objectstack/connector-openapi@18.0.0-next.1
+  - @objectstack/connector-rest@18.0.0-next.1
+  - @objectstack/connector-slack@18.0.0-next.1
+  - @objectstack/driver-sql@18.0.0-next.1
+
 ## 0.3.22-next.0
 
 ### Patch Changes

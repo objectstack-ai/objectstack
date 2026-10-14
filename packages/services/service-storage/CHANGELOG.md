@@ -1,5 +1,94 @@
 # @objectstack/service-storage
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 08b38cb: fix(services)!: the datasource admin, share-link, webhook redeliver and storage families refuse a session the ADR-0069 authentication policy holds
+  
+  Clause-②: no (narrowing) — a session ADR-0069 holds out of protected resources is refused by families that answered it; core's existing exports only, no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at four families of routes mounted directly on the host server, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions these families serve: a session whose user carries the ADR-0069 posture (an expired password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before any of the family's logic runs. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers these routes and this diff adds none (not registered / already-registered); and no published interface or type changes (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate. REST and the runtime dispatcher already refuse such a session. Four families of routes mounted straight on the host server never asked, so they served it as an ordinary signed-in caller:
+  
+  - **`@objectstack/service-datasource`**: the datasource admin family (`registerDatasourceAdminRoutes`). Its door now asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) about the session it already reads, before the anonymous floor and the capability check.
+  - **`@objectstack/plugin-sharing`**: the share-link family (`registerShareLinkRoutes`). Every route, the two capability-token routes included, is now mounted through one door that refuses a context carrying `authGate`. `SharingServicePlugin`'s resolver now puts the session's posture on that context, as REST does.
+  - **`@objectstack/plugin-webhooks`**: the redeliver door (`WebhookOutboxPlugin`), on both of its faces: the route the plugin mounts, and the `webhooks` service's `handleRedeliver`.
+  - **`@objectstack/service-storage`**: the storage family, the two capability-token raw-transfer routes included. Every route is now mounted through one door. The posture is bound where every other storage gate is bound, so both the plugin's own mount and the host door `mountStorageRoutes` carry it. When a gate feature is active, the door reads the session and refuses a held one. When the gate is active but the session cannot be read, the door answers the declared `503` (`SERVICE_UNAVAILABLE`), as REST does. A direct call of `registerStorageRoutes` mounts the family exactly as before, because like the other storage gates this one is bound by the package's composition. No exported declaration changes.
+  
+  - **Refused now:** a held session gets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message`, in each family's declared error envelope, before the family does anything else. This is the answer REST gives the same session.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, and an API-key caller is unaffected because it has no session to hold. A CORS preflight is answered as before.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before these routes answer them, as on every other protected route. If you mount the storage routes through `mountStorageRoutes`, the gate is bound from the kernel's `auth` service with nothing to configure. If you mount `registerShareLinkRoutes` yourself with your own `contextFromRequest`, set `authGate` on the context it returns for a held session; the door refuses on that field.
+- 5e725b8: A server-side producer can store a file and attach it to a record: `IFileAttachmentService.attachFile`, registered by `StorageServicePlugin` as the kernel service `file-attachments` (`FILE_ATTACHMENT_SERVICE`), writes the bytes, one `sys_file` row and one `sys_attachment` row linking it to the parent, under the checks every other attachment of that parent meets
+  
+  Clause-②: yes (widening: `@objectstack/spec/contracts` gains `IFileAttachmentService`, `AttachFileInput`, `AttachedFile` and `FILE_ATTACHMENT_SERVICE`, and `StorageServicePlugin` registers and declares one more service)
+  
+  - **The call.** `attachFile({ parentObject, parentId, organizationId, filename, mimeType, data })` answers `{ fileId, attachmentId, size }`. `organizationId` is required: the organization the caller acts in, or `null` for none. It acts as the system, for a producer with no browser upload in front of it (inbound mail first). Reach it with `ctx.getService(FILE_ATTACHMENT_SERVICE)` once the kernel has bootstrapped.
+  - **What it runs.** Each check is the one the rest of the platform already runs, not a copy:
+    - The `max_upload_mb` storage setting, through the same verdict the REST upload doors ask. Over it, the call is refused `413 PAYLOAD_TOO_LARGE` before anything is stored.
+    - The parent's organization. A parent walled into another organization than `organizationId` is refused `404 RECORD_NOT_FOUND`, as a missing parent is. Both rows are written in the parent's organization, or in the caller's for a global parent.
+    - Every gate on the `sys_attachment` insert, among them the `enable.files` opt-in: a parent object without it is refused `403 FILES_DISABLED`.
+    - Before the kernel has bootstrapped, or with no data engine, the call is refused `503 SERVICE_UNAVAILABLE`. A malformed input is refused `400 VALIDATION_ERROR`.
+  - **No refusal leaves a committed `sys_file`.** The row is written `pending` before the bytes, and turns `committed` only in the same transaction as the `sys_attachment` insert. A refused call removes the bytes and the row before it throws. If the process dies mid-call, the pending-upload retention reclaims both.
+  - `@objectstack/service-storage`: the upload doors' size refusal moved from the route module into `storage-limits.ts`, beside the limit it enforces, so the doors and the verb read one status, one code and one sentence. The doors answer exactly as before.
+
+### Patch Changes
+
+- 3c1a046: fix: a route's catch-all `500` answers its own generic text, never the caught error's message, and `@objectstack/types` exports the writer that does it, `sendServerFault`
+  
+  Clause-②: yes (widening) — `@objectstack/types` gains one export, `sendServerFault`; nothing is removed, renamed or narrowed, and no response field changes shape.
+  
+  A declared 5xx does not carry the text of the error it caught: that text can name server internals, such as a path, a host or a table. The REST layer already withheld it. The storage, settings and i18n route families and the share-link routes answer in the nested `{ success: false, error: { code, message } }` envelope and did not: their catch-all `500` sent the caught error's message to the caller.
+  
+  - **What a caller now reads.** The same `status` and `code` as before, with the route's own generic text as `error.message`: `Internal error` on the storage and i18n routes, the route's message on the settings routes (`Failed to list manifests`, `Failed to read namespace`, `Failed to write namespace`, `Action failed`), and the route's `Failed to …` message on the share-link routes. On the storage routes this includes the metadata store's outage sentence, which an operator now reads in the server log.
+  - **What the operator reads.** The original error, stack included, in one `[5xx]` server-fault line. The storage byte routes, which already withheld the text, logged two lines per fault and now log one. A line names the mounted route pattern when the route passes one, never the request URL.
+  - **Unchanged.** Every `4xx` answer. The settings `SETTINGS_CRYPTO_UNAVAILABLE` refusal, which keeps its prescription. The authorization-store outage `503`, which keeps its declared code and message. The storage `501 NOT_IMPLEMENTED` answers. On the share-link routes, any error that declares its own `status` keeps the envelope it declares.
+  - **`sendServerFault(res, status, code, message, thrown, request?)`** (new, `@objectstack/types`): writes `message` in the declared envelope, and hands `thrown` to the server-fault log with its stack, as the fault's one line. Use it for an arm that answers a caught fault. Keep `sendError` for a `4xx` and for a `5xx` whose text you wrote for the reader. `request` is the mounted route pattern, never the request URL.
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/observability@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes

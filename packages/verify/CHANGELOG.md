@@ -1,5 +1,169 @@
 # @objectstack/verify
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 06dbc4e: fix(verify)!: `runDashboardWindowProofs` takes no options, so the dashboard date-window run can no longer be pinned to an instant the server does not resolve on, and a run that crosses UTC midnight after it starts reports `not-run` instead of a false red
+  
+  `runDashboardWindowProofs(stack, token, config)` loses its fourth parameter, and `DashboardWindowProofOptions` (its only member was `now`) is retired. The server resolves a dashboard's date preset per request on its own clock, so any `now` other than the current instant made every window read `contradicted`: the option could only produce false reds, and nothing passed it.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/verify#DashboardWindowProofOptions) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What retires is one type export of `@objectstack/verify`'s published entry, `DashboardWindowProofOptions`, together with the optional fourth parameter of `runDashboardWindowProofs` that it typed. The affected party is a TypeScript caller, and the compiler at that call site delivers the break. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - FROM `DashboardWindowProofOptions` TO nothing (no replacement): drop the fourth argument, so `runDashboardWindowProofs(stack, token, config, { now })` becomes `runDashboardWindowProofs(stack, token, config)`.
+  
+  Fix: the presets resolve when the run starts, and each count measure places its fixture rows on the day it is probed. A run that crossed UTC midnight between the two judged that measure against the previous day's edges and could read it `contradicted`. That measure is now `not-run`, and its detail names both days; the widget reads `inconclusive`. The guard that catches a day turning while a measure is being probed is unchanged.
+
+### Patch Changes
+
+- 7958bdf: No flow position reads the single-brace `{…}` template dialect any more, and its resolver is deleted (ADR-0032 Sequencing 6: "delete the single-brace resolver"). `AutomationEngine.evaluateCondition` evaluates every condition as CEL: a condition carrying a `{var}` hole is refused as the CEL brace trap, naming its source, and a `template` or `flow` envelope is refused before evaluation, where the deleted path substituted the variables and compared the text. A literal in a value slot is handed on as written: a `Date` in a code-defined flow reaches the write as the `Date`, where the deleted interpolator wrote `{}`.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused) The two step-18 D3 entries, registered on this line before this change, record the retirement of the single-brace dialect from every value and text position; this change deletes the resolver behind those positions and the condition path no registered flow reached. No authorable flow surface changes: registerFlow and objectstack validate already refused a braced condition and a template or flow envelope at every condition slot (ADR-0032 §1a), and the residual calls the resolver kept saw literals only. No new D3 entry and no D2 conversion. -->
+  
+  **BREAKING**: a narrowing of a published runtime method and of published lint exports, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 3 keeps one template delimiter, `{{ }}`, and its Sequencing 6 deletes the single-brace resolver. The earlier changes on this line retired the dialect position by position — every value slot, the text slots, each CRUD filter operand — so the resolver's last readers were two calls that saw literals only and a condition path that only a direct call reached.
+  
+  **What changes.**
+  
+  - **Conditions.** `AutomationEngine.evaluateCondition(condition, variables, context?)` reads every condition as CEL — bare text, an envelope with `dialect: 'cel'`, or one naming no dialect. The template path it kept for a string carrying a `{var}` hole is deleted: such a string is refused as a CEL fault that names its source and says not to wrap field references in `{…}`, and an envelope with `dialect: 'template'` or `dialect: 'flow'` is refused before evaluation. `registerFlow` already refused both at every condition slot (a start node's `condition`, an edge `condition`, a `decision` branch's `expression`, a screen field's `visibleWhen`), so no registered flow changes. What changes is a direct caller: a plugin calling the method, or `@objectstack/verify`'s `stack.automation.evaluateCondition`, which hands the condition over as given.
+  - **Value-slot literals.** A literal in a value slot — a `fields`, `input` or `templateData` value, an `assignment` value in any of its three shapes, a `notify` recipient, an `http` `body`, a screen's `defaults`, `defaultValue` or `recordId` — is handed on as a copy of what was written (arrays and plain objects copied, every other value as it is). The deleted interpolator walked every object's own entries, so a `Date` written in a code-defined flow reached the write as `{}`; it reaches it as the `Date`.
+  - **`@objectstack/lint`.** `validateFlowTemplatePaths` reads the `{{ }}` holes of a node's strings and no single-brace token; a CRUD node's `filter` is not scanned, since each operand is a value slot that renders no template. So `flow-template-unknown-field` and `flow-template-lookup-traversal` report only `warning` now: their `error` at a filter operand, and every finding on a single-brace token, are gone, and the value-slot and text-slot judges refuse those tokens at the same doors as `expression-invalid`. Messages and hints spell a hole `{{ record.x }}`. `flow-double-brace-interpolation` and `flow-bare-dollar-reference`, at a string outside every value slot, text slot and declared literal (a plugin node's own config, a `connector_action` input), say the value is read as written, where they prescribed a `{var}` token nothing reads. The lint's mirror of the retired grammar is removed with its exports.
+  - **`@objectstack/spec`.** The `FlowSchema` example's `connector_action` input holds a literal, since nothing reads a token there. The upgrade guide's step-18 text-slot entry says no other flow string reads the single-brace dialect, where it said every other one kept it, and its value-slot entry names every value slot the retirement reached on this line, where it named only the `assignment` values and the CRUD `fields` map.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `engine.evaluateCondition('{amount} > 100', vars)` | `engine.evaluateCondition('amount > 100', vars)` | the template substituted text and compared it; CEL compares the values and fails the run on an absent variable |
+  | `"{status} == 'open'"`, `'{status} == open'` | `"status == 'open'"` | a string literal is quoted |
+  | `{ dialect: 'template', source: "{flag} == true" }`, `dialect: 'flow'` | `{ dialect: 'cel', source: 'flag == true' }` | — |
+  | `classifyFlowTemplateToken(inner)` (`@objectstack/lint`) | `valueSlotTemplateRefusals(value)` / `textSlotTemplateRefusal(text)` (`@objectstack/spec/automation`), which refuse a token with the spelling that replaces it | the grammar it classified is read by nothing |
+  | `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` | the CEL stdlib: `isoDate(today())`, `isoDatetime(now())`, `round`, `floor`, `ceil`, `abs`, `min`, `max` | — |
+  | `FlowTemplateTokenVerdict` | nothing: the judges' reading of the retired grammar is internal to `@objectstack/spec` | — |
+  
+  **The one-line fix: write a condition as CEL, without `{…}` around a reference.**
+  
+  **Who is affected, measured.** In this repository at the base: no braced condition and no `template` or `flow` condition envelope in `examples/`, the docs or any package source; the deleted path's own pins in `@objectstack/service-automation` (`engine.test.ts`, `nested-region-parity.test.ts`) and `@objectstack/verify`'s door test are re-pinned to the refusal here. No authored `Date` literal in a flow was found; a compiled artifact serialises one to text, so only a flow handed to `registerFlow` in code carried one. Neither repository imports the removed lint exports. hotcrm at `0f84c9c` carries no braced condition and no `connector_action` input; its flows still author the single-brace dialect at value and text positions earlier changes on this line refuse, which its own upgrade migrates.
+  
+  ### The kit
+  
+  - **The engine.** `AutomationEngine.evaluateCondition` (`@objectstack/service-automation`): the template path, its hole discriminator and its text comparison are deleted. The value-slot resolvers' literal arm and the `assignment` executor copy a literal (`copyLiteral`, `builtin/value-slot-map.ts`). The single-brace interpolator (`interpolate`, `interpolateString`, `resolveToken`, its function table and `FlowExpressionFunctionError`), which the package did not export, is deleted with its tests.
+  - **The lint.** `validateFlowTemplatePaths` and the two wrong-syntax hints (`lint-flow-patterns.ts`); `classifyFlowTemplateToken`, `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` and `FlowTemplateTokenVerdict` are removed.
+  - **The verify handle.** `stack.automation.evaluateCondition`'s documentation states the engine's reading: CEL, a `{var}` hole refused.
+  - **ADR-0087.** No new entry: the step-18 D3 entries `flow-value-slot-template-dialect-refused` and `flow-text-slot-single-brace-refused` record the retirement.
+- b4d573a: fix(spec,core): the rolling `last_7_days`, `last_30_days` and `last_90_days` presets close on today, at the spec's prescription table, the save door's refusal and the analytics preset arm
+  
+  Clause-②: no (no accept set widens: the three rolling windows gain the inclusive `{today}` end every calendar preset already has)
+  
+  The three rolling windows were the open arm of `DATE_RANGE_PRESET_MACRO_WINDOWS`: `['{30_days_ago}', null]`, prescribed as `{ $gte: '{30_days_ago}' }`. A `$gte`-only window has no upper bound, so on a column that carries future dates (a close date, a due date) "last 30 days" also counted every later day. Measured on a `date` field with one row dated today−5 and one dated today+5: that window counted 2, while the console's preset lowering and the analytics preset arm counted 1.
+  
+  - `DATE_RANGE_PRESET_MACRO_WINDOWS` now closes every rolling window on `{today}`: `last_7_days` is `['{7_days_ago}', '{today}']`, and `last_30_days` and `last_90_days` follow the same shape. That is the inclusive last-day end every calendar preset already uses, and the extent the console's lowering already selects. The table's declared type narrows to match, `readonly [start: string, end: string]` (it was `end: string | null`). A reader that compared `end` with `null` still compiles; that branch can no longer be taken.
+  - The save door's refusal of a bare preset comparand (`bareDateRangePresetComparandMessage`, and the `filter-preset-comparand` lint verdict that quotes it) now prescribes the closed window. For `last_30_days` it says: write `{ $between: ['{30_days_ago}', '{today}'] }`, where it used to say `{ $gte: '{30_days_ago}' }`.
+  - `@objectstack/core`'s `resolveAnalyticsDateRangePreset`, the preset arm behind `timeDimensions[].dateRange`, selects the same extent. A rolling window now stops before tomorrow begins in the reference timezone, exactly as `today` does, with `endExclusive: true`. It used to end at the reference instant, so it dropped rows stamped later today. Its ends keep this module's own "the day the window stops before" spelling (`tomorrow`). Every preset this resolver returns is now `endExclusive: true`, and a caller's explicit `[a, b]` window keeps its inclusive reading, as before.
+  - The semantic migration entry `filter-preset-ordering-comparand-refused`, which `spec-changes.json` and `os migrate meta` carry, now names `{ $between: ["{30_days_ago}", "{today}"] }` as the window for `last_30_days` in its replacement, where it named `{ $gte: "{30_days_ago}" }`.
+  
+  If you followed the old refusal and authored `{ $gte: '{N_days_ago}' }` for a rolling preset, add `$lte: '{today}'`, or write the `$between` pair above, to stop counting future-dated rows.
+- Updated dependencies [dac99c2]
+- Updated dependencies [5c9bfb0]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [3d830b7]
+- Updated dependencies [777eed2]
+- Updated dependencies [8258181]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [8024e12]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [d4aaeaf]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [3490bf5]
+- Updated dependencies [920bc12]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [6f4c518]
+- Updated dependencies [08b38cb]
+- Updated dependencies [bae5841]
+- Updated dependencies [917b1a0]
+- Updated dependencies [d9d7edd]
+- Updated dependencies [d45d0e9]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [01d5034]
+- Updated dependencies [f24574a]
+- Updated dependencies [e790cfc]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [09ef77c]
+- Updated dependencies [5d3018d]
+- Updated dependencies [404fc47]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [24e064f]
+- Updated dependencies [5e725b8]
+- Updated dependencies [6d96721]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [28e294f]
+- Updated dependencies [775ed65]
+- Updated dependencies [02a691a]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [be50633]
+- Updated dependencies [325a92e]
+  - @objectstack/plugin-security@18.0.0-next.1
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/objectql@18.0.0-next.1
+  - @objectstack/plugin-sharing@18.0.0-next.1
+  - @objectstack/service-settings@18.0.0-next.1
+  - @objectstack/service-automation@18.0.0-next.1
+  - @objectstack/service-mailbox@18.0.0-next.1
+  - @objectstack/rest@18.0.0-next.1
+  - @objectstack/runtime@18.0.0-next.1
+  - @objectstack/plugin-auth@18.0.0-next.1
+  - @objectstack/plugin-approvals@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/service-storage@18.0.0-next.1
+  - @objectstack/service-datasource@18.0.0-next.1
+  - @objectstack/plugin-webhooks@18.0.0-next.1
+  - @objectstack/metadata@18.0.0-next.1
+  - @objectstack/service-messaging@18.0.0-next.1
+  - @objectstack/mcp@18.0.0-next.1
+  - @objectstack/plugin-audit@18.0.0-next.1
+  - @objectstack/plugin-email@18.0.0-next.1
+  - @objectstack/plugin-hono-server@18.0.0-next.1
+  - @objectstack/service-analytics@18.0.0-next.1
+  - @objectstack/service-cache@18.0.0-next.1
+  - @objectstack/service-job@18.0.0-next.1
+  - @objectstack/service-package@18.0.0-next.1
+  - @objectstack/service-queue@18.0.0-next.1
+  - @objectstack/service-realtime@18.0.0-next.1
+  - @objectstack/service-sms@18.0.0-next.1
+  - @objectstack/trigger-api@18.0.0-next.1
+  - @objectstack/trigger-record-change@18.0.0-next.1
+  - @objectstack/trigger-schedule@18.0.0-next.1
+  - @objectstack/plugin-pinyin-search@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes

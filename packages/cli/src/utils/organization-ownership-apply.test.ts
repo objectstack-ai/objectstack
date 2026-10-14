@@ -694,6 +694,47 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     );
   });
 
+  it('a column-drop table the booted composition does not declare is not-declared, counted, kept and blocking — not blamed on the release', async () => {
+    db.exec(`CREATE TABLE sys_flow_dispatch (id TEXT PRIMARY KEY, organization_id TEXT)`);
+    const c = catalog();
+    const l = ledger();
+    const answering = async (outcome: 'not-declared' | 'not-proposed'): Promise<OrganizationOwnershipApplyReport> => {
+      const real = columnDrops.drop;
+      columnDrops.drop = async (columns) => [
+        ...(await real(columns.filter((c) => c.table !== 'sys_flow_dispatch'))),
+        ...(columns.some((c) => c.table === 'sys_flow_dispatch')
+          ? [{ table: 'sys_flow_dispatch', column: 'organization_id', outcome }]
+          : []),
+      ];
+      try {
+        return await apply(c, l);
+      } finally {
+        columnDrops.drop = real;
+      }
+    };
+    const flowDispatchBlocker = (report: OrganizationOwnershipApplyReport): string[] =>
+      report.steps.find((s) => s.step === 'column-drops')!.blockers.filter((b) => b.includes('sys_flow_dispatch.organization_id'));
+
+    const notDeclared = await answering('not-declared');
+    const drops = notDeclared.steps.find((s) => s.step === 'column-drops')!;
+    expect(drops.status).toBe('blocked');
+    // sys_job.organization_id and the grant's retired permission_set_id drop; sys_flow_dispatch is kept.
+    expect(drops.summary).toEqual({ dropped: 2, due: 3, notDeclared: 1 });
+    expect(flowDispatchBlocker(notDeclared)).toHaveLength(1);
+    expect(rows(`SELECT name FROM pragma_table_info('sys_flow_dispatch') WHERE name = 'organization_id'`)).toHaveLength(1);
+    expect(rows(`SELECT name FROM pragma_table_info('sys_job') WHERE name = 'organization_id'`)).toHaveLength(0);
+
+    // The control: the same table on the resumed run, answered `not-proposed`
+    // (a declared object the differ proposed no drop for).
+    const notProposed = await answering('not-proposed');
+    expect(notProposed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion']);
+    const control = notProposed.steps.find((s) => s.step === 'column-drops')!;
+    expect(control.status).toBe('blocked');
+    expect(control.summary).toEqual({ dropped: 0, due: 1, notDeclared: 0 });
+    expect(flowDispatchBlocker(notProposed)).toHaveLength(1);
+    expect(flowDispatchBlocker(notProposed)[0]).not.toBe(flowDispatchBlocker(notDeclared)[0]);
+  });
+
   it('holds a column whose rows another stage owns, and reports it', async () => {
     db.exec(`
       CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT, package_id TEXT);

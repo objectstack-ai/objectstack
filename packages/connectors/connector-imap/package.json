@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/connector-imap",
-  "version": "18.0.0-next.0",
+  "version": "18.0.0-next.1",
   "license": "Apache-2.0",
   "description": "IMAP connector for ObjectStack — a read-only IMAP4rev1 session (EXAMINE, UID FETCH with BODY.PEEK) and the per-user-shaped mail account and credential abstraction the mailbox sync connects through.",
   "main": "dist/index.js",
