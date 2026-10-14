@@ -525,6 +525,9 @@ export default class MigrateOrganizationOwnership extends Command {
       const liveStack = stack;
       report = await applyOrganizationOwnership({
         executor,
+        // Whether this boot composed the security plugin: a shipped set or a
+        // built-in position it alone declares is reported with that cause.
+        securityPlugin: stack.composition.securityPlugin,
         ...(flags['template-choice']?.length ? { templateChoices: flags['template-choice'] } : {}),
         ...(flags['metadata-choice']?.length ? { metadataChoices: flags['metadata-choice'] } : {}),
         posture,
