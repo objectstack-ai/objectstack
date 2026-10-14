@@ -173,6 +173,7 @@ async function callerContext(b: Booted): Promise<CallerContext> {
   const headers = new Headers({ authorization: `Bearer ${b.token}` });
   return resolveAuthzContext({
     userAuthGates: undefined,
+    apiKeyLifecycle: undefined,
     ql: b.ql,
     headers,
     getSession: async (h: any) => api?.getSession?.({ headers: h }),

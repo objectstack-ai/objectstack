@@ -136,6 +136,7 @@ describe('controlled_by_parent parent gates: sys_attachment and sys_comment judg
     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
     const context = await resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers({ authorization: `Bearer ${token}` }),
       getSession: async (h: any) => api?.getSession?.({ headers: h }),
