@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 222 |
+| Write call sites | 223 |
 | Object name statically decidable | 152 |
-| Object name chosen at run time | 70 |
+| Object name chosen at run time | 71 |
 | Against a tenancy-enabled object | 151 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 161 |
+| Threading a tenant context | 162 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 119 |
+| Threading a decidably elevated context | 120 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 95 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-14 at `c0f645856`.
+Measured on 2026-10-14 at `bb4760b9b`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 646 |
-| engine-shaped types recognised | 73 |
+| tracked non-test sources scanned | 648 |
+| engine-shaped types recognised | 74 |
 | declared objects in the registry | 116 |
-| same-named calls subtracted as non-engine | 159 |
+| same-named calls subtracted as non-engine | 161 |
 
 ## Every site
 
@@ -205,6 +205,7 @@ Measured on 2026-10-14 at `c0f645856`.
 | `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_ASSOCIATION_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `update` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
+| `packages/services/service-mailbox/src/sync/mailbox-sync-service.ts` | `update` | `MAILBOX_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `receiptObject` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `RECEIPT_OBJECT` | undecidable | context, elevation undecidable | 1 |

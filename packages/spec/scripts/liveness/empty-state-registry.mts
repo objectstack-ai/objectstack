@@ -173,6 +173,22 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     rationale: 'Which metadata types a Studio action offers itself for. An authoring-surface affordance, not an access decision.',
   },
   {
+    file: 'packages/spec/src/system/fate-supplement.zod.ts',
+    property: 'where',
+    semantics: 'scope',
+    rationale:
+      'A host fate supplement row\'s counted category: which rows of the table the organization-ownership plan COUNTS under that label. Absent = the whole table, the same reading as the platform inventory\'s own categories. It selects a population to report, and grants and deletes nothing.',
+    evidence: 'packages/cli/src/utils/organization-ownership-plan.ts (planCategory — `category.where ?? []`)',
+  },
+  {
+    file: 'packages/spec/src/system/fate-supplement.zod.ts',
+    property: 'mirror',
+    semantics: 'scope',
+    rationale:
+      'Which rows of a `mirror-deletion` (ADR-0131 D10 fate 2) table are copies of code, as the platform inventory\'s own `mirror` reads: absent = every row. It selects work for the ceremony\'s mirror step, not access, and the fate itself is the declaration that the rows are re-derivable. The step deletes nothing before the verified id-to-name rewrite, and it always keeps every row a named category claims and, on a table that records provenance, every row no seeder wrote.',
+    evidence: 'packages/cli/src/utils/organization-ownership-apply.ts (deletableWhere — the mirror selector minus every claimed row)',
+  },
+  {
     file: 'packages/spec/src/automation/flow.zod.ts',
     property: 'errorCode',
     semantics: 'scope',

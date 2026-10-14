@@ -7,7 +7,9 @@ import type { ErrorCode, RegisteredErrorCode, StandardErrorCode } from '@objects
 // `sys_file.scope` select read it too. A value import: the doors ask it.
 import { UploadScopeSchema } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError, logServerFault } from '@objectstack/types';
+// [#23174] A catch-all 5xx answers through `sendServerFault`: the route's
+// generic text on the wire, the caught error with its stack in the fault log.
+import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
 // boundaries and a monorepo resolves the same module through more than one path
 // (`src` under vitest aliases, `dist` under the published `exports`), so two
@@ -223,13 +225,11 @@ function declaredContentLength(req: IHttpRequest): number | undefined {
  * every case so the answer never says which check failed. Anything else is a
  * genuine fault and stays `500 INTERNAL`, whatever its text says.
  *
- * The fault's own text never reaches the caller — a declared 5xx answers with
- * the route's generic `fallbackMessage`, the platform rule the REST door keeps
- * (`packages/rest/src/error-response.ts`, `logWithheldServerFault`). The
- * operator keeps it: the original error, stack included, goes to the same
- * server-fault funnel `sendError` writes every 5xx line to, logged first the
- * way the package registrar's sandbox branch logs before it answers. `route`
- * is the mounted PATTERN, never the request URL, whose last segment is a live
+ * The fault's own text never reaches the caller: the 500 answers through the
+ * shared caught-fault writer `sendServerFault` (`@objectstack/types`), which
+ * writes the route's generic `fallbackMessage` and hands the original error,
+ * stack included, to the server-fault log as the fault's one line. `route` is
+ * the mounted PATTERN, never the request URL, whose last segment is a live
  * signed token.
  */
 function sendRawByteRouteFailure(
@@ -242,8 +242,7 @@ function sendRawByteRouteFailure(
     sendError(res, 401, 'INVALID_TOKEN', STORAGE_TOKEN_REFUSAL_MESSAGE);
     return;
   }
-  logServerFault({ status: 500, code: 'INTERNAL', error: err, request: route });
-  sendError(res, 500, 'INTERNAL', fallbackMessage);
+  sendServerFault(res, 500, 'INTERNAL', fallbackMessage, err, route);
 }
 
 /**
@@ -976,7 +975,7 @@ export function registerStorageFamily(
         downloadUrl: `${basePath}/files/${fileId}/url`,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
@@ -1032,7 +1031,7 @@ export function registerStorageFamily(
         etag: updated!.etag,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
@@ -1131,7 +1130,7 @@ export function registerStorageFamily(
         expiresAt,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
@@ -1287,7 +1286,7 @@ export function registerStorageFamily(
         bytesReceived: data.byteLength,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
@@ -1390,7 +1389,7 @@ export function registerStorageFamily(
         url: `${basePath}/files/${session.file_id}/url`,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
@@ -1449,7 +1448,7 @@ export function registerStorageFamily(
         expiresAt: session.expires_at,
       });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
@@ -1488,7 +1487,7 @@ export function registerStorageFamily(
       // carried no envelope at all.
       sendOk(res, { url });
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 
@@ -1537,7 +1536,7 @@ export function registerStorageFamily(
 
       res.status(302).header('Location', url).send('');
     } catch (err: any) {
-      sendError(res, 500, 'INTERNAL', err?.message ?? 'Internal error');
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
   });
 

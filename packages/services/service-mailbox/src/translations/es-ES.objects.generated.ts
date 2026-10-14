@@ -34,6 +34,22 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       owner_user_id: {
         label: "Propietario",
         help: "El usuario propietario de este buzón. El propietario ve todos los mensajes que llegaron a él, incluidos los no asociados."
+      },
+      imap_folder: {
+        label: "Carpeta sincronizada",
+        help: "La carpeta IMAP a la que pertenece el cursor de sincronización. Si el buzón se sincroniza desde otra carpeta, el cursor vuelve a empezar."
+      },
+      imap_uid_validity: {
+        label: "UIDVALIDITY",
+        help: "El UIDVALIDITY de la carpeta con el que se tomó el cursor. Si el servidor informa otro valor, sus UID designan otros mensajes y el cursor vuelve a empezar."
+      },
+      imap_last_uid: {
+        label: "Último UID sincronizado",
+        help: "El UID más alto de la carpeta ya entregado a la ingesta (almacenado, ya almacenado, suprimido u omitido). La siguiente sincronización obtiene los UID superiores."
+      },
+      imap_synced_at: {
+        label: "Última sincronización",
+        help: "Cuándo terminó la sincronización por última vez una pasada por la carpeta."
       }
     }
   },

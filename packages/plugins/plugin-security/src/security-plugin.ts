@@ -165,6 +165,18 @@ import { declareEveryoneBaseline, registerBuiltinPositions } from './builtin-pos
 import { registerBuiltinCapabilities } from './builtin-capabilities.js';
 
 /**
+ * [ADR-0138 D9, D1] Whether `context` is the GUEST envelope — the anonymous
+ * principal the explicit guest entry assembles: `principalKind: 'guest'` and no
+ * `userId`. The one reading of that fact in this file: the set resolution (D3),
+ * the organization refusal (D4) and the owner-anchor stamp's guest branch (D1)
+ * all ask it here.
+ */
+function isGuestEnvelope(context: unknown): boolean {
+  const c = context as { principalKind?: unknown; userId?: unknown } | null | undefined;
+  return c?.principalKind === 'guest' && !c?.userId;
+}
+
+/**
  * [ADR-0095 D3 / Finding 2 / #2937] Platform-admin-EXCLUSIVE capabilities — the
  * platform-scoped `systemPermissions` that `admin_full_access` carries and
  * `organization_admin` DELIBERATELY withholds (see `default-permission-sets.ts`:
@@ -2398,6 +2410,9 @@ export class SecurityPlugin implements Plugin {
           // a zero-section form falls open to — one of these columns).
           // Ownership stays NULL for object hooks / the first-admin
           // bootstrap to assign, exactly like other anonymous-seeded rows.
+          // [ADR-0138 D1] This is the form doors' half of "the guest never
+          // owns"; the endpoint doors' half is the owner-anchor stamp's guest
+          // branch (step 3.5), which a grant context never reaches.
           if (opCtx.operation === 'insert' && opCtx.data && typeof opCtx.data === 'object') {
             const rows = Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data];
             const stripped = new Set<string>();
@@ -3335,6 +3350,21 @@ export class SecurityPlugin implements Plugin {
       //     back) is tolerated by comparing against the pre-image; a bulk
       //     change-set carrying `owner_id` has no pre-image to compare and
       //     fails CLOSED.
+      //   • GUEST — [ADR-0138 D1] the guest is a principal, never an owner. For
+      //     the anonymous principal ({@link isGuestEnvelope}) the step stamps
+      //     nothing: there is no user id to stamp, and nothing stands in for
+      //     one — never the guest, never the system principal — so an absent or
+      //     empty owner is left unset. A guest-SUPPLIED owner, on insert or on
+      //     update, is a forgery and is refused WHATEVER the guest is granted:
+      //     the transfer grant is never consulted for it (the anchor tier keeps
+      //     the transfer bit off a guest binding, and this branch does not lean
+      //     on that). Who owns a guest-written row is the scenario's own
+      //     metadata, and its writers never meet this step as the guest's
+      //     value: a `beforeInsert` hook runs inside the engine's operation,
+      //     after this middleware, and a record-change flow writes as itself.
+      //     So "supplied" is told apart from "set by the scenario" by where the
+      //     value came from — the payload the guest's write arrived with — and
+      //     never by what the value is.
       //
       // System/boot writes carry `isSystem` and short-circuited the whole
       // middleware above — imports, OAuth provisioning, cron snapshots and
@@ -3388,6 +3418,18 @@ export class SecurityPlugin implements Plugin {
                 { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
               );
             };
+            // [ADR-0138 D1] The guest branch (see the step's header). Its refusal
+            // names no grant to acquire, because none admits a guest's owner.
+            const guest = isGuestEnvelope(opCtx.context);
+            const denyGuestOwnerWrite = (): never => {
+              throw new PermissionDeniedError(
+                `[Security] Access denied: 'owner_id' on '${opCtx.object}' cannot be set by an anonymous caller — ` +
+                  `a guest never owns a record and never assigns one, whatever it is granted. Leave 'owner_id' out ` +
+                  `of the request: the owner of a row a guest writes is set by the object's own hooks or ` +
+                  `record-change flows, and stays unset when none sets it (ADR-0138 D1)`,
+                { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+              );
+            };
             // Lazily evaluated + memoized (incl. a `false` result): the common
             // path pays nothing, and ADR-0090 D10 — under delegation BOTH
             // principals must independently hold the transfer grant.
@@ -3409,6 +3451,12 @@ export class SecurityPlugin implements Plugin {
                   // single-record-only stamp left bulk-inserted rows NULL-owned
                   // and invisible to their creator).
                   if (userId) row.owner_id = userId;
+                  // [ADR-0138 D1 item 5] A guest is stamped with nothing, and
+                  // its empty owner is left UNSET: an empty string would land
+                  // in the anchor as a value that is neither an owner nor none.
+                  else if (guest && row.owner_id === '') row.owner_id = null;
+                } else if (guest) {
+                  denyGuestOwnerWrite();
                 } else if (
                   !(isScalarId(row.owner_id) && userId != null && String(row.owner_id) === String(userId)) &&
                   !hasTransferGrant()
@@ -3426,6 +3474,9 @@ export class SecurityPlugin implements Plugin {
               const single = !Array.isArray(opCtx.data);
               for (const row of rows) {
                 if (!writesOwner(row)) continue;
+                // [ADR-0138 D1] A guest assigns no ownership — not a transfer,
+                // not a disown, not an echo — and no grant changes that.
+                if (guest) denyGuestOwnerWrite();
                 if (hasTransferGrant()) break; // authorized transfer — allow every row
                 let unchanged = false;
                 if (single && isScalarId(row.owner_id)) {
@@ -6483,7 +6534,7 @@ export class SecurityPlugin implements Plugin {
     // never reaches the guest. The baseline does not reach it either (applied
     // only to a caller with a user id, below), and `everyone` is never among
     // its positions.
-    const isGuest = context?.principalKind === 'guest' && !context?.userId;
+    const isGuest = isGuestEnvelope(context);
     const positions = isGuest ? [] : (context?.positions ?? []);
     const explicitPermissionSets = context?.permissions ?? [];
     const requested = [...positions, ...explicitPermissionSets];
@@ -8766,7 +8817,7 @@ export class SecurityPlugin implements Plugin {
     // {@link resolveOperationPrincipals} return before it for one (the
     // middleware's system short-circuit, and `checkControlledByParentWrite`'s
     // first exit), so this rule reads no elevation of its own.
-    if (context?.principalKind !== 'guest' || context?.userId) return;
+    if (!isGuestEnvelope(context)) return;
     const tenantId = context?.tenantId;
     if (typeof tenantId === 'string' && tenantId !== '') return;
     const decision = await resolveGuestOrganization(this.ql, this.tenancyPosture);
