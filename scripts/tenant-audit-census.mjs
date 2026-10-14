@@ -1532,13 +1532,6 @@ export const UNTYPED_RECEIVERS = [
     what: '`ql: any` seed helper writing `schema.name` -- a runtime object name off the registered schema',
   },
   {
-    file: 'packages/plugins/plugin-security/src/permission-set-projection.ts',
-    receiver: 'ql',
-    engine: true,
-    what: '`ql: any` writing `sys_permission_set` -- a catalog row object retired by C3 stage 8 (ADR-0131 D3), so the name is no longer a declared object; the module is unwired and deleted with stage 7a',
-  },
-
-  {
     file: 'packages/services/service-settings/src/settings-service-plugin.ts',
     receiver: 'eng',
     engine: true,
