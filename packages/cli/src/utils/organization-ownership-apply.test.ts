@@ -36,6 +36,7 @@ import {
 } from './organization-ownership-apply.js';
 import { buildOrganizationOwnershipPlan } from './organization-ownership-plan.js';
 import { backfillOrgAdminGrants } from '@objectstack/plugin-security';
+import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 
 let dir: string;
 let file: string;
@@ -776,8 +777,9 @@ describe('ADR-0131 D10 --apply — the grant\'s retired id column (C7b, seat ans
         .run(...keys.map((k) => data[k] as never));
       return data;
     },
-    async delete(object: string, opts: { where?: { id?: unknown } }) {
-      db.prepare(`DELETE FROM "${object}" WHERE id = ?`).run(opts?.where?.id as never);
+    async delete(object: string, options: { where?: { id?: unknown } }) {
+      assertEngineDeleteDispatch(options as never);
+      db.prepare(`DELETE FROM "${object}" WHERE id = ?`).run(options?.where?.id as never);
       return 1;
     },
   };
