@@ -1,12 +1,13 @@
 ---
 '@objectstack/cli': minor
+'@objectstack/spec': patch
 ---
 
 feat(cli)!: `os migrate organization-ownership --apply` executes only the plan the operator reviewed (ADR-0131 D10)
 
 Clause-②: yes (widening)
 
-<!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of one CLI command's writing mode: `--apply` without the reviewed plan file is refused, and the remedy is in the invocation an operator types (add `--plan-file`), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+<!-- adr-0087: registered cli-organization-ownership-apply-plan-file-required -->
 
 **BREAKING** (a narrowing of `--apply`'s accept set, released in 18.0.0-next.1), shipped as `minor` under the launch-window convention for breaking changes. It also widens the command: a new flag, `--plan-file`, new refusal reasons, and two new keys on the apply report.
 
