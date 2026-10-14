@@ -64,12 +64,14 @@ const LINE = {
 /**
  * Reports exactly what a shipped guard can read. `markerType` distinguishes an
  * absent key from every present shape, so the control case cannot pass by
- * accident of a falsy value.
+ * accident of a falsy value. The row is named through `ctx.previous`, the
+ * delete's pre-image in both phases: a body's `ctx.input` is the flattened
+ * record payload, which a delete does not carry.
  */
 const PROBE_SOURCE = `
   ctx.log.info('probe', {
     event: ctx.event,
-    id: ctx.input ? ctx.input.id : null,
+    previousId: ctx.previous ? ctx.previous.id : null,
     markerType: typeof ctx.referentialCascadeDelete,
     markerIsTrue: ctx.referentialCascadeDelete === true,
     twinType: typeof ctx.referentialFieldClear,
@@ -135,7 +137,7 @@ describe('#23221 — a shipped body observes ctx.referentialCascadeDelete across
     const hand = seen.splice(0);
     expect(hand.map((o) => o.event)).toEqual(['beforeDelete', 'afterDelete']);
     for (const o of hand) {
-      expect(o.id).toBe(l1.id);
+      expect(o.previousId).toBe(l1.id);
       // Absent, not false — the guard idiom must read "not cascade-issued".
       expect(o.markerType).toBe('undefined');
       expect(o.markerIsTrue).toBe(false);
@@ -149,7 +151,7 @@ describe('#23221 — a shipped body observes ctx.referentialCascadeDelete across
     const cascade = seen.splice(0);
     expect(cascade.map((o) => o.event)).toEqual(['beforeDelete', 'afterDelete']);
     for (const o of cascade) {
-      expect(o.id).toBe(l2.id);
+      expect(o.previousId).toBe(l2.id);
       // The whole card: the declared key, readable from inside QuickJS.
       expect(o.markerType).toBe('boolean');
       expect(o.markerIsTrue).toBe(true);
