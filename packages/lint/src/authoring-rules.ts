@@ -1149,11 +1149,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //
   // `normalized` for a reason worth stating, since the props bag survives the
   // Zod parse UNCHANGED and both tiers would otherwise carry the same data: the
-  // ADR-0087 conversion layer runs inside `normalizeStackInput`, so a converted
-  // alias (`page-header-subtitle-alias` rewrites `properties.description` →
-  // `subtitle`) is already canonical here and is never reported as undeclared —
-  // while a schema error elsewhere in the stack cannot take these findings down
-  // with it.
+  // ADR-0087 conversion layer runs inside `normalizeStackInput`, so a prop
+  // spelling a live D2 conversion still rewrites on the load path is already
+  // canonical here and is never reported as undeclared — while a schema error
+  // elsewhere in the stack cannot take these findings down with it.
   //
   // Gating: every finding is an `error`, so `os validate`, `os build` and
   // `os lint` refuse an undeclared prop, a value the props schema rejects, a
