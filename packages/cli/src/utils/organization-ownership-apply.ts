@@ -794,10 +794,13 @@ async function foldLineage(run: Run, organizationId: string, type: string, name:
   }
   if (shape.seq) {
     const seq = sql.q('event_seq', HISTORY);
-    const [own] = await sql.read(HISTORY, `SELECT MIN(${seq}) AS lo, COUNT(*) AS n FROM ${h} WHERE ${mine}`, args);
+    const [own] = await sql.read(HISTORY, `SELECT MIN(${seq}) AS lo, MAX(${seq}) AS hi, COUNT(*) AS n FROM ${h} WHERE ${mine}`, args);
     const [env] = await sql.read(HISTORY, `SELECT MAX(${seq}) AS m FROM ${h} WHERE ${o} IS NULL`);
     if (num(own?.n) > 0 && num(own!.lo) <= num(env?.m)) {
-      await execute(run, HISTORY, `UPDATE ${h} SET ${seq} = ${seq} + ? WHERE ${mine}`, [num(env?.m) - num(own!.lo) + 1, ...args]);
+      // Wholly above the old range too: a unique (organization_id, event_seq)
+      // index is checked row by row, so no row may land on a sibling's number.
+      const offset = Math.max(num(env?.m), num(own!.hi)) - num(own!.lo) + 1;
+      await execute(run, HISTORY, `UPDATE ${h} SET ${seq} = ${seq} + ? WHERE ${mine}`, [offset, ...args]);
     }
   }
   await execute(run, HISTORY, `UPDATE ${h} SET ${o} = NULL WHERE ${mine}`, args);

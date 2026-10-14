@@ -1148,6 +1148,15 @@ describe('ADR-0131 D10 --apply — a customization conflict resolved by --metada
 });
 
 describe('ADR-0131 D10 --apply — history renumbering (seat answers 6162538253, Q2 A)', () => {
+  /**
+   * The unique indexes a 17.x runtime created on history (its per-scope
+   * counters), checked row by row: a renumbering may never land a row on a
+   * sibling's number mid-statement.
+   */
+  const HISTORY_UNIQUE = `
+    CREATE UNIQUE INDEX uniq_history_org_seq ON sys_metadata_history (organization_id, event_seq);
+    CREATE UNIQUE INDEX uniq_history_org_version ON sys_metadata_history (organization_id, type, name, version);`;
+
   // A database holding only what each pin plants, so every step can finish
   // under any posture and the late step is reached.
   beforeEach(() => {
@@ -1175,6 +1184,7 @@ describe('ADR-0131 D10 --apply — history renumbering (seat answers 6162538253,
       ALTER TABLE sys_metadata ADD COLUMN metadata TEXT;
       CREATE TABLE sys_metadata_history (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT,
         version INTEGER, event_seq INTEGER, checksum TEXT);
+      ${HISTORY_UNIQUE}
       INSERT INTO sys_metadata_history VALUES
         ('h_env1', NULL, 'object', 'deal', 1, 1, 'e1'),
         ('h_env2', NULL, 'object', 'deal', 2, 2, 'e2'),
@@ -1275,6 +1285,7 @@ describe('ADR-0131 D10 --apply — history renumbering (seat answers 6162538253,
       INSERT INTO sys_metadata VALUES ${orgRows};
       CREATE TABLE sys_metadata_history (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT,
         version INTEGER, event_seq INTEGER, checksum TEXT);
+      ${HISTORY_UNIQUE}
       ${historyRows ? `INSERT INTO sys_metadata_history VALUES ${historyRows};` : ''}
     `);
     void versioned;
