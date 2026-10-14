@@ -337,3 +337,90 @@ describe("a page action row's `onSuccess` stays open beside `api`, `script` and 
     expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'onSuccess']]]);
   });
 });
+
+// ===========================================================================
+// 4. operation — ActionSchema's own enum, and its `onSuccess` rule
+// ===========================================================================
+
+/** A declarative update row: `operation: 'update'` with a static `patch`. */
+const UPDATE = { operation: 'update', patch: { status: 'done' } } as const;
+
+/** `ActionSchema`'s refusal of `onSuccess` beside `operation: 'update'`, and the subject it opens with. */
+const ACTION_UPDATE_SUBJECT = "An `operation: 'update'` action's `onSuccess`";
+const actionUpdateOnSuccessMessage = (): string => {
+  const issues = issuesOf(ActionSchema.safeParse({
+    name: 'close_task', label: 'Close', ...UPDATE, onSuccess: HOP,
+  }));
+  expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['onSuccess']]]);
+  expect(issues[0].message.startsWith(ACTION_UPDATE_SUBJECT)).toBe(true);
+  return issues[0].message;
+};
+
+describe("a page action row's `operation` is `ActionSchema`'s own enum", () => {
+  it('NO SECOND VOCABULARY: every row holds the very enum instance `ActionSchema.operation` declares', () => {
+    const operation = ActionSchema.in.shape.operation.unwrap();
+    type Shape = { shape: Record<string, z.ZodOptional<z.ZodType>> };
+    const memberOf = (props: unknown) =>
+      ((props as Shape).shape.actions.unwrap() as unknown as z.ZodArray<z.ZodType>).element as unknown as Shape;
+    expect((ActionButtonPropsSchema as unknown as Shape).shape.operation.unwrap()).toBe(operation);
+    expect((ActionIconPropsSchema as unknown as Shape).shape.operation.unwrap()).toBe(operation);
+    expect(memberOf(GROUP).shape.operation.unwrap()).toBe(operation);
+    expect(memberOf(MENU).shape.operation.unwrap()).toBe(operation);
+  });
+
+  it.each(ROWS)("REFUSAL: $name with `operation: 'delete'` is refused at `operation` with the action's own text", (row) => {
+    const issues = issuesOf(row.parse({ operation: 'delete', patch: { status: 'done' } }));
+    expect(issues.map((i) => i.path)).toEqual([[...row.at, 'operation']]);
+    const action = issuesOf(ActionSchema.safeParse({ name: 'x', label: 'X', operation: 'delete', patch: { status: 'done' } }))
+      .find((i) => i.path.join('.') === 'operation');
+    expect(issues[0].message).toBe(action?.message);
+    expect(issues[0].message.startsWith("`operation: 'delete'` is a bulk-def operation with no row-level form")).toBe(true);
+  });
+
+  it.each(ROWS)("REFUSAL: $name with `operation: 'create'` (no member) is refused at `operation`", (row) => {
+    const issues = issuesOf(row.parse({ operation: 'create', patch: { status: 'done' } }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['invalid_value', [...row.at, 'operation']]]);
+  });
+
+  it.each(ROWS)("ACCEPTED CONTROL: $name with `operation: 'update'` and a `patch` parses unchanged", (row) => {
+    const r = row.parse({ ...UPDATE });
+    expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
+    expect(row.parsed(r.data).operation).toBe('update');
+  });
+});
+
+describe("a page action row's `onSuccess` is refused beside `operation: 'update'`, as `ActionSchema` refuses it", () => {
+  /** No executor, the two the hop is declared beside, and a host handler: the write runs first on each. */
+  const BESIDE = [undefined, 'api', 'script', 'run'] as const;
+  const updateRow = (row: Row, executor: string | undefined, extra: Record<string, unknown> = {}) =>
+    row.parse({ ...(executor === undefined ? {} : { [row.executorKey]: executor }), ...UPDATE, ...extra });
+  const updateSubject = (row: Row) => onSuccessSubject(row, "`operation: 'update'`");
+
+  it.each(ROWS.flatMap((row) => BESIDE.map((executor) => [row.name, String(executor), row, executor] as const)))(
+    'REFUSAL: %s with executor %s, `operation: \'update\'` and `onSuccess` is refused at `onSuccess`, ONE issue',
+    (_name, _label, row, executor) => {
+      const issues = issuesOf(updateRow(row, executor, { onSuccess: HOP }));
+      expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'onSuccess']]]);
+      expect(firstSentence(issues[0].message)).toBe(
+        `${updateSubject(row)} would follow a result the contract does not declare: the console's action runner reads `
+        + "`operation` before any executor, so an `operation: 'update'` action runs no handler and no executor of its "
+        + 'own (the platform action route writes `patch` to the current record as the caller), and the runner then '
+        + 'performs the post-success hop after that write succeeds.',
+      );
+    },
+  );
+
+  it.each(ROWS.flatMap((row) => BESIDE.map((executor) => [row.name, String(executor), row, executor] as const)))(
+    'NEGATIVE CONTROL: %s with executor %s and `operation: \'update\'` and no `onSuccess` parses',
+    (_name, _label, row, executor) => {
+      const r = updateRow(row, executor);
+      expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
+    },
+  );
+
+  it.each(ROWS)("ONE TEXT: $name gives `ActionSchema`'s own refusal of the pairing, after the subject", (row) => {
+    const rowMessage = issuesOf(updateRow(row, 'api', { onSuccess: HOP }))[0].message;
+    expect(rowMessage.slice(updateSubject(row).length))
+      .toBe(actionUpdateOnSuccessMessage().slice(ACTION_UPDATE_SUBJECT.length));
+  });
+});

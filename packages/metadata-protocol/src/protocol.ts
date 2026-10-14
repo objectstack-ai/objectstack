@@ -5984,8 +5984,7 @@ export interface MutationProjectionOutcome {
  * write by throwing — it is the seam for domain invariants that must hold on
  * every runtime-authored body regardless of which HTTP surface produced it
  * (e.g. plugin-security's OWD posture gate: an environment may only TIGHTEN
- * a packaged object's `sharingModel`, and `externalSharingModel ≤
- * sharingModel` per ADR-0090 D11).
+ * a packaged object's `sharingModel`).
  *
  * Invoked inside `saveMetaItem` for BOTH draft and publish-mode saves, after
  * the ADR-0005 overlay/runtime-create authorization and the per-type spec

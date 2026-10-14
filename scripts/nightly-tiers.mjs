@@ -67,6 +67,34 @@
  * request that introduces it, which is the open question the landing card
  * records.
  *
+ * ## The nightly's shards: one slice of the tier on EVERY shard, by the nightly's own count
+ *
+ * `--packages` is the nightly's whole input to `scripts/partition-test-shards.mjs`,
+ * and the one tier-owning package (`@objectstack/cli`, 82 tier files at
+ * 4f81f31526) has to reach every one of the nightly's shards as a slice of its
+ * own: an item the split does not place on a shard leaves that shard running
+ * nothing, reading green, while another carries the whole tier.
+ *
+ * The nightly used to get its slices by inheriting Test Core's
+ * `FILE_SHARDED_PACKAGES`, a map derived for a different run -- Test Core's six
+ * shards and its queue-tier weights -- and that inheritance broke twice with no
+ * step red. 9ff74285 retired the CLI's entry (2026-10-02): from the next night
+ * the second shard's test step ran 0s and the first carried the whole tier
+ * (each slice had run 1196s / 1168s on 2026-10-01; the one shard ran up to
+ * 2615s after). 59194834 re-sliced the CLI 3 ways (2026-10-09), and three
+ * slices cannot spread over two shards, so the partitioner kept it whole until
+ * run 38517756588 killed the first shard at its 45-minute limit.
+ *
+ * So the document states the nightly's slicing itself: `sliceAcrossShards`
+ * names every tier-owning package, and the partitioner cuts each one into as
+ * many slices as the run's own `--shard k/N` has shards, still subject to its
+ * per-run slice decision and the vitest file floor. Test Core's map no longer
+ * reaches the nightly, and a change to the nightly's matrix re-slices it with
+ * no edit here. `partition-test-shards.mjs --self-test` (run on every pull
+ * request by lint.yml) pins it on the live tree: this document, at the shard
+ * count `test-nightly-tiers.yml` declares, yields that many non-empty shards,
+ * each carrying one distinct slice of the CLI.
+ *
  * ## Where `OS_TEST_TIERS` has to be declared to reach vitest at all
  *
  * turbo 2.10 runs in STRICT env mode: a variable that `turbo.json` neither
@@ -195,10 +223,15 @@ export function tierPackages(repoRoot = REPO_ROOT) {
  * the tier-owning packages with the same partitioner and the same slice
  * grammar the Test Core matrix uses. `count` is written because the
  * partitioner checks it against `items.length`.
+ *
+ * `sliceAcrossShards` names every tier-owning package: the nightly states its
+ * own slicing rather than inheriting Test Core's `FILE_SHARDED_PACKAGES`, and
+ * the partitioner cuts each named package into as many slices as the nightly
+ * has shards -- see "The nightly's shards" in this file's header.
  */
 export function packageListDocument(repoRoot = REPO_ROOT) {
   const items = tierPackages(repoRoot).map(({ name, path: dir }) => ({ name, path: dir }));
-  return { packages: { count: items.length, items } };
+  return { packages: { count: items.length, items }, sliceAcrossShards: items.map(({ name }) => name) };
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +495,12 @@ export function selfTest() {
     const doc = packageListDocument(root);
     check(() => assert(doc.packages.count === 2 && doc.packages.items.length === 2, 'the document counts what it lists'));
     check(() => assert(eq(doc.packages.items[1], { name: '@x/owner', path: 'packages/owner' }), 'items carry name and repo-relative path'));
+    check(() =>
+      assert(
+        eq(doc.sliceAcrossShards, doc.packages.items.map((i) => i.name)),
+        `the document states its own slicing, naming every tier-owning package -- got ${JSON.stringify(doc.sliceAcrossShards)}`
+      )
+    );
 
     // -- failing files, from a report shaped like vitest's JSON reporter -------
     const known = owners.flatMap((o) => o.files.map((f) => `${o.path}/${f}`));
@@ -497,7 +536,7 @@ export function selfTest() {
   check(() => assert(judgeCollection('p', tier, ['test/c.test.ts'], ['test/a.e2e.test.ts']).some((p) => /does NOT collect 1 nightly-tier/.test(p)), 'a tier file missing from nightly runs nowhere'));
   check(() => assert(judgeCollection('p', tier, [], []).length === 1, 'an empty nightly collection is exactly one problem: the tier files run nowhere'));
 
-  const FLOOR = 45;
+  const FLOOR = 47;
   assert(cases >= FLOOR, `${cases} cases ran, below the pinned floor of ${FLOOR} -- cases stopped running`);
   console.log(`\u2713 nightly-tiers self-test: ${cases} cases pass.`);
   return SELF_TEST_VERDICT;

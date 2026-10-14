@@ -282,7 +282,7 @@ export const COVERAGE = {
   },
   capabilityChains: {
     security:
-      'security/* — positions + permission sets (CRUD + FLS + RLS + depth + VAMA + system/tab permissions + adminScope) + sharing rules (position & BU-subtree recipients) + per-object OWD/externalSharingModel + seeded sys_business_unit tree + access-matrix.json gate (ADR-0090)',
+      'security/* — positions + permission sets (CRUD + FLS + RLS + depth + VAMA + system/tab permissions + adminScope) + sharing rules (position & BU-subtree recipients) + per-object OWD (sharingModel) + seeded sys_business_unit tree + access-matrix.json gate (ADR-0090)',
     automation: 'automation/flows/index.ts (incl. approval nodes) + automation/webhooks/index.ts + automation/jobs/index.ts + system/emails/index.ts',
   },
   i18nAndTheming: {

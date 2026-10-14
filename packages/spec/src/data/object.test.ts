@@ -2085,7 +2085,9 @@ describe('TenancyConfigSchema — strategy/crossTenantAccess removal', () => {
     const message = result.error!.issues.map((i) => i.message).join('\n');
     expect(message).toContain('crossTenantAccess');
     expect(message).toContain('ADR-0056');
-    expect(message).toContain('externalSharingModel');
+    // The retired external OWD is no longer named as a live channel (#23268).
+    expect(message).toContain('explicit shares');
+    expect(message).not.toContain('externalSharingModel');
   });
 
   it('rejects arbitrary unknown tenancy keys instead of silently stripping them', () => {

@@ -90,9 +90,9 @@ export const ClientLiaisonPosition = definePosition({
 
 /**
  * External client audience — a position for external client principals.
- * External principals evaluate against each object's `externalSharingModel`
- * dial (ADR-0090 D11); this position is how the admin marks a user as
- * belonging to that audience.
+ * External principals reach explicitly shared rows only (the ADR-0095
+ * `EXTERNAL` rung, never an org-wide default); this position is how the admin
+ * marks a user as belonging to that audience.
  */
 export const ClientPortalUserPosition = definePosition({
   name: 'client_portal_user',
