@@ -29,7 +29,8 @@
  *     `?keepData=true` removes the package and keeps the table; deleting the
  *     package's own row of the shared object first (no `dropStorage`) lets the
  *     uninstall complete, keep the shared table and still drop the tables the
- *     package alone held.
+ *     package alone held. Either way the running registry then serves the
+ *     other package's definition of the object.
  *  4. CONTROL: an object one package holds — the uninstall drops its table.
  *
  * ## The composition — the shipped pieces
@@ -219,7 +220,13 @@ async function expectUntouched(h: Process, others: Array<string | null>) {
   expect(await h.storedBindings(SHARED)).toEqual([P, ...others].sort((a, b) => String(a).localeCompare(String(b))));
   expect(await h.hasTable(SHARED)).toBe(true);
   expect(await h.records(SHARED)).toEqual(['kept']);
+  // The running registry still serves P's definition of the object.
+  expect(h.engine.registry.getObject(SHARED)).toMatchObject({ label: `${SHARED} ${P}` });
 }
+
+/** After P's row of the shared object is gone, the running registry serves Q's. */
+const expectServedByQ = (h: Process) =>
+  expect(h.engine.registry.getObject(SHARED)).toMatchObject({ label: `${SHARED} ${Q}` });
 
 describe('[#23473] DELETE /packages/:id of a package whose object another stored row also holds', () => {
   it('without keepData: refused 409 RESOURCE_CONFLICT before anything durable — the package, both rows, the table and its record stay', async () => {
@@ -262,6 +269,7 @@ describe('[#23473] DELETE /packages/:id of a package whose object another stored
     expect(await h.storedBindings(SHARED)).toEqual([Q]);
     expect(await h.hasTable(SHARED)).toBe(true);
     expect(await h.records(SHARED)).toEqual(['kept']);
+    expectServedByQ(h);
   }, 60_000);
 
   it('the way out, P\'s own row first: the uninstall completes, keeps the shared table and still drops the table P alone held', async () => {
@@ -281,6 +289,7 @@ describe('[#23473] DELETE /packages/:id of a package whose object another stored
     expect(await h.storedBindings(SHARED)).toEqual([Q]);
     expect(await h.hasTable(SHARED)).toBe(true);
     expect(await h.records(SHARED)).toEqual(['kept']);
+    expectServedByQ(h);
     expect(await h.hasTable(PRIVATE)).toBe(false);
   }, 60_000);
 
