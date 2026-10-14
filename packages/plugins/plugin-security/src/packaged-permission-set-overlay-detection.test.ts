@@ -41,7 +41,6 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { permissionSetRowFields } from './permission-set-projection.js';
 import {
   detectPackagedPermissionSetOverlays,
   reportPackagedPermissionSetOverlays,
@@ -89,7 +88,8 @@ const rowFor = (ps: any, over: Record<string, any> = {}) => ({
   name: ps.name,
   managed_by: 'package',
   package_id: ps._packageId,
-  ...permissionSetRowFields(ps),
+  label: ps.label,
+  object_permissions: JSON.stringify(ps.objects ?? {}),
   ...over,
 });
 
@@ -267,5 +267,35 @@ describe('pin 4 — the reading is LOUD, and quiet when there is nothing to say'
     const reading = await reportPackagedPermissionSetOverlays(ql, { logger: log });
     expect(reading.count).toBe(0);
     expect(log.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('the overlay sweep reads `sys_metadata` through `tryFind`', () => {
+  it('a refused overlay read is a reading of nothing — the boot is not failed by a diagnostic', async () => {
+    // `tryFind`'s contract, pinned at the one door that still calls it: a read
+    // that throws answers no rows, so the reading reports no fork rather than
+    // throwing into the boot that runs it. A diagnostic that could fail a boot
+    // would be worse than the fork it reports.
+    const a = declaredSet();
+    const ql = makeQl([a]);
+    ql.metaRows.push(overlayFor('ehr_quality_inspector'));
+    const control = await detectPackagedPermissionSetOverlays(ql);
+    expect(control.names, 'control: the same overlay is found when the read answers').toEqual(['ehr_quality_inspector']);
+
+    const seen: unknown[] = [];
+    const refused: any = {
+      ...ql,
+      async find(object: string, q: any) {
+        seen.push({ object, where: q?.where, limit: q?.limit });
+        throw new Error('fake driver: sys_metadata unavailable');
+      },
+    };
+    const reading = await detectPackagedPermissionSetOverlays(refused);
+    expect(reading).toEqual({ count: 0, names: [], findings: [] });
+    // Both type spellings were asked, each under the shared page cap.
+    expect(seen).toEqual([
+      { object: 'sys_metadata', where: { type: 'permission', state: 'active' }, limit: 1000 },
+      { object: 'sys_metadata', where: { type: 'permissions', state: 'active' }, limit: 1000 },
+    ]);
   });
 });

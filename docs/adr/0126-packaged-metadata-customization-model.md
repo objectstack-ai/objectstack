@@ -94,7 +94,7 @@ Three real mechanisms operate across those tiers, each invented separately:
 - **Clone-to-customize** (#11513, permission sets only): server-side lock on the packaged base
   (`packaged-permission-set-lock.ts`), a clone action demanding a new name, and — the piece this
   ADR generalizes — the ruling that **switching a packaged artifact off is row state, not a
-  definition write** (`packages/plugins/plugin-security/src/permission-set-projection.ts`, #4669).
+  definition write** (`packages/plugins/plugin-security/src/permission-set-projection.ts`, #4669; *Path note, 2026-10: #15204 stage 8 retired the `sys_permission_set` row whose `active` column carried that row state, and stage 7a (#23368) deleted the module; the path is kept as the record of what this section measured*).
 - **Extend** (`objectExtensions`, `packages/spec/src/data/object.zod.ts`; navigation
   contributions, ADR-0029 D7): a package adds fields/validations/indexes to another package's
   object, or nav items to another package's app, merged at boot. Package-grain, additive,

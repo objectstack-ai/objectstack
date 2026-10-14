@@ -53,10 +53,10 @@
 - undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
 - 落地遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法、不退回 ccr 绕过。
 - 确认 MERGED 要两个读数:每轮同时读队列分支与 `origin/main`。
+- 落地评论 = 两个读数的探针表 + 一行状态变更(摘标/关卡/收口),⛔ 不复述 `## 席位核对`。
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
-- 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 - 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>3000 行(含生成物)照 Tier H。
-- 受管路径全在 `.claude/**` 者 Tier S:席内达档复核过落地前检三条即转正式入队。
+- 受管路径全在 `.claude/**` 者 Tier S:席内达档复核过落地前检两条即转正式入队。
 - Tier H(其余受管面)者:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。
