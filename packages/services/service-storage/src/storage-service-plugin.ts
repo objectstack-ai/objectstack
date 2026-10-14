@@ -20,6 +20,9 @@ import {
   // judges a key-admitted request by the KEY's answer.
   resolveApiKeyAdmission,
   userAuthGateSourceOf,
+  // [#23367] The API-key lifecycle policy source, and its branded refusal.
+  apiKeyLifecyclePolicySourceOf,
+  isApiKeyLifecycleRefusalError,
 } from '@objectstack/core';
 import type {
   IHttpServer,
@@ -28,6 +31,7 @@ import type {
   ISecurityService,
   IStorageService,
   IFileAccessDelegate,
+  ApiKeyLifecyclePolicy,
 } from '@objectstack/spec/contracts';
 import {
   OBSERVABILITY_METRICS_SERVICE,
@@ -1162,6 +1166,8 @@ function buildAuthSessionResolver(
 type GateAuthService = {
   isAuthGateActive?(): boolean;
   resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
+  /** [#23367] The API-key lifecycle policy (`IAuthService.resolveApiKeyLifecyclePolicy`). */
+  resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy;
 };
 
 /**
@@ -1233,6 +1239,10 @@ function buildAuthGateSessionReader(
         Date.now(),
         await resolveAdmissionTenancyPosture(registry),
         userAuthGateSourceOf(auth),
+        // [#23367] The API-key lifecycle policy, from the same service. A key
+        // its own lifecycle refuses (`lifecycle`) carries no posture and is
+        // left to the identity resolution below, which fails it closed.
+        apiKeyLifecyclePolicySourceOf(auth),
       );
       if (admission.outcome === 'held') return { authGate: admission.gate };
       if (admission.outcome !== 'none') return undefined;
@@ -1406,6 +1416,8 @@ function buildFileReadAuthorizer(
         getSession,
         tenancyPosture,
         userAuthGates: userAuthGateSourceOf(resolveGateAuthService(registry)),
+        // [#23367] The API-key lifecycle policy, from the same service.
+        apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(resolveGateAuthService(registry)),
       });
       if (!authz.userId) return 'unauthenticated';
 
@@ -1461,6 +1473,12 @@ function buildFileReadAuthorizer(
       // the file-read door answers the 503 it is instead of a silent 'deny'
       // indistinguishable from a genuine refusal.
       if (isAuthzStoreUnavailableError(err)) throw err;
+      // [#23367] A key its own lifecycle refused (revoked, expired, inactive)
+      // is not a read verdict either: re-raised by brand for the download
+      // door, which relays it as its declared 403 and ledger code beside the
+      // store outage. Never a 'deny', which would answer it as a refusal on
+      // the record.
+      if (isApiKeyLifecycleRefusalError(err)) throw err;
       return 'deny'; // fail closed
     }
   };

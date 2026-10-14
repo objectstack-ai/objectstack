@@ -83,6 +83,7 @@ describe('sys_attachment delete gate under an unscoped multi-delete (#9483)', ()
     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
     return resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers({ authorization: `Bearer ${token}` }),
       getSession: async (h: any) => api?.getSession?.({ headers: h }),
@@ -278,6 +279,7 @@ describe('sys_attachment unscoped multi-delete is refused on its SHAPE, not on e
     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
     return resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers({ authorization: `Bearer ${token}` }),
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

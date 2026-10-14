@@ -121,6 +121,25 @@ describe('a second package registering a default record page for an object anoth
     expect(registry.listItems<any>('page').map((p) => p.name)).toEqual(['acme_org_detail']);
   });
 
+  it('names a remedy every holder can take: leave out a PAGE, never a whole package', async () => {
+    // The remedy sentence is what an author (or an AI) acts on, so its text is
+    // the contract here. It names the page to leave out, not the package: a
+    // deployment cannot leave out a package such as the platform's auth
+    // plugin, and can still leave out the one page it ships. It names no
+    // option, no package and no tracker number, so it stays true whichever
+    // holder is on the other side.
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.auth', [recordPage('acme_org_detail', 'acme_org')]))).toBeUndefined();
+    const err = await register(pkg('com.acme.tenant', [recordPage('tenant_org_detail', 'acme_org')]));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: DEFAULT_RECORD_PAGE_CONFLICT_CODE, status: 422 });
+    expect(err!.message.split('. ')[1]).toBe(
+      'Keep one default per object: set `isDefault: false` on one of the two pages, or compose the deployment '
+        + 'without the other package\'s page',
+    );
+    expect(err!.message).not.toMatch(/without the package/);
+    expect(err!.message).not.toMatch(/#\d+|registerOrganizationRecordPage|plugin-auth/);
+  });
+
   it('is refused in either order — whichever registers second is the second default', async () => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.tenant', [recordPage('tenant_org_detail', 'acme_org')]))).toBeUndefined();

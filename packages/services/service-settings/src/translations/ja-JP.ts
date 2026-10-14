@@ -113,6 +113,10 @@ export const jaJP: PlatformTranslationData = {
           title: 'ネットワーク',
           description: 'ユーザーがどこから認証できるかを制限します。',
         },
+        api_keys: {
+          title: 'API キー',
+          description: '個人 API キーの有効期間。期限切れ、非アクティブ期間を超えて未使用、または失効したキーはそれぞれのエラーコードで拒否され、対処は常に新しいキーの作成です。',
+        },
         social: {
           title: 'ソーシャルサインイン',
           description:
@@ -211,6 +215,22 @@ export const jaJP: PlatformTranslationData = {
         allowed_ip_ranges: {
           label: '許可 IP レンジ',
           help: 'CIDR レンジまたは正確な IP(1行に1つ、またはカンマ区切り)。例:203.0.113.0/24。設定すると、この範囲外からのサインインを拒否します。空欄で制限なし。X-Forwarded-For を設定する信頼できるプロキシが必要です。',
+        },
+        api_key_default_expiry_days: {
+          label: 'キーの既定の有効期間(日)',
+          help: '有効期限を指定せずに作成したキーは、作成からこの日数で期限切れになります。下の最大有効期間を超えることはありません。',
+        },
+        api_key_max_expiry_days: {
+          label: 'キーの最大有効期間(日)',
+          help: '新しいキーが指定できる最も遠い有効期限(作成時から数えます)。これより長いものは拒否されます(API_KEY_EXPIRY_TOO_LONG)。ちょうどこの日数は受け付けます。',
+        },
+        api_key_inactivity_days: {
+          label: '非アクティブによる失効(日)',
+          help: 'この日数のあいだ使用記録のないキーは拒否されます(API_KEY_INACTIVE)。失効(revoke)はされません。新しいキーを作成してください。一度も使われていないキーは作成時から、それが下のポリシー開始時刻より古い場合はポリシー開始時刻から数えます。0 で非アクティブ失効をオフにします。',
+        },
+        api_key_policy_started_at: {
+          label: 'キーポリシーの開始時刻',
+          help: 'サーバーがこのポリシーで初めて動作したときに自動で記録されます(UTC、ISO 8601)。それ以前に有効期限なしで作成されたキーはこの時刻の 1 年後に期限切れになり、使用記録のないキーはこの時刻から非アクティブ期間を数えます。変更すると、まだ日付が付いていないキーの両方の日付が動きます。',
         },
         google_enabled: {
           label: 'Google ログインを有効化',

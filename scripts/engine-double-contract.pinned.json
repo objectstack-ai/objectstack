@@ -3907,6 +3907,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/api-key-lifecycle.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/app-plugin.seed-locale-producer.test.ts",
       "verb": "findOne",
       "pinned": 1

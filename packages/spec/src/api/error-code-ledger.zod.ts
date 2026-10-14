@@ -302,6 +302,13 @@ export const ERROR_CODE_LEDGER = {
     'VALIDATION_FAILED',          // record-level validation; carries `fields[]` (#3977)
   ],
   '@objectstack/runtime': [
+    // [#23367, ruling A] 400 on `POST /keys` (`domains/keys.ts`): the signing
+    // asked for an `expires_at` further away than the API-key lifecycle
+    // policy's ceiling (`api_key_max_expiry_days`, one year by default). Not a
+    // VALIDATION_ERROR synonym: the body is well formed and the date is valid;
+    // the policy refuses its distance, and the remedy (ask for a nearer date,
+    // rotate before it) is the policy's own.
+    'API_KEY_EXPIRY_TOO_LONG',
     // [#16041] `POST /analytics/query` / `/analytics/sql` refused a
     // `timeDimensions[].dateRange` string outside the closed date-range
     // vocabulary (`AnalyticsDateRangeSchema` in `data/analytics.zod.ts`,
@@ -923,6 +930,18 @@ export const ERROR_CODE_LEDGER = {
     'DEFAULT_RECORD_PAGE_CONFLICT',
   ],
   '@objectstack/core': [
+    // [#23367, ruling A] The API-key lifecycle refusals: three distinct key
+    // states, decided once at the shared key-admission seam
+    // (`resolveApiKeyAdmission`, `security/api-key.ts`) and raised by
+    // `resolveAuthzContext` as the branded `ApiKeyLifecycleRefusalError`
+    // (`status: 403`, a located message naming the date). A face that relays
+    // the brand answers this code; a face that does not fails closed to its
+    // generic 401. None re-spells a standard member: `EXPIRED_TOKEN` is the
+    // session/JWT expiry whose remedy is a refresh, and no refresh exists for a
+    // key — the remedy here is a new key.
+    'API_KEY_EXPIRED',            // past its `expires_at`, or past the one-year grace of a key signed with none
+    'API_KEY_INACTIVE',           // no recorded use within the inactivity window; not revoked, a new key is the remedy
+    'API_KEY_REVOKED',            // its `revoked` flag is set
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',

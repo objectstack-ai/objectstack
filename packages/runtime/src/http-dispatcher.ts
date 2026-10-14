@@ -10,6 +10,8 @@ import {
     // every seam between `resolveAuthzContext` and a door), and the tenancy
     // read is classified by the REGISTRY's own "never registered" brand.
     rethrowAuthzStoreUnavailable, isServiceNotRegisteredError,
+    // [#23367] ...and the branded API-key lifecycle refusal, by the same kind of brand.
+    isApiKeyLifecycleRefusalError,
     // [#21941] The environment-membership gate raises the same loud outage
     // when its own read cannot answer.
     AuthzStoreUnavailableError,
@@ -708,7 +710,15 @@ export class HttpDispatcher {
             // with no credential, which is the "changed disguise" the shared
             // `rethrowAuthzStoreUnavailable` exists to end. It re-raises that
             // class by brand and returns `undefined` for everything else, so
-            // every other fault still degrades exactly as before:
+            // every other fault still degrades exactly as before.
+            //
+            // [#23367, ruling A item 3] The one other throw that leaves: a key
+            // its own lifecycle refused (revoked, expired, inactive). It is a
+            // verdict on the credential presented, not an absent one, and it
+            // carries its declared 403 and ledger code, which the transport's
+            // error render answers. Matched by brand, so every unbranded fault
+            // still falls through to the anonymous request below.
+            if (isApiKeyLifecycleRefusalError(err)) throw err;
             rethrowAuthzStoreUnavailable(err);
             // anonymous request — leave executionContext undefined
         }

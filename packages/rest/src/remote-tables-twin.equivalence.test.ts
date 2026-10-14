@@ -277,6 +277,7 @@ function mountBoth() {
     }
     const authz = await resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       // [#9593] The SAME engine the admin spelling resolves `objectql` to,
       // stated rather than omitted. It used to be `undefined` here, which was
       // right while only a session mattered; now that one spelling reads

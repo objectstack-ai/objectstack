@@ -205,6 +205,7 @@ async function boot(makeDriver: () => Driver, posture: TenancyPosture) {
   const enforced = async (userId: string) => {
     const authz = await resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: engine,
       headers: {},
       getSession: async () => ({

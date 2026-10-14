@@ -93,9 +93,17 @@ describe('#8053: a member revokes their OWN sys_api_key', () => {
   const keyStillAuthenticates = async (raw: string): Promise<boolean> => {
     const res = await stack.api('/data/showcase_task?$top=1', { headers: { 'x-api-key': raw } });
     if (res.status === 200) return true;
-    // 401 = credential rejected. Anything else (e.g. 403) would mean the key
-    // WAS accepted and something later refused — a different fact entirely.
-    expect(res.status, `revoked-key probe should be 401, got ${res.status}`).toBe(401);
+    // [#23367, ruling A] A revoked key is refused with its own located code,
+    // `403 API_KEY_REVOKED` — the credential recognised and its state refusing
+    // it. Any OTHER 403 would mean the key WAS accepted and something later
+    // refused — a different fact entirely — so the code decides, not the
+    // status. An unrecognised key keeps the generic 401.
+    if (res.status === 403) {
+      const body: any = await res.json();
+      expect(body?.error?.code, 'a 403 on the key probe must be the key\'s own revocation').toBe('API_KEY_REVOKED');
+      return false;
+    }
+    expect(res.status, `revoked-key probe should be 401 or 403 API_KEY_REVOKED, got ${res.status}`).toBe(401);
     return false;
   };
 

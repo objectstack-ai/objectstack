@@ -1003,7 +1003,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       last_used_at: {
         label: "Último uso el",
-        help: "Se actualiza automáticamente en cada llamada a la API."
+        help: "Se registra cuando se usa la clave, como máximo una vez por hora. Una clave sin uso registrado durante el plazo de inactividad (90 días por defecto) se rechaza hasta que se sustituya."
       },
       revoked: {
         label: "Revocado"

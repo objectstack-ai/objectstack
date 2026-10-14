@@ -29,6 +29,7 @@
     "AnalyticsResult (interface)",
     "AnalyticsStrategy (interface)",
     "ApiEndpointMatch (interface)",
+    "ApiKeyLifecyclePolicy (interface)",
     "ApprovalActionAttachment (interface)",
     "ApprovalActionKind (type)",
     "ApprovalActionRow (interface)",
