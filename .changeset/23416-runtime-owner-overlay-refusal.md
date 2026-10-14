@@ -14,16 +14,12 @@ An object has exactly one registry entry, so it has exactly one owning package (
 
 `saveMetaItem` now refuses that save before any write, with the refusal and the prescription that the code-owner case gives.
 
-## FROM → TO
+What changes for you, where package `P`'s runtime-authored row owns object `NAME` and `Q` is any other package:
 
-Package `P`'s runtime-authored row owns object `NAME`; `Q` is any other package.
-
-| request | FROM | TO |
-|:--|:--|:--|
-| `PUT /api/v1/meta/object/NAME?package=Q` (`saveMetaItem({ type: 'object', name: NAME, packageId: Q, … })`) | `200` "Saved object … package=Q"; a `Q`-bound row stored; the registry kept `P`'s schema and logged `registerObject failed … already owned by package "P"` | `422 OBJECT_OVERLAY_PACKAGE_MISMATCH`, nothing stored for `Q`: "Cannot layer object 'NAME': the overlay is bound to package 'Q', but the object is owned by package 'P'. …" |
-| the same save with `?mode=draft` | success; a `Q`-bound draft row stored | the same `422`; no draft row |
-| `duplicatePackage` from `P` to `Q`, for an object whose name does not carry `P`'s namespace prefix (so the copy keeps `NAME`) | the object listed in `copied`; a `Q`-bound row stored that the registry never held | the object listed in `failed` with the refusal's text; nothing stored for it |
-| the same save naming `P`, or naming no package | `200` | `200`, unchanged |
+- FROM `PUT /api/v1/meta/object/NAME?package=Q` (`saveMetaItem({ type: 'object', name: NAME, packageId: Q, … })`) answering `200` "Saved object … package=Q", with a `Q`-bound row stored while the registry kept `P`'s schema and logged `registerObject failed … already owned by package "P"`, TO `422 OBJECT_OVERLAY_PACKAGE_MISMATCH` with nothing stored for `Q`: "Cannot layer object 'NAME': the overlay is bound to package 'Q', but the object is owned by package 'P'. …"
+- FROM the same save with `?mode=draft` storing a `Q`-bound draft row, TO the same `422` with no draft row.
+- FROM `duplicatePackage` from `P` to `Q` listing in `copied` an object whose name does not carry `P`'s namespace prefix (so the copy keeps `NAME`), with a `Q`-bound row stored that the registry never held, TO that object listed in `failed` with the refusal's text and nothing stored for it.
+- The same save naming `P`, or naming no package, answers `200` as before.
 
 **Remedy, in one line.** Save the object with `?package=P` (or with no package, which addresses `P`'s row), or give `Q`'s object its own name. A `Q`-bound row stored before this change is removed with `DELETE /api/v1/meta/object/NAME?package=Q`.
 
