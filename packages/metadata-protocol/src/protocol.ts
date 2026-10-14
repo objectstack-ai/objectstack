@@ -5380,6 +5380,48 @@ function collectReferenceHits(
 }
 
 /**
+ * Every place a stored document names `targetName` as the HEAD of a composite
+ * record key, through a composite-key site of the derived index
+ * (`REFERENCE_SITES.compositeKeyByTarget`; the one site today is a permission
+ * set's `fields`, keyed `<object>.<field>`).
+ *
+ * A separate walk, not a branch inside {@link collectReferenceHits}: that walk
+ * matches a WHOLE value and serves every other site, so it stays as it is. This
+ * one reads only the record each site names, at the document ROOT where the
+ * site's premise is derived (`compositeKeySiteHolds`, `./reference-sites.ts`),
+ * and only its keys.
+ *
+ * A key names the target when the text before its FIRST separator equals the
+ * target's name — the split the security plugin makes for field rules
+ * (`key.startsWith(object + '.')`), exact because no object name contains a `.`.
+ * A key with no separator, or one at index 0 (`.full_name`), names no object.
+ * The field part is never read, so a key whose FIELD part spells the target
+ * (`invoice.customer`) is not a reference to it. One hit per site: the reported
+ * path (`fields{key}`) does not carry the key, so a second matching key is the
+ * same row.
+ */
+function collectCompositeKeyHeadHits(
+    item: unknown,
+    separators: ReadonlyMap<string, string>,
+    targetName: string,
+): Array<{ path: string; property: string }> {
+    const hits: Array<{ path: string; property: string }> = [];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return hits;
+    for (const [property, separator] of separators) {
+        const record = (item as Record<string, unknown>)[property];
+        if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
+        for (const key of Object.keys(record)) {
+            const at = key.indexOf(separator);
+            if (at > 0 && key.slice(0, at) === targetName) {
+                hits.push({ path: `${property}{key}`, property });
+                break;
+            }
+        }
+    }
+    return hits;
+}
+
+/**
  * Phase 3a-destructive: detect changes between an existing object schema
  * and an incoming overlay that would break runtime data — removed fields,
  * field type narrowing, required toggled on without a default. Returned
@@ -30227,8 +30269,17 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
 
-        const sites = REFERENCE_SITES.byTarget.get(singularTarget);
-        if (!sites || sites.length === 0) {
+        const sites = REFERENCE_SITES.byTarget.get(singularTarget) ?? [];
+        // [#23539] Sites that name the target in the HEAD of a composite record
+        // key — a permission set's `fields`, keyed `<object>.<field>`, for target
+        // `object` and nothing else. They live in their own map, never in
+        // `byTarget`, because `duplicatePackage` reads `byTarget.get('object')` as
+        // a flat set of object-naming property names (see
+        // COMPOSITE_KEY_REFERENCE_SITES in `./reference-sites.ts`). Without them a
+        // set whose only rule for an object was a field rule was missing here,
+        // and the "Used by" panel could clear that object for deletion.
+        const compositeSites = REFERENCE_SITES.compositeKeyByTarget.get(singularTarget) ?? [];
+        if (sites.length === 0 && compositeSites.length === 0) {
             return { references: [] };
         }
 
@@ -30244,7 +30295,23 @@ export class ObjectStackProtocolImplementation implements
             }
             properties.set(site.property, site.target);
         }
-        const matchers = [...propertiesByFromType].map(([fromType, properties]) => ({ fromType, properties }));
+        // Composite-key sites share that one read: property → separator, per
+        // source type, and a source type they alone name still gets its matcher.
+        const separatorsByFromType = new Map<string, Map<string, string>>();
+        for (const site of compositeSites) {
+            let separators = separatorsByFromType.get(site.fromType);
+            if (!separators) {
+                separators = new Map<string, string>();
+                separatorsByFromType.set(site.fromType, separators);
+            }
+            separators.set(site.property, site.separator);
+            if (!propertiesByFromType.has(site.fromType)) propertiesByFromType.set(site.fromType, new Map());
+        }
+        const matchers = [...propertiesByFromType].map(([fromType, properties]) => ({
+            fromType,
+            properties,
+            separators: separatorsByFromType.get(fromType),
+        }));
 
         const seen = new Set<string>(); // dedup key: `${fromType}|${itemName}|${path}`
         const out: Array<{ type: string; name: string; label?: string; path: string; kind: string }> = [];
@@ -30291,7 +30358,9 @@ export class ObjectStackProtocolImplementation implements
                     // Don't list an item as a reference to itself unless the
                     // self-reference is meaningful (e.g. object→field path).
                     const isSelfReference = matcher.fromType === singularTarget && sourceName === targetName;
-                    for (const { path, property } of collectReferenceHits(raw, matcher.properties, targetName)) {
+                    const hits = collectReferenceHits(raw, matcher.properties, targetName);
+                    if (matcher.separators) hits.push(...collectCompositeKeyHeadHits(raw, matcher.separators, targetName));
+                    for (const { path, property } of hits) {
                         // An item naming ITSELF through a scalar property is
                         // the item, not a dependent. Collection-valued paths
                         // are kept, because an item that lists itself among
