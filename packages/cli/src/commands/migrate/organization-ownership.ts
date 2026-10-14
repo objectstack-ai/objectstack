@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Command, Flags } from '@oclif/core';
@@ -34,11 +34,14 @@ import {
   applyOrganizationOwnership,
   checkpointFromDetails,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+  ReviewedPlanRefusal,
+  reviewedPlanFromFile,
   TemplateChoiceRefusal,
   type ApplyExecutor,
   type CeremonyLedgerPort,
   type ColumnDropOutcome,
   type OrganizationOwnershipApplyReport,
+  type ReviewedPlan,
 } from '../../utils/organization-ownership-apply.js';
 
 /** Who the ceremony's metadata saves name as their actor. */
@@ -87,9 +90,11 @@ async function confirm(question: string): Promise<boolean> {
  *
  * ## `--apply` (ADR-0131 D10 ceremony items 2 to 4)
  *
- * The writing mode. It asks about the backup first — the operator's act and
- * the precondition (D10 item 2): `--backup-taken`, or a yes at the prompt; a
- * non-interactive run without the flag is refused before the boot. It then
+ * The writing mode. It reads the reviewed plan file first (`--plan-file`, the
+ * file a plan run wrote; without it the run is refused before the boot), then
+ * asks about the backup — the operator's act and the precondition (D10 item
+ * 2): `--backup-taken`, or a yes at the prompt; a non-interactive run without
+ * the flag is refused before the boot. It then
  * performs the fates in order — attribution, the authored catalog conversion,
  * the template promotion, the settings global-rung move, the verified id→name
  * rewrite, mirror deletion, column drops — through `../../utils/organization-ownership-apply.ts`,
@@ -99,6 +104,17 @@ async function confirm(question: string): Promise<boolean> {
  * the ceremony's marker: `applied_at` once every step has finished,
  * `verified_at` when the post-check also reads zero discrepancies. A report
  * file is written beside the plan's, never over an existing one.
+ *
+ * ## `--plan-file FILE` (the plan the operator reviewed)
+ *
+ * `--apply` requires the plan file a plan run wrote, and executes only that
+ * plan: it refuses, before anything is written, when the inventory digest it
+ * computes differs from the file's (a different `--fate-supplement`, another
+ * release) or the file names another database. Both digests and the remedy —
+ * plan again, review, hand the new file in — are named. A checkpoint recorded
+ * under another digest is superseded by the reviewed plan: the run starts over
+ * and its report says so (`restartedFrom`). There is no flag that skips the
+ * comparison.
  *
  * ## `--fate-supplement FILE` (the host's own objects, ADR-0131 D10)
  *
@@ -128,7 +144,7 @@ export default class MigrateOrganizationOwnership extends Command {
     'The v18 organization-ownership ceremony (ADR-0131 D10). Without --apply, the read-only plan: per table, the fate, ' +
     'the row counts, the rows whose owner cannot be derived (by id), and which tables will receive NOT NULL, written ' +
     'to a file — never a row or a column changed; it refuses, naming it, any table it cannot enumerate. With --apply ' +
-    '(and a backup): attribution, the authored catalog conversion, the template promotion, the settings move, the ' +
+    '(the reviewed plan file in --plan-file, and a backup), only that plan: attribution, the authored catalog conversion, the template promotion, the settings move, the ' +
     'verified id-to-name rewrite, mirror deletion and column drops, in that order, ' +
     'resumable from a recorded checkpoint, then the post-check.';
 
@@ -136,7 +152,7 @@ export default class MigrateOrganizationOwnership extends Command {
     '$ os migrate organization-ownership',
     '$ os migrate organization-ownership --out plans/v18-ownership.json',
     '$ os migrate organization-ownership --database-url postgres://… --json',
-    '$ os migrate organization-ownership --apply --backup-taken',
+    '$ os migrate organization-ownership --apply --plan-file plans/v18-ownership.json --backup-taken',
     '$ os migrate organization-ownership --fate-supplement host-fates.json',
   ];
 
@@ -157,6 +173,12 @@ export default class MigrateOrganizationOwnership extends Command {
         'Perform the ceremony: attribution, the verified id-to-name rewrite, mirror deletion, column drops, then the ' +
         'post-check. Idempotent; an interrupted run resumes from its recorded checkpoint. Requires a backup',
       default: false,
+    }),
+    'plan-file': Flags.string({
+      description:
+        'With --apply (required): the plan file a plan run wrote and you reviewed. The run refuses, before any write, ' +
+        'when its inventory digest differs from that file\'s (another --fate-supplement, another release) or the file ' +
+        'names another database',
     }),
     'backup-taken': Flags.boolean({
       description:
@@ -233,6 +255,10 @@ export default class MigrateOrganizationOwnership extends Command {
     }
     if (flags['template-choice']?.length) {
       await refuse({ reason: 'flag-without-apply', detail: '--template-choice is only meaningful with --apply' }, '--template-choice is only meaningful with --apply.');
+      return;
+    }
+    if (flags['plan-file']) {
+      await refuse({ reason: 'flag-without-apply', detail: '--plan-file is only meaningful with --apply' }, '--plan-file is only meaningful with --apply.');
       return;
     }
     if (flags['backup-taken']) {
@@ -349,13 +375,40 @@ export default class MigrateOrganizationOwnership extends Command {
 
   /** `--apply`: the backup precondition, the boot, the ceremony, the report file. */
   private async runApply(
-    flags: { 'database-url'?: string; out?: string; json?: boolean; 'backup-taken'?: boolean; 'template-choice'?: string[] },
+    flags: {
+      'database-url'?: string;
+      out?: string;
+      json?: boolean;
+      'backup-taken'?: boolean;
+      'template-choice'?: string[];
+      'plan-file'?: string;
+    },
     posture: string,
     refuse: (payload: Record<string, unknown>, message: string) => Promise<void>,
     inventory: readonly InventoryEntry[] | undefined,
   ): Promise<void> {
     const json = Boolean(flags.json);
     const timer = createTimer();
+    // The reviewed plan, read before the backup question and the boot.
+    if (!flags['plan-file']) {
+      await refuse(
+        { reason: 'plan-file-required', detail: 'pass --plan-file with the plan file you reviewed' },
+        'Refused: --apply executes only a plan you reviewed. Run the plan first (os migrate organization-ownership, with ' +
+          'the same --fate-supplement), review the file it writes, then re-run --apply with --plan-file FILE.',
+      );
+      return;
+    }
+    let reviewedPlan: ReviewedPlan;
+    const planFile = resolve(flags['plan-file']);
+    try {
+      reviewedPlan = reviewedPlanFromFile(planFile, await readFile(planFile, 'utf8'));
+    } catch (error) {
+      const refusal = error instanceof ReviewedPlanRefusal
+        ? error
+        : new ReviewedPlanRefusal('plan-file-unusable', `The plan file ${planFile} cannot be read: ${(error as Error).message}.`, { file: planFile });
+      await refuse({ reason: refusal.reason, ...refusal.detail, detail: refusal.message }, `Refused: ${refusal.message}`);
+      return;
+    }
     if (!flags['backup-taken']) {
       const target = flags['database-url'] ?? process.env.OS_DATABASE_URL ?? 'the project database';
       const yes = !json && (await confirm(
@@ -522,11 +575,16 @@ export default class MigrateOrganizationOwnership extends Command {
           },
         },
         ledger,
+        reviewedPlan,
         ...(inventory ? { inventory } : {}),
         ...(json ? {} : { onProgress: (message: string) => printStep(message) }),
       });
     } catch (error: unknown) {
       if (isExitSignal(error)) throw error;
+      if (error instanceof ReviewedPlanRefusal) {
+        await refuse({ reason: error.reason, ...error.detail, detail: error.message }, `Refused: ${error.message}`);
+        return;
+      }
       if (error instanceof TemplateChoiceRefusal) {
         await refuse({ reason: 'template-choice-refused', detail: error.message }, `Refused: ${error.message}`);
         return;

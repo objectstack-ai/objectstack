@@ -1506,9 +1506,11 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   // `reference_to` is absent — the other half of the #5017 fix.
   { receiver: 'def', expected: ['reference'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
-  // `required` joined this list with #7503: `resolveCbpRelation` mirrors the
-  // runtime's three-step fallback, whose steps 1 and 3 are predicated on it.
-  { receiver: 'f', expected: ['label', 'name', 'required', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
+  // `required` joined this list with #7503 and left it with #23272: what
+  // counts as a controlled_by_parent master (`master_detail` + `required: true`)
+  // is read by the spec's exported `isControlledByParentMasterField`, which
+  // `cbpMasterCandidates` calls, so this rule no longer reads it off `f`.
+  { receiver: 'f', expected: ['label', 'name', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
   {
     receiver: 'p',
     expected: ['allowCreate', 'allowDelete', 'allowEdit', 'allowRead', 'modifyAllRecords', 'readScope', 'viewAllRecords'],

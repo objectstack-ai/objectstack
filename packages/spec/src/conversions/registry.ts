@@ -4930,11 +4930,24 @@ const PAGE_HEADER_COMPONENT_TYPES = new Set(['page:header', 'page-header']);
  * without those pages silently losing their second line, the exact failure
  * shape this entry exists to prevent. The fixture pins all three positions.
  *
- * **Live window**; retires at 18.
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23421). The authoring funnel no longer rewrites the old key, so an
+ * author meets `PageHeaderProps`' own refusal, which names the rename
+ * (`aliases: { description: 'subtitle' }`), at every door that judges page
+ * props: `os validate` / `os build` / `os lint` and the metadata save door
+ * alike, where before the first two converted silently and the save door
+ * refused. Stored rows keep healing: stored-row rehydration replays the full
+ * chain, this entry included (`applyConversionsToStoredItem`), and so do the
+ * artifact-ingestion door (inside its window) and `os migrate meta`. The kebab
+ * `page-header` type stays in its walk for those replays only — objectui no
+ * longer registers that type, so a source node of it renders the unknown
+ * component panel whatever its props say.
  */
 const pageHeaderSubtitleAlias: MetadataConversion = {
   id: 'page-header-subtitle-alias',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'page.component.page-header.description',
   summary:
     "page-header component prop 'description' → 'subtitle' (the off-spec spelling a renderer tolerated through a bare `subtitle ?? description` fallback; `subtitle` is the declared key, and the fallback retires)",
@@ -5575,11 +5588,21 @@ const pageCardBodyToChildren: MetadataConversion = {
  * anything the rewrite declines to touch: it refuses the object form with a
  * message naming `bodyExtra`, at any position.
  *
- * **Live window**; retires at 18.
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23421). The authoring funnel no longer rewrites the object form,
+ * so an author meets that array-only field's refusal naming `bodyExtra` at
+ * every door that judges page props — `os validate` / `os build` / `os lint`
+ * and the metadata save door alike, where before the first two converted
+ * silently and the save door refused. Stored rows keep healing: stored-row
+ * rehydration replays the full chain, this entry included
+ * (`applyConversionsToStoredItem`), and so do the artifact-ingestion door
+ * (inside its window) and `os migrate meta`.
  */
 const inlineActionApiParamsToBodyExtra: MetadataConversion = {
   id: 'inline-action-api-params-to-body-extra',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'page.component.element:button.action.params',
   summary:
     "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (a static payload and a parameter definition are two things, so the payload gets its own key; `params` stays the ActionParam[] definition array)",

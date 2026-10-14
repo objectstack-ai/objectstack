@@ -1630,6 +1630,17 @@ function restoreFlowRegistration(automationService: FlowRegistrationService, nam
  *    The default save mode is the live one (`active`), which is what the
  *    engine registration already is: a draft row would leave the engine
  *    running a flow the next boot does not bind.
+ *  - **No package, because no caller here holds one** [#23292]. The save
+ *    resolves the row (ADR-0048): the one package's row when the flow's
+ *    active rows are bound to exactly one, else the package-unbound row; a
+ *    name two packages hold is refused `409 RESOURCE_CONFLICT`, relayed with
+ *    the engine put back as below. The only package-shaped input these doors
+ *    reach is a `_packageId` stamp: the caller's body's, which is the caller's
+ *    bytes, or the engine-held definition's, which for a two-package name is
+ *    the contender the boot bind armed by arrival order. ⛔ Never pass either
+ *    as `packageId`: the first makes the body a package selector this door
+ *    never declared, the second is the guess the 409 refuses. The clone's
+ *    target is a new name and carries no envelope (ADR-0126 §7.1).
  *  - **Engine first, store second.** The engine's registration is the
  *    stricter validation (strict parse, cycles, regions, node config keys,
  *    predicates), so a definition it refuses is never stored; that refusal is

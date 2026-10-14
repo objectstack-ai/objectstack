@@ -57,12 +57,15 @@
  * the original divergence for exactly these configs with all of them green.
  *
  * The two fixtures below are a MINIMAL PAIR from one template, differing in a
- * single key on one page-header component: `description`, the alias
- * `page-header-subtitle-alias` rewrites at load, against `subtitle`, the
- * canonical spelling that converts nothing. So the pin discriminates on the
+ * single key on one page-header component: `visibility`, the alias
+ * `page-component-visibility-to-visibleWhen` rewrites at load, against
+ * `visibleWhen`, the canonical spelling that converts nothing. (The pair used
+ * to differ in the header's `description` against `subtitle`; that conversion,
+ * `page-component-visibility-to-visibleWhen`, retired from the load path at protocol 18 and
+ * the fixture was re-pointed here, as the paragraph below prescribes.) So the pin discriminates on the
  * CONVERSION and not on "a page is present" — measured on the pair before it
- * was written: `description` → text `--strict` 1, `--json --strict` 1, `--json`
- * 0, `warnings: []`, one notice; `subtitle` → 0 on every face, no notices.
+ * was written: `visibility` → text `--strict` 1, `--json --strict` 1, `--json`
+ * 0, `warnings: []`, one notice; `visibleWhen` → 0 on every face, no notices.
  *
  * Under the one-authoring-shape ruling (#20367) every accepted config is
  * `defineStack` output, and `defineStack` applies the conversion itself at
@@ -71,13 +74,13 @@
  * reachable again (#20476) because the producer RECORDS the conversions it
  * applied on the stack it returns (`stackConversionsOf`) and the door folds
  * that record into the list `--strict` gates on and into `conversions`. The
- * cell below is back to the measurement above: `description` → both `--strict`
+ * cell below is back to the measurement above: `visibility` → both `--strict`
  * faces 1, `--json` alone 0, `warnings: []`, the one notice.
  *
  * The live-notice assertion (the payload entry, and the producer's one
  * stderr line) is the anti-vacuity guard, and it is load-bearing rather than
- * decorative. `page-header-subtitle-alias` is a LIVE
- * window that retires from the load path at protocol 18; the day it retires,
+ * decorative. `page-component-visibility-to-visibleWhen` is a LIVE
+ * window; the day it retires from the load path,
  * this fixture raises nothing and, without that assertion, the file would keep
  * passing while pinning an empty cell — precisely the failure this test exists
  * to remove. It goes red instead, and whoever retires the entry re-points the
@@ -172,14 +175,15 @@ export default defineStack({
 
 /**
  * The conversions-only minimal pair (#11301) — `CLEAN_SOURCE`'s shape plus one
- * `page:header` component, whose second line is authored under the key named.
+ * `page:header` component, whose visibility predicate is authored under the
+ * key named.
  *
  * Nothing else here raises an advisory: the unknown-key lints run on the
- * POST-conversion `normalized`, so what they see is the canonical `subtitle`
+ * POST-conversion `normalized`, so what they see is the canonical `visibleWhen`
  * either way, and both members are pinned to `warnings: []` below rather than
  * assumed to be.
  */
-const headerPageSource = (headerTextKey: 'description' | 'subtitle'): string => `
+const headerPageSource = (headerVisibilityKey: 'visibility' | 'visibleWhen'): string => `
 import { defineStack } from '@objectstack/spec';
 
 export default defineStack({
@@ -195,7 +199,7 @@ export default defineStack({
     name: 'strictexit_home',
     label: 'Home',
     regions: [{ name: 'main', components: [
-      { type: 'page:header', properties: { title: 'Tickets', ${headerTextKey}: 'All open tickets' } },
+      { type: 'page:header', properties: { title: 'Tickets' }, ${headerVisibilityKey}: "page.mode != 'edit'" },
     ] }],
   }],
 }, { strict: false });
@@ -237,10 +241,10 @@ beforeAll(() => {
   writeFileSync(join(cleanDir, 'objectstack.config.ts'), CLEAN_SOURCE);
   linkSpec(cleanDir);
   conversionsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-'));
-  writeFileSync(join(conversionsDir, 'objectstack.config.ts'), headerPageSource('description'));
+  writeFileSync(join(conversionsDir, 'objectstack.config.ts'), headerPageSource('visibility'));
   linkSpec(conversionsDir);
   conversionsCanonDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-canon-'));
-  writeFileSync(join(conversionsCanonDir, 'objectstack.config.ts'), headerPageSource('subtitle'));
+  writeFileSync(join(conversionsCanonDir, 'objectstack.config.ts'), headerPageSource('visibleWhen'));
   linkSpec(conversionsCanonDir);
 });
 
@@ -326,25 +330,25 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
       'the producer-applied conversion reaches the payload, once',
     ).toEqual([
       {
-        conversionId: 'page-header-subtitle-alias',
-        path: 'pages[0].regions[0].components[0].properties.subtitle',
-        from: 'description',
-        to: 'subtitle',
+        conversionId: 'page-component-visibility-to-visibleWhen',
+        path: 'pages[0].regions[0].components[0].visibleWhen',
+        from: 'visibility',
+        to: 'visibleWhen',
       },
     ]);
     expect(typeof payload.conversions?.[0]?.retiresIn, 'the expiry rides the entry').toBe('number');
 
     // The text face names what failed it, in its `⚠` block.
-    expect(text.stdout).toContain("conversion 'page-header-subtitle-alias'");
+    expect(text.stdout).toContain("conversion 'page-component-visibility-to-visibleWhen'");
 
     // Anti-vacuity AND the one-stderr-line property: the conversion is LIVE —
     // it fired, in the producer, once per run — and no door-side line repeats it
-    // on stderr. The day `page-header-subtitle-alias` retires this goes red;
+    // on stderr. The day `page-component-visibility-to-visibleWhen` retires this goes red;
     // re-point `headerPageSource` at a live entry in
     // `packages/spec/src/conversions/registry.ts`.
     for (const run of [text, json]) {
       expect(
-        run.stderr.split("conversion 'page-header-subtitle-alias'").length - 1,
+        run.stderr.split("conversion 'page-component-visibility-to-visibleWhen'").length - 1,
         'defineStack reported the conversion at load, on exactly one stderr line',
       ).toBe(1);
     }
@@ -356,7 +360,7 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     const json = await runCli(['validate', '--json'], conversionsDir);
     expect(json.code, `--json without --strict must stay 0:\n${json.stdout}\n${json.stderr}`).toBe(0);
     const payload = JSON.parse(json.stdout) as { conversions?: Array<{ conversionId?: unknown }> };
-    expect((payload.conversions ?? []).map((n) => n.conversionId)).toEqual(['page-header-subtitle-alias']);
+    expect((payload.conversions ?? []).map((n) => n.conversionId)).toEqual(['page-component-visibility-to-visibleWhen']);
   }, 120_000);
 
   it('control: the same page under the CANONICAL key converts nothing and exits 0 on both faces', async () => {
@@ -372,7 +376,7 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     expect(payload.warnings).toEqual([]);
     expect(payload.conversions).toEqual([]);
     // The discriminator's other half: the canonical key raises no notice anywhere.
-    expect(json.stderr).not.toContain("conversion 'page-header-subtitle-alias'");
+    expect(json.stderr).not.toContain("conversion 'page-component-visibility-to-visibleWhen'");
   }, 120_000);
 
   it('control: without --strict, the same advisory-raising config still exits 0 under --json', async () => {

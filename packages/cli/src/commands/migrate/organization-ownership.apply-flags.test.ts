@@ -4,10 +4,16 @@
  * `os migrate organization-ownership --apply` asks about the backup before it
  * opens the database (ADR-0131 D10 ceremony item 2): without `--backup-taken`
  * a non-interactive run is refused, and the boot never happens. The flag means
- * nothing without `--apply`, and is refused there too.
+ * nothing without `--apply`, and is refused there too. Before the backup
+ * question, `--apply` requires the plan file the operator reviewed
+ * (`--plan-file`), readable as a plan; the digest comparison itself is pinned
+ * in `organization-ownership-apply.test.ts`.
  */
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const boot = vi.hoisted(() => vi.fn(async () => {
@@ -27,6 +33,20 @@ beforeAll(async () => {
 const CASE_TIMEOUT_MS = 60_000;
 
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+
+const PLAN_DIR = mkdtempSync(join(tmpdir(), 'os-c7b-plan-file-'));
+/** A plan file as a plan run writes it (the fields the apply reads). */
+const PLAN_FILE = join(PLAN_DIR, 'plan.json');
+writeFileSync(PLAN_FILE, JSON.stringify({
+  kind: 'organization-ownership-plan',
+  ceremony: 'ADR-0131 D10',
+  generatedAt: '2026-10-14T00:00:00Z',
+  database: 'fixture.db',
+  inventoryDigest: 'f'.repeat(64),
+  posture: 'single',
+}));
+const NOT_A_PLAN = join(PLAN_DIR, 'report.json');
+writeFileSync(NOT_A_PLAN, JSON.stringify({ kind: 'organization-ownership-apply' }));
 
 async function runJson(argv: string[]): Promise<{ payload: Record<string, unknown>; exitCode: unknown }> {
   const chunks: string[] = [];
@@ -53,9 +73,39 @@ afterEach(() => {
   boot.mockClear();
 });
 
+describe('os migrate organization-ownership --apply — the reviewed plan file', () => {
+  it('refuses --apply without --plan-file, before the backup question and the boot', async () => {
+    const { payload, exitCode } = await runJson(['--apply', '--backup-taken', '--json']);
+    expect(payload).toMatchObject({ error: 'apply_refused', reason: 'plan-file-required' });
+    expect(exitCode).toBe(1);
+    expect(boot).not.toHaveBeenCalled();
+  }, CASE_TIMEOUT_MS);
+
+  it('refuses a --plan-file that is not a plan, naming it, before the boot', async () => {
+    const { payload, exitCode } = await runJson(['--apply', '--plan-file', NOT_A_PLAN, '--backup-taken', '--json']);
+    expect(payload).toMatchObject({ error: 'apply_refused', reason: 'plan-file-unusable', file: NOT_A_PLAN });
+    expect(exitCode).toBe(1);
+    expect(boot).not.toHaveBeenCalled();
+  }, CASE_TIMEOUT_MS);
+
+  it('refuses a --plan-file that does not exist, before the boot', async () => {
+    const missing = join(PLAN_DIR, 'missing.json');
+    const { payload } = await runJson(['--apply', '--plan-file', missing, '--backup-taken', '--json']);
+    expect(payload).toMatchObject({ error: 'apply_refused', reason: 'plan-file-unusable', file: missing });
+    expect(boot).not.toHaveBeenCalled();
+  }, CASE_TIMEOUT_MS);
+
+  it('refuses --plan-file without --apply, before the boot', async () => {
+    const { payload, exitCode } = await runJson(['--plan-file', PLAN_FILE, '--json']);
+    expect(payload).toMatchObject({ error: 'plan_refused', reason: 'flag-without-apply' });
+    expect(exitCode).toBe(1);
+    expect(boot).not.toHaveBeenCalled();
+  }, CASE_TIMEOUT_MS);
+});
+
 describe('os migrate organization-ownership --apply — the backup precondition', () => {
   it('refuses a non-interactive --apply without --backup-taken, before the boot', async () => {
-    const { payload, exitCode } = await runJson(['--apply', '--json']);
+    const { payload, exitCode } = await runJson(['--apply', '--plan-file', PLAN_FILE, '--json']);
     expect(payload).toMatchObject({ error: 'apply_refused', reason: 'backup-unacknowledged' });
     expect(exitCode).toBe(1);
     expect(boot).not.toHaveBeenCalled();
@@ -69,7 +119,7 @@ describe('os migrate organization-ownership --apply — the backup precondition'
   }, CASE_TIMEOUT_MS);
 
   it('with --backup-taken, goes on to the boot', async () => {
-    const { payload } = await runJson(['--apply', '--backup-taken', '--json']);
+    const { payload } = await runJson(['--apply', '--plan-file', PLAN_FILE, '--backup-taken', '--json']);
     expect(payload).toMatchObject({ error: 'boot_failed', reason: 'boot-failed' });
     expect(boot).toHaveBeenCalledTimes(1);
     expect(boot.mock.calls[0]).toEqual([expect.objectContaining({ deferSchemaDdl: true, composeHostStack: true })]);

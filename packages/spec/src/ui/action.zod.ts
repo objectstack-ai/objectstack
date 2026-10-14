@@ -35,11 +35,8 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
-import {
-  ON_SUCCESS_EXECUTORS,
-  onSuccessBesideExecutorRefusal,
-  onSuccessBesideUpdateOperationRefusal,
-} from './action-on-success-executor';
+import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
+import { refuseDeclarativeUpdateContradictions, type DeclarativeUpdateSurface } from './action-declarative-update';
 import { navigationTargetRefusal } from './navigation-target';
 
 /**
@@ -1255,9 +1252,12 @@ const actionObject = () => strictObject({
    * The maintainer's 2026-08-06 ruling on #5777 took direction A (a separate
    * key, no same-name union), so this key keeps ONE meaning and the object form
    * is REFUSED here — with a message that names `bodyExtra` rather than the
-   * bare "expected array, received object" an author cannot act on. Sources
-   * still carrying the object form are rewritten at load by the
-   * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2).
+   * bare "expected array, received object" an author cannot act on. The
+   * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2) rewrote
+   * the object form at load for protocol 17's window; retired from the load
+   * path at 18, it now rewrites only data at rest (stored rows, artifacts
+   * inside the ingestion window, `os migrate meta`), so an authored object
+   * form meets this refusal.
    *
    * **The api prescription is not universal, which #6828 measured and the
    * maintainer's 2026-08-10 ruling closed.** On a `type:'url'` action the
@@ -1292,11 +1292,13 @@ const actionObject = () => strictObject({
         && typeof iss.input === 'object'
         && !Array.isArray(iss.input)
         ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not a values map. "
-          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead. "
+          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead; "
+          + "the loader rewrote that object form to `bodyExtra` on an inline page button until @objectstack/spec 18, which refuses it (ADR-0087 D2). "
           + "For a `type:'url'` action there is nowhere to move it to, by decision: put static values straight into the `target` string "
           + "(`${param.X}` interpolates a value collected by the params dialog, `${ctx.X}` one from the action context), and open a new tab with "
           + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed. "
-          + 'Expected an array of ActionParam, received an object.'
+          + 'Expected an array of ActionParam, received an object. '
+          + 'Run `os migrate meta --from 16` to list the mechanical edits for the inline `element:button` action case; `--write` applies the ones it can prove, and a registered action keeps its object form until you move it by hand.'
         : undefined
     ),
   }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
@@ -1863,147 +1865,29 @@ const actionObject = () => strictObject({
 });
 
 /**
- * The keys an `operation: 'update'` action must not carry, each with the
- * sentence that names the executor the key belongs to. A table rather than a
- * chain of `.refine()`s so every combination gets ONE issue at ITS key's path
- * — the same shape `BulkActionDefSchema`'s refinements use for the def side.
+ * `ActionSchema`'s surface of the declarative-update judge
+ * (`action-declarative-update.ts`, which carries the rule and every text, and
+ * applies the same judge to the page action rows). Its five rules, in brief:
+ * `patch` only beside `operation: 'update'`; beside it, `type` stays at its
+ * default `'script'` (the platform action route), every key that binds or
+ * shapes a dispatch the update does not make is refused at its own path, there
+ * is a `patch` or a non-empty `params` to write, and no `list_toolbar`
+ * location. `objectName` is judged by `defineStack`'s walk instead
+ * (`stack.zod.ts`, `collectGlobalUpdateActionErrors`).
  */
-const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<readonly [key: string, why: string]> = [
-  ['target',
-    "`target` names a handler, URL, page, flow or endpoint — an `operation: 'update'` action dispatches on "
-    + 'none of them: the platform action route writes `patch` to the current record. Drop `target`; to call '
-    + "an endpoint of your own instead, use `type: 'api'` without `operation`."],
-  ['body',
-    "`body` is the inline handler of a `type: 'script'` action — an `operation: 'update'` action has no "
-    + 'handler: the write IS the `patch`, performed by the platform as the caller. Drop `body`; to write '
-    + 'through a handler of your own (system-elevated `ctx.api`), drop `operation` and `patch` instead.'],
-  ['method',
-    "`method` is the HTTP verb of a `type: 'api'` request — an `operation: 'update'` action makes no request "
-    + 'of its own: the platform performs the write on the data plane. Drop `method`.'],
-  ['bodyExtra',
-    "`bodyExtra` is the static request body of a `type: 'api'` action — on an `operation: 'update'` action "
-    + 'the static field values go in `patch`. Move them there and drop `bodyExtra`.'],
-  ['bodyShape',
-    "`bodyShape` shapes a `type: 'api'` request body — an `operation: 'update'` action sends no request body "
-    + 'of its own. Drop `bodyShape`.'],
-  ['recordIdParam',
-    "`recordIdParam` injects the row id into a request body — an `operation: 'update'` action binds the "
-    + 'current record from the invocation context and has no body to inject into. Drop `recordIdParam`.'],
-  ['recordIdField',
-    "`recordIdField` seeds `recordIdParam` — an `operation: 'update'` action binds the current record from "
-    + 'the invocation context and injects nothing. Drop `recordIdField`.'],
-  // One text with the page action rows' refusal of the same pairing
-  // (`action-on-success-executor.ts`).
-  ['onSuccess', onSuccessBesideUpdateOperationRefusal("An `operation: 'update'` action's `onSuccess`")],
-  ['outcomeMessages',
-    "`outcomeMessages` picks success copy by the `outcome` a handler returns — an `operation: 'update'` "
-    + 'action has no handler: the platform performs the write and reports no outcome, so no entry could '
-    + 'ever be chosen. Drop it; a fixed confirmation for the write is `successMessage`.'],
-  ['opensInNewTab',
-    "`opensInNewTab` pre-opens a tab for a handler-returned `{ redirectUrl }` — an `operation: 'update'` "
-    + 'action has no handler and returns no redirect. Drop it.'],
-  ['newTabUrl',
-    "`newTabUrl` is the zero-roundtrip target of the pre-opened-tab flow — an `operation: 'update'` action "
-    + 'has no such flow. Drop it.'],
-];
-
-/**
- * The mixing rule between the declarative single-record field write and the
- * rest of the action vocabulary (#14092), designed with the PR that landed it
- * and pinned in `action-row-update.test.ts`:
- *
- *  1. `operation: 'update'` keeps `type` at its default `'script'` — the
- *     platform action route — and any OTHER explicit `type` is refused. An
- *     explicit `type: 'script'` is indistinguishable from the materialized
- *     default at object level (a `.default()` has already run by the time a
- *     refinement sees the object — the #13897 asymmetry) and means the same
- *     thing, so it is accepted.
- *  2. Every key that names or shapes a dispatch the update does not make is
- *     refused at its own path ({@link DECLARATIVE_UPDATE_REFUSED_KEYS}).
- *  3. `patch` without `operation: 'update'` is refused (it would be silently
- *     dropped — ADR-0078); `operation: 'update'` with neither `patch` nor
- *     `params` is refused (nothing to write).
- *  4. `list_toolbar` is refused: no current record there.
- *
- * Deliberately NOT judged here: `objectName`. The same schema parses an
- * action embedded on an object (object implicit) and a standalone one in
- * `stack.actions` (only `objectName` can say), so the standalone form is
- * judged where standalone-ness is knowable — `defineStack`'s cross-reference
- * walk (`stack.zod.ts`, `collectGlobalUpdateActionErrors`).
- */
-function refuseDeclarativeUpdateContradictions(
-  data: {
-    type?: string;
-    operation?: string;
-    patch?: unknown;
-    params?: unknown;
-    locations?: unknown;
-  } & Record<string, unknown>,
-  ctx: z.core.$RefinementCtx,
-): void {
-  if (data.operation !== 'update') {
-    if (data.patch !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['patch'],
-        message:
-          "`patch` only applies to `operation: 'update'` — without it the action never writes fields, so "
-          + "these values would be silently dropped. Add `operation: 'update'`, or for the static request "
-          + "body of a `type: 'api'` action use `bodyExtra`.",
-      });
-    }
-    return;
-  }
-
-  if (data.type !== undefined && data.type !== 'script') {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['type'],
-      message:
-        "`operation: 'update'` is performed by the platform action route — the route a `type: 'script'` "
-        + "action posts to — so `type` stays at its default `'script'`; leave it off. A `type: '"
-        + `${data.type}'\` action dispatches on \`target\` (\`api\` makes the browser call the endpoint itself) `
-        + 'and never performs the write.',
-    });
-  }
-
-  for (const [key, why] of DECLARATIVE_UPDATE_REFUSED_KEYS) {
-    if (data[key] !== undefined) {
-      ctx.addIssue({ code: 'custom', path: [key], message: why });
-    }
-  }
-
-  const collectsParams = Array.isArray(data.params) && data.params.length > 0;
-  if (data.patch === undefined && !collectsParams) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['patch'],
-      message:
-        "An `operation: 'update'` action has nothing to write: declare a static `patch` (`{ status: 'done' }`), "
-        + 'or `params` so the dialog collects the values, or both — the patch is merged UNDER the collected params.',
-    });
-  }
-
-  if (Array.isArray(data.locations)) {
-    data.locations.forEach((location, index) => {
-      if (location !== 'list_toolbar') return;
-      ctx.addIssue({
-        code: 'custom',
-        path: ['locations', index],
-        message:
-          "`list_toolbar` has no current record — an `operation: 'update'` action writes ONE record, the one it "
-          + 'runs on. Use a record location (`list_item`, `record_header`, `record_more`, `record_section`) or, '
-          + "for the selection bar, a `bulkActionDefs` entry on the list view (`{ operation: 'update', patch }`).",
-      });
-    });
-  }
-}
+const ACTION_DECLARATIVE_UPDATE: DeclarativeUpdateSurface = {
+  executorKey: 'type',
+  executorDefaultsToScript: true,
+  onSuccessSubject: "An `operation: 'update'` action's `onSuccess`",
+  staticParams: false,
+};
 
 /**
  * The two places `outcomeMessages` (#21095) would parse clean and never be
  * read — refused at the key's own path, each with the rewrite. The third,
- * `operation: 'update'`, lives in {@link DECLARATIVE_UPDATE_REFUSED_KEYS}
- * beside `onSuccess`, the sibling key it is refused for the same reason as.
+ * `operation: 'update'`, lives in the declarative-update judge's refused-key
+ * table (`action-declarative-update.ts`) beside `onSuccess`, the sibling key it
+ * is refused for the same reason as.
  *
  *  1. A type with no server response. Only `type: 'api'` (the `target` call's
  *     response body) and `type: 'script'` (the handler's return value) hand
@@ -2326,7 +2210,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + "`operation: 'update'` with a `patch` for a declarative single-record write, or make this a "
     + "`type: 'api'` action calling an endpoint of your own — otherwise drop `undoable`.",
   path: ['undoable'],
-}).superRefine(refuseDeclarativeUpdateContradictions)
+}).superRefine(refuseDeclarativeUpdateContradictions(ACTION_DECLARATIVE_UPDATE))
   .superRefine(refuseInertOutcomeMessages)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final

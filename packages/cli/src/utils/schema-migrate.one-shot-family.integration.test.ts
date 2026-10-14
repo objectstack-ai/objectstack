@@ -126,6 +126,12 @@ interface Mode {
   label: string;
   /** The argv after the command id. `@DB@` is the case's database URL, `@DIR@` the project directory. */
   argv: string[];
+  /**
+   * Runs of the same command that must precede this mode on the same case, as
+   * an operator's would (each a mode pinned as no-write itself), before any
+   * state is read.
+   */
+  after?: string[][];
 }
 
 interface Caller {
@@ -199,9 +205,15 @@ const CALLERS: Record<string, Caller> = {
       argv: ['--out', '@DIR@/organization-ownership-plan.json', '--database-url', '@DB@', '--json'],
     }],
     // `--apply` writes the ceremony's fates and its report file; never a seed.
+    // It executes only a plan the operator reviewed, so the plan run (the
+    // no-write mode above) writes that file first.
     write: [{
       label: 'migrate organization-ownership --apply',
-      argv: ['--apply', '--backup-taken', '--out', '@DIR@/organization-ownership-apply.json', '--database-url', '@DB@', '--json'],
+      after: [['--out', '@DIR@/organization-ownership-reviewed-plan.json', '--database-url', '@DB@', '--json']],
+      argv: [
+        '--apply', '--backup-taken', '--plan-file', '@DIR@/organization-ownership-reviewed-plan.json',
+        '--out', '@DIR@/organization-ownership-apply.json', '--database-url', '@DB@', '--json',
+      ],
     }],
   },
   'commands/migrate/plan.ts': {
@@ -427,16 +439,22 @@ async function readSeededRows(dbFile: string): Promise<unknown> {
 let caseSeq = 0;
 
 /** A fresh copy of the served database, and the argv with its placeholders filled. */
-function prepareCase(argv: string[], opts: { absent?: boolean } = {}): { dbFile: string; argv: string[] } {
+function prepareCase(argv: string[], opts: { absent?: boolean } = {}): { dbFile: string; argv: string[]; fill: (argv: string[]) => string[] } {
   caseSeq += 1;
   const caseDir = join(dir, 'cases', String(caseSeq));
   mkdirSync(caseDir, { recursive: true });
   const dbFile = join(caseDir, 'app.db');
   if (!opts.absent) copyFileSync(templateDb, dbFile);
-  return {
-    dbFile,
-    argv: argv.map((a) => a.replace('@DB@', `file:${dbFile}`).replace('@DIR@', caseDir)),
-  };
+  const fill = (raw: string[]): string[] => raw.map((a) => a.replace('@DB@', `file:${dbFile}`).replace('@DIR@', caseDir));
+  return { dbFile, argv: fill(argv), fill };
+}
+
+/** The runs a mode declares must precede it ({@link Mode.after}), on the same case. */
+async function runBefore(run: Invoke, c: { fill: (argv: string[]) => string[] }, after: string[][] | undefined): Promise<void> {
+  for (const argv of after ?? []) {
+    const result = await runJson(run, c.fill(argv));
+    expect(result.payload?.error, `a preceding run failed: ${JSON.stringify(result.payload).slice(0, 400)}`).toBeUndefined();
+  }
 }
 
 beforeAll(async () => {
@@ -535,12 +553,16 @@ describe('[#21391] a no-write mode does not bring a missing SQLite file into exi
 });
 
 describe('[#21391] a write mode runs no seed write', () => {
-  it.each(WRITE)('$label', async ({ run, argv }) => {
+  it.each(WRITE)('$label', async ({ run, argv, after }) => {
     const c = prepareCase(argv);
+    await runBefore(run, c, after);
     const before = await readSeededRows(c.dbFile);
     expect(before).toEqual([expect.objectContaining({ name: 'Acme', status: 'won' })]);
 
-    await runJson(run, c.argv);
+    const result = await runJson(run, c.argv);
+    // A mode that declares its preceding runs reached its own write, never a
+    // refusal for want of them (the pin below would hold vacuously otherwise).
+    if (after) expect(result.payload?.error, JSON.stringify(result.payload).slice(0, 400)).toBeUndefined();
 
     // A seed replay puts `won` back to `open` and bumps `updated_at`.
     expect(await readSeededRows(c.dbFile)).toEqual(before);
@@ -624,8 +646,9 @@ describe('[#21471] no mode creates key material in an empty key home, in a devel
     expect(readdirSync(home)).toEqual(['dev-crypto-key']);
   }, CASE_TIMEOUT_MS);
 
-  it.each([...NO_WRITE, ...WRITE])('$label', async ({ run, argv }) => {
+  it.each([...NO_WRITE, ...WRITE])('$label', async ({ run, argv, ...mode }) => {
     const c = prepareCase(argv);
+    await runBefore(run, c, 'after' in mode ? mode.after : undefined);
     const result = await runJson(run, c.argv);
 
     // The run reached its report or its refusal, never a failed boot: a boot
