@@ -115,13 +115,14 @@ describe('NotifyConfigSchema — an unknown key is refused, not stripped', () =>
         recipients: ['u1'], title: 'hi', [key]: value,
       });
       expect(message).toContain(canonical);
-      // Both readings must be served: the ADR-0087 conversion rewrites this
-      // key at load, so a config that still carries it at PARSE time also
-      // carries the canonical key — and since #4923 it carries one holding a
-      // DIFFERENT value, because an identical twin is deleted by the
-      // conversion. Without this half the prescription ("rename it") is wrong
-      // for the population that actually reaches this error.
-      expect(message).toContain('flow-node-notify-config-aliases');
+      // Both readings must be served. An author meets this refusal for the
+      // retired spelling itself — the conversion left the load path at 18 —
+      // so the prescription is the rename, naming the release. A stored flow
+      // reaches it after the rehydration seam replayed the conversion, so it
+      // still carries the alias only beside a canonical key holding a
+      // DIFFERENT value (#4923: an identical twin is deleted by the
+      // conversion). Without this half the rename is wrong for that population.
+      expect(message).toContain('was removed in @objectstack/spec 18');
       expect(message).toMatch(/delete|reconcile/i);
       // The reconciliation reading has to name the OTHER key too, or the
       // author cannot see which two spellings disagree.

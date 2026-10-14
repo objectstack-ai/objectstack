@@ -113,9 +113,13 @@ import {
     resolveAuthzContext,
     isAuthzStoreUnavailableError,
     // ADR-0069 — the authentication-policy gate's ONE decision, asked of the
-    // session `resolveInstallPrincipal` reads (see `refuseHeldSession`).
+    // posture `resolveInstallPrincipal`'s shared resolver decided (see
+    // `refuseHeldSession`).
     evaluateAuthGate,
     type AuthGate,
+    // [#23455] The auth service's per-user posture computation, bound for the
+    // shared key-admission seam.
+    userAuthGateSourceOf,
     // [#16013] The ADMISSION seam's posture derivation, in ONE call — the same
     // symbol `packages/rest`'s seam now imports, for the same reason. It reads
     // the posture IN FORCE off the kernel's `tenancy` service and carries
@@ -176,7 +180,7 @@ import {
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
-import type { IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type {
     DeletePackageRequest,
     UninstallCleanupOutcome,
@@ -536,23 +540,26 @@ interface InstallPrincipal {
     /** [#15204 W2] The EFFECTIVE tenancy posture this admission resolved. */
     tenancyPosture?: TenancyPosture;
     /**
-     * ADR-0069: the authentication-policy posture of the session this
-     * admission resolved, present only for a session the policy holds.
-     * `refuseHeldSession` refuses on it.
+     * ADR-0069: the authentication-policy posture of the principal this
+     * admission resolved, present only for one the policy holds — a held
+     * session, or (#23455, ruling C′ item 1) an API key whose owner holds an
+     * `account`-scope posture. `refuseHeldSession` refuses on it.
      */
     authGate?: AuthGate;
 }
 
 /**
- * ADR-0069: the refusal every install-local door gives a session the
- * authentication policy HOLDS (an expired password, enforced MFA not yet
- * enrolled), right after the 401 and before the caller's capabilities are
- * consulted or the ledger is read. Such a session is gated out of every
- * protected resource until it remediates, so it gets REST's answer: `403`
- * with the gate's own `code` and `message`, in this plugin's envelope. The
- * consult itself happens once, in `resolveInstallPrincipal`; this only
- * answers on it, in one place, so a door added later cannot copy a weaker
- * answer. `null` when the session is not held.
+ * ADR-0069: the refusal every install-local door gives a principal the
+ * authentication policy HOLDS (a session with an expired password, enforced
+ * MFA not yet enrolled; an API key whose owner owes that enrolment), right
+ * after the 401 and before the caller's capabilities are consulted or the
+ * ledger is read. Such a principal is gated out of every protected resource
+ * until it remediates, so it gets REST's answer: `403` with the gate's own
+ * `code` and `message`, in this plugin's envelope. The consult itself happens
+ * once, in `resolveInstallPrincipal`; this only answers on it, in one place,
+ * so a door added later cannot copy a weaker answer. Nothing is written, so a
+ * held key is served again the moment its owner remediates (ruling C′ item
+ * 4). `null` when the principal is not held.
  */
 function refuseHeldSession(c: any, principal: InstallPrincipal): Response | null {
     if (!principal.authGate) return null;
@@ -3319,13 +3326,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             let ql: IObjectQLEngine | undefined;
             try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
 
-            // The session user the bridge below read, kept so the ADR-0069 gate
-            // is asked about the SAME session the resolver admitted: one read,
-            // both decisions. The resolver calls the bridge only when no API
-            // key admitted the caller, so a key caller leaves it unset and no
-            // policy holds it.
-            let sessionUser: unknown;
-
             // The better-auth session bridge — resolved lazily and defensively,
             // exactly as the previous implementation did, then handed to the
             // shared resolver instead of being trusted on its own.
@@ -3338,9 +3338,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     }
                     // [#22258] The in-process session-read rule, as in
                     // `resolveActiveOrgId` above.
-                    const session = await api?.getSession?.(inProcessSessionReadInput(h));
-                    sessionUser = session?.user;
-                    return session;
+                    return await api?.getSession?.(inProcessSessionReadInput(h));
                 } catch {
                     return undefined;
                 }
@@ -3350,15 +3348,38 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // THIS door before the resolver runs. Omitting it is what left
             // both posture-conditional API-key refusals unreachable here.
             const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
-            const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
+            // [#23455 · ruling C′ item 3] The auth service's per-user posture
+            // computation, for the shared key-admission seam: a key whose OWNER
+            // holds an `account`-scope posture resolves as a held principal
+            // carrying it (`authz.authGate`), exactly as it does on REST. Read
+            // per request like the two above; a lookup that faults is a kernel
+            // with no posture to ask.
+            let authService: IAuthService | undefined;
+            try {
+                authService = ctx.getService<IAuthService>('auth');
+            } catch {
+                authService = undefined;
+            }
+            const authz = await resolveAuthzContext({
+                ql,
+                headers,
+                getSession,
+                tenancyPosture,
+                userAuthGates: userAuthGateSourceOf(authService),
+            });
             if (!authz.userId) return null;
             // ADR-0069: the ONE consult of the authentication-policy gate for
-            // all five doors, on the session read above (the posture rides its
-            // user, computed by plugin-auth's `customSession` enrichment only
-            // while a gate feature is active). No request path is passed, so
-            // the allow-list can grant no exemption (an empty path earns none,
-            // #7898); no install-local route is a remediation or bootstrap route.
-            const authGate = evaluateAuthGate(sessionUser, '');
+            // all five doors. [#23455] It asks the shared resolver's posture
+            // (`authz.authGate`), decided for whichever credential admitted the
+            // caller: a held session's own, or the account-scope posture of an
+            // API key's owner. It used to ask the session user alone, so a key
+            // never carried a posture here and a held owner's key was served.
+            // A key whose owner holds only a `credential`-scope posture
+            // (password expiry, a forced reset) carries none, and is served. No
+            // request path is passed, so the allow-list can grant no exemption
+            // (an empty path earns none, #7898); no install-local route is a
+            // remediation or bootstrap route.
+            const authGate = evaluateAuthGate(authz, '');
             return {
                 userId: String(authz.userId),
                 systemPermissions: Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [],

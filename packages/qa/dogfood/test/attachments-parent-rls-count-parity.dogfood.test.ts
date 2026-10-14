@@ -65,6 +65,7 @@ describe('sys_attachment reads inherit parent RLS — the COUNT too (#9483)', ()
     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
     const headers = new Headers({ authorization: `Bearer ${token}` });
     return resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers,
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

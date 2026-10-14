@@ -358,6 +358,13 @@ export * from './injected-system-columns';
 // it) so `@objectstack/lint` — spec-only by contract — can warn at author time.
 export * from './injected-system-column-provenance';
 
+// controlled_by_parent master predicate (ADR-0055 §1, #23272) — the single
+// source for "does this object satisfy the exactly-one-master rule" and "does
+// this field count as its master". Read by `ObjectSchema`'s refinement, the
+// v18 stored-row listing and `@objectstack/lint`, and exported so a producer
+// that writes `controlled_by_parent` asks the spec instead of restating it.
+export * from './controlled-by-parent-master';
+
 // Feed & Activity Protocol — retains only the UI activity-timeline config enums
 // (FeedItemType / FeedFilterMode); the feed backend contracts were retired (ADR-0052 §5).
 export * from './feed.zod';

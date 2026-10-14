@@ -75,9 +75,9 @@
  *   tile receives one number, and `AnalyticsResultResponseSchema`'s column
  *   metadata (`@objectstack/spec/api`) carries `format` / `currency` /
  *   `percentScale` and no width. So a `sum` / `avg` over a `number` with no
- *   declared `scale` does NOT yet show the width this rule derives — measured
- *   at `.objectui-sha` pin `89cad75d5570`, the `object-metric` tile still shows
- *   it as a whole number, and the dataset-bound tile, given no measure
+ *   declared `scale` does NOT yet show the width this rule derives — as
+ *   measured on the renderer (`liveness/field.json`, row `scale`), the
+ *   `object-metric` tile still shows it as a whole number, and the dataset-bound tile, given no measure
  *   `format`, prints an integer answer as it is and rounds any other to at
  *   most two decimals. The end-state is ruled (maintainer ruling 5933283974 on
  *   objectui#11254, batch 261 item 4, letter A deferred, 「其他四张同意」): the
@@ -107,8 +107,8 @@
  *   decimal places are the currency's, not a setting — its ISO 4217 minor
  *   unit decides its display. The amount's cell resolves its fraction
  *   digits from the currency's own ISO 4217 minor-unit count and never read
- *   the key; measured at
- *   `.objectui-sha` pin `62597c588072` (the pin when the ruling landed), the
+ *   the key; when the ruling landed (the renderer reading is recorded in
+ *   `liveness/field.json`, row `scale`), the
  *   grid summary footer and the dashboard metric widget did read it on a
  *   currency column, as `scale ?? 0` — the ruling's consumer half is
  *   objectui#10221, which ruling 乙 widens to that metric widget and lands

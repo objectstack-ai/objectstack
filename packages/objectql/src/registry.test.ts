@@ -383,18 +383,28 @@ describe('SchemaRegistry', () => {
          * pass BOTH before and after the fix: run it against the pre-fix
          * `registry.ts` and it stays green, which is what proves the message did
          * not move (only the mutations that used to precede it are gone).
+         *
+         * [#23505] The message did move, deliberately: it opens with the way
+         * out and goes on to name EVERY extended object, not only the first.
+         * The order this test holds is unchanged — the first refusable object
+         * walked is named first, with its extenders in registration order — so
+         * it reads that order off the structured refusal rather than off prose.
          */
-        it('[#7970] the refusal still names the first refusable object and all its extenders', () => {
+        it('[#7970] the refusal still names the first refusable object first, with all its extenders', () => {
             registry.registerObject({ name: 'alpha', fields: {} }, 'com.owner', 'base', 'own');
             registry.registerObject({ name: 'beta', fields: {} }, 'com.owner', 'base', 'own');
             registry.registerObject({ name: 'alpha', fields: {} }, 'com.ext1', undefined, 'extend');
             registry.registerObject({ name: 'alpha', fields: {} }, 'com.ext2', undefined, 'extend');
             registry.registerObject({ name: 'beta', fields: {} }, 'com.ext3', undefined, 'extend');
 
-            expect(() => registry.unregisterObjectsByPackage('com.owner')).toThrow(
-                'Cannot uninstall package "com.owner": object "alpha" is extended by ' +
-                'com.ext1, com.ext2. Uninstall extenders first.',
-            );
+            let err: any;
+            try {
+                registry.unregisterObjectsByPackage('com.owner');
+            } catch (e) {
+                err = e;
+            }
+            expect(err?.extendedObjects?.[0]).toEqual({ objectName: 'alpha', extenders: ['com.ext1', 'com.ext2'] });
+            expect(err.message.indexOf('"alpha"')).toBeLessThan(err.message.indexOf('"beta"'));
         });
 
         it('[#7970] force still removes the owner even with a free sibling ahead of it', () => {

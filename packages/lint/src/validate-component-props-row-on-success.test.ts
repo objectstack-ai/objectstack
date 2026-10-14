@@ -111,21 +111,24 @@ describe("the props gate refuses a page action row's `onSuccess` beside an execu
 
 // `operation` on a page action row: `ActionSchema`'s own enum, and its refusal
 // of `onSuccess` beside `operation: 'update'` (the runner performs the write
-// before any executor), whatever executor the row names.
+// before any executor). Beside the operation a row names no executor or
+// `script`, the route the write is posted to; every other executor there is
+// refused at the executor key (`@objectstack/spec`'s
+// `component-action-row-declarative-update.test.ts`).
 
 describe("the props gate judges a page action row's `operation` as `ActionSchema` does", () => {
   const UPDATE = { operation: 'update', patch: { status: 'done' } };
 
-  it.each(ROWS)("REFUSAL: %s with `api`, `operation: 'update'` and `onSuccess` is one finding at `onSuccess`", (_row, node, at, key, subject) => {
-    const findings = validateComponentProps(stackWith(node({ [key]: 'api', ...UPDATE, onSuccess: { navigate: '/tasks' } })));
+  it.each(ROWS)("REFUSAL: %s with `script`, `operation: 'update'` and `onSuccess` is one finding at `onSuccess`", (_row, node, at, key, subject) => {
+    const findings = validateComponentProps(stackWith(node({ [key]: 'script', ...UPDATE, onSuccess: { navigate: '/tasks' } })));
     expect(findings.map((f) => [f.rule, f.path])).toEqual([[COMPONENT_PROPS_INVALID, `${at}.onSuccess`]]);
     expect(findings[0].message).toContain(
       `${ownerOf(subject)} \`onSuccess\` (\`operation: 'update'\`) would follow a result the contract does not declare:`,
     );
   });
 
-  it.each(ROWS)("ACCEPTED CONTROL: %s with `api` and `operation: 'update'` and no `onSuccess` reports nothing", (_row, node, _at, key) => {
-    expect(validateComponentProps(stackWith(node({ [key]: 'api', ...UPDATE })))).toEqual([]);
+  it.each(ROWS)("ACCEPTED CONTROL: %s with `script` and `operation: 'update'` and no `onSuccess` reports nothing", (_row, node, _at, key) => {
+    expect(validateComponentProps(stackWith(node({ [key]: 'script', ...UPDATE })))).toEqual([]);
   });
 
   it.each(ROWS)("REFUSAL: %s with `operation: 'delete'` is one finding at `operation`", (_row, node, at) => {

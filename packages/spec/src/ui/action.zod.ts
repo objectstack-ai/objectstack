@@ -35,11 +35,8 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
-import {
-  ON_SUCCESS_EXECUTORS,
-  onSuccessBesideExecutorRefusal,
-  onSuccessBesideUpdateOperationRefusal,
-} from './action-on-success-executor';
+import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
+import { refuseDeclarativeUpdateContradictions, type DeclarativeUpdateSurface } from './action-declarative-update';
 import { navigationTargetRefusal } from './navigation-target';
 
 /**
@@ -1381,66 +1378,12 @@ const actionObject = () => strictObject({
    * `objects.<object>._actions.<action>.outcomeMessages.<outcome>`, and an
    * object-less action reads `globalActions.<action>.outcomeMessages.<outcome>`.
    *
-   * Liveness: the ledger row was `planned` until the console reader landed,
-   * and it is `live` from the pin this repo builds against (`.objectui-sha` =
-   * `b9814b334`, re-read there 2026-10-14:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
-   * `1fb1ced36`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
-   * byte-identical in body to `9646e2ed2` and MOVED down by 11, `1498` -> `1509`
-   * (objectui#12191, objectui `334f0cff9`: the runner admits `mailto:` through one
-   * navigation-target answer, its eleven import lines added above it; every other
-   * hunk lies below the reader), and the four action renderers
-   * are byte-identical (`git diff --quiet`). At `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-   * `499799502`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `20c6d351a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `20c6d351a`, re-read there 2026-10-10:
-   * `core/src/actions/ActionRunner.ts` changed above the reader only (+29/-35,
-   * objectui#6349 batch 4, objectui `d32869883`: `ActionContext` and
-   * `ActionResult` declared once and `UndoableOperation` published, every hunk
-   * in the import block and those declarations at the top of the file), so
-   * `composeSuccessMessage` MOVED `1504` -> `1498` with its body byte-identical,
-   * and the four action renderers are byte-identical (`git diff --quiet`). At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
-   * `f0268ad78`, re-read there 2026-10-09:
-   * `core/src/actions/ActionRunner.ts` changed above the reader only (+7/-0,
-   * objectui#11695: the confirmation handler's `destructive` option and its
-   * docblock), so `composeSuccessMessage` MOVED `1497` -> `1504` with its body
-   * byte-identical. At `a58626c88`, re-read there 2026-10-06:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`, re-read 2026-10-05: `core/src/actions/ActionRunner.ts` is
-   * byte-identical to `2e818d0b5`, re-read there 2026-10-04, and to
-   * `ab1879721`, where it was read 2026-10-03, so the anchor below held
-   * unmoved). The reader is objectui#11344 (objectui
-   * `c476be0e0`): `ActionRunner.composeSuccessMessage`
-   * (`core/src/actions/ActionRunner.ts:1509`) picks `outcomeMessages[outcome]`
-   * off the handler's return value, falls back to `successMessage` and then to
-   * the runner's default text, and fills `${result.*}` in whichever it shows.
-   * The four action renderers forward the key to the runner (`action:bar`
-   * spreads a registered action onto `action:button` whole). At `89cad75d5570`
-   * no objectui source outside its types named the key.
+   * Liveness: the ledger row was `planned` until the console reader landed
+   * (objectui#11344) and is `live` now; the reader — the action runner picks
+   * `outcomeMessages[outcome]` off the handler's return value, falls back to
+   * `successMessage` and then to the runner's default text, and fills
+   * `${result.*}` in whichever it shows — is recorded by symbol in
+   * `packages/spec/liveness/action.json`, row `outcomeMessages`.
    */
   outcomeMessages: z.record(SnakeCaseIdentifierSchema, I18nLabelSchema).optional().describe("Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case `outcome` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message may interpolate ${result.*}, the scope `onSuccess.navigate` declares. An outcome with no entry here falls back to `successMessage`, then to the default text. Not allowed beside `resultDialog` (which suppresses the success toast) or `operation: 'update'` (no handler, so no outcome)."),
   // Runtime (ActionRunner) already honours this — declared here so authors can
@@ -1772,9 +1715,8 @@ const actionObject = () => strictObject({
    * surface and defaults `'self'`; the handler convention is a shipped surface
    * and keeps new-tab.
    *
-   * The console consumer is objectui's `ActionRunner` (`handlePostExecution`
-   * → `readOnSuccessNavigation` → `navigateOnSuccess`), read at the
-   * `.objectui-sha` pin `f8a9d0fb`. After an `api` or `script` action
+   * The console consumer is objectui's action runner (recorded by symbol in
+   * `packages/spec/liveness/action.json`, rows `onSuccess.*`). After an `api` or `script` action
    * succeeds, it interpolates `navigate` with the `${param.*}`, `${ctx.*}` and
    * `${result.*}` scopes and hands the URL to the console's router. It opens
    * a new tab only on `openIn: 'newTab'`. The liveness ledger's two
@@ -1822,9 +1764,9 @@ const actionObject = () => strictObject({
   // `aria` REMOVED (ADR-0049 enforce-or-remove; the triage record on the card,
   // comment 5860351140 on #20323, follows the `ChartConfig.aria` retirement
   // `2bf6ef18d`). The ledger graded this key `live` on an uncited "PARTIAL —
-  // honored by a few objectui renderers" note, and no reader stood behind it.
-  // Measured at this checkout's `.objectui-sha` pin `f8a9d0fb05`: none of the
-  // surfaces that render an action — `action:button`, `action:icon`,
+  // honored by a few objectui renderers" note, and no reader stood behind it
+  // (the measurement is recorded in `packages/spec/liveness/action.json`, row
+  // `aria`): none of the surfaces that render an action — `action:button`, `action:icon`,
   // `action:menu`, `action:group`, `action:bar`, the grid's row and bulk
   // action menus, `record:quick_actions`, the declared-actions bar — reads an
   // action's `aria`. The only `schema.aria` readers there are the PLACING
@@ -1868,147 +1810,29 @@ const actionObject = () => strictObject({
 });
 
 /**
- * The keys an `operation: 'update'` action must not carry, each with the
- * sentence that names the executor the key belongs to. A table rather than a
- * chain of `.refine()`s so every combination gets ONE issue at ITS key's path
- * — the same shape `BulkActionDefSchema`'s refinements use for the def side.
+ * `ActionSchema`'s surface of the declarative-update judge
+ * (`action-declarative-update.ts`, which carries the rule and every text, and
+ * applies the same judge to the page action rows). Its five rules, in brief:
+ * `patch` only beside `operation: 'update'`; beside it, `type` stays at its
+ * default `'script'` (the platform action route), every key that binds or
+ * shapes a dispatch the update does not make is refused at its own path, there
+ * is a `patch` or a non-empty `params` to write, and no `list_toolbar`
+ * location. `objectName` is judged by `defineStack`'s walk instead
+ * (`stack.zod.ts`, `collectGlobalUpdateActionErrors`).
  */
-const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<readonly [key: string, why: string]> = [
-  ['target',
-    "`target` names a handler, URL, page, flow or endpoint — an `operation: 'update'` action dispatches on "
-    + 'none of them: the platform action route writes `patch` to the current record. Drop `target`; to call '
-    + "an endpoint of your own instead, use `type: 'api'` without `operation`."],
-  ['body',
-    "`body` is the inline handler of a `type: 'script'` action — an `operation: 'update'` action has no "
-    + 'handler: the write IS the `patch`, performed by the platform as the caller. Drop `body`; to write '
-    + 'through a handler of your own (system-elevated `ctx.api`), drop `operation` and `patch` instead.'],
-  ['method',
-    "`method` is the HTTP verb of a `type: 'api'` request — an `operation: 'update'` action makes no request "
-    + 'of its own: the platform performs the write on the data plane. Drop `method`.'],
-  ['bodyExtra',
-    "`bodyExtra` is the static request body of a `type: 'api'` action — on an `operation: 'update'` action "
-    + 'the static field values go in `patch`. Move them there and drop `bodyExtra`.'],
-  ['bodyShape',
-    "`bodyShape` shapes a `type: 'api'` request body — an `operation: 'update'` action sends no request body "
-    + 'of its own. Drop `bodyShape`.'],
-  ['recordIdParam',
-    "`recordIdParam` injects the row id into a request body — an `operation: 'update'` action binds the "
-    + 'current record from the invocation context and has no body to inject into. Drop `recordIdParam`.'],
-  ['recordIdField',
-    "`recordIdField` seeds `recordIdParam` — an `operation: 'update'` action binds the current record from "
-    + 'the invocation context and injects nothing. Drop `recordIdField`.'],
-  // One text with the page action rows' refusal of the same pairing
-  // (`action-on-success-executor.ts`).
-  ['onSuccess', onSuccessBesideUpdateOperationRefusal("An `operation: 'update'` action's `onSuccess`")],
-  ['outcomeMessages',
-    "`outcomeMessages` picks success copy by the `outcome` a handler returns — an `operation: 'update'` "
-    + 'action has no handler: the platform performs the write and reports no outcome, so no entry could '
-    + 'ever be chosen. Drop it; a fixed confirmation for the write is `successMessage`.'],
-  ['opensInNewTab',
-    "`opensInNewTab` pre-opens a tab for a handler-returned `{ redirectUrl }` — an `operation: 'update'` "
-    + 'action has no handler and returns no redirect. Drop it.'],
-  ['newTabUrl',
-    "`newTabUrl` is the zero-roundtrip target of the pre-opened-tab flow — an `operation: 'update'` action "
-    + 'has no such flow. Drop it.'],
-];
-
-/**
- * The mixing rule between the declarative single-record field write and the
- * rest of the action vocabulary (#14092), designed with the PR that landed it
- * and pinned in `action-row-update.test.ts`:
- *
- *  1. `operation: 'update'` keeps `type` at its default `'script'` — the
- *     platform action route — and any OTHER explicit `type` is refused. An
- *     explicit `type: 'script'` is indistinguishable from the materialized
- *     default at object level (a `.default()` has already run by the time a
- *     refinement sees the object — the #13897 asymmetry) and means the same
- *     thing, so it is accepted.
- *  2. Every key that names or shapes a dispatch the update does not make is
- *     refused at its own path ({@link DECLARATIVE_UPDATE_REFUSED_KEYS}).
- *  3. `patch` without `operation: 'update'` is refused (it would be silently
- *     dropped — ADR-0078); `operation: 'update'` with neither `patch` nor
- *     `params` is refused (nothing to write).
- *  4. `list_toolbar` is refused: no current record there.
- *
- * Deliberately NOT judged here: `objectName`. The same schema parses an
- * action embedded on an object (object implicit) and a standalone one in
- * `stack.actions` (only `objectName` can say), so the standalone form is
- * judged where standalone-ness is knowable — `defineStack`'s cross-reference
- * walk (`stack.zod.ts`, `collectGlobalUpdateActionErrors`).
- */
-function refuseDeclarativeUpdateContradictions(
-  data: {
-    type?: string;
-    operation?: string;
-    patch?: unknown;
-    params?: unknown;
-    locations?: unknown;
-  } & Record<string, unknown>,
-  ctx: z.core.$RefinementCtx,
-): void {
-  if (data.operation !== 'update') {
-    if (data.patch !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['patch'],
-        message:
-          "`patch` only applies to `operation: 'update'` — without it the action never writes fields, so "
-          + "these values would be silently dropped. Add `operation: 'update'`, or for the static request "
-          + "body of a `type: 'api'` action use `bodyExtra`.",
-      });
-    }
-    return;
-  }
-
-  if (data.type !== undefined && data.type !== 'script') {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['type'],
-      message:
-        "`operation: 'update'` is performed by the platform action route — the route a `type: 'script'` "
-        + "action posts to — so `type` stays at its default `'script'`; leave it off. A `type: '"
-        + `${data.type}'\` action dispatches on \`target\` (\`api\` makes the browser call the endpoint itself) `
-        + 'and never performs the write.',
-    });
-  }
-
-  for (const [key, why] of DECLARATIVE_UPDATE_REFUSED_KEYS) {
-    if (data[key] !== undefined) {
-      ctx.addIssue({ code: 'custom', path: [key], message: why });
-    }
-  }
-
-  const collectsParams = Array.isArray(data.params) && data.params.length > 0;
-  if (data.patch === undefined && !collectsParams) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['patch'],
-      message:
-        "An `operation: 'update'` action has nothing to write: declare a static `patch` (`{ status: 'done' }`), "
-        + 'or `params` so the dialog collects the values, or both — the patch is merged UNDER the collected params.',
-    });
-  }
-
-  if (Array.isArray(data.locations)) {
-    data.locations.forEach((location, index) => {
-      if (location !== 'list_toolbar') return;
-      ctx.addIssue({
-        code: 'custom',
-        path: ['locations', index],
-        message:
-          "`list_toolbar` has no current record — an `operation: 'update'` action writes ONE record, the one it "
-          + 'runs on. Use a record location (`list_item`, `record_header`, `record_more`, `record_section`) or, '
-          + "for the selection bar, a `bulkActionDefs` entry on the list view (`{ operation: 'update', patch }`).",
-      });
-    });
-  }
-}
+const ACTION_DECLARATIVE_UPDATE: DeclarativeUpdateSurface = {
+  executorKey: 'type',
+  executorDefaultsToScript: true,
+  onSuccessSubject: "An `operation: 'update'` action's `onSuccess`",
+  staticParams: false,
+};
 
 /**
  * The two places `outcomeMessages` (#21095) would parse clean and never be
  * read — refused at the key's own path, each with the rewrite. The third,
- * `operation: 'update'`, lives in {@link DECLARATIVE_UPDATE_REFUSED_KEYS}
- * beside `onSuccess`, the sibling key it is refused for the same reason as.
+ * `operation: 'update'`, lives in the declarative-update judge's refused-key
+ * table (`action-declarative-update.ts`) beside `onSuccess`, the sibling key it
+ * is refused for the same reason as.
  *
  *  1. A type with no server response. Only `type: 'api'` (the `target` call's
  *     response body) and `type: 'script'` (the handler's return value) hand
@@ -2331,7 +2155,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + "`operation: 'update'` with a `patch` for a declarative single-record write, or make this a "
     + "`type: 'api'` action calling an endpoint of your own — otherwise drop `undoable`.",
   path: ['undoable'],
-}).superRefine(refuseDeclarativeUpdateContradictions)
+}).superRefine(refuseDeclarativeUpdateContradictions(ACTION_DECLARATIVE_UPDATE))
   .superRefine(refuseInertOutcomeMessages)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final

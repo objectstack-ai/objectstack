@@ -20,12 +20,9 @@
  * 2. **Grants naming no permission set** — `sys_user_permission_set` rows
  *    whose `permission_set` the catalog does not resolve.
  * 3. **Grants that name nothing** — `sys_user_permission_set` rows whose
- *    `permission_set` is empty. The grant-name backfill
- *    (`grant-permission-set-name-backfill.ts`) names every grant whose set row
- *    carries a name the catalog resolves; the rest — an id with no set row,
- *    another organization's set row, a set row whose name the catalog does not
- *    resolve (a row-only set) — stay unnamed, and an unnamed grant confers
- *    nothing.
+ *    `permission_set` is empty. The v18 ceremony's verified rewrite names
+ *    every grant it can before the legacy id column is dropped, and blocks on
+ *    the rest; an unnamed grant confers nothing.
  *
  * And it lists PER POSITION, since a definition belongs to the environment and
  * to no organization:
@@ -65,18 +62,16 @@
  *
  * ## When it runs
  *
- * At `kernel:bootstrapped`, from `SecurityPlugin.start`, AFTER the grant-name
- * backfill registered beside it (handlers run in registration order): every
- * `kernel:ready` handler has settled, so every code, package and environment
- * definition this boot registers is in the catalog, and a name the backfill
- * gives a grant this boot is not reported. A package installed into the running process later is not
+ * At `kernel:bootstrapped`, from `SecurityPlugin.start`: every `kernel:ready`
+ * handler has settled, so every code, package and environment definition this
+ * boot registers is in the catalog. A package installed into the running process later is not
  * re-judged until the next boot, which is why every line says "at this boot".
  *
  * ADR anchors: ADR-0131 D3 (one catalog home), D4 (references by name).
  */
 
 import type { SecurityCatalogEntry, SecurityCatalogReader, SecurityCatalogType } from '@objectstack/core';
-import { GRANT_OBJECT, GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
+import { GRANT_OBJECT, GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
 
 /** The user ↔ position assignment object (ADR-0057 D4). */
 export const POSITION_ASSIGNMENT_OBJECT = 'sys_user_position';
@@ -122,8 +117,6 @@ export interface UnresolvedReference {
 export interface UnnamedGrant {
   id: string;
   userId: string | null;
-  /** The grant's id reference, when it carries one — what the name backfill could not turn into a name. */
-  permissionSetId: string | null;
 }
 
 /** Everything the report found for one organization; `null` is the organization-less bucket. */
@@ -312,13 +305,13 @@ export async function collectCatalogReferences(
 
     if (readGrants) {
       const rows = await scanAll(engine, GRANT_OBJECT, [
-        'id', 'user_id', GRANT_SET_ID_FIELD, GRANT_SET_NAME_FIELD, 'organization_id',
+        'id', 'user_id', GRANT_SET_NAME_FIELD, 'organization_id',
       ]);
       for (const row of rows) {
         const name = nameOf(row[GRANT_SET_NAME_FIELD]);
         if (name === undefined) {
           bucket(organizationOf(row)).unnamedGrants.push({
-            id: String(row.id), userId: stringOrNull(row.user_id), permissionSetId: stringOrNull(row[GRANT_SET_ID_FIELD]),
+            id: String(row.id), userId: stringOrNull(row.user_id),
           });
           continue;
         }
@@ -440,10 +433,10 @@ function logReport(report: CatalogReferenceReport, logger?: CatalogReferenceRepo
     logError(
       logger,
       `[security] ${unnamed.count} ${GRANT_OBJECT} grant(s) name no permission set (${GRANT_SET_NAME_FIELD} is ` +
-        'empty), so each confers nothing (ADR-0131 D4). The one-time name backfill names a grant whose set row ' +
-        'carries a name the catalog resolves; these did not get one — the set row is missing, belongs to another ' +
-        'organization, or carries a name the catalog does not resolve, and the backfill logs which. Nothing was ' +
-        'changed. Fix: grant the intended permission set again by name, or remove these grants.',
+        'empty), so each confers nothing (ADR-0131 D4). Nothing was changed. Fix: run the v18 ceremony, ' +
+        'os migrate organization-ownership --apply, which names each legacy grant from its retired id and lists ' +
+        'the ones it cannot name; then restart. Granting the set again by name before it runs makes a second ' +
+        'grant the ceremony will report, not name.',
       { count: unnamed.count, organizations: unnamed.organizations },
     );
   }

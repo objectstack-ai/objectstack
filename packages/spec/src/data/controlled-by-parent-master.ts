@@ -17,9 +17,19 @@
  * Kept in one module so the two cannot drift: an object the upgrade's preview
  * lists is exactly an object the parse refuses, and the reverse.
  *
- * ⚠️ Internal to `packages/spec`. Not re-exported from `data/index.ts` or any
- * other entry: publishing the predicate is its own card, so this module adds
- * nothing to the package's public surface.
+ * PUBLIC (`@objectstack/spec/data`, #23272): a producer that must emit an
+ * object `ObjectSchema` accepts asks this module rather than restating the
+ * rule —
+ *
+ * - {@link controlledByParentMasterRefusal} answers the object-level question
+ *   "does this object satisfy the exactly-one-master rule?": `undefined` is
+ *   yes. A producer choosing a default asks it with `'controlled_by_parent'`
+ *   as the sharing model it is about to write;
+ * - {@link isControlledByParentMasterField} answers the field-level half,
+ *   "does this field count as a master?", which the refusal counts. A reader
+ *   that lists the candidates itself (`@objectstack/lint`'s
+ *   `cbpMasterCandidates`, which names each candidate's `reference` in its
+ *   finding) reads this, so what counts as a master is spelled here once.
  *
  * Read on either the PARSED field map or a stored body: `required` is
  * `z.boolean().default(false)`, so on the parsed map an omitted `required` is
@@ -65,6 +75,22 @@ export interface ControlledByParentMasterRefusal {
 }
 
 /**
+ * Does this field count as a `controlled_by_parent` master under ADR-0055 §1?
+ * A `master_detail` field declared `required: true`, and nothing else: a
+ * non-required `master_detail` and a required `lookup` are the two tiers
+ * ruling B retired (#23100). An object satisfies the rule when EXACTLY ONE of
+ * its fields counts — {@link controlledByParentMasterRefusal} is that count.
+ *
+ * Reads `required === true` on either the parsed field or a stored body (see
+ * the module header), and accepts any value: a non-object counts as no master.
+ */
+export function isControlledByParentMasterField(field: unknown): boolean {
+  if (field === null || typeof field !== 'object') return false;
+  const f = field as { type?: unknown; required?: unknown };
+  return f.type === 'master_detail' && f.required === true;
+}
+
+/**
  * Judge one object against ADR-0055 §1's one-required-master rule. Returns
  * `undefined` when the rule does not apply (another sharing model, no field
  * map) or the object satisfies it; otherwise the refusal.
@@ -82,9 +108,7 @@ export function controlledByParentMasterRefusal(
   const requiredLookups = entries
     .filter(([, f]) => f?.type === 'lookup' && f.required === true)
     .map(([key]) => key);
-  const masters = entries
-    .filter(([, f]) => f?.type === 'master_detail' && f.required === true)
-    .map(([key]) => key);
+  const masters = entries.filter(([, f]) => isControlledByParentMasterField(f)).map(([key]) => key);
   if (masters.length === 1) return undefined;
   if (masters.length > 1) {
     return {

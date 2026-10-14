@@ -14,6 +14,7 @@ import {
   type RowPredicate,
 } from './organization-ownership-inventory.js';
 import { physicalTableListSql, rotationBaseOf } from './unmanaged-tables.js';
+import { planGrantRewrite, type GrantCollision, type LegacySetRow } from './organization-ownership-grants.js';
 
 /**
  * The ADR-0131 D10 ceremony's preflight — ceremony item 1, read-only.
@@ -154,6 +155,43 @@ export interface TablePlan {
    * until the operator chooses one row per group; nothing is guessed.
    */
   templateConflicts?: TemplateConflict[];
+  /**
+   * `sys_metadata` only: the keys of the promotion population that more than
+   * one row holds once the organization leaves the key — two organizations, or
+   * an organization and the environment. Kept and blocking until the operator
+   * keeps one row per key; nothing is guessed.
+   */
+  metadataConflicts?: MetadataConflict[];
+  /** `sys_user_permission_set` only: what the grant's unique key holds ({@link GrantKeyPlan}). */
+  grants?: GrantKeyPlan;
+}
+
+/**
+ * One overlay key of `sys_metadata` (`type`, `name`, package, bundle member)
+ * that the promotion cannot carry alone: every row that holds it, and whose.
+ */
+export interface MetadataConflict {
+  type: string;
+  name: string;
+  packageId: string | null;
+  bundleMember: string | null;
+  candidates: Array<{ id: string; organizationId: string | null; state: string | null }>;
+}
+
+/**
+ * `sys_user_permission_set` (C7b): the populations the unique index on
+ * (`user_id`, `permission_set`, `organization_id`) refuses, which the ceremony
+ * reports and never deletes. A NULL organization is keyed with NULL, as the
+ * write door keys it.
+ */
+export interface GrantKeyPlan {
+  /** `absent` on a 17.x database this release has not booted against yet: nothing can be counted. */
+  nameColumn: 'present' | 'absent';
+  /** Named grants holding one set for one user in one organization: they block the legacy id column's drop. */
+  duplicates: { groups: number; rows: number };
+  /** Legacy grants the rewrite may not name, each with the grant that already holds its key: they block the rewrite. */
+  rewriteCollisions: GrantCollision[];
+  note?: string;
 }
 
 /** One `(name, locale)` the promotion cannot carry without the operator's choice. */
@@ -165,6 +203,9 @@ export interface TemplateConflict {
 
 /** The table whose customized and authored rows the ceremony promotes (ruling C on ADR-0131 §6 Q1). */
 export const TEMPLATE_OBJECT = 'sys_email_template';
+/** The permission-set grant table whose unique key the plan reads ({@link GrantKeyPlan}). */
+export const GRANT_OBJECT = 'sys_user_permission_set';
+const LEGACY_SET_OBJECT = 'sys_permission_set';
 
 /** Provenance the seeders stamped: only such a row can be a copy of code. */
 export const SEEDED_BY: readonly string[] = ['package', 'platform', 'system'];
@@ -187,6 +228,98 @@ export function templatePromotionSql(sql: Sql, cols: ReadonlySet<string>): { tex
     text: `${customized} OR ${managed} IS NULL OR ${managed} NOT IN (${SEEDED_BY.map(() => '?').join(', ')})`,
     params: [...params, ...SEEDED_BY],
   };
+}
+
+/** The table whose organization-scoped customizations the ceremony promotes (ruling record 6020163868, A). */
+export const METADATA_OBJECT = 'sys_metadata';
+
+/**
+ * The five presentational types whose organization-scoped rows are promoted to
+ * environment rows (ruling records 6020163868 and 6020151485, both A). The
+ * inventory's `organization-presentational-promotion` category names the same
+ * list, and a pin holds the two equal.
+ */
+export const PRESENTATIONAL_TYPES: readonly string[] = ['view', 'dashboard', 'report', 'translation', 'email_template'];
+
+/** One `sys_metadata` row of a presentational type, by its overlay key. */
+export interface MetadataKeyRow {
+  id: string;
+  type: string;
+  name: string;
+  packageId: string | null;
+  bundleMember: string | null;
+  /** `null` = an environment row. */
+  organizationId: string | null;
+  state: string | null;
+}
+
+/**
+ * Every `sys_metadata` row of a presentational type, by key, keyset-paged:
+ * environment rows and organization rows alike, so a key the environment
+ * already holds is seen as held. No body is read.
+ */
+export async function readMetadataKeyRows(sql: Sql, table: string, columns: ReadonlySet<string>): Promise<MetadataKeyRow[]> {
+  for (const column of ['type', 'name', ORG]) requireColumn(table, columns, column);
+  const select = ['id', 'type', 'name', ORG, ...['package_id', 'bundle_member', 'state'].filter((c) => columns.has(c))];
+  const t = sql.q(table, table);
+  const id = sql.q(ID, table);
+  const types = PRESENTATIONAL_TYPES.map(() => '?').join(', ');
+  const out: MetadataKeyRow[] = [];
+  let after: unknown;
+  for (;;) {
+    const rows = await sql.read(
+      table,
+      `SELECT ${select.map((c) => `${sql.q(c, table)} AS ${sql.q(c, table)}`).join(', ')} FROM ${t} ` +
+        `WHERE ${sql.q('type', table)} IN (${types})${after === undefined ? '' : ` AND ${id} > ?`} ORDER BY ${id} LIMIT ${PAGE}`,
+      after === undefined ? [...PRESENTATIONAL_TYPES] : [...PRESENTATIONAL_TYPES, after],
+    );
+    for (const row of rows) {
+      out.push({
+        id: String(row.id),
+        type: String(row.type),
+        name: String(row.name),
+        packageId: nonEmptyId(row.package_id),
+        bundleMember: nonEmptyId(row.bundle_member),
+        organizationId: nonEmptyId(row[ORG]),
+        state: nonEmptyId(row.state),
+      });
+    }
+    if (rows.length < PAGE) return out;
+    after = rows[rows.length - 1]!.id;
+  }
+}
+
+/**
+ * Split the promotion population by overlay key: a key held by exactly one
+ * row, an organization's, is promotable in place; a key held by an
+ * organization's row and any other row (another organization's, or the
+ * environment's) is a conflict. Keys only the environment holds are not the
+ * ceremony's.
+ */
+export function groupMetadataKeyRows(rows: readonly MetadataKeyRow[]): { promotable: MetadataKeyRow[]; conflicts: MetadataConflict[] } {
+  const byKey = new Map<string, MetadataKeyRow[]>();
+  for (const row of rows) {
+    const key = [row.type, row.name, row.packageId ?? '', row.bundleMember ?? ''].join('\u0000');
+    byKey.set(key, [...(byKey.get(key) ?? []), row]);
+  }
+  const promotable: MetadataKeyRow[] = [];
+  const conflicts: MetadataConflict[] = [];
+  for (const group of byKey.values()) {
+    if (!group.some((r) => r.organizationId !== null)) continue;
+    if (group.length === 1) {
+      promotable.push(group[0]!);
+      continue;
+    }
+    const first = group[0]!;
+    conflicts.push({
+      type: first.type,
+      name: first.name,
+      packageId: first.packageId,
+      bundleMember: first.bundleMember,
+      candidates: group.map((r) => ({ id: r.id, organizationId: r.organizationId, state: r.state })),
+    });
+  }
+  return { promotable, conflicts };
 }
 
 /** The JSON of a definition's own keys, for comparing two bodies. */
@@ -615,6 +748,14 @@ async function applyAnchor(
   return left;
 }
 
+/**
+ * Overlay-key columns that arrived after 17.x: `sys_metadata.bundle_member`
+ * first shipped in 18.0.0-next.0. Both the plan and the apply boot with schema
+ * changes held, so on the 17.x databases this ceremony migrates the column is
+ * absent, which the overlay key reads as NULL (its NULL-folded part).
+ */
+const FOLDED_KEY_COLUMNS: ReadonlySet<string> = new Set(['bundle_member']);
+
 async function planCategory(sql: Sql, table: string, columns: ReadonlySet<string>, category: InventoryCategory): Promise<{ rows: number; groups?: number }> {
   // A category that selects on the organization column has no rows left once
   // the column is gone (the ceremony's post-check reads a dropped table too).
@@ -626,10 +767,15 @@ async function planCategory(sql: Sql, table: string, columns: ReadonlySet<string
   if (!category.conflictBy) {
     return { rows: await sql.count(table, `SELECT COUNT(*) AS n FROM ${t} WHERE ${where.text}`, where.params) };
   }
-  const groupBy = category.conflictBy.groupBy.map((c) => {
-    requireColumn(table, columns, c);
-    return sql.q(c, table);
-  });
+  // A key column a 17.x database never had (see FOLDED_KEY_COLUMNS) reads as
+  // NULL on every row there, and grouping by a constant is no grouping: it is
+  // grouped by only where it exists. Every other column is required.
+  const groupBy = category.conflictBy.groupBy
+    .filter((c) => columns.has(c) || !FOLDED_KEY_COLUMNS.has(c))
+    .map((c) => {
+      requireColumn(table, columns, c);
+      return sql.q(c, table);
+    });
   const distinct = category.conflictBy.distinct;
   if (distinct) requireColumn(table, columns, distinct);
   const having = distinct ? `COUNT(DISTINCT ${sql.q(distinct, table)}) > 1` : 'COUNT(*) > 1';
@@ -645,6 +791,53 @@ async function planCategory(sql: Sql, table: string, columns: ReadonlySet<string
     throw new OrganizationOwnershipPlanRefusal('unreadable-table', `The conflict count on ${table} came back without a number.`, table);
   }
   return { rows: count, groups };
+}
+
+/** {@link GrantKeyPlan}: read-only, keyed like the index. */
+async function planGrantKeys(ctx: PlanContext, table: string, columns: ReadonlySet<string>): Promise<GrantKeyPlan> {
+  const { sql } = ctx;
+  if (!columns.has('permission_set') || !columns.has('user_id')) {
+    return {
+      nameColumn: 'absent',
+      duplicates: { groups: 0, rows: 0 },
+      rewriteCollisions: [],
+      note:
+        `${table} has no permission_set column yet, so no grant names its set and nothing here can be counted. ` +
+        'Boot this release once against the database (its schema sync adds the column), then re-run the plan.',
+    };
+  }
+  const keyColumns = ['user_id', 'permission_set', ...(columns.has(ORG) ? [ORG] : [])];
+  const duplicates = await planCategory(sql, table, columns, {
+    id: 'duplicate-grants',
+    label: 'grants holding one permission set for one user in one organization',
+    citation: 'seat answers 6162538253, Q5 A',
+    where: [{ column: 'permission_set', isNull: false }],
+    conflictBy: { groupBy: keyColumns },
+  });
+  const rewriteCollisions: GrantCollision[] = [];
+  if (columns.has('permission_set_id')) {
+    const t = sql.q(table, table);
+    const nameCol = sql.q('permission_set', table);
+    const select = ['id', 'user_id', 'permission_set', 'permission_set_id', ...(columns.has(ORG) ? [ORG] : [])]
+      .map((c) => sql.q(c, table)).join(', ');
+    const rows = await sql.read(table, `SELECT ${select} FROM ${t}`, []);
+    const named = rows.filter((r) => nonEmptyId(r.permission_set) !== null);
+    const legacy = rows.filter((r) => nonEmptyId(r.permission_set) === null);
+    const sets = new Map<string, LegacySetRow>();
+    const setColumns = ctx.catalog.columns.get(LEGACY_SET_OBJECT);
+    if (legacy.length && setColumns?.has('name')) {
+      const setSelect = ['id', 'name', ...(setColumns.has(ORG) ? [ORG] : [])].map((c) => sql.q(c, LEGACY_SET_OBJECT)).join(', ');
+      for (const r of await sql.read(LEGACY_SET_OBJECT, `SELECT ${setSelect} FROM ${sql.q(LEGACY_SET_OBJECT, LEGACY_SET_OBJECT)}`, [])) {
+        sets.set(String(r.id), { name: nonEmptyId(r.name), organizationId: nonEmptyId(r[ORG]) });
+      }
+    }
+    rewriteCollisions.push(...planGrantRewrite(
+      legacy.map((r) => ({ id: String(r.id), userId: nonEmptyId(r.user_id), organizationId: nonEmptyId(r[ORG]), setId: nonEmptyId(r.permission_set_id) })),
+      named.map((r) => ({ id: String(r.id), userId: nonEmptyId(r.user_id), organizationId: nonEmptyId(r[ORG]), name: String(r.permission_set) })),
+      sets,
+    ).collisions);
+  }
+  return { nameColumn: 'present', duplicates: { groups: duplicates.groups ?? 0, rows: duplicates.rows }, rewriteCollisions };
 }
 
 async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source: TablePlan['source'], tables: string[]): Promise<TablePlan> {
@@ -722,11 +915,17 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
     }
     plan.categories.push({ id: category.id, label: category.label, citation: category.citation, rows, ...(groups !== undefined ? { groups } : {}) });
   }
+  if (entry.object === METADATA_OBJECT && hasOrg) {
+    const conflicts: MetadataConflict[] = [];
+    for (const table of tables) conflicts.push(...groupMetadataKeyRows(await readMetadataKeyRows(sql, table, ctx.catalog.columns.get(table)!)).conflicts);
+    plan.metadataConflicts = conflicts;
+  }
   if (entry.object === TEMPLATE_OBJECT) {
     const conflicts: TemplateConflict[] = [];
     for (const table of tables) conflicts.push(...(await readTemplateConflicts(sql, table, ctx.catalog.columns.get(table)!)));
     plan.templateConflicts = conflicts;
   }
+  if (entry.object === GRANT_OBJECT) plan.grants = await planGrantKeys(ctx, tables[0]!, columns);
 
   const rows = plan.rows!;
   const departing = plan.departures.reduce((n, d) => n + d.rows, 0);

@@ -27,6 +27,7 @@ import {
   readHostFateSupplement,
   type InventoryEntry,
 } from './organization-ownership-inventory.js';
+import { PRESENTATIONAL_TYPES } from './organization-ownership-plan.js';
 
 /**
  * The first census's platform population — 59 carrying the column, 25 not —
@@ -308,5 +309,13 @@ describe('readHostFateSupplement — a file it cannot use is refused, naming the
   it('the merge refusals reach the caller from the file too', async () => {
     const file = write('platform.json', JSON.stringify([host('sys_member')]));
     expect(await refusalOfAsync(() => readHostFateSupplement(file))).toMatchObject({ reason: 'fate-supplement-platform-object', file, row: 0, object: 'sys_member' });
+  });
+});
+
+describe('the promotion population is the inventory\'s', () => {
+  it('PRESENTATIONAL_TYPES, which the apply promotes, is the list the sys_metadata promotion category names', () => {
+    const category = inventoryEntryFor('sys_metadata')!.categories!.find((c) => c.id === 'organization-presentational-promotion')!;
+    const types = category.where!.find((c) => c.column === 'type') as { in?: readonly string[] };
+    expect([...PRESENTATIONAL_TYPES].sort()).toEqual([...(types.in ?? [])].sort());
   });
 });

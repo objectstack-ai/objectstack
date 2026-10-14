@@ -238,7 +238,6 @@ async function seedTenant(
     {
       id: 'ups_zzz_founder',
       user_id: 'usr_founder',
-      permission_set_id: ADMIN_PS_ID,
       permission_set: 'admin_full_access',
       organization_id: unscopedOrganizationId,
     },
@@ -259,7 +258,6 @@ async function seedTenant(
       {
         id: `ups_org_${n}`,
         user_id: `usr_orgadmin_${n}`,
-        permission_set_id: ADMIN_PS_ID,
         permission_set: 'admin_full_access',
         organization_id: `org_${n}`,
       },
@@ -275,7 +273,7 @@ async function findRows(engine: ObjectQL, object: string, where: any = {}): Prom
 
 /** Every `admin_full_access` grant row that no organization scopes. */
 async function unscopedGrants(engine: ObjectQL): Promise<any[]> {
-  const links = await findRows(engine, 'sys_user_permission_set', { permission_set_id: ADMIN_PS_ID });
+  const links = await findRows(engine, 'sys_user_permission_set', { permission_set: 'admin_full_access' });
   expect(links.length, 'ANTI-VACUITY: the fixture must have written grant rows').toBeGreaterThan(0);
   return links.filter((r) => !r.organization_id);
 }
@@ -307,13 +305,14 @@ describe('#16861 — an existing platform admin is found, not sampled for', () =
     const engine = await boot();
     await seedTenant(engine as any, 60);
 
-    const all = await findRows(engine, 'sys_user_permission_set', { permission_set_id: ADMIN_PS_ID });
+    const all = await findRows(engine, 'sys_user_permission_set', { permission_set: 'admin_full_access' });
     expect(all).toHaveLength(61);
 
-    // The exact read the defect shipped: same object, same where, same cap, no order.
+    // The exact read the defect shipped: same object, the same population (every
+    // grant of the admin set, read by name now that the id is retired), same cap, no order.
     const window50 = await (engine as any).find(
       'sys_user_permission_set',
-      { where: { permission_set_id: ADMIN_PS_ID }, limit: 50 },
+      { where: { permission_set: 'admin_full_access' }, limit: 50 },
       { context: SYSTEM_CTX },
     );
     expect(window50).toHaveLength(50);
@@ -421,7 +420,7 @@ describe('#16861 — an existing platform admin is found, not sampled for', () =
     );
     await ql.insert(
       'sys_user_permission_set',
-      { id: 'ups_system', user_id: 'usr_system', permission_set_id: ADMIN_PS_ID, permission_set: 'admin_full_access', organization_id: null },
+      { id: 'ups_system', user_id: 'usr_system', permission_set: 'admin_full_access', organization_id: null },
       { context: SYSTEM_CTX },
     );
     await seedUser(ql, 'usr_real', 'real@tenant.example', '2026-03-01T00:00:00.000Z', true);
@@ -480,7 +479,7 @@ describe('#16861 — an existing platform admin is found, not sampled for', () =
               out.push({
                 id: `ups_${String(i).padStart(6, '0')}`,
                 user_id: `usr_${String(i).padStart(6, '0')}`,
-                permission_set_id: permissionSets.find((p) => p.name === 'admin_full_access')?.id,
+                permission_set: 'admin_full_access',
                 organization_id: `org_${i}`,
               });
             }

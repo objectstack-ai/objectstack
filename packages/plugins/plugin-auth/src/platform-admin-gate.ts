@@ -42,6 +42,20 @@
  * which exists so a held user can remediate (change-password, two-factor
  * enrollment, sign-out) and was never a declaration about administration.
  * None of those remediation endpoints is judged here, so none changes.
+ *
+ * ## The same refusal at the vendor-served doors
+ *
+ * Three platform-admin doors are served by better-auth itself rather than by a
+ * raw mount, so this judge never runs there: the re-authorized impersonation
+ * endpoint (`admin-impersonate-endpoint.ts`), SSO-provider administration
+ * (registration, and an owner's update and delete), and the `admin` plugin's
+ * own role-scalar actions (both in `auth-manager.ts`'s global before-hook). Their session is a raw better-auth
+ * read that `customSession` never decorates, so it carries no `authGate`.
+ * Each door therefore asks the auth service for the acting user's posture —
+ * the same computation, and the same first entry, that `customSession` puts on
+ * a session (`resolveUserAuthGates`, ADR-0069 · #23287 ruling C′ item 3) — and
+ * hands it to {@link judgeHeldSession}, the refusal this judge gives. One
+ * posture computation, one decision, one refusal body, at every door.
  */
 
 import { evaluateAuthGate } from '@objectstack/core';
@@ -107,6 +121,29 @@ export function isPlatformAdminUser(sessionUser: unknown): boolean {
 }
 
 /**
+ * ADR-0069 D3 — the refusal a held session meets on the platform-admin
+ * surface, or `null` when `sessionUser` holds no posture.
+ *
+ * `sessionUser` is anything carrying the session gate's posture carrier,
+ * `authGate` (the first entry of `resolveUserAuthGates`, as `customSession`
+ * stamps it). The decision is the gate's own, `evaluateAuthGate`, consulted
+ * pathless for the reason the module header gives, so every posture code holds,
+ * whatever its scope: a session IS the password sign-in (#23287, ruling C′
+ * item 1), and the session gate refuses each code on every route outside its
+ * remediation allow-list. The body is the one {@link judgePlatformAdmin}
+ * answers: `403`, the posture's own `code` and `message` (its remediation
+ * pointer), in the ADR-0112 envelope. No code of its own.
+ */
+export function judgeHeldSession(sessionUser: unknown): PlatformAdminRefusal | null {
+  const held = evaluateAuthGate(sessionUser, '');
+  if (!held) return null;
+  return {
+    status: 403,
+    body: { success: false, error: { code: held.code, message: held.message } },
+  };
+}
+
+/**
  * Judge a resolved session for a platform-admin-only route.
  *
  * `session` is what `auth.api.getSession({ headers })` returned — that call
@@ -144,16 +181,8 @@ export function judgePlatformAdmin(session: unknown): PlatformAdminVerdict {
   }
 
   // ADR-0069 D3: the gate's shared decision, pathless (see the header).
-  const held = evaluateAuthGate(user, '');
-  if (held) {
-    return {
-      ok: false,
-      refusal: {
-        status: 403,
-        body: { success: false, error: { code: held.code, message: held.message } },
-      },
-    };
-  }
+  const held = judgeHeldSession(user);
+  if (held) return { ok: false, refusal: held };
 
   if (!isPlatformAdminUser(user)) {
     return {

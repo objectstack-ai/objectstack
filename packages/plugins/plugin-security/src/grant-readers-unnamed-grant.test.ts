@@ -4,26 +4,26 @@
  * [ADR-0131 D4] The grant that names nothing, as each `plugin-security` grant
  * reader treats it once the readers key on `sys_user_permission_set.permission_set`.
  *
- * Such a grant is real state: a grant written before the name column existed
- * carries `NULL` until the one-time backfill names it, and the backfill runs at
- * `kernel:bootstrapped` — after the `kernel:ready` passes (the platform-admin
- * bootstrap, the organization-admin backfill) that read grants. On an upgraded
- * deployment's first boot every grant is unnamed when those passes run. The
- * backfill also leaves a grant unnamed for good when its id names no set row,
- * or a set row of another organization.
+ * Such a grant is real state on a database the v18 ceremony has not run on: a
+ * grant written before the name column existed carries `NULL` until the
+ * ceremony's verified rewrite (`os migrate organization-ownership --apply`,
+ * ADR-0131 D10) names it from the legacy `permission_set_id`, a column no
+ * runtime reader declares any more (C7b).
  *
  * Each reader takes its fail-closed direction:
  *
  * - **explain** reports nothing about it — it names no set;
- * - **the platform-admin bootstrap** reads an unscoped one on the admin set row
- *   as an administrator who may already exist, and withholds the promotion —
- *   without naming it as the holder;
- * - **the organization-administrator reconcile** still reaches it through its
- *   id to revoke it, and never inserts a duplicate beside it.
+ * - **the platform-admin bootstrap** reads an unscoped one as an administrator
+ *   who may already exist, and withholds the promotion — without naming it as
+ *   the holder;
+ * - **the organization-administrator reconcile** reads grants by name alone:
+ *   it neither counts such a grant nor revokes it, and writes NOTHING for a
+ *   qualifying pair holding one in that organization (the ceremony's rename
+ *   needs its key); once the rewrite names it, the boot sweep revokes it where
+ *   its pair no longer qualifies.
  *
  * Real ObjectQL over the SQL driver with the real `SecurityPlugin`; a grant is
- * unnamed by writing `NULL` with the name hooks unbound, the state the backfill
- * leaves, then the hooks are bound again.
+ * unnamed by writing `NULL` beneath the engine.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -120,24 +120,24 @@ async function user(engine: ObjectQL, id: string, createdAt: string): Promise<vo
   );
 }
 
-const setIdOf = async (engine: ObjectQL, name: string): Promise<string> =>
-  String(((await engine.find('sys_permission_set', { where: { name, organization_id: null }, context: SYS })) as any[])[0]?.id);
+const knexOf = (engine: ObjectQL): any => ((engine as any).getDriver('sys_user_permission_set') as any).knex;
 
 /**
- * The state a grant written before the name column carries, or one the
- * backfill has not named: `NULL` name and the legacy id of the set row it
- * names (organization-less). Grants are written by name today (ADR-0131 D4)
- * and the engine refuses one naming nothing, so it is written beneath it.
+ * The state a grant written before the name column carries until the v18
+ * ceremony's rewrite names it: a `NULL` name. Grants are written by name
+ * today (ADR-0131 D4) and the engine refuses one naming nothing, so it is
+ * written beneath it.
  */
 async function unname(engine: ObjectQL, where: Record<string, unknown>): Promise<void> {
-  const knex = ((engine as any).getDriver('sys_user_permission_set') as any).knex;
-  for (const g of await knex('sys_user_permission_set').where(where)) {
-    const legacyId = g.permission_set_id ?? (g.permission_set ? await setIdOf(engine, g.permission_set) : null);
-    await knex('sys_user_permission_set').where({ id: g.id }).update({ permission_set: null, permission_set_id: legacyId });
-  }
+  await knexOf(engine)('sys_user_permission_set').where(where).update({ permission_set: null });
   const rows = (await engine.find('sys_user_permission_set', { where, context: SYS })) as any[];
   expect(rows.length).toBeGreaterThan(0);
-  expect(rows.every((r) => r.permission_set == null && r.permission_set_id)).toBe(true);
+  expect(rows.every((r) => r.permission_set == null)).toBe(true);
+}
+
+/** What the ceremony's verified rewrite does to such a grant: it names it. */
+async function rename(engine: ObjectQL, id: string, name: string): Promise<void> {
+  await knexOf(engine)('sys_user_permission_set').where({ id }).update({ permission_set: name });
 }
 
 const grantsOf = async (engine: ObjectQL, userId: string): Promise<any[]> =>
@@ -243,20 +243,26 @@ describe('[ADR-0131 D4] a grant that names nothing — the organization-administ
     return engine;
   }
 
-  it('a qualifying pair holding it is not handed a duplicate grant', async () => {
+  it('[Q-S3b (ii)] a qualifying pair holding it is written nothing — a named grant beside it would hold the key the ceremony\'s rename needs — and it confers nothing meanwhile', async () => {
     const engine = await orgAdmin();
-    expect(await reconcileOrgAdminGrant(engine, 'usr_orgadmin', ORG)).toEqual({ action: 'noop' });
-    expect(await grantsOf(engine, 'usr_orgadmin')).toHaveLength(1);
+    expect(await reconcileOrgAdminGrant(engine, 'usr_orgadmin', ORG)).toEqual({ action: 'skipped', reason: 'unnamed_grant_awaits_ceremony' });
+    expect(await backfillOrgAdminGrants(engine)).toMatchObject({ granted: 0 });
+    expect((await grantsOf(engine, 'usr_orgadmin')).map((g) => g.permission_set ?? null)).toEqual([null]);
   });
 
-  it('a demotion still revokes it — reached through its id', async () => {
+  it('a demotion does not reach it while it is unnamed; once the rewrite names it, the boot sweep revokes it', async () => {
     const engine = await orgAdmin();
     await engine.update('sys_member', { id: 'm_owner', role: 'member' }, { context: orgCtx } as any);
     await reconcileOrgAdminGrant(engine, 'usr_orgadmin', ORG);
+    const [left] = await grantsOf(engine, 'usr_orgadmin');
+    expect(left).toMatchObject({ permission_set: null });
+
+    await rename(engine, String(left.id), 'organization_admin_no_bypass');
+    await backfillOrgAdminGrants(engine);
     expect(await grantsOf(engine, 'usr_orgadmin')).toEqual([]);
   });
 
-  it('the boot backfill still revokes it once its pair has no membership left', async () => {
+  it('the boot sweep does not reach it while its pair has no membership and it is unnamed; once named, it revokes it', async () => {
     const engine = await orgAdmin();
     await user(engine, 'usr_orphan', '2025-05-01T00:00:00.000Z');
     await engine.insert(
@@ -268,8 +274,11 @@ describe('[ADR-0131 D4] a grant that names nothing — the organization-administ
       { context: orgCtx } as any,
     );
     await unname(engine, { id: 'g_orphan' });
-    const summary = await backfillOrgAdminGrants(engine);
-    expect(summary.revoked).toBe(1);
+    expect((await backfillOrgAdminGrants(engine)).revoked).toBe(0);
+    expect(await grantsOf(engine, 'usr_orphan')).toHaveLength(1);
+
+    await rename(engine, 'g_orphan', 'organization_admin_no_bypass');
+    expect((await backfillOrgAdminGrants(engine)).revoked).toBe(1);
     expect(await grantsOf(engine, 'usr_orphan')).toEqual([]);
   });
 });

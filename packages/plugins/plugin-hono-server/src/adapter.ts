@@ -280,8 +280,19 @@ function toLoggableError(thrown: unknown): Error {
  * producer's spelling IS the registered member sitting in `code`, so
  * `demotedDeclaredCode` returns `undefined` by construction — forwarding it
  * would put two spellings of one fact on every envelope this seam renders.
+ *
+ * ## Exported for the other Hono door (#23365)
+ *
+ * `@objectstack/hono`'s `createHonoApp` is a second Hono door: it builds its own
+ * app, and its two catch arms (the auth mount's and the `dispatch()`
+ * catch-all's) read `statusCode` alone, so a declared `status` and `code` were
+ * lost there and the answer was `500`. Those arms now ask THIS function, so the
+ * two doors answer one throw alike. It is exported so that they can, and ⛔ it
+ * is not restated there: a second recogniser is how the doors would start
+ * disagreeing about what counts as declared. Each caller keeps its own
+ * fallback arm for the `undefined` answer.
  */
-function declaredEnvelopeForThrow(thrown: unknown): {
+export function declaredEnvelopeForThrow(thrown: unknown): {
     status: number;
     body: { success: false; error: Record<string, unknown> };
 } | undefined {

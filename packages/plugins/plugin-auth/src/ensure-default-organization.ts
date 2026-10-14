@@ -483,8 +483,8 @@ export async function ensureDefaultOrganization(
     }
     // [ADR-0131 D4] The grants NAMING the set (`permission_set`), not the
     // grants carrying the row's id. A grant that names nothing yet — an
-    // upgraded deployment's, before the one-time backfill names it at
-    // `kernel:bootstrapped` — is not read as the admin: this helper CONFERS
+    // legacy one the v18 ceremony's rewrite has not named (ADR-0131 D10) —
+    // is not read as the admin: this helper CONFERS
     // (an owner membership and the seeded rows), and a grant that names no set
     // confers nothing. The answer is then `no_admin`, which decides nothing
     // (`default-org-bootstrap-once.ts` records no decision on it), so a later

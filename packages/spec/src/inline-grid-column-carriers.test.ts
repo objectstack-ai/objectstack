@@ -294,9 +294,9 @@ function typeConditionalRules(): { rules: TypeConditionalRule[]; unprobed: strin
 /**
  * A stack whose child object carries a field `probe` of `fieldType`, and an
  * identity-only `inlineColumns` entry over it. The field type is the column
- * type's own name: at the `.objectui-sha` pin `db11afd4967c`,
- * `fieldTypeToColumnType` maps each of the column schema's nine types' namesake
- * field type to that same column type.
+ * type's own name: the renderer's column-type derivation maps each of the
+ * column schema's nine types' namesake field type to that same column type
+ * (recorded in `packages/spec/liveness/field.json`, row `inlineColumns`).
  */
 const stackWithProbeField = (fieldType: string, column: Record<string, unknown>) => {
   const child = childObject([column]);

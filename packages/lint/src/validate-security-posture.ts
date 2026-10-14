@@ -118,7 +118,7 @@
  * credit belongs to the schema's closed enum.
  */
 
-import { referenceCarrierOf } from '@objectstack/spec/data';
+import { isControlledByParentMasterField, referenceCarrierOf } from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
 import { indexObjectGraph, nearestName, packagesOf, recordsOf, type ObjectGraph } from './object-graph.js';
 
@@ -323,13 +323,14 @@ interface CbpRelation {
  * three-tier fallback in the runtime: a required `master_detail`, else ANY
  * `master_detail`, else a required `lookup`. ADR-0055 §1 never recorded the
  * second and third tiers, and ruling B retired both, so the table collapsed
- * to its first row and is spelled as the one predicate it now is. The same
- * sentence is read three times, each by the seam that owns its input shape —
- * `ObjectSchema`'s parse (`refuseControlledByParentWithoutOneMaster`,
- * `packages/spec/src/data/object.zod.ts`), this linter, and the runtime's
- * `resolveCbpRelation` (`packages/plugins/plugin-security/src/security-plugin.ts`)
- * — and the tests of this rule hold its verdict equal to the parse's on the
- * shapes the ruling names. ⛔ Do not re-introduce a fallback tier here: a
+ * to its first row. What counts as a master is not spelled here: it is the
+ * spec's exported field predicate, `isControlledByParentMasterField`
+ * (`@objectstack/spec/data`, #23272), the one `ObjectSchema`'s refusal
+ * (`controlledByParentMasterRefusal`) counts, so the parse and this linter
+ * read one sentence. The runtime's `resolveCbpRelation`
+ * (`packages/plugins/plugin-security/src/security-plugin.ts`) reads the
+ * unparsed registry and keeps its own reading, and the tests of this rule
+ * hold its verdict equal to the parse's on the shapes the ruling names. ⛔ Do not re-introduce a fallback tier here: a
  * linter that accepts what the parse and the runtime refuse reads, to the next
  * author, as a gate that is watching.
  *
@@ -344,7 +345,7 @@ interface CbpRelation {
  */
 function cbpMasterCandidates(obj: AnyRec): CbpRelation[] {
   return recordsOf(obj.fields)
-    .filter((f) => f.type === 'master_detail' && f.required === true && refOf(f))
+    .filter((f) => isControlledByParentMasterField(f) && refOf(f))
     .map((f) => ({ field: String(f.name ?? '?'), type: 'master_detail', master: refOf(f) as string }));
 }
 

@@ -10,8 +10,9 @@
  * are gone; "New" opens the grant form, and the form's name field carries a
  * widget hint the console resolves to a catalog picker (`field:position-ref`
  * lists `GET /meta/position`, `field:permission-ref` lists
- * `GET /meta/permission`). The legacy `permission_set_id` lookup grants
- * nothing and is hidden from the forms (maintainer ruling, 2026-10-12).
+ * `GET /meta/permission`). The legacy `permission_set_id` granted nothing,
+ * was hidden from the forms (maintainer ruling, 2026-10-12), and is now
+ * retired from the declaration (ADR-0131 D10, C7b): it is not served at all.
  *
  * Read from `GET /meta/object/<name>` on a booted showcase: what the console
  * actually receives, not the source declaration, so the pin fails if the spec
@@ -51,9 +52,9 @@ describe('[#15204 B2] grant forms pick names from the catalog', () => {
     expect(served.sys_user_permission_set?.permission_set?.widget).toBe('permission-ref');
   });
 
-  it('permission_set_id is served hidden, and the name field it sits beside is not', () => {
-    expect(served.sys_user_permission_set?.permission_set_id?.hidden).toBe(true);
-    // Control: the read is not answering `hidden` for every field.
+  it('the retired permission_set_id is not served, and the name field that replaced it is served visible', () => {
+    expect(served.sys_user_permission_set).not.toHaveProperty('permission_set_id');
+    // Control: the read serves the object's fields at all.
     expect(served.sys_user_permission_set?.permission_set?.hidden).not.toBe(true);
   });
 });

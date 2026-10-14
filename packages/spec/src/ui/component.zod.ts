@@ -59,11 +59,8 @@ import { AggregationFunction } from '../data/query.zod';
 import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { ActionSchema, ActionType, InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
-import {
-  ON_SUCCESS_EXECUTORS,
-  onSuccessBesideExecutorRefusal,
-  onSuccessBesideUpdateOperationRefusal,
-} from './action-on-success-executor';
+import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
+import { refuseDeclarativeUpdateContradictions } from './action-declarative-update';
 import { navigationTargetRefusal } from './navigation-target';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
@@ -888,8 +885,7 @@ export const PageTabsProps = strictObject({
      * same record for the tab item, so the sweep cannot re-derive the same
      * false candidate a component over).
      *
-     * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+     * The key is LIVE at objectui `b9814b334` (re-read there 2026-10-14:
      * every objectui file this record cites is byte-identical across the hop
      * from `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
      * `1fb1ced36`, re-read there 2026-10-12:
@@ -1149,8 +1145,7 @@ export const PageCardProps = strictObject({
  * on all four; `component-record-block-field-security.test.ts` holds the four
  * declarations identical.
  *
- * Each clause is read off the objectui pin this repo builds against
- * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * Each clause is read off objectui `b9814b334` (re-read there 2026-10-14:
  * across the hop from `1fb1ced36` `record-related-list.tsx` and the three
  * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor in
  * those four moved; `record-details.tsx` (+92/-8: objectui#12294, objectui
@@ -2839,8 +2834,7 @@ export const PageAccordionProps = strictObject({
      * is the rider that records the liveness here so the next sweep cannot
      * re-derive the same false candidate).
      *
-     * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+     * The key is LIVE at objectui `b9814b334` (re-read there 2026-10-14:
      * every objectui file this record cites is byte-identical across the hop
      * from `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
      * `1fb1ced36`, re-read there 2026-10-12:
@@ -3291,8 +3285,7 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * recorded it for the accordion and tab items. This is the same record for
    * the button.
    *
-   * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * The key is LIVE at objectui `b9814b334` (re-read there 2026-10-14:
    * every objectui file this record cites is byte-identical across the hop from
    * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
@@ -3374,9 +3367,7 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * 2026-09-20 with `scripts/check-issue-citations.mjs --probe-cause` and came
    * back minted, gone from the board and 404 on the web endpoint too — DELETED,
    * not transferred. ⛔ No replacement number is guessed here: the live record
-   * of the discipline is THIS BLOCK, together with
-   * `check:objectui-pin-citations`, whose header states the same rule and whose
-   * refusal text enforces it. The read point
+   * of the discipline is THIS BLOCK. The read point
    * first MOVED rather than died on the earlier hop onto `9602dc820`, which is
    * why the anchors span a second
    * file):
@@ -3784,8 +3775,7 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * objectui's ADR-0080 curated public vocabulary carries six blocks this map
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
- * (`core/src/registry/public-blocks.ts:117-122` at the pin this repo builds
- * against, `.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * (`core/src/registry/public-blocks.ts:117-122` at objectui `b9814b334`, re-read there 2026-10-14:
  * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
  * the four `action-*.tsx` renderers, `basic/data-list.tsx` and
  * `previews/block-config.ts` are byte-identical across the hop from `1fb1ced36`
@@ -4154,12 +4144,18 @@ const ROW_URL_NAVIGATOR_EXECUTORS: ReadonlySet<string> = new Set(['url', 'naviga
  * the spelling that resolved the executor, so an `actionType: 'url'` row reads
  * as it always has, and a name-leg row learns that declaring the executor key
  * is how a `name` stops choosing the url navigator.
+ *
+ * Beside `operation: 'update'` the runner runs no executor, so no url
+ * navigator reads `target`: the declarative-update judge
+ * ({@link rowDeclarativeUpdate}) refuses `target` there whole, and this
+ * judgment stands down rather than prescribe a scheme for a key to be dropped.
  */
 function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', owner: string) {
   return (
-    row: { actionType?: string; type?: string; name?: string; target?: string },
+    row: { actionType?: string; type?: string; name?: string; target?: string; operation?: unknown },
     ctx: z.RefinementCtx,
   ): void => {
+    if (row.operation === 'update') return;
     const executor = effectiveRowExecutor(row, executorKey);
     if (executor === undefined || !ROW_URL_NAVIGATOR_EXECUTORS.has(executor) || typeof row.target !== 'string') return;
     const spelled = row[executorKey]
@@ -4195,10 +4191,15 @@ function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', owner:
  * refusal. The `element:button` inline action keeps its own declared fold of
  * `type: 'navigation'` onto `'url'` (`normalizeInlineAction`, `action.zod.ts`),
  * a bridge for its measured producers.
+ *
+ * Beside `operation: 'update'` the declarative-update judge
+ * ({@link rowDeclarativeUpdate}) refuses every executor but `'script'`, the
+ * alias included, with "leave it off"; this rename onto `'url'` stands down
+ * there, so the row is never told both to write `'url'` and to drop the key.
  */
 function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: string) {
-  return (row: { actionType?: string; type?: string }, ctx: z.RefinementCtx): void => {
-    if (row[executorKey] !== 'navigation') return;
+  return (row: { actionType?: string; type?: string; operation?: unknown }, ctx: z.RefinementCtx): void => {
+    if (row.operation === 'update' || row[executorKey] !== 'navigation') return;
     ctx.addIssue({
       code: 'custom',
       path: [executorKey],
@@ -4259,10 +4260,25 @@ const actionOnSuccessBlock = () => ActionSchema.in.shape.onSuccess.unwrap();
  * value parsed clean.
  *
  * What the enum does not bring: `ActionSchema`'s rules ABOUT `operation` are
- * refinements of the action. The one about `onSuccess` is carried to the rows
- * ({@link refuseRowOnSuccessBesideExecutor}), with the action's own text.
+ * refinements of the action. They are carried to the rows whole, by the one
+ * judge both read ({@link rowDeclarativeUpdate}), with the action's own texts.
  */
 const actionOperation = () => ActionSchema.in.shape.operation.unwrap();
+
+/**
+ * A page action row's `patch`: `ActionSchema`'s own record of static field
+ * values, by reference, read off the object half of the action's pipe as
+ * {@link actionOperation} reads `operation`. ⛔ No second shape.
+ *
+ * Every row forwards `patch` to the runner beside `operation`, and the runner's
+ * update merges it only when it is a plain object (`executeUpdateOperation`,
+ * `ActionRunner.ts` at the pin: anything else becomes `{}`), as the platform
+ * route's write bag does (`declarativeUpdateWrite`). Until this, the rows
+ * declared `z.unknown()`, so a string, array or number `patch` parsed clean and
+ * was dropped before the write; and the declarative-update judge reads a
+ * present `patch` as something to write, which holds only for a record.
+ */
+const actionPatch = () => ActionSchema.in.shape.patch.unwrap();
 
 /**
  * The console runner's built-in executors: `ActionType`'s six, the members its
@@ -4301,27 +4317,22 @@ function rowOnSuccessRefused(executor: string | undefined): boolean {
  * with the subject naming the row and the spelling that resolved its executor,
  * as {@link refuseUnopenableRowUrlTarget} names it. Beside `operation:
  * 'update'` it is refused whatever the executor, as `ActionSchema` refuses it
- * on every `type`, with that refusal's text. The issue lands at
- * `onSuccess`, so `os validate`'s props gate reports it at `properties.onSuccess`
- * or `properties.actions.N.onSuccess`.
+ * on every `type`, with that refusal's text — by the declarative-update judge
+ * ({@link rowDeclarativeUpdate}), whose refused-key table carries the pairing
+ * for the action and the rows alike, so this executor half stands down there.
+ * The issue lands at `onSuccess`, so `os validate`'s props gate reports it at
+ * `properties.onSuccess` or `properties.actions.N.onSuccess`.
  */
 function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', owner: string) {
   return (
     row: { actionType?: string; type?: string; name?: string; operation?: unknown; onSuccess?: unknown },
     ctx: z.RefinementCtx,
   ): void => {
-    if (row.onSuccess === undefined) return;
     // `operation: 'update'` first, as the runner reads it: the write runs
     // before any executor, and the row's executor key is never consulted.
-    // ONE issue, `ActionSchema`'s text for the same pairing.
-    if (row.operation === 'update') {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['onSuccess'],
-        message: onSuccessBesideUpdateOperationRefusal(`${owner} \`onSuccess\` (\`operation: 'update'\`)`),
-      });
-      return;
-    }
+    // The pairing is the declarative-update judge's (ONE issue, the action's
+    // text), so nothing is judged here beside it.
+    if (row.onSuccess === undefined || row.operation === 'update') return;
     const executor = effectiveRowExecutor(row, executorKey);
     if (!rowOnSuccessRefused(executor)) return;
     const key = row[executorKey] === '' ? `an empty \`${executorKey}\`` : `no \`${executorKey}\``;
@@ -4336,6 +4347,48 @@ function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', ow
       message: onSuccessBesideExecutorRefusal(`${owner} \`onSuccess\` (${spelled})`, executor, executorKey),
     });
   };
+}
+
+/**
+ * `ActionSchema`'s declarative-update rules on a page action row: the one judge
+ * both read (`action-declarative-update.ts`), on the row's surface. ⛔ No
+ * second copy of a rule or a text. Every row forwards `operation`, `patch`,
+ * `params`, `target`, `method`, `bodyExtra`, `bodyShape`, `locations` and
+ * `onSuccess` to the console's action runner (and `action:button` its
+ * `recordIdField`), and the runner reads `operation` before any executor: the
+ * write is posted through its `script` dispatch, so beside it the row's
+ * executor and the keys that bind one are never read. So each rule lands on the
+ * row at the same path, with the action's text:
+ *
+ * - `patch` without `operation: 'update'` — refused at `patch`;
+ * - beside it, an executor key other than `'script'` — refused at that key
+ *   (`actionType` on a node, `type` on a member). The row's key has no default,
+ *   so the text says it names that route or nothing; an empty key names
+ *   nothing, as {@link effectiveRowExecutor} reads it;
+ * - beside it, `target`, `method`, `bodyExtra`, `bodyShape`, `onSuccess` and
+ *   (`action:button` only) `recordIdField` — each refused at its own path. The
+ *   table's other keys are not row keys, so the strict row refuses them as
+ *   unknown before this runs;
+ * - beside it, nothing to write — refused at `patch`. A node's non-empty
+ *   OBJECT `params` counts: on `action:button` / `action:icon` it IS
+ *   `properties.params`, whose static values the runner's update merges over
+ *   `patch`. A member's does not (refused off `api` by
+ *   {@link actionContainerMemberParamsFitType}, and never forwarded);
+ * - beside it, a `list_toolbar` location — refused at `locations.N`.
+ *
+ * Applied first on each row, as the runner reads `operation` first: the row's
+ * url-target, executor-alias and `onSuccess`-executor judgments stand down
+ * beside the operation, since each key they judge is refused here whole.
+ * `os validate`'s props gate parses `properties` against these same rows, so
+ * it reports each refusal at `properties.KEY` or `properties.actions.N.KEY`.
+ */
+function rowDeclarativeUpdate(executorKey: 'actionType' | 'type', owner: string) {
+  return refuseDeclarativeUpdateContradictions({
+    executorKey,
+    executorDefaultsToScript: false,
+    onSuccessSubject: `${owner} \`onSuccess\` (\`operation: 'update'\`)`,
+    staticParams: executorKey === 'actionType',
+  });
 }
 
 /**
@@ -4451,8 +4504,8 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
-  patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
+  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
+  patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
   confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
   successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
   errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
@@ -4467,7 +4520,8 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
     .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: \'update\'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s"))
+}).superRefine(rowDeclarativeUpdate('actionType', "An `action:button`'s"))
+  .superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s"))
   .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:button`'s `actionType: 'navigation'`"))
   .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:button`'s")));
 /** Author state (ADR-0122: the bare name is the author state). */
@@ -4552,8 +4606,8 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
-  patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
+  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
+  patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
   confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
   successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
   errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
@@ -4566,7 +4620,8 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
     .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: \'update\'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
-}).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s"))
+}).superRefine(rowDeclarativeUpdate('actionType', "An `action:icon`'s"))
+  .superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s"))
   .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:icon`'s `actionType: 'navigation'`"))
   .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:icon`'s")));
 /** Author state (ADR-0122: the bare name is the author state). */
@@ -4657,8 +4712,7 @@ export type ActionIconPropsParsed = z.infer<typeof ActionIconPropsSchema>;
  * [#21855] The rows' value ratchet for this one member, with its own
  * inventory. A member's `params` is its `ActionParam[]` input list: both
  * containers forward an array as `actionParams` (group `:346-348`, menu
- * `:270-272`, re-read at the pin this repo builds against, `.objectui-sha` =
- * `b9814b334`, 2026-10-14: `action-group.tsx`, `action-menu.tsx` and
+ * `:270-272`, re-read at objectui `b9814b334`, 2026-10-14: `action-group.tsx`, `action-menu.tsx` and
  * `static-params.ts` are byte-identical across the hop from `1fb1ced36` (`git
  * diff --quiet`), so both held unmoved; at `1fb1ced36`, 2026-10-12:
  * `action-group.tsx`, `action-menu.tsx` and
@@ -4745,8 +4799,8 @@ function actionContainerMemberShape() {
     method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
     bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-    operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
-    patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
+    operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location'),
+    patch: actionPatch().optional().describe('Static field values the declarative `operation: \'update\'` writes, forwarded to the runner: `ActionSchema`\'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: \'update\'` (it would be silently dropped)'),
     confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
     successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
     errorMessage: z.string().optional().describe('Toast shown when the action fails, in place of the raw error'),
@@ -4843,7 +4897,8 @@ function buildActionGroupMember() {
     ...actionContainerMemberShape(),
     size: z.enum([...BUTTON_PRIMITIVE_SIZES, 'md']).optional()
       .describe('Inline button size — the Button primitive\'s vocabulary, plus `md` (drawn as `default`), falling back to the group\'s `size`. A dropdown item reads no size'),
-  }).superRefine(actionContainerMemberParamsFitType('action:group'))
+  }).superRefine(rowDeclarativeUpdate('type', "An `action:group` member's"))
+    .superRefine(actionContainerMemberParamsFitType('action:group'))
     .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's"))
     .superRefine(refuseRowUrlExecutorAlias('type', "An `action:group` member's `type: 'navigation'`"))
     .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:group` member's"));
@@ -4865,7 +4920,8 @@ function buildActionMenuMember() {
         + 'button (the menu\'s own `size`). Remove it, or put the action in an `action:group`, whose inline buttons '
         + 'read a member\'s `size`.',
     },
-  }, actionContainerMemberShape()).superRefine(actionContainerMemberParamsFitType('action:menu'))
+  }, actionContainerMemberShape()).superRefine(rowDeclarativeUpdate('type', "An `action:menu` member's"))
+    .superRefine(actionContainerMemberParamsFitType('action:menu'))
     .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's"))
     .superRefine(refuseRowUrlExecutorAlias('type', "An `action:menu` member's `type: 'navigation'`"))
     .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:menu` member's"));
@@ -5383,8 +5439,7 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * `packages/types` (its type declaration and zod twin), against 3 hits for the
  * control `schema.editable` in `ObjectGrid.tsx`. It was declared ahead of its
  * reader on purpose (the BUILD objectui#11068 chose), and its describe carried
- * the `[EXPERIMENTAL — not enforced]` marker that said so. Re-measured at the
- * pin this repo builds against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * the `[EXPERIMENTAL — not enforced]` marker that said so. Re-measured at objectui `b9814b334` (re-read there 2026-10-14:
  * `ObjectGrid.tsx` changed across the hop from `1fb1ced36` (+327/-80:
  * objectui#12292, objectui#12303, objectui#12030 and objectui#12270) and
  * `data-table.tsx` changed too (+320/-90: objectui#12322, objectui#12310 and
@@ -5535,8 +5590,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * objectui side, not a second shape here: the list view door declares the
    * same members, and objectui's grid follows this declaration.
    *
-   * ⚠️ That gap is closed at the pin this repo builds against (`.objectui-sha`
-   * = `b9814b334`, re-read there 2026-10-14:
+   * ⚠️ That gap is closed at objectui `b9814b334` (re-read there 2026-10-14:
    * `ObjectGrid.tsx` changed across the hop from `1fb1ced36` (+327/-80:
    * objectui#12292, objectui#12303, objectui#12030 and objectui#12270);
    * objectui#12270 re-worded the comment above the two reads and added the
@@ -5969,7 +6023,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `ComponentPropsMap` key. This record said to drop the marker in the change
    * that lands the BUILD at the pin, and it is dropped here.
    *
-   * Read at the pin this repo builds against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * Read at objectui `b9814b334` (re-read there 2026-10-14:
    * `ObjectGrid.tsx` changed across the hop from `1fb1ced36` (+327/-80:
    * objectui#12292, objectui#12303, objectui#12030 and objectui#12270) and
    * `data-table.tsx` changed (+320/-90: objectui#12322, objectui#12310 and
@@ -6448,8 +6502,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * scratch; #9881 / commit 60e0f900a recorded the accordion and tab items). This is the
    * same record for the metric tile.
    *
-   * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * The key is LIVE at objectui `b9814b334` (re-read there 2026-10-14:
    * every objectui file this record cites is byte-identical across the hop from
    * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
@@ -6726,8 +6779,7 @@ const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
  * which is how the key kept re-authorizing itself. `groupField` is the
  * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
- * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * `limit` (#16503) was measured later, at objectui `b9814b334` (re-read there 2026-10-14:
  * `ObjectKanban.tsx` is byte-identical across the hop from `1fb1ced36` (`git
  * diff --quiet`), so the anchor did not move and was re-read in place. At
  * `1fb1ced36`, re-read there 2026-10-12:
@@ -6865,8 +6917,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   /**
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
-   * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * ships, is documented and is in use). Measured at objectui `b9814b334` (re-read there 2026-10-14:
    * `plugin-kanban/src/types.ts` (still no row-cap member), `ObjectKanban.tsx`,
    * `element-data-source.ts`, `ElementDataSourceGate.tsx` and
    * `plugin-kanban.mdx` are byte-identical across the hop from `1fb1ced36`
@@ -7191,8 +7242,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * since retired that block (objectui#8257), so `object-kanban` offers no
    * quick-add control and no block a document can name offers one either).
    *
-   * Measured at the objectui pin this repo builds against
-   * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * Measured at objectui `b9814b334` (re-read there 2026-10-14:
    * `plugin-kanban/src/index.tsx` changed only below the pass-through (+2/-2,
    * objectui#12030, objectui `c5406c201`: a comment re-cited to `18.0.0-next.0`
    * at `:551-552`), which did not move from `345-346`; `KanbanBoardCore.tsx`,
@@ -7436,8 +7486,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * maintainer ruling, verbatim `B`: declare `navigation` on the platform
    * element schemas).
    *
-   * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `b9814b334`, re-read there 2026-10-14:
+   * Measured at objectui `b9814b334` (re-read there 2026-10-14:
    * every objectui file this record cites is byte-identical across the hop from
    * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
@@ -7683,8 +7732,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * maintainer ruling, verbatim `B`), the same carrier and the same def as
    * `object-kanban`'s above.
    *
-   * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `b9814b334`, re-read there 2026-10-14:
+   * Measured at objectui `b9814b334` (re-read there 2026-10-14:
    * `useNavigationOverlay.ts` is byte-identical to `1fb1ced36` (`git diff
    * --quiet`), and `ObjectCalendar.tsx` changed above and between the anchors
    * here (+179/-49: objectui#12291's quick-create hand-off and objectui#12030)
@@ -8932,8 +8980,7 @@ const OBJECT_MAP_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 
 /**
  * `object-map` (objectui `plugin-map/src/ObjectMap.tsx` plus the registry shell
- * `plugin-map/src/index.tsx`, read at the pin this repo builds against —
- * `.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * `plugin-map/src/index.tsx`, read at objectui `b9814b334`, re-read there 2026-10-14:
  * every objectui file this record cites is byte-identical across the hop from
  * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
  * `1fb1ced36`, re-read there 2026-10-12:
@@ -9151,8 +9198,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (ui#6206-B reaching the
-   * `object-*` family: #15449, decision batch #55, option A). Measured at the
-   * pin this repo builds against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * `object-*` family: #15449, decision batch #55, option A). Measured at objectui `b9814b334` (re-read there 2026-10-14:
    * every objectui file this record cites is byte-identical across the hop from
    * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
@@ -9249,8 +9295,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
   /**
    * Marker order — the `SortItem` ARRAY form, the one sort orthography every
    * DECLARED `sort` door on this platform carries (objectui#8221, decision batch
-   * #77, option B). Measured at the pin this repo builds against
-   * (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * #77, option B). Measured at objectui `b9814b334` (re-read there 2026-10-14:
    * every objectui file this record cites is byte-identical across the hop from
    * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
@@ -9469,8 +9514,7 @@ function objectGanttMarker() {
 
 /**
  * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
- * shell `plugin-gantt/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * shell `plugin-gantt/src/index.tsx`, read at objectui `b9814b334`, re-read there 2026-10-14:
  * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
  * byte-identical across the hop from `1fb1ced36` (`git diff --quiet`), so every
  * anchor in them held unmoved; `ListView.tsx` changed (+23/-3: objectui#12292,
@@ -9775,8 +9819,7 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
  * block (`ObjectTree.tsx:289-302`) and that `ObjectView` / `ListView` EMIT when
  * they flatten `options.tree` (`ListView.tsx:4142-4166`, `case 'tree'`: the
  * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
- * NO `tree` key). Both halves re-READ at the
- * pin this repo builds against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * NO `tree` key). Both halves re-READ at objectui `b9814b334` (re-read there 2026-10-14:
  * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
  * `1fb1ced36` (`git diff --quiet`), so `289-302` and `240-261` did not move;
  * and `ListView.tsx` changed (+23/-3: objectui#12292, objectui#12030 and
@@ -9955,8 +9998,7 @@ const OBJECT_TREE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 
 /**
  * `object-tree` (objectui `plugin-tree/src/ObjectTree.tsx` plus the registry
- * shell `plugin-tree/src/index.tsx`, read at the pin this repo builds against
- * — `.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * shell `plugin-tree/src/index.tsx`, read at objectui `b9814b334`, re-read there 2026-10-14:
  * every objectui file this record cites is byte-identical across the hop from
  * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
  * `1fb1ced36`, re-read there 2026-10-12:
@@ -10172,8 +10214,7 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * component-level `dataSource` binding can supply the object instead"; that
    * holds for them because each registers through `ElementDataSourceGate`,
    * which lowers the spec binding onto `objectName` before the renderer sees
-   * the node. `plugin-tree/src/index.tsx` does NOT: at the pin this repo
-   * builds against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+   * the node. `plugin-tree/src/index.tsx` does NOT: at objectui `b9814b334` (re-read there 2026-10-14:
    * re-COUNTED by the same method, 0 for the tree, 3 each for `plugin-gantt`,
    * `plugin-grid` and `plugin-calendar` and 4 for `plugin-map`; the tree, gantt
    * and map shells are byte-identical across the hop from `1fb1ced36` (`git
@@ -10606,8 +10647,7 @@ function objectTimelineItemsFitVariant() {
 /**
  * `object-timeline` (objectui `plugin-timeline/src/ObjectTimeline.tsx`, the
  * presentational `plugin-timeline/src/renderer.tsx` it composes into, and the
- * registry shell `plugin-timeline/src/index.tsx` — all read at the pin this
- * repo builds against (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+ * registry shell `plugin-timeline/src/index.tsx` — all read at objectui `b9814b334` (re-read there 2026-10-14:
  * every objectui file this record cites is byte-identical across the hop from
  * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
  * `1fb1ced36`, re-read there 2026-10-12:
@@ -10884,8 +10924,7 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
    * `schema.<key>` OR `props.<key>`, and a measurement that greps only the
    * first publishes a refusal for a key the renderer honours.
    *
-   * Read points at the pin this repo builds against (`.objectui-sha` =
-   * `b9814b334`, re-read there 2026-10-14:
+   * Read points at objectui `b9814b334` (re-read there 2026-10-14:
    * every objectui file this record cites is byte-identical across the hop from
    * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
@@ -11268,8 +11307,7 @@ export const ComponentPropsMap = {
   // `element:` vocabulary (`component-type-vocabulary.ts` derives the known
   // set from this map's keys), on the three-part evidence that vocabulary's
   // string-arm ledger asks of a type admitted without an enum member — all
-  // measured at the pin this repo builds against (`.objectui-sha` =
-  // `b9814b334`, re-read there 2026-10-14:
+  // measured at objectui `b9814b334` (re-read there 2026-10-14:
   // `public-blocks.ts`, `data-list.tsx` and `block-config.ts` are
   // byte-identical across the hop from `1fb1ced36` (`git diff --quiet`), so
   // `:117-118`, `:85`, `317` and `311-351` did not move; `block-types.ts`
@@ -11398,8 +11436,7 @@ export const ComponentPropsMap = {
   // #5068 gate skipped them and objectui's OWN mirror stood in as the
   // authority for map and gantt while tree's rung-1 `data` read stayed
   // undeclared on every face. Key sets measured from the renderers' read
-  // points at the pin this repo builds against (`.objectui-sha` =
-  // `b9814b334`, re-read there 2026-10-14:
+  // points at objectui `b9814b334` (re-read there 2026-10-14:
   // every objectui file this record cites is byte-identical across the hop from
   // `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
   // `1fb1ced36`, re-read there 2026-10-12:
@@ -11506,8 +11543,7 @@ export const ComponentPropsMap = {
   // type union's open string arm, and with no row here the #5068 gate skipped
   // it — so `object-timeline` was unjudged in both directions, a real key and
   // a typo riding through alike. Key set measured from the renderer's read
-  // points at the pin this repo builds against (`.objectui-sha` =
-  // `b9814b334`, re-read there 2026-10-14:
+  // points at objectui `b9814b334` (re-read there 2026-10-14:
   // every objectui file this record cites is byte-identical across the hop from
   // `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
   // `1fb1ced36`, re-read there 2026-10-12:

@@ -182,8 +182,8 @@ describe('FlowNodeSchema', () => {
       type: 'create_record',
       label: 'Create Account',
       // #5500 — was `object:`, the retired spelling the ADR-0087 D2 conversion
-      // `flow-node-crud-object-alias` rewrites at load (live through this major,
-      // retires at 18). A fixture is a teaching surface, so it spells the
+      // `flow-node-crud-object-alias` rewrote at load for protocol 17's window
+      // (retired from the load path at 18). A fixture is a teaching surface, so it spells the
       // canonical key the executor actually reads.
       config: {
         objectName: 'account',
@@ -440,7 +440,7 @@ describe('FlowSchema', () => {
             label: 'Get Opportunity',
             // #4924 — was `{ object, recordId }`, and GetRecordConfigSchema declares
             // NEITHER: `object` is the retired spelling the ADR-0087 D2 conversion
-            // `flow-node-crud-object-alias` rewrites at load, and `recordId` is not a
+            // `flow-node-crud-object-alias` rewrote at load, and `recordId` is not a
             // key any CRUD executor has ever read. CRUD nodes address rows through
             // `filter` only, so the id goes in as a filter VALUE. `outputVariable` is
             // what actually binds the row to a variable — without it the downstream

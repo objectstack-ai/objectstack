@@ -44,6 +44,7 @@ import {
   hasWildcardPattern,
   DEFAULT_CORS_ALLOW_HEADERS,
   DEFAULT_CORS_EXPOSE_HEADERS,
+  declaredEnvelopeForThrow,
 } from '@objectstack/plugin-hono-server';
 
 export interface ObjectStackHonoCorsOptions {
@@ -508,6 +509,33 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
     return c.json({ success: false, error: { code, message } }, status);
   };
 
+  /**
+   * [#23365] What BOTH catch arms below answer for a throw that escaped them.
+   *
+   * A throw that carries a declared ADR-0112 `status` and a registered `code`
+   * is answered as that envelope. Both arms used to read `statusCode` alone, so
+   * a declared `status` and `code` were lost: a missing record's
+   * `404 RECORD_NOT_FOUND`, the `/data` version refusals' `409` and `400`, and
+   * an authorization-store outage's `503` all left `dispatch()` and answered
+   * `500 INTERNAL_ERROR` on this host only.
+   *
+   * The recognition is `declaredEnvelopeForThrow`, the ONE rule #16545 landed
+   * for `@objectstack/plugin-hono-server`'s direct-mount routes, imported and
+   * ⛔ never restated here, so the two Hono doors answer one throw alike: the
+   * same two conditions, the same 5xx disclosure filter, and the same body
+   * (`details` and `userMessage` only when the producer declared them).
+   *
+   * A throw the recogniser does not accept takes the arm's answer exactly as
+   * before: a bare `Error` is still `500` carrying `code` and `message`, with
+   * no `cause`, and a throw declaring `statusCode` with no registered code
+   * keeps that status.
+   */
+  const thrownJson = (c: any, err: any) => {
+    const declared = declaredEnvelopeForThrow(err);
+    if (declared) return c.json(declared.body, declared.status);
+    return errorJson(c, err.message || 'Internal Server Error', err.statusCode || 500);
+  };
+
   const toResponse = (c: any, result: HttpDispatcherResult) => {
     if (result.handled) {
       if (result.response) {
@@ -779,7 +807,11 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       if (!result.handled) return yieldUnowned(c, next, () => toResponse(c, result));
       return toResponse(c, result);
     } catch (err: any) {
-      return errorJson(c, err.message || 'Internal Server Error', err.statusCode || 500);
+      // [#23365] The same rendering as the catch-all below (`thrownJson`). No
+      // in-repo producer was found that reaches this arm with a declared
+      // envelope (better-auth answers its own failures as a `Response`), so it
+      // takes the rule for uniformity: one rule for both arms, not two.
+      return thrownJson(c, err);
     }
   });
 
@@ -828,7 +860,9 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       const result = await dispatcher.dispatch(method, subPath, body, queryParams, { request: c.req.raw }, prefix);
       return toResponse(c, result);
     } catch (err: any) {
-      return errorJson(c, err.message || 'Internal Server Error', err.statusCode || 500);
+      // [#23365] A declared ADR-0112 envelope that left `dispatch()` (its foot
+      // catch re-raises everything but a denial) is answered as declared.
+      return thrownJson(c, err);
     }
   });
 

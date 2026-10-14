@@ -60,9 +60,9 @@
  *
  * Each row of the grid can open a full form for that row, and that form draws
  * more than the grid: it has room for the rich inputs a cell cannot hold. Its
- * fields are derived from the child object too, by a broader rule — measured
- * against objectui at the `.objectui-sha` pin `31971ff1e28f`
- * (`packages/plugin-form/src/deriveMasterDetail.ts`, `deriveFormFields`).
+ * fields are derived from the child object too, by a broader rule — the
+ * renderer's own derivation (its read point is recorded in
+ * `packages/spec/liveness/field.json`, row `inlineColumns`).
  * Every child field, in the field map's own order, except:
  *
  *   - a name in {@link INLINE_GRID_SYSTEM_FIELDS} or

@@ -325,27 +325,8 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
     check: 'check:scripts-typecheck',
     why: 'type-checks packages/spec/scripts/** (the generators and gate scripts themselves) under tsconfig.scripts.json — no artifact, and no debt ledger by design (#5475)',
   },
-  // #10274. Audits this package's own PROSE: a read-point record that says
-  // "`.objectui-sha` = `<sha>`" is asserting the pin this repo builds against,
-  // and #10137 moved the pin under four such records without anything failing.
-  //
-  // NO_GENERATOR, and here the classification is the SAFETY PROPERTY rather than
-  // a bookkeeping choice. The `gen:` a reader would reach for — rewrite each
-  // cited sha to the pin file — is the one operation this gate must never offer:
-  // the sha is not the record, the objectui file:line anchors beside it are, and
-  // they are only true of the tree they were counted in. Regenerating the sha
-  // alone would leave every record CLAIMING the current pin while its anchors
-  // still described the old one, i.e. it would convert a loud "unverifiable" into
-  // a silent lie. #10274 measured that as real, not theoretical: re-measuring the
-  // four records found two anchors that had been wrong since they were written.
-  // A failure here is always a re-measurement, never a command.
-  {
-    check: 'check:objectui-pin-citations',
-    why: 'audits spec source prose: a citation in the asserting spelling (`.objectui-sha` = `<sha>`) must equal the root pin file — no artifact, and deliberately no `gen:`, because rewriting the sha without re-measuring the anchors beside it is the failure mode (#10274)',
-  },
-  // #11344. The nearest sibling to `check:objectui-pin-citations` above, and
-  // classified NO_GENERATOR for the same reason rather than for a bookkeeping
-  // one. `llms.txt` is hand-kept prose that SHIPS in the tarball (`files`), and
+  // #11344. Classified NO_GENERATOR as a safety property rather than for a
+  // bookkeeping one. `llms.txt` is hand-kept prose that SHIPS in the tarball (`files`), and
   // the obvious `gen:` — restamp each count, drop each dead symbol — is the one
   // operation that must never be offered: the number is not the claim, the
   // sentence beside it is. Restamping `| integration | 7 | Connector (Database,

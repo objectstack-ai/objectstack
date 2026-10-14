@@ -135,21 +135,24 @@ async function boot(environmentId?: string) {
         engine.insert(NAME, { title }, { context: { isSystem: true } } as any);
 
     /**
-     * A package-less row of the object as it exists at rest — the save door
-     * resolves a package-less save of an item a package holds to that
-     * package's row, so such a row is only ever a stored one.
+     * A row of the object as it exists at rest, bound to `packageId` (`null`:
+     * no package). The save door writes neither once another package's row
+     * owns the object: it resolves a package-less save to that package's row,
+     * and [#23416, ADR-0029 D9.9] refuses a save naming a second package. So
+     * such a row is only ever a stored one.
      */
-    const seedUnboundRow = async () => {
-        const body = ticket('Ticket unbound');
+    const seedStoredRow = async (packageId: string | null) => {
+        const body = ticket(`Ticket ${packageId ?? 'unbound'}`);
         const now = new Date().toISOString();
         await engine.insert('sys_metadata', {
-            id: 'seed_active_unbound', type: 'object', name: NAME,
-            package_id: null, state: 'active', metadata: JSON.stringify(body), checksum: hashSpec(body, 'object'),
+            id: `seed_active_${packageId ?? 'unbound'}`, type: 'object', name: NAME,
+            package_id: packageId, state: 'active', metadata: JSON.stringify(body), checksum: hashSpec(body, 'object'),
             version: 1, created_at: now, updated_at: now,
         }, { context: { isSystem: true } } as any);
     };
+    const seedUnboundRow = () => seedStoredRow(null);
 
-    return { save, remove, storedPackages, hasTable, records, insertRecord, seedUnboundRow };
+    return { save, remove, storedPackages, hasTable, records, insertRecord, seedStoredRow, seedUnboundRow };
 }
 
 const ok = (res: any) => {
@@ -167,10 +170,12 @@ const refusedConflict = (res: any) => {
 /** Two packages' rows of the object, its table and one record — the card's setup. */
 async function twoPackageObject(environmentId?: string) {
     const h = await boot(environmentId);
-    // The registry holds one owner per object name, so the second package's
-    // write-through is refused (and logged) at save time; the row is stored.
+    // [#23416, ADR-0029 D9.9] The save door refuses a save into a second
+    // package of an object a runtime-authored row owns, so Q's row is one
+    // stored before that refusal existed: seeded, not saved. The registry
+    // holds P, as the refused write-through left it.
     ok(await h.save(P));
-    ok(await h.save(Q));
+    await h.seedStoredRow(Q);
     await h.insertRecord('kept');
     expect(await h.storedPackages()).toEqual([P, Q]);
     expect(await h.hasTable()).toBe(true);

@@ -206,7 +206,7 @@ function makeQl(tables: Record<string, any[]>, opts: { epoch?: boolean; middlewa
  */
 async function armedQl(tables: Record<string, any[]>): Promise<Ql> {
   const ql = makeQl(tables);
-  await resolveAuthzContext({ ql, headers: {} });
+  await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {} });
   expect(ql.calls.length).toBe(0);
   expect(ql.middlewareCount()).toBe(1);
   return ql;
@@ -379,6 +379,7 @@ async function resolveBoth(c: CallerClass) {
 
   const memoQl = await armedQl(makeTables());
   const withMemo = await resolveAuthzContext({
+    userAuthGates: undefined,
     ql: memoQl,
     headers: c.headers ?? {},
     getSession: sessionReadThatResolves(memoQl, c.fixture),
@@ -388,6 +389,7 @@ async function resolveBoth(c: CallerClass) {
 
   const baselineQl = makeQl(makeTables());
   const baseline = await resolveAuthzContext({
+    userAuthGates: undefined,
     ql: baselineQl,
     headers: c.headers ?? {},
     getSession: sessionReadOnly(c.fixture),
@@ -424,20 +426,20 @@ describe('request-scoped grants memo — the round-trip count', () => {
     expect(oneResolution).toBe(6);
 
     const memoQl = await armedQl(makeTables());
-    const withMemo = await resolveAuthzContext({ ql: memoQl, headers: {}, getSession: sessionReadThatResolves(memoQl, member), nowMs: T0 });
+    const withMemo = await resolveAuthzContext({ userAuthGates: undefined, ql: memoQl, headers: {}, getSession: sessionReadThatResolves(memoQl, member), nowMs: T0 });
     expect(memoQl.calls.length).toBe(oneResolution);
     expect(multiset(memoQl.calls)).toEqual(multiset(standaloneQl.calls));
 
     // An engine without the write-epoch seam: the memo declines, and the
     // request makes the two resolutions it made before the memo existed.
     const noSeamQl = makeQl(makeTables(), { epoch: false });
-    const noSeam = await resolveAuthzContext({ ql: noSeamQl, headers: {}, getSession: sessionReadThatResolves(noSeamQl, member), nowMs: T0 });
+    const noSeam = await resolveAuthzContext({ userAuthGates: undefined, ql: noSeamQl, headers: {}, getSession: sessionReadThatResolves(noSeamQl, member), nowMs: T0 });
     expect(noSeamQl.calls.length).toBe(2 * oneResolution);
     expect(noSeam).toEqual(withMemo);
 
     // …and one that cannot register a middleware (no write observer) declines too.
     const noMiddlewareQl = makeQl(makeTables(), { middleware: false });
-    const noMiddleware = await resolveAuthzContext({ ql: noMiddlewareQl, headers: {}, getSession: sessionReadThatResolves(noMiddlewareQl, member), nowMs: T0 });
+    const noMiddleware = await resolveAuthzContext({ userAuthGates: undefined, ql: noMiddlewareQl, headers: {}, getSession: sessionReadThatResolves(noMiddlewareQl, member), nowMs: T0 });
     expect(noMiddlewareQl.calls.length).toBe(2 * oneResolution);
     expect(noMiddleware).toEqual(withMemo);
   });
@@ -445,11 +447,11 @@ describe('request-scoped grants memo — the round-trip count', () => {
   it('the request that registers the engine\'s write observer stores nothing for it; the next one is served', async () => {
     const ql = makeQl(makeTables());
     expect(ql.middlewareCount()).toBe(0);
-    const first = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0 });
+    const first = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0 });
     expect(ql.middlewareCount()).toBe(1);
     expect(ql.calls.length).toBe(12);
     const before = ql.calls.length;
-    const second = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0 });
+    const second = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0 });
     expect(ql.calls.length - before).toBe(6);
     expect(ql.middlewareCount()).toBe(1);
     expect(second).toEqual(first);
@@ -474,14 +476,14 @@ describe('request-scoped grants memo — isolation', () => {
       return payload;
     };
 
-    const pOwner = resolveAuthzContext({ ql, headers: {}, getSession: gated(sessionReadThatResolves(ql, owner), ownerRead), nowMs: T0, tenancyPosture: 'isolated' });
-    const pMember = resolveAuthzContext({ ql, headers: {}, getSession: gated(sessionReadThatResolves(ql, member), memberRead), nowMs: T0, tenancyPosture: 'isolated' });
+    const pOwner = resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: gated(sessionReadThatResolves(ql, owner), ownerRead), nowMs: T0, tenancyPosture: 'isolated' });
+    const pMember = resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: gated(sessionReadThatResolves(ql, member), memberRead), nowMs: T0, tenancyPosture: 'isolated' });
     await Promise.all([ownerRead.promise, memberRead.promise]);
     release.resolve();
     const [ownerCtx, memberCtx] = await Promise.all([pOwner, pMember]);
 
-    const baselineOwner = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(owner), nowMs: T0, tenancyPosture: 'isolated' });
-    const baselineMember = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
+    const baselineOwner = await resolveAuthzContext({ userAuthGates: undefined, ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(owner), nowMs: T0, tenancyPosture: 'isolated' });
+    const baselineMember = await resolveAuthzContext({ userAuthGates: undefined, ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(ownerCtx).toEqual(baselineOwner);
     expect(memberCtx).toEqual(baselineMember);
     expect(ownerCtx.userId).toBe('u_owner');
@@ -497,14 +499,14 @@ describe('request-scoped grants memo — isolation', () => {
     const ql = await armedQl(tables);
     const member = sessionOf('u_member', 'member@x.com', 'org_a');
 
-    const first = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
+    const first = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(first.positions).toContain('auditor');
 
     // Revoked with NO epoch bump and outside the chain: what retires the first
     // request's resolution is the end of that request, and nothing else.
     tables.sys_user_position = withoutMembersAuditor(tables.sys_user_position);
     const before = ql.calls.length;
-    const second = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
+    const second = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(second.positions).not.toContain('auditor');
     expect(second.permissions).not.toContain('read_all');
     expect(ql.calls.length - before).toBe(6);
@@ -518,6 +520,7 @@ describe('request-scoped grants memo — isolation', () => {
 
     const read = sessionReadThatResolves(ql, member);
     await resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers: {},
       getSession: async () => {
@@ -540,6 +543,7 @@ describe('request-scoped grants memo — isolation', () => {
     const qlB = await armedQl(makeTables());
     const member = sessionOf('u_member', 'member@x.com', 'org_a');
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql: qlA,
       headers: {},
       getSession: sessionReadThatResolves(qlB, member),
@@ -548,7 +552,7 @@ describe('request-scoped grants memo — isolation', () => {
     });
     expect(qlB.calls.length).toBe(6);
     expect(qlA.calls.length).toBe(6);
-    const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
+    const baseline = await resolveAuthzContext({ userAuthGates: undefined, ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
   });
 
@@ -556,12 +560,14 @@ describe('request-scoped grants memo — isolation', () => {
     const ql = await armedQl(makeTables());
     const member = sessionOf('u_member', 'member@x.com', 'org_a');
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers: {},
       getSession: async () => {
         // The inner call resolves twice-over-once in ITS OWN scope: its session
         // read's resolution serves its step 2 (6 reads), and that scope closes.
         const inner = await resolveAuthzContext({
+          userAuthGates: undefined,
           ql,
           headers: {},
           getSession: sessionReadThatResolves(ql, member),
@@ -576,7 +582,7 @@ describe('request-scoped grants memo — isolation', () => {
     });
     // Inner 8, outer step 2 afresh 8.
     expect(ql.calls.length).toBe(12);
-    const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
+    const baseline = await resolveAuthzContext({ userAuthGates: undefined, ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
   });
 });
@@ -586,7 +592,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
   const postWriteBaseline = async (nowMs = T0) => {
     const after = makeTables();
     after.sys_user_position = withoutMembersAuditor(after.sys_user_position);
-    return resolveAuthzContext({ ql: makeQl(after), headers: {}, getSession: sessionReadOnly(member), nowMs, tenancyPosture: 'isolated' });
+    return resolveAuthzContext({ userAuthGates: undefined, ql: makeQl(after), headers: {}, getSession: sessionReadOnly(member), nowMs, tenancyPosture: 'isolated' });
   };
 
   it('a revocation that bumped the epoch BEFORE the first resolution opened and lands before step 2', async () => {
@@ -601,6 +607,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
     });
     const read = sessionReadThatResolves(ql, member);
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers: {},
       getSession: async () => {
@@ -630,7 +637,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
       await landing.promise;
       tables.sys_user_position = withoutMembersAuditor(tables.sys_user_position);
     });
-    const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(ql.calls.length).toBe(12);
     // Not landed yet: a fresh read still sees the row, and so did step 2.
     expect(ctx.positions).toContain('auditor');
@@ -643,6 +650,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
     const ql = await armedQl(tables);
     const read = sessionReadThatResolves(ql, member);
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers: {},
       getSession: async () => {
@@ -664,6 +672,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
     const ql = await armedQl(makeTables());
     const read = sessionReadThatResolves(ql, member);
     await resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers: {},
       getSession: async () => {
@@ -686,7 +695,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
       if (!started && object === 'sys_metadata_activation') { started = true; w = ql.write('sys_audit_log', 'insert', async () => {}); }
       return find(object, opts);
     };
-    await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
+    await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member), nowMs: T0, tenancyPosture: 'isolated' });
     await w;
     expect(ql.calls.length).toBe(12);
   });
@@ -694,10 +703,10 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
   it('a step-2 clock later than the first resolution\'s, inside its validity window, is served', async () => {
     // temp_role is valid until T0 + 1 day: T0 + 1 hour is inside the window.
     const ql = await armedQl(makeTables());
-    const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0), nowMs: T0 + HOUR, tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0), nowMs: T0 + HOUR, tenancyPosture: 'isolated' });
     expect(ql.calls.length).toBe(6);
     expect(ctx.positions).toContain('temp_role');
-    const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0 + HOUR, tenancyPosture: 'isolated' });
+    const baseline = await resolveAuthzContext({ userAuthGates: undefined, ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0 + HOUR, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
   });
 
@@ -705,16 +714,16 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
     // The session read resolves at T0 (temp_role active until T0 + 1 day);
     // step 2 asks at T0 + 2 days, past that boundary.
     const ql = await armedQl(makeTables());
-    const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0), nowMs: T0 + 2 * DAY, tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0), nowMs: T0 + 2 * DAY, tenancyPosture: 'isolated' });
     expect(ctx.positions).not.toContain('temp_role');
     expect(ctx.permissions).not.toContain('temp_tools');
     expect(ql.calls.length).toBe(12);
-    const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0 + 2 * DAY, tenancyPosture: 'isolated' });
+    const baseline = await resolveAuthzContext({ userAuthGates: undefined, ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0 + 2 * DAY, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
 
     // A step-2 clock EARLIER than the resolution it would be served.
     const ql2 = await armedQl(makeTables());
-    await resolveAuthzContext({ ql: ql2, headers: {}, getSession: sessionReadThatResolves(ql2, member, T0), nowMs: T0 - DAY, tenancyPosture: 'isolated' });
+    await resolveAuthzContext({ userAuthGates: undefined, ql: ql2, headers: {}, getSession: sessionReadThatResolves(ql2, member, T0), nowMs: T0 - DAY, tenancyPosture: 'isolated' });
     expect(ql2.calls.length).toBe(12);
   });
 
@@ -722,6 +731,7 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
     const ql = await armedQl(makeTables());
     const read = sessionReadThatResolves(ql, member);
     await resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers: {},
       getSession: async () => {
@@ -745,9 +755,9 @@ describe('request-scoped grants memo — step 2 reads afresh whenever a fresh re
       return find(object, opts);
     };
     const sink: { payload?: any; grants?: UserAuthzGrants } = {};
-    const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0, sink), nowMs: T0, tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0, sink), nowMs: T0, tenancyPosture: 'isolated' });
     expect(sink.grants).toBeUndefined();
-    const baseline = await resolveAuthzContext({ ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
+    const baseline = await resolveAuthzContext({ userAuthGates: undefined, ql: makeQl(makeTables()), headers: {}, getSession: sessionReadOnly(member), nowMs: T0, tenancyPosture: 'isolated' });
     expect(ctx).toEqual(baseline);
   });
 });
@@ -757,7 +767,7 @@ describe('request-scoped grants memo — served values are clones', () => {
     const ql = await armedQl(makeTables());
     const sink: { payload?: any; grants?: UserAuthzGrants } = {};
     const member = sessionOf('u_member', 'member@x.com', 'org_a');
-    const ctx = await resolveAuthzContext({ ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0, sink), nowMs: T0, tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, ql, headers: {}, getSession: sessionReadThatResolves(ql, member, T0, sink), nowMs: T0, tenancyPosture: 'isolated' });
     expect(ql.calls.length).toBe(6);
     expect(ctx.positions).toEqual(sink.payload.user.positions);
     expect(ctx.positions).not.toBe(sink.payload.user.positions);

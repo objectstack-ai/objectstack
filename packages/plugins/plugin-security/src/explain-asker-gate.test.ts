@@ -176,14 +176,14 @@ beforeAll(async () => {
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
   }, SYS);
   await e.insert('sys_user_permission_set', {
-    id: 'ups_ag_member', user_id: MEMBER, permission_set_id: 'ps_ag_member', permission_set: MEMBER_SET.name,
+    id: 'ups_ag_member', user_id: MEMBER, permission_set: MEMBER_SET.name,
   }, SYS);
   await e.insert('sys_permission_set', {
     id: 'ps_ag_edit_only', name: EDIT_ONLY_SET.name, label: EDIT_ONLY_SET.name, organization_id: null, managed_by: 'admin',
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
   }, SYS);
   await e.insert('sys_user_permission_set', {
-    id: 'ups_ag_edit_only', user_id: EDIT_ONLY_USER, permission_set_id: 'ps_ag_edit_only', permission_set: EDIT_ONLY_SET.name,
+    id: 'ups_ag_edit_only', user_id: EDIT_ONLY_USER, permission_set: EDIT_ONLY_SET.name,
   }, SYS);
   await e.insert(BOARD, [
     { id: HIDDEN, name: 'hidden', owner_id: 'usr_ag_owner' },

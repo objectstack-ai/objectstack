@@ -61,7 +61,7 @@
  * `page-component-visibility-to-visibleWhen` rewrites at load, against
  * `visibleWhen`, the canonical spelling that converts nothing. (The pair used
  * to differ in the header's `description` against `subtitle`; that conversion,
- * `page-component-visibility-to-visibleWhen`, retired from the load path at protocol 18 and
+ * `page-header-subtitle-alias`, retired from the load path at protocol 18 and
  * the fixture was re-pointed here, as the paragraph below prescribes.) So the pin discriminates on the
  * CONVERSION and not on "a page is present" — measured on the pair before it
  * was written: `visibility` → text `--strict` 1, `--json --strict` 1, `--json`

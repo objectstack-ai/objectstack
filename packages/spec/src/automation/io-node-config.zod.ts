@@ -93,46 +93,50 @@ const IO_NODE_CONFIG_HISTORY =
  * `source` shape (#3796 / #4045).
  *
  * Each is a RETIRED SPELLING, not a typo, so a bare "did you mean" would
- * under-serve it: `flow-node-notify-config-aliases` rewrites all five at load
- * (including the `registerFlow` rehydration seam). Since #4923 that rewrite
- * also DELETES a retired spelling that merely repeats the canonical key's
- * value, which sharpens what a surviving one means: it survived because the
- * canonical key is also present and says something DIFFERENT, and the
+ * under-serve it. `flow-node-notify-config-aliases` rewrote all five at load
+ * for protocol 17's window and left the load path at 18 (#23487), so each
+ * prescription is the upgrade prescription, naming the release. It answers
+ * two readers: an author, who wrote the retired spelling and owes the rename;
+ * and a stored flow, which reaches this parse after the rehydration seam
+ * replayed the conversion, and still carries the spelling only because the
+ * canonical key is also present and says something DIFFERENT (#4923) — the
  * conversion will not pick between two values the author wrote.
- *
- * So each prescription answers both readings — the rename, for whoever parses
- * this contract directly, and a reconciliation naming BOTH keys, for whoever
- * came through the load path.
  */
 const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
   to:
-    'The recipient slot is `recipients`. `to` is the pre-17 spelling, rewritten at load by the ADR-0087 D2 '
-    + 'conversion `flow-node-notify-config-aliases` — so if `recipients` is also present, the two name DIFFERENT '
-    + 'recipients and the conversion kept both rather than choosing who gets notified. Decide the '
-    + 'recipients, put them on `recipients`, and delete `to`.',
+    'The `notify` node config key `to` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the email-idiom '
+    + 'spelling the loader rewrote to `recipients` until this release. Use `recipients`. Rename the key; the value '
+    + '(who gets notified) is unchanged. If `recipients` is also present, the two name DIFFERENT recipients — '
+    + 'decide who gets notified, put them on `recipients`, and delete `to`. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   subject:
-    'The heading slot is `title`. `subject` is the pre-17 spelling rewritten at load by '
-    + '`flow-node-notify-config-aliases`; delete it once `title` carries the text. If `title` is also present with '
-    + 'a DIFFERENT value, the conversion kept both rather than choosing — reconcile them onto `title`.',
+    'The `notify` node config key `subject` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the '
+    + 'email-idiom spelling the loader rewrote to `title` until this release. Use `title`. Rename the key; the '
+    + 'value (the heading text) is unchanged. If `title` is also present with a DIFFERENT value, reconcile them '
+    + 'onto `title`. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   body:
-    'The body slot is `message`. `body` is the pre-17 spelling rewritten at load by '
-    + '`flow-node-notify-config-aliases`; delete it once `message` carries the text. If `message` is also present '
-    + 'with a DIFFERENT value, the conversion kept both rather than choosing — reconcile them onto `message`. '
-    + '(`body` IS canonical on an `http` node — the key is wrong only here.)',
+    'The `notify` node config key `body` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the '
+    + 'email-idiom spelling the loader rewrote to `message` until this release. Use `message`. Rename the key; '
+    + 'the value (the body text) is unchanged. If `message` is also present with a DIFFERENT value, reconcile '
+    + 'them onto `message`. (`body` IS canonical on an `http` node — the key is wrong only here.) '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   url:
-    'The click-through slot is `actionUrl`. It was renamed at 17 because `url` elsewhere on the platform means '
-    + '"HTTP endpoint to call" (`http` node, webhooks), a different concept from an in-app click target. '
-    + '`flow-node-notify-config-aliases` rewrites it at load; delete it once `actionUrl` carries the link. If '
-    + '`actionUrl` is also present with a DIFFERENT link, the conversion kept both rather than choosing where the '
-    + 'notification points — reconcile them onto `actionUrl`.',
+    'The `notify` node config key `url` was removed in @objectstack/spec 18 (ADR-0087 D2) — `url` elsewhere on '
+    + 'the platform means "HTTP endpoint to call" (`http` node, webhooks), a different concept from an in-app '
+    + 'click target, and the loader rewrote it to `actionUrl` until this release. Use `actionUrl`. Rename the '
+    + 'key; the value (the click-through link) is unchanged. If `actionUrl` is also present with a DIFFERENT '
+    + 'link, reconcile them onto `actionUrl`. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   source:
-    'The click-through target is the flat PAIR `sourceObject` + `sourceId`, never a nested `source: { object, id }`. '
-    + '`flow-node-notify-config-aliases` lifts the nested shape at load and drops it once every part is accounted '
-    + 'for, so a surviving `source` means a part of it holds a DIFFERENT value from the flat `sourceObject` / '
-    + '`sourceId` already in that slot, and the conversion declined to pick — reconcile onto the flat pair '
-    + 'and delete `source`. '
+    'The nested `notify` node config `source: { object, id }` was removed in @objectstack/spec 18 (ADR-0087 D2) — '
+    + 'the click-through target is the flat PAIR `sourceObject` + `sourceId`, which the loader lifted the nested '
+    + 'shape onto until this release. Use `sourceObject` and `sourceId`. Move `source.object` to `sourceObject` '
+    + 'and `source.id` to `sourceId`; the values are unchanged. If the flat pair is also present with a DIFFERENT '
+    + 'value, reconcile onto the flat pair and delete `source`. '
     + 'Note the pair only takes effect together: a half-specified target is dropped so the inbox never renders a '
-    + 'dead link.',
+    + 'dead link. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 };
 
 /**
@@ -525,8 +529,11 @@ function notifyLiteralRefusals(cfg: {
  *    tolerates (drops) the half-specified shape rather than rejecting it.
  *  - The historical aliases (`to`/`subject`/`body`/`url`, nested
  *    `source: { object, id }`) are NOT part of this contract: the ADR-0087 D2
- *    conversion `flow-node-notify-config-aliases` rewrites them at load, so the
- *    executor only ever sees the canonical keys below (#3796, #4045).
+ *    conversion `flow-node-notify-config-aliases` rewrote them at load for
+ *    protocol 17's window (#3796, #4045) and, retired from the load path at 18
+ *    (#23487), rewrites only stored flows, so an authored alias meets
+ *    {@link NOTIFY_KEY_GUIDANCE} and the executor only ever sees the canonical
+ *    keys below.
  */
 export const NotifyConfigSchema = lazySchema(() => strictObject({
   surface: 'this notify node config',

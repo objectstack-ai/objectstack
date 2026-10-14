@@ -43,8 +43,8 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
-| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own |
-| **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
+| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location |
+| **patch** | `Record<string, any>` | optional | Static field values the declarative `operation: 'update'` writes, forwarded to the runner: `ActionSchema`'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: 'update'` (it would be silently dropped) |
 | **confirmText** | `string` | optional | Confirmation question asked before the action runs |
 | **successMessage** | `string` | optional | Toast shown when the action succeeds |
 | **errorMessage** | `string` | optional | Toast shown when the action fails, in place of the raw error |
@@ -101,8 +101,8 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
-| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own |
-| **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
+| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location |
+| **patch** | `Record<string, any>` | optional | Static field values the declarative `operation: 'update'` writes, forwarded to the runner: `ActionSchema`'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: 'update'` (it would be silently dropped) |
 | **confirmText** | `string` | optional | Confirmation question asked before the action runs |
 | **successMessage** | `string` | optional | Toast shown when the action succeeds |
 | **errorMessage** | `string` | optional | Toast shown when the action fails, in place of the raw error |
@@ -137,8 +137,8 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
-| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own |
-| **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
+| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location |
+| **patch** | `Record<string, any>` | optional | Static field values the declarative `operation: 'update'` writes, forwarded to the runner: `ActionSchema`'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: 'update'` (it would be silently dropped) |
 | **confirmText** | `string` | optional | Confirmation question asked before the action runs |
 | **successMessage** | `string` | optional | Toast shown when the action succeeds |
 | **errorMessage** | `string` | optional | Toast shown when the action fails, in place of the raw error |
@@ -191,8 +191,8 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
-| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own |
-| **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
+| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, a `patch` or `params` gives the values to write, and `list_toolbar` is not a location |
+| **patch** | `Record<string, any>` | optional | Static field values the declarative `operation: 'update'` writes, forwarded to the runner: `ActionSchema`'s own record of field values, merged UNDER the values `params` supplies. Refused on a row without `operation: 'update'` (it would be silently dropped) |
 | **confirmText** | `string` | optional | Confirmation question asked before the action runs |
 | **successMessage** | `string` | optional | Toast shown when the action succeeds |
 | **errorMessage** | `string` | optional | Toast shown when the action fails, in place of the raw error |

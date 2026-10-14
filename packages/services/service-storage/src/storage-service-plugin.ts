@@ -1158,6 +1158,25 @@ function buildAuthSessionResolver(
   };
 }
 
+/** The slice of the kernel's `auth` service the storage family's two posture readers use. */
+type GateAuthService = {
+  isAuthGateActive?(): boolean;
+  resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
+};
+
+/**
+ * The kernel's `auth` service, or `undefined` when none is registered (a
+ * kernel composed without `plugin-auth`). One lookup for both posture readers:
+ * the family door's gate reader and the download authorizer's resolver.
+ */
+function resolveGateAuthService(registry: StorageGateRegistry): GateAuthService | undefined {
+  try {
+    return registry.getService<GateAuthService>('auth') ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * ADR-0069 — read a request's session user for the authentication-policy gate
  * the storage family's door asks (`registerStorageFamily`). `undefined` when
@@ -1190,16 +1209,7 @@ function buildAuthGateSessionReader(
   registry: StorageGateRegistry,
   engine: IDataEngine | null,
 ): StorageGatedSessionReader | undefined {
-  type GateAuthService = {
-    isAuthGateActive?(): boolean;
-    resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
-  };
-  let authService: GateAuthService | undefined;
-  try {
-    authService = registry.getService<GateAuthService>('auth');
-  } catch {
-    return undefined;
-  }
+  const authService = resolveGateAuthService(registry);
   if (!authService) return undefined;
   const getSession = buildGetSession(registry);
   if (!getSession) return undefined;
@@ -1380,7 +1390,23 @@ function buildFileReadAuthorizer(
       // fix. Raised INSIDE this `try`, so an outage takes the relay (commit 6a180e42d) in
       // the `catch` below rather than a new net.
       const tenancyPosture = await resolveAdmissionTenancyPosture(registry);
-      const authz = await resolveAuthzContext({ ql: engine, headers, getSession, tenancyPosture });
+      // [#23455] The auth service's per-user posture computation, named here
+      // as every key-admitting seam names it. This authorizer is not a second
+      // ADR-0069 gate: every route that reaches it is mounted behind the
+      // family's door (`mountFamilyRoute` in `storage-routes.ts`), whose gate
+      // reader (`buildAuthGateSessionReader`) has already refused a held
+      // owner's key on this request with the posture's `403`, and both are
+      // bound by `composeStorageRoutes` from the same `auth` service. Passing
+      // the source keeps the resolved context truthful (a held key resolves
+      // as a held principal carrying `authGate`) instead of reading a held
+      // key as a plain admission here.
+      const authz = await resolveAuthzContext({
+        ql: engine,
+        headers,
+        getSession,
+        tenancyPosture,
+        userAuthGates: userAuthGateSourceOf(resolveGateAuthService(registry)),
+      });
       if (!authz.userId) return 'unauthenticated';
 
       // Uploader / owner may always download.

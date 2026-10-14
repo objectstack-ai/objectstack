@@ -63,10 +63,19 @@ describe('SharingLevel', () => {
     // no code path granted any of those verbs — both gates matched
     // `edit`/`full` alike, so it was byte-equivalent to `edit` while telling
     // admins otherwise. Declared-but-unenforced (ADR-0078 / ADR-0049), same
-    // reason `queue` and `guest` are rejected above. Stacks still authoring it
-    // are rewritten at load by the `sharing-rule-access-level-full-to-edit`
-    // conversion, so this rejection is reachable only via a direct parse.
-    expect(() => SharingLevel.parse('full')).toThrow();
+    // reason `queue` and `guest` are rejected above. Its conversion
+    // (`sharing-rule-access-level-full-to-edit`) left the load path at 18, so
+    // this rejection is what an author meets at every door — and it is the
+    // upgrade prescription naming `edit` and the release, never zod's bare
+    // "expected one of".
+    const refused = SharingLevel.safeParse('full');
+    expect(refused.success).toBe(false);
+    expect(refused.error!.issues).toHaveLength(1);
+    expect(refused.error!.issues[0]!.code).toBe('invalid_value');
+    const message = refused.error!.issues[0]!.message;
+    expect(message).toContain("`accessLevel: 'full'` was removed in @objectstack/spec 18");
+    expect(message).toContain("Use `accessLevel: 'edit'`");
+    expect(message).not.toMatch(/Expected one of/);
   });
 });
 

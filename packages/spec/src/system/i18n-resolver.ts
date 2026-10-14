@@ -4367,14 +4367,13 @@ export function resolveFlowScreenTitle(
  * decision (server-side vs client-side application) belonged to the
  * downstream runner card of #11287, and that card took the client side.
  * objectui's `FlowRunner` overlays `flows.<flow>.screens` on the screen it
- * draws, read at the `.objectui-sha` pin `f8a9d0fb`, and the ledger's
- * `flows.screens` row is `live` citing it. This function stays unregistered
+ * draws, and the ledger's `flows.screens` row is `live` citing it. This function stays unregistered
  * because the server-side route is not the one taken. `flows.<flow>.label`
  * takes the same client side: `FlowRunner` hands this function the authored
  * label the engine serves on every run result as `AutomationResult.flowLabel`,
  * and draws the answer (the API name when no label was served) in its header
- * and its completion toast, read at the `.objectui-sha` pin `0abd4f9f8`. Both
- * `flows` rows in the ledger are `live`. The terminal toasts and the option
+ * and its completion toast. Both `flows` rows in the ledger are `live`, and
+ * cite these reads. The terminal toasts and the option
  * labels (#22507) take the same client side — the runner hands the served
  * `successMessage` / `errorMessage` to this function as it does the label,
  * and overlays each served field's options through

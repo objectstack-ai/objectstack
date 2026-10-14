@@ -28,5 +28,5 @@ export const entry: SemanticMigration = {
     'Every page action row\'s `operation` is absent or `\'update\'`, and no row with `operation: \'update\'` carries '
     + '`onSuccess`; `os validate` reports no `component-props-invalid` finding at `properties.operation`, '
     + '`properties.actions.N.operation`, or at the `onSuccess` of an `operation: \'update\'` row, and every such row '
-    + 'parses as before.',
+    + 'parses as before unless `ui-page-action-row-declarative-update-rules` refuses it.',
 };

@@ -75,7 +75,9 @@ describe('CRUD config contracts — an unknown key is refused, not stripped', ()
       const message = unknownKeyMessage(schema, { ...base, object: 'lead' })!;
       expect(message).toContain(`this ${nodeType} node config`);
       expect(message).toContain('`objectName`');
-      expect(message).toContain('flow-node-crud-object-alias');
+      // The upgrade prescription since the conversion left the load path at 18.
+      expect(message).toContain('`object` was removed in @objectstack/spec 18');
+      expect(message).toContain('Use `objectName`. Rename the key');
       // The distance claim in the schema's comment, pinned: without the
       // curated entry this key would get NO suggestion at all.
       expect(message).not.toContain('`object` → ');
@@ -90,7 +92,8 @@ describe('CRUD config contracts — an unknown key is refused, not stripped', ()
     '%s: prescribes `filter` for the retired `filters` spelling, and names the match-everything-write hazard',
     (_nodeType, schema, base) => {
       const message = unknownKeyMessage(schema, { ...base, filters: { status: 'stale' } })!;
-      expect(message).toContain('flow-node-crud-filter-alias');
+      expect(message).toContain('`filters` was removed in @objectstack/spec 18');
+      expect(message).toContain('Use `filter`. Rename the key');
       expect(message).toContain('match-everything write');
       expect(message, 'the prescription names the hazard, never a tracker id').not.toMatch(/#\d{3,5}/);
     },
@@ -101,7 +104,7 @@ describe('CRUD config contracts — an unknown key is refused, not stripped', ()
     // not declare. `create_record` is outside `flow-node-crud-filter-alias`'s
     // node-type set precisely because it has no filter.
     const message = unknownKeyMessage(CreateRecordConfigSchema, { objectName: 'task', filters: {} })!;
-    expect(message).not.toContain('flow-node-crud-filter-alias');
+    expect(message).not.toContain('Use `filter`');
     expect(message).not.toContain('`filter` (singular)');
   });
 
@@ -412,7 +415,8 @@ describe('MapConfigSchema — an unknown key is refused, not stripped', () => {
   it('prescribes `flowName` for the undeclared `flow` fallback', () => {
     const message = unknownKeyMessage(MapConfigSchema, { collection: { dialect: 'cel', source: 'tasks' }, flowName: 'per_row', flow: 'ignored' })!;
     expect(message).toContain('this map node config');
-    expect(message).toContain('flow-node-map-flow-alias');
+    expect(message).toContain('`flow` was removed in @objectstack/spec 18');
+    expect(message).toContain('Use `flowName`');
     expect(message).toMatch(/delete/i);
   });
 
