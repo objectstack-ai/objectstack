@@ -404,8 +404,8 @@ describe('validatePageFieldBindings — a related list splits its child and pare
         filter: [{ field: 'ghost_filter', operator: 'equals', value: 'x' }],
       },
     }).map(([, , path, message]) => [path, message])).toEqual([
-      [`${LIST}.sort[0]`, expect.stringContaining('"ghost_sort" is not a field on object "crm_account"')],
-      [`${LIST}.filter[0]`, expect.stringContaining('"ghost_filter" is not a field on object "crm_account"')],
+      [`${LIST}.sort[0].field`, expect.stringContaining('"ghost_sort" is not a field on object "crm_account"')],
+      [`${LIST}.filter[0].field`, expect.stringContaining('"ghost_filter" is not a field on object "crm_account"')],
       [`${LIST}.relationshipField`, expect.stringContaining('"ghost_fk" is not a field on object "crm_account"')],
     ]);
   });
