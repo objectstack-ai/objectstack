@@ -30,7 +30,9 @@ export function plainMessage(over: Record<string, string | null> = {}, body = 'H
 
 /**
  * A message forwarded AS AN ATTACHMENT (RFC 2046 §5.2.1): the forwarder's note
- * plus the original message as a `message/rfc822` part.
+ * plus the original message as a `message/rfc822` part — or, with
+ * `mediaType: 'message/global'`, as the internationalized part of RFC 6532
+ * §3.7, optionally base64-encoded (that type allows any transfer encoding).
  */
 let boundarySeq = 0;
 
@@ -39,6 +41,8 @@ export function forwardAsAttachment(options: {
   to?: string;
   messageId?: string;
   original: string;
+  mediaType?: 'message/rfc822' | 'message/global';
+  base64?: boolean;
 }): string {
   // A boundary of its own per message, as every client mints one: a forward
   // nested inside another must not share its delimiter.
@@ -59,10 +63,13 @@ export function forwardAsAttachment(options: {
       '',
       "See the customer's question attached.",
       `--${boundary}`,
-      'Content-Type: message/rfc822',
+      `Content-Type: ${options.mediaType ?? 'message/rfc822'}`,
+      ...(options.base64 ? ['Content-Transfer-Encoding: base64'] : []),
       'Content-Disposition: attachment; filename="question.eml"',
       '',
-      options.original,
+      options.base64
+        ? (Buffer.from(options.original, 'utf8').toString('base64').match(/.{1,76}/g) ?? []).join('\r\n')
+        : options.original,
       `--${boundary}--`,
       '',
     ].join('\r\n'),
