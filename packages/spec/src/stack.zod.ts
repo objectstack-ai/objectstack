@@ -63,7 +63,11 @@ import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
 
 import { ApiEndpointSchema, type ApiEndpoint } from './api/endpoint.zod';
-import { validateApiEndpointDeclarations } from './api/endpoint-publish-gate';
+import {
+  validateApiEndpointDeclarations,
+  validateAnonymousElevatedFlows,
+  type ElevatedFlowCandidate,
+} from './api/endpoint-publish-gate';
 import { retiredKey } from './shared/retired-key';
 
 // AI Protocol
@@ -167,11 +171,27 @@ export type DatasourceMappingRule = z.input<typeof DatasourceMappingRuleSchema>;
  * unavoidable: `defineStack`, `os validate`, the lint scorer, the metadata
  * plugin's artifact ingestion and `EnvironmentArtifactSchema.metadata` all run
  * through this one parse, so no publish path can forget to check.
+ *
+ * [ADR-0138 D2b] The same parse also runs the one cross-item gate: an
+ * `authRequired: false` endpoint of `type: 'flow'` whose `target` names a flow
+ * of this stack declaring `runAs: 'system'` is refused, located at the
+ * endpoint's `authRequired`, with the record's prescription. Both items are in
+ * this one input, so the refusal holds whichever of the two was edited last. A
+ * target flow outside the stack is not readable here; the metadata layer's
+ * doors read it there (`validateAnonymousElevatedFlows`' module notes).
  */
 function applyApiEndpointGates(
-  config: { manifest?: { namespace?: string | undefined } | undefined; apis?: ApiEndpoint[] | undefined },
+  config: {
+    manifest?: { namespace?: string | undefined } | undefined;
+    apis?: ApiEndpoint[] | undefined;
+    flows?: readonly ElevatedFlowCandidate[] | undefined;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  for (const issue of validateAnonymousElevatedFlows(config.apis, config.flows)) {
+    ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+  }
+
   for (const issue of validateApiEndpointDeclarations(config.apis, {
     namespace: config.manifest?.namespace,
   })) {

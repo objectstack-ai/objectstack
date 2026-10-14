@@ -1,12 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // ADR-0090 D5 ("no ghost grants") on the protocol's own uninstall door,
-// `deletePackage` — after ADR-0131 C3 stage 6b-2, where no seeder or
-// materializer writes a `sys_permission_set` row: a package's set is served by
-// the security catalog from the registry, and a grant names it. (Until stage 7
-// retires the ADR-0094 projector, the publish below still has it write an
-// `admin` projection row that no authorization path reads; the uninstall
-// removes it.)
+// `deletePackage`. No `sys_permission_set` row exists to write or remove
+// (ADR-0131 C3: no seeder, materializer or projector writes one): a package's
+// set is served by the security catalog, and a grant names it.
 //
 // The withdrawal (`registry.uninstallPackage`) runs before the uninstall
 // cleanups and releases the package's names, so the door captures the
