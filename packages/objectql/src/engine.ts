@@ -4295,9 +4295,10 @@ export class ObjectQL implements IObjectQLEngine {
    * `HookContext.referentialCascadeDelete` (see
    * {@link claimReferentialCascadeDelete}).
    *
-   * Ambient, for {@link cascadeDeleteSets}' reason — a context key would turn a
-   * caller's absent context into a present one on the child delete, and both
-   * `buildSession` and `buildHookApi` branch on its absence — and for one more
+   * Ambient, for {@link cascadeDeleteSets}' reason — a context key would change
+   * what the child delete is handed (where no transaction is opened, an absent
+   * caller context would become a present one, and both `buildSession` and
+   * `buildHookApi` branch on its absence) — and for one more
    * the update twin's `__referentialFieldClear` never had to weigh, because its
    * envelope semantics predated its declared projection: the child delete's
    * context is the very object `buildHookApi` hands to `ScopedContext`, so a

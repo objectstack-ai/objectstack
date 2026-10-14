@@ -1281,8 +1281,9 @@ export const HookContextSchema = lazySchema(() => z.object({
    *  - it does not ride the envelope, so a write a hook issues through
    *    `ctx.api` during a cascade dispatch is NOT marked, a delete included:
    *    that is the hook's own write, not one the cascade issued;
-   *  - it does not turn a caller's absent context into a present one, so the
-   *    child of a cascade that carried no context still sees no `ctx.session`.
+   *  - it changes nothing the child delete is handed: the context reaches it
+   *    exactly as it did before this key existed, so no `ctx.session`,
+   *    `ctx.user` or `ctx.api` reading moves because of it.
    *
    * Being declared, it is carried across the QuickJS sandbox boundary by
    * contract (`buildSandboxContext` / `installCtx` in `packages/runtime`), so a
