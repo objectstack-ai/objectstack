@@ -102,9 +102,38 @@
  * and the dogfood sweep distinguishes the two envelopes on purpose (see
  * `admin-ban-endpoints.ts`). Keeping them also mints no new public error code,
  * so nothing here reaches the spec error-code ledger.
+ *
+ * ## A held caller is refused first, with the gate's refusal (ADR-0069 D3)
+ *
+ * A platform admin whom the authentication policy holds (an expired or
+ * administrator-forced password, enforced MFA not yet enrolled) is gated out of
+ * every protected resource until they remediate, and minting a session as
+ * another user is one. Measured on a real boot before this check: in every held
+ * state the session gate refused the admin's data read with the posture code,
+ * while this endpoint answered `200` with a session for the target — and that
+ * session is not held, so the hold was bypassed outright.
+ *
+ * The session `adminMiddleware` hands this handler is a raw better-auth read
+ * that `customSession` never decorates, so it carries no `authGate` (measured),
+ * and no ADR-0069 transport seam ever sees a request under the auth namespace.
+ * So the handler asks the auth service for the caller's posture in the
+ * organization the session operates in — the session gate's own carrier, the
+ * first entry of `resolveUserAuthGates` — and refuses a held caller with
+ * `judgeHeldSession`, the refusal `judgePlatformAdmin` gives on the raw
+ * platform-admin mounts. Order: identity (the vendor's `401`), then the
+ * posture, then the authorization predicate below — the order the session gate
+ * and the judge apply, so a held non-admin reads the posture too.
+ *
+ * That refusal is the GATE's envelope (`{ success: false, error: { code,
+ * message } }`), not the vendor's flat one, on purpose: it is the session
+ * gate's answer, and a client that recognises a held session reads the same
+ * body here as on every other protected door. Its codes are the posture
+ * vocabulary (`AuthGateCodeSchema`), so it mints no code either.
+ *
+ * ## The rest of the admin plugin's lane: {@link VENDOR_ROLE_SCALAR_ADMIN_PATHS}
  */
 
-import { isPlatformAdminUser } from './platform-admin-gate.js';
+import { isPlatformAdminUser, judgeHeldSession } from './platform-admin-gate.js';
 import { IMPERSONATE_USER_PATH, ADMIN_SESSION_COOKIE_KEY } from './impersonation-bearer-rotation.js';
 
 /**
@@ -117,6 +146,57 @@ import { IMPERSONATE_USER_PATH, ADMIN_SESSION_COOKIE_KEY } from './impersonation
  * security gate, and an unverifiable actor must never pass.
  */
 export type PlatformAdminOracle = (userId: string) => Promise<boolean>;
+
+/**
+ * Answers the session gate's posture carrier for `userId` operating in
+ * `organizationId`: the first, most urgent entry of the auth service's ONE
+ * per-user posture computation (`resolveUserAuthGates`, ADR-0069 · #23287
+ * ruling C′ item 3), exactly what `customSession` stamps on a session as
+ * `user.authGate` — or `undefined` when no policy holds the user.
+ *
+ * Injected for the same reason as {@link PlatformAdminOracle}. It fails OPEN,
+ * as the computation it reads does: a lookup that fails holds no one.
+ */
+export type SessionPostureOracle = (userId: string, organizationId: string | undefined) => Promise<unknown>;
+
+/**
+ * The better-auth `admin` plugin routes that the vendor serves ITSELF and
+ * authorizes on its own inputs alone — `adminMiddleware` (a session) plus
+ * `hasPermission` over the legacy `role` scalar — so no ObjectStack judge runs
+ * on them and nothing on their path reads the ADR-0069 posture.
+ *
+ * Measured on a real boot: a caller carrying `role = 'admin'` (a pre-ADR-0068
+ * deployment, which `isPlatformAdminUser` still reads) and held by the policy
+ * in any state was refused by the session gate on a data read and ADMITTED to
+ * every one of these — the user listing and record, the session listing and
+ * revocation, and the writes (`update-user` landed, `set-role` answered `200`).
+ * `auth-manager.ts`'s global before-hook therefore refuses a held caller on
+ * these paths with the same refusal, asked of the same posture computation.
+ *
+ * Every other path the plugin registers is classified, not forgotten
+ * (`admin-impersonate-endpoint.held-caller.test.ts` reds on a vendor path that
+ * is in neither list):
+ *
+ *  - `/admin/impersonate-user` — its own door, this module's endpoint;
+ *  - `/admin/create-user`, `/admin/set-user-password`, `/admin/ban-user`,
+ *    `/admin/unban-user`, `/admin/remove-user` — an ObjectStack mount on the
+ *    path runs `judgePlatformAdmin` (held refused) before anything reaches the
+ *    vendor;
+ *  - `/admin/stop-impersonating` — the EXIT from an impersonation, a
+ *    remediation-shaped request like sign-out, carried by the impersonated
+ *    session; holding it would trap that session rather than protect anything;
+ *  - `/admin/has-permission` — a question that changes nothing and refuses no
+ *    one (no `adminMiddleware`).
+ */
+export const VENDOR_ROLE_SCALAR_ADMIN_PATHS: ReadonlySet<string> = new Set([
+  '/admin/set-role',
+  '/admin/get-user',
+  '/admin/update-user',
+  '/admin/list-users',
+  '/admin/list-user-sessions',
+  '/admin/revoke-user-session',
+  '/admin/revoke-user-sessions',
+]);
 
 /** The slice of better-auth's `admin` plugin this module rewrites. */
 export interface AdminPluginLike {
@@ -166,6 +246,7 @@ export const USER_NOT_FOUND = { code: 'USER_NOT_FOUND', message: 'User not found
 export async function applyPlatformAdminImpersonation(
   plugin: AdminPluginLike,
   isPlatformAdmin: PlatformAdminOracle,
+  postureOf: SessionPostureOracle,
 ): Promise<boolean> {
   const vendor = plugin?.endpoints?.impersonateUser;
   if (!vendor || vendor.path !== IMPERSONATE_USER_PATH || !vendor.options) return false;
@@ -201,6 +282,17 @@ export async function applyPlatformAdminImpersonation(
     async (ctx: any) => {
       const caller = ctx.context.session?.user;
       const callerId = typeof caller?.id === 'string' ? caller.id : '';
+
+      // ── ADR-0069 D3: a held caller is refused first (see the header) ─────
+      // The session gate's carrier, asked for the organization this session
+      // operates in, then the gate's decision and the judge's refusal body.
+      if (callerId) {
+        const activeOrgId = ctx.context.session?.session?.activeOrganizationId;
+        const held = judgeHeldSession({
+          authGate: await postureOf(callerId, typeof activeOrgId === 'string' && activeOrgId ? activeOrgId : undefined),
+        });
+        if (held) throw new APIError('FORBIDDEN', held.body);
+      }
 
       // ── THE changed predicate (1/2): who may impersonate ─────────────────
       // `isPlatformAdminUser` reads the session user we already hold — which

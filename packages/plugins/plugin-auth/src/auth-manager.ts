@@ -86,7 +86,9 @@ import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
 import {
   applyPlatformAdminImpersonation,
+  VENDOR_ROLE_SCALAR_ADMIN_PATHS,
 } from './admin-impersonate-endpoint.js';
+import { judgeHeldSession } from './platform-admin-gate.js';
 import {
   applyDeclaredInvitationVerificationToListing,
 } from './list-user-invitations-verification.js';
@@ -2101,6 +2103,25 @@ export class AuthManager {
             // fall through — the vendor still performs the revoke itself
           }
 
+          // ── ADR-0069 D3: the admin plugin's role-scalar actions refuse a ──
+          // caller the authentication policy holds. better-auth serves these
+          // itself and authorizes them on a session plus the legacy `role`
+          // scalar, so no ObjectStack judge runs and nothing on the path read
+          // the posture: measured on a real boot, a held caller carrying that
+          // scalar was admitted to every one of them, writes included. The
+          // refusal is the session gate's, asked of the session gate's own
+          // posture carrier (`assertActorNotHeld`), and it runs FIRST — before
+          // the vendor's authorization and before the record guard below — the
+          // order the session gate applies. No resolvable session falls through
+          // to the vendor's own 401. `VENDOR_ROLE_SCALAR_ADMIN_PATHS`
+          // (`admin-impersonate-endpoint.ts`) classifies every other path the
+          // plugin registers.
+          if (VENDOR_ROLE_SCALAR_ADMIN_PATHS.has(ctx?.path)) {
+            const actor = await this.resolveActor(ctx);
+            if (actor?.userId) await this.assertActorNotHeld(actor);
+            // fall through — the vendor still authorizes everything it owns
+          }
+
           // ── #10069: the ADMIN revoke that identifies NO record must not ──
           // report success either. better-auth 1.7.1's `admin/revoke-user-
           // session` handler calls `deleteSession(ctx.body.sessionToken)`
@@ -2147,9 +2168,17 @@ export class AuthManager {
           // `sessionMiddleware` (→ 401). Fail-CLOSED: an unverifiable actor is
           // denied. (D5.1's `/oauth2/authorize` gate is a different surface —
           // the OP issuing codes, not the env's RP config.)
+          //
+          // ADR-0069 D3: a caller the authentication policy holds is refused
+          // FIRST, with the session gate's refusal (`assertActorNotHeld`) —
+          // identity, then posture, then the platform-admin question, the order
+          // `judgePlatformAdmin` applies on the `/admin/sso/*` bridges. Measured
+          // on a real boot before this: a held platform admin's registration
+          // answered `200` and the provider row landed, in every held state.
           if (ctx?.path === '/sso/register') {
             const actor = await this.resolveActor(ctx);
             if (actor?.userId) {
+              await this.assertActorNotHeld(actor);
               const ok = await this.isPlatformAdminUserId(actor.userId);
               if (!ok) {
                 const { APIError } = await import('better-auth/api');
@@ -3607,10 +3636,18 @@ export class AuthManager {
         //
         // Every OTHER better-auth-native `/admin/*` route still gates on the
         // legacy scalar and still refuses platform admins — that is the parent
-        // card's remaining surface, deliberately untouched here.
+        // card's remaining surface, deliberately untouched here. (A caller the
+        // ADR-0069 policy holds is refused on those ahead of the vendor, by the
+        // global before-hook — `VENDOR_ROLE_SCALAR_ADMIN_PATHS`.)
+        //
+        // ADR-0069 D3 — the same endpoint refuses a caller the policy holds,
+        // asked of the session gate's own posture carrier (`computeAuthGate`,
+        // the first entry of `resolveUserAuthGates`); see the endpoint module.
         const rewired = await applyPlatformAdminImpersonation(
           adminPlugin,
           (userId: string) => this.isPlatformAdminUserId(userId),
+          (userId: string, organizationId: string | undefined) =>
+            this.computeAuthGate(userId, organizationId, false),
         );
         if (!rewired) {
           // The vendor renamed or dropped the endpoint. Say so loudly: the
@@ -7181,6 +7218,33 @@ export class AuthManager {
     const engine = this.getDataEngine();
     if (!engine) return false;
     return hasPlatformAdminStanding(engine, userId);
+  }
+
+  /**
+   * ADR-0069 D3 at a vendor-served platform-admin door (the SSO-provider
+   * registration hook, the `admin` plugin's role-scalar actions): refuse
+   * `actor` when the authentication policy holds them, with the refusal the
+   * session gate gives, and return otherwise.
+   *
+   * These doors are better-auth endpoints whose session `customSession` never
+   * decorates, so the posture is ASKED, never read off the request: the session
+   * gate's own carrier ({@link computeAuthGate} — the first entry of
+   * {@link resolveUserAuthGates}, the ONE per-user posture computation) for the
+   * organization the actor's session operates in, judged by `judgeHeldSession`
+   * (`platform-admin-gate.ts`), which is `judgePlatformAdmin`'s held refusal.
+   * No second computation and no second decision. It fails OPEN exactly where
+   * that computation does (an unreadable posture holds no one).
+   *
+   * Thrown as a better-auth `APIError` carrying the judge's ADR-0112 body, so
+   * the vendor endpoint answers `403` with the posture's own code and message.
+   */
+  private async assertActorNotHeld(actor: { userId: string; activeOrgId?: string }): Promise<void> {
+    const held = judgeHeldSession({
+      authGate: await this.computeAuthGate(actor.userId, actor.activeOrgId, false),
+    });
+    if (!held) return;
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('FORBIDDEN', held.body);
   }
 
   /**
