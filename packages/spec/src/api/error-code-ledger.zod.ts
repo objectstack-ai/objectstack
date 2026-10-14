@@ -685,6 +685,17 @@ export const ERROR_CODE_LEDGER = {
     'WRITABLE_PACKAGE_REQUIRED',
   ],
   '@objectstack/metadata-core': [
+    // [ADR-0131 D6/D7, #23429] `readLegacyOrganizationRows`
+    // (`legacy-organization-row.ts`, `LegacyOrganizationRowsUnreadable`) could
+    // not tell a `sys_metadata`-family table's legacy organization rows from
+    // the environment's: the driver's raw seam returned no result set, its SQL
+    // dialect resolved to none, or the column list came back empty for a table
+    // that exists. Refused, never read as "none" — that answer would serve,
+    // list or delete one organization's rows as the environment's. It reaches a
+    // door only on a database the organization-ownership ceremony has not
+    // migrated (which `os serve` refuses), so the remedy it names is the
+    // ceremony.
+    'LEGACY_ORGANIZATION_ROWS_UNREADABLE',
     'METADATA_BRANCH',
     'METADATA_CONFLICT',
     'METADATA_NOT_FOUND',

@@ -70,12 +70,12 @@ function makeQl(declared: any[] = []) {
       const rows = tableFor(object);
       if (!rows) return [];
       const hit = rows.filter((r) => matches(r, q?.where));
+      const bounded = typeof q?.limit === 'number' ? hit.slice(0, q.limit) : hit;
       // [ADR-0131 D7] The engine shapes a read to the declared columns, and
       // the family declares no `organization_id`: the key never comes back.
-      const shaped = object === 'sys_metadata'
-        ? hit.map(({ organization_id: _physical, ...declared }) => declared)
-        : hit;
-      return typeof q?.limit === 'number' ? shaped.slice(0, q.limit) : shaped;
+      return object === 'sys_metadata'
+        ? bounded.map(({ organization_id: _physical, ...declared }) => declared)
+        : bounded;
     },
     // The physical column, as a database the ceremony has not migrated still
     // holds it, read through the table's driver.

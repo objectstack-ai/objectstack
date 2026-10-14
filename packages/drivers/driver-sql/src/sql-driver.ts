@@ -15356,9 +15356,18 @@ export class SqlDriver implements IDataDriver {
    * declaration boot's write guard has nothing to count: a question every
    * boot asks (does a retired column still physically exist?) must not cost a
    * plan its "writes nothing" claim.
+   *
+   * Built on Knex directly, not {@link getBuilder}: it reads the CATALOG and
+   * returns column names, never a row, so the tenant scope a row read must
+   * carry (`check:tenant-chokepoint`) has nothing to scope. The table is
+   * resolved as `getBuilder` resolves it.
    */
   async listPhysicalColumns(object: string, options?: DriverOptions): Promise<string[]> {
-    const info = (await this.getBuilder(object, options).columnInfo()) as Record<string, unknown>;
+    let catalog = this.knex(this.physicalTableByObject[object] ?? object);
+    const remoteSchema = this.physicalSchemaByObject[object];
+    if (remoteSchema) catalog = catalog.withSchema(remoteSchema);
+    if (options?.transaction) catalog = catalog.transacting(options.transaction as Knex.Transaction);
+    const info = (await catalog.columnInfo()) as Record<string, unknown>;
     return Object.keys(info ?? {});
   }
 

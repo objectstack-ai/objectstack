@@ -3312,6 +3312,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/metadata-family-data-door-gate.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/ownership-floor-alternates.test.ts",
       "verb": "findOne",
       "pinned": 1
