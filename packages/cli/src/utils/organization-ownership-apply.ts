@@ -133,6 +133,10 @@ import {
  * recorded, the posture it runs under is not the one the plan was computed
  * under (the posture decides what attribution and the authored conversion
  * write), or the file names another database ({@link ReviewedPlanRefusal}).
+ * A choice deletes the other rows of its conflict, so the reviewed plan also
+ * binds what a `--metadata-choice` or `--template-choice` may delete: the
+ * chosen conflict must hold exactly the rows the file listed for it
+ * ({@link ReviewedConflict}), or the apply refuses (`plan-conflict-mismatch`).
  * The remedy is always the same: plan again, review it, hand the new file in.
  * A checkpoint recorded under another digest is therefore one the reviewed
  * plan supersedes: the run starts over (each step is idempotent), and the
