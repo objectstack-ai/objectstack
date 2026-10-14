@@ -4,7 +4,7 @@
 
 fix(plugin-auth)!: impersonation, SSO-provider administration and the admin plugin's role-scalar actions refuse a caller the ADR-0069 authentication policy holds
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at three doors better-auth serves inside plugin-auth (the re-authorized impersonation endpoint, SSO-provider registration, update and delete, and the admin plugin's own role-scalar actions), not a metadata change. No spec key, option, config field, response field or stored shape is removed, renamed or re-shaped, and a caller the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which callers these doors serve: a user who holds an ADR-0069 posture (an expired or administrator-forced password, or enforced MFA not yet enrolled, globally or by the organization the session operates in) is now refused with the session gate's 403 before the door acts. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these doors and this diff adds none (not registered / already-registered); the one added export is an addition, so nothing published is retired or re-typed (not runtime-interface-only / type-surface-only / runtime-export-retired). -->
 
