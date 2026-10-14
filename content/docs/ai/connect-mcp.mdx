@@ -121,9 +121,59 @@ Or mint one over REST:
 
 ```bash
 curl -b cookies.txt -X POST https://your-deployment.example.com/api/v1/keys
-# → { "success": true, "data": { "key": "osk_...", "prefix": "osk_...", "name": "API Key" } }
+# → { "success": true, "data": { "key": "osk_...", "prefix": "osk_...", "name": "API Key",
+#                                "expires_at": "2027-01-12T09:30:00.000Z" } }
 #   the raw key is shown once — store it in your secret manager
 ```
+
+### Key lifetime, inactivity and rotation
+
+Personal API keys do not live forever. The policy is part of the
+authentication settings (**Setup → Settings → Authentication → API keys**), with
+these defaults:
+
+| Rule | Default | Setting |
+|:---|:---|:---|
+| A key created without `expires_at` expires after | 90 days | `api_key_default_expiry_days` |
+| The furthest `expires_at` a new key may ask for | 1 year from creation | `api_key_max_expiry_days` |
+| A key with no recorded use is refused after | 90 days | `api_key_inactivity_days` (`0` turns it off) |
+
+- **Creating a key.** Pass `{ "expires_at": "<ISO date>" }` to choose the
+  expiry. A date further away than the maximum is refused with
+  `400 API_KEY_EXPIRY_TOO_LONG`, whose message names the latest date allowed;
+  exactly the maximum is accepted. Without `expires_at` the key gets the
+  default lifetime, and the response echoes the date it got.
+- **Use is recorded.** Each key's `last_used_at` is stamped when the key is
+  used (at most once an hour) and shows on the API Keys page.
+- **Keys created before the policy.** A key that was created with no expiry
+  date gets one year of grace from the moment the deployment started enforcing
+  the policy (recorded once, as `api_key_policy_started_at`). The date is
+  written onto the key's `expires_at` the first time it is used, so the API
+  Keys page shows it, and the refusal after it names it. A key with no recorded
+  use counts its inactivity from that same moment (or from its own creation,
+  when that is later).
+
+A key that stops working is refused with `403` and a code that says why — the
+message names the key's prefix, the date, and the remedy:
+
+| Code | Meaning |
+|:---|:---|
+| `API_KEY_EXPIRED` | Past its `expires_at` (or past the grace of a key created with none). |
+| `API_KEY_INACTIVE` | No recorded use for longer than the inactivity window. The key is **not** revoked. |
+| `API_KEY_REVOKED` | Revoked by its owner or an administrator. |
+
+The remedy is the same for all three: **create a new key and replace the old
+one wherever it is configured** — keys do not renew. To rotate without a gap,
+create the new key first, switch the integration over, then revoke the old one.
+An unknown key (a typo, a key that never existed) still gets the generic
+`401 UNAUTHENTICATED`.
+
+These codes reach the caller on the REST data API (`/api/v1/data/…`), the
+datasource admin and share-link routes, the marketplace install routes and the
+MCP **stdio** transport. The other endpoints the runtime serves — the MCP HTTP
+endpoint (`/api/v1/mcp`) among them — and the settings and file-storage routes
+refuse the same key with the generic `401 UNAUTHENTICATED`; the server log
+names the code there.
 
 Send it on every request in any of three equivalent forms:
 
@@ -159,8 +209,8 @@ security, field-level security, and tenant isolation apply to the stdio session
 exactly as they would to that identity in the Console — and revoking the key
 stops the session on its next call.
 
-The transport is **fail-closed**: a missing, unknown, revoked, expired, or
-owner-less key makes stdio **refuse to start** rather than fall back to an
+The transport is **fail-closed**: a missing, unknown, revoked, expired,
+inactive, or owner-less key makes stdio **refuse to start** rather than fall back to an
 unscoped or `system` session — there is deliberately no bypass. For a
 full-authority local agent, mint the key on a platform-admin or dedicated
 **service** identity; for a scoped one, mint it on a user with exactly the

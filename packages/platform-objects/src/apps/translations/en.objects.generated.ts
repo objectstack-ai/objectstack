@@ -1003,7 +1003,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       last_used_at: {
         label: "Last Used At",
-        help: "Automatically updated on each API call"
+        help: "Recorded when the key is used, at most once an hour. A key with no recorded use for the inactivity window (90 days by default) is refused until replaced"
       },
       revoked: {
         label: "Revoked"
