@@ -32,6 +32,7 @@ import '@objectstack/runtime';
 import '@objectstack/objectql';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { AutomationServicePlugin } from '@objectstack/service-automation';
+import { JobServicePlugin } from '@objectstack/service-job';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..');
@@ -92,6 +93,7 @@ async function bootServed(projectDir: string, dbFile: string): Promise<void> {
   const kernel = runtime.getKernel();
   for (const plugin of stack.plugins) await kernel.use(plugin as any);
   await kernel.use(new PlatformObjectsPlugin() as any);
+  await kernel.use(new JobServicePlugin() as any);
   await kernel.use(new AutomationServicePlugin({ armRuntime: false }) as any);
   await runtime.start();
   await kernel.shutdown();
@@ -165,6 +167,14 @@ beforeAll(async () => {
   templateDb = join(dir, 'template.db');
   await bootServed(servedProject, templateDb);
 
+  {
+    const db = new Database(templateDb, { readonly: true });
+    try {
+      readings.servedTables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>).map((r) => r.name);
+    } finally {
+      db.close();
+    }
+  }
   readings.servedBoot = Object.fromEntries(TABLES.map((t) => [t, { columns: columns(templateDb, t), schema: schemaOf(templateDb, t) }]));
   // The v17 shape: the injected tenant column these two objects carried before
   // they declared `systemFields: { tenant: false }`.
