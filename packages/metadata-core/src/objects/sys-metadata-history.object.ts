@@ -177,6 +177,20 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
   // keeps the engine from injecting one back. The v18 ceremony
   // (`os migrate organization-ownership --apply`) drops the physical column.
   systemFields: { tenant: false },
+  // [ADR-0131 D7, the #22107 precedent] With no organization column there is
+  // no tenant wall, and a walled deployment's `organization_admin` holds a
+  // `'*'` grant — so without an object-level gate the generic data door would
+  // serve every organization's rows of this table (every item version body). D7 governs it by
+  // object permission: `studio.access`, platform-scoped (no tenant
+  // administrator holds it by role) and admitted by every `/meta` door that
+  // serves this table (`/meta/:type/:name/history` and `/audit` admit it among
+  // `studio.access` / `setup.access` / `manage_metadata`; `/packages/:id/commits`
+  // among `studio.access` / `setup.access`). `requiredPermissions` is an
+  // AND-gate, so it names one capability all three doors admit — and not
+  // `setup.access`, which organization admins DO hold (plugin-security's
+  // `PLATFORM_ADMIN_ONLY_CAPABILITIES` excludes it on purpose). Platform code
+  // reads under the system context, which the gate does not stop.
+  requiredPermissions: ['studio.access'],
 
   indexes: [
     // The environment's event cursor and each item's lineage are unique

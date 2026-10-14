@@ -47,8 +47,6 @@
  */
 
 import type { SecurityCatalogType } from '@objectstack/core';
-import { columnListSql, columnNameOf, dialectOf } from './organization-ownership-plan.js';
-import { resolvePlannedDriverExec } from './unmanaged-tables.js';
 
 /** The command's own name, the `actor` its deletions record. */
 export const SECURITY_CATALOG_OVERLAYS_ACTOR = 'os migrate security-catalog-overlays';
@@ -93,6 +91,7 @@ const SYSTEM = { context: { isSystem: true } } as const;
 interface EngineLike {
   registry: unknown;
   find(object: string, query: Record<string, unknown>, options?: Record<string, unknown>): Promise<any[]>;
+  getDriverForObject?(objectName: string): unknown;
 }
 
 function engineOf(kernel: { getService(name: string): unknown }): EngineLike {
@@ -118,36 +117,6 @@ async function storedRows(engine: EngineLike, storedType: string): Promise<any[]
 }
 
 /**
- * The ids of a legacy organization's `sys_metadata` rows, read off the
- * physical column.
- *
- * The family declares no `organization_id` (ADR-0131 D7), so the engine can
- * neither filter on it nor return it. On a database the organization-ownership
- * ceremony has not migrated yet the column is still there, and a row with a
- * value in it is an organization's, not the environment's: the cold boot never
- * loads one, so it is never a conflict, and this step must not list or delete
- * it. No raw-SQL seam (a driver without physical columns) or no column (a
- * migrated or fresh database) means there is no such row. A read that fails is
- * thrown, never taken for "none".
- */
-async function legacyOrganizationRowIds(driver: unknown): Promise<ReadonlySet<string>> {
-  const exec = resolvePlannedDriverExec(driver);
-  if (!exec) return new Set();
-  const { normalizeRows } = await import('@objectstack/metadata-protocol');
-  const d = driver as { dialectName?: unknown; config?: { client?: unknown } };
-  const named = typeof d.dialectName === 'string' ? d.dialectName : undefined;
-  const client = d.config?.client;
-  const dialect = dialectOf(named ?? (typeof client === 'string' ? client : undefined)) ?? 'sqlite';
-  const columns = normalizeRows(await exec(columnListSql(dialect), ['sys_metadata']));
-  if (!columns.some((row) => columnNameOf(row) === 'organization_id')) return new Set();
-  const rows = normalizeRows(await exec(
-    "SELECT id FROM sys_metadata WHERE organization_id IS NOT NULL AND organization_id <> ''",
-    [],
-  ));
-  return new Set(rows.map((row) => String(row.id)));
-}
-
-/**
  * The listed rows (module header, "The population"), positions first, then by
  * name, then by stored spelling (canonical first).
  *
@@ -168,7 +137,11 @@ export async function listSecurityCatalogOverlayRows(
   }
   if (held.size === 0) return [];
 
-  const legacy = await legacyOrganizationRowIds(driver);
+  // [ADR-0131 D6/D7] On a database the ceremony has not migrated, a legacy
+  // organization's rows are told apart by the physical column (the engine can
+  // no longer name it); an unanswered read refuses the step.
+  const { readLegacyOrganizationRows } = await import('@objectstack/metadata-core');
+  const legacy = await readLegacyOrganizationRows(engine.getDriverForObject?.('sys_metadata') ?? driver);
   const listed: SecurityCatalogOverlayRow[] = [];
   for (const [storedType, catalogType] of STORED_TYPE_SPELLINGS) {
     for (const row of await storedRows(engine, storedType)) {

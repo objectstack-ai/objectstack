@@ -4,6 +4,10 @@
 '@objectstack/metadata': minor
 '@objectstack/rest': minor
 '@objectstack/spec': minor
+'@objectstack/objectql': minor
+'@objectstack/plugin-security': minor
+'@objectstack/service-datasource': minor
+'@objectstack/platform-objects': minor
 '@objectstack/cli': patch
 ---
 
@@ -22,6 +26,7 @@ FROM → TO:
 - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
 - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
 - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+- `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
 - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply`. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
 
 The indexes are re-keyed with the column:
@@ -34,6 +39,17 @@ What else changes:
 
 - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
 - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
-- `os migrate security-catalog-overlays` still lists and deletes only the environment's rows. On a database the ceremony has not migrated, it reads the physical `organization_id` column through the driver, and it leaves out a row that holds a value there. The engine can no longer name that column.
+- Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+  - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+  - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+  - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history` and `/audit` admit `studio.access`, `setup.access` or `manage_metadata`; `/packages/:id/commits` admits `studio.access` or `setup.access`. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `setup.access` or only `manage_metadata` therefore still reads these rows through `/meta`, but not through the data door.
+  - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+- On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+  - boot hydration, the `/meta` list, by-name and draft-preview reads and the authored hook and action binders leave them out;
+  - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+  - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+  - `os migrate security-catalog-overlays` neither lists nor deletes it;
+  - a commit recorded in a legacy organization's layer is still refused by the revert;
+  - the runtime-datasource reads and the packaged permission-set overlay reading leave them out.
 - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
 - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.

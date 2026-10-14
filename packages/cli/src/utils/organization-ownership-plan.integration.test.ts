@@ -77,7 +77,6 @@ function seed(): void {
       ('md_2', 'org_default', 'view', 'deal_list', 'active', NULL),
       ('md_3', 'org_b', 'view', 'deal_list', 'active', NULL),
       ('md_4', 'org_b', 'flow', 'escalate', 'active', NULL);
-    ALTER TABLE sys_metadata ADD COLUMN bundle_member TEXT;
 
     -- fate 2: the catalog, seeded mirrors beside one Setup-authored row
     CREATE TABLE sys_position (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT);

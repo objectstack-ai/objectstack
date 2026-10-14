@@ -99,12 +99,6 @@ const CONTROLS = [
   'permission/m22371_rep/env/draft',
 ];
 
-/**
- * The cold boot's one conflict after `--apply`: the legacy organization control
- * (`m22371_rep` of `org_m22371`), which the step never lists or deletes.
- */
-const LEGACY_ORGANIZATION_CONFLICT = [`permission/m22371_rep ${PKG}`];
-
 let dir: string;
 let templateDb: string;
 const savedCwd = process.cwd();
@@ -328,7 +322,7 @@ describe('os migrate security-catalog-overlays — the preview lists exactly wha
   }, CASE_TIMEOUT_MS);
 });
 
-describe('os migrate security-catalog-overlays --apply — deletes exactly the listed rows, and the cold boot is then refused over none of them', () => {
+describe('os migrate security-catalog-overlays --apply — deletes exactly the listed rows, and the cold boot then comes up', () => {
   it('auth on: every listed row deleted through the write path, one audit line each; the controls stay', async () => {
     setAuth(true);
     const db = caseDb();
@@ -372,14 +366,11 @@ describe('os migrate security-catalog-overlays --apply — deletes exactly the l
       'position/m22371_lead delete allowed by os migrate security-catalog-overlays',
     ]);
 
-    // The cold boot of the same database and configuration is no longer refused
-    // over any row the step owns, and a second preview lists nothing (exit 0).
-    // [ADR-0131 D7] What remains is the legacy organization control: with no
-    // declared column, hydration no longer tells it apart, so once the
-    // environment's row is gone it is the one left holding the name. It is the
-    // organization-ownership ceremony's to settle, and until that has run the
-    // v18 `os serve` refuses this database outright (D10 item 5).
-    expect(await coldBootConflicts(db)).toEqual(LEGACY_ORGANIZATION_CONFLICT);
+    // The cold boot of the same database and configuration that was refused now
+    // comes up, and a second preview lists nothing (exit 0). [ADR-0131 D7] The
+    // legacy organization control stays stored and is never hydrated: the boot
+    // leaves it out off the physical column, as the step does.
+    expect(await coldBootConflicts(db)).toEqual([]);
     const again = await runJson(['--database-url', `file:${db}`, '--json']);
     expect(again.payload.listed).toBe(0);
     expect(again.exitCode).toBe(0);
@@ -393,6 +384,6 @@ describe('os migrate security-catalog-overlays --apply — deletes exactly the l
     expect(payload.deleted).toBe(LISTED_AUTH_OFF.length);
     expect(await storedRows(db)).toContain('permissions/member_default/env/active');
     expect(await storedRows(db)).toContain('permission/m22371_rep/org_m22371/active');
-    expect(await coldBootConflicts(db)).toEqual(LEGACY_ORGANIZATION_CONFLICT);
+    expect(await coldBootConflicts(db)).toEqual([]);
   }, CASE_TIMEOUT_MS * 2);
 });

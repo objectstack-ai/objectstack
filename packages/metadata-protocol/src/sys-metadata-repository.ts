@@ -56,7 +56,7 @@
  * switch.
  */
 
-import { hashSpec, orderedMapKeys, ConflictError } from '@objectstack/metadata-core';
+import { hashSpec, orderedMapKeys, ConflictError, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 // #4867 — the SAME discriminator `DatabaseLoader` uses (#4825), imported, not
 // re-implemented. A second hand-rolled "which driver errors are benign?" here
 // would be two vocabularies for one question, which is the dual-source debt
@@ -699,7 +699,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // platform plumbing under a door that already authorized the caller, and
     // it scopes its own rows by organization. None of them reaches the data
     // engine as a principal-less context.
-    const row = await this.engine.findOne('sys_metadata', {
+    const row = await this.findEnvironmentRow({
       where: this.whereFor(
         ref,
         state,
@@ -829,7 +829,10 @@ export class SysMetadataRepository implements MetadataRepository {
       // [#23297] Every active row, never the first one: see this method's
       // header. A failed read propagates (the caller's write fails), as the
       // single-row read did.
-      const activeRows = await this.engine.find('sys_metadata', { where: activeWhere, context });
+      const activeRows = await this.withoutLegacyOrganizationRows(
+        await this.engine.find('sys_metadata', { where: activeWhere, context }),
+        context,
+      );
       const bindings = new Set<string>();
       for (const activeRow of (activeRows ?? []) as Array<{ package_id?: unknown }>) {
         if (typeof activeRow?.package_id === 'string' && activeRow.package_id !== '') bindings.add(activeRow.package_id);
@@ -837,7 +840,7 @@ export class SysMetadataRepository implements MetadataRepository {
       if (bindings.size === 1) targetPackageId = [...bindings][0] ?? null;
       else if (bindings.size > 1) ambiguousPackages = [...bindings].sort();
     }
-    let row = await this.engine.findOne('sys_metadata', {
+    let row = await this.findEnvironmentRow({
       where: this.whereFor(ref, state, targetPackageId, member),
       context,
     });
@@ -848,7 +851,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // That package-less row is the one the write updates; `put`'s stamp
     // (`existingPkg ?? targetPackageId`) then adopts it into the package.
     if (!row && state === 'draft' && packageId == null && targetPackageId !== null) {
-      row = await this.engine.findOne('sys_metadata', {
+      row = await this.findEnvironmentRow({
         where: this.whereFor(ref, state, null, member),
         context,
       });
@@ -1134,7 +1137,7 @@ export class SysMetadataRepository implements MetadataRepository {
 
     const state: OverlayState = opts.state ?? 'active';
     const result = await this.withTxn(async (ctx) => {
-      const existing = await this.engine.findOne('sys_metadata', {
+      const existing = await this.findEnvironmentRow({
         where: this.whereFor(
           ref,
           state,
@@ -1332,7 +1335,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // so a second package's same-name draft can no longer be the row this
     // promotion picks up. Omitted → unchanged "match any package" behaviour for
     // callers that have no package in hand (`publishMetaItem`).
-    const draftRow = await this.engine.findOne('sys_metadata', {
+    const draftRow = await this.findEnvironmentRow({
       where: this.whereFor(
         ref,
         'draft',
@@ -1505,7 +1508,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // A missing active row (deleted, or never published) yields `null` — the
     // unbound row, which is the only defined answer: `sys_metadata_history`
     // carries no `package_id` column, so a vanished binding is not recoverable.
-    const activeRow = await this.engine.findOne('sys_metadata', {
+    const activeRow = await this.findEnvironmentRow({
       where: this.whereFor(ref, 'active', undefined, member),
       context: { isSystem: true },
     });
@@ -1531,11 +1534,11 @@ export class SysMetadataRepository implements MetadataRepository {
     };
     if (filter.type) where.type = filter.type;
     // [#21908] The explicit system opt-in, as `get` carries — see its note.
-    const rows = await this.engine.find('sys_metadata', {
+    const rows = await this.withoutLegacyOrganizationRows(await this.engine.find('sys_metadata', {
       where,
       limit: filter.limit,
       context: { isSystem: true },
-    });
+    }));
     for (const row of rows) {
       if (filter.nameContains && !String(row.name).includes(filter.nameContains)) continue;
       const item = this.rowToItem(
@@ -1586,7 +1589,9 @@ export class SysMetadataRepository implements MetadataRepository {
     this.assertOpen();
     // [ADR-0131 D6] The environment's drafts, whichever repository asks.
     const where = packageScopedRowWhere('draft', filter);
-    const rows = await this.engine.find('sys_metadata', { where, context: { isSystem: true } });
+    const rows = await this.withoutLegacyOrganizationRows(
+      await this.engine.find('sys_metadata', { where, context: { isSystem: true } }),
+    );
     return (rows as any[]).map((row) => ({
       type: row.type,
       name: row.name,
@@ -1945,6 +1950,42 @@ export class SysMetadataRepository implements MetadataRepository {
   }
 
   // ── helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * [ADR-0131 D6/D7] The environment's row at `where`. The family declares no
+   * organization column, so the engine can neither filter on it nor return
+   * it; on a database the organization-ownership ceremony has not migrated, a
+   * legacy organization's row still sits under the same address, and a write
+   * that resolved to it would rewrite that organization's row in place
+   * (measured: the ceremony's template promotion did, through
+   * `saveMetaItem`). The single-row read stays the common path; only when the
+   * row it returns is a legacy organization's ({@link readLegacyOrganizationRows},
+   * off the physical column) is the address re-read for the environment's own
+   * row — `null` when there is none, so the write creates it. A read of the
+   * column that cannot answer throws, and the write fails with it.
+   */
+  private async findEnvironmentRow(query: { where: Record<string, unknown>; context?: Record<string, unknown> }): Promise<any | null> {
+    const row = await this.engine.findOne('sys_metadata', query);
+    if (!row) return row ?? null;
+    const legacy = await this.legacyOrganizationRowIds(query.context);
+    if (!legacy.has(String((row as { id?: unknown }).id))) return row;
+    const rows = await this.engine.find('sys_metadata', query);
+    return ((rows ?? []) as any[]).find((r) => !legacy.has(String(r?.id))) ?? null;
+  }
+
+  /** [ADR-0131 D6/D7] `rows` without a legacy organization's — see {@link findEnvironmentRow}. */
+  private async withoutLegacyOrganizationRows<R>(rows: R[] | null | undefined, context?: Record<string, unknown>): Promise<R[]> {
+    if (!rows || rows.length === 0) return rows ?? [];
+    const legacy = await this.legacyOrganizationRowIds(context);
+    return legacy.size === 0 ? rows : rows.filter((row) => !legacy.has(String((row as { id?: unknown }).id)));
+  }
+
+  /** Inside a write, the statements join its transaction (`context.transaction`). */
+  private async legacyOrganizationRowIds(context?: Record<string, unknown>): Promise<ReadonlySet<string>> {
+    const driver = (this.engine as { getDriverForObject?: (objectName: string) => unknown }).getDriverForObject?.('sys_metadata');
+    const transaction = (context as { transaction?: unknown } | undefined)?.transaction;
+    return new Set((await readLegacyOrganizationRows(driver, 'sys_metadata', transaction !== undefined ? { transaction } : {})).keys());
+  }
 
   private assertOpen(): void {
     if (this.closed) throw new Error('SysMetadataRepository is closed');
