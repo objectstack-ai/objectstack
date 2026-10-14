@@ -158,6 +158,18 @@
         "content/docs/ui/forms.mdx"
       ],
       "note": "Newly VISIBLE to this gate at #4001 批 18, not newly authorable: the four variants were always authored on `FormView.submitBehavior`, but the shape was a plain `z.union`, which this walk cannot recognise as discriminated. Batch 18 made it `z.discriminatedUnion('kind')` so a bad key inside one arm reports `unrecognized_keys` at the key's own path instead of an `invalid_union` whose prescription the renderers flatten away (#5014) — and that turned an already-authorable vocabulary into a governed one. GOVERNED rather than exempt: ui/forms.mdx names all four (line 20 lists them together, and the `thank-you` and `redirect` shapes have worked examples)."
+    },
+    {
+      "key": "fate:attribution|column-drop|mirror-deletion|report",
+      "label": "host fate supplement row (ADR-0131 D10 fate)",
+      "exempt": "generated-reference-only",
+      "reason": "Authored by a host operator for one command, `os migrate organization-ownership --fate-supplement FILE` (ADR-0131 D10, the inventory's host supplement); the file is the spec's OrganizationOwnershipSupplementSchema. The gap, stated plainly: no hand-written page documents the v18 ceremony's inputs at all (measured when this entry was added: no file under content/docs names `--fate-supplement` or `--backup-taken`), so the generated content/docs/references/system/fate-supplement.mdx and the command's own --help are the reference until the ceremony's operator guide is written."
+    },
+    {
+      "key": "kind:holder|parent|subject",
+      "label": "host fate supplement attribution anchor",
+      "exempt": "generated-reference-only",
+      "reason": "The fate-3 anchor inside a host fate supplement row; see the `fate:` entry for the same command, the same file and the same documentation gap."
     }
   ]
 }

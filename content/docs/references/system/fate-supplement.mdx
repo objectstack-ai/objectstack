@@ -1,0 +1,474 @@
+---
+title: Fate Supplement — System Protocol reference
+navTitle: Fate Supplement
+description: "Fate Supplement schemas of the ObjectStack System Protocol — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/system/fate-supplement.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { OrganizationOwnershipAnchorSchema, OrganizationOwnershipCategorySchema, OrganizationOwnershipDepartureSchema, OrganizationOwnershipFateSchema, OrganizationOwnershipRowConditionSchema, OrganizationOwnershipSupplementSchema, OrganizationOwnershipSupplementEntrySchema } from '@objectstack/spec/system';
+import type { OrganizationOwnershipAnchor, OrganizationOwnershipCategory, OrganizationOwnershipDeparture, OrganizationOwnershipFate, OrganizationOwnershipRowCondition, OrganizationOwnershipSupplement, OrganizationOwnershipSupplementEntry } from '@objectstack/spec/system';
+
+// Validate data
+const result = OrganizationOwnershipAnchorSchema.parse(data);
+```
+
+---
+
+## OrganizationOwnershipAnchor
+
+Fate 3 anchor: parent, subject or holder
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'parent'` | ✅ |  |
+| **childKey** | `string` | ✅ | Column of this row naming a row of parentObject |
+| **parentObject** | `string` | ✅ | Object whose row carries the organization |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'subject'` | ✅ |  |
+| **objectColumn** | `string` | ✅ | Column naming the object of the record the row is about |
+| **idColumn** | `string` | ✅ | Column naming that record's id |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'holder'` | ✅ |  |
+| **holderObject** | `string` | ✅ | Object whose rows point at this row |
+| **holderKey** | `string` | ✅ | Column of holderObject naming this row; every stamped holder must agree |
+
+---
+
+
+---
+
+## OrganizationOwnershipCategory
+
+A named row population the ceremony counts on the table
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Category id (kebab-case), as the plan labels the count |
+| **label** | `string` | ✅ | What the population is, in the operator's terms |
+| **citation** | `string` | ✅ | The ruling or record that names the population |
+| **where** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | optional | Rows of the population; absent = every row |
+| **conflictBy** | `{ groupBy: string[]; distinct?: string }` | optional | Count groups holding more than one row instead of rows |
+
+### Nested Shape: `OrganizationOwnershipCategory.where[number][option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **equals** | `string \| number \| boolean` | ✅ | The column equals this value |
+
+### Nested Shape: `OrganizationOwnershipCategory.where[number][option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **in** | `string[]` | ✅ | The column holds one of these values |
+
+### Nested Shape: `OrganizationOwnershipCategory.where[number][option 3]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **notIn** | `string[]` | ✅ | The column is NULL or holds none of these values |
+
+### Nested Shape: `OrganizationOwnershipCategory.where[number][option 4]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **isNull** | `boolean` | ✅ | true: the column is NULL; false: it is not |
+
+### Nested Shape: `OrganizationOwnershipCategory.where[number][option 5]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **notTrue** | `true` | ✅ | The column is NULL or holds anything but true |
+
+### Nested Shape: `OrganizationOwnershipCategory.conflictBy`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **groupBy** | `string[]` | ✅ | Columns the rows are grouped by |
+| **distinct** | `string` | optional | Count a group only when it holds more than one distinct value of this column |
+
+
+---
+
+## OrganizationOwnershipDeparture
+
+Rows that leave the table before the NOT NULL gate: neither attributed nor reported
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Departure id (kebab-case), as the plan labels the count |
+| **label** | `string` | ✅ | Which rows leave, and by which step |
+| **citation** | `string` | ✅ | The ruling or record that names the step |
+| **as** | `Enum<'mirror-deletion' \| 'moved'>` | ✅ | mirror-deletion for mirrors; moved for rows re-homed elsewhere |
+| **where** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | ✅ | The rows that leave |
+
+### Nested Shape: `OrganizationOwnershipDeparture.where[number][option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **equals** | `string \| number \| boolean` | ✅ | The column equals this value |
+
+### Nested Shape: `OrganizationOwnershipDeparture.where[number][option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **in** | `string[]` | ✅ | The column holds one of these values |
+
+### Nested Shape: `OrganizationOwnershipDeparture.where[number][option 3]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **notIn** | `string[]` | ✅ | The column is NULL or holds none of these values |
+
+### Nested Shape: `OrganizationOwnershipDeparture.where[number][option 4]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **isNull** | `boolean` | ✅ | true: the column is NULL; false: it is not |
+
+### Nested Shape: `OrganizationOwnershipDeparture.where[number][option 5]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **notTrue** | `true` | ✅ | The column is NULL or holds anything but true |
+
+
+---
+
+## OrganizationOwnershipFate
+
+ADR-0131 D10 fate: column-drop, mirror-deletion, attribution or report
+
+### Allowed Values
+
+* `column-drop`
+* `mirror-deletion`
+* `attribution`
+* `report`
+
+
+---
+
+## OrganizationOwnershipRowCondition
+
+One condition on a row: equals, in, notIn, isNull or notTrue on one column
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **equals** | `string \| number \| boolean` | ✅ | The column equals this value |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **in** | `string[]` | ✅ | The column holds one of these values |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **notIn** | `string[]` | ✅ | The column is NULL or holds none of these values |
+
+---
+
+#### Option 4
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **isNull** | `boolean` | ✅ | true: the column is NULL; false: it is not |
+
+---
+
+#### Option 5
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **notTrue** | `true` | ✅ | The column is NULL or holds anything but true |
+
+---
+
+
+---
+
+## OrganizationOwnershipSupplement
+
+The host fate supplement: the ADR-0131 D10 fates of the objects a host provides, one row per object
+
+**Type:** `({ object: string; citation: string; categories?: object[]; note?: string; … } | … +3 more)[]`
+
+
+---
+
+## OrganizationOwnershipSupplementEntry
+
+The fate of one object the host provides (ADR-0131 D10)
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The object (= its table) the host provides |
+| **citation** | `string` | ✅ | The host's source for this fate |
+| **categories** | `{ id: string; label: string; citation: string; where?: (object \| … +4 more)[]; … }[]` | optional | Named row populations the plan counts on the table |
+| **note** | `string` | optional | A note the plan carries beside the table |
+| **fate** | `'column-drop'` | ✅ | Fate 1: the object ends with no organization_id column |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='column-drop'].categories[number]`
+
+A named row population the ceremony counts on the table
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Category id (kebab-case), as the plan labels the count |
+| **label** | `string` | ✅ | What the population is, in the operator's terms |
+| **citation** | `string` | ✅ | The ruling or record that names the population |
+| **where** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | optional | Rows of the population; absent = every row |
+| **conflictBy** | `{ groupBy: string[]; distinct?: string }` | optional | Count groups holding more than one row instead of rows |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The object (= its table) the host provides |
+| **citation** | `string` | ✅ | The host's source for this fate |
+| **categories** | `{ id: string; label: string; citation: string; where?: (object \| … +4 more)[]; … }[]` | optional | Named row populations the plan counts on the table |
+| **note** | `string` | optional | A note the plan carries beside the table |
+| **fate** | `'mirror-deletion'` | ✅ | Fate 2: mirror rows are deleted after the verified rewrite |
+| **mirror** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | optional | Which rows are mirrors; absent = every row |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='mirror-deletion'].categories[number]`
+
+A named row population the ceremony counts on the table
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Category id (kebab-case), as the plan labels the count |
+| **label** | `string` | ✅ | What the population is, in the operator's terms |
+| **citation** | `string` | ✅ | The ruling or record that names the population |
+| **where** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | optional | Rows of the population; absent = every row |
+| **conflictBy** | `{ groupBy: string[]; distinct?: string }` | optional | Count groups holding more than one row instead of rows |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='mirror-deletion'].mirror[number][option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **equals** | `string \| number \| boolean` | ✅ | The column equals this value |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='mirror-deletion'].mirror[number][option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **in** | `string[]` | ✅ | The column holds one of these values |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='mirror-deletion'].mirror[number][option 3]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **notIn** | `string[]` | ✅ | The column is NULL or holds none of these values |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='mirror-deletion'].mirror[number][option 4]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **isNull** | `boolean` | ✅ | true: the column is NULL; false: it is not |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='mirror-deletion'].mirror[number][option 5]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **column** | `string` | ✅ | Column the condition reads |
+| **notTrue** | `true` | ✅ | The column is NULL or holds anything but true |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The object (= its table) the host provides |
+| **citation** | `string` | ✅ | The host's source for this fate |
+| **categories** | `{ id: string; label: string; citation: string; where?: (object \| … +4 more)[]; … }[]` | optional | Named row populations the plan counts on the table |
+| **note** | `string` | optional | A note the plan carries beside the table |
+| **fate** | `'attribution'` | ✅ | Fate 3: NULL rows take their organization from an anchor |
+| **anchors** | `({ kind: 'parent'; childKey: string; parentObject: string } \| { kind: 'subject'; objectColumn: string; idColumn: string } \| { kind: 'holder'; holderObject: string; holderKey: string })[]` | ✅ | The anchors, in order; empty = the Default Organization under single, otherwise reported |
+| **departures** | `{ id: string; label: string; citation: string; as: Enum<'mirror-deletion' \| 'moved'>; … }[]` | optional | Rows that leave the table before the NOT NULL gate |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='attribution'].categories[number]`
+
+A named row population the ceremony counts on the table
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Category id (kebab-case), as the plan labels the count |
+| **label** | `string` | ✅ | What the population is, in the operator's terms |
+| **citation** | `string` | ✅ | The ruling or record that names the population |
+| **where** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | optional | Rows of the population; absent = every row |
+| **conflictBy** | `{ groupBy: string[]; distinct?: string }` | optional | Count groups holding more than one row instead of rows |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='attribution'].anchors[number][kind='parent']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'parent'` | ✅ |  |
+| **childKey** | `string` | ✅ | Column of this row naming a row of parentObject |
+| **parentObject** | `string` | ✅ | Object whose row carries the organization |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='attribution'].anchors[number][kind='subject']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'subject'` | ✅ |  |
+| **objectColumn** | `string` | ✅ | Column naming the object of the record the row is about |
+| **idColumn** | `string` | ✅ | Column naming that record's id |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='attribution'].anchors[number][kind='holder']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'holder'` | ✅ |  |
+| **holderObject** | `string` | ✅ | Object whose rows point at this row |
+| **holderKey** | `string` | ✅ | Column of holderObject naming this row; every stamped holder must agree |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='attribution'].departures[number]`
+
+Rows that leave the table before the NOT NULL gate: neither attributed nor reported
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Departure id (kebab-case), as the plan labels the count |
+| **label** | `string` | ✅ | Which rows leave, and by which step |
+| **citation** | `string` | ✅ | The ruling or record that names the step |
+| **as** | `Enum<'mirror-deletion' \| 'moved'>` | ✅ | mirror-deletion for mirrors; moved for rows re-homed elsewhere |
+| **where** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | ✅ | The rows that leave |
+
+---
+
+#### Option 4
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The object (= its table) the host provides |
+| **citation** | `string` | ✅ | The host's source for this fate |
+| **categories** | `{ id: string; label: string; citation: string; where?: (object \| … +4 more)[]; … }[]` | optional | Named row populations the plan counts on the table |
+| **note** | `string` | optional | A note the plan carries beside the table |
+| **fate** | `'report'` | ✅ | Fate 4: NULL rows are listed, never guessed, never deleted |
+| **departures** | `{ id: string; label: string; citation: string; as: Enum<'mirror-deletion' \| 'moved'>; … }[]` | optional | Rows that leave the table before the NOT NULL gate |
+| **notNullExempt** | `string` | optional | The column is not the tenancy anchor, so it never receives NOT NULL: the reason |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='report'].categories[number]`
+
+A named row population the ceremony counts on the table
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Category id (kebab-case), as the plan labels the count |
+| **label** | `string` | ✅ | What the population is, in the operator's terms |
+| **citation** | `string` | ✅ | The ruling or record that names the population |
+| **where** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | optional | Rows of the population; absent = every row |
+| **conflictBy** | `{ groupBy: string[]; distinct?: string }` | optional | Count groups holding more than one row instead of rows |
+
+### Nested Shape: `OrganizationOwnershipSupplementEntry[fate='report'].departures[number]`
+
+Rows that leave the table before the NOT NULL gate: neither attributed nor reported
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Departure id (kebab-case), as the plan labels the count |
+| **label** | `string` | ✅ | Which rows leave, and by which step |
+| **citation** | `string` | ✅ | The ruling or record that names the step |
+| **as** | `Enum<'mirror-deletion' \| 'moved'>` | ✅ | mirror-deletion for mirrors; moved for rows re-homed elsewhere |
+| **where** | `({ column: string; equals: string \| number \| boolean } \| { column: string; in: string[] } \| { column: string; notIn: string[] } \| { column: string; isNull: boolean } \| … +1 more)[]` | ✅ | The rows that leave |
+
+---
+
+
+---
+
