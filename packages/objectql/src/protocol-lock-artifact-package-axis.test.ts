@@ -170,3 +170,61 @@ describe('[#21803] two installed packages ship one view: the real SchemaRegistry
         }
     });
 });
+
+/**
+ * [#23297, ADR-0010 §3.3, ADR-0048] The delete door's `_lock` gate takes the
+ * package the delete names (`?package=`, `packageId`), as the save gate does
+ * (#21761). What that address decides is the save gate's, and no more:
+ *
+ *  4. The verdict does not narrow to the named package. A ships no lock and B
+ *     ships `'full'`: a delete naming A is refused `ITEM_LOCKED`, exactly as
+ *     the save naming A is and as both reads naming A report. The lock is the
+ *     strictest of every shipping package's answer (#21803); a door that
+ *     admitted the delete would be looser than the read.
+ *  5. The prose follows the address. A and B both ship `'full'`, each with its
+ *     own reason: the refusal of a delete naming a package carries that
+ *     package's reason, as the save's does. Before, the delete handed the gate
+ *     no package and carried the reason of the package whose id sorts first,
+ *     whichever package the delete named.
+ */
+describe('[#23297] a delete naming a package: the save gate\'s verdict, and its prose', () => {
+    const refusalOf = async (protocol: ObjectStackProtocolImplementation, name: string, packageId: string, verb: 'save' | 'delete') => {
+        const err = await settle(verb === 'save'
+            ? protocol.saveMetaItem({
+                type: 'view', name, item: { name, label: 'edited', object: 'account', viewKind: 'list' }, packageId,
+            })
+            : protocol.deleteMetaItem({ type: 'view', name, packageId }));
+        return err ? { code: err.code, status: err.status, lock: err.lock, lockReason: err.lockReason } : 'admitted';
+    };
+
+    describe('4. A ships no lock, B ships \'full\': the delete naming A is refused as the save naming A is', () => {
+        const arrangement: Arrangement = { name: 'v_del_a', locks: { [A]: undefined, [B]: 'full' } };
+        for (const { order, packages } of ORDERS) {
+            it(`${order}`, async () => {
+                const protocol = protocolFor(arrangement, packages);
+                const save = await refusalOf(protocol, arrangement.name, A, 'save');
+                const remove = await refusalOf(protocol, arrangement.name, A, 'delete');
+                expect(save).toMatchObject(REFUSED_FULL);
+                expect(remove).toMatchObject(REFUSED_FULL);
+                expect(remove).toEqual(save);
+                const read: any = await protocol.getMetaItem({ type: 'view', name: arrangement.name, packageId: A });
+                expect({ lock: read.lock, editable: read.editable, deletable: read.deletable }).toEqual(LOCKED_FULL);
+            });
+        }
+    });
+
+    describe('5. A and B both ship \'full\', each with its own reason: the delete carries the named package\'s reason', () => {
+        const arrangement: Arrangement = { name: 'v_del_prose', locks: { [A]: 'full', [B]: 'full' } };
+        for (const { order, packages } of ORDERS) {
+            for (const packageId of [A, B]) {
+                it(`${order} · delete naming ${packageId}`, async () => {
+                    const protocol = protocolFor(arrangement, packages);
+                    const save = await refusalOf(protocol, arrangement.name, packageId, 'save');
+                    const remove = await refusalOf(protocol, arrangement.name, packageId, 'delete');
+                    expect(remove).toMatchObject({ ...REFUSED_FULL, lockReason: `Packaged lock of ${packageId}.` });
+                    expect(remove).toEqual(save);
+                });
+            }
+        }
+    });
+});
