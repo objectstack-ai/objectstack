@@ -285,6 +285,62 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(rules).not.toContain(SECURITY_FLS_UNKNOWN_FIELD);
   });
 
+  // ── [#23549] An EMPTY object part ('.description') is an unqualified key ──
+  //
+  // It names no object, so the evaluator's `key.startsWith(`${objectName}.`)`
+  // can never match it: no object name is empty (`ObjectSchema.name` is
+  // `/^[a-z_][a-z0-9_]*$/`). Both rules used to pass it — the rule above
+  // skipped every key containing a '.', and the unknown-field rule read the
+  // empty head as another package's object (skip 1) — so the mask was stored
+  // and never enforced. Owned by the rule above, whose id, consequence and
+  // remedy all fit; the unknown-field rule skips it, so one key earns one
+  // finding.
+  it('an empty object part reds under security-fls-unqualified-key ONLY, naming the <object>.<field> form', () => {
+    const findings = validateSecurityPosture(flsStack('.description'));
+    expect(findings.map((f) => f.rule)).toEqual([SECURITY_FLS_UNQUALIFIED_KEY]);
+    const [finding] = findings;
+    expect(finding.severity).toBe('error');
+    expect(finding.path).toBe('permissions[0].fields[".description"]');
+    // The card's acceptance: the prescription names the qualified form, and
+    // its example is a key the rules accept (the remainder kept as the field).
+    expect(finding.message).toContain("its object part (before the first '.') is empty");
+    expect(finding.hint).toContain("'<object>.<field>'");
+    expect(finding.hint).toContain("'crm_opportunity.description'");
+  });
+
+  // Every edge of the shape, with the controls on either side of it, in one
+  // run: each key earns exactly the ids listed — never two findings for one
+  // defect, and never none for an unmatchable key this stack can judge.
+  it.each([
+    // The empty object part, in each spelling the split can produce.
+    ['.description', [SECURITY_FLS_UNQUALIFIED_KEY]],
+    ['.', [SECURITY_FLS_UNQUALIFIED_KEY]],
+    ['..description', [SECURITY_FLS_UNQUALIFIED_KEY]],
+    ['.description.x', [SECURITY_FLS_UNQUALIFIED_KEY]],
+    // Controls, unchanged: the bare key, the empty and the dangling remainder
+    // on an in-stack object, another package's object, and a real field.
+    ['description', [SECURITY_FLS_UNQUALIFIED_KEY]],
+    ['crm_account.', [SECURITY_FLS_UNKNOWN_FIELD]],
+    ['crm_account.description.x', [SECURITY_FLS_UNKNOWN_FIELD]],
+    ['no_such_object.x', []],
+    ['no_such_object.', []],
+    ['crm_account.description', []],
+  ] as const)('the FLS key %j earns exactly %j', (key, rules) => {
+    expect(rulesOf(flsStack(key))).toEqual(rules);
+  });
+
+  it('an empty object part whose remainder is no plain field name gets the form, not a broken example', () => {
+    // `'crm_opportunity.'` or `'crm_opportunity..x'` would be a key the
+    // unknown-field rule refuses in turn — a remedy an author (or an agent)
+    // follows literally must not lead to the next refusal.
+    for (const key of ['.', '..description', '.description.x']) {
+      const [finding] = validateSecurityPosture(flsStack(key));
+      expect(finding.rule, key).toBe(SECURITY_FLS_UNQUALIFIED_KEY);
+      expect(finding.hint, key).toContain("'<object>.<field>'");
+      expect(finding.hint, key).not.toContain('crm_opportunity.');
+    }
+  });
+
   // ── Negative controls: an implementation that always fires passes every
   //    positive above, so these are what make the positives readings.
   it('an all-qualified, all-real permission set emits NOTHING new', () => {
@@ -430,9 +486,11 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
   it('skip 1 still holds for a truncated key naming an unknown object', () => {
     // The deliberate non-widening: `'no_such_object.'` is unmatchable too, but
     // judging it would mean judging a key whose OBJECT half this stack cannot
-    // resolve — the same disposition `'.description'` (empty object name) is
-    // left to. Named here so the silence is a decision on record, not an
-    // oversight, and measured against a firing control in the same run.
+    // resolve — another package may declare `no_such_object`. Named here so the
+    // silence is a decision on record, not an oversight, and measured against
+    // a firing control in the same run. (An EMPTY object half is not this
+    // case: no package can declare it, and `security-fls-unqualified-key`
+    // reports it — #23549.)
     expect(
       rulesOf({
         objects: [ACCOUNT],
