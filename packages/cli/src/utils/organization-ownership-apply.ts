@@ -1049,12 +1049,24 @@ async function historyDuplicates(run: Run): Promise<string[]> {
   const out: string[] = [];
   if (hcols.has('event_seq')) {
     const seq = sql.q('event_seq', HISTORY);
-    const dup = await sql.read(HISTORY, `SELECT ${seq} AS s, COUNT(*) AS n FROM ${h} GROUP BY ${seq} HAVING COUNT(*) > 1 ORDER BY ${seq}`);
+    const dup = await sql.read(HISTORY, `SELECT ${seq} AS s FROM ${h} GROUP BY ${seq} HAVING COUNT(*) > 1 ORDER BY ${seq}`);
     if (dup.length) {
+      const shown = dup.slice(0, 10).map((d) => d.s);
+      const [ty, nm] = ['type', 'name'].map((c) => sql.q(c, HISTORY));
+      const holders = await sql.read(
+        HISTORY,
+        `SELECT ${seq} AS s, ${sql.q('id', HISTORY)} AS id, ${ty} AS t, ${nm} AS n FROM ${h} ` +
+          `WHERE ${seq} IN (${shown.map(() => '?').join(', ')}) ORDER BY ${seq}, ${sql.q('id', HISTORY)}`,
+        shown,
+      );
+      const byNumber = shown.map(
+        (n) => `event_seq ${String(n)}: ${holders.filter((r) => String(r.s) === String(n)).map((r) => `${String(r.t)} ${String(r.n)} (row ${String(r.id)})`).join(', ')}`,
+      );
       out.push(
-        `${HISTORY}.event_seq is not unique environment-wide: ${dup.slice(0, 10).map((d) => `${String(d.s)} (${String(d.n)} rows)`).join(', ')}` +
-          `${dup.length > 10 ? `, and ${dup.length - 10} more` : ''}. The column is not dropped until every event has its own ` +
-          'number. Renumber or remove the duplicated events, then re-run --apply.',
+        `${HISTORY}: event_seq is not unique environment-wide — ${byNumber.join('; ')}` +
+          `${dup.length > 10 ? `; and ${dup.length - 10} more number(s)` : ''}. The ceremony never renumbers history ` +
+          'a database numbered twice: the organization_id column is not dropped until every event has its own number. ' +
+          'Remedy: give each of these rows a number no other row holds (or remove the duplicate), then re-run --apply.',
       );
     }
   }
@@ -1066,10 +1078,11 @@ async function historyDuplicates(run: Run): Promise<string[]> {
     );
     if (dup.length) {
       out.push(
-        `${HISTORY} holds one version of an item more than once: ` +
-          `${dup.slice(0, 10).map((d) => `${String(d.t)} ${String(d.n)} v${String(d.v)} (${String(d.c)} rows)`).join(', ')}` +
-          `${dup.length > 10 ? `, and ${dup.length - 10} more` : ''}. The column is not dropped until every version names one ` +
-          'snapshot. Renumber or remove the duplicated versions, then re-run --apply.',
+        `${HISTORY}: a version of an item is held more than once — ` +
+          `${dup.slice(0, 10).map((d) => `${String(d.t)} ${String(d.n)} version ${String(d.v)} (${String(d.c)} rows)`).join('; ')}` +
+          `${dup.length > 10 ? `; and ${dup.length - 10} more` : ''}. The ceremony never renumbers history a database ` +
+          'numbered twice: the organization_id column is not dropped until every version names one snapshot. Remedy: give ' +
+          'each of these rows a version no other row of the item holds (or remove the duplicate), then re-run --apply.',
       );
     }
   }
@@ -1365,8 +1378,8 @@ async function environmentRowOf(run: Run, conflict: MetadataConflict): Promise<A
 
 /**
  * One `sys_metadata` row takes a body in place, by ONE statement, doing to the
- * row what the metadata door does on a save: the door's lock gate first (a
- * locked item stays locked: the write is refused, nothing written); the row's
+ * row what the metadata door does on a save (its caller has asked the door's
+ * lock gate first, before any write of the resolution); the row's
  * stored `_lock` family kept (the door never sets, changes or removes it,
  * ADR-0010 §3.5), whatever the body carries; and `checksum` restamped from the
  * written body (`hashSpec`, the door's own), which the repository serves as
@@ -1380,14 +1393,6 @@ async function writeBody(
   address: { type: string; name: string; packageId: string | null },
   version?: number,
 ): Promise<Record<string, unknown>> {
-  const verdict = await run.opts.lock.verdict(address.type, address.name, address.packageId);
-  if (!verdict.editable) {
-    throw new Error(
-      `the ${address.type} ${address.name} is locked (_lock=${verdict.lock ?? 'unknown'}` +
-        `${verdict.lockReason ? `: ${verdict.lockReason}` : ''}), so the metadata door would refuse this write, and the ` +
-        'ceremony does not make it',
-    );
-  }
   const written: Record<string, unknown> = Object.fromEntries(Object.entries(body).filter(([k]) => !k.startsWith('_lock')));
   for (const [k, v] of Object.entries(row.stored ?? {})) if (k.startsWith('_lock')) written[k] = v;
   const sql = run.sql;
@@ -1484,6 +1489,21 @@ async function resolveMetadataConflict(run: Run, r: MetadataResolution, notes: s
   }
   const env = environment[0];
   const address = { type: conflict.type, name: conflict.name, packageId: conflict.packageId };
+  // The door's lock gate, asked ONCE and before any write of this resolution
+  // (the history fold, the promotion, the in-place write): a locked item stays
+  // locked, and a refusal leaves nothing written.
+  const writes = env ? !(env.body && sameBody(env.body, body)) : chosen.organizationId !== null;
+  if (writes) {
+    const verdict = await run.opts.lock.verdict(address.type, address.name, address.packageId);
+    if (!verdict.editable) {
+      return (
+        `${what} could not take the body of the chosen row ${chosen.id}: the item is locked (_lock=${verdict.lock ?? 'unknown'}` +
+        `${verdict.lockReason ? `: ${verdict.lockReason}` : ''}), so the metadata door would refuse the write, and the ` +
+        'ceremony does not make it. Nothing was written or deleted; unlock the item, or choose the row the environment ' +
+        'already holds, then re-run.'
+      );
+    }
+  }
   // The body the key's environment row must read back with: the chosen body, as written.
   let expected: Record<string, unknown> = env?.body && sameBody(env.body, body) ? env.body : body;
   try {
@@ -1502,7 +1522,8 @@ async function resolveMetadataConflict(run: Run, r: MetadataResolution, notes: s
       }
       expected = await writeBody(run, { id: env.id, stored: env.body }, body, address, version);
     }
-    if (closing.length) await run.opts.door.save(conflict.type as never, conflict.name, body, { packageId: conflict.packageId });
+    // The row as written (its stored lock family kept), so a rerun's door save meets the same body.
+    if (closing.length) await run.opts.door.save(conflict.type as never, conflict.name, expected, { packageId: conflict.packageId });
   } catch (error) {
     return (
       `${what} could not take the body of the chosen row ${chosen.id}` +

@@ -1365,10 +1365,52 @@ describe('ADR-0131 D10 --apply — a customization conflict resolved by --metada
       });
       expect(asked).toEqual([['view', 'deal_list', null]]);
       expect(step(report).status).toBe('blocked');
-      expect(step(report).blockers.join('\n')).toMatch(/is locked \(_lock=full: shipped locked\).*Nothing was deleted/s);
+      expect(step(report).blockers.join('\n')).toMatch(/is locked \(_lock=full: shipped locked\).*Nothing was written or deleted/s);
       expect(labelOf('md_env')).toBe('Env list');
       expect(deletes()).toEqual([]);
     });
+  });
+
+  it('⭐ the lock is asked before the history fold and the promotion: under a wall, a refusal leaves history and rows as they were', async () => {
+    metadataTable([
+      md('md_org', 'org_default', 'view', 'deal_list', { name: 'deal_list', label: 'Org list' }),
+      md('md_env', null, 'view', 'deal_list', { name: 'deal_list', label: 'Env list' }),
+      md('md_lone', 'org_default', 'dashboard', 'sales', { name: 'sales' }),
+    ].join(', '));
+    db.exec(`
+      CREATE TABLE sys_metadata_history (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT,
+        version INTEGER, event_seq INTEGER, checksum TEXT);
+      INSERT INTO sys_metadata_history VALUES
+        ('h_env', NULL, 'view', 'deal_list', 1, 1, 'e1'),
+        ('h_org1', 'org_default', 'view', 'deal_list', 1, 1, 'o1'), ('h_org2', 'org_default', 'view', 'deal_list', 2, 2, 'o2');
+    `);
+    const history = rows('SELECT * FROM sys_metadata_history ORDER BY id');
+    const report = await apply(storingDoor(catalog()), ledger(), {
+      posture: 'isolated',
+      metadataChoices: ['md_org'],
+      columnDrops: { drop: async (columns) => columns.map(({ table, column }) => ({ table, column, outcome: 'not-proposed' as const })) },
+      lock: { verdict: async (type) => (type === 'view' ? { editable: false, lock: 'full' } : { editable: true }) },
+    });
+    expect(step(report).status).toBe('blocked');
+    expect(step(report).blockers.join('\n')).toMatch(/view deal_list could not take the body .*Nothing was written or deleted/s);
+    // No fold, no promotion, no write: history and both rows of the key are as they were.
+    expect(writes.filter((w) => /sys_metadata/.test(w))).toEqual([]);
+    expect(rows('SELECT * FROM sys_metadata_history ORDER BY id')).toEqual(history);
+    expect(owners()).toEqual([['md_env', null], ['md_lone', 'org_default'], ['md_org', 'org_default']]);
+    expect(labelOf('md_env')).toBe('Env list');
+  });
+
+  it('the door save after the in-place write sends the row as written, its stored lock family kept', async () => {
+    metadataTable([
+      md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(true, 'Org copy')),
+      md('md_other', 'org_b', 'view', 'crm_lead.intake', formView(false, 'Other copy')),
+      md('md_env', null, 'view', 'crm_lead.intake', { ...formView(true, 'Env copy'), _lock: 'customize' }),
+    ].join(', '));
+    const c = storingDoor(catalog());
+    const report = await apply(c, ledger(), { views: servedViews(c, []), metadataChoices: ['md_org'] });
+    expect(step(report).status).toBe('done');
+    expect(c.viewSaves.at(-1)!.body).toMatchObject({ label: 'Org copy', _lock: 'customize' });
+    expect((c.viewSaves.at(-1)!.body.config as any).sharing.enabled).toBe(false);
   });
 
   it('two conflicts of one item that differ only by bundle member are two conflicts, each chosen for', async () => {
@@ -1775,7 +1817,8 @@ describe('ADR-0131 D10 --apply — history renumbering (seat answers 6162538253,
     // environment scope (NULL is distinct), and no layout can move them.
     viewWithHistory(
       `('md_env', NULL, 'object', 'deal', 'active', NULL, NULL, 1, '{"name":"deal"}')`,
-      `('h_e1', NULL, 'object', 'deal', 1, 7, 'e1'), ('h_e2', NULL, 'object', 'deal', 2, 7, 'e2')`,
+      `('h_e1', NULL, 'object', 'deal', 1, 7, 'e1'), ('h_e2', NULL, 'object', 'deal', 2, 7, 'e2'),
+       ('h_v1', NULL, 'object', 'account', 3, 8, 'v1'), ('h_v2', NULL, 'object', 'account', 3, 9, 'v2')`,
     );
     const drops: string[][] = [];
     const report = await apply(catalog(), ledger(), {
@@ -1788,7 +1831,16 @@ describe('ADR-0131 D10 --apply — history renumbering (seat answers 6162538253,
     });
     const renumber = report.steps.find((s) => s.step === 'history-renumber')!;
     expect(renumber.status).toBe('blocked');
-    expect(renumber.blockers.join('\n')).toMatch(/event_seq is not unique environment-wide: 7 \(2 rows\)/);
+    // The refusal names the table, each item holding the number, and the remedy.
+    expect(renumber.blockers).toContainEqual(
+      'sys_metadata_history: event_seq is not unique environment-wide — event_seq 7: object deal (row h_e1), object deal ' +
+        '(row h_e2). The ceremony never renumbers history a database numbered twice: the organization_id column is not ' +
+        'dropped until every event has its own number. Remedy: give each of these rows a number no other row holds (or ' +
+        'remove the duplicate), then re-run --apply.',
+    );
+    expect(renumber.blockers).toContainEqual(expect.stringMatching(
+      /^sys_metadata_history: a version of an item is held more than once — object account version 3 \(2 rows\)\. .*Remedy: give each of these rows a version no other row of the item holds/,
+    ));
     expect(report.steps.find((s) => s.step === 'column-drops')!.status).toBe('not-reached');
     expect(drops).toEqual([]);
   });
