@@ -2,6 +2,7 @@
 '@objectstack/metadata-core': minor
 '@objectstack/metadata-protocol': minor
 '@objectstack/metadata': minor
+'@objectstack/rest': minor
 '@objectstack/spec': minor
 '@objectstack/cli': patch
 ---
@@ -33,3 +34,5 @@ What else changes:
 
 - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
 - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+- `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+- The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
