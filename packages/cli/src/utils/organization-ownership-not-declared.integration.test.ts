@@ -91,7 +91,10 @@ function projectFor(name: string, config: Record<string, unknown>): string {
   return projectDir;
 }
 
-/** The real command, `--apply`, from `projectDir`, over a fresh copy of the fixture. */
+/**
+ * The real command from `projectDir`, over a fresh copy of the fixture: the plan
+ * run first (its file is the reviewed plan `--apply` executes), then `--apply`.
+ */
 async function applyIn(projectDir: string): Promise<{ dbFile: string; report: any; exitCode: number }> {
   const dbFile = join(projectDir, 'v17.db');
   copyFileSync(templateDb, dbFile);
@@ -109,9 +112,15 @@ async function applyIn(projectDir: string): Promise<{ dbFile: string; report: an
   process.chdir(projectDir);
   let exitCode: number | undefined;
   try {
+    const planFile = join(projectDir, 'plan.json');
+    await MigrateOrganizationOwnership.run(['--out', planFile, '--database-url', `file:${dbFile}`, '--json'], { root: CLI_ROOT });
+    stdout.mockClear();
     try {
       await MigrateOrganizationOwnership.run(
-        ['--apply', '--backup-taken', '--out', join(projectDir, 'apply.json'), '--database-url', `file:${dbFile}`, '--json'],
+        [
+          '--apply', '--backup-taken', '--plan-file', planFile,
+          '--out', join(projectDir, 'apply.json'), '--database-url', `file:${dbFile}`, '--json',
+        ],
         { root: CLI_ROOT },
       );
     } catch (error) {

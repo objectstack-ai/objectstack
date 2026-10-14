@@ -42,6 +42,7 @@ import {
   type OrganizationOwnershipApplyReport,
   type StepReport,
 } from './organization-ownership-apply.js';
+import { inventoryDigest } from './organization-ownership-plan.js';
 
 // [#10126] Pay the first load of what the boot reaches through dynamic
 // `import()`s at MODULE LOAD, outside the clocked hook.
@@ -126,6 +127,8 @@ async function ceremony(posture: string, db: Database.Database): Promise<Organiz
     },
     posture,
     database: 'v17',
+    // The plan the operator reviewed: the one this run computes.
+    reviewedPlan: { file: 'plan.json', generatedAt: '2026-10-14T00:00:00Z', database: 'v17', inventoryDigest: inventoryDigest(), posture },
     catalog,
     door: { save: async (type, name) => { throw new Error(`the door was asked to save ${type} ${name}`); } },
     templates: { find: async () => undefined },
