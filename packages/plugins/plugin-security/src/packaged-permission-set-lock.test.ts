@@ -747,6 +747,40 @@ describe('[#21789] the lock judges "shipped by a code package" from the row\'s p
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// [ADR-0086 D3] The lock reads a set's package from its BINDING only
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A set's owner is the package it is registered under (`_packageId`); its
+ * body's `packageId` is an author's declaration, refused at every door where it
+ * disagrees with that binding. The lock used to fall back to the body key when
+ * the binding was absent, so a set filed into no package whose body named one
+ * was locked as that package's: the one reader still treating the declaration
+ * as provenance.
+ */
+describe('[ADR-0086 D3] the lock never reads a set\'s body `packageId` as its package', () => {
+  /** Filed with no binding, its body naming a package: the shape the fallback locked. */
+  const unboundNamingAPackage = () => orgSet({ name: 'ehr_quality_inspector', packageId: 'com.example.ehr' });
+
+  it('a registry item with no binding is NOT packaged, whatever its body declares', () => {
+    expect(classifyPackagedPermissionSet('ehr_quality_inspector', makeQl([unboundNamingAPackage()])))
+      .toEqual({ status: 'org' });
+  });
+
+  it('the layered read\'s code layer, the same', () => {
+    const read = { status: 'read' as const, envelope: { code: unboundNamingAPackage(), overlay: null, effective: null } };
+    expect(classifyPackagedPermissionSet('ehr_quality_inspector', makeQl(null), read)).toEqual({ status: 'org' });
+  });
+
+  it('CONTROL: the binding decides, and a body key naming another package does not move it', () => {
+    expect(classifyPackagedPermissionSet('ehr_quality_inspector', makeQl([packagedSet()])))
+      .toEqual({ status: 'packaged', packageId: 'com.example.ehr' });
+    expect(classifyPackagedPermissionSet('ehr_quality_inspector', makeQl([packagedSet({ packageId: 'com.example.other' })])))
+      .toEqual({ status: 'packaged', packageId: 'com.example.ehr' });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The refusal's guidance reaches the END USER — `userMessage` on the wire
 // ─────────────────────────────────────────────────────────────────────────────
 

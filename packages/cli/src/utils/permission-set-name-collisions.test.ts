@@ -270,23 +270,47 @@ describe('#18024 — `os build` reports a permission-set name another package in
     expect(await findPermissionSetNameCollisions(parsed)).toEqual([]);
   });
 
-  it('the author-declared `packageId` answers only where no package ships the set', () => {
-    // The seeder owns a set under `_packageId ?? packageId` — registry
-    // provenance first, ADR-0086 D3's author-declared id as the fallback. Inside
-    // an artifact the package IS the registry provenance, so a set carrying a
-    // different `packageId` is still declared by the package that ships it;
-    // reading the key there would attribute a package's own sets to someone
-    // else and invent a collision with itself.
-    const inArtifact = parsedArtifact([ordersStack([ordersSet(SHARED_NAME, 'com.example.elsewhere')])]);
+  it('[ADR-0086 D3] the owner is the package that ships the set, never the body\'s `packageId`', async () => {
+    // A set is owned by the package that registers it. Inside an artifact the
+    // package IS that registration, so a set whose body names another package
+    // is still declared by the package that ships it. The build door refuses
+    // that body (the stack schema), so the artifact is composed unjudged here
+    // (`strict: false`) and read raw: this pins the READER, not the door.
+    const inArtifact = artifact([ordersStack([ordersSet(SHARED_NAME, 'com.example.elsewhere')])], { strict: false });
     expect(collectPermissionSetDeclarations(inArtifact)).toEqual([
       { name: SHARED_NAME, declaredBy: ORDERS_ID },
     ]);
 
-    // With no package around the declaration at all, the key is the only owner
-    // there is — the shape the seeder's fallback exists for.
-    expect(collectPermissionSetDeclarations({
-      permissions: [ordersSet(SHARED_NAME, 'com.example.elsewhere')],
-    })).toEqual([{ name: SHARED_NAME, declaredBy: 'com.example.elsewhere' }]);
+    // With no package around the declaration, the set has NO owner: the body's
+    // key is not a fallback. Two such sets of one name, naming two different
+    // packages in their bodies, are therefore not a collision; read through the
+    // body key, they were reported as one package colliding with another.
+    const unbound = {
+      permissions: [ordersSet(SHARED_NAME, 'com.example.elsewhere'), ordersSet(SHARED_NAME, 'com.example.yonder')],
+    };
+    expect(collectPermissionSetDeclarations(unbound)).toEqual([]);
+    expect(await findPermissionSetNameCollisions(unbound)).toEqual([]);
+
+    // …and the build door is where such a stack stops: the parse the commands
+    // run refuses each body key at its own `packageId`.
+    const parsed = ObjectStackDefinitionSchema.safeParse(unbound);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(
+      expect.arrayContaining(['permissions.0.packageId', 'permissions.1.packageId']),
+    );
+  });
+
+  it('CONTROL: a manifest-bound stack declares every set under its manifest id, whatever the body says', async () => {
+    const bound = {
+      manifest: { id: CORE_ID },
+      permissions: [coreSet(SHARED_NAME), ordersSet(SHARED_NAME, 'com.example.elsewhere')],
+    };
+    expect(collectPermissionSetDeclarations(bound)).toEqual([
+      { name: SHARED_NAME, declaredBy: CORE_ID },
+      { name: SHARED_NAME, declaredBy: CORE_ID },
+    ]);
+    // One package declaring its own name twice is a re-seed, not a collision.
+    expect(await findPermissionSetNameCollisions(bound)).toEqual([]);
   });
 
   it('a declaration with no resolvable owner is dropped, never reported as a collision', async () => {
