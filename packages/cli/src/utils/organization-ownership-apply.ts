@@ -54,6 +54,17 @@ import {
  *     (`convertPositionBindingRows`). Only under `single` (ADR-0131 D3: a
  *     Setup catalog write is an environment metadata write under `single` and
  *     refused under a wall); under a wall the rows are reported.
+ *  2r. `history-renumber` — seat answer Q2 A (6162538253). Once the
+ *     organization leaves the key, `sys_metadata_history.event_seq` and each
+ *     item's `(type, name, version)` lineage are unique environment-wide; an
+ *     organization's history kept its own sequences beside the
+ *     environment's. Each organization's `event_seq` range is shifted by ONE
+ *     offset, its commit ranges with it; a version lineage is shifted only
+ *     where an environment lineage (or an earlier organization's) of the same
+ *     `(type, name)` holds those numbers, the organization's `sys_metadata`
+ *     row's own `version` with it. Order within an organization and the
+ *     version a rollback resolves are unchanged. It writes numbers, never
+ *     deletes, and runs while the organization ids still say whose a row is.
  *  2a. `metadata-promotion` — rulings A on #22011 and #22008 (records
  *     6020163868, 6020151485): first every public-form withdrawal an
  *     organization saved is carried onto the environment, fail-closed (any
@@ -124,6 +135,7 @@ export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-owners
 export const CEREMONY_STEPS = [
   'attribution',
   'authored-conversion',
+  'history-renumber',
   'metadata-promotion',
   'template-promotion',
   'settings-move',
@@ -664,6 +676,153 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
     );
   }
   return { step: 'authored-conversion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+}
+
+// ── Step 2r: history renumbering (seat answer Q2 A) ─────────────────────────
+
+const HISTORY = 'sys_metadata_history';
+const COMMITS = 'sys_metadata_commit';
+const OVERLAYS = 'sys_metadata';
+
+const num = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * One organization's numbers, moved above `base` without a transaction and
+ * safely re-runnable. The offset puts the new range wholly ABOVE both `base`
+ * and the old range, so a row's own number says whether it moved: the
+ * dependents (commit ranges, the overlay row's version) move first, each only
+ * where it still lies inside the old range, and the history rows last, in ONE
+ * statement. A re-run finds the history above `base` and moves nothing.
+ * Returns the new top of the range.
+ */
+async function shiftRange(
+  run: Run,
+  range: { min: number; max: number },
+  base: number,
+  dependents: (offset: number, oldMax: number) => Promise<void>,
+  history: (offset: number) => Promise<void>,
+): Promise<{ top: number; moved: boolean }> {
+  if (range.min > base) return { top: Math.max(base, range.max), moved: false };
+  const offset = Math.max(base, range.max) - range.min + 1;
+  await dependents(offset, range.max);
+  await history(offset);
+  return { top: range.max + offset, moved: true };
+}
+
+async function runHistoryRenumber(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { organizationsShifted: 0, lineagesShifted: 0 };
+  const hcols = await columnsOf(run, HISTORY);
+  if (!hcols?.has(ORG) || !hcols.has('event_seq')) {
+    return { step: 'history-renumber', status: 'done', summary, blockers: [], notes: [] };
+  }
+  const sql = run.sql;
+  const h = sql.q(HISTORY, HISTORY);
+  const o = sql.q(ORG, HISTORY);
+  const ccols = await columnsOf(run, COMMITS);
+  const commitsCarry = !!ccols?.has(ORG) && ccols.has('event_seq_start') && ccols.has('event_seq_end');
+  const mcols = await columnsOf(run, OVERLAYS);
+  const overlaysCarry = !!mcols?.has(ORG) && mcols.has('version');
+
+  // ── event_seq: one offset per organization, in organization order ──
+  const envTop = num((await sql.read(HISTORY, `SELECT MAX(${sql.q('event_seq', HISTORY)}) AS m FROM ${h} WHERE ${o} IS NULL`))[0]?.m);
+  const ranges = await sql.read(
+    HISTORY,
+    `SELECT ${o} AS org, MIN(${sql.q('event_seq', HISTORY)}) AS lo, MAX(${sql.q('event_seq', HISTORY)}) AS hi ` +
+      `FROM ${h} WHERE ${o} IS NOT NULL GROUP BY ${o} ORDER BY ${o}`,
+  );
+  let base = envTop;
+  for (const r of ranges) {
+    const org = String(r.org);
+    const shifted = await shiftRange(
+      run,
+      { min: num(r.lo), max: num(r.hi) },
+      base,
+      async (offset, oldMax) => {
+        if (!commitsCarry) return;
+        const c = sql.q(COMMITS, COMMITS);
+        const s0 = sql.q('event_seq_start', COMMITS);
+        const s1 = sql.q('event_seq_end', COMMITS);
+        await execute(
+          run,
+          COMMITS,
+          `UPDATE ${c} SET ${s0} = ${s0} + ?, ${s1} = ${s1} + ? WHERE ${sql.q(ORG, COMMITS)} = ? AND ${s0} <= ?`,
+          [offset, offset, org, oldMax],
+        );
+      },
+      async (offset) => {
+        await execute(run, HISTORY, `UPDATE ${h} SET ${sql.q('event_seq', HISTORY)} = ${sql.q('event_seq', HISTORY)} + ? WHERE ${o} = ?`, [offset, org]);
+      },
+    );
+    base = shifted.top;
+    if (shifted.moved) summary.organizationsShifted++;
+  }
+
+  // ── versions: per (type, name), only where another lineage holds them ──
+  if (hcols.has('version')) {
+    const v = sql.q('version', HISTORY);
+    const ty = sql.q('type', HISTORY);
+    const nm = sql.q('name', HISTORY);
+    const lineages = await sql.read(
+      HISTORY,
+      `SELECT ${ty} AS t, ${nm} AS n, ${o} AS org, MIN(${v}) AS lo, MAX(${v}) AS hi FROM ${h} ` +
+        `GROUP BY ${ty}, ${nm}, ${o} ORDER BY ${ty}, ${nm}, ${o}`,
+    );
+    const byItem = new Map<string, Array<Record<string, unknown>>>();
+    for (const l of lineages) {
+      const key = `${String(l.t)}\u0000${String(l.n)}`;
+      byItem.set(key, [...(byItem.get(key) ?? []), l]);
+    }
+    for (const group of byItem.values()) {
+      const env = group.find((l) => l.org === null || l.org === undefined || l.org === '');
+      const orgs = group.filter((l) => l !== env);
+      if (orgs.length === 0) continue;
+      // With no environment lineage, the first organization keeps its numbers.
+      let vbase = env ? num(env.hi) : Number.NEGATIVE_INFINITY;
+      for (const l of orgs) {
+        const org = String(l.org);
+        if (vbase === Number.NEGATIVE_INFINITY) {
+          vbase = num(l.hi);
+          continue;
+        }
+        const shifted = await shiftRange(
+          run,
+          { min: num(l.lo), max: num(l.hi) },
+          vbase,
+          async (offset, oldMax) => {
+            if (!overlaysCarry) return;
+            const m = sql.q(OVERLAYS, OVERLAYS);
+            const mv = sql.q('version', OVERLAYS);
+            await execute(
+              run,
+              OVERLAYS,
+              `UPDATE ${m} SET ${mv} = ${mv} + ? WHERE ${sql.q(ORG, OVERLAYS)} = ? AND ${sql.q('type', OVERLAYS)} = ? ` +
+                `AND ${sql.q('name', OVERLAYS)} = ? AND ${mv} <= ?`,
+              [offset, org, l.t, l.n, oldMax],
+            );
+          },
+          async (offset) => {
+            await execute(
+              run,
+              HISTORY,
+              `UPDATE ${h} SET ${v} = ${v} + ? WHERE ${o} = ? AND ${ty} = ? AND ${nm} = ?`,
+              [offset, org, l.t, l.n],
+            );
+          },
+        );
+        vbase = shifted.top;
+        if (shifted.moved) summary.lineagesShifted++;
+      }
+    }
+  }
+  if (summary.organizationsShifted || summary.lineagesShifted) {
+    run.opts.onProgress?.(
+      `history renumbered: ${summary.organizationsShifted} organization event range(s), ${summary.lineagesShifted} version lineage(s)`,
+    );
+  }
+  return { step: 'history-renumber', status: 'done', summary, blockers: [], notes: [] };
 }
 
 // ── Step 2a: organization customizations and form withdrawals (rulings A) ──
@@ -1471,6 +1630,7 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
 const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   attribution: runAttribution,
   'authored-conversion': runAuthoredConversion,
+  'history-renumber': runHistoryRenumber,
   'metadata-promotion': runMetadataPromotion,
   'template-promotion': runTemplatePromotion,
   'settings-move': runSettingsMove,

@@ -410,6 +410,7 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(report.steps.map((s) => [s.step, s.status])).toEqual([
       ['attribution', 'done'],
       ['authored-conversion', 'done'],
+      ['history-renumber', 'done'],
       ['metadata-promotion', 'done'],
       ['template-promotion', 'done'],
       ['settings-move', 'done'],
@@ -514,7 +515,7 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const again = await apply(c, l);
 
     expect(again.resumedFrom).toEqual([
-      'attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion', 'column-drops',
+      'attribution', 'authored-conversion', 'history-renumber', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion', 'column-drops',
     ]);
     expect(again.steps.every((s) => s.status === 'checkpointed')).toBe(true);
     expect(again.complete).toBe(true);
@@ -526,14 +527,14 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const c = catalog();
     const l = ledger();
     await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE FROM "sys_capability"/ }) })).rejects.toThrow(/killed mid-step/);
-    expect(Object.keys(l.checkpoint!.completed)).toEqual(['attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite']);
+    expect(Object.keys(l.checkpoint!.completed)).toEqual(['attribution', 'authored-conversion', 'history-renumber', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite']);
     expect(rows('SELECT COUNT(*) AS n FROM sys_position_permission_set')).toEqual([{ n: 3 }]);
     writes = [];
 
     const resumed = await apply(c, l);
 
-    expect(resumed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite']);
-    expect(resumed.steps.map((s) => s.status)).toEqual(['checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'done', 'done']);
+    expect(resumed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'history-renumber', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite']);
+    expect(resumed.steps.map((s) => s.status)).toEqual(['checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'done', 'done']);
     expect(writes.some((w) => /^UPDATE/.test(w))).toBe(false);
     expect(resumed.complete).toBe(true);
     expect(rows('SELECT COUNT(*) AS n FROM sys_position_permission_set')).toEqual([{ n: 0 }]);
@@ -1007,5 +1008,105 @@ describe('ADR-0131 D10 --apply — a customization conflict resolved by --metada
       /md_org and md_env both choose for view deal_list/,
     );
     expect(writes).toEqual([]);
+  });
+});
+
+describe('ADR-0131 D10 --apply — history renumbering (seat answers 6162538253, Q2 A)', () => {
+  const history = (): void => {
+    db.exec(`
+      CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT,
+        package_id TEXT, bundle_member TEXT, version INTEGER);
+      INSERT INTO sys_metadata VALUES
+        ('row_env', NULL, 'object', 'deal', 'active', NULL, NULL, 2),
+        ('row_a', 'org_a', 'view', 'board', 'active', NULL, NULL, 3),
+        ('row_b', 'org_b', 'view', 'board', 'active', NULL, NULL, 2);
+      ALTER TABLE sys_metadata ADD COLUMN metadata TEXT;
+      CREATE TABLE sys_metadata_history (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT,
+        version INTEGER, event_seq INTEGER, checksum TEXT);
+      INSERT INTO sys_metadata_history VALUES
+        ('h_env1', NULL, 'object', 'deal', 1, 1, 'e1'),
+        ('h_env2', NULL, 'object', 'deal', 2, 2, 'e2'),
+        ('h_env3', NULL, 'view', 'board', 1, 3, 'e3'),
+        ('h_a1', 'org_a', 'view', 'board', 1, 1, 'a1'),
+        ('h_a2', 'org_a', 'view', 'board', 2, 2, 'a2'),
+        ('h_a3', 'org_a', 'view', 'board', 3, 3, 'a3'),
+        ('h_b1', 'org_b', 'view', 'board', 1, 1, 'b1'),
+        ('h_b2', 'org_b', 'view', 'board', 2, 2, 'b2'),
+        ('h_c1', 'org_c', 'report', 'solo', 1, 1, 'c1');
+      CREATE TABLE sys_metadata_commit (id TEXT PRIMARY KEY, organization_id TEXT, event_seq_start INTEGER, event_seq_end INTEGER);
+      INSERT INTO sys_metadata_commit VALUES
+        ('c_env', NULL, 1, 3), ('c_a', 'org_a', 1, 3), ('c_b', 'org_b', 1, 2);
+    `);
+  };
+  const seqs = (): Array<[unknown, unknown, unknown, unknown]> =>
+    rows('SELECT id, organization_id, event_seq, version FROM sys_metadata_history ORDER BY id').map((r) => [r.id, r.organization_id, r.event_seq, r.version]);
+  const step = (report: OrganizationOwnershipApplyReport) => report.steps.find((s) => s.step === 'history-renumber')!;
+
+  it('makes event_seq and every (type, name, version) unique environment-wide, writing numbers only', async () => {
+    history();
+    const before = rows('SELECT COUNT(*) AS n FROM sys_metadata_history');
+    const report = await apply(catalog(), ledger(), { posture: 'isolated' });
+    expect(step(report)).toMatchObject({ status: 'done', summary: { organizationsShifted: 3, lineagesShifted: 2 } });
+    expect(rows('SELECT COUNT(*) AS n FROM sys_metadata_history')).toEqual(before);
+    expect(rows('SELECT event_seq, COUNT(*) AS n FROM sys_metadata_history GROUP BY event_seq HAVING COUNT(*) > 1')).toEqual([]);
+    expect(rows('SELECT type, name, version FROM sys_metadata_history GROUP BY type, name, version HAVING COUNT(*) > 1')).toEqual([]);
+    expect(writes.some((w) => /^DELETE/.test(w))).toBe(false);
+  });
+
+  it('⭐ order within each organization and the version a rollback resolves are unchanged', async () => {
+    history();
+    await apply(catalog(), ledger(), { posture: 'isolated' });
+    const ordered = (org: string): string[] =>
+      rows(`SELECT checksum FROM sys_metadata_history WHERE organization_id = '${org}' ORDER BY event_seq`).map((r) => String(r.checksum));
+    expect(ordered('org_a')).toEqual(['a1', 'a2', 'a3']);
+    expect(ordered('org_b')).toEqual(['b1', 'b2']);
+    // The overlay row's version still names its own snapshot: a rollback by
+    // version lands on that organization's body, never another lineage's.
+    for (const id of ['row_a', 'row_b']) {
+      const [row] = rows(`SELECT organization_id, version FROM sys_metadata WHERE id = '${id}'`);
+      const snap = rows(
+        `SELECT checksum FROM sys_metadata_history WHERE type = 'view' AND name = 'board' AND version = ${Number(row!.version)}`,
+      );
+      expect(snap).toEqual([{ checksum: id === 'row_a' ? 'a3' : 'b2' }]);
+    }
+    // A lineage no other one shares keeps its numbers.
+    expect(rows(`SELECT version FROM sys_metadata_history WHERE id = 'h_c1'`)).toEqual([{ version: 1 }]);
+    expect(rows(`SELECT version FROM sys_metadata WHERE id = 'row_env'`)).toEqual([{ version: 2 }]);
+  });
+
+  it('commit ranges move with their organization\'s history', async () => {
+    history();
+    await apply(catalog(), ledger(), { posture: 'isolated' });
+    for (const [commit, org] of [['c_a', 'org_a'], ['c_b', 'org_b']] as const) {
+      const [c] = rows(`SELECT event_seq_start AS s, event_seq_end AS e FROM sys_metadata_commit WHERE id = '${commit}'`);
+      const [range] = rows(`SELECT MIN(event_seq) AS lo, MAX(event_seq) AS hi FROM sys_metadata_history WHERE organization_id = '${org}'`);
+      expect([c!.s, c!.e]).toEqual([range!.lo, range!.hi]);
+    }
+    expect(rows(`SELECT event_seq_start AS s, event_seq_end AS e FROM sys_metadata_commit WHERE id = 'c_env'`)).toEqual([{ s: 1, e: 3 }]);
+  });
+
+  it('a second run moves nothing, and a run killed between the commit and history writes resumes without moving a commit twice', async () => {
+    history();
+    await apply(catalog(), ledger(), { posture: 'isolated' });
+    const settled = seqs();
+    const commits = rows('SELECT * FROM sys_metadata_commit ORDER BY id');
+    const again = await apply(catalog(), ledger(), { posture: 'isolated' });
+    expect(step(again).summary).toMatchObject({ organizationsShifted: 0, lineagesShifted: 0 });
+    expect(seqs()).toEqual(settled);
+    expect(rows('SELECT * FROM sys_metadata_commit ORDER BY id')).toEqual(commits);
+
+    // Killed after org_a's commit range moved, before its history did.
+    db.close();
+    db = new Database(file);
+    db.exec('DROP TABLE sys_metadata; DROP TABLE sys_metadata_history; DROP TABLE sys_metadata_commit;');
+    history();
+    await expect(apply(catalog(), ledger(), {
+      posture: 'isolated',
+      executor: executor({ failOnceOn: /^UPDATE "sys_metadata_history" SET "event_seq"/ }),
+    })).rejects.toThrow(/killed mid-step/);
+    const l = ledger();
+    await apply(catalog(), l, { posture: 'isolated' });
+    expect(seqs()).toEqual(settled);
+    expect(rows('SELECT * FROM sys_metadata_commit ORDER BY id')).toEqual(commits);
   });
 });
