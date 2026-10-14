@@ -55,9 +55,9 @@ const RETIRED_KEY = ['connector', 'connectionTimeoutMs'].join('.');
 
 /**
  * THE FIXTURE — the generated protocol-18 page's line that turned
- * `integration/connector-connection-timeout-retirement` red ("authors
- * .connectionTimeoutMs"), excerpted. The key sits outside inline code, which
- * is the shape that walk flags.
+ * `integration/connector-connection-timeout-retirement` red (its offender
+ * line read "authors" and the member read), excerpted. The key sits outside
+ * inline code, which is the shape that walk flags.
  */
 const FIXTURE = [
   '## Protocol 17 → 18',
