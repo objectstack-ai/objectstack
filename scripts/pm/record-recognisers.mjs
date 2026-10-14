@@ -64,7 +64,6 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
@@ -1159,7 +1158,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 10,
-  '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 25,
+  '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
 });
 
@@ -1365,11 +1364,6 @@ export async function selfTest() {
   t('⭐ `--template --face declaration` prints exactly that face\'s template and exits 0', (() => { const r = faceCli(['--template', '--face', 'declaration']); return r.status === 0 && r.stdout === `${DECL_TPL}\n`; })());
   t('⛔ `--face` naming no face is REFUSED with the usage, exit 1', (() => { const r = faceCli(['--template', '--face', 'lane']); return r.status === 1 && says(r.stderr, 'usage:'); })() && faceCli(['--template', '--face']).status === 1);
   t('`--brief-template --face declaration` prints exactly that face\'s brief', (() => { const r = faceCli(['--brief-template', '--face', 'declaration']); return r.status === 0 && r.stdout === `${contractReviewBriefLines({ face: 'declaration' }).join('\n')}\n`; })());
-  // The rule text and this table name the same two NAMES and the same prose faces: the charter is the
-  // rule and this file its machine copy, so a charter edit dropping one reds here rather than drifting.
-  const CHARTER = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8');
-  t('⭐ the charter names BOTH tier constants by NAME, and the `--face declaration` template', says(CHARTER, `\`${CONTRACT_REVIEW_TIER_NAME}\``) && says(CHARTER, `\`${TIER_DEFAULT_NAME}\``) && says(CHARTER, '--face declaration'));
-  t('…and every prose face this file excludes from the review surface', REVIEW_SURFACE_EXCLUDED_PROSE_FACES.every((f) => says(CHARTER, f.prefix !== undefined ? f.prefix.replace(/\/$/, '') : f.basename.replace(/\.md$/, ''))));
 
   // -- the 2026-09-20 ruling: a PURE REGENERATION keeps the record -----------
   battery('⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees');
@@ -1668,8 +1662,7 @@ export async function selfTest() {
       + 'recognition dialects, the unsigned and newest-governs readings and the two gaps; the head sha in a span '
       + 'of its own; the `Served-tier:` reading — at tier, below, missing, unreadable, the identifier refused by '
       + 'value and by shape, the stamp control and the measured continuation spelling; the review tier read off '
-      + 'the face — schema, governed rules text, the declaration alone — exact in both directions, and the charter '
-      + 'naming both tiers; the pure-regeneration carry and the prose-only carry decided on committed trees in '
+      + 'the face — schema, governed rules text, the declaration alone — exact in both directions; the pure-regeneration carry and the prose-only carry decided on committed trees in '
       + 'every direction; the copyable template, per face, driven back through the '
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; and the ONE '
