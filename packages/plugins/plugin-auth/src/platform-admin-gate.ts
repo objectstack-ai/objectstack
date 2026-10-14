@@ -120,7 +120,7 @@ export function isPlatformAdminUser(sessionUser: unknown): boolean {
  * to tell "the payload never reached the gate" from "the gate said no".
  *
  * A held session is refused between the two, with `403` and the gate's own
- * `code` and `message` (`PASSWORD_EXPIRED` / `MFA_REQUIRED`): identity first,
+ * `code` and `message` (`AuthGateCodeSchema`): identity first,
  * then the authentication-policy posture, then authorization, the order the
  * REST and dispatcher seams already apply. A held non-admin therefore reads
  * the posture refusal rather than `PERMISSION_DENIED`, the same 403 status.

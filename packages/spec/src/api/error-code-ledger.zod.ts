@@ -562,6 +562,12 @@ export const ERROR_CODE_LEDGER = {
     'PASSWORD_ALREADY_SET',       // pass-through from better-auth
     'PASSWORD_EXPIRED',
     'PASSWORD_POLICY_VIOLATION',
+    // [#23287, ruling C′ item 2] 403 from every ADR-0069 gate seam while an
+    // administrator's forced password change (`sys_user.must_change_password`)
+    // is outstanding. It used to reuse `PASSWORD_EXPIRED`; the forced act now
+    // has its own code (scope `credential`, `AUTH_GATE_SCOPES`), so a client
+    // can tell an expiry from a reset an administrator asked for.
+    'PASSWORD_RESET_REQUIRED',
     'PASSWORD_REUSE',
     'OAUTH_REGISTER_FAILED',       // better-auth rejected the client registration
     'PHONE_NOT_ENABLED',

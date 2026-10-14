@@ -51,9 +51,9 @@ import type { SharingEngine } from './sharing-service.js';
 const BASE = '/api/v1/share-links';
 
 /** The gate postures plugin-auth's enrichment writes, one per policy. */
-const PASSWORD_EXPIRED = { code: 'PASSWORD_EXPIRED', message: 'Your password has expired. Please change it to continue.' };
+const PASSWORD_EXPIRED = { code: 'PASSWORD_EXPIRED' as const, message: 'Your password has expired. Please change it to continue.' };
 const MFA_REQUIRED = {
-  code: 'MFA_REQUIRED',
+  code: 'MFA_REQUIRED' as const,
   message: 'Multi-factor authentication is required. Please set up an authenticator app to continue.',
 };
 

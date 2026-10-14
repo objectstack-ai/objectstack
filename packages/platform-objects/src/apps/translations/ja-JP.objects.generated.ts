@@ -70,7 +70,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "パスワード変更必須",
-        help: "true の場合、パスワードを変更するまでユーザーはブロックされます（403 PASSWORD_EXPIRED）。管理者のユーザー管理ルートが設定します。システム管理。"
+        help: "true の場合、パスワードを変更するまでユーザーはブロックされます（403 PASSWORD_RESET_REQUIRED）。管理者のユーザー管理ルートが設定します。システム管理。"
       },
       mfa_required_at: {
         label: "MFA 強制適用日時",
@@ -197,6 +197,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "次回サインイン時にパスワード変更を必須にする"
+          },
+          revokeSessionsAndKeys: {
+            label: "すべてのセッションからサインアウトし API キーを失効させる",
+            helpText: "このユーザーのすべてのセッションを終了し、所有するすべての API キーを失効させます。アカウント侵害の疑いがある場合はオンのままにし、通常のリセットではオフにしてください。失効したキーはパスワード変更後も失効したままです。"
           }
         },
         resultDialog: {

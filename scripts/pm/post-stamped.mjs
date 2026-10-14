@@ -465,6 +465,13 @@
  * ceiling tier with nothing behind it, the measurement behind the fourth). `claimKeyedLineRefusals` carries the four
  * decisions that keep it a mirror and not a fifth dialect.
  *
+ * ## A decision analysis carries its four-facet marker, or the comment is refused (#23420)
+ *
+ * A comment whose decision frame, options and recommendation make it a decision analysis is `EXIT_REFUSED` before any
+ * request when it carries no `os-decision-facets` marker outside code — read as the pre-handover check reads it, so an
+ * analysis that check could never find is not written. `decisionFacetRefusals`' banner carries the predicate, the
+ * measurement it was chosen on, and what it cannot see. `--comment` only.
+ *
  * ## ⚖️ Why this ACTS by default, where `sweep-closed-cards.mjs` dry-runs
  *
  * Its sibling next door defaults to a dry run and needs `--write`, because it
@@ -853,6 +860,7 @@ import {
   CLAIM_COMMENT_MARKER,
   COMMENT_BODY_LIMIT,
   CONTRACT_REVIEW_HEADING_MARKER,
+  DECISION_FACET_MARKER,
   EXIT_PREREQUISITE_NOT_MET,
   H56_STAMP_TOLERANCE_MIN,
   ISSUE_BODY_LIMIT,
@@ -860,6 +868,7 @@ import {
   claimSeatNumber,
   h56EstimatedStamp,
   h56StampedReadings,
+  hasDecisionFacetMarker,
   markerMatches,
   protocolStamps,
   proxyRearmPlan,
@@ -2200,6 +2209,175 @@ export function vacantLedgerRefusalText(rows) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// A decision ANALYSIS carries the four-facet marker — refused BEFORE the write (#23420)
+// ---------------------------------------------------------------------------
+//
+// A decision is anchored on its card, its analysis written there as a comment (`SKILL.md` 〈升级与决策〉 ②), and
+// the analysis's four-facet block opens with the machine-findable marker `os-decision-facets`
+// (`references/decision-analysis.md` 〈四棱卡面块固定形状〉). The pre-handover check finds a pending decision by that
+// marker and nothing else (`check-handover.mjs`, predicate (b)), so an analysis written without it is a decision no
+// reader can find — the two analyses one shift left outside the inbox carried none.
+//
+// ## The predicate: three signals, ALL of them, read over the body with its code blanked
+//
+//   FRAME           the comment names a decision where a comment names its own subject — its opening line, a
+//                   heading, or a bold lead (a paragraph or list item opening with `**…**`) — whose text, decoration
+//                   skipped, OPENS with one of `DECISION_FRAME_OPENERS`.
+//   OPTIONS         the options set the analysis template lays out: a table whose header row has an option column
+//                   (`选项` / `方案` / `Option`), or two or more distinct option labels (`A`, `B2`, `C′` …) as the
+//                   bold lead of an UNINDENTED list item (`- **A**: …`).
+//   RECOMMENDATION  `推荐` (⛔ not `不推荐`), `recommend` / `recommends` or `recommendation`, then an option label.
+//
+// Why three and not two, measured over the repository's comment stream (5,519 fleet-bot comments, 2026-10-08T23:36Z
+// → 2026-10-14T10:29Z): the three without the marker fire on 7 — the two measured analyses, four more analyses of
+// the same shape, and one decision the director seat filed with its options laid out — and on no other record.
+// FRAME with a table or a recommendation fires on 45: ten director delta readings (`## 席位意见（增量）` — a delta
+// over an analysis that carries the block, `decision-analysis.md` 总监批前卡评论是增量), twenty-two triage round
+// records (`**Decision box:**` leads over `recommends X` digests), four summon ledgers and a seat note. A delta backs
+// a letter and never lays the options out again; a round record nests each card's options under that card's bullet.
+// Those are the two shapes OPTIONS' two conditions key on.
+//
+// ## The marker, read the way the handover check reads it
+//
+// `hasDecisionFacetMarker` over the body with its code blanked (`stripMarkdownCode`) — the reading `check-handover.mjs`
+// calls `carriesFacetMarker`. It is composed here from the same two imports of `check-half-states.mjs` (which owns the
+// token and its reader), ⛔ never imported from `check-handover.mjs`: that file imports THIS one (`seatPostVacancy`),
+// so the import back would be a cycle. A bare line and its HTML-comment form both read; a marker inside code is a
+// quotation, which the handover check does not read either, so it clears nothing here.
+//
+// ## What it cannot see, stated rather than implied
+//
+// Precision before recall, because a false refusal costs a seat its write: an analysis with no FRAME (a triage record
+// that files a decision box under its `## Triage:` heading), with its options in prose, or recommending without
+// naming an option label, is not recognised and is written as before. And the target's number is not read: this core
+// is offline, so whether the comment lands on the decision's own card is the writer's half. `--comment` only — a card
+// body is not an analysis comment, and `--body` and every other route are untouched.
+
+/**
+ * The words a decision FRAME opens with, each beside a live heading or lead it was measured on. Read case-blind for
+ * the English ones, at the START of the text only: `## Triage: decision-box entry check` names a decision box and is
+ * a triage record, not an analysis.
+ */
+export const DECISION_FRAME_OPENERS = Object.freeze([
+  Object.freeze({ opener: '决策', measured: '`## 决策:空闲的生命周期清理…` · `## 决策分析：…` · `## 决策请求(第 3 项):…`' }),
+  Object.freeze({ opener: '待裁', measured: '`## 待裁:ADR-0139 的组合点该放在哪…` · `## 待裁(`needs-user-decision`):…`' }),
+  Object.freeze({ opener: '待维护者裁决', measured: '`## 待维护者裁决：天花板的“实测值”取哪个读数…`' }),
+  Object.freeze({ opener: '回箱待裁', measured: '`## 回箱待裁(`needs-user-decision`):…`' }),
+  Object.freeze({ opener: '决裁', measured: '`## 决裁详解（按决裁格式六项重写…）`' }),
+  Object.freeze({ opener: '重新分析', measured: '`## 重新分析（维护者本场三句话之后）：…`' }),
+  Object.freeze({ opener: '席位意见', measured: '`## 席位意见 · 决策:…的四行规则怎么…落地` — the card\'s own candidate heading' }),
+  Object.freeze({ opener: 'Seat reading', measured: 'the card\'s candidate heading, the English twin of `席位意见`' }),
+  Object.freeze({ opener: 'Decision', measured: '`## Decision: how an environment overlay keeps…` · `## Decision box: who counts…` · `Decision record: …`' }),
+  Object.freeze({ opener: 'Re-analysis', measured: '`## Re-analysis for the decision: …`' }),
+  Object.freeze({ opener: "Needs the maintainer's word", measured: '`**Needs the maintainer\'s word.** The dev\'s options, condensed:` — the bold lead of an analysis with no decision heading' }),
+]);
+
+/** An opener as the regex reads it: an ASCII one escaped, case-blind, apostrophe-tolerant and word-bounded on the right. */
+const frameOpenerSource = (opener) =>
+  /^[\x20-\x7e]+$/u.test(opener)
+    ? `${opener.replace(/[.*+?^${}()|[\]\\]/gu, (ch) => `\\${ch}`).replace(/'/gu, "['’]")}(?![A-Za-z])`
+    : opener;
+const DECISION_FRAME_RE = new RegExp(`^(?:${DECISION_FRAME_OPENERS.map(({ opener }) => frameOpenerSource(opener)).join('|')})`, 'iu');
+/** An option label as analyses write it: one capital A–F, an optional digit or prime (`A`, `B2`, `C′`) — measured up to `E2`. */
+const OPTION_LABEL = "[A-F](?:\\d|′|')?";
+const OPTION_TABLE_HEADER = /^(?:选项|方案|options?)$/iu;
+const TABLE_LINE = /^[ \t]*\|.*\|[ \t]*$/u;
+const TABLE_DELIMITER = /^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)+\|?[ \t]*$/u;
+/**
+ * An UNINDENTED list item whose bold lead is an option label and nothing else but a parenthetical and a colon —
+ * `- **A**: …`, `- **B2：**`, `1. **选项 C** — …`, `- **A(席位推荐)**:…`. ⛔ Not a label followed by words: `**A crash between
+ * the two:**`, `**H1:**` and `**D5.2 over-inclusion**` are an article, a hypothesis and an ADR item, measured in records.
+ */
+const TOP_OPTION_ITEM = new RegExp(`^(?:[-*+]|\\d{1,2}[.)])[ \\t]+\\*\\*(?:(?:选项|方案|Option)[ \\t]*)?(${OPTION_LABEL})(?:[ \\t]*[(（][^*\\n]*?[)）])?[ \\t]*[:：]?\\*\\*`, 'u');
+/** `推荐` (not `不推荐`), `recommend(s)` or `recommendation`, then an option label — a question prefix (`Q1 =`, `问一`) or a card number may sit between. */
+const RECOMMENDATION_RE = new RegExp(
+  `(?<!不)(?:推荐|\\b[Rr]ecommends?\\b|\\b[Rr]ecommendation\\b)[\\s:：*_,，=]*(?:(?:Q\\d+|问[一二三四五六七八九十]|\\d{3,6})[ \\t]*[=:：]?[ \\t]*)?(?:\\*\\*)?(?:(?:选项|方案|[Oo]ption)[ \\t]*)?(${OPTION_LABEL})(?![A-Za-z0-9_])`,
+  'u',
+);
+const FRAME_HEADING = /^ {0,3}#{1,6}[ \t]+(.*)$/u;
+const FRAME_BOLD_LEAD = /^(?:[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)?\*\*([^*\n]+)\*\*/u;
+const frameText = (text) => text.replace(/^[\s*_~`⭐⛔⚠️✅️]+/u, '');
+
+/** The three signals read over one span of lines — the span a frame governs, or the whole body when none does. */
+function signalsIn(lines) {
+  let table = null;
+  for (let i = 0; table === null && i + 1 < lines.length; i++) {
+    if (!TABLE_LINE.test(lines[i]) || !TABLE_DELIMITER.test(lines[i + 1])) continue;
+    if (lines[i].split('|').some((cell) => OPTION_TABLE_HEADER.test(cell.replace(/[*_`]/gu, '').trim()))) table = lines[i].trim();
+  }
+  const labels = [...new Set(lines.map((line) => TOP_OPTION_ITEM.exec(line)?.[1]).filter((label) => label !== undefined))];
+  const recommendation = RECOMMENDATION_RE.exec(lines.join('\n'))?.[0] ?? null;
+  return { table, labels, recommendation };
+}
+
+/**
+ * The three signals of a decision analysis in one body, over the body with fenced and inline code blanked. The
+ * options and the recommendation are read inside the SPAN their frame governs — a heading's section down to the next
+ * heading of its level or above, a bold lead's down to the next heading, a plain opening line's the whole body — so
+ * signals from three different sections of a round record (an applied `**A:**` item, a `### Decision box` heading, a
+ * nested `recommends C`) never add up to one analysis. The first frame whose span carries both is the one returned.
+ * Pure and offline; the measurement and `--self-test` both read it.
+ * @returns {{ marker: boolean, frame: string|null, table: string|null, labels: string[], recommendation: string|null }}
+ */
+export function decisionAnalysisSignals(body) {
+  const code = stripMarkdownCode(String(body ?? ''));
+  const lines = code.split(/\r?\n/u);
+  const level = lines.map((line) => /^ {0,3}(#{1,6})[ \t]/u.exec(line)?.[1].length ?? 0);
+  const nextHeading = (from, atOrAbove) => {
+    for (let j = from + 1; j < lines.length; j++) if (level[j] > 0 && level[j] <= atOrAbove) return j;
+    return lines.length;
+  };
+  const opening = lines.findIndex((line) => line.trim() !== '');
+  const frames = [];
+  lines.forEach((line, i) => {
+    const heading = FRAME_HEADING.exec(line);
+    const lead = heading === null ? FRAME_BOLD_LEAD.exec(line) : null;
+    const text = heading !== null ? heading[1] : lead !== null ? lead[1] : i === opening ? line : null;
+    if (text === null || !DECISION_FRAME_RE.test(frameText(text))) return;
+    const end = heading !== null ? nextHeading(i, level[i]) : lead !== null ? nextHeading(i, 6) : lines.length;
+    frames.push({ frame: frameText(text), ...signalsIn(lines.slice(i, end)) });
+  });
+  const marker = hasDecisionFacetMarker(code);
+  const found = frames.find((f) => (f.table !== null || f.labels.length >= 2) && f.recommendation !== null) ?? frames[0];
+  return found !== undefined ? { marker, ...found } : { marker, frame: null, ...signalsIn(lines) };
+}
+
+/** FRAME ∧ OPTIONS ∧ RECOMMENDATION — the predicate, without the marker's half. */
+export function isDecisionAnalysis(signals) {
+  return signals.frame !== null && (signals.table !== null || signals.labels.length >= 2) && signals.recommendation !== null;
+}
+
+/**
+ * The refusal row for a comment that is a decision analysis and carries no marker outside code — empty otherwise.
+ * @returns {{ frame: string, options: string, recommendation: string }[]}
+ */
+export function decisionFacetRefusals(body) {
+  const signals = decisionAnalysisSignals(body);
+  if (signals.marker || !isDecisionAnalysis(signals)) return [];
+  // Code is blanked to spaces and emphasis is decoration: both are folded so the row reads as the line did.
+  const shown = (text, limit) => offendingSpan(text.replace(/\*+/gu, '').replace(/\s{2,}/gu, ' ').trim(), limit);
+  return [{
+    frame: shown(signals.frame, 120),
+    options: signals.table !== null ? `the options table \`${offendingSpan(signals.table, 100)}\`` : `option labels ${signals.labels.map((l) => `\`${l}\``).join(', ')} as list-item leads`,
+    recommendation: shown(signals.recommendation, 80),
+  }];
+}
+
+/** The refusal a caller reads, from `decisionFacetRefusals`' row — the shape of every refusal above it. */
+export function decisionFacetRefusalText(rows) {
+  return (
+    `post-stamped: REFUSED — this comment is a decision analysis and carries no \`${DECISION_FACET_MARKER}\` marker outside code. Nothing was written.\n` +
+    rows.map((r, i) => `  ${i + 1}. [decision-facets] frame:          ${r.frame}\n      options:        ${r.options}\n      recommendation: ${r.recommendation}`).join('\n') +
+    '\n\n  A decision analysis anchored on its card carries the four-facet block, and the block\'s first line is the\n' +
+    `  machine-findable marker: append it — \`${DECISION_FACET_MARKER}\` alone on a line (or its HTML-comment form), then the four\n` +
+    '  facets ① 项目长远合理性 ② 实际业务拉动 ③ 防 AI 犯错 ④ 创业阶段不扩散, one line each, and the `Prior rulings read:` line.\n' +
+    '  The shape is `references/decision-analysis.md` 〈四棱卡面块固定形状〉. The pre-handover check finds a pending\n' +
+    '  decision by that marker alone, so an analysis without it leaves the decision outside the maintainer\'s inbox.\n' +
+    '  A marker inside code is a quotation and clears nothing. ⛔ No flag turns it off.'
+  );
+}
+
 /**
  * The block the platform appends to an artefact whose sent body does not
  * already carry one: a blank line, a rule, the bare attribution line — 58
@@ -3404,6 +3582,9 @@ const USAGE = [
   '  MANDATORY hit `--tier` printed nor a `reason:` included — and the refusal prints the spelling that can.',
   '  A `## Contract review` comment\'s `Local-runs:` line is read the same way when it is present (`none`, or',
   '  `probe — REASON`); a record without the line is not re-judged.',
+  '  A comment that is a decision analysis — a decision frame, an options table or lettered options, and a',
+  `  recommendation naming one — is REFUSED when it carries no \`${DECISION_FACET_MARKER}\` marker outside code; the`,
+  '  refusal prints the four-facet block it owes. Card bodies and every other route are untouched.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
   `  Exit: 0 written and stored · ${EXIT_USAGE} usage · ${EXIT_REFUSED} refused, nothing written ·`,
@@ -3459,6 +3640,13 @@ async function main(argv) {
   const record = options.mode === 'comment' ? recordKeyedLineRefusals(rendered.body) : [];
   if (record.length > 0) {
     console.error(recordLineRefusalText(record));
+    return EXIT_REFUSED;
+  }
+  // ⛔ Comments only: a decision analysis is anchored on its card AS A COMMENT, and the handover check reads comments.
+  // Before the transport, so a dry run is refused exactly as a live write is.
+  const facets = options.mode === 'comment' ? decisionFacetRefusals(rendered.body) : [];
+  if (facets.length > 0) {
+    console.error(decisionFacetRefusalText(facets));
     return EXIT_REFUSED;
   }
   // ⛔ Bodies only: a VACANT seat post's ledger holds pointers, never obligations (#23396). Before the transport,
@@ -3638,6 +3826,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
   'the record line: a `## Contract review` record\'s `Local-runs:` value, judged when present — an absent line is not re-judged': 9,
   'the vacant body: a VACANT seat post\'s ledger holds pointers, never obligations': 27,
+  'the decision facets: a decision analysis carries its marker, and a delta, a record or a quotation is not one': 22,
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 13,
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
 });
@@ -4809,6 +4998,95 @@ export function selfTest() {
     t('⛔ the card-reference regex is NOT global — an exported `g` regex carries a cursor between callers', LEDGER_CARD_REF.global === false && CURRENT_PM_HEADING.global === false);
     t('structural: the CLI runs this on `--body` only, BEFORE the transport, so a dry run is refused as a live write is', /const vacant = options\.mode === 'body' \? vacantLedgerRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && stampSource.indexOf('vacantLedgerRefusals(rendered.body)') < stampSource.indexOf('await resolveRoute(process.env)'));
     t('structural: code is blanked by the patrol\'s own fence reader, imported and ⛔ never restated', /\bstripMarkdownCode,\n/u.test(stampSource) && /function\s+stripMarkdownCode\b/u.test(stampSource) === false);
+  }
+
+  // ── the decision facets (#23420) ───────────────────────────────────────────
+  // Fixtures are the measured comments, trimmed: the Chinese analysis (table + 推荐) and the English one (bold-lead
+  // frame, lettered items, `recommends **A**`) that left their decisions outside the inbox; a director delta reading,
+  // a triage round record and a triage 速读 completion, which must stay untouched.
+  battery('the decision facets: a decision analysis carries its marker, and a delta, a record or a quotation is not one');
+  {
+    const facets = (body) => decisionFacetRefusals(body);
+    const MARKER_BLOCK = ['', DECISION_FACET_MARKER, '- ① 项目长远合理性:不扩大特例。', '- ② 实际业务拉动:今天谁撞上。', '- ③ 防 AI 犯错:响亮拒绝。', '- ④ 创业阶段不扩散:不新增面。', 'Prior rulings read: 清理 · 日志 → 0 hits; ADR none; thread: none'].join('\n');
+    const ZH = [
+      '## 决策:空闲的生命周期清理该不该打日志 · `domain:devx` seat 1 · `session_x`',
+      '',
+      '**一句话问题:** 清单要求空闲时不打日志,产品每次清理都打一行汇总。',
+      '',
+      '| 选项 | 做什么 | 代价 | 工作量 |',
+      '|:--|:--|:--|:--|',
+      '| **A(推荐)** | 改清单,预期这一行 | 只改清单 | XS |',
+      '| B | 改打印条件 | objectql 补丁 | S |',
+      '',
+      '**四轴:**',
+      '- **长远合理性(领起):** A 照 ADR 原文执行。',
+      '',
+      '**推荐 A。** 若你更想要更安静的日志,B 也不贵。',
+    ].join('\n');
+    const EN = [
+      '## PR #23209 is held: ruling B item 5 contradicts AGENTS.md Prime Directive 15 as written · `domain:devx` seat 1',
+      '',
+      '**Governing text:** Prime Directive 15 reserves the release acts to the maintainer.',
+      '',
+      '**Needs the maintainer\'s word.** The dev\'s options, condensed:',
+      '- **A**: a Tier H one-sentence amendment to the directive.',
+      '- **B**: leave AGENTS.md as is and treat the ruling as standing authorization.',
+      '- **C**: land the PR but use it only after A.',
+      '',
+      'This seat recommends **A**: one rule text that matches one mechanism.',
+    ].join('\n');
+    t('⭐ THE MEASURED CHINESE ANALYSIS (heading frame, options table, `推荐` line) without the marker is REFUSED, one row', facets(ZH).length === 1 && facets(ZH)[0].options.includes('选项') && facets(ZH)[0].recommendation.includes('推荐 A'));
+    t('⭐ THE MEASURED ENGLISH ANALYSIS (bold-lead frame, lettered items, `recommends **A**`) without the marker is REFUSED', facets(EN).length === 1 && facets(EN)[0].frame.startsWith('Needs the maintainer') && facets(EN)[0].options.includes('`A`, `B`, `C`'));
+    t('⭐ the same two analyses with the four-facet block appended are ACCEPTED', facets(ZH + '\n' + MARKER_BLOCK).length === 0 && facets(EN + '\n' + MARKER_BLOCK).length === 0);
+    t('…and the HTML-comment form of the marker reads the same, as the shape declares the two spellings equal', facets(ZH + `\n\n<!-- ${DECISION_FACET_MARKER} -->\n- ① …`).length === 0);
+    t('⛔ a marker inside code is a QUOTATION and clears nothing — inline span or fence, the handover check reads neither', facets(ZH + `\n\nThe block opens with \`${DECISION_FACET_MARKER}\`.`).length === 1 && facets(EN + `\n\n\`\`\`\n${DECISION_FACET_MARKER}\n\`\`\``).length === 1);
+    const DELTA = [
+      '## 席位意见（增量）· director seat (summon #37, `session_y`), read on the maintainer\'s 「继续决裁」',
+      '',
+      'The card\'s six items and 四轴 stand; this is the delta. Premises re-checked on `origin/main`: all hold.',
+      '',
+      '**推荐：A，回退 C。** 同意席位的字母，补四条口径：',
+      '',
+      '- **①：** 交接清单是换班的唯一接口。',
+      '- **②③：** 本班实测三类残缺都要维护者亲自指出。',
+      '- **④：** 两个脚本都是本地 node 检查。',
+    ].join('\n');
+    t('⭐ a director DELTA reading is untouched: it backs a letter and never lays the options out again', facets(DELTA).length === 0 && decisionAnalysisSignals(DELTA).frame !== null && decisionAnalysisSignals(DELTA).recommendation !== null);
+    const ROUND = [
+      '## R390 round record (objectstack) · triage seat · `session_z`',
+      '',
+      '### Maintainer direction this hour (applied)',
+      '- 「同意 A + C」. Recorded.',
+      '- **A:** two objectui cards → p1.',
+      '- **C:** the follow-up list is posted.',
+      '',
+      '### Decision box',
+      '- **#23434** passes entry.',
+      '  - The question: pin hops rewrite docblocks. The seat recommends C, fallback B.',
+      '',
+      '### Next fire',
+      'objectui.',
+    ].join('\n');
+    t('⭐ a round record is untouched: its option items, its `### Decision box` heading and its nested `recommends C` sit in three sections, and signals count only inside the span their frame governs', facets(ROUND).length === 0);
+    t('…while the SAME lines inside one decision section are one analysis — the span rule, not the words, is what spared it', facets(['### Decision box', '- **A:** two objectui cards → p1.', '- **C:** the follow-up list.', 'The seat recommends C, fallback B.'].join('\n')).length === 1);
+    const TRIAGE = ['## Triage: decision-box entry check, with one completion. Graded `priority:p2`', '', '### 维护者速读', '| 选项 | 做法 | 工作量 |', '|:--|:--|:--|', '| **A** | 同一条规则 | 1 个 PR |', '| **B** | 维持现状 | 无 |', '', '立卡席位推荐 A，本席同意。'].join('\n');
+    t('⛔ the stated recall limit, pinned: a triage record under its `## Triage:` heading opens no frame — `decision-box` mid-heading is not an opener', facets(TRIAGE).length === 0 && decisionAnalysisSignals(TRIAGE).frame === null);
+    t('⛔ two signals are not an analysis: a frame and a recommendation with no options, a frame and options with no recommendation, options and a recommendation with no frame', facets('## 决策:x\n\n**推荐 A。**').length === 0 && facets('## 决策:x\n\n| 选项 | 做法 |\n|--|--|\n| A | y |').length === 0 && facets('## Note\n\n- **A**: x\n- **B**: y\n\nThis seat recommends **A**.').length === 0);
+    t('⛔ an article, a hypothesis and a finding list are not option labels — `**A crash…**`, `**H1:**`, `**F1, F2:**`', decisionAnalysisSignals('## 决策:x\n\n- **A crash between the two:** y\n- **B narrowing.** z\n- **H1:** w\n- **F1, F2:** v\n\n推荐 A').labels.length === 0);
+    t('⛔ an INDENTED option item is a digest\'s, not an analysis\'s, and `不推荐` is no recommendation', decisionAnalysisSignals('## 决策:x\n\n- #1:\n  - **A**: y\n  - **B**: z').labels.length === 0 && decisionAnalysisSignals('## 决策:x\n\nB 不推荐 C').recommendation === null);
+    t('⛔ a recommending word must name an option label: `recommends a fix` and `recommended **B**` (a ruling\'s narration) are not one', decisionAnalysisSignals('## 决策:x\n\nThe seat recommends a fix.').recommendation === null && decisionAnalysisSignals('## 决策:x\n\nThis seat recommended **B**.').recommendation === null);
+    t('a question prefix or a card number may sit between `推荐` and its letter (`推荐：问一 A`, `推荐 Q1 = A`, `推荐:15213 A`)', ['推荐：问一 A（保持）', '**推荐 Q1 = A,回退 C**', '**推荐:15213 A。**'].every((line) => decisionAnalysisSignals(`## 决策:x\n\n${line}`).recommendation !== null));
+    t('the frame reads through emphasis and in either language, at any heading level or as the opening line', ['## **决策:** x', '### 待裁:x', '## 待维护者裁决:x', '## 席位意见 · 决策:x', '## Decision box: x', 'Decision record: x', '## Re-analysis for the decision: x', '## Seat reading: x'].every((line) => decisionAnalysisSignals(line).frame !== null));
+    t('⛔ a claim, a fenced `os-dev-report` whose JSON names options and a recommendation, and a `## Contract review` record are all untouched', facets('Claim: PM loop round 3\nSession: `session_x`\nBranch: `claude/issue-1-x`').length === 0 && facets('os-dev-report\n\n```json\n{ "open_questions": [{ "question": "## 决策", "options": ["- **A**: x", "- **B**: y"], "recommendation": "推荐 A" }] }\n```').length === 0 && facets('## Contract review\n\nServed-tier: `x`\n\n- **D1:** holds.\n- **D3:** holds; recommendation B.\n\n**VERDICT: PASS**').length === 0);
+    const refusalText = decisionFacetRefusalText(facets(EN));
+    t('the refusal names the marker, the row, the four-facet remedy and its shape, that nothing was written, and that no flag turns it off', refusalText.includes(DECISION_FACET_MARKER) && refusalText.includes('[decision-facets] frame:') && refusalText.includes('Prior rulings read:') && refusalText.includes('〈四棱卡面块固定形状〉') && refusalText.includes('Nothing was written') && refusalText.includes('No flag turns it off'));
+    t('⛔ the refusal\'s own words carry no tracker number and no HTML comment — a runtime string an author is shown, and one a seat may quote on GitHub', /#\d/u.test(decisionFacetRefusalText([])) === false && decisionFacetRefusalText([]).includes('<!--') === false);
+    t('the openers are frozen with the line each was measured on, and the recommendation pattern carries no `g` cursor', Object.isFrozen(DECISION_FRAME_OPENERS) && DECISION_FRAME_OPENERS.every((o) => typeof o.opener === 'string' && typeof o.measured === 'string') && RECOMMENDATION_RE.global === false && DECISION_FRAME_RE.global === false);
+    t('structural: the CLI runs this on `--comment` only, BEFORE the transport, so `--body` is untouched and a dry run is refused as a live write is', /const facets = options\.mode === 'comment' \? decisionFacetRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && stampSource.indexOf('decisionFacetRefusals(rendered.body)') < stampSource.indexOf('await resolveRoute(process.env)') && (stampSource.slice(0, stampSource.indexOf('export function selfTest()')).match(/decisionFacetRefusals\(rendered\.body\)/gu) ?? []).length === 1);
+    t('structural: the token and its reader are imported from the file that owns them, ⛔ never restated here', /\bDECISION_FACET_MARKER,\n/u.test(stampSource) && /\bhasDecisionFacetMarker,\n/u.test(stampSource) && /function\s+hasDecisionFacetMarker\b/u.test(stampSource) === false && !new RegExp(`=\\s*'${DECISION_FACET_MARKER}'`, 'u').test(stampSource));
+    let handoverSource = '';
+    try { handoverSource = readFileSync(new URL('./check-handover.mjs', import.meta.url), 'utf8'); } catch { handoverSource = ''; }
+    t('structural: the handover check\'s `carriesFacetMarker` is the same composition read here — code blanked, then the owner\'s reader — so the write side refuses exactly what that reader would miss', /export function carriesFacetMarker\(body\) \{\n\s+return hasDecisionFacetMarker\(stripMarkdownCode\(String\(body \?\? ''\)\)\);\n\}/u.test(handoverSource) && /const code = stripMarkdownCode\(String\(body \?\? ''\)\);/u.test(stampSource) && /return \{ marker: hasDecisionFacetMarker\(code\)|const marker = hasDecisionFacetMarker\(code\);/u.test(stampSource));
   }
 
   // ── the relay transport ──────────────────────────────────────────────────

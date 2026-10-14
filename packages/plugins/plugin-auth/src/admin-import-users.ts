@@ -42,7 +42,7 @@
  *  - `temporary`  — force the no-infrastructure path (no email, no SMS) for
  *                   every row: each created account gets a generated temporary
  *                   password, `must_change_password` is stamped (403
- *                   PASSWORD_EXPIRED until changed), and the passwords are
+ *                   PASSWORD_RESET_REQUIRED until changed), and the passwords are
  *                   returned ONCE in the HTTP response, one per row. Never
  *                   persisted, never logged.
  *  - `none`       — identity only: no password, no invitation. better-auth

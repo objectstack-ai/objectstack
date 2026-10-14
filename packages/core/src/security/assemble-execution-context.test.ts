@@ -390,7 +390,7 @@ describe('#6216 — the named per-face divergences are values, not switches', ()
 });
 
 describe('#7280 — the ADR-0069 gate is an ENTRY-decided field', () => {
-  const GATE = { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' };
+  const GATE = { code: 'PASSWORD_EXPIRED' as const, message: 'Your password has expired.' };
 
   it('a face that resolves a gate carries it on the envelope verbatim', () => {
     const ctx = assembleExecutionContext({

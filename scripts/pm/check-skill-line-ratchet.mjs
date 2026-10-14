@@ -1251,7 +1251,17 @@ export const CEILINGS = new Map([
   // rule beside it), so +4 −1 leaves +3. This file is not a CROSS_FILE_MOVES
   // destination, so no `ruledRaises` record applies. Landed count, headroom 0,
   // same convention.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 61],
+  // Raised 61 → 64 by the same rule's second half — an ORDINARY raise
+  // (maintainer, 2026-10-14, live chat, verbatim and untranslated: 「23431 同意」,
+  // adopting letter A on the consumer-follow-up principle; ruling record
+  // 6166489573 on #23431). A consumer repo's follow-up card of a protocol change
+  // is p1 only when its absence breaks users, and every such follow-up is listed
+  // on the consumer's first-release card for the new major: three rule lines at
+  // their measured floor (116/119/93 bytes; no two-line spelling fits the
+  // 120-byte cap), with no restatement left in the section to pay with. Not a
+  // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
+  // count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 64],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.

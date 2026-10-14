@@ -119,9 +119,9 @@ function isAuthenticated(ctx: ShareLinkExecutionContext): boolean {
  * allow-list, and the dispatcher's twin of the same routes already refuses a
  * held session there.
  *
- * `code` is declared as a bare string on the envelope; its one producer
- * (plugin-auth's `customSession` enrichment) writes only `PASSWORD_EXPIRED` /
- * `MFA_REQUIRED`, both members of the error-code vocabulary.
+ * `code` is a member of the closed posture vocabulary (`AuthGateCodeSchema`,
+ * `@objectstack/spec/kernel`), every member of which is registered in the
+ * error-code vocabulary.
  */
 function refuseHeldSession(res: IHttpResponse, ctx: ExecutionContext): boolean {
   const gate = ctx.authGate;
