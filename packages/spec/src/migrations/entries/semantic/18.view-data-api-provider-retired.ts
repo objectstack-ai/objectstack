@@ -17,8 +17,11 @@ import type { SemanticMigration } from '../../types.js';
 // arm is refused at parse with the prescription instead.
 export const entry: SemanticMigration = {
   id: 'view-data-api-provider-retired',
-  surface: "view.data (`provider: 'api'`, with its `read` / `write` request blocks) — the view-level API data source",
-  replacement: "A view binds its object (`provider: 'object'`) or static rows (`provider: 'value'`); the API read "
+  surface: "view.data (`provider: 'api'`, with its `read` / `write` request blocks) — the view-level API data source, "
+    + "in a view and in the `data` prop of each page component that takes a view data source (`object-grid`, "
+    + '`object-map`, `object-gantt`, `object-tree`)',
+  replacement: "A view binds its object (`provider: 'object'`) or static rows (`provider: 'value'`), and so does a "
+    + "page component's `data` prop; the API read "
     + "moves onto a page component's `dataSource` binding — `{ provider: 'api', read: { url }, path? }` under a "
     + "page's `regions[].components[]` — which is same-origin, carries no credentials and is read with the "
     + "console's signed-in fetch.",
@@ -29,12 +32,17 @@ export const entry: SemanticMigration = {
     + 'stored row alike, and the author decides for each such view which page composes the endpoint it '
     + "read and what the view itself should now bind. The arm's `headers` block is the part with no "
     + "successor at all: a key an author had written there was a credential in metadata, and the page "
-    + 'element binding refuses the key; the console sends its own signed-in fetch instead.',
+    + 'element binding refuses the key; the console sends its own signed-in fetch instead. A page component '
+    + 'whose `data` prop is a view data source took the same arm through the same schema and has no mechanical '
+    + 'move either: deleting its `data` would make it query its object instead.',
   acceptanceCriteria: "No view in `stack.views[]`, in any object's `listViews` / `formViews` map or in a stored "
-    + "`sys_metadata` view row carries `data.provider: 'api'`; the parse refuses one with the prescription. "
+    + "`sys_metadata` view row carries `data.provider: 'api'`, and no page component's `data` prop does; the "
+    + 'parse refuses one in a view, and the component-props gate of `os validate`, `os build` and `os lint` '
+    + 'refuses one in a page component, with the prescription. '
     + "Every endpoint such a view read is either a page component's API binding on a same-origin path "
     + 'with no credential key, or dropped on purpose; and every converted view binds its object or static '
-    + 'rows and loads. `os migrate meta --stored` lists each stored view still bound to the API source as a '
-    + 'TODO under this entry\'s id, before the upgrade and after it, by row and position, showing the '
-    + 'request URL and method and withholding every other request key, and rewrites none of them.',
+    + 'rows and loads. `os migrate meta --stored` lists each stored view, and each page component of a stored '
+    + 'page, still bound to the API source as a TODO under this entry\'s id, before the upgrade and after it, '
+    + 'by row and position, showing the request URL and method and withholding every other request key, and '
+    + 'rewrites none of them.',
 };

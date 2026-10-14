@@ -447,6 +447,22 @@ export function registerShareLinkRoutes(
           return invalidOrExpired();
         }
         if (row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now())) {
+          // [#23328] The audience is judged BEFORE the password. Before sign-in
+          // the probe asks the audience and never the password: `resolveToken`
+          // refuses an anonymous caller of a `signed_in` link on the audience
+          // before it verifies any password, so the password arm below knows
+          // only whether a password was SENT — answered first, it told the
+          // holder of the CORRECT password `WRONG_PASSWORD`, and the console
+          // never offered sign-in. Asked first, an anonymous caller reads one
+          // answer whatever it sent, so nothing here can tell it whether a
+          // guessed password is right. A signed-in caller keeps the password
+          // arms. The dispatcher twin (`runtime/src/domains/share-links.ts`)
+          // carries the same order — it cannot import this package, which is
+          // a dev dependency there — and one table holds both mounts to it:
+          // `runtime/src/domains/share-links-refusal-order.test.ts`.
+          if (row.audience === 'signed_in' && !signedInUserId) {
+            return sendError(res, 401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
+          }
           // [#21197] `password_hash` is `internal`, so the probe row comes back
           // without it; read off the row, every protected link would answer
           // "invalid" here instead of prompting for its password. Recovered
@@ -459,9 +475,6 @@ export function registerShareLinkRoutes(
               providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
               providedPassword ? 'Incorrect password' : 'This link requires a password',
             );
-          }
-          if (row.audience === 'signed_in' && !signedInUserId) {
-            return sendError(res, 401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
           }
         }
         if (row && (row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now()))) {

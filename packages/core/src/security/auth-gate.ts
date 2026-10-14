@@ -294,8 +294,16 @@ function matchesAllowlistedRoute(rawPath: string): boolean {
       scoped = true;
     }
     if (segments[i] === 'auth') {
-      // `<base>[/<scope>/<id>]/auth/…` — the remediation surface. This is the
-      // anchored replacement for `path.includes('/auth/')`.
+      // `<base>[/<scope>/<id>]/auth/…` — the auth NAMESPACE, kept reachable so
+      // a held user can remediate. This is the anchored replacement for
+      // `path.includes('/auth/')`.
+      //
+      // ⚠️ The namespace is wider than remediation: the platform-admin family
+      // is mounted under it too, and administration is a protected resource
+      // (ADR-0069 D3). That family is held to the gate by consulting
+      // `evaluateAuthGate` PATHLESS at its own judge (`platform-admin-gate.ts`
+      // in plugin-auth), so it never inherits this arm. ⛔ A protected family
+      // mounted under this namespace does the same; it never passes its path.
       if (i + 1 < segments.length) return true;
       // Bare `<base>/auth`, exempt only UNSCOPED: that is exactly what the old
       // `ALLOW_PREFIXES` equality branch admitted (`/auth`, `/api/auth`,

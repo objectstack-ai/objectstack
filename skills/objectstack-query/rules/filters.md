@@ -164,9 +164,9 @@ computing "today" at module load freezes the date into the built artifact.
 A **flow node's** `config.filter` takes these tokens too. What a dropped
 condition does there is a flow rule, not a query rule
 (**objectstack-automation**): it *widens* the query, so `get_record` /
-`update_record` / `delete_record` fail the step instead of running it. A
-`{FUNC()}` neither dialect resolves is `flow-filter-token-unknown`: that node
-cannot run at all.
+`update_record` / `delete_record` refuse the step instead of running it. Any
+other `{…}` token there is refused (`expression-invalid`), naming its CEL
+value envelope.
 
 **Unknown tokens are rejected, not ignored.** Outside a flow, a whole-`{...}`
 value is a placeholder by construction: `objectstack build` fails it (rule

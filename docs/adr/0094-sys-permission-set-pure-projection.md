@@ -1,6 +1,6 @@
 # ADR-0094: Permission-Set Definitions Have One Authoritative Store — `sys_permission_set` Becomes a Pure Projection
 
-**Status**: Accepted (2026-07-14); **D5 retired 2026-08-09** (see D5-R)
+**Status**: Accepted (2026-07-14); **D5 retired 2026-08-09** (see D5-R) · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D2/D3/D13): **the projection is retired by execution** — #15204 stage 8 (`66949b7729`, 2026-10-13) unregistered the `sys_permission_set` row object, the `permission` projector with its boot reconcile, and the data-door write-through; D1 stands, generalized by ADR-0131 D3. See the notes under the TL;DR, D1–D4, the Consequences, the 2026-07-14 addendum and the 2026-09-04 amendment.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (overlay store), [ADR-0056](./0056-permission-model-landing-verification.md) (landing verification), [ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md) (two doors / provenance)
 **Closes**: framework#2875 (root cause behind the #2857 display-freshness class)
@@ -12,6 +12,12 @@ ADR-0005 rollback landed by #6483 / PR #6608)
 ---
 
 ## TL;DR
+
+> **RETIRED 2026-10-13 (#15204 stage 8, `66949b7729`, by execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D2/D3/D13).**
+> The `sys_permission_set` row object is no longer registered, and the machinery that kept it a
+> projection — the write-through (D3), the `permission` projector (D2) and the boot reconcile and
+> backfill (D4) — is unwired; its module stays in the tree until #15204 stage 7a deletes it. D1
+> stands. Read the rest of this summary, D2–D4 and the Consequences in the past tense.
 
 A permission-set **definition** (label, description, the six facet groups, `adminScope`,
 `active`) now has exactly **one authoritative store: the metadata layer** — packaged
@@ -93,7 +99,19 @@ recreates ids.
 **Assignments and bindings stay data-plane.** Which users/positions hold a set is
 environment *state*, not part of the definition; those tables are unchanged.
 
+> **Note (2026-10-14) — D1 stands; the row and the binding table it names do not.**
+> [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3 generalizes D1: the metadata registry
+> is the one store, and #15204 stage 8 (`66949b7729`, 2026-10-13) retired both the projected record
+> and `sys_position_permission_set` (a position's sets are now its definition's `permissionSets`).
+> `sys_user_permission_set` stays.
+
 ### D2 — The record is written only by the projector, awaited by the protocol (door enumeration amended 2026-09-04 — see the amendment at the end)
+
+> **RETIRED 2026-10-13 (#15204 stage 8, by execution of ADR-0131 D2/D3).** The `permission`
+> projector is unwired and the record it wrote is retired; a metadata-door save reaches the security
+> catalog through the door's own registry write-through. The protocol seam `registerMutationProjector`
+> stays: since #23334 (`6d96721faa`) the security catalog echo uses it for `permission` and
+> `position` to register environment-wide definitions in memory, and it writes no row.
 
 `@objectstack/metadata-protocol` gains `registerMutationProjector(type, fn)`: an
 awaited, best-effort per-type hook invoked after persistence inside `saveMetaItem`
@@ -131,6 +149,10 @@ The existing `onMetadataMutation` subscription remains only as a compatibility f
 when the protocol predates `registerMutationProjector`.
 
 ### D3 — Data-door writes are redirected into metadata (write-through)
+
+> **RETIRED 2026-10-13 (#15204 stage 8, by execution of ADR-0131 D3/D13).** The write-through is
+> unwired with the `sys_permission_set` row object, whose data route is gone; a permission set is
+> written through the metadata door alone.
 
 An engine middleware (registered by `plugin-security`, object-filtered to
 `sys_permission_set`, running **inside** the security middleware so all existing
@@ -183,6 +205,10 @@ Kernels without a metadata protocol capable of `saveMetaItem` /`getMetaItemLayer
 store there is no split brain to prevent.
 
 ### D4 — Boot reconciliation and the migration/backfill path
+
+> **RETIRED 2026-10-13 (#15204 stage 8, by execution of ADR-0131 D2/D13).** The boot reconcile and
+> backfill are unwired; legacy `sys_permission_set` rows stay in their table until the ADR-0131 D10
+> migration takes them.
 
 At `kernel:ready`, after the ADR-0086 D5 package seeding, `plugin-security` runs a
 convergence pass:
@@ -341,6 +367,11 @@ other write.
   metadata) stays open; junction FKs and Setup's list/query surface make the projection
   the pragmatic shape today.
 
+> **Note (2026-10-14) — the open question is answered.**
+> [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3 drops the record store, and #15204
+> stage 8 (`66949b7729`, 2026-10-13) executed it: the security catalog is served from the metadata
+> registry, with no `sys_permission_set` row object.
+
 ## Alternatives considered
 
 - **Keep hardening the #2867 subscriber** (more events, more call sites). Rejected —
@@ -426,6 +457,14 @@ only a seed-not-clobber discipline.
 Only `sys_permission_set` was both metadata-authoritative **and** carried a
 harmful, actively-drifting split-brain, which is why it was fixed first and in
 full. The follow-up work above landed via framework#2909.
+
+> **Note (2026-10-14) — three of the four types have no record object any more.**
+> `sys_permission_set`, `sys_position` and `sys_capability` are retired as row objects by #15204
+> stage 8 (`66949b7729`, 2026-10-13), by execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
+> D3/D13, and no seeder writes a declared item into any table (ADR-0131 D2): their definitions live
+> in the metadata registry alone, so the `sys_position` and `sys_capability` rows of the table above,
+> and the `sys_capability.scope` tradeoff below, describe row objects that are no longer registered.
+> `sys_sharing_rule` is not one of the four row objects stage 8 retired.
 
 #### Recorded tradeoffs (#2909)
 
@@ -587,3 +626,9 @@ tracked on #15204.
 So this amendment describes a mechanism with one major to live. It is written
 for whoever has to keep the seven doors correct until then — not as an
 invitation to build something new on top of them.
+
+> **RETIRED 2026-10-13 — the major ran out.** #15204 stage 8 (`66949b7729`) executed C3's
+> retirement of this mechanism: the `permission` projector is unwired and the `sys_permission_set`
+> row object is retired. The seven call sites remain as the generic seam; the security catalog echo
+> (#23334, `6d96721faa`) now registers the `permission` and `position` projectors behind them and
+> writes no row.

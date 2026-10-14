@@ -2,6 +2,7 @@
 
 - **Status**: Accepted (D5 completed in v17 — see the #3355 addendum at the end:
   the residual `system` bucket is renamed `system-data` and the bare value retired)
+  · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13): `sys_position_permission_set`, one of the RBAC link tables this record files as writable data, and `sys_position` / `sys_capability`, two of the provenance-column objects it sets apart, are retired as row objects by #15204 stage 8 (`66949b7729`, 2026-10-13); the policy stands. See the notes in the Context and the two addenda.
 - **Date**: 2026-07-19
 - **Issue**: #3220 (root cause surfaced by the #1591 / #3213 better-auth guard work; safe slice shipped in #3222)
 - **Relates to**: ADR-0049 (no unenforced security properties), ADR-0092 (identity
@@ -51,6 +52,13 @@ write policy **expressible and enforced** without breaking the writable set.
 > `sys_capability`, guarded by `assertSystemRowWriteGate` (ADR-0066). That is a
 > per-row provenance axis; this ADR is about the per-object schema bucket. The
 > shared word is a coincidence.
+
+> **Note (2026-10-14) — three objects named above are retired.** `sys_position_permission_set`
+> (item 2), `sys_position` and `sys_capability` are no longer registered since #15204 stage 8
+> (`66949b7729`, 2026-10-13), by execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
+> D3/D13: positions, their sets and capabilities are metadata-registry definitions. The RBAC link
+> tables are now `sys_user_position` and `sys_user_permission_set`, and of the three
+> provenance-column objects only `sys_sharing_rule` remains.
 
 ## Decision
 
@@ -181,6 +189,11 @@ successor to the engine-owned-DEFAULT overload of `system`.
   "engine-managed schema, writable via `userActions`" — the residual meaning of the
   bucket after the engine-owned rows move out.
 
+> **Note (2026-10-14).** `sys_position_permission_set` has left the writable set with its object,
+> retired by #15204 stage 8 (`66949b7729`, 2026-10-13;
+> [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
+> D3/D13); the relabel's reasoning is unchanged.
+
 **Not a behaviour or enforcement change.** Resolved affordances, the guard verdict,
 the 405 reconciliation and the permissions clamp are byte-identical before and
 after; this is a self-documenting relabel. No data migration (`managedBy` is schema
@@ -276,6 +289,12 @@ model. Under v16 all eight resolved `import: false` (locked `system` plus
 `userActions` blocks that only ever re-opened create/edit/delete), so the flip
 would have put a "bulk-bind permission sets from a spreadsheet" entry point in the
 admin console for the first time.
+
+> **Note (2026-10-14).** Two of the three link tables remain: `sys_position_permission_set` is
+> retired by #15204 stage 8 (`66949b7729`, 2026-10-13;
+> [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
+> D3/D13), and a position's sets are edited in its definition through the metadata door, not
+> imported as rows. The decision below is unchanged.
 
 **What is NOT at stake.** No authorization boundary. `import` is an affordance —
 it decides whether a UI entry point renders. Every row a CSV import writes still

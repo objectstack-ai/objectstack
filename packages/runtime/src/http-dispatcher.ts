@@ -1353,7 +1353,32 @@ export class HttpDispatcher {
      * ADR-0069 — returns a 403 response when the resolved session is blocked by
      * an auth-policy gate (expired password / required MFA) on a non-allow-listed
      * path, else null. Mirrors the REST `enforceAuth` seam so REST + dispatcher
-     * (MCP) enforce consistently. Fails open on any lookup error.
+     * (MCP) enforce consistently.
+     *
+     * [#23245 — #13906 decision 2 option B] An ACTIVE gate whose session read
+     * fails throws `AuthzStoreUnavailableError('auth_gate', …)`, which leaves
+     * `dispatch()` (this call sits above its `try`) and is answered
+     * `503 SERVICE_UNAVAILABLE` by the transport's error envelope — the same
+     * exit the identity step's and the membership gate's outages take. It used
+     * to fail open here: the read's rejection collapsed into "no session", so a
+     * session the policy holds was admitted whenever the auth service could not
+     * answer, while REST's `computeExecCtx` answered the same window 503.
+     *
+     * The arms, case for case with the declared-endpoint fallback's
+     * `readGatedSessionUser` (`dispatcher-plugin.ts`) and REST's gate block:
+     *
+     *  - allow-listed path, no `auth` service, or no gate feature active —
+     *    including an `isAuthGateActive()` probe that THROWS (a host whose
+     *    probe faults never declared a gate) — answers null with no read;
+     *  - the gate is active and the session API, the header bag or the read
+     *    itself fails ⇒ the branded outage, never null;
+     *  - the gate is active and the read RESOLVES with no posture (no session,
+     *    an API-key or anonymous caller, an un-held user) ⇒ null, admitted;
+     *  - the gate is active and the read carries a posture ⇒ the gate's 403.
+     *
+     * Every other fault keeps the old fail-open: the outer net re-raises only
+     * the branded outage (`rethrowAuthzStoreUnavailable`, the shape core
+     * prescribes for every seam between the session and a door).
      *
      * [#22773] `method` is the request's: the allow-list's parameterised row
      * (the inbound automation hook) is exempt for `POST` only, and without a
@@ -1372,32 +1397,47 @@ export class HttpDispatcher {
             if (!authService || typeof authService.isAuthGateActive !== 'function' || !authService.isAuthGateActive()) {
                 return null;
             }
-            let api: any = authService.api;
-            if (!api && typeof authService.getApi === 'function') api = await authService.getApi();
-            if (!api?.getSession) return null;
-            // Normalize headers to a Web Headers instance for getSession.
-            const raw: any = context?.request?.headers;
-            let headers: any;
-            if (raw && typeof raw.get === 'function') {
-                headers = raw;
-            } else if (raw && typeof raw === 'object') {
-                headers = new (globalThis as any).Headers();
-                for (const k of Object.keys(raw)) {
-                    const v = raw[k];
-                    if (v != null) headers.set(String(k), Array.isArray(v) ? v.join(',') : String(v));
+            // The gate is ACTIVE from here: the session read either answers or
+            // is the outage it is (#13906 decision 2 B). ⛔ Never a
+            // `.catch(() => undefined)` on it — that converts a THROW into the
+            // same `undefined` a gate-less session produces, which is the
+            // collapse #23245 repaired.
+            let session: any;
+            try {
+                let api: any = authService.api;
+                if (!api && typeof authService.getApi === 'function') api = await authService.getApi();
+                // A provider that mounts no session API has no session to hold.
+                if (!api?.getSession) return null;
+                // Normalize headers to a Web Headers instance for getSession.
+                const raw: any = context?.request?.headers;
+                let headers: any;
+                if (raw && typeof raw.get === 'function') {
+                    headers = raw;
+                } else if (raw && typeof raw === 'object') {
+                    headers = new (globalThis as any).Headers();
+                    for (const k of Object.keys(raw)) {
+                        const v = raw[k];
+                        if (v != null) headers.set(String(k), Array.isArray(v) ? v.join(',') : String(v));
+                    }
+                } else {
+                    // No header bag carries no credential, so no session to hold.
+                    return null;
                 }
-            } else {
-                return null;
+                // [#22258] The in-process session-read rule (`@objectstack/types`):
+                // a cookie request reads without renewal, because this door's
+                // response never carries a renewed cookie.
+                session = await api.getSession(inProcessSessionReadInput(headers));
+            } catch (err) {
+                throw new AuthzStoreUnavailableError('auth_gate', err);
             }
-            // [#22258] The in-process session-read rule (`@objectstack/types`):
-            // a cookie request reads without renewal, because this door's
-            // response never carries a renewed cookie.
-            const session: any = await api.getSession(inProcessSessionReadInput(headers)).catch(() => undefined);
             const gate = evaluateAuthGate(session?.user, cleanPath, method);
             if (!gate) return null;
             return this.error(gate.message, 403, { code: gate.code });
-        } catch {
-            return null; // fail-open — never break dispatch on a gate hiccup
+        } catch (err) {
+            // The branded outage above is re-raised; every other fault still
+            // fails open — never break dispatch on a gate hiccup.
+            rethrowAuthzStoreUnavailable(err);
+            return null;
         }
     }
 

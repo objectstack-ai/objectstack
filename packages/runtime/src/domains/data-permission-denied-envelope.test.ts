@@ -118,9 +118,16 @@ describe('/data PERMISSION_DENIED body — #7450', () => {
             getObjects: vi.fn().mockReturnValue({}),
             registry: { getObject: vi.fn().mockReturnValue({ name: 'app_parent_object' }) },
         };
+        // ADR-0138 D2: `/data` refuses an anonymous caller 401 as its first
+        // statement, and `dispatch()` re-resolves the caller from the request —
+        // so the kernel answers a session for it in the shape
+        // `resolveExecutionContext` reads. Only identity is stubbed; the route,
+        // the engine's denial and every expectation are unchanged. Anonymity is
+        // pinned in `domains/domain-floor-anonymous-deny.test.ts`.
+        const auth = { api: { getSession: async () => ({ user: { id: 'u_test' } }) } };
         const kernel = {
             context: {
-                getService: (name: string) => (name === 'objectql' ? mockObjectQL : null),
+                getService: (name: string) => (name === 'objectql' ? mockObjectQL : name === 'auth' ? auth : null),
             },
         } as any;
         dispatcher = new HttpDispatcher(kernel);
@@ -149,6 +156,19 @@ describe('/data PERMISSION_DENIED body — #7450', () => {
         expect(r.response?.body?.error?.message).toBe(USER_MESSAGE);
         // The route's own object still rides: the caller named it themselves.
         expect(r.response?.body?.error?.details).toEqual({ object: 'app_parent_object' });
+    });
+
+    it('an anonymous caller never reaches the engine: the domain floor answers 401 UNAUTHENTICATED first', async () => {
+        mockObjectQL.update.mockRejectedValue(directDenial('app_parent_object'));
+        const anonymous = new HttpDispatcher({ context: { getService: (n: string) => (n === 'objectql' ? mockObjectQL : null) } } as any);
+
+        const r = await anonymous.dispatch('PATCH', '/data/app_parent_object/1', { name: 'x' }, {}, { request: {} } as any);
+
+        expect(r.handled).toBe(true);
+        expect(r.response?.status).toBe(401);
+        expect(r.response?.body?.error?.code).toBe('UNAUTHENTICATED');
+        expect(mockObjectQL.find).not.toHaveBeenCalled();
+        expect(mockObjectQL.update).not.toHaveBeenCalled();
     });
 
     it('never serialises positions or permissionSets', async () => {

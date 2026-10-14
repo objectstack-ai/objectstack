@@ -618,6 +618,20 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'carries no `code` there. A callback payload, not a thrown error and not a response body.',
     },
     {
+        code: 'OS_METADATA_CONVERSION_TODO',
+        file: 'packages/services/service-automation/src/engine.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The same conversion-TODO vocabulary as the apply.ts row above, stamped by the automation ' +
+            'engine for a site its flow registration refuses once the parse has accepted the flow: ' +
+            "`canonicalizeStoredFlow` returns it in `todos` beside the chain's own TODOs, and the " +
+            'stored-metadata migration pass flattens it onto its report rows exactly as it does those, ' +
+            'with no `code`. A returned record, not a thrown error and not a response body: ' +
+            '`registerFlow` throws its own plain refusal and never this.',
+    },
+    {
         code: 'ERR_BULK_PER_ROW_HOOK_LIMIT',
         file: 'packages/spec/src/data/bulk-write-hook-conformance.ts',
         shape: 'objlitconst',
