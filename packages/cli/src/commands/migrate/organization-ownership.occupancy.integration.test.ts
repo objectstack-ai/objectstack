@@ -174,7 +174,7 @@ describe('os migrate organization-ownership --apply — the occupancy gate', () 
       throw new Error('the database was opened');
     });
     const { stdout } = await run(applyArgv('--json'));
-    expect(JSON.parse(stdout)).toMatchObject({ error: 'apply_refused', reason: 'boot-failed' });
+    expect(JSON.parse(stdout)).toMatchObject({ error: 'boot_failed', reason: 'boot-failed' });
     expect(boot).toHaveBeenCalledTimes(1);
   }, CASE_TIMEOUT_MS);
 });
