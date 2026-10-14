@@ -1832,7 +1832,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
   });
 
   it('maps every `findings.push` site in the source', () => {
-    expect(pushedRuleIds()).toHaveLength(18);
+    // 16 since #23268: the external dial's alias and wider-than-internal sites left with the key.
+    expect(pushedRuleIds()).toHaveLength(16);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {
