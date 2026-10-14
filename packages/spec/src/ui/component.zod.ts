@@ -59,7 +59,11 @@ import { AggregationFunction } from '../data/query.zod';
 import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { ActionSchema, ActionType, InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
-import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
+import {
+  ON_SUCCESS_EXECUTORS,
+  onSuccessBesideExecutorRefusal,
+  onSuccessBesideUpdateOperationRefusal,
+} from './action-on-success-executor';
 import { navigationTargetRefusal } from './navigation-target';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
@@ -4188,6 +4192,27 @@ function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: 
 const actionOnSuccessBlock = () => ActionSchema.in.shape.onSuccess.unwrap();
 
 /**
+ * A page action row's `operation`: `ActionSchema`'s own enum, by reference,
+ * read off the object half of the action's pipe as {@link actionOnSuccessBlock}
+ * reads `onSuccess`. ⛔ No second vocabulary: the one member is `'update'`,
+ * and `'delete'` / `'custom'` get the action's own "bulk-def operation with no
+ * row-level form" refusal.
+ *
+ * Every row forwards `operation` to the runner beside `type`
+ * (`action-button.tsx:322` at the pin; `action-icon.tsx`, `action-group.tsx`
+ * and `action-menu.tsx` forward it too), and the runner reads it BEFORE any
+ * executor (`ActionRunner.ts:1384-1388`): `isUpdateOperationAction` tests
+ * `operation === 'update'`, so any other value fell through to the executor
+ * and did nothing. Until this, the rows declared `z.unknown()`, and such a
+ * value parsed clean.
+ *
+ * What the enum does not bring: `ActionSchema`'s rules ABOUT `operation` are
+ * refinements of the action. The one about `onSuccess` is carried to the rows
+ * ({@link refuseRowOnSuccessBesideExecutor}), with the action's own text.
+ */
+const actionOperation = () => ActionSchema.in.shape.operation.unwrap();
+
+/**
  * The console runner's built-in executors: `ActionType`'s six, the members its
  * `builtinExecutors` table is typed by (`Record<RunnableActionType, …>`, so the
  * table and the enum cannot drift), and its one local alias `navigation`
@@ -4222,16 +4247,29 @@ function rowOnSuccessRefused(executor: string | undefined): boolean {
  * an `action:group` / `action:menu` member. The refusal text is the one
  * `ActionSchema` prints for the same executor (`action-on-success-executor.ts`),
  * with the subject naming the row and the spelling that resolved its executor,
- * as {@link refuseUnopenableRowUrlTarget} names it. The issue lands at
+ * as {@link refuseUnopenableRowUrlTarget} names it. Beside `operation:
+ * 'update'` it is refused whatever the executor, as `ActionSchema` refuses it
+ * on every `type`, with that refusal's text. The issue lands at
  * `onSuccess`, so `os validate`'s props gate reports it at `properties.onSuccess`
  * or `properties.actions.N.onSuccess`.
  */
 function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', owner: string) {
   return (
-    row: { actionType?: string; type?: string; name?: string; onSuccess?: unknown },
+    row: { actionType?: string; type?: string; name?: string; operation?: unknown; onSuccess?: unknown },
     ctx: z.RefinementCtx,
   ): void => {
     if (row.onSuccess === undefined) return;
+    // `operation: 'update'` first, as the runner reads it: the write runs
+    // before any executor, and the row's executor key is never consulted.
+    // ONE issue, `ActionSchema`'s text for the same pairing.
+    if (row.operation === 'update') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['onSuccess'],
+        message: onSuccessBesideUpdateOperationRefusal(`${owner} \`onSuccess\` (\`operation: 'update'\`)`),
+      });
+      return;
+    }
     const executor = effectiveRowExecutor(row, executorKey);
     if (!rowOnSuccessRefused(executor)) return;
     const key = row[executorKey] === '' ? `an empty \`${executorKey}\`` : `no \`${executorKey}\``;
@@ -4361,7 +4399,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: z.unknown().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`'),
+  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
   patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
   confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
   successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
@@ -4374,7 +4412,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
   onSuccess: actionOnSuccessBlock().optional()
-    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, and on a row that names no executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
+    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: \'update\'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
 }).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s"))
@@ -4462,7 +4500,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: z.unknown().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`'),
+  operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
   patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
   confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
   successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
@@ -4473,7 +4511,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
   resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
   onSuccess: actionOnSuccessBlock().optional()
-    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, and on a row that names no executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
+    .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: \'update\'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
   objectName: z.string().optional()
     .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
 }).superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s"))
@@ -4652,7 +4690,7 @@ function actionContainerMemberShape() {
     method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
     bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-    operation: z.unknown().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`'),
+    operation: actionOperation().optional().describe('Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`\'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own'),
     patch: z.unknown().optional().describe('Field values the declarative `operation` writes, forwarded to the runner'),
     confirmText: z.string().optional().describe('Confirmation question asked before the action runs'),
     successMessage: z.string().optional().describe('Toast shown when the action succeeds'),
@@ -4663,7 +4701,7 @@ function actionContainerMemberShape() {
     toast: z.unknown().optional().describe('Toast behaviour, forwarded to the runner'),
     resultDialog: z.unknown().optional().describe('One-shot result dialog for a value the response shows exactly once, forwarded to the runner'),
     onSuccess: actionOnSuccessBlock().optional()
-      .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, and on a row that names no executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
+      .describe('Post-success navigation, forwarded to the runner: `ActionSchema`\'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: \'update\'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with ${, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab`'),
     objectName: z.string().optional()
       .describe('Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page\'s object. Omit to act on the page\'s object'),
   };
