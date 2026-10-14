@@ -119,7 +119,7 @@
 
 import { referenceCarrierOf } from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
-import { indexObjectGraph, nearestName, recordsOf, type ObjectGraph } from './object-graph.js';
+import { indexObjectGraph, nearestName, packagesOf, recordsOf, type ObjectGraph } from './object-graph.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
@@ -406,6 +406,197 @@ function grantsObjectAccess(p: AnyRec): boolean {
 }
 
 /**
+ * `security-controlled-by-parent-no-relation` for one object, at `path`. One
+ * builder for the declared object and the merged one ({@link
+ * extensionMergedCbpFindings}), so the two read in one wording.
+ */
+function cbpNoRelationFinding(objName: string, path: string): SecurityFinding {
+  return {
+    severity: 'error',
+    rule: SECURITY_CBP_NO_RELATION,
+    where: `object "${objName}"`,
+    path,
+    // [#22161] One verdict sentence; the ADR-0055 rule it tested and why
+    // the object is unusable rather than locked down are this id's
+    // `os explain` entry.
+    message:
+      `declares sharingModel 'controlled_by_parent' but no required master_detail field to derive access ` +
+      `from, so every read is denied and every write refused (422 INVALID_METADATA)`,
+    // [#22161] One remedy line; that an object with no master decides its
+    // own baseline, and what each value means, is this id's `os explain`
+    // entry.
+    hint:
+      `Add the master relation, e.g. fields.parent: { type: 'master_detail', reference: '<master_object>', ` +
+      `required: true }, or set its own sharingModel: 'private', 'public_read' or 'public_read_write'`,
+  };
+}
+
+/**
+ * `security-controlled-by-parent-ambiguous-relation` for one object, at
+ * `path`, naming its candidates. Shared like {@link cbpNoRelationFinding}.
+ */
+function cbpAmbiguousRelationFinding(objName: string, path: string, candidates: CbpRelation[]): SecurityFinding {
+  const roster = candidates.map((cand) => `"${cand.field}" → ${cand.master}`).join(', ');
+  return {
+    severity: 'error',
+    rule: SECURITY_CBP_AMBIGUOUS_RELATION,
+    where: `object "${objName}"`,
+    path,
+    // [#22161] One verdict sentence; why exactly one master is the rule is
+    // this id's `os explain` entry.
+    message:
+      `declares ${candidates.length} required master_detail fields (${roster}), so no ` +
+      `controlled_by_parent master is derived: every read denied, every write refused`,
+    // [#22161] One remedy line.
+    hint:
+      `Keep master_detail on the ONE master this object's rows belong to, and declare every other parent ` +
+      `as a lookup field`,
+  };
+}
+
+/** One `objectExtensions` entry as the registry registers it — see {@link extensionMergedCbpFindings}. */
+interface VisibleExtension {
+  /** The position of the package that ships it: registration order across packages. */
+  carrier: number;
+  /** The entry's path, e.g. `objectExtensions[0]`. */
+  path: string;
+  /** `ext.priority ?? 200`, the registry's default. */
+  priority: number;
+  /** Its field records, name folded in (`recordsOf`). */
+  fields: AnyRec[];
+}
+
+/**
+ * [#23210 · ADR-0055 §1] `security-controlled-by-parent-no-relation` and
+ * `security-controlled-by-parent-ambiguous-relation`, judged on the MERGED
+ * field set of a `controlled_by_parent` object that an `objectExtensions`
+ * entry of this stack extends.
+ *
+ * The registry folds every extension onto its target at boot, so an object
+ * that passes the per-object rules above as declared can run with two required
+ * master_detail fields, or none, and the runtime then derives no master and
+ * fails closed. The stack schema refuses the same merged shape
+ * (`applyControlledByParentExtensionGate`, `@objectstack/spec`'s
+ * `stack.zod.ts`); this is the door an UNPARSED intake meets — `os lint` on a
+ * raw config, a direct call — and the tests hold the two verdicts equal.
+ *
+ * The merge is read as the registry computes it (`mergeObjectDefinitions`,
+ * `SchemaRegistry.resolveObject`), and as the schema door reads it, since
+ * `@objectstack/lint` imports no runtime: the target's own declaration is the
+ * base and keeps its `sharingModel`; fields merge by name, a later writer
+ * replacing the whole field; extensions apply in ascending `priority`, equal
+ * priorities in registration order, one per package per target (the later
+ * entry wins). `extend` names its target verbatim.
+ *
+ * Visible targets, as the schema door has them: with no `packages[]`, the
+ * stack's `objects` extended by its `objectExtensions`; with `packages[]`, the
+ * objects every body declares (plus a top-level object no body declares)
+ * extended by every body's `objectExtensions` — the artifact is the
+ * co-ownership boundary, the reach `validate-translation-references.ts`
+ * already takes for extension FIELDS. Unjudged, as by the schema: a target
+ * the stack does not declare (the blind spot `validate-object-references.ts`
+ * states), a target two bodies declare, a target whose own declaration
+ * already breaks the rule (reported above, at its own path), and a target on
+ * which two packages write one field key at the priority that decides it.
+ *
+ * Each finding sits at the `fields` of an extension that wrote a key which is
+ * a `master_detail` in the declaration or in the merged set — the line that
+ * added the second master, or demoted the one.
+ */
+function extensionMergedCbpFindings(stack: AnyRec): SecurityFinding[] {
+  const findings: SecurityFinding[] = [];
+  const bodies = packagesOf(stack).map((entry) =>
+    entry.manifest && typeof entry.manifest === 'object' && !Array.isArray(entry.manifest)
+      ? (entry.manifest as AnyRec)
+      : {},
+  );
+  const multi = Array.isArray(stack.packages);
+
+  // Target name → its declaration, or `null` when two packages claim it.
+  const targets = new Map<string, AnyRec | null>();
+  const owners = new Map<string, number>();
+  const declare = (objects: AnyRec[], carrier: number) => {
+    for (const obj of objects) {
+      const name = typeof obj.name === 'string' && obj.name.length > 0 ? obj.name : undefined;
+      if (!name || targets.get(name) === null) continue;
+      const owner = owners.get(name);
+      if (owner !== undefined && owner !== carrier) {
+        targets.set(name, null);
+        continue;
+      }
+      owners.set(name, carrier);
+      targets.set(name, obj);
+    }
+  };
+  if (!multi) {
+    declare(recordsOf(stack.objects), 0);
+  } else {
+    bodies.forEach((body, j) => declare(recordsOf(body.objects), j));
+    declare(recordsOf(stack.objects).filter((obj) => typeof obj.name === 'string' && !owners.has(obj.name)), bodies.length);
+  }
+
+  // Target name → its extensions, one per package.
+  const extensions = new Map<string, Map<number, VisibleExtension>>();
+  const collect = (entries: unknown, carrier: number, at: string) => {
+    if (!Array.isArray(entries)) return;
+    entries.forEach((entry: unknown, i: number) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+      const ext = entry as AnyRec;
+      const target = ext.extend;
+      if (typeof target !== 'string' || !targets.get(target)) return;
+      const byCarrier = extensions.get(target) ?? new Map<number, VisibleExtension>();
+      byCarrier.set(carrier, {
+        carrier,
+        path: `${at}objectExtensions[${i}]`,
+        priority: typeof ext.priority === 'number' ? ext.priority : 200,
+        fields: recordsOf(ext.fields),
+      });
+      extensions.set(target, byCarrier);
+    });
+  };
+  if (!multi) collect(stack.objectExtensions, 0, '');
+  else bodies.forEach((body, j) => collect(body.objectExtensions, j, `packages[${j}].manifest.`));
+
+  for (const [target, byCarrier] of extensions) {
+    const base = targets.get(target);
+    if (!base || owdOf(base) !== 'controlled_by_parent') continue;
+    if (cbpMasterCandidates(base).length !== 1) continue;
+
+    const baseFields = new Map(recordsOf(base.fields).map((f) => [String(f.name ?? '?'), f] as const));
+    const merged = new Map(baseFields);
+    const ordered = [...byCarrier.values()].sort((a, b) => a.priority - b.priority || a.carrier - b.carrier);
+    const writers = new Map<string, VisibleExtension>();
+    const tiedWriters = new Map<string, number>();
+    for (const ext of ordered) {
+      for (const field of ext.fields) {
+        const key = String(field.name ?? '?');
+        const previous = writers.get(key);
+        tiedWriters.set(key, previous?.priority === ext.priority ? (tiedWriters.get(key) ?? 1) + 1 : 1);
+        writers.set(key, ext);
+        merged.set(key, field);
+      }
+    }
+    if ([...tiedWriters.values()].some((count) => count > 1)) continue;
+
+    const candidates = cbpMasterCandidates({ ...base, fields: [...merged.values()] });
+    if (candidates.length === 1) continue;
+    const blamed = new Set<VisibleExtension>();
+    for (const [key, ext] of writers) {
+      if (merged.get(key)?.type === 'master_detail' || baseFields.get(key)?.type === 'master_detail') blamed.add(ext);
+    }
+    for (const ext of ordered) {
+      if (!blamed.has(ext)) continue;
+      findings.push(
+        candidates.length === 0
+          ? cbpNoRelationFinding(target, `${ext.path}.fields`)
+          : cbpAmbiguousRelationFinding(target, `${ext.path}.fields`, candidates),
+      );
+    }
+  }
+  return findings;
+}
+
+/**
  * Validate the security posture of a stack. Returns findings (empty = clean).
  * `error` findings gate the build in `os compile`; `info` is advisory.
  *
@@ -511,24 +702,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // who may author it.
     const cbpCandidates = owd === 'controlled_by_parent' ? cbpMasterCandidates(obj) : undefined;
     if (cbpCandidates && cbpCandidates.length === 0) {
-      findings.push({
-        severity: 'error',
-        rule: SECURITY_CBP_NO_RELATION,
-        where: `object "${objName}"`,
-        path: `${objPath}.sharingModel`,
-        // [#22161] One verdict sentence; the ADR-0055 rule it tested and why
-        // the object is unusable rather than locked down are this id's
-        // `os explain` entry.
-        message:
-          `declares sharingModel 'controlled_by_parent' but no required master_detail field to derive access ` +
-          `from, so every read is denied and every write refused (422 INVALID_METADATA)`,
-        // [#22161] One remedy line; that an object with no master decides its
-        // own baseline, and what each value means, is this id's `os explain`
-        // entry.
-        hint:
-          `Add the master relation, e.g. fields.parent: { type: 'master_detail', reference: '<master_object>', ` +
-          `required: true }, or set its own sharingModel: 'private', 'public_read' or 'public_read_write'`,
-      });
+      findings.push(cbpNoRelationFinding(objName, `${objPath}.sharingModel`));
     }
 
     // ── [#14747 · #23100] controlled_by_parent with TWO OR MORE masters ───
@@ -547,22 +721,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // not: the ambiguity is a property of the document, independent of who may
     // author it.
     if (cbpCandidates && cbpCandidates.length > 1) {
-      const roster = cbpCandidates.map((cand) => `"${cand.field}" → ${cand.master}`).join(', ');
-      findings.push({
-        severity: 'error',
-        rule: SECURITY_CBP_AMBIGUOUS_RELATION,
-        where: `object "${objName}"`,
-        path: `${objPath}.fields`,
-        // [#22161] One verdict sentence; why exactly one master is the rule is
-        // this id's `os explain` entry.
-        message:
-          `declares ${cbpCandidates.length} required master_detail fields (${roster}), so no ` +
-          `controlled_by_parent master is derived: every read denied, every write refused`,
-        // [#22161] One remedy line.
-        hint:
-          `Keep master_detail on the ONE master this object's rows belong to, and declare every other parent ` +
-          `as a lookup field`,
-      });
+      findings.push(cbpAmbiguousRelationFinding(objName, `${objPath}.fields`, cbpCandidates));
     }
 
     // D11: external dial present on any object (system included) must obey
@@ -598,6 +757,12 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       }
     }
   }
+
+  // ── [#23210] the same two rules, on an object's MERGED field set ─────
+  // An `objectExtensions` entry of this stack merges into its target at boot,
+  // so an object that passes above as declared can run with two required
+  // master_detail fields, or none. See {@link extensionMergedCbpFindings}.
+  findings.push(...extensionMergedCbpFindings(stack));
 
   // [#16108] The object graph, for the FLS field-existence rule below. Built
   // ONCE here rather than per permission set: `indexObjectGraph` walks every
