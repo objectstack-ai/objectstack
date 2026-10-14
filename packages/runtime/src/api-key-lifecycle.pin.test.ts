@@ -14,22 +14,27 @@
  *    a changed setting changes the answer;
  *  - a kernel with no `auth` service keeps the pre-policy signing.
  *
- * ## The dispatcher face fails CLOSED on a refused key
+ * ## The dispatcher face relays the refusal (ruling A item 3)
  *
- * `HttpDispatcher`'s identity step re-raises only the store outage by brand,
- * so the branded lifecycle refusal is answered there as an anonymous request:
- * the generic 401 at a door that refuses anonymity (`POST /keys` here),
- * nothing is minted, and a cookie beside the dead key never answers for it. Pinned so a later change cannot turn that into an
- * admission or a 500.
+ * `HttpDispatcher`'s identity step re-raises the branded lifecycle refusal
+ * beside the store outage, so `dispatch()` leaves with it and the transport's
+ * error render answers its declared `403` and ledger code — on `POST /keys`,
+ * and on the MCP HTTP endpoint (`/api/v1/mcp`), driven through the mounted
+ * route. Nothing is minted, and a cookie beside the dead key never answers for
+ * it. The relay is by BRAND: an unbranded throw at the same step, even one
+ * spelling the same code and status, is still answered as an anonymous
+ * request (the generic 401), and so is an unknown key.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { hashApiKey, isAuthzStoreUnavailableError } from '@objectstack/core';
+import { hashApiKey, isApiKeyLifecycleRefusalError, isAuthzStoreUnavailableError } from '@objectstack/core';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { ApiErrorSchema } from '@objectstack/spec/api';
 import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 
 import { HttpDispatcher, type HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
+import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
 const DAY = 86_400_000;
 const NOW = Date.parse('2027-01-01T00:00:00.000Z');
@@ -134,7 +139,7 @@ describe('[#23367] POST /keys — the default life and the ceiling', () => {
   });
 });
 
-// ── The dispatcher face: a refused key fails CLOSED ──────────────────────────
+// ── The dispatcher face: the refusal is relayed, by brand ───────────────────
 
 const KEY = 'osk_dispatcher_lifecycle_pin';
 /** `/keys` takes its anonymous decision as its first statement (ADR-0138 D2), so it shows what the face resolved. */
@@ -173,7 +178,7 @@ function dispatcherWithKey(row: Record<string, unknown>) {
   };
   const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
   (dispatcher as any).domainDeps.logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
-  return { dispatcher, inserted, getSession };
+  return { dispatcher, inserted, getSession, kernel };
 }
 
 const post = (headers: Record<string, string>) => new Request(`http://tenant.example/api/v1${ROUTE}`, {
@@ -183,23 +188,53 @@ const post = (headers: Record<string, string>) => new Request(`http://tenant.exa
 });
 const pctx = (r: Request): HttpProtocolContext => ({ request: r });
 
-describe('[#23367] the dispatcher face fails CLOSED on a key its lifecycle refuses', () => {
+async function rejectionOf(p: Promise<unknown>): Promise<any> {
+  try {
+    await p;
+  } catch (err) {
+    return err;
+  }
+  return undefined;
+}
+
+describe('[#23367] the dispatcher face relays a key its lifecycle refuses, by brand', () => {
   let warn: ReturnType<typeof vi.spyOn>;
   beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
   afterEach(() => { warn.mockRestore(); });
 
-  it('a revoked key is answered the generic 401, and nothing is minted', async () => {
+  it('a revoked key leaves `dispatch()` as the branded 403 API_KEY_REVOKED, and nothing is minted', async () => {
     const { dispatcher, inserted } = dispatcherWithKey({ revoked: true });
-    const result: any = await dispatcher.dispatch('POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY })));
-    expect(result.response?.status).toBe(401);
+    const err = await rejectionOf(dispatcher.dispatch('POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY }))));
+    expect(err, '`dispatch()` RESOLVED — the refusal was absorbed inside the pipeline').toBeDefined();
+    expect(isApiKeyLifecycleRefusalError(err)).toBe(true);
+    expect(err).toMatchObject({ code: 'API_KEY_REVOKED', status: 403 });
     expect(inserted).toEqual([]);
   });
 
-  it('a cookie beside the dead key never answers for it', async () => {
+  it('a cookie beside the dead key never answers for it: 403 API_KEY_EXPIRED, nothing minted', async () => {
     const { dispatcher, inserted } = dispatcherWithKey({ expires_at: '2000-01-01T00:00:00.000Z' });
-    const result: any = await dispatcher.dispatch(
-      'POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY, cookie: 'session=ok' })));
+    const err = await rejectionOf(dispatcher.dispatch(
+      'POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY, cookie: 'session=ok' }))));
+    expect(err).toMatchObject({ code: 'API_KEY_EXPIRED', status: 403 });
+    expect(inserted).toEqual([]);
+  });
+
+  it('an UNBRANDED throw at the identity step, even one spelling the same code and status, is still the generic 401', async () => {
+    const { dispatcher, inserted } = dispatcherWithKey({ revoked: true });
+    const lookalike = Object.assign(new Error('not the brand'), { code: 'API_KEY_REVOKED', status: 403 });
+    vi.spyOn(dispatcher as any, 'timedResolveExecutionContext').mockRejectedValue(lookalike);
+    const result: any = await dispatcher.dispatch('POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY })));
     expect(result.response?.status).toBe(401);
+    expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
+    expect(inserted).toEqual([]);
+  });
+
+  it('an unknown key is still the generic 401', async () => {
+    const { dispatcher, inserted } = dispatcherWithKey({});
+    const result: any = await dispatcher.dispatch(
+      'POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': 'osk_never_issued' })));
+    expect(result.response?.status).toBe(401);
+    expect(result.response?.body?.error?.code).toBe('UNAUTHENTICATED');
     expect(inserted).toEqual([]);
   });
 
@@ -208,5 +243,87 @@ describe('[#23367] the dispatcher face fails CLOSED on a key its lifecycle refus
     const result: any = await dispatcher.dispatch('POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY })));
     expect(result.response?.status).toBe(201);
     expect(inserted).toHaveLength(1);
+  });
+});
+
+// ── MCP HTTP, on the wire: the mounted `/api/v1/mcp` route and its render ───
+
+/** A fake `IHttpServer` recording the handlers the plugin mounts. */
+function makeFakeServer() {
+  const handlers: Record<string, (req: any, res: any) => any> = {};
+  const rec = (verb: string) => (path: string, handler: any) => { handlers[`${verb} ${path}`] = handler; };
+  return {
+    handlers,
+    server: { get: rec('GET'), post: rec('POST'), put: rec('PUT'), delete: rec('DELETE'), patch: rec('PATCH') },
+  };
+}
+
+async function mountOn(kernel: unknown) {
+  const { server, handlers } = makeFakeServer();
+  const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+  await plugin.start?.({
+    getKernel: () => kernel,
+    getService: (n: string) => (n === 'http.server' ? server : undefined),
+    environmentId: undefined,
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+    hook: () => {}, on: () => {},
+  } as any);
+  return handlers;
+}
+
+async function drive(handler: ((req: any, res: any) => any) | undefined, headers: Record<string, string>) {
+  expect(handler, 'route must be mounted').toBeTypeOf('function');
+  const res: any = {
+    statusCode: undefined, body: undefined,
+    status(c: number) { res.statusCode = c; return res; },
+    header() { return res; },
+    json(b: any) { res.body = b; return res; },
+    end() { return res; },
+  };
+  await handler!({ headers, query: {}, body: { jsonrpc: '2.0', id: 1, method: 'tools/list' } }, res);
+  return { status: res.statusCode as number, body: res.body };
+}
+
+const MCP = 'POST /api/v1/mcp';
+
+describe('[#23367] MCP HTTP answers a dead key with its own 403 and code, on the wire', () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
+  afterEach(() => { warn.mockRestore(); });
+
+  it('a revoked key: 403 API_KEY_REVOKED in the declared envelope', async () => {
+    const { kernel } = dispatcherWithKey({ revoked: true });
+    const handlers = await mountOn(kernel);
+    const { status, body } = await drive(handlers[MCP], { 'x-api-key': KEY });
+    expect(status).toBe(403);
+    expect(body?.success).toBe(false);
+    const parsed = ApiErrorSchema.safeParse(body?.error);
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(body?.error?.code).toBe('API_KEY_REVOKED');
+  });
+
+  it('an inactive key: 403 API_KEY_INACTIVE', async () => {
+    const { kernel } = dispatcherWithKey({
+      created_at: '2000-01-01T00:00:00.000Z',
+      last_used_at: '2000-01-01T00:00:00.000Z',
+      expires_at: '2999-01-01T00:00:00.000Z',
+    });
+    const handlers = await mountOn(kernel);
+    const { status, body } = await drive(handlers[MCP], { 'x-api-key': KEY });
+    expect(status).toBe(403);
+    expect(body?.error?.code).toBe('API_KEY_INACTIVE');
+  });
+
+  it('an unknown key is no lifecycle refusal: it passes the identity step as anonymous, and `POST /keys` answers it the generic 401', async () => {
+    const { kernel } = dispatcherWithKey({});
+    const handlers = await mountOn(kernel);
+    // The fixture registers no MCP service, so the anonymous request reaches
+    // the MCP door and is answered there (501), never at the identity step.
+    const mcp = await drive(handlers[MCP], { 'x-api-key': 'osk_never_issued' });
+    expect(mcp.status).not.toBe(403);
+    expect(mcp.body?.error?.code).not.toMatch(/^API_KEY_/);
+    const keys = await drive(handlers['POST /api/v1/keys'], { 'x-api-key': 'osk_never_issued' });
+    expect(keys.status).toBe(401);
+    expect(keys.body?.error?.code).toBe('UNAUTHENTICATED');
   });
 });

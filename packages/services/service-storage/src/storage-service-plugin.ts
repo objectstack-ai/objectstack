@@ -1474,12 +1474,11 @@ function buildFileReadAuthorizer(
       // indistinguishable from a genuine refusal.
       if (isAuthzStoreUnavailableError(err)) throw err;
       // [#23367] A key its own lifecycle refused (revoked, expired, inactive)
-      // fails CLOSED to the door's 401, exactly as the key it used to read as
-      // unknown did — not to a 'deny', which would tell a dead credential it
-      // was recognised and refused on the record. This family's download door
-      // relays only the store outage by brand, so the refusal's code reaches
-      // the operator's log, from the resolver, and not the wire.
-      if (isApiKeyLifecycleRefusalError(err)) return 'unauthenticated';
+      // is not a read verdict either: re-raised by brand for the download
+      // door, which relays it as its declared 403 and ledger code beside the
+      // store outage. Never a 'deny', which would answer it as a refusal on
+      // the record.
+      if (isApiKeyLifecycleRefusalError(err)) throw err;
       return 'deny'; // fail closed
     }
   };
