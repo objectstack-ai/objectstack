@@ -151,6 +151,9 @@ import { planUnmanagedImport, unmanagedInstallPostureRefusal } from './package-u
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+// [#23183] The app item read's package-id key — the one spelling of the arm
+// `GetMetaItemRequestSchema.name` declares ({@link resolveAppPackageIdKey}).
+import { isAppPackageIdKey } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -10624,6 +10627,97 @@ export class ObjectStackProtocolImplementation implements
         }, options);
     }
 
+    /**
+     * [#23183] The packages {@link resolveAppPackageIdKey} has reported as
+     * holding more than one app, keyed by package and app set, so the operator
+     * is told once per state rather than once per read.
+     */
+    private readonly reportedMultiAppPackages = new Set<string>();
+
+    /**
+     * [#23183] ADR-0048 §3.1: "The route/container coordinate for an installed
+     * package's UI is its package id … With the current one-app-per-package
+     * invariant, the app *is* the package container." So the app item read
+     * answers for a package id as it answers for the app's own name, as
+     * `GetMetaItemRequestSchema.name` declares. This is the one place the key is
+     * resolved: both transports' item reads hand {@link getMetaItem} the key
+     * they were asked for, and neither resolves it itself.
+     *
+     * Recognised by `isAppPackageIdKey` (`@objectstack/spec/api`): `type: 'app'`
+     * and a key in the package-id grammar, which no app name is in. Every other
+     * request is returned untouched, so every by-name read of every type is
+     * unchanged.
+     *
+     * "The package's app" is what the package-scoped list serves
+     * ({@link getMetaItems} with `packageId`, the read behind
+     * `GET /meta/app?package=`): the apps the package ships, its stored rows
+     * included, none for a disabled package. Its drafts are in view exactly
+     * when this read reads drafts (`state: 'draft'` or `previewDrafts`), so the
+     * key resolves to the app the read itself would serve.
+     *
+     *  - ONE app: the request becomes that app's by-name read, scoped to the
+     *    package (`packageId`, ADR-0048 prefer-local). The envelope names the
+     *    app by its own `name`, the address a save of it uses and the item its
+     *    `version` token belongs to.
+     *  - NONE, or MORE THAN ONE (a package breaking ADR-0019 D3's at-most-one
+     *    rule, which the save door does not enforce): the request is returned
+     *    as asked, and its by-name read answers absence, because no legal app
+     *    name is in the package-id grammar. Absence, and no answer of its own:
+     *    the doors' read gate answers an unpublished app as absent (ADR-0045
+     *    §3), and a separate "two apps" answer would let a caller see an app
+     *    being built in the package before it is published. The operator is
+     *    told instead, in the log.
+     *
+     * A `packageId` naming a different package is refused `400 INVALID_REQUEST`:
+     * the key already names the package, and a prefer-local scope from a
+     * second package would read that package's same-name app, not this one's.
+     *
+     * A failed list read propagates: a store outage is never answered as "no
+     * such package" (#5532).
+     */
+    private async resolveAppPackageIdKey<R extends {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
+    }>(request: R): Promise<R> {
+        if (!isAppPackageIdKey(request.type, request.name)) return request;
+        const packageId = request.name;
+        if (request.packageId !== undefined && request.packageId !== packageId) {
+            const err: any = new Error(
+                `The app read's key '${packageId}' is a package id, and it names a different package `
+                + `than packageId '${request.packageId}'. Name the package once: read the app by its `
+                + `package id alone, or by its own app name with packageId as its scope.`,
+            );
+            err.code = 'INVALID_REQUEST';
+            err.status = 400;
+            throw err;
+        }
+        const readsDrafts = request.state === 'draft' || request.previewDrafts === true;
+        const listed = await this.getMetaItems({
+            type: 'app',
+            packageId,
+            ...(readsDrafts ? { previewDrafts: true } : {}),
+        });
+        const names = [...new Set(
+            ((listed as { items?: unknown[] } | undefined)?.items ?? [])
+                .map((app) => (app as { name?: unknown } | null)?.name)
+                .filter((name): name is string => typeof name === 'string' && name.length > 0),
+        )];
+        if (names.length === 1) return { ...request, name: names[0], packageId };
+        if (names.length > 1) {
+            const key = `${packageId}|${[...names].sort().join(',')}`;
+            if (!this.reportedMultiAppPackages.has(key)) {
+                this.reportedMultiAppPackages.add(key);
+                console.warn(
+                    `[metadata-protocol] Package '${packageId}' holds ${names.length} apps `
+                    + `(${[...names].sort().join(', ')}), so reading the app by its package id answers `
+                    + `"not found": with one app per package the app is the package container `
+                    + `(ADR-0048 §3.1), and a package may define at most one app (ADR-0019 D3). `
+                    + `Fold them into one app, or move all but one into packages of their own.`,
+                );
+            }
+        }
+        return request;
+    }
+
     async getMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
@@ -10631,6 +10725,12 @@ export class ObjectStackProtocolImplementation implements
     }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
+        // [#23183] ADR-0048 §3.1: the app read keyed by PACKAGE ID, resolved
+        // ONCE, here, to the package's one app read by its own name in that
+        // package, so every step below (the stored row, the lock, the version
+        // token) reads the app exactly as its by-name read does. See
+        // {@link resolveAppPackageIdKey}.
+        request = await this.resolveAppPackageIdKey(request);
         // [#22877] Ruling 6116165299 (Q2 i): ONE member of a bundled type is
         // addressed by name, the selector's or else the canonical one. Every
         // layer below answers that member or nothing — the stored row, the
@@ -20786,6 +20886,57 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23415, ADR-0048] The refusal of a delete that asks to drop an object's
+     * table ({@link shouldDropStorage} says yes) while another stored row of
+     * the object stays after it. A `sys_metadata` row is keyed by its package,
+     * so one object can hold one row per package (and a package-less row), and
+     * every such row serves the object over the ONE table its name maps to.
+     * Dropping the table with one of them left the others' object served
+     * with its records gone: measured at `DELETE
+     * /api/v1/meta/object/NAME?package=P&dropStorage=true` on a booted
+     * showcase, `200` with a receipt naming Q's remaining row, then `500` on
+     * the object's next data read.
+     *
+     * Refused, not skipped: an explicit `dropStorage` that drops nothing would
+     * be an opt-in the runtime does not honour while the receipt answers
+     * success. Refused before any write, so nothing is deleted and the request
+     * succeeds once the remedy is applied: without `dropStorage` (this row
+     * goes, the table stays), or with the object's last row.
+     *
+     * The rows that count are the ones the delete's own address read
+     * ({@link packagelessAddress}) holds: the environment's ACTIVE rows of the
+     * object. A draft row is not one: a draft is never materialised and never
+     * served, so it holds no records, and the last active row's delete still
+     * drops the table it was the last to serve.
+     *
+     * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member
+     * for a refusal that comes from environment state rather than the request
+     * (the same request is accepted once the other rows are gone), as
+     * {@link packagelessAddressAmbiguityRefusal} answers for the same rows.
+     * The prescription first, because a 4xx message crosses the REST boundary
+     * bounded at 500 characters with its tail truncated.
+     */
+    private static dropStorageRemainingRowsRefusal(
+        type: string,
+        name: string,
+        deletedPackage: string | null,
+        remainingPackages: readonly string[],
+        unboundRemains: boolean,
+    ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+        const which = deletedPackage !== null ? ` (package=${deletedPackage})` : '';
+        const err = new Error(
+            'Send the delete again without dropStorage to remove this row and keep the table, or delete the '
+            + "object's other rows first and drop the table with the last one. Nothing was deleted. "
+            + `After this delete${which}, ${type} '${name}' is still served: `
+            + `${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}, and the object's records are in its table. `
+            + "dropStorage drops an object's table only with the object's last row.",
+        ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+        err.code = 'RESOURCE_CONFLICT';
+        err.status = 409;
+        return err;
+    }
+
+    /**
      * [commit 311433f6b] The item-name grammar verdict — stage 1 of the
      * maintainer-ruled retirement of compound `<section>/<name>` addressing
      * (2026-08-25). Refuse, on the doors that MINT or PROMOTE a `sys_metadata`
@@ -28405,6 +28556,9 @@ export class ObjectStackProtocolImplementation implements
          * is removed (object + active only; never `sys_`). Default false keeps
          * delete non-destructive to data. Used by the "discard a previewed
          * object" flow so a publish-to-preview leaves no orphan table.
+         * [#23415] Only with the object's last stored row: while another row
+         * of it stays stored, the delete is refused `409 RESOURCE_CONFLICT`
+         * ({@link dropStorageRemainingRowsRefusal}).
          */
         dropStorage?: boolean;
         /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
@@ -28598,6 +28752,9 @@ export class ObjectStackProtocolImplementation implements
             // more packages hold: the door's own verdict, rethrown as it is by
             // the `catch` below, never re-wrapped as a delete that failed.
             let addressRefusal: Error | undefined;
+            // [#23415] The refusal of a table drop another stored row of the
+            // object still needs: rethrown as it is, as `addressRefusal` is.
+            let dropRefusal: Error | undefined;
 
             try {
                 const targetState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
@@ -28694,6 +28851,25 @@ export class ObjectStackProtocolImplementation implements
                     };
                 }
 
+                // [#23165] What is still stored at this address once this row
+                // is gone, from the rows the address read already holds. Read
+                // by the table drop's verdict just below and by the receipt.
+                const remainingPackages = rowsAtAddress.candidates.filter((id) => id !== packageId);
+                const unboundRemains = rowsAtAddress.unbound && packageId !== null;
+                const remains = remainingPackages.length > 0 || unboundRemains;
+                // [#23415] The table drop, decided ONCE, before anything is
+                // written: an object's table goes only with its last stored
+                // row. A `dropStorage` delete that would leave another row of
+                // the object stored, and served over this table, is refused
+                // whole — see {@link dropStorageRemainingRowsRefusal}.
+                const dropsStorage = this.shouldDropStorage(request.type, request.name, request.dropStorage, targetState);
+                if (dropsStorage && remains) {
+                    dropRefusal = ObjectStackProtocolImplementation.dropStorageRemainingRowsRefusal(
+                        singularTypeForRepo, request.name, packageId, remainingPackages, unboundRemains,
+                    );
+                    throw dropRefusal;
+                }
+
                 // Last-write-wins parent resolution unless the caller pinned
                 // an explicit version (Studio's "Reset" button is unpinned;
                 // a future "delete vN" flow can pass parentVersion).
@@ -28745,7 +28921,9 @@ export class ObjectStackProtocolImplementation implements
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
                 // for a discarded object so a publish-to-preview leaves no residue.
-                if (this.shouldDropStorage(request.type, request.name, request.dropStorage, targetState)) {
+                // [#23415] Decided above; reached only when this was the
+                // object's last stored row.
+                if (dropsStorage) {
                     await this.dropObjectStorage(singularTypeForRepo, request.name);
                 }
 
@@ -28778,11 +28956,6 @@ export class ObjectStackProtocolImplementation implements
                     organizationId: orgId,
                     ...mutationEventMember(singularTypeForRepo, member),
                 });
-                // [#23165] What is still stored at this address once this row
-                // is gone, from the rows the address read already holds.
-                const remainingPackages = rowsAtAddress.candidates.filter((id) => id !== packageId);
-                const unboundRemains = rowsAtAddress.unbound && packageId !== null;
-                const remains = remainingPackages.length > 0 || unboundRemains;
                 const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
                 return {
                     success: true,
@@ -28832,7 +29005,11 @@ export class ObjectStackProtocolImplementation implements
                 // [#21899] The door's own verdict, not a store failure: it
                 // leaves with its envelope and sentence, never re-wrapped as an
                 // overlay delete that failed.
-                if (err === originGatedRefusal || (addressRefusal !== undefined && err === addressRefusal)) throw err;
+                if (
+                    err === originGatedRefusal
+                    || (addressRefusal !== undefined && err === addressRefusal)
+                    || (dropRefusal !== undefined && err === dropRefusal)
+                ) throw err;
                 if (err instanceof ConflictError) {
                     // [#21207] Keyed values or none in the text and attributes.
                     const conflict = await this.metadataConflictRefusal(

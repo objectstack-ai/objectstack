@@ -1098,6 +1098,7 @@
     "getAuthEndpointUrl (function)",
     "getDefaultRouteRegistrations (function)",
     "identityFreeEndpointGateFailure (function)",
+    "isAppPackageIdKey (function)",
     "isSubscribableChannel (function)",
     "makeApiErrorSchema (function)",
     "normalizeEndpointPath (function)",

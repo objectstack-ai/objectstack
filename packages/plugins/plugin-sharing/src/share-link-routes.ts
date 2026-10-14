@@ -119,9 +119,9 @@ function isAuthenticated(ctx: ShareLinkExecutionContext): boolean {
  * allow-list, and the dispatcher's twin of the same routes already refuses a
  * held session there.
  *
- * `code` is declared as a bare string on the envelope; its one producer
- * (plugin-auth's `customSession` enrichment) writes only `PASSWORD_EXPIRED` /
- * `MFA_REQUIRED`, both members of the error-code vocabulary.
+ * `code` is a member of the closed posture vocabulary (`AuthGateCodeSchema`,
+ * `@objectstack/spec/kernel`), every member of which is registered in the
+ * error-code vocabulary.
  */
 function refuseHeldSession(res: IHttpResponse, ctx: ExecutionContext): boolean {
   const gate = ctx.authGate;
@@ -463,6 +463,22 @@ export function registerShareLinkRoutes(
           if (row.audience === 'signed_in' && !signedInUserId) {
             return sendError(res, 401, 'SIGN_IN_REQUIRED', 'Please sign in to view this link');
           }
+          // [#23372] An `email` audience is judged before the password too, and
+          // its refusal is the generic one, for every caller the link did not
+          // resolve for. Its satisfaction is the caller's own `?email=` claim,
+          // not a verified identity, and this probe deliberately never reads
+          // it: an answer that differed for an allowlisted email — a password
+          // prompt for it, the generic refusal for any other — would let
+          // anyone holding the token test addresses against the allowlist.
+          // Nor may the password arm below answer: `resolveToken` refuses the
+          // audience before it verifies any password, so that arm knows only
+          // whether one was SENT, and told the holder of the CORRECT password
+          // `WRONG_PASSWORD`. So the caller reads what a password-less `email`
+          // link and an unknown token answer, whatever email and password it
+          // sent, signed in or not; only the record itself — an allowlisted
+          // email AND the right password — differs. Same arm in the dispatcher
+          // twin, held to this order by the same table.
+          if (row.audience === 'email') return invalidOrExpired();
           // [#21197] `password_hash` is `internal`, so the probe row comes back
           // without it; read off the row, every protected link would answer
           // "invalid" here instead of prompting for its password. Recovered

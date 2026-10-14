@@ -70,7 +70,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "Debe cambiar la contraseña",
-        help: "Si es true, el usuario queda bloqueado (403 PASSWORD_EXPIRED) hasta que cambie su contraseña. Lo establecen las rutas de administración de usuarios; gestionado por el sistema."
+        help: "Si es true, el usuario queda bloqueado (403 PASSWORD_RESET_REQUIRED) hasta que cambie su contraseña. Lo establecen las rutas de administración de usuarios; gestionado por el sistema."
       },
       mfa_required_at: {
         label: "MFA exigido desde",
@@ -197,6 +197,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "Exigir cambio de contraseña en el próximo inicio de sesión"
+          },
+          revokeSessionsAndKeys: {
+            label: "Cerrar sesión en todas partes y revocar las claves de API",
+            helpText: "Termina todas las sesiones de este usuario y revoca todas sus claves de API. Déjelo activado si la cuenta puede estar comprometida; desactívelo para un restablecimiento rutinario. Las claves revocadas siguen revocadas tras el cambio de contraseña."
           }
         },
         resultDialog: {

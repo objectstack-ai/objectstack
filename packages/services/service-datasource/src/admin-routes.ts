@@ -22,9 +22,13 @@ import {
   classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
   // ADR-0069 — the authentication-policy gate's ONE decision, called at this
-  // family's door on the session user the door already reads (see
-  // `requireDatasourceAdmin`), never re-derived here.
+  // family's door on the posture the shared resolver decided for whichever
+  // credential admitted the caller (see `requireDatasourceAdmin`), never
+  // re-derived here.
   evaluateAuthGate,
+  // [#23287, ruling C′ item 3] The auth service's per-user posture
+  // computation, handed to the shared key-admission seam.
+  userAuthGateSourceOf,
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { ErrorCode } from '@objectstack/spec/api';
@@ -453,10 +457,11 @@ export function registerDatasourceAdminRoutes(
   const requireDatasourceAdmin = async (req: any, res: any): Promise<boolean> => {
     let userId: string | undefined;
     let systemPermissions: string[] = [];
-    // The better-auth session user the identity resolution below read, kept so
-    // the ADR-0069 gate is asked about the SAME session the floor admitted —
-    // one read, both decisions, as for the two below.
-    let sessionUser: unknown;
+    // [#23287] The resolved context, kept so the ADR-0069 gate is asked about
+    // the SAME principal the floor admitted: its `authGate` is the posture the
+    // shared resolver decided for whichever credential admitted it — the
+    // session's own, or an API key owner's account-scope posture.
+    let gateSubject: { authGate?: unknown } | undefined;
     try {
       const headers = toWebHeaders(req?.headers);
       if (headers) {
@@ -467,14 +472,7 @@ export function registerDatasourceAdminRoutes(
         // would answer "no auth service" on precisely the deployments that
         // have one but register it later — every session-authenticated caller
         // refused, with nothing in the registry to show for it.
-        const readSession = buildGetSession(ctx);
-        const getSession = readSession
-          ? async (h: Headers) => {
-              const session = await readSession(h);
-              sessionUser = (session as { user?: unknown } | null | undefined)?.user;
-              return session;
-            }
-          : undefined;
+        const getSession = buildGetSession(ctx);
         // `IDataEngine` for both spellings: the resolver reads exactly `find`
         // off this, which is the data plane's own surface, and the same pair
         // is spelled this way where other services resolve the engine. The
@@ -492,8 +490,23 @@ export function registerDatasourceAdminRoutes(
         // `resolveAdmissionTenancyPosture` above for the classification and for
         // why a quiet `catch` at this seam is the defect, not the fix.
         const tenancyPosture = await resolveAdmissionTenancyPosture();
-        const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
+        // [#23287, ruling C′ item 3] Read per request like the two above. A
+        // lookup that faults is a kernel with no posture to ask.
+        let authService: IAuthService | undefined;
+        try {
+          authService = ctx.getService<IAuthService>('auth');
+        } catch {
+          authService = undefined;
+        }
+        const authz = await resolveAuthzContext({
+          ql,
+          headers,
+          getSession,
+          tenancyPosture,
+          userAuthGates: userAuthGateSourceOf(authService),
+        });
         userId = authz.userId;
+        gateSubject = authz;
         // The same envelope, read twice. `systemPermissions` is the resolver's
         // aggregate of every permission set the caller holds (user-bound and
         // position-bound alike) — the field `package-routes.ts` and the `/meta`
@@ -510,7 +523,7 @@ export function registerDatasourceAdminRoutes(
       // Fail closed: an identity that could not be resolved is not an identity.
       userId = undefined;
       systemPermissions = [];
-      sessionUser = undefined;
+      gateSubject = undefined;
     }
     // ADR-0069 — a session the authentication policy HOLDS (an expired
     // password, enforced MFA not yet enrolled) is gated out of every protected
@@ -527,10 +540,12 @@ export function registerDatasourceAdminRoutes(
     //
     // The refusal is the REST seam's answer — `403` with the gate's own `code`
     // and `message` — written through this family's declared envelope.
-    // `code` is declared as a bare string on the envelope's `authGate`; its one
-    // producer (plugin-auth's `customSession` enrichment) writes only
-    // `PASSWORD_EXPIRED` / `MFA_REQUIRED`, both members of the vocabulary.
-    const gate = evaluateAuthGate(sessionUser, '');
+    // [#23287, ruling C′ item 3] The posture is the shared resolver's, for
+    // whichever credential admitted the caller: a held session's own, or the
+    // account-scope posture of an API key's owner. A key whose owner holds
+    // only a `credential`-scope posture (password expiry, a forced reset)
+    // carries none, and is served.
+    const gate = evaluateAuthGate(gateSubject, '');
     if (gate) {
       sendError(res, 403, gate.code as ErrorCode, gate.message);
       return true;

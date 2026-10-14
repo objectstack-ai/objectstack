@@ -70,7 +70,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "须修改密码",
-        help: "为 true 时，用户会被阻止访问（403 PASSWORD_EXPIRED），直到修改密码。由管理员用户管理接口写入；系统维护。"
+        help: "为 true 时，用户会被阻止访问（403 PASSWORD_RESET_REQUIRED），直到修改密码。由管理员用户管理接口写入；系统维护。"
       },
       mfa_required_at: {
         label: "MFA 强制生效时间",
@@ -197,6 +197,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "下次登录时必须修改密码"
+          },
+          revokeSessionsAndKeys: {
+            label: "在所有设备上退出并吊销 API 密钥",
+            helpText: "结束该用户的所有会话，并吊销其名下的所有 API 密钥。怀疑账号可能被盗用时请保持开启；常规重置可关闭。被吊销的密钥在修改密码后仍保持吊销。"
           }
         },
         resultDialog: {
