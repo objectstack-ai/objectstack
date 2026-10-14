@@ -585,14 +585,8 @@
     "packages/plugins/plugin-security/src/packaged-permission-set-overlay-detection.test.ts": {
       "unjudged": 1
     },
-    "packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts": {
-      "blind": 1
-    },
     "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts": {
       "blind": 1
-    },
-    "packages/plugins/plugin-security/src/permission-set-projection.test.ts": {
-      "unjudged": 1
     },
     "packages/plugins/plugin-security/src/resolve-permission-sets-for-context.pin.test.ts": {
       "unjudged": 1
