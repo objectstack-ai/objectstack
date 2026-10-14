@@ -70,14 +70,14 @@ function seed(): void {
     -- fate 1, nothing to drop: better-auth's own table
     CREATE TABLE sys_user (id TEXT PRIMARY KEY, email TEXT);
     INSERT INTO sys_user VALUES ('usr_1', 'a@example.com');
-    -- fate 1 with the ruled promotion categories
+    -- fate 1 with the ruled promotion categories, in the 17.x shape: no
+    -- bundle_member column (it first shipped in 18.0.0-next.0)
     CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT, package_id TEXT);
     INSERT INTO sys_metadata VALUES
       ('md_1', NULL, 'object', 'crm_deal', 'active', NULL),
       ('md_2', 'org_default', 'view', 'deal_list', 'active', NULL),
       ('md_3', 'org_b', 'view', 'deal_list', 'active', NULL),
       ('md_4', 'org_b', 'flow', 'escalate', 'active', NULL);
-    ALTER TABLE sys_metadata ADD COLUMN bundle_member TEXT;
 
     -- fate 2: the catalog, seeded mirrors beside one Setup-authored row
     CREATE TABLE sys_position (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT);
@@ -119,6 +119,20 @@ afterEach(() => {
 });
 
 describe('ADR-0131 D10 preflight — the per-table plan', () => {
+  it('plans a 17.x sys_metadata with no bundle_member column, and keys by the member where the column exists', async () => {
+    // The 17.x shape (the seed): planned, not refused for the missing column.
+    const before = table(await plan('isolated'), 'sys_metadata');
+    expect(before.categories.find((c) => c.id === 'environment-overlay-duplicates')?.groups).toBe(1);
+
+    // An 18.x shape: two locales of one item are two keys, not a duplicate.
+    db.exec(`ALTER TABLE sys_metadata ADD COLUMN bundle_member TEXT;
+      UPDATE sys_metadata SET bundle_member = 'en-US' WHERE id = 'md_2';
+      UPDATE sys_metadata SET bundle_member = 'fr-FR' WHERE id = 'md_3';`);
+    const after = table(await plan('isolated'), 'sys_metadata');
+    expect(after.categories.find((c) => c.id === 'environment-overlay-duplicates')?.groups).toBe(0);
+    expect(after.metadataConflicts).toEqual([]);
+  });
+
   it('names each fate with its counts, the unattributable ids, and NOT NULL readiness (isolated)', async () => {
     const p = await plan('isolated');
 

@@ -17,11 +17,10 @@
  *  3. The boot report names both populations, per type, with their remedies
  *     — the v18 migration ceremony for the legacy organization rows, and the
  *     two remedies for the sealed overlays. Nothing is deleted or rewritten.
- *  4. [ADR-0131 C7] No read is left that reaches a legacy organization's
- *     rows: the anonymous form doors' `view` read of the Default
- *     Organization's layer (`legacyFormOrganizationId`) was deleted when the
- *     v18 ceremony began carrying those withdrawals onto the environment. A
- *     caller still passing the key reads the environment.
+ *  4. [Triage ruling Q3 A] The one read left that reaches a legacy
+ *     organization's rows: the anonymous form doors' `view` list read
+ *     (`legacyFormOrganizationId`), kept fail-closed until the ceremony. Any
+ *     other type reads the environment alone, whoever passes the key.
  *
  * Reverse verification (one-shot, recorded in the PR): restoring an
  * organization row to the served-row lookup (`findServedOverlayRow` with its
@@ -378,7 +377,7 @@ describe('§3 the boot report names both populations, per type, with their remed
     });
 });
 
-describe('§4 [ADR-0131 C7] the anonymous form doors\' legacy organization read is deleted', () => {
+describe('§4 [triage ruling Q3 A] the anonymous form doors\' legacy layer is the one read left that reaches a legacy organization', () => {
     const seed = () => ({
         sys_metadata: [
             metaRow('view', 'intake', null, { label: 'env intake' }),
@@ -387,11 +386,20 @@ describe('§4 [ADR-0131 C7] the anonymous form doors\' legacy organization read 
         ],
     });
 
-    for (const type of ['view', 'dashboard'] as const) {
-        it(`a ${type} list read passing the deleted legacyFormOrganizationId key reads the environment`, async () => {
-            const { protocol } = harness(seed());
-            const list = await protocol.getMetaItems({ type, legacyFormOrganizationId: ORG } as { type: string });
-            expect((list.items as Row[]).map((i) => i.label)).toEqual(type === 'view' ? ['env intake'] : []);
-        });
-    }
+    it('a view list read with legacyFormOrganizationId prefers that organization\'s body', async () => {
+        const { protocol } = harness(seed());
+        const list = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: ORG });
+        expect((list.items as Row[]).map((i) => i.label)).toEqual(['org intake']);
+        // …and nothing else reads it: the same list without the key, and with the retired key.
+        for (const caller of CALLERS) {
+            const plain = await protocol.getMetaItems(asCaller({ type: 'view' }, caller));
+            expect((plain.items as Row[]).map((i) => i.label)).toEqual(['env intake']);
+        }
+    });
+
+    it('the key reaches no other type', async () => {
+        const { protocol } = harness(seed());
+        const list = await protocol.getMetaItems({ type: 'dashboard', legacyFormOrganizationId: ORG });
+        expect(list.items).toEqual([]);
+    });
 });

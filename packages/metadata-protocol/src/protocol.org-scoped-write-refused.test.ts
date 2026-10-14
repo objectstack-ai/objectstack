@@ -444,19 +444,15 @@ describe('a package-less organization overlay, two packages shipping its view na
         return { protocol, rows };
     }
 
-    /**
-     * [ADR-0131 C7] The env-wide read's copies of the view, where the doors
-     * find the form: the legacy organization read is deleted.
-     */
+    /** The organization read's copies of the view, where the doors find the form. */
     async function servedCopies(protocol: any): Promise<Array<Record<string, any>>> {
-        const envWide: any = await protocol.getMetaItems({ type: 'view' });
-        return (envWide.items as any[]).filter((v) => v?.name === NAME);
+        const org: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_a' });
+        return (org.items as any[]).filter((v) => v?.name === NAME);
     }
 
     /**
-     * The copies the anonymous doors would serve for the slug, by their own
-     * composition: open, and not withdrawn by any body of the view name in
-     * that same env-wide list.
+     * The copies the anonymous doors would serve for the slug: open, and not
+     * withdrawn by the env-wide layer they read beneath the organization's.
      */
     async function doorsServe(protocol: any): Promise<Array<Record<string, any>>> {
         const envWide: any = await protocol.getMetaItems({ type: 'view' });
@@ -481,13 +477,13 @@ describe('a package-less organization overlay, two packages shipping its view na
             .toEqual([null]);
     }
 
-    it('[ADR-0131 C7] no read serves the legacy overlay: the doors serve each package\'s shipped copy', async () => {
+    it('the organization read serves the overlay once per package, each copy stamped with that package', async () => {
         const { protocol, rows } = makeTwoPackageProtocol();
         await storeOpenOverlay(protocol, rows);
         const copies = await servedCopies(protocol);
-        expect(copies.map((v) => v.label)).toEqual(['Intake', 'Intake']);
+        expect(copies.map((v) => v.label)).toEqual(['Intake (org)', 'Intake (org)']);
         expect(copies.map((v) => v._packageId).sort()).toEqual(['pkg_a', 'pkg_b']);
-        // Control: before any withdrawal the doors serve both copies.
+        // Control: before any withdrawal the doors serve the overlay.
         expect(await doorsServe(protocol)).toHaveLength(2);
     });
 
@@ -511,8 +507,9 @@ describe('a package-less organization overlay, two packages shipping its view na
                 expect(named).toEqual([['pkg_a', withdrawing !== 'pkg_a'], ['pkg_b', withdrawing !== 'pkg_b']]);
             });
 
-            it('the doors serve no copy once one package withdraws the name', async () => {
+            it('the doors serve no copy of the overlay stored before the withdrawal', async () => {
                 const { protocol } = await withdrawAfterOverlay();
+                // Both stamped copies are still the open overlay, and both are closed.
                 expect((await servedCopies(protocol)).map((v) => v._packageId).sort()).toEqual(['pkg_a', 'pkg_b']);
                 expect(await doorsServe(protocol)).toEqual([]);
             });
@@ -786,13 +783,13 @@ describe('each package\'s copy of a view container expands into its own package\
 
     /**
      * What the anonymous doors serve for the slug, by their own composition
-     * (`registerFormEndpoints`): the env-wide read, each open candidate
-     * judged over that same list (the legacy organization read is deleted,
-     * ADR-0131 C7).
+     * (`registerFormEndpoints`): the organization's read, each open candidate
+     * judged over the env-wide view list beneath it.
      */
     async function doorsServe(protocol: any): Promise<unknown[]> {
+        const org: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_a' });
         const envWide: any = await protocol.getMetaItems({ type: 'view' });
-        return (envWide.items as any[]).filter((view) => anonymousFormIntakeCandidates(view)
+        return (org.items as any[]).filter((view) => anonymousFormIntakeCandidates(view)
             .some((c) => c.slug === SLUG && !anonymousFormIntakeWithdrawnIn(envWide.items, view, c)));
     }
 

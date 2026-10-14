@@ -1,34 +1,36 @@
 ---
-'@objectstack/cli': patch
-'@objectstack/rest': patch
-'@objectstack/metadata-protocol': patch
+'@objectstack/cli': minor
 ---
 
-feat(cli): the organization-ownership ceremony promotes organization customizations and carries public-form withdrawals; the anonymous form doors read the environment alone (ADR-0131 D10)
+feat(cli): the organization-ownership ceremony carries the `sys_metadata` organization layer into the environment (ADR-0131 D10)
 
-Clause-②: no
+Clause-②: yes (widening)
 
-`os migrate organization-ownership --apply` gains a step, `metadata-promotion`, after the authored catalog conversion:
+The plan of `os migrate organization-ownership` gains a key, `metadataConflicts` on the `sys_metadata` table. It lists every overlay key that more than one row would hold once the organization leaves the key, with each row's id. `--apply` gains a flag, `--metadata-choice ROW_ID`. Nothing is removed from the plan or the apply.
 
-- **Form withdrawals are carried first, fail-closed, under every posture.** When an organization withdrew a public form (`sharing.enabled` or `sharing.allowAnonymous` set to `false`, link kept), every view the environment serves under that name that still serves the form open takes the withdrawal. That covers stored views and views served from code, in every package. The ceremony saves the withdrawal through the metadata door, into the view's own package. The judgement is the anonymous doors' own predicate. Any organization's withdrawal wins.
-- **Under `single`, organization customizations become environment rows.** These are the `sys_metadata` rows of `view`, `dashboard`, `report`, `translation` and `email_template`. A row whose key (type, name, package, bundle member) no other row holds is promoted in place, by clearing its `organization_id`.
-- **Conflicts are listed and block the step until the operator chooses.** A key that two organizations hold, or an organization and the environment, is a conflict. The plan lists it (`metadataConflicts`, with every row id), and the apply blocks on it. Choose the row the environment keeps with `--metadata-choice ROW_ID`, once per conflict. The chosen row is promoted and read back, any public-form withdrawal an unchosen row holds is carried onto it, and only then are the unchosen rows deleted, by id. No row of a conflict is deleted before a choice is made.
-- **Under a wall, nothing is promoted unless the operator names the row.** One organization's customization is not every organization's. A row named with `--metadata-choice` is promoted knowingly; the rest are reported and keep the column from being dropped.
+`--apply` gains a step, `metadata-promotion`, after the authored catalog conversion:
 
-Two more steps renumber `sys_metadata_history`, because `event_seq` and every `(type, name, version)` lineage must be unique environment-wide once the organization leaves the key. The metadata door numbers a save from history in its own scope, so each step runs where none of the ceremony's own environment saves can land on a number it gave an organization:
+- **Form withdrawals are carried first, under every posture, and fail-closed.** When an organization withdrew a public form (`sharing.enabled` or `sharing.allowAnonymous` set to `false`, link kept), every view the environment serves under that name that still serves the form open takes the withdrawal. That covers stored views and views served from code, in every package. The ceremony saves it through the metadata door, into the view's own package, and any organization's withdrawal wins.
+- **Under `single`, an organization customization whose key no other row holds becomes the environment's, in place.** This covers the `sys_metadata` rows of `view`, `dashboard`, `report`, `translation` and `email_template`; the key is type, name, package and bundle member. The row takes its history with it.
+- **A key held by more than one row is a conflict, listed in the plan.** Under `single` it blocks the step until the operator chooses one row with `--metadata-choice ROW_ID`, once per conflict.
+  - The key ends with exactly one environment row. Where the key has an environment row, that row takes the chosen body through the metadata door, in place. Where it has none, the chosen organization row is promoted in place.
+  - Any public-form withdrawal another row of the key holds is kept on that body.
+  - The environment row is read back. Only then are the key's organization rows deleted, in one statement, by id.
+  - A rerun after an interruption accepts the same `--metadata-choice` and finishes.
+- **Under a wall (`isolated`, `group`), nothing is promoted unless the operator names the row, and nothing is ever deleted.** A named row becomes the environment's as above. The other organization rows stay where they are, reported, and they keep the column from being dropped.
 
-- **`version-renumber`** runs before the promotion. Where two lineages of one item exist, the organizations' lineages are laid out one above another and the environment's goes above them all. Each overlay row's `version` moves with its own lineage, so the version a rollback resolves is unchanged.
-- **`sequence-renumber`** runs after the last environment save, just before `column-drops`. Each organization's event range is shifted above the environment's by one offset, and its commit ranges move with it, so order within an organization is unchanged. It runs on every apply, even after a checkpoint, so a save made between two runs is covered too.
+`event_seq` and every `(type, name, version)` of `sys_metadata_history` become unique environment-wide. The metadata door numbers a save from history in its own scope, so each lineage is placed where no environment save can land on it:
 
-Both steps write numbers only, delete nothing, and are safe to re-run after an interruption.
+- **A promoted row takes its history with it.** Before the row leaves its organization, that organization's lineage of the item is moved above the environment's numbers and becomes environment history. Every later environment save of the item numbers above it, and the row's version still names its own snapshot.
+- **A new step, `history-renumber`, runs just before `column-drops`, on every apply, even after a checkpoint.** It lays out every lineage still tagged to an organization above the environment's: each organization's event range by one offset, its commit ranges with it, and each item's version lineage, the organization's rows with it.
+  - Under `single`, that history then becomes the environment's too.
+  - Under a wall it stays its organization's.
 
-`GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction.
+Order within an organization, and the version a rollback resolves, are unchanged. Nothing in history is deleted.
 
-The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
-
-Until the ceremony runs, a database whose withdrawals were saved only at the organization layer serves those forms open again. Run the ceremony as part of the v18 upgrade:
+On a 17.x database `sys_metadata` has no `bundle_member` column. The ceremony boots with schema changes held, so it reads that column as absent, the overlay key's NULL member, and plans the table rather than refusing it.
 
 ```bash
 os migrate organization-ownership --out plan.json   # review plan.json: metadataConflicts lists every conflict
-os migrate organization-ownership --apply --backup-taken --metadata-choice ROW_ID   # one per listed conflict
+os migrate organization-ownership --apply --backup-taken --plan-file plan.json --metadata-choice ROW_ID   # one per listed conflict
 ```

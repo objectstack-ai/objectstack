@@ -177,9 +177,10 @@ export default class MigrateOrganizationOwnership extends Command {
     'metadata-choice': Flags.string({
       description:
         'With --apply: the sys_metadata row id the environment keeps for a listed customization conflict (rows ' +
-        'of one type, name and package once the organization leaves the key). Repeat once per conflict; the ' +
-        'other rows of that conflict are deleted only after the chosen row is promoted and read back. Under a ' +
-        'wall, also an organization row promoted knowingly',
+        'of one type, name and package once the organization leaves the key). Repeat once per conflict. Under ' +
+        'single the key keeps one environment row defining the chosen body, and its organization rows are deleted ' +
+        'only after that row reads back; under a wall nothing is deleted, and a named organization row of a key it ' +
+        'alone holds is promoted knowingly',
       multiple: true,
     }),
     'fate-supplement': Flags.string({

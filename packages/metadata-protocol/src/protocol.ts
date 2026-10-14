@@ -88,7 +88,7 @@ import {
     stripInjectedSystemColumns,
     // [#7774] The i18n-bundle identity table (#7730) and its reader. A type
     // listed here is identified by `(name, <field>)`, so every merge in the
-    // unscoped `/meta` list keys on the pair — see {@link mergePackageAwareOverlay}.
+    // unscoped `/meta` list keys on the pair — see {@link metaItemKey}.
     ITEM_KEY_DISCRIMINATORS,
     itemDiscriminator,
     type MetadataItem,
@@ -2390,6 +2390,62 @@ function isShippedViewItem(artifact: unknown): boolean {
 }
 
 /**
+ * ADR-0048 (#1828) — composite dedup identity for the unscoped metadata list.
+ *
+ * Two installed packages may legitimately ship the same `type`/`name`
+ * (e.g. `page/home`); the SchemaRegistry already stores them under distinct
+ * `${packageId}:${name}` keys. Any list-merge that deduplicates by bare `name`
+ * collapses the two packages' rows into one (last-write-wins), which is the
+ * bug this key closes. A `NUL` separator keeps names containing `:` unambiguous.
+ *
+ * [#7774] `discriminator` is a third component, and it is OPTIONAL on purpose:
+ * omitting it produces the exact two-component string this function has always
+ * produced, so every type identified by `(package, name)` keeps a
+ * byte-identical key and this change's blast radius is provable rather than
+ * argued. It is supplied only for a type listed in `ITEM_KEY_DISCRIMINATORS`
+ * (`email_template` today), whose identity the spec declares as
+ * `(name, locale)` — an i18n bundle. Without it the second locale's
+ * `Map.set` overwrote the first and `GET /meta/email_template` served one
+ * member of a bundle it had every member of.
+ */
+function metaItemKey(
+    packageId: string | null | undefined,
+    name: unknown,
+    discriminator?: string,
+): string {
+    const base = `${packageId ?? ''}\u0000${String(name)}`;
+    return discriminator === undefined ? base : `${base}\u0000${discriminator}`;
+}
+
+/**
+ * [#7774] The bundle discriminator a STORED `sys_metadata` row declares, read
+ * off the row's serialized body.
+ *
+ * The row's own COLUMNS cannot answer this: `sys_metadata`'s overlay
+ * uniqueness is `(type, name, organization_id, package_id)` — declared on
+ * `idx_sys_metadata_overlay_active` in `sys-metadata.object.ts` — and the
+ * table has no locale column at all. An `email_template` overlay's locale
+ * lives inside the `metadata` JSON payload, which is where its identity is.
+ * So a row-level merge keying on columns alone cannot tell two members of one
+ * bundle apart, and the body has to be consulted.
+ *
+ * The parse is skipped entirely for an undiscriminated type (all but one
+ * today): `undefined` comes back before any JSON work, so this costs nothing
+ * on the paths it does not serve. A body that fails to parse falls back to the
+ * canonical member instead of throwing — the caller a few lines on parses it
+ * again for real, and that failure is the one that should surface.
+ */
+function storedRowDiscriminator(type: string, record: unknown): string | undefined {
+    if (!ITEM_KEY_DISCRIMINATORS[type]) return undefined;
+    const raw = (record as { metadata?: unknown } | null | undefined)?.metadata;
+    let body: unknown = raw;
+    if (typeof raw === 'string') {
+        try { body = JSON.parse(raw); } catch { body = undefined; }
+    }
+    return itemDiscriminator(type, body);
+}
+
+/**
  * [#22877] The by-name doors' bundle member selector: the request member, and
  * the `?member=` query parameter in each REST route's closed set (ruling
  * 6116165299, Q2 i). Named after what the stored column holds
@@ -2532,7 +2588,7 @@ function mutationEventMemberOfBody(type: string, body: unknown): { member?: stri
  * no package).
  */
 interface ServedOverlayRowCandidate {
-    readonly scope: 'env';
+    readonly scope: 'org' | 'env';
     readonly organizationId: string | null;
     readonly spelling: 'canonical' | 'other';
     readonly packageId: string | null | undefined;
@@ -2556,10 +2612,12 @@ interface StoredRowPlace {
  *  - Scope (ADR-0131 D6): the environment's rows only. A legacy
  *    organization-scoped row is reported at boot
  *    ({@link ObjectStackProtocolImplementation.reportUnhydratableOrgScopedRows})
- *    and never served, by any read: the anonymous form doors' read of the
- *    Default Organization's legacy layer was deleted when the v18 migration
- *    ceremony began carrying those rows' withdrawals into the environment
- *    (ADR-0131 C7, rulings A on #22008 and #22011).
+ *    and never served. The ONE exception is `legacyOrganizationId`, which only
+ *    the anonymous form doors' read of the Default Organization's legacy
+ *    layer passes (through the list read): that legacy organization's rows,
+ *    then the environment's — kept fail-closed until the v18 migration
+ *    ceremony carries those rows into the environment layer and deletes the
+ *    read with them.
  *  - Then the spelling: the canonical type, then the other spelling (the
  *    at-rest tolerance the reads have always had, #4432).
  *  - Then the package (ADR-0048 prefer-local): with a `packageId`, that
@@ -2580,9 +2638,12 @@ interface StoredRowPlace {
  * scope (`resolveOverlayLockLayer` in `item-lock.ts`, #21761).
  */
 function servedOverlayRowCandidates(address: {
+    readonly legacyOrganizationId?: string;
     readonly packageId: string | undefined;
 }): ServedOverlayRowCandidate[] {
-    const scopes: Array<Pick<ServedOverlayRowCandidate, 'scope' | 'organizationId'>> = [{ scope: 'env', organizationId: null }];
+    const scopes: Array<Pick<ServedOverlayRowCandidate, 'scope' | 'organizationId'>> = address.legacyOrganizationId
+        ? [{ scope: 'org', organizationId: address.legacyOrganizationId }, { scope: 'env', organizationId: null }]
+        : [{ scope: 'env', organizationId: null }];
     const packages: Array<string | null | undefined> = address.packageId ? [address.packageId, null] : [undefined];
     return scopes.flatMap((scope) => (['canonical', 'other'] as const).flatMap((spelling) =>
         packages.map((packageId) => ({ ...scope, spelling, packageId }))));
@@ -2661,7 +2722,8 @@ function servedViewExpansion<E extends { packageId: string | undefined }>(
  *   • [#21804] When `records` are stored rows the caller read (`rowsRead`,
  *     each record's `stored` place), the winner among them is the one
  *     {@link servedOverlayRowCandidates} picks for `P`: `P`'s own row before
- *     the package-less one. It
+ *     the package-less one (the form doors' legacy organization row before
+ *     the environment's, where they read that layer). It
  *     is the resolution `getMetaItem` takes, so it does not depend on the
  *     order the store returned the rows in. Without `rowsRead` (the
  *     MetadataService merge, whose `records` are already-resolved items),
@@ -2709,7 +2771,7 @@ function mergePackageAwareOverlay(
     baseItems: unknown[],
     records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
-    rowsRead?: Readonly<Record<string, never>>,
+    rowsRead?: { readonly legacyOrganizationId?: string },
     unseated?: WeakSet<object>,
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
@@ -2733,7 +2795,7 @@ function mergePackageAwareOverlay(
     // `real` among a slot's contributions: the first candidate of
     // {@link servedOverlayRowCandidates} that one of the rows sits at.
     const servedStoredRow = (list: readonly Contribution[], real: string | undefined): any => {
-        for (const candidate of servedOverlayRowCandidates({ packageId: real })) {
+        for (const candidate of servedOverlayRowCandidates({ legacyOrganizationId: rowsRead?.legacyOrganizationId, packageId: real })) {
             const hit = list.find((c) => c.stored !== undefined
                 && c.stored.organizationId === candidate.organizationId
                 && (c.stored.type === type ? 'canonical' : 'other') === candidate.spelling
@@ -9486,7 +9548,13 @@ export class ObjectStackProtocolImplementation implements
         );
     }
 
-    async getMetaItems(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
+    /**
+     * `legacyFormOrganizationId` is not a request key of the spec's
+     * `GetMetaItemsRequest`: only the anonymous form doors pass it, for their
+     * read of the Default Organization's legacy `view` layer (triage ruling
+     * Q3 A; see {@link readFlattenedMetaItems}).
+     */
+    async getMetaItems(request: { type: string; packageId?: string; previewDrafts?: boolean; legacyFormOrganizationId?: string }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. This one
         // is load-bearing twice over: the SchemaRegistry indexes code-authored
         // items under the SINGULAR type, and the overlay-hydration branch below
@@ -9538,7 +9606,7 @@ export class ObjectStackProtocolImplementation implements
      * `request` arrives already folded by the calling face (#4432).
      */
     private async readFlattenedMetaItems(
-        request: { type: string; packageId?: string; previewDrafts?: boolean },
+        request: { type: string; packageId?: string; previewDrafts?: boolean; legacyFormOrganizationId?: string },
         audience: 'served' | 'execution',
     ) {
         const { packageId } = request;
@@ -9547,11 +9615,15 @@ export class ObjectStackProtocolImplementation implements
         // The list serves the environment's stored rows over the code
         // packages' definitions, and no organization's: a legacy
         // organization-scoped row is reported at boot
-        // ({@link reportUnhydratableOrgScopedRows}) and never served — the
-        // anonymous form doors included: their read of the Default
-        // Organization's legacy `view` layer was deleted when the v18
-        // migration ceremony (ADR-0131 C7) began carrying its withdrawals into
-        // the environment, fail-closed.
+        // ({@link reportUnhydratableOrgScopedRows}) and never served. The one
+        // exception is `legacyFormOrganizationId`, which only the anonymous
+        // form doors pass (triage ruling Q3 A): their read of a `view` keeps
+        // the Default Organization's legacy layer — that organization's body
+        // preferred, and a withdrawal in either layer closing the form —
+        // fail-closed until the v18 migration ceremony (ADR-0131 C7) carries
+        // those rows into the environment layer and deletes this read. Any
+        // other type reads the environment alone, whoever passes the key.
+        const orgId = canonicalMetaType(request.type) === 'view' ? request.legacyFormOrganizationId : undefined;
         let items: unknown[] = [];
 
         // Unscoped kernels (control plane): read everything from SchemaRegistry.
@@ -9622,8 +9694,8 @@ export class ObjectStackProtocolImplementation implements
             // the view containers it expands through the same two calls, so
             // the two doors cannot disagree about which containers are in
             // scope for one caller.
-            const records = await this.readActiveOverlayRows(request);
-            lockRows = packageId ? await this.readActiveOverlayRows({ type: request.type }) : records;
+            const records = await this.readActiveOverlayRows(request, orgId);
+            lockRows = packageId ? await this.readActiveOverlayRows({ type: request.type }, orgId) : records;
             const standInRows = packageId ? lockRows.filter((row) => (row?.package_id ?? null) === null) : [];
             if ((records && records.length > 0) || standInRows.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
@@ -9680,7 +9752,7 @@ export class ObjectStackProtocolImplementation implements
                     return this.foldObjectExtendersFromRegistry(
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
-                }, {}, unseated);
+                }, { legacyOrganizationId: orgId }, unseated);
 
                 // [#13407] Expand any aggregated `defineView` container this
                 // READ just merged in, INLINE into this response's own `items`
@@ -10209,7 +10281,10 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#21442, ADR-0131 D6] The active `sys_metadata` rows a read of
      * `request.type` consults: the environment's rows, restricted to
-     * `request.packageId` when one is given. Moved here unchanged from
+     * `request.packageId` when one is given — plus, for the anonymous form
+     * doors' read alone, the rows of the legacy organization
+     * `legacyOrganizationId` names (that organization's row wins its slot;
+     * read uncached, and retired with the v18 migration ceremony). Moved here unchanged from
      * {@link readFlattenedMetaItems}, the list read, so the by-name read
      * ({@link resolveRowlessExpandedView}) selects the view containers it
      * expands by this same rule — ⛔ never a second selection rule, which would
@@ -10220,6 +10295,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readActiveOverlayRows(
         request: { type: string; packageId?: string },
+        legacyOrganizationId?: string,
     ): Promise<any[]> {
         const { packageId } = request;
         const queryByOrg = async (oid: string | null): Promise<any[]> => {
@@ -10294,7 +10370,21 @@ export class ObjectStackProtocolImplementation implements
                 this.engine, overlayCacheKey, overlayCacheEpoch, records, overlayCacheTtlMs, overlayCacheNow,
             );
         }
-        return records;
+        if (!legacyOrganizationId) return records;
+        // The anonymous form doors' legacy layer (triage Q3 A, ADR-0131 C7):
+        // that organization's rows override the environment's on name
+        // collision. ADR-0048 (#1828) — key by (package, name), not bare name,
+        // so a package A row and a package B row of the same name do not
+        // collapse. [#7774] …and for a bundled type the slot is `(package,
+        // name, locale)`: an environment row and the organization's row may
+        // customize DIFFERENT members of one bundle.
+        const orgRecords = await queryByOrg(legacyOrganizationId);
+        const mergedMap = new Map<string, any>();
+        const rowKey = (r: any): string =>
+            metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
+        for (const r of records) mergedMap.set(rowKey(r), r);
+        for (const r of orgRecords) mergedMap.set(rowKey(r), r);
+        return Array.from(mergedMap.values());
     }
 
     /**
@@ -20838,7 +20928,7 @@ export class ObjectStackProtocolImplementation implements
         try {
             // [ADR-0131 D6] A save lands environment-wide, so the pages it meets
             // are the environment-wide rows.
-            records = await this.readActiveOverlayRows({ type });
+            records = await this.readActiveOverlayRows({ type }, undefined);
         } catch (error) {
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
@@ -20981,7 +21071,7 @@ export class ObjectStackProtocolImplementation implements
         try {
             // [ADR-0131 D6] A save lands environment-wide, so its siblings are
             // the environment-wide rows.
-            records = await this.readActiveOverlayRows({ type });
+            records = await this.readActiveOverlayRows({ type }, undefined);
         } catch (error) {
             // [#5532] The readers' rule: only an unprovisioned store means "no
             // rows". Any other failure is not answered as "no sibling".

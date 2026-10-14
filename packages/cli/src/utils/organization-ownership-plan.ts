@@ -726,6 +726,14 @@ async function applyAnchor(
   return left;
 }
 
+/**
+ * Overlay-key columns that arrived after 17.x: `sys_metadata.bundle_member`
+ * first shipped in 18.0.0-next.0. Both the plan and the apply boot with schema
+ * changes held, so on the 17.x databases this ceremony migrates the column is
+ * absent, which the overlay key reads as NULL (its NULL-folded part).
+ */
+const FOLDED_KEY_COLUMNS: ReadonlySet<string> = new Set(['bundle_member']);
+
 async function planCategory(sql: Sql, table: string, columns: ReadonlySet<string>, category: InventoryCategory): Promise<{ rows: number; groups?: number }> {
   // A category that selects on the organization column has no rows left once
   // the column is gone (the ceremony's post-check reads a dropped table too).
@@ -737,10 +745,15 @@ async function planCategory(sql: Sql, table: string, columns: ReadonlySet<string
   if (!category.conflictBy) {
     return { rows: await sql.count(table, `SELECT COUNT(*) AS n FROM ${t} WHERE ${where.text}`, where.params) };
   }
-  const groupBy = category.conflictBy.groupBy.map((c) => {
-    requireColumn(table, columns, c);
-    return sql.q(c, table);
-  });
+  // A key column a 17.x database never had (see FOLDED_KEY_COLUMNS) reads as
+  // NULL on every row there, and grouping by a constant is no grouping: it is
+  // grouped by only where it exists. Every other column is required.
+  const groupBy = category.conflictBy.groupBy
+    .filter((c) => columns.has(c) || !FOLDED_KEY_COLUMNS.has(c))
+    .map((c) => {
+      requireColumn(table, columns, c);
+      return sql.q(c, table);
+    });
   const distinct = category.conflictBy.distinct;
   if (distinct) requireColumn(table, columns, distinct);
   const having = distinct ? `COUNT(DISTINCT ${sql.q(distinct, table)}) > 1` : 'COUNT(*) > 1';

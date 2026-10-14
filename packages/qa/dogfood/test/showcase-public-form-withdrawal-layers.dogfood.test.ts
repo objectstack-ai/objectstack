@@ -11,22 +11,20 @@
 // retired the per-organization overlay axis, that save lands ENVIRONMENT-WIDE
 // even when the admin has an active organization.
 //
-// The anonymous form doors read the environment alone (ADR-0131 C7): their
-// read of the Default Organization's legacy layer is deleted, because the v18
-// ceremony (`os migrate organization-ownership --apply`) carries every
-// organization-layer withdrawal onto the environment, fail-closed (rulings A
-// on #22008 and #22011; the carry is pinned in the cli's
-// `organization-ownership-apply.test.ts`). No door can write an organization
-// row any more, so this file PLANTS legacy organization rows at rest in
-// `sys_metadata`, as a door left them before the retirement, and pins:
+// The anonymous form doors still read the Default Organization's layer for
+// its withdrawals, fail-closed, until ADR-0131 C7 carries those rows to the
+// environment layer (triage ruling Q3 A on the retirement card). No door can
+// write such a row any more, so this file PLANTS legacy organization rows
+// at rest in `sys_metadata`, as a door left them before the retirement, and
+// pins:
 //
 //   - a legacy organization overlay that keeps the form open does not survive
 //     an environment withdrawal: both anonymous doors answer
 //     `404 FORM_NOT_FOUND` and nothing lands;
-//   - ⭐ a legacy organization row is read by no door: its withdrawal no longer
-//     closes a form open environment-wide — it is the ceremony's to carry;
+//   - ⭐ a legacy organization WITHDRAWAL still closes the form while it is
+//     open environment-wide (the read Q3 A keeps);
 //   - the admin's save with an active organization is environment-wide;
-//   - open environment-wide (control): both doors accept, and the row lands in
+//   - open at both layers (control): both doors accept, and the row lands in
 //     the organization the doors resolve.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -123,7 +121,7 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
     await stack?.stop();
   });
 
-  it('PRECONDITION: with a legacy organization overlay that keeps the form open, the form is served', async () => {
+  it('PRECONDITION: a legacy organization overlay that keeps the form open is served', async () => {
     await plantLegacyOrgOverlay(true);
     expect(await probe()).toEqual(OPEN);
   });
@@ -134,14 +132,14 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
     expect(await probe()).toEqual(CLOSED);
   });
 
-  it('⭐ a legacy organization WITHDRAWAL is read by no door: the form open environment-wide is served until the ceremony carries it (ADR-0131 C7)', async () => {
+  it('⭐ a legacy organization WITHDRAWAL still closes the form while it is open environment-wide (fail-closed until C7)', async () => {
     await scope(null);
     expect(await saved(true)).toMatch(/env-wide/);
     await plantLegacyOrgOverlay(false);
-    expect(await probe()).toEqual(OPEN);
+    expect(await probe()).toEqual(CLOSED);
   });
 
-  it('open environment-wide (control): both doors accept and the row lands in the organization', async () => {
+  it('open at both layers (control): both doors accept and the row lands in the organization', async () => {
     await scope(organizationId);
     expect(await saved(true)).toMatch(/env-wide/);
     await plantLegacyOrgOverlay(true);
