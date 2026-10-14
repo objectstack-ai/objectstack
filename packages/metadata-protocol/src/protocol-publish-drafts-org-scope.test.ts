@@ -195,17 +195,6 @@ const objectBody = (name: string) => ({
     },
 });
 
-/** [#6190] The org-scoped specimen — `view`, one of the five overlay-enabled
- *  types, was a type that legitimately carried per-org rows before ADR-0131
- *  D6. See the third case. */
-const viewBody = (name: string) => ({
-    name,
-    label: 'Project Tasks',
-    object: 'proj_task',
-    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
-    columns: [{ field: 'title', label: 'Title' }],
-});
-
 describe('publishPackageDrafts — env-wide draft under a non-null active org (#3115)', () => {
     it('saves the object draft env-wide (no organization column, ADR-0131 D7) when no org is threaded', async () => {
         const { engine, rows } = makeStubEngine();

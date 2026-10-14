@@ -200,15 +200,6 @@ describe('§1 [ADR-0131 D6] every read serves the environment\'s rows, whatever 
     }
 });
 
-/** A promise's value, or the error it rejected with. */
-async function settle<T>(p: Promise<T>): Promise<T | Error> {
-    try {
-        return await p;
-    } catch (e) {
-        return e as Error;
-    }
-}
-
 describe('§2 [triage ruling Q1 → C] an environment overlay of sealed managed content is not served: the package definition wins', () => {
     const packaged = (type: string, name: string): Artifact => ({
         type, name, body: { name, label: 'packaged', _packageId: PKG },

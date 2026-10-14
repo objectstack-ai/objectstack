@@ -132,38 +132,6 @@ function harness(environmentId: string | undefined, rows: StoredRow[]) {
 
 const settle = (run: Promise<unknown>) => run.then(() => null, (e: unknown) => e);
 
-type Verdict = { refused: { code: unknown; status: unknown } } | 'admitted';
-const ITEM_LOCKED: Verdict = { refused: { code: 'ITEM_LOCKED', status: 403 } };
-/** [ADR-0131 D6] Every organization-scoped write is refused first, before the `_lock` gate is reached. */
-const NOT_OVERRIDABLE: Verdict = { refused: { code: 'NOT_OVERRIDABLE', status: 403 } };
-
-/**
- * The door, end to end. Refused ⇔ the ADR-0112 `ITEM_LOCKED` / 403 envelope
- * came back (or, for an organization-scoped request, `NOT_OVERRIDABLE` / 403). Admitted ⇔ the ADR-0010 `_lock` gate was reached and answered no
- * refusal; whatever the write does after that (validation, a double that
- * persists nothing) is not a lock verdict and is not read as one.
- */
-async function door(
-    protocol: ObjectStackProtocolImplementation, name: string, operation: 'save' | 'delete', organizationId?: string,
-    type = 'view',
-): Promise<Verdict> {
-    const gate = vi.spyOn(protocol as any, operation === 'save' ? 'assertLockAllowsWrite' : 'assertLockAllowsDelete');
-    try {
-        const scope = organizationId ? { organizationId } : {};
-        const outcome: any = await settle(operation === 'save'
-            ? protocol.saveMetaItem({ type, name, item: { name, label: name, object: 'account' }, ...scope })
-            : protocol.deleteMetaItem({ type, name, ...scope }));
-        if (outcome instanceof Error && ['ITEM_LOCKED', 'NOT_OVERRIDABLE'].includes((outcome as any).code)) {
-            return { refused: { code: (outcome as any).code, status: (outcome as any).status } };
-        }
-        expect(gate, `${type}/${name} ${operation}: not refused, yet the _lock gate was never reached`).toHaveBeenCalledTimes(1);
-        expect(await gate.mock.results[0]?.value).toBeNull();
-        return 'admitted';
-    } finally {
-        gate.mockRestore();
-    }
-}
-
 /** Both reads' envelopes for the same request; they must agree with each other first. */
 async function envelope(protocol: ObjectStackProtocolImplementation, name: string, organizationId?: string, type = 'view') {
     const scope = organizationId ? { organizationId } : {};
@@ -179,10 +147,6 @@ afterEach(() => vi.restoreAllMocks());
 const TOPOLOGIES = [
     { kernel: 'environment', environmentId: ENV_ID },
     { kernel: 'host-config', environmentId: undefined },
-] as const;
-const REQUEST_SCOPES = [
-    { requestScope: 'no organization', organizationId: undefined },
-    { requestScope: `organization ${ORG}`, organizationId: ORG },
 ] as const;
 const OPERATIONS = ['save', 'delete'] as const;
 

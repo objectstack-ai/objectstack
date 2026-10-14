@@ -410,7 +410,6 @@ describe('#21334 a container on another package\'s object never takes that packa
     const REPAIR = 'com.example.repairassets';
     const TASK = 'showcase_task';
     const DEFAULT = `${TASK}.default`;
-    const ORG = 'org_acme';
     const data = { provider: 'object', object: TASK };
     const PACKAGED_COLUMNS = ['title', 'project', 'assignee', 'status', 'priority', 'due_date', 'progress']
         .map((field) => ({ field }));
