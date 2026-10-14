@@ -64,6 +64,9 @@ export * from './tracing.zod';
 // change tracking is `sys_metadata` history and the package model (ADR-0126).
 // See the D3 record `change-management-family-retired`.
 export * from './migration.zod';
+// The host fate supplement `os migrate organization-ownership --fate-supplement`
+// reads (ADR-0131 D10): the fates a host declares for the objects it provides.
+export * from './fate-supplement.zod';
 
 // Security & Compliance
 export * from './auth-config.zod';

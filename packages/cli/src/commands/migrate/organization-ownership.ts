@@ -26,6 +26,11 @@ import {
   type OrganizationOwnershipPlan,
 } from '../../utils/organization-ownership-plan.js';
 import {
+  HostFateSupplementRefusal,
+  readHostFateSupplement,
+  type InventoryEntry,
+} from '../../utils/organization-ownership-inventory.js';
+import {
   applyOrganizationOwnership,
   checkpointFromDetails,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
@@ -95,6 +100,21 @@ async function confirm(question: string): Promise<boolean> {
  * `verified_at` when the post-check also reads zero discrepancies. A report
  * file is written beside the plan's, never over an existing one.
  *
+ * ## `--fate-supplement FILE` (the host's own objects, ADR-0131 D10)
+ *
+ * The inventory holds the platform's fates. An object a HOST provides — a
+ * platform-prefixed table carrying `organization_id` that no platform row
+ * names — is refused, because no fate may be guessed for it. The host declares
+ * those fates in one JSON file (the spec's `OrganizationOwnershipSupplementSchema`,
+ * `@objectstack/spec/system`) and hands it to this flag; both modes read it and
+ * plan, or apply, its rows on the same terms as the platform's
+ * (`mergeHostFateSupplement`). A file that cannot be used — missing, not JSON,
+ * a row the schema refuses, a duplicate row, a row naming a platform object —
+ * is refused before the database is opened, inside the `--json` envelope. Its
+ * rows enter the plan's `inventoryDigest`, so the apply's checkpoint is keyed
+ * on the supplement too. Nothing is read without the flag: no environment
+ * variable, no conventional path.
+ *
  * The apply boot composes the deployment's served object set
  * (`composeHostStack`, with the auth-gated security declarations and the
  * served platform) so the security catalog it verifies names against is the
@@ -117,6 +137,7 @@ export default class MigrateOrganizationOwnership extends Command {
     '$ os migrate organization-ownership --out plans/v18-ownership.json',
     '$ os migrate organization-ownership --database-url postgres://… --json',
     '$ os migrate organization-ownership --apply --backup-taken',
+    '$ os migrate organization-ownership --fate-supplement host-fates.json',
   ];
 
   static override flags = {
@@ -150,6 +171,12 @@ export default class MigrateOrganizationOwnership extends Command {
         'deleted only after the chosen body is promoted and verified',
       multiple: true,
     }),
+    'fate-supplement': Flags.string({
+      description:
+        'A JSON file of the fates the host declares for the objects it provides (OrganizationOwnershipSupplementSchema, ' +
+        '@objectstack/spec/system), read in both modes and planned on the same terms as the platform inventory. ' +
+        'A row naming a platform object, a duplicate row, or a row the schema refuses is refused',
+    }),
   };
 
   async run(): Promise<void> {
@@ -178,8 +205,30 @@ export default class MigrateOrganizationOwnership extends Command {
       return;
     }
 
+    // The host's fate supplement, read before the database is opened in either
+    // mode: a supplement that cannot be used refuses the whole run.
+    let inventory: readonly InventoryEntry[] | undefined;
+    if (flags['fate-supplement']) {
+      try {
+        inventory = await readHostFateSupplement(resolve(flags['fate-supplement']));
+      } catch (error) {
+        if (!(error instanceof HostFateSupplementRefusal)) throw error;
+        await refuse(
+          {
+            reason: error.reason,
+            file: error.file,
+            ...(error.row !== undefined ? { row: error.row } : {}),
+            ...(error.object !== undefined ? { object: error.object } : {}),
+            detail: error.message,
+          },
+          `Refused: ${error.message}`,
+        );
+        return;
+      }
+    }
+
     if (flags.apply) {
-      await this.runApply(flags, posture, refuse);
+      await this.runApply(flags, posture, refuse, inventory);
       return;
     }
     if (flags['template-choice']?.length) {
@@ -228,6 +277,7 @@ export default class MigrateOrganizationOwnership extends Command {
         },
         posture,
         database: stack.dbLabel,
+        ...(inventory ? { inventory } : {}),
       });
     } catch (error: unknown) {
       if (isExitSignal(error)) throw error;
@@ -302,6 +352,7 @@ export default class MigrateOrganizationOwnership extends Command {
     flags: { 'database-url'?: string; out?: string; json?: boolean; 'backup-taken'?: boolean; 'template-choice'?: string[] },
     posture: string,
     refuse: (payload: Record<string, unknown>, message: string) => Promise<void>,
+    inventory: readonly InventoryEntry[] | undefined,
   ): Promise<void> {
     const json = Boolean(flags.json);
     const timer = createTimer();
@@ -455,6 +506,7 @@ export default class MigrateOrganizationOwnership extends Command {
           },
         },
         ledger,
+        ...(inventory ? { inventory } : {}),
         ...(json ? {} : { onProgress: (message: string) => printStep(message) }),
       });
     } catch (error: unknown) {

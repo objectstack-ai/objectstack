@@ -30,9 +30,16 @@
  *  - `cloud-supplement` — cloud-declared objects. The 2026-09-03 cloud-side
  *    supplement is not readable from this repository, so the rows are the
  *    names this repository records as cloud-provided
- *    (`CLOUD_PROVIDED_OBJECT_NAMES`). Cloud stays on v17 (ruling 6094175435 on
- *    #15211), so no v18 ceremony runs against a cloud database: each carries
- *    fate 4, `cloudCarried`, never a guessed fate.
+ *    (`CLOUD_PROVIDED_OBJECT_NAMES`). Cloud's tenant databases run this
+ *    ceremony (cloud ruling record 6146394952, A), and a cloud-provided
+ *    object's fate is the host's to declare: each row carries fate 4,
+ *    `cloudCarried`, never a guessed fate, until a host fate supplement
+ *    replaces it (C10).
+ *  - `host-supplement` — rows a host declares for the objects it provides,
+ *    read from the file `os migrate organization-ownership --fate-supplement`
+ *    names ({@link readHostFateSupplement}). They join this table on the same
+ *    terms as the platform's rows; the row shape is the spec's
+ *    `OrganizationOwnershipSupplementEntrySchema` (`@objectstack/spec/system`).
  *
  * Any other table carrying `organization_id` that a deployment holds is an
  * application object (a customer's own app): {@link APPLICATION_OBJECT_FATE}
@@ -56,81 +63,80 @@
  * the plan that reads it never change a row or a column.
  */
 
-/** The four D10 fates. */
-export type OrganizationOwnershipFate = 'column-drop' | 'mirror-deletion' | 'attribution' | 'report';
+import { readFile } from 'node:fs/promises';
+import {
+  OrganizationOwnershipFateSchema,
+  OrganizationOwnershipSupplementSchema,
+  type OrganizationOwnershipAnchor,
+  type OrganizationOwnershipCategory,
+  type OrganizationOwnershipDeparture,
+  type OrganizationOwnershipFate as SpecOrganizationOwnershipFate,
+  type OrganizationOwnershipRowCondition,
+  type OrganizationOwnershipSupplement,
+} from '@objectstack/spec/system';
 
-export const ORGANIZATION_OWNERSHIP_FATES: readonly OrganizationOwnershipFate[] = [
-  'column-drop',
-  'mirror-deletion',
-  'attribution',
-  'report',
-];
+// ── The row vocabulary, declared once in the spec ────────────────────────────
+//
+// Every shape a row is built from is the spec's
+// (`@objectstack/spec`, `system/fate-supplement.zod.ts`): a host authors its rows against
+// that schema, and the platform's rows below are typed by the same
+// declarations, so the two cannot drift into two dialects. The top-level row
+// keys are the one list kept here (`InventoryEntry` adds what only the platform
+// states); `organization-ownership-inventory.test.ts` pins them equal to the
+// spec's and parses every platform row through the spec's row schema.
+
+/** The four D10 fates. */
+export type OrganizationOwnershipFate = SpecOrganizationOwnershipFate;
+
+export const ORGANIZATION_OWNERSHIP_FATES: readonly OrganizationOwnershipFate[] = OrganizationOwnershipFateSchema.options;
 
 /** Where an inventory row's object was counted. */
 export type InventoryCensus =
   | 'platform-census-2026-08-31'
   | 'platform-census-main'
   | 'example-census-2026-08-31'
-  | 'cloud-supplement';
+  | 'cloud-supplement'
+  | 'host-supplement';
+
+/** Each arm of `T` with its list-valued fields read-only. */
+type ReadonlyLists<T> = T extends unknown ? { [K in keyof T]: T[K] extends ReadonlyArray<infer U> ? readonly U[] : T[K] } : never;
 
 /**
  * One condition on a row. A {@link RowPredicate} ANDs them. Spelled as data,
  * never as SQL text, so the plan binds every value and quotes every column.
+ * The spec's arms, with `in` / `notIn` read-only: the platform's rows and the
+ * ceremony's own selectors share constant value lists, and a spec-parsed row
+ * (mutable lists) is assignable to it unchanged.
  */
-export type RowCondition =
-  | { column: string; equals: string | number | boolean }
-  | { column: string; in: readonly string[] }
-  | { column: string; notIn: readonly string[] }
-  | { column: string; isNull: boolean }
-  /** The column is NULL or holds anything but `true`. */
-  | { column: string; notTrue: true };
+export type RowCondition = ReadonlyLists<OrganizationOwnershipRowCondition>;
 
 export type RowPredicate = readonly RowCondition[];
 
 /**
  * Where a NULL row's organization comes from (D10 fate 3). Tried in order;
- * the first that answers wins.
+ * the first that answers wins: `parent` (`childKey` names a row of
+ * `parentObject`, whose `organization_id` the row takes), `subject`
+ * (`objectColumn` / `idColumn` name ANY record; that record's
+ * `organization_id` is the row's), `holder` (rows of `holderObject` point at
+ * this row through `holderKey`; when every stamped holder agrees on one
+ * organization, the row takes it).
  */
-export type Anchor =
-  /** `childKey` names a row of `parentObject`, whose `organization_id` the row takes. */
-  | { kind: 'parent'; childKey: string; parentObject: string }
-  /** `objectColumn` / `idColumn` name ANY record; that record's `organization_id` is the row's. */
-  | { kind: 'subject'; objectColumn: string; idColumn: string }
-  /**
-   * Rows of `holderObject` point at this row through `holderKey`; when every
-   * stamped holder agrees on one organization, the row takes it.
-   */
-  | { kind: 'holder'; holderObject: string; holderKey: string };
+export type Anchor = OrganizationOwnershipAnchor;
 
-/** A named row population the plan counts on a table. */
-export interface InventoryCategory {
-  id: string;
-  label: string;
-  /** The ruling or record that names the population. */
-  citation: string;
-  /** Rows of the population — counted over the whole table. */
-  where?: RowPredicate;
-  /**
-   * Count GROUPS instead: rows matching `where`, grouped by these columns, in
-   * groups holding more than one row (or, with `distinct`, more than one
-   * distinct value of that column). The plan reports the group count and the
-   * rows in them.
-   */
-  conflictBy?: { groupBy: readonly string[]; distinct?: string };
-}
+/**
+ * A named row population the plan counts on a table: rows matching `where`
+ * over the whole table, or with `conflictBy` the GROUPS of those rows holding
+ * more than one row (or, with `distinct`, more than one distinct value of that
+ * column) — the plan reports the group count and the rows in them.
+ */
+export type InventoryCategory = OrganizationOwnershipCategory;
 
 /**
  * Rows that leave the table by another step of the ceremony before its NOT
- * NULL gate is read: they are neither attributed nor reported.
+ * NULL gate is read: they are neither attributed nor reported. `as` is fate 2
+ * for mirrors, `moved` for rows a ceremony step re-homes elsewhere.
  */
-export interface InventoryDeparture {
-  id: string;
-  label: string;
-  citation: string;
-  /** Fate 2 for mirrors; `moved` for rows a ceremony step re-homes elsewhere. */
-  as: 'mirror-deletion' | 'moved';
-  where: RowPredicate;
-}
+export type InventoryDeparture = OrganizationOwnershipDeparture;
 
 export interface InventoryEntry {
   object: string;
@@ -150,7 +156,7 @@ export interface InventoryEntry {
    * NOT NULL whatever its rows hold. The reason, in the operator's terms.
    */
   notNullExempt?: string;
-  /** Fate 4 only: a cloud-declared object; cloud stays on v17. */
+  /** Fate 4 only: a cloud-provided object no host fate supplement has declared yet (C10). */
   cloudCarried?: boolean;
   /** Federated from another datasource; the planned database holds no table for it. */
   external?: boolean;
@@ -175,8 +181,9 @@ const D3_CATALOG = 'ADR-0131 D3/D13: the catalog object retires; definitions liv
 const D10_SINGLE = 'ADR-0131 D10 fate 3: under single, the Default Organization; otherwise reported';
 const CLOUD =
   'cloud-provided (CLOUD_PROVIDED_OBJECT_NAMES, @objectstack/spec/system); the 2026-09-03 cloud-side supplement is ' +
-  'not readable here. Cloud stays on v17 (ruling record 6094175435): no v18 ceremony runs against a cloud ' +
-  'database, so the row is listed, never given a guessed fate; C10 assigns it when cloud moves';
+  'not readable here. Cloud\'s tenant databases run this ceremony (cloud ruling record 6146394952, A), and the fate ' +
+  'of an object the host provides is the host\'s to declare: a host fate supplement (--fate-supplement) replaces ' +
+  'this row; without one it is listed, never given a guessed fate (C10)';
 const EXAMPLE =
   `${CENSUS_1}: non-platform object, column auto-injected, presumptive accidental (no citable writer fact); ` +
   D10_SINGLE;
@@ -187,8 +194,8 @@ const PMAIN: readonly InventoryCensus[] = ['platform-census-main'];
 const EX: readonly InventoryCensus[] = ['example-census-2026-08-31'];
 
 /** Rows a package or the platform seeded — the D10 fate-2 mirror selector on the catalog objects. */
-const SEEDED: RowPredicate = [{ column: 'managed_by', in: ['package', 'platform', 'system'] }];
-const AUTHORED: RowPredicate = [{ column: 'managed_by', notIn: ['package', 'platform', 'system'] }];
+const SEEDED = [{ column: 'managed_by', in: ['package', 'platform', 'system'] }] satisfies RowPredicate;
+const AUTHORED = [{ column: 'managed_by', notIn: ['package', 'platform', 'system'] }] satisfies RowPredicate;
 
 const parent = (childKey: string, parentObject: string): Anchor => ({ kind: 'parent', childKey, parentObject });
 const subject = (objectColumn: string, idColumn: string): Anchor => ({ kind: 'subject', objectColumn, idColumn });
@@ -566,4 +573,171 @@ const BY_OBJECT: ReadonlyMap<string, InventoryEntry> = new Map(
 /** The inventory row for `object`, or `undefined`. */
 export function inventoryEntryFor(object: string): InventoryEntry | undefined {
   return BY_OBJECT.get(object);
+}
+
+// ── The host fate supplement ──────────────────────────────────────────────────
+
+/** Why a host fate supplement cannot join the inventory. */
+export type HostFateSupplementRefusalReason =
+  /** The file is missing or cannot be read. */
+  | 'fate-supplement-unreadable'
+  /** The file is not JSON. */
+  | 'fate-supplement-unparsable'
+  /** The file is not an array of rows, or a row is one the spec's schema refuses. */
+  | 'fate-supplement-invalid'
+  /** Two rows name one object. */
+  | 'fate-supplement-duplicate-object'
+  /** A row names an object the platform inventory already gives a fate. */
+  | 'fate-supplement-platform-object';
+
+/**
+ * The supplement cannot join the inventory. Thrown before anything is read
+ * from the database, so nothing is planned or applied; the command answers it
+ * as a refusal inside its `--json` envelope, naming the file and the row.
+ */
+export class HostFateSupplementRefusal extends Error {
+  constructor(
+    readonly reason: HostFateSupplementRefusalReason,
+    message: string,
+    readonly file: string,
+    /** The refused row's zero-based index in the file's array. */
+    readonly row?: number,
+    readonly object?: string,
+  ) {
+    super(message);
+    this.name = 'HostFateSupplementRefusal';
+  }
+}
+
+const HOST: readonly InventoryCensus[] = ['host-supplement'];
+
+/**
+ * The inventory with a host's supplement rows joined to it, on the same terms
+ * as the platform's rows: each takes census `host-supplement` and is planned,
+ * and applied, exactly as a platform row with its fate is. ADR-0131 D10 drives
+ * the ceremony from "the two censuses … cloud's supplement for cloud-declared
+ * ones"; this is that supplement, declared by the host instead of guessed here.
+ *
+ *  - A row naming an object the platform inventory already gives a fate is
+ *    refused: the platform's row stands, and a host declares only the objects
+ *    it provides.
+ *  - A row naming a cloud-provided placeholder (census `cloud-supplement`,
+ *    `cloudCarried`, fate 4 with no declared fate) replaces it, in place. Those
+ *    rows are C10's placeholder for exactly this declaration.
+ *  - Any other row joins as a new row. A row whose table the planned database
+ *    lacks is listed `absent` by the plan, as an inventoried object is, so one
+ *    supplement serves every database kind a host runs.
+ *  - Two rows naming one object are refused.
+ *
+ * The result is deterministic: a replaced row keeps its place and new rows are
+ * appended in object-name order, so the plan's `inventoryDigest` — and the
+ * apply's checkpoint, keyed on it — names the content, not the file's order.
+ */
+export function mergeHostFateSupplement(
+  supplement: OrganizationOwnershipSupplement,
+  file: string,
+  inventory: readonly InventoryEntry[] = ORGANIZATION_OWNERSHIP_INVENTORY,
+): readonly InventoryEntry[] {
+  const at = new Map(inventory.map((entry, index) => [entry.object, index]));
+  const seen = new Map<string, number>();
+  const merged = [...inventory];
+  const added: InventoryEntry[] = [];
+  supplement.forEach((row, index) => {
+    const first = seen.get(row.object);
+    if (first !== undefined) {
+      throw new HostFateSupplementRefusal(
+        'fate-supplement-duplicate-object',
+        `The host fate supplement ${file} declares ${row.object} twice (rows [${first}] and [${index}]); one object takes ` +
+          'one fate.',
+        file,
+        index,
+        row.object,
+      );
+    }
+    seen.set(row.object, index);
+    const { object, ...declared } = row;
+    const entry: InventoryEntry = { object, census: HOST, ...declared };
+    const existing = at.get(object);
+    if (existing === undefined) {
+      added.push(entry);
+      return;
+    }
+    const platform = inventory[existing]!;
+    if (!platform.census.includes('cloud-supplement')) {
+      throw new HostFateSupplementRefusal(
+        'fate-supplement-platform-object',
+        `The host fate supplement ${file} row [${index}] names ${object}, which the platform inventory already gives ` +
+          `a fate (${platform.fate}). A host declares fates only for the objects it provides; the platform's row ` +
+          'stands, so remove this one.',
+        file,
+        index,
+        object,
+      );
+    }
+    merged[existing] = entry;
+  });
+  added.sort((a, b) => (a.object < b.object ? -1 : a.object > b.object ? 1 : 0));
+  return [...merged, ...added];
+}
+
+/** `[3].anchors[0].kind` for a zod issue path. */
+function issuePath(path: readonly PropertyKey[]): string {
+  return path.map((key) => (typeof key === 'number' ? `[${key}]` : `.${String(key)}`)).join('').replace(/^\./, '');
+}
+
+/**
+ * Read the host fate supplement at `file` — a JSON array of rows the spec's
+ * `OrganizationOwnershipSupplementSchema` admits — and return the inventory
+ * with it merged in ({@link mergeHostFateSupplement}). Called by the command
+ * only when it is handed the file: the inventory has no ambient input.
+ *
+ * Every way of not using the file throws {@link HostFateSupplementRefusal},
+ * naming the file and, for a row, its index and object: ⛔ a row is never
+ * skipped and a file is never half-read.
+ */
+export async function readHostFateSupplement(
+  file: string,
+  inventory: readonly InventoryEntry[] = ORGANIZATION_OWNERSHIP_INVENTORY,
+): Promise<readonly InventoryEntry[]> {
+  let text: string;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch (error) {
+    throw new HostFateSupplementRefusal(
+      'fate-supplement-unreadable',
+      `The host fate supplement ${file} could not be read: ${error instanceof Error ? error.message : String(error)}.`,
+      file,
+    );
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (error) {
+    throw new HostFateSupplementRefusal(
+      'fate-supplement-unparsable',
+      `The host fate supplement ${file} is not JSON: ${error instanceof Error ? error.message : String(error)}.`,
+      file,
+    );
+  }
+  const parsed = OrganizationOwnershipSupplementSchema.safeParse(json);
+  if (!parsed.success) {
+    const [issue, ...more] = parsed.error.issues;
+    const row = typeof issue!.path[0] === 'number' ? issue!.path[0] : undefined;
+    const named = row === undefined ? undefined : (json as Array<{ object?: unknown }>)[row]?.object;
+    const object = typeof named === 'string' ? named : undefined;
+    const where = issue!.path.length > 1 ? ` at ${issuePath(issue!.path.slice(1))}` : '';
+    const others = more.length > 0 ? ` (and ${more.length} more issue(s))` : '';
+    throw new HostFateSupplementRefusal(
+      'fate-supplement-invalid',
+      row === undefined
+        ? `The host fate supplement ${file} must be a JSON array of fate rows (OrganizationOwnershipSupplementSchema, ` +
+            `@objectstack/spec/system): ${issue!.message}${others}.`
+        : `The host fate supplement ${file} row [${row}]${object ? ` (${object})` : ''} is refused${where}: ` +
+            `${issue!.message}${others}.`,
+      file,
+      row,
+      object,
+    );
+  }
+  return mergeHostFateSupplement(parsed.data, file, inventory);
 }

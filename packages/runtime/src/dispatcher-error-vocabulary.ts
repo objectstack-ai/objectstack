@@ -1404,6 +1404,33 @@ export const UNRESOLVED_CODE_HELPERS: readonly UnresolvedCodeHelper[] = [
             'responder, which takes the identical parameter type.',
     },
     {
+        file: 'packages/types/src/response-envelope.ts',
+        helper: 'sendServerFault',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'rest',
+        verdict: 'compiler-narrowed',
+        why:
+            'The caught-fault sibling of `sendError`: `sendServerFault(res, status, code: ErrorCode, ' +
+            'message, thrown, request?)` types the parameter to the same CLOSED union, so an unregistered ' +
+            'literal fails the build; an `any`-typed value is not checked, so callers pass literals. Like `sendError` it has ' +
+            'zero in-file callers: the route families that answer a caught fault import it, and their own ' +
+            'call sites spell the codes.',
+    },
+    {
+        file: 'packages/types/src/response-envelope.ts',
+        helper: 'writeErrorEnvelope',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'rest',
+        verdict: 'compiler-narrowed',
+        why:
+            'The module-private write the two exported envelope writers share, so the error ' +
+            'envelope is still written in one place. Its parameter is typed `code: ErrorCode`, and its only ' +
+            'callers are `sendError` and `sendServerFault`, which pass their own `ErrorCode` parameter ' +
+            'through: nothing reduces in-file because nothing is authored here.',
+    },
+    {
         file: 'packages/runtime/src/http-dispatcher.ts',
         helper: 'error',
         param: 'code',

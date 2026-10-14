@@ -21,7 +21,8 @@
  *    read gates keep the pool to the mailbox's owner and `manage_mailboxes`
  *    holders (`mail-read-visibility.ts`).
  *  - **Forward as attachment is read** (Q3 C, phase 1): the headers of a
- *    `message/rfc822` part are participants too, under source `attachment`.
+ *    `message/rfc822` or `message/global` part are participants too, under
+ *    source `attachment`.
  *
  * ## Writes, in order
  *

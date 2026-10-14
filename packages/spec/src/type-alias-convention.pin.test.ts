@@ -271,9 +271,11 @@ import type * as M185 from './shared/epoch.zod.js';
 import type * as M187 from './shared/duration.zod.js';
 // [#18451] The build-progress PHASE vocabulary -- new module, next free index.
 import type * as M188 from './ai/build-progress.zod.js';
+// The host fate supplement (ADR-0131 D10's C10 stage) -- new module, next free index.
+import type * as M189 from './system/fate-supplement.zod.js';
 
 // ---------------------------------------------------------------------------
-// 778 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 785 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1281,6 +1283,15 @@ export type Iso_system_encryption__KeyManagementProviderSchema = Assert<Eq< z.in
 // system/environment-artifact.zod.ts
 export type Iso_system_environmentArtifact__Sha256DigestSchema = Assert<Eq< z.input< typeof M131.Sha256DigestSchema >, z.infer< typeof M131.Sha256DigestSchema > >>;
 
+// system/fate-supplement.zod.ts
+export type Iso_system_fateSupplement__OrganizationOwnershipAnchorSchema = Assert<Eq< z.input< typeof M189.OrganizationOwnershipAnchorSchema >, z.infer< typeof M189.OrganizationOwnershipAnchorSchema > >>;
+export type Iso_system_fateSupplement__OrganizationOwnershipCategorySchema = Assert<Eq< z.input< typeof M189.OrganizationOwnershipCategorySchema >, z.infer< typeof M189.OrganizationOwnershipCategorySchema > >>;
+export type Iso_system_fateSupplement__OrganizationOwnershipDepartureSchema = Assert<Eq< z.input< typeof M189.OrganizationOwnershipDepartureSchema >, z.infer< typeof M189.OrganizationOwnershipDepartureSchema > >>;
+export type Iso_system_fateSupplement__OrganizationOwnershipFateSchema = Assert<Eq< z.input< typeof M189.OrganizationOwnershipFateSchema >, z.infer< typeof M189.OrganizationOwnershipFateSchema > >>;
+export type Iso_system_fateSupplement__OrganizationOwnershipRowConditionSchema = Assert<Eq< z.input< typeof M189.OrganizationOwnershipRowConditionSchema >, z.infer< typeof M189.OrganizationOwnershipRowConditionSchema > >>;
+export type Iso_system_fateSupplement__OrganizationOwnershipSupplementEntrySchema = Assert<Eq< z.input< typeof M189.OrganizationOwnershipSupplementEntrySchema >, z.infer< typeof M189.OrganizationOwnershipSupplementEntrySchema > >>;
+export type Iso_system_fateSupplement__OrganizationOwnershipSupplementSchema = Assert<Eq< z.input< typeof M189.OrganizationOwnershipSupplementSchema >, z.infer< typeof M189.OrganizationOwnershipSupplementSchema > >>;
+
 // system/http-server.zod.ts
 export type Iso_system_httpServer__MiddlewareType = Assert<Eq< z.input< typeof M132.MiddlewareType >, z.infer< typeof M132.MiddlewareType > >>;
 
@@ -1680,7 +1691,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 778 isomorphic pins', () => {
+  it('still declares all 785 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2487,14 +2498,21 @@ describe('ADR-0122 type-alias convention', () => {
     // it is pinned here (Iso_ui_page__ElementApiDataSourceSchema) rather than
     // given an `ElementApiDataSourceParsed` synonym. +1 added.
     //
-    // 776 -> 778 is #23316: the flow meta read's engine verdict, the new
+    // 776 -> 783 is the host fate supplement (ADR-0131 D10's C10 stage): the
+    // seven exported schemas of the new `system/fate-supplement.zod.ts` are
+    // closed objects, unions and enums with no default and no transform in
+    // their trees, so each is pinned here (Iso_system_fateSupplement__*)
+    // rather than given an `XParsed` synonym. +7 added.
+    //
+    // 783 -> 785 is #23316: the flow meta read's engine verdict, the new
     // exported `FlowRegistrationSchema` (a discriminated union of three closed
     // literal arms) and `FlowRegistrationRefusalSchema` (two plain strings, one
     // optional) — no default and no transform anywhere in either tree, so both
     // are pinned here (Iso_api_protocol__FlowRegistrationSchema,
     // Iso_api_protocol__FlowRegistrationRefusalSchema) rather than given
-    // `…Parsed` synonyms. +2 added.
-    expect(pins).toHaveLength(778);
+    // `…Parsed` synonyms. +2 added (landed beside the fate supplement's +7;
+    // both counted from the same base of 776).
+    expect(pins).toHaveLength(785);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
