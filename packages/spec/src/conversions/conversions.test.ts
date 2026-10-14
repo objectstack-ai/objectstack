@@ -14,6 +14,7 @@ import {
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { ElementButtonPropsSchema, PageHeaderProps, PageTabsProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
+import { defineStack } from '../stack.zod.js';
 import { applyMetaMigrations } from '../migrations/chain.js';
 import { applyConversions, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
@@ -177,6 +178,10 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
+  // `flow-node-crud-filter-alias` and `flow-node-crud-object-alias` left the
+  // load path at 18 (#23487): the rewrite cases below run the data-at-rest
+  // posture (`includeRetired`) — the replay stored flows still get — and the
+  // retirement itself is pinned in the load-path retirement block.
   describe('flow-node-crud-filter-alias (PD #12 retirement)', () => {
     it('renames config.filters → config.filter only for CRUD node types', () => {
       const { stack, notices } = collectConversionNotices({
@@ -190,7 +195,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
             ],
           },
         ],
-      });
+      }, { includeRetired: true });
       const nodes = (stack.flows as any[])[0].nodes;
       expect(nodes[0].config).toEqual({ objectName: 'lead', filter: { x: 1 } });
       expect(nodes[1].config).toEqual({ filters: { y: 2 } });
@@ -211,7 +216,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
             ],
           },
         ],
-      });
+      }, { includeRetired: true });
       const node = (stack.flows as any[])[0].nodes[0];
       expect(node.config.filter).toEqual({ keep: true });
       // Two different match maps under two names is the ambiguous half of the
@@ -247,6 +252,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('deletes an alias whose value EQUALS the canonical key, and emits a notice', () => {
       const { stack, notices } = collectConversionNotices(
         crudFlow({ objectName: 'task', object: 'task' }),
+        { includeRetired: true },
       );
       expect(configOf(stack)).toEqual({ objectName: 'task' });
       expect(configOf(stack)).not.toHaveProperty('object');
@@ -274,15 +280,15 @@ describe('conversion layer (ADR-0087 D2)', () => {
             ],
           },
         ],
-      });
+      }, { includeRetired: true });
       expect(configOf(stack)).toEqual({ filter: { status: 'stale' } });
       expect(notices).toHaveLength(1);
     });
 
     it('is idempotent in shape AND notices — the deduped result replays to itself', () => {
-      const once = collectConversionNotices(crudFlow({ objectName: 'task', object: 'task' }));
+      const once = collectConversionNotices(crudFlow({ objectName: 'task', object: 'task' }), { includeRetired: true });
       expect(once.notices).toHaveLength(1);
-      const twice = collectConversionNotices(once.stack);
+      const twice = collectConversionNotices(once.stack, { includeRetired: true });
       expect(twice.stack).toEqual(once.stack);
       expect(twice.notices).toHaveLength(0);
     });
@@ -297,7 +303,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
 
     it('keeps BOTH spellings when the values differ — the upgrade tool does not choose', () => {
       const before = crudFlow({ objectName: 'task', object: 'ticket' });
-      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
       expect(stack).toEqual(before);
       expect(configOf(stack)).toEqual({ objectName: 'task', object: 'ticket' });
       expect(notices).toHaveLength(0);
@@ -306,6 +312,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('judges each pair on its own value — one twin dedupes while its neighbour survives', () => {
       const { stack, notices } = collectConversionNotices(
         crudFlow({ objectName: 'task', object: 'task', filter: { a: 1 }, filters: { a: 2 } }),
+        { includeRetired: true },
       );
       expect(configOf(stack)).toEqual({ objectName: 'task', filter: { a: 1 }, filters: { a: 2 } });
       expect(notices).toHaveLength(1);
@@ -380,6 +387,65 @@ describe('conversion layer (ADR-0087 D2)', () => {
         expect(stack).toEqual(before);
         expect(notices).toHaveLength(0);
       }
+    });
+
+    /**
+     * The family closed at 18 (#23487): every entry whose window ran out
+     * before 18 has a verdict. Seven left the load path (with #23421's two,
+     * nine of the family); the eight below stay, each with the reason written
+     * into its own docblock and what would have to change for it to retire.
+     * A new entry below 18 that is neither retired nor listed here is an
+     * entry nobody judged.
+     */
+    it('every entry whose window ran out before 18 is retired or kept by name', () => {
+      const kept = ALL_CONVERSIONS.filter((c) => c.toMajor < 18 && !c.retiredFromLoadPath).map((c) => c.id).sort();
+      expect(kept).toEqual([
+        'datasource-driver-mongo-to-mongodb',
+        'flow-node-connector-config-lift',
+        'flow-node-http-callout-rename',
+        'flow-node-wait-event-config-lift',
+        'page-component-visibility-to-visibleWhen',
+        'page-kind-jsx-to-html',
+        'retry-policy-converged',
+        'view-visibleOn-to-visibleWhen',
+      ]);
+      for (const id of [
+        'flow-node-crud-filter-alias',
+        'flow-node-crud-object-alias',
+        'flow-node-notify-config-aliases',
+        'flow-node-map-flow-alias',
+        'flow-node-subflow-flow-alias',
+        'flow-node-script-config-aliases',
+        'sharing-rule-access-level-full-to-edit',
+      ]) {
+        expect(ALL_CONVERSIONS.find((c) => c.id === id), id).toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
+      }
+    });
+
+    it('a retired flow-node alias reaches defineStack as authored and is refused naming the rename and the release', () => {
+      const authored = {
+        flows: [{
+          name: 'f',
+          label: 'F',
+          type: 'autolaunched',
+          nodes: [
+            { id: 's', type: 'start', label: 'S' },
+            { id: 'g', type: 'get_record', label: 'G', config: { objectName: 'lead', object: 'lead' } },
+          ],
+          edges: [],
+        }],
+      };
+      let refusal: unknown;
+      try {
+        defineStack(authored);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.object']);
+      expect(issues[0]!.message).toContain('`object` was removed in @objectstack/spec 18');
+      expect(issues[0]!.message).toContain('Use `objectName`');
     });
 
     it('a live-window conversion still applies at load (protocol-15 aliases)', () => {

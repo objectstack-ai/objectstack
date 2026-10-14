@@ -165,11 +165,12 @@ describe('unknown keys — refused, not stripped, and this class had no other ga
     ['functionName', 'score_lead', '`function`'],
     ['input', { leadId: '1' }, '`inputs`'],
   ] as ReadonlyArray<[string, unknown, string]>)(
-    'script: the retired `%s` alias gets its conversion named, not just a rename',
+    'script: the retired `%s` alias gets the upgrade prescription naming its release, not just a rename',
     (key, value, canonical) => {
       const message = unknownKeyMessage(ScriptConfigSchema, { function: 'f', [key]: value })!;
       expect(message).toContain(canonical);
-      expect(message).toContain('flow-node-script-config-aliases');
+      expect(message).toContain('was removed in @objectstack/spec 18');
+      expect(message).toContain(`Use ${canonical}. Rename the key`);
     },
   );
 
@@ -198,7 +199,7 @@ describe('unknown keys — refused, not stripped, and this class had no other ga
 
   it('subflow: prescribes `flowName`, and points `timeoutMs` at the node it belongs on', () => {
     expect(unknownKeyMessage(SubflowConfigSchema, { flowName: 'audit_flow', flow: 'ignored' }))
-      .toContain('flow-node-subflow-flow-alias');
+      .toContain('`flow` was removed in @objectstack/spec 18 (ADR-0087 D2)');
     const timeout = unknownKeyMessage(SubflowConfigSchema, { flowName: 'audit_flow', timeoutMs: 30000 })!;
     expect(timeout).toContain('FlowNodeSchema.timeoutMs');
   });
