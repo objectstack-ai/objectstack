@@ -46,7 +46,16 @@ export async function probeMigrationTarget(
   }
 }
 
-/** The operator-facing hint attached to every refusal and warning. */
-export const OCCUPANCY_HINT =
-  'Stop the process using it (a running "os dev"/"os serve" is the usual one) and re-run, ' +
-  'or pass --force to migrate anyway.';
+/** The remedy every occupancy refusal names, written once for both hints below. */
+const STOP_CLAUSE = 'Stop the process using it (a running "os dev"/"os serve" is the usual one) and re-run';
+
+/**
+ * The hint for a command that takes no `--force`: the stop remedy alone.
+ * `os migrate organization-ownership` attaches it — its ceremony has no flag
+ * that skips the reviewed plan or the backup either — so its refusal never
+ * names a flag the command would reject.
+ */
+export const OCCUPANCY_STOP_HINT = `${STOP_CLAUSE}.`;
+
+/** The operator-facing hint attached to every refusal and warning of a command with `--force`. */
+export const OCCUPANCY_HINT = `${STOP_CLAUSE}, or pass --force to migrate anyway.`;
