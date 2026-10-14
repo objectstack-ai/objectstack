@@ -145,7 +145,9 @@ export interface ConversionTodoNotice {
    * The {@link MetadataConversion.id} whose surface the site is on — or, for a
    * stored shape no conversion covers (a refused shape, see
    * {@link CONVERSION_TODO_CODE}), the id of the D3 semantic entry that
-   * refuses it.
+   * refuses it. A TODO the automation engine adds for a site its flow
+   * registration refuses and neither covers names that door instead:
+   * `'registerFlow'` (`IAutomationService.canonicalizeStoredFlow`).
    */
   conversionId: string;
   /** Dotted surface the conversion governs. */

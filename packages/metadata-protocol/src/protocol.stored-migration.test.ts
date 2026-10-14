@@ -1184,6 +1184,37 @@ describe('migrateStoredMetadata — the v18 stored shapes refused with no lossle
         expect(text).not.toContain('s3cr3t');
     });
 
+    it('#23317 — a page whose component binds the retired API source in its data prop is listed by page and component, without its headers', async () => {
+        const block = (type: string, data: unknown) => ({ id: 'cases', type, properties: { objectName: 'crm_case', data } });
+        const page = (name: string, data: unknown) => ({
+            type: 'page',
+            name,
+            metadata: { name, label: name, type: 'app', regions: [{ name: 'main', components: [block('object-grid', data)] }] },
+        });
+        const { engine, tables } = makeStubEngine([
+            page('partner_page', { provider: API, read: { url: 'https://partner.example.com/cases', headers: { Authorization: 'Bearer s3cr3t' } } }),
+            page('case_page', { provider: 'object', object: 'crm_case' }),
+        ]);
+        const before = JSON.stringify(metaRows(tables));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const report = await protocol.migrateStoredMetadata();
+
+        expect(report.canonical).toBe(1);
+        expect(report.rows.map((r) => [r.type, r.name, r.outcome, r.todos.map((t) => [t.conversionId, t.path])])).toEqual([
+            ['page', 'partner_page', 'skipped', [['view-data-api-provider-retired', 'pages[0].regions[0].components[0].properties.data']]],
+        ]);
+        const text = formatStoredMigrationReport(report).join('\n');
+        expect(text).toContain('page/partner_page [env-wide]');
+        expect(text).toContain('The `object-grid` component `cases` of page `partner_page`');
+        expect(text).not.toContain('s3cr3t');
+        // Listed, never written.
+        expect(storedMigrationClean(report)).toBe(true);
+        const applied = await protocol.migrateStoredMetadata({ apply: true });
+        expect(applied.rewritten).toBe(0);
+        expect(JSON.stringify(metaRows(tables))).toBe(before);
+    });
+
     it('#23269 — a flow whose CRUD filter operand is a {…} token is listed by flow and node; the CEL form is canonical', async () => {
         const { engine, tables } = makeStubEngine([
             crudFlow('fd_refused_filter', '{record.id}'),

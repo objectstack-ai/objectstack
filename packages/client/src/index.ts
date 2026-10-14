@@ -825,7 +825,7 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
  * reads, made reachable from the SDK (commit cf71d73f8).
  *
  * `DELETE /meta/:type/:name` ("reset metadata item to artifact default")
- * reads THREE carriers. This bag declares TWO of them, and the third's
+ * reads FOUR carriers. This bag declares THREE of them, and the fourth's
  * absence is a ruling rather than an oversight:
  *
  * - {@link DeleteMetaItemOptions.ifMatch} — the ADR-0008 OCC pin. The door
@@ -837,9 +837,15 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
  *   reset: discard the pending draft and leave the published overlay
  *   serving. Its absence did not make the SDK safer, it made the SDK's only
  *   reachable reset the full one.
+ * - {@link DeleteMetaItemOptions.packageId} — `?package=<id>` (#23293), the
+ *   package whose row the delete removes (ADR-0048: one row per package).
+ *   The door refuses a delete that names no package of an item two or more
+ *   packages hold, `409 RESOURCE_CONFLICT`, and naming the package is that
+ *   refusal's remedy, so without this member an SDK caller was prescribed a
+ *   parameter their client could not send.
  *
  * ⛔ `?dropStorage=true` is deliberately NOT a member, and adding it "for
- * completeness" reverses a decision. It is the one carrier of the three that
+ * completeness" reverses a decision. It is the one carrier of the four that
  * ADDS destructive reach — it drops the object's physical table after the
  * metadata row goes — no caller was measured needing it from this client,
  * and the door's repeated-parameter refusal exists because of that
@@ -894,6 +900,26 @@ export interface DeleteMetaItemOptions {
      * overlay too.
      */
     state?: 'active' | 'draft';
+    /**
+     * `?package=<id>` — the software package whose row this delete removes
+     * (`sys_metadata.package_id`, ADR-0048), and no other package's row.
+     *
+     * Omit to name no package. The door then removes the row of the one
+     * package the item's rows (at the deleted `state`) are bound to, removes
+     * the package-unbound row when none is bound, and refuses `409
+     * RESOURCE_CONFLICT`, naming the packages and deleting nothing, when two
+     * or more hold the item. Naming one of them here is what that refusal
+     * prescribes. A named package that holds no row removes nothing
+     * (`reset: false`).
+     *
+     * Same member name, same `package` query key and same truthy guard as
+     * {@link SaveMetaItemOptions.packageId}, the save door's address for the
+     * row it writes: only a non-empty id reaches the wire, and `undefined` and
+     * `''` both send nothing. The door reads the value through the same
+     * function as the save door, so it reads `all` as naming no package there
+     * too; this client forwards the id verbatim and decides nothing about it.
+     */
+    packageId?: string;
 }
 
 /**
@@ -906,8 +932,8 @@ export interface DeleteMetaItemOptions {
  * BYTE-IDENTICAL to what this method sent before the bag existed.
  *
  * `URLSearchParams.set` (never `append`) is load-bearing: the door REFUSES a
- * repeated `state` (#6877), so a builder that could emit the key twice would
- * turn a caller's option into a 400.
+ * repeated `state` (#6877) or `package` (#23165), so a builder that could emit
+ * a key twice would turn a caller's option into a 400.
  */
 function metaDeleteQuery(options?: DeleteMetaItemOptions): string {
     if (!options) return '';
@@ -915,6 +941,9 @@ function metaDeleteQuery(options?: DeleteMetaItemOptions): string {
     // Only `'draft'` is actionable server-side; `'active'` is the default
     // said out loud and sends nothing.
     if (options.state === 'draft') params.set('state', 'draft');
+    // [#23293] The save path's spelling and guard (`metaSaveQuery`): an empty
+    // id names no package, so it is never put on the wire.
+    if (options.packageId) params.set('package', options.packageId);
     const qs = params.toString();
     return qs ? `?${qs}` : '';
 }
@@ -1881,7 +1910,14 @@ export class ObjectStackClient {
      * @param type - Metadata type (e.g., 'object', 'plugin')
      * @param name - Item name (snake_case identifier)
      * @param options - {@link DeleteMetaItemOptions}: the ADR-0008 OCC pin
-     *   (`ifMatch`) and the narrower draft-only discard (`state: 'draft'`).
+     *   (`ifMatch`), the narrower draft-only discard (`state: 'draft'`), and
+     *   the package whose row the delete removes (`packageId`).
+     *
+     * NAME THE PACKAGE when two packages hold the item. A delete that names
+     * none of an item two or more packages hold is refused `409
+     * RESOURCE_CONFLICT`, naming them, and nothing is deleted; pass the
+     * package whose row you mean as `options.packageId` (`?package=` on the
+     * wire), as `saveItem` names the row it writes.
      *
      * PIN THE RESET. This verb destroys a row: unpinned, a reset issued
      * against a version somebody else has already replaced silently destroys
@@ -7710,7 +7746,8 @@ export class ScopedEnvironmentClient {
      * twin takes, and reaches the SAME handler: the scoped mount is not a
      * second implementation, it is one `registerForBase` call replayed
      * against `/environments/:environmentId` (see `RestServer`), so this door
-     * reads `?state=` — and the `If-Match` header — byte-identically. A bag
+     * reads `?state=` and `?package=` — and the `If-Match` header —
+     * byte-identically. A bag
      * on only one of the two clients would be a fresh divergence of the kind
      * #7019 rules against, not half a fix.
      *

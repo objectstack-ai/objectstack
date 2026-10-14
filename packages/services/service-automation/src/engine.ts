@@ -65,13 +65,13 @@ import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // hand-written `trim()` here is exactly the drift the #15662 campaign built the
 // shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
-import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, CONVERSION_TODO_CODE, type ConversionNotice, type ConversionConflictNotice, type ConversionTodoNotice } from '@objectstack/spec';
 // [ADR-0126 §7.3, #20761] "Does a code package ship this flow?" is NOT read
 // off a definition here. The subflow guards, the arming gate and the
 // activation door ask {@link AutomationEngine.packagedFlowOwner} — the loader's
 // set, attached by the host — because a definition reaches `registerFlow`
 // through authoring doors too, and its provenance stamps are the caller's.
-import type { FlowRegionParsed } from '@objectstack/spec/automation';
+import type { FlowGraph, FlowRegionParsed } from '@objectstack/spec/automation';
 import type {
     Connector,
     ConnectorActionEffect,
@@ -2252,6 +2252,100 @@ const CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION: readonly string[] = [
 ];
 
 /**
+ * One site a registration check refuses (#23317): where it is, the shape
+ * found there, and the check's own words for it.
+ *
+ * A check does not throw: it returns a {@link RegistrationCheckRefusal}, which
+ * {@link AutomationEngine.registerFlow} throws and
+ * {@link AutomationEngine.canonicalizeStoredFlow} lists site by site. So the
+ * stored pass (`os migrate meta --stored`) previews exactly what registration
+ * refuses, through the same checks, and a check added to registration is
+ * previewed with no second change.
+ */
+interface RegistrationCheckSite {
+    /**
+     * The site's path in the stack the stored pass wraps one flow in —
+     * `flows[0].nodes[2].config.title`, `flows[0].edges[1].condition` — the
+     * spelling `applyConversionsToFlow` gives a TODO's path, so a site a
+     * conversion TODO already names is recognised as the same site.
+     */
+    readonly path: string;
+    /** The shape found at the site, serialized: a source text, a key, a declared value. */
+    readonly from: string;
+    /** The site's refusal on one line: where it is, then the check's message. */
+    readonly detail: string;
+}
+
+/**
+ * What one registration check refuses in a flow: the error `registerFlow`
+ * throws, byte for byte, and every site it names.
+ */
+interface RegistrationCheckRefusal {
+    readonly message: string;
+    readonly sites: readonly RegistrationCheckSite[];
+}
+
+/**
+ * The id a registration refusal is listed under in the stored pass — a
+ * `ConversionTodoNotice.conversionId` that names the refusing door, for a site
+ * no conversion and no D3 entry of the migration chain covers.
+ */
+export const FLOW_REGISTRATION_TODO_ID = 'registerFlow';
+
+/** What a TODO from {@link FLOW_REGISTRATION_TODO_ID} says the site is on. */
+const FLOW_REGISTRATION_TODO_SURFACE = 'flow — a site AutomationEngine.registerFlow refuses';
+
+/**
+ * One key the undeclared-config-key walk finds: the key, its path from the
+ * node (`config.fields[0].visibleIf`), and the line its refusal prints.
+ */
+interface UndeclaredConfigKey {
+    readonly key: string;
+    readonly at: string;
+    readonly line: string;
+}
+
+/** The flow's own path in the stack the stored pass wraps it in: `{ flows: [flow] }`. */
+const STORED_FLOW_PATH = 'flows[0]';
+
+/**
+ * The stored-pass path of one graph's container — `flows[0]` for the flow's
+ * own, `flows[0].nodes[1].config.body` for a loop body — built from
+ * {@link FlowGraph.path}, so a nested node is named where the conversion walk
+ * (`mapFlowNodeList`) names it.
+ */
+function storedGraphPath(graph: FlowGraph): string {
+    let out = STORED_FLOW_PATH;
+    for (const segment of graph.path) out += typeof segment === 'number' ? `[${segment}]` : `.${segment}`;
+    return out;
+}
+
+/** The stored-pass path of one region-scoped list member, by its index in the graph. */
+function storedGraphMemberPath(graph: FlowGraph, list: 'nodes' | 'edges', index: number): string {
+    return `${storedGraphPath(graph)}.${list}[${index}]`;
+}
+
+/**
+ * One registration refusal site as a stored-pass TODO. The fate leads and the
+ * check's own words follow, as a refused-shape TODO's do: the site stays as
+ * stored, and the flow does not register.
+ */
+function flowRegistrationTodo(flowName: string, site: RegistrationCheckSite): ConversionTodoNotice {
+    const reason = 'No conversion rewrites it, and registerFlow refuses it: left as stored, the flow is not '
+        + `registered at boot and never runs. Flow \`${flowName}\`, ${site.detail}`;
+    return {
+        code: CONVERSION_TODO_CODE,
+        conversionId: FLOW_REGISTRATION_TODO_ID,
+        surface: FLOW_REGISTRATION_TODO_SURFACE,
+        from: site.from,
+        path: site.path,
+        reason,
+        message: `[protocol] left ${FLOW_REGISTRATION_TODO_SURFACE} at ${site.path} as stored — `
+            + `AutomationEngine.registerFlow refuses it and no conversion rewrites it: ${reason}`,
+    };
+}
+
+/**
  * Lift the `{ dialect, source }` envelopes the flow schema derives for edge
  * `condition`s back onto the conversion output — and take nothing else with
  * them (#4454).
@@ -4358,10 +4452,71 @@ export class AutomationEngine implements IAutomationService {
      * template token, a CRUD filter operand among them, which
      * {@link registerFlow} goes on to refuse. The parse accepts such a flow, so
      * without them the stored pass would read a flow the boot refuses as on
-     * protocol. They change nothing in `parsed` or `storable`; `registerFlow`
-     * ignores them, since its own refusal names the same sites.
+     * protocol.
+     *
+     * [#23317] `todos` also carries every site {@link registerFlow} refuses
+     * once the parse has accepted the flow: the same registration checks, run
+     * here without registering ({@link registrationCheckRefusals}), each site
+     * listed under {@link FLOW_REGISTRATION_TODO_ID}. A text slot's template
+     * hole, a decision's `mode`, a malformed predicate, a plugin node's
+     * undeclared config key and an `api` flow with no secret are among them.
+     * A site a conversion TODO already names is not listed twice. What the
+     * parse itself refuses is not a TODO: this method throws it, and the
+     * stored pass reports that row `failed` with the parse's words.
+     *
+     * None of it changes `parsed` or `storable`, and nothing here throws for
+     * it. The checks run on the first read of `todos`, so a caller that reads
+     * none (the save door, a package duplication, the sync's comparison of a
+     * held flow) does no more work than before. `registerFlow` reads none
+     * either: it runs the same checks itself and throws the first refusal.
      */
     canonicalizeStoredFlow(name: string, definition: unknown): {
+        parsed: FlowParsed;
+        storable: unknown;
+        notices: ConversionNotice[];
+        conflicts: ConversionConflictNotice[];
+        todos: ConversionTodoNotice[];
+    } {
+        const { parsed, storable, notices, conflicts, todos: chainTodos } = this.canonicalizeFlow(name, definition);
+        // The registration checks run when `todos` is first READ, once: the
+        // stored pass reads it, and the doors that only want `parsed` or
+        // `storable` (the save door, a package duplication, the sync's
+        // "already held?" comparison) pay nothing for a listing they discard.
+        const listRegistrationRefusals = (): ConversionTodoNotice[] => {
+            const todos = [...chainTodos];
+            // One listing per site: a site a conversion TODO names (the value-slot
+            // refusal the spec lists under its D3 entry) keeps that TODO, which
+            // names the retirement; the registration check's line for it is the
+            // same refusal and is not repeated.
+            const listed = new Set(chainTodos.map((todo) => todo.path));
+            for (const refusal of this.registrationCheckRefusals(name, parsed)) {
+                for (const site of refusal.sites) {
+                    if (listed.has(site.path)) continue;
+                    todos.push(flowRegistrationTodo(name, site));
+                }
+            }
+            return todos;
+        };
+        let listedTodos: ConversionTodoNotice[] | undefined;
+        return {
+            parsed,
+            storable,
+            notices,
+            conflicts,
+            get todos(): ConversionTodoNotice[] {
+                listedTodos ??= listRegistrationRefusals();
+                return listedTodos;
+            },
+        };
+    }
+
+    /**
+     * {@link canonicalizeStoredFlow}'s pass without the registration checks:
+     * convert, parse, and refuse what the parse, the cycle check and the
+     * region validator refuse. {@link registerFlow} calls this and then runs
+     * the checks itself, so registration judges a flow once.
+     */
+    private canonicalizeFlow(name: string, definition: unknown): {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
@@ -4451,7 +4606,7 @@ export class AutomationEngine implements IAutomationService {
         // One canonicalization policy, shared with the stored-row migration so
         // the two can never disagree about what "canonical" means (#4454).
         // Execution takes the parsed shape (schema defaults materialized).
-        const { parsed } = this.canonicalizeStoredFlow(name, definition);
+        const { parsed } = this.canonicalizeFlow(name, definition);
 
         // ADR-0018 §M1 — node types are validated against the live action
         // registry, but NOT here: the check moved to the moment the vocabulary
@@ -4461,34 +4616,15 @@ export class AutomationEngine implements IAutomationService {
         // soft-fail — a flow authored against a currently-absent plugin must
         // still register, and executeNode() throws NO_EXECUTOR at run time.
 
-        // #4277 — REJECT config keys the node's descriptor does not declare
-        // (the tightened #4059 warning; a `visibleIf` typo used to register in
-        // silence). Hard-fail with per-key prescriptions: see
-        // validateNodeConfigKeys for why the #4045 reconciliation made this
-        // safe, and for the deliberate exemptions (`assignment`, schemaless
-        // types, keyValue maps). [#21982] Only for the types the spec does not
-        // judge — plugin node types (#22343: `try_catch` was the last builtin
-        // here); every builtin's undeclared key was refused by the
-        // `FlowSchema.parse` above.
-        this.validateNodeConfigKeys(name, parsed);
-
-        // #15429 — parse every `decision` node's config against the spec's
-        // `DecisionConfigSchema` and refuse the flow on an invalid `mode`, with
-        // the schema's own sentence — the same answer `os validate` gives.
-        this.validateDecisionModes(name, parsed);
-
-        // ADR-0032 §Decision 1a — parse-validate every predicate at registration,
-        // so a malformed condition (e.g. the #1491 `{record.x}` template-brace-in-
-        // CEL mistake) is a LOUD registration error with the offending source,
-        // not a silent runtime `false`. Hard-fail: a broken predicate is never
-        // safe to run.
-        this.validateFlowExpressions(name, parsed);
-
-        // ADR-0041 — an `api` flow's inbound hook requires a per-flow secret.
-        // Refused here, at the publish seam, so the author learns before
-        // deploying; `trigger-api`'s own `start()` refuses the same binding for
-        // a host that binds without this engine.
-        this.validateApiTriggerSecret(name, parsed);
+        // [#23317] Every registration check, in order, through the ONE list
+        // the stored pass previews with ({@link registrationChecks}). The first
+        // refusal is thrown, so a flow is refused exactly as before; a check
+        // belongs in that list, never as a second call here, or the stored
+        // pass would read a flow this method refuses as on protocol.
+        for (const check of this.registrationChecks({ advisory: true })) {
+            const refusal = check(name, parsed);
+            if (refusal) throw new Error(refusal.message);
+        }
 
         // Version history management
         const history = this.flowVersionHistory.get(name) ?? [];
@@ -10340,6 +10476,74 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#23317] What {@link registerFlow} judges a canonical flow by after the
+     * parse — every registration check, in the order it runs them. The ONE
+     * list: `registerFlow` throws the first refusal, and
+     * {@link registrationCheckRefusals} collects them all for the stored pass,
+     * so a check added here is refused at registration and previewed by
+     * `os migrate meta --stored` alike.
+     *
+     * `advisory` turns on the schema-aware expression pass, which logs and
+     * never refuses: registration runs it, the stored pass does not, so the
+     * doors that canonicalize without registering log nothing new.
+     */
+    private registrationChecks(
+        { advisory }: { advisory: boolean },
+    ): ReadonlyArray<(flowName: string, flow: FlowParsed) => RegistrationCheckRefusal | undefined> {
+        return [
+            // #4277 — config keys the node's descriptor does not declare (the
+            // tightened #4059 warning; a `visibleIf` typo used to register in
+            // silence), with per-key prescriptions: see validateNodeConfigKeys
+            // for why the #4045 reconciliation made this safe, and for the
+            // deliberate exemptions (`assignment`, schemaless types, keyValue
+            // maps). [#21982] Only for the types the spec does not judge —
+            // plugin node types (#22343: `try_catch` was the last builtin here);
+            // every builtin's undeclared key was refused by `FlowSchema.parse`.
+            (flowName, flow) => this.validateNodeConfigKeys(flowName, flow),
+            // #15429 — every `decision` node's config against the spec's
+            // `DecisionConfigSchema`, refused on an invalid `mode` with the
+            // schema's own sentence — the same answer `os validate` gives.
+            (flowName, flow) => this.validateDecisionModes(flowName, flow),
+            // ADR-0032 §Decision 1a — every predicate parse-validated, so a
+            // malformed condition (e.g. the #1491 `{record.x}` template-brace-in-
+            // CEL mistake) is a LOUD registration error with the offending
+            // source, not a silent runtime `false`: a broken predicate is never
+            // safe to run.
+            (flowName, flow) => this.validateFlowExpressions(flowName, flow, { advisory }),
+            // ADR-0041 — an `api` flow's inbound hook requires a per-flow
+            // secret, refused at the publish seam so the author learns before
+            // deploying; `trigger-api`'s own `start()` refuses the same binding
+            // for a host that binds without this engine.
+            (flowName, flow) => this.validateApiTriggerSecret(flowName, flow),
+        ];
+    }
+
+    /**
+     * [#23317] Every refusal {@link registerFlow} would raise for a flow that
+     * has passed the parse, without registering it — what the stored pass
+     * lists through {@link canonicalizeStoredFlow}.
+     *
+     * Never throws. A check that throws instead of refusing still names a flow
+     * `registerFlow` does not register (it throws the same error there), so it
+     * is listed as one refusal at the flow itself: the doors that canonicalize
+     * without registering must not start throwing for a check they never ran.
+     */
+    private registrationCheckRefusals(flowName: string, flow: FlowParsed): RegistrationCheckRefusal[] {
+        const refusals: RegistrationCheckRefusal[] = [];
+        for (const check of this.registrationChecks({ advisory: false })) {
+            let refusal: RegistrationCheckRefusal | undefined;
+            try {
+                refusal = check(flowName, flow);
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                refusal = { message, sites: [{ path: STORED_FLOW_PATH, from: JSON.stringify(flowName), detail: message }] };
+            }
+            if (refusal) refusals.push(refusal);
+        }
+        return refusals;
+    }
+
+    /**
      * REJECT node `config` keys the node type's descriptor does not declare
      * (#4277 — the error half of the #4045 unknown-key ladder; #4059 shipped
      * the warn half).
@@ -10402,10 +10606,12 @@ export class AutomationEngine implements IAutomationService {
      * Hard-fail matches {@link validateFlowExpressions} below — a flow whose
      * metadata is wrong never registers, and every `registerFlow` call site
      * already try/catches per flow, so a bad flow is skipped loudly at boot
-     * rather than crashing the kernel.
+     * rather than crashing the kernel. [#23317] The refusal is returned, not
+     * thrown: `registerFlow` throws it ({@link registrationChecks}).
      */
-    private validateNodeConfigKeys(flowName: string, flow: FlowParsed): void {
+    private validateNodeConfigKeys(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
         const violations: string[] = [];
+        const sites: RegistrationCheckSite[] = [];
         // #4389 — every graph, not just the flow's own. `visibleIf` is the typo
         // this check exists to catch, and moving the node into a `loop` body
         // used to restore the silence #4277 closed. No double-reporting from the
@@ -10413,22 +10619,32 @@ export class AutomationEngine implements IAutomationService {
         // slot as a bare `nodes: { type: 'array' }` with no `items`, so the
         // schema-lockstep walk stops there rather than descending twice.
         for (const graph of collectFlowGraphs(flow)) {
-            const scoped: string[] = [];
-            for (const node of graph.nodes) {
+            graph.nodes.forEach((node, index) => {
                 // `assignment` config keys are the author's variable names — see the
                 // exemption note above.
-                if (node.type === 'assignment') continue;
+                if (node.type === 'assignment') return;
                 // [#21982] The spec judged this type's keys in `FlowSchema.parse`:
                 // one judge per type, never two.
-                if (builtinNodeConfigKeysJudged(node.type)) continue;
+                if (builtinNodeConfigKeysJudged(node.type)) return;
                 const schema = this.actionDescriptors.get(node.type)?.configSchema as ConfigSchemaNode | undefined;
-                if (!schema) continue;
-                this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', scoped);
-            }
-            for (const v of scoped) violations.push(graph.scope ? `${graph.scope} · ${v}` : v);
+                if (!schema) return;
+                const found: UndeclaredConfigKey[] = [];
+                this.collectUndeclaredConfigKeys(node, schema, node.config, 'config', found);
+                for (const key of found) {
+                    const v = graph.scope ? `${graph.scope} · ${key.line}` : key.line;
+                    violations.push(v);
+                    sites.push({
+                        path: `${storedGraphMemberPath(graph, 'nodes', index)}.${key.at}`,
+                        from: JSON.stringify(key.key),
+                        detail: v,
+                    });
+                }
+            });
         }
-        if (violations.length > 0) {
-            throw new Error(
+        if (violations.length === 0) return undefined;
+        return {
+            sites,
+            message:
                 `Flow '${flowName}' rejected: ${violations.length} undeclared config key(s).\n` +
                 violations.map((v) => `  - ${v}`).join('\n') +
                 `\nAn undeclared key is never read, so it can only be a typo or dead config — fix the ` +
@@ -10436,8 +10652,7 @@ export class AutomationEngine implements IAutomationService {
                 `declare it on the node type's descriptor configSchema instead: the built-in node types were ` +
                 `reconciled so every key their executors read is declared, and a read-but-undeclared key is ` +
                 `exactly the drift that reconciliation removed.`,
-            );
-        }
+        };
     }
 
     /**
@@ -10469,29 +10684,38 @@ export class AutomationEngine implements IAutomationService {
      * Hard-fail, like {@link validateNodeConfigKeys}: a flow whose gateway
      * declares a mode the engine does not have is wrong metadata, and the
      * caller's per-flow try/catch skips it loudly at boot rather than arming a
-     * gateway that would run as something the author did not write.
+     * gateway that would run as something the author did not write. [#23317]
+     * The refusal is returned, not thrown: `registerFlow` throws it.
      */
-    private validateDecisionModes(flowName: string, flow: FlowParsed): void {
+    private validateDecisionModes(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
         const failures: string[] = [];
+        const sites: RegistrationCheckSite[] = [];
         for (const graph of collectFlowGraphs(flow)) {
             const at = graph.scope ? `${graph.scope}: ` : '';
-            for (const node of graph.nodes) {
-                if (node.type !== 'decision') continue;
+            graph.nodes.forEach((node, index) => {
+                if (node.type !== 'decision') return;
                 const verdict = DecisionConfigSchema.safeParse(node.config ?? {});
-                if (verdict.success) continue;
+                if (verdict.success) return;
                 for (const issue of verdict.error.issues) {
                     if (issue.path[0] !== 'mode') continue;
-                    failures.push(`  • ${at}node '${node.id}' (decision) at config.mode: ${issue.message}`);
+                    const detail = `${at}node '${node.id}' (decision) at config.mode: ${issue.message}`;
+                    failures.push(`  • ${detail}`);
+                    sites.push({
+                        path: `${storedGraphMemberPath(graph, 'nodes', index)}.config.mode`,
+                        from: JSON.stringify((node.config as Record<string, unknown> | undefined)?.mode ?? null),
+                        detail,
+                    });
                 }
-            }
+            });
         }
-        if (failures.length > 0) {
-            throw new Error(
+        if (failures.length === 0) return undefined;
+        return {
+            sites,
+            message:
                 `Flow '${flowName}' rejected: ${failures.length} invalid decision \`mode\` ` +
                 `declaration${failures.length > 1 ? 's' : ''}. The config is metadata, so re-registering ` +
                 `changes nothing; fix the node in the flow definition:\n${failures.join('\n')}`,
-            );
-        }
+        };
     }
 
     /**
@@ -10514,31 +10738,45 @@ export class AutomationEngine implements IAutomationService {
      * Hard-fail, like {@link validateNodeConfigKeys}: every `registerFlow` call
      * site already try/catches per flow, so a refused flow is skipped loudly
      * at boot, and the `/automation` write doors answer the throw as `400
-     * VALIDATION_FAILED`.
+     * VALIDATION_FAILED`. [#23317] The refusal is returned, not thrown:
+     * `registerFlow` throws it.
      */
-    private validateApiTriggerSecret(flowName: string, flow: FlowParsed): void {
+    private validateApiTriggerSecret(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
         const resolved = this.deriveTriggerBinding(flowName, flow);
-        if (resolved?.triggerType !== 'api') return;
+        if (resolved?.triggerType !== 'api') return undefined;
         const config = (resolved.binding.config ?? {}) as Record<string, unknown>;
-        if (typeof config.secret === 'string' && config.secret.trim() !== '') return;
+        if (typeof config.secret === 'string' && config.secret.trim() !== '') return undefined;
         // [#20790] …or the write-only credential channel holds it: a flow stored
         // through the metadata save door keeps no secret in its definition, and
         // its binding carries the reader instead. Only for the WITHHELD form —
         // `hookSecretResolver` yields no reader for a start node that writes
         // `secret: ''` (cleared), so that one is refused below whatever the
         // channel still holds.
-        if (resolved.binding.resolveSecret) return;
+        if (resolved.binding.resolveSecret) return undefined;
         const asks = [
             flow.type === 'api' ? "`type: 'api'`" : undefined,
             config.triggerType === 'api' ? "start-node `config.triggerType: 'api'`" : undefined,
         ].filter((s): s is string => s !== undefined);
-        throw new Error(
-            `Flow '${flowName}' rejected: it binds the inbound \`api\` trigger (${asks.join(' and ')}) but its ` +
+        const why =
+            `it binds the inbound \`api\` trigger (${asks.join(' and ')}) but its ` +
             `start node declares no \`config.secret\`. An inbound hook is armed only with a per-flow secret that ` +
             `every post is HMAC-verified against (ADR-0041), so this flow could never be armed. Set a non-blank ` +
             `\`config.secret\` on the start node. A flow that is only ever started explicitly and never receives ` +
-            `inbound posts is \`type: 'autolaunched'\`, with no \`triggerType: 'api'\` on its start node.`,
-        );
+            `inbound posts is \`type: 'autolaunched'\`, with no \`triggerType: 'api'\` on its start node.`;
+        // The site is the start node's `config.secret`, the key the author sets
+        // (the flow itself when it has no start node). What was found there is
+        // shown only as a blank string or `null`: a secret that is set clears
+        // this check, so nothing this prints can be one.
+        const startIndex = flow.nodes.findIndex((n) => n.type === 'start');
+        const found = typeof config.secret === 'string' ? config.secret : null;
+        return {
+            message: `Flow '${flowName}' rejected: ${why}`,
+            sites: [{
+                path: startIndex < 0 ? STORED_FLOW_PATH : `${STORED_FLOW_PATH}.nodes[${startIndex}].config.secret`,
+                from: JSON.stringify(found),
+                detail: `${startIndex < 0 ? 'the flow' : `node '${flow.nodes[startIndex]!.id}' (start) at config.secret`}: ${why}`,
+            }],
+        };
     }
 
     /**
@@ -10562,7 +10800,7 @@ export class AutomationEngine implements IAutomationService {
         schema: ConfigSchemaNode,
         value: unknown,
         path: string,
-        violations: string[],
+        violations: UndeclaredConfigKey[],
     ): void {
         if (schema.type === 'array' && schema.items) {
             if (!Array.isArray(value)) return;
@@ -10595,13 +10833,16 @@ export class AutomationEngine implements IAutomationService {
             // a bonus for the cases it does catch.
             const suggestion = nearestName(key, declared);
             const guidance = FLOW_NODE_UNKNOWN_KEY_GUIDANCE[node.type]?.[key];
-            violations.push(
-                `node '${node.id}' (${node.type}): unknown config key \`${key}\` at ${path}.${key}` +
-                (suggestion ? ` — did you mean \`${suggestion}\`?` : '') +
-                ` It is not declared by this node type's configSchema, so nothing reads it.` +
-                ` Declared here: ${declared.join(', ')}.` +
-                (guidance ? ` ${guidance}` : ''),
-            );
+            violations.push({
+                key,
+                at: `${path}.${key}`,
+                line:
+                    `node '${node.id}' (${node.type}): unknown config key \`${key}\` at ${path}.${key}` +
+                    (suggestion ? ` — did you mean \`${suggestion}\`?` : '') +
+                    ` It is not declared by this node type's configSchema, so nothing reads it.` +
+                    ` Declared here: ${declared.join(', ')}.` +
+                    (guidance ? ` ${guidance}` : ''),
+            });
         }
     }
 
@@ -10641,10 +10882,26 @@ export class AutomationEngine implements IAutomationService {
      * in arithmetic) as ADVISORY warnings (logged, never thrown). Flow conditions
      * bind the record's fields flat, so the schema pass uses `flattened` scope.
      * The fatal set is unchanged — a resolver can never break a flow that used to
-     * register cleanly.
+     * register cleanly. `advisory: false` skips that pass: the stored pass
+     * previews refusals ({@link registrationCheckRefusals}), and an advisory
+     * finding is none.
+     *
+     * [#23317] The refusal is returned, not thrown: `registerFlow` throws it.
+     * Each failure is recorded with its site, so the stored pass lists it
+     * where the author wrote it.
      */
-    private validateFlowExpressions(flowName: string, flow: FlowParsed): void {
+    private validateFlowExpressions(
+        flowName: string,
+        flow: FlowParsed,
+        { advisory }: { advisory: boolean },
+    ): RegistrationCheckRefusal | undefined {
         const failures: string[] = [];
+        const sites: RegistrationCheckSite[] = [];
+        /** One failure: its line in the thrown message, and its site for the stored pass. */
+        const refuse = (path: string, where: string, message: string, source: unknown): void => {
+            failures.push(`  • ${where}: ${message}\n      source: \`${source}\``);
+            sites.push({ path, from: JSON.stringify(String(source)), detail: `${where}: ${message}` });
+        };
 
         // Resolve the flow's record-change target object (start node's
         // `config.objectName`) so `record.*`/bare field refs can be checked
@@ -10659,19 +10916,19 @@ export class AutomationEngine implements IAutomationService {
             })()
             : undefined;
 
-        const check = (where: string, raw: unknown, useSchemaHint = true): void => {
+        const check = (path: string, where: string, raw: unknown, useSchemaHint = true): void => {
             if (raw == null) return;
             // Fatal pass — syntax, brace-in-CEL, unknown-function (ADR-0032 §5).
             // Unchanged: matches the CLI build's fatal set exactly.
             const result = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
             for (const e of result.errors) {
-                failures.push(`  • ${where}: ${e.message}\n      source: \`${e.source}\``);
+                refuse(path, where, e.message, e.source);
             }
             // Advisory schema-aware pass — only when the source is syntactically
             // valid (else it would just re-report the fatal error). Everything it
             // finds (field-existence, tier-3 typo, tier-4 type mismatch) is LOGGED,
             // never thrown, so registration behaviour is strictly additive (#1928).
-            if (useSchemaHint && result.errors.length === 0 && schemaHint) {
+            if (advisory && useSchemaHint && result.errors.length === 0 && schemaHint) {
                 const schemaPass = validateExpression('predicate', raw as string | { dialect?: string; source?: string }, schemaHint);
                 for (const issue of [...schemaPass.errors, ...schemaPass.warnings]) {
                     // #6499's separately-argued 14th site — the OPPOSITE cause
@@ -10754,19 +11011,19 @@ export class AutomationEngine implements IAutomationService {
             return { message: verdict.error.issues[0]?.message ?? EVALUATED_EXPRESSION_SOURCE_REQUIRED, source };
         };
 
-        const checkStructuralCondition = (where: string, raw: unknown): void => {
+        const checkStructuralCondition = (path: string, where: string, raw: unknown): void => {
             if (raw == null) return;
             const shapeRefusal = structuralConditionRefusal(raw);
             if (shapeRefusal) {
-                failures.push(`  • ${where}: ${shapeRefusal.message}\n      source: \`${shapeRefusal.source}\``);
+                refuse(path, where, shapeRefusal.message, shapeRefusal.source);
                 return;
             }
             const blankRefusal = evaluatedSourceRefusal(raw);
             if (blankRefusal) {
-                failures.push(`  • ${where}: ${blankRefusal.message}\n      source: \`${blankRefusal.source}\``);
+                refuse(path, where, blankRefusal.message, blankRefusal.source);
                 return;
             }
-            check(where, raw);
+            check(path, where, raw);
         };
 
         // #4347 — every graph in the flow, not just the top-level arrays. An
@@ -10778,10 +11035,11 @@ export class AutomationEngine implements IAutomationService {
         // region so a nested finding says where it is.
         for (const graph of collectFlowGraphs(flow)) {
             const at = graph.scope ? `${graph.scope}: ` : '';
-            for (const node of graph.nodes) {
+            for (const [index, node] of graph.nodes.entries()) {
+                const nodePath = storedGraphMemberPath(graph, 'nodes', index);
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 // start-node trigger gate + decision/branch predicates live in config.condition
-                checkStructuralCondition(`${at}node '${node.id}' (${node.type}) condition`, cfg.condition);
+                checkStructuralCondition(`${nodePath}.config.condition`, `${at}node '${node.id}' (${node.type}) condition`, cfg.condition);
 
                 // [#19939] The value slots' OTHER form — a literal — refused where
                 // it still spells the retired `{…}` template dialect (the C half
@@ -10794,9 +11052,11 @@ export class AutomationEngine implements IAutomationService {
                 // `assignment` node — so a flow that registers is never refused
                 // there, and vice versa.
                 for (const refusal of flowNodeValueTemplateRefusals(node.type, node.config)) {
-                    failures.push(
-                        `  • ${at}node '${node.id}' (${node.type}) ${refusal.label} at config.${refusal.path}: `
-                        + `${refusal.message}\n      source: \`${refusal.source}\``,
+                    refuse(
+                        `${nodePath}.config.${refusal.path}`,
+                        `${at}node '${node.id}' (${node.type}) ${refusal.label} at config.${refusal.path}`,
+                        refusal.message,
+                        refusal.source,
                     );
                 }
 
@@ -10809,14 +11069,15 @@ export class AutomationEngine implements IAutomationService {
                 // hole holding logic or an unknown formatter stops the flow here
                 // instead of throwing at the node mid-run.
                 for (const slot of flowNodeTextSlotSources(node.type, node.config)) {
+                    const slotPath = `${nodePath}.config.${slot.path}`;
                     const slotWhere = `${at}node '${node.id}' (${node.type}) ${slot.label} at config.${slot.path}`;
                     const tokenRefusal = textSlotTemplateRefusal(slot.source);
                     if (tokenRefusal !== undefined) {
-                        failures.push(`  • ${slotWhere}: ${tokenRefusal}\n      source: \`${slot.source}\``);
+                        refuse(slotPath, slotWhere, tokenRefusal, slot.source);
                         continue;
                     }
                     for (const e of validateExpression('template', slot.source).errors) {
-                        failures.push(`  • ${slotWhere}: ${e.message}\n      source: \`${slot.source}\``);
+                        refuse(slotPath, slotWhere, e.message, slot.source);
                     }
                 }
 
@@ -10830,6 +11091,7 @@ export class AutomationEngine implements IAutomationService {
                 // since #19939 retired the single-brace one with the `loop` / `map`
                 // `collection` it recorded.
                 for (const found of resolveFlowNodeExpressions(node.type, node.config)) {
+                    const slotPath = `${nodePath}.config.${found.path}`;
                     const slotWhere =
                         `${at}node '${node.id}' (${node.type}) ${found.entry.label} at config.${found.path}`;
                     // [#15137] `value` slots — the ruled `assignment.assignments.*`
@@ -10847,7 +11109,7 @@ export class AutomationEngine implements IAutomationService {
                     // nothing said at any layer.
                     if (found.entry.role === 'value') {
                         for (const refusal of this.valueEnvelopeRefusals(found.value)) {
-                            failures.push(`  • ${slotWhere}: ${refusal.message}\n      source: \`${refusal.source}\``);
+                            refuse(slotPath, slotWhere, refusal.message, refusal.source);
                         }
                         continue;
                     }
@@ -10875,29 +11137,34 @@ export class AutomationEngine implements IAutomationService {
                     // `edge.condition` before `checkStructuralCondition` does.
                     const shapeRefusal = predicateSlotRefusal(found.value);
                     if (shapeRefusal) {
-                        failures.push(`  • ${slotWhere}: ${shapeRefusal.message}\n      source: \`${shapeRefusal.source}\``);
+                        refuse(slotPath, slotWhere, shapeRefusal.message, shapeRefusal.source);
                         continue;
                     }
                     // No schema hint: a screen's `visibleWhen` binds the screen's OWN
                     // collected values, not the trigger record's fields, so the
                     // field-existence pass would report every field name as unknown.
-                    check(slotWhere, found.value, false);
+                    check(slotPath, slotWhere, found.value, false);
                 }
             }
-            for (const edge of graph.edges) {
-                checkStructuralCondition(`${at}edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition as unknown);
+            for (const [index, edge] of graph.edges.entries()) {
+                checkStructuralCondition(
+                    `${storedGraphMemberPath(graph, 'edges', index)}.condition`,
+                    `${at}edge '${edge.id}' (${edge.source}→${edge.target}) condition`,
+                    edge.condition as unknown,
+                );
             }
         }
 
-        if (failures.length > 0) {
-            throw new Error(
+        if (failures.length === 0) return undefined;
+        return {
+            sites,
+            message:
                 `Flow '${flowName}' has ${failures.length} invalid expression${failures.length > 1 ? 's' : ''} (ADR-0032 §1a). ` +
                 `Predicates — conditions and declared bare-CEL slots such as a screen field's \`visibleWhen\` — ` +
                 `must not wrap references in \`{…}\` template braces, and neither may a value slot (a computed ` +
                 `value is a CEL envelope, the list a \`loop\` or \`map\` iterates included):\n` +
                 `${failures.join('\n')}`,
-            );
-        }
+        };
     }
 
     /**

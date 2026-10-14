@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { flowNodeValueTemplateRefusals } from '../automation/flow-value-slot-template.js';
 import { ObjectSchema } from '../data/object.zod.js';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry.js';
+import { ComponentPropsMap } from '../ui/component.zod.js';
+import { PageSchema } from '../ui/page.zod.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
 import { applyConversions, applyConversionsToFlow } from './apply.js';
 import { REFUSED_STORED_SHAPES } from './refused-shapes.js';
@@ -330,5 +332,102 @@ describe('#23269 — a stored flow whose CRUD filter operand is a {…} token is
       flowNodeValueTemplateRefusals(n.type, n.config).map((r) => `flows[0].nodes[${i + 1}].config.${r.path}`));
     expect(todos.map((t) => t.path)).toEqual(judged);
     expect(judged).toEqual(['flows[0].nodes[1].config.filter.id']);
+  });
+});
+
+// ── #23317 ────────────────────────────────────────────────────────────────
+
+describe('#23317 — a stored page whose component binds the retired API source in its `data` prop is listed by page and component', () => {
+  const PRESCRIPTION = /`view\.data\.provider: 'api'` was removed in @objectstack\/spec 18/;
+  /** The components whose `data` prop is a view data source, as the D3 entry names them. */
+  const VIEW_DATA_COMPONENTS = ['object-grid', 'object-map', 'object-gantt', 'object-tree'] as const;
+  const component = (type: string, data: unknown, id = 'block') => ({ id, type, properties: { objectName: 'crm_case', data } });
+  const pageRow = (components: unknown[], extra: Record<string, unknown> = {}) => ({
+    name: 'partner_page',
+    label: 'Partner',
+    type: 'app',
+    regions: [{ name: 'main', components }],
+    ...extra,
+  });
+
+  it.each(VIEW_DATA_COMPONENTS)('%s: one TODO at the data prop, naming the page and the component, with its fate and the prescription; the row is not rewritten', (type) => {
+    const row = pageRow([component(type, apiData())]);
+    const { item, todos } = storedTodos('page', row);
+    expect(item).toEqual(row);
+    expect(todos.map((t) => [t.conversionId, t.path])).toEqual([
+      ['view-data-api-provider-retired', 'pages[0].regions[0].components[0].properties.data'],
+    ]);
+    const todo = todos[0]!;
+    expect(todo.reason).toContain(`The \`${type}\` component \`block\` of page \`partner_page\`, at pages[0].regions[0].components[0], binds the retired view-level API data source.`);
+    expect(todo.reason).toMatch(/No mechanical move: the successor is a page component's `dataSource` binding/);
+    expect(todo.reason).toMatch(/Left as stored, the page still loads and saves, because the page parse does not judge a component's properties/);
+    expect(todo.reason).toMatch(PRESCRIPTION);
+  });
+
+  it('reaches a component nested in another component and a component in a slot', () => {
+    const row = pageRow(
+      [{ id: 'tabs', type: 'page:tabs', properties: { items: [{ label: 'Cases', children: [component('object-grid', apiData(), 'inner')] }] } }],
+      { slots: { details: component('object-tree', apiData(), 'slotted') } },
+    );
+    const { todos } = storedTodos('page', row);
+    expect(todos.map((t) => t.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.items[0].children[0].properties.data',
+      'pages[0].slots.details.properties.data',
+    ]);
+  });
+
+  it('never prints a credential: the URL and the method are shown, every other request key is withheld', () => {
+    const { todos } = storedTodos('page', pageRow([component('object-grid', apiData())]));
+    const todo = todos[0]!;
+    expect(JSON.parse(todo.from)).toEqual({
+      provider: 'api',
+      read: { url: 'https://partner.example.com/cases', method: 'GET', headers: '[withheld]' },
+      write: { url: '/api/v1/cases', method: 'POST' },
+    });
+    expect(`${todo.from} ${todo.reason} ${todo.message}`).not.toContain('s3cr3t');
+  });
+
+  it.each([
+    ['the `object` provider', component('object-grid', { provider: 'object', object: 'crm_case' })],
+    ['the `value` provider', component('object-map', { provider: 'value', items: [{ name: 'a' }] })],
+    ['a component whose `data` is a row array, not a view data source', component('object-kanban', apiData())],
+    ['a type with no props row', component('custom:partner-widget', apiData())],
+    ['the governed element binding on the component itself', {
+      id: 'block', type: 'object-grid', properties: { objectName: 'crm_case' }, dataSource: { provider: API, read: { url: '/api/v1/cases' } },
+    }],
+  ])('not listed: %s', (_label, node) => {
+    const row = pageRow([node]);
+    const { item, todos } = storedTodos('page', row);
+    expect(item).toEqual(row);
+    expect(todos).toEqual([]);
+  });
+
+  it('agrees with the refusing door: the listed components are exactly the props rows whose `data` refuses the binding with the prescription', () => {
+    const listed = Object.keys(ComponentPropsMap).filter((type) => storedTodos('page', pageRow([component(type, apiData())])).todos.length > 0);
+    expect(listed).toEqual([...VIEW_DATA_COMPONENTS]);
+    for (const type of Object.keys(ComponentPropsMap)) {
+      const verdict = (ComponentPropsMap as Record<string, { safeParse(v: unknown): { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } }>)[type]!
+        .safeParse({ objectName: 'crm_case', data: apiData() });
+      const refusedWithPrescription = !verdict.success
+        && verdict.error!.issues.some((i) => i.path[0] === 'data' && PRESCRIPTION.test(i.message));
+      expect(refusedWithPrescription, type).toBe((VIEW_DATA_COMPONENTS as readonly string[]).includes(type));
+    }
+  });
+
+  it('the fate it states holds: the page parse accepts the page, and the component props row refuses the binding', () => {
+    const row = pageRow(VIEW_DATA_COMPONENTS.map((type, i) => component(type, apiData(), `b${i}`)));
+    expect(PageSchema.safeParse(row).success).toBe(true);
+    for (const type of VIEW_DATA_COMPONENTS) {
+      expect(ComponentPropsMap[type].safeParse({ objectName: 'crm_case', data: apiData() }).success, type).toBe(false);
+    }
+  });
+
+  it('the D3 entry and the detector name the components the detector lists', () => {
+    const entry = MIGRATIONS_BY_MAJOR[18]?.semantic.find((s) => s.id === 'view-data-api-provider-retired');
+    const detector = REFUSED_STORED_SHAPES.find((r) => r.id === 'view-data-api-provider-retired');
+    for (const type of VIEW_DATA_COMPONENTS) {
+      expect(entry?.surface, type).toContain(`\`${type}\``);
+      expect(detector?.surface, type).toContain(type);
+    }
   });
 });

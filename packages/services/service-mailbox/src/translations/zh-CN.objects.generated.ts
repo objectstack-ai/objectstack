@@ -34,6 +34,22 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       owner_user_id: {
         label: "所有者",
         help: "拥有此邮箱的用户。所有者可以读取到达此邮箱的每一封邮件,包括未关联的邮件。"
+      },
+      imap_folder: {
+        label: "同步文件夹",
+        help: "同步游标所属的 IMAP 文件夹。邮箱改从其他文件夹同步时,游标从头开始。"
+      },
+      imap_uid_validity: {
+        label: "UIDVALIDITY",
+        help: "游标所依据的文件夹 UIDVALIDITY。服务器报告其他值时,其 UID 指向其他邮件,游标从头开始。"
+      },
+      imap_last_uid: {
+        label: "最后同步的 UID",
+        help: "已交给接收处理的文件夹最高 UID(已存储、已存在、已抑制或已跳过)。下次同步获取高于它的 UID。"
+      },
+      imap_synced_at: {
+        label: "最后同步时间",
+        help: "同步最近一次完成对该文件夹的一轮读取的时间。"
       }
     }
   },

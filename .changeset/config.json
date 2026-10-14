@@ -52,6 +52,7 @@
       "@objectstack/trigger-record-change",
       "@objectstack/trigger-api",
       "@objectstack/trigger-schedule",
+      "@objectstack/connector-imap",
       "@objectstack/connector-mcp",
       "@objectstack/connector-rest",
       "@objectstack/connector-slack",
