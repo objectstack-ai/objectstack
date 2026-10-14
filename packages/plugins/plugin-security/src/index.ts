@@ -70,22 +70,6 @@ export type {
   CollisionReportSink,
   PermissionSetNameCollisionDiagnostic,
 } from './permission-set-name-collision.js';
-// [ADR-0094] sys_permission_set pure-projection machinery.
-export {
-  permissionSetRowFields,
-  permissionSetBodyFromRow,
-  upsertEnvPermissionSet,
-  projectPermissionMutation,
-  registerPermissionSetProjection,
-  createPermissionSetWriteThrough,
-  reconcilePermissionSetProjection,
-} from './permission-set-projection.js';
-export type {
-  PermissionSeedOutcome,
-  ProjectionDeps,
-  ProjectionReconcileOutcome,
-  WriteThroughDeps,
-} from './permission-set-projection.js';
 export { cleanupPackagePermissions } from './cleanup-package-permissions.js';
 export type { PackagePermissionCleanupOutcome } from './cleanup-package-permissions.js';
 export { objectPostureGate, registerObjectPostureGate } from './object-posture-gate.js';
@@ -138,7 +122,8 @@ export type {
 } from './packaged-permission-set-lock.js';
 // [commit 5619aace3 — maintainer ruling 2026-08-25, option B] The lock's METADATA-door
 // registration: the pre-persistence authoring-gate seam consults the SAME
-// classifier and throws the SAME error classes as the data door above.
+// classifier and throws the SAME error classes exported above. Since C3 stage 8
+// retired the `sys_permission_set` data door, it is the lock's one door.
 export { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
 export type { PermissionSetLockGateContext } from './packaged-permission-set-lock-gate.js';
 export {

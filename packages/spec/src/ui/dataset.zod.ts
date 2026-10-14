@@ -283,6 +283,9 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * and this docblock and the `describe` beneath it both said so.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `b9814b334`, re-read there 2026-10-14:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At

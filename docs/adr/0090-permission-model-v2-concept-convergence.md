@@ -3,6 +3,7 @@
 **Status**: Accepted (2026-07-09)
 · **Amended** (2026-10-13, ADR-0138 D3/D4) — D9's `guest` anchor bindings resolve for anonymous requests, in the organization ADR-0138 D4 resolves; an empty set denies all.
 · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13) — two of the row objects D3 renames into, `sys_position` and `sys_position_permission_set`, and the `sys_capability` D5 names, are retired by #15204 stage 8 (`66949b7729`, 2026-10-13): a position is a metadata-registry definition that names its sets in `PositionSchema.permissionSets`; `sys_user_position` stays. See the notes under D3, D5 and D8.
+· **Amended** (2026-10-14, ruling of record 6159300530 on #23268, letter A) — D11's external org-wide default is retired: external visibility is the [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) `EXTERNAL` rung, explicitly shared rows only. See the note under D11.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing verification),
@@ -477,6 +478,17 @@ alias tax on every API.
 > Ruling: director seat, batch #195 item 2, maintainer 「同意」 2026-09-20 — letter **C**.
 
 ### D11 — OWD gains an external dimension (`externalSharingModel`)
+
+> **Amended 2026-10-14 (ruling of record 6159300530 on #23268, letter A — the maintainer's 「23268
+> 同意」).** External visibility is [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md)
+> / [ADR-0099](./0099-posture-adjudicated-tiering-and-external-rung.md)'s `EXTERNAL` rung —
+> explicitly shared rows only, never OWD-derived — so `externalSharingModel` is retired (ADR-0049
+> enforce-or-remove; the schema refuses it with "delete the key"), and when a portal or partner
+> line is built, external principals reach rows through explicit shares, relationship-based grants
+> (a sharing set: the records related to the principal's account or contact — Salesforce's
+> sharing sets, Power Pages' table-permission scopes) and share links, drawn from an identity pool
+> separate from members (the pool below is kept). The bullets that follow record the decision as
+> taken; read their `externalSharingModel` and external-OWD clauses as superseded by this note.
 
 Portal and partner scenarios need the Salesforce insight: internal and external record baselines
 are **two different dials, and external must never be wider**. Decision:

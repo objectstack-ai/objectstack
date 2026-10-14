@@ -404,7 +404,7 @@ the only trace is a server-side `WARN` naming the object, the field, and both re
 
 ## 5. Sharing Rules & Organization-Wide Defaults
 
-The baseline visibility of an object is set by its **Organization-Wide Default (OWD)** — the `sharingModel` field on the object (`packages/spec/src/data/object.zod.ts`), one of the four canonical values `private`, `public_read`, `public_read_write`, `controlled_by_parent` (ADR-0090 D4 — the legacy aliases `read`/`read_write`/`full` were **removed from the enum**; authoring rejects them). A custom object with no declared `sharingModel` resolves to **`private`** (ADR-0090 D1 — the unset state no longer means public). An optional `externalSharingModel` (same enum, default `private`, never wider than the internal value) is the stricter dial for external portal/partner principals (ADR-0090 D11). **Sharing rules** then grant *additional* access on top of that baseline — sharing only ever widens, RLS only ever narrows.
+The baseline visibility of an object is set by its **Organization-Wide Default (OWD)** — the `sharingModel` field on the object (`packages/spec/src/data/object.zod.ts`), one of the four canonical values `private`, `public_read`, `public_read_write`, `controlled_by_parent` (ADR-0090 D4 — the legacy aliases `read`/`read_write`/`full` were **removed from the enum**; authoring rejects them). A custom object with no declared `sharingModel` resolves to **`private`** (ADR-0090 D1 — the unset state no longer means public). There is no separate external default: an external portal/partner principal reaches explicitly shared rows only (ADR-0095). **Sharing rules** then grant *additional* access on top of that baseline — sharing only ever widens, RLS only ever narrows.
 
 ```yaml
 # account.object.yml

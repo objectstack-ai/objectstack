@@ -704,7 +704,7 @@ const SECURITY_OWD_ALIAS_EXPLANATION: RuleExplanation = {
       'on the read path.',
     '\'public\' is not an OWD value and never was, so nothing retired it: it is legal on the ' +
       'neighbouring keys \'access\' (its \'default\') and \'publicSharing\' (its \'allowedAudiences\'), ' +
-      'just not on \'sharingModel\' or \'externalSharingModel\'. Its fix-it offers \'public_read_write\'.',
+      'just not on \'sharingModel\'. Its fix-it offers \'public_read_write\'.',
     'The parsed doors refuse these values at the schema enum before this rule runs; it reaches the ' +
       'unparsed ones — `os lint` on a raw config, a direct call of the rule.',
   ],

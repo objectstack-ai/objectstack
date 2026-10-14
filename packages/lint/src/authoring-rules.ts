@@ -1948,6 +1948,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    corresponds to no lint rule at all, so it is not coverage in the other
   //    direction either. Twelve rules were enforced at no runtime door while
   //    this field said they were.
+  //    (#23268 since retired the key and that rule with it: the gate no longer
+  //    reads `externalSharingModel`, and this block no longer carries the id.)
   //  - DOUBLE-REPORTING. It cannot happen, and not by luck: `saveMetaItem` runs
   //    `assertRuntimeAuthoringRules` (this table, 422 `invalid_metadata`) BEFORE
   //    `runAuthoringGate` (the ADR-0094 gate, 403 `owd_external_wider`), and
@@ -1996,7 +1998,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // entry; the split is what let each half cross on its own evidence, and it
   // stays split for that reason rather than being folded back.
   //
-  // This entry remains the rest of the D7 block (14 rule ids) as ONE
+  // This entry remains the rest of the D7 block (13 rule ids since #23268) as ONE
   // registration, not a per-rule split: the baseline/candidate differential is
   // what keeps a write of one declared type from leaking the other rules'
   // whole-stack findings — every finding derived from a sibling collection is

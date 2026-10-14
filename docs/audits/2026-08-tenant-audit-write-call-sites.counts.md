@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 228 |
-| Object name statically decidable | 155 |
+| Write call sites | 227 |
+| Object name statically decidable | 154 |
 | Object name chosen at run time | 73 |
 | Against a tenancy-enabled object | 153 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 167 |
+| Threading a tenant context | 166 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 121 |
+| Threading a decidably elevated context | 122 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 99 |
+| Threading a context of undecidable elevation | 97 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-14 at `5d4205c6b`.
+Measured on 2026-10-14 at `f98ac45c5`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 652 |
-| engine-shaped types recognised | 75 |
+| tracked non-test sources scanned | 650 |
+| engine-shaped types recognised | 76 |
 | declared objects in the registry | 116 |
-| same-named calls subtracted as non-engine | 163 |
+| same-named calls subtracted as non-engine | 164 |
 
 ## Every site
 
@@ -136,6 +136,8 @@ Measured on 2026-10-14 at `5d4205c6b`.
 | `packages/plugins/plugin-auth/src/default-organization-invariant.ts` | `insert` | `sys_organization` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-backfill-ledger.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/membership-ended-session.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 2 |
@@ -161,9 +163,6 @@ Measured on 2026-10-14 at `5d4205c6b`.
 | `packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-security/src/grant-permission-set-name-backfill.ts` | `update` | `GRANT_OBJECT` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
-| `packages/plugins/plugin-security/src/permission-set-projection.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-security/src/permission-set-projection.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-security/src/permission-set-projection.ts` | `delete` | `sys_permission_set` | undeclared-name | elevated | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 3 |

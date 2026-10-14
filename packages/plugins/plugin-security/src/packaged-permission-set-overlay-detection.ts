@@ -32,7 +32,7 @@
  *
  * ## ⛔ It does not consult `customized`, and that is measured, not stylistic
  *
- * `upsertEnvPermissionSet` computes the flag as
+ * The retired projector (`upsertEnvPermissionSet`, C3 stage 7a) computed the flag as
  * `existing.managed_by === 'package' ? !!customized : false`. On the exact
  * field-reported shape — a genuinely package-declared set whose row's
  * `managed_by` predates provenance tracking (`permission-set-drift.ts`'s
@@ -49,10 +49,8 @@
  * ## Scope, stated rather than assumed
  *
  *  - ENV-WIDE overlays only (`sys_metadata.organization_id IS NULL`), the same
- *    boundary `reconcilePermissionSetProjection` and `permission-set-drift.ts`
- *    draw (#10103 residue, deliberately out of scope). A reading that answered
- *    a different question from the reconciler it reports on would send an
- *    operator to a row the reconciler never touches;
+ *    boundary the retired reconciler (`reconcilePermissionSetProjection`) and
+ *    drift diagnostic drew (#10103 residue, deliberately out of scope);
  *  - "package-declared" is decided by {@link classifyPackagedPermissionSet} —
  *    the engine SchemaRegistry, the same source the write-door lock uses, so
  *    the reading and the lock can never disagree about which sets are locked;
@@ -65,15 +63,28 @@
  *    silent fork, which is why the LOCK's provenance read is not a page at all.
  */
 
-import { tryFind, type ProjectionLogger } from './permission-set-projection.js';
 import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
+import { seedCtx } from './organization-scope.js';
 
 /**
- * Page cap for the `sys_metadata` overlay sweep — the same value
- * `reconcilePermissionSetProjection` and `computePermissionSetDriftDiagnostics`
- * use for the identical read. Shared deliberately: three readings of the same
- * rows answering under three different caps would disagree about the same
- * environment.
+ * One environment-wide page of `object`, read as the system. A read that
+ * throws answers `[]`: this module is a diagnostic READING run at boot, and a
+ * reading that could fail the boot would be worse than the fork it reports, so
+ * a refused read is a reading of nothing. ⛔ Never use this where `[]` is read
+ * as "gone" — a write door that must tell an outage from an absence asks the
+ * error's type instead.
+ */
+async function tryFind(ql: any, object: string, where: any, limit: number): Promise<any[]> {
+  try {
+    const rows = await ql.find(object, { where, limit }, { context: seedCtx() });
+    return Array.isArray(rows) ? rows : [];
+  } catch { return []; }
+}
+
+/**
+ * Page cap for the `sys_metadata` overlay sweep — the value the retired
+ * reconciler and drift diagnostic used for the identical read, kept so this
+ * reading answers under the cap it always has.
  */
 export const OVERLAY_PAGE_LIMIT = 1000;
 
@@ -96,7 +107,8 @@ export interface PackagedPermissionSetOverlayReading {
 }
 
 export interface OverlayDetectionOptions {
-  logger?: ProjectionLogger;
+  /** Where {@link reportPackagedPermissionSetOverlays} reports a non-empty reading. */
+  logger?: { warn: (m: string, meta?: Record<string, any>) => void };
 }
 
 /**

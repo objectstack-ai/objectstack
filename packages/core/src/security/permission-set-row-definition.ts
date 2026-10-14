@@ -12,12 +12,12 @@
  * the dual source ADR-0131 D10 retires.
  *
  * The function is pure: one row in, one body out — no engine, no I/O. It is
- * the logic the security plugin's boot backfill applies today
- * (`permissionSetBodyFromRow`), held here so the ceremony and that plugin read
- * one mapping; the plugin's copy is deleted when its boot module is.
+ * the logic the security plugin's boot backfill applied
+ * (`permissionSetBodyFromRow`) until C3 stage 7a deleted it, held here as the
+ * one mapping the ceremony reads.
  *
- * The mapping is the inverse of the row shape the security plugin projects a
- * definition into: the snake_case facet columns, stored as JSON text, become
+ * The mapping is the inverse of the row shape the security plugin projected a
+ * definition into until then: the snake_case facet columns, stored as JSON text, become
  * the camelCase body keys —
  *
  *  - `name` → `name`; `label` → `label`, falling back to the name when the

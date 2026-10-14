@@ -35,7 +35,11 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
-import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
+import {
+  ON_SUCCESS_EXECUTORS,
+  onSuccessBesideExecutorRefusal,
+  onSuccessBesideUpdateOperationRefusal,
+} from './action-on-success-executor';
 import { navigationTargetRefusal } from './navigation-target';
 
 /**
@@ -1251,9 +1255,12 @@ const actionObject = () => strictObject({
    * The maintainer's 2026-08-06 ruling on #5777 took direction A (a separate
    * key, no same-name union), so this key keeps ONE meaning and the object form
    * is REFUSED here — with a message that names `bodyExtra` rather than the
-   * bare "expected array, received object" an author cannot act on. Sources
-   * still carrying the object form are rewritten at load by the
-   * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2).
+   * bare "expected array, received object" an author cannot act on. The
+   * `inline-action-api-params-to-body-extra` conversion (ADR-0087 D2) rewrote
+   * the object form at load for protocol 17's window; retired from the load
+   * path at 18, it now rewrites only data at rest (stored rows, artifacts
+   * inside the ingestion window, `os migrate meta`), so an authored object
+   * form meets this refusal.
    *
    * **The api prescription is not universal, which #6828 measured and the
    * maintainer's 2026-08-10 ruling closed.** On a `type:'url'` action the
@@ -1288,11 +1295,13 @@ const actionObject = () => strictObject({
         && typeof iss.input === 'object'
         && !Array.isArray(iss.input)
         ? "`params` is the parameter DEFINITION array (fields collected from the user before the action runs), not a values map. "
-          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead. "
+          + "For a `type:'api'` action's static request body — including `{{page.<var>}}` tokens — use `bodyExtra: { … }` instead; "
+          + "the loader rewrote that object form to `bodyExtra` on an inline page button until @objectstack/spec 18, which refuses it (ADR-0087 D2). "
           + "For a `type:'url'` action there is nowhere to move it to, by decision: put static values straight into the `target` string "
           + "(`${param.X}` interpolates a value collected by the params dialog, `${ctx.X}` one from the action context), and open a new tab with "
           + "`openIn: 'new-tab'`. The url-side readings of an object `params` — a static `${param.X}` scope, and `params.newTab` — are RETIRED, not renamed. "
-          + 'Expected an array of ActionParam, received an object.'
+          + 'Expected an array of ActionParam, received an object. '
+          + 'Run `os migrate meta --from 16` to list the mechanical edits for the inline `element:button` action case; `--write` applies the ones it can prove, and a registered action keeps its object form until you move it by hand.'
         : undefined
     ),
   }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
@@ -1374,6 +1383,9 @@ const actionObject = () => strictObject({
    *
    * Liveness: the ledger row was `planned` until the console reader landed,
    * and it is `live` from the pin this repo builds against (`.objectui-sha` =
+   * `b9814b334`, re-read there 2026-10-14:
+   * every objectui file this record cites is byte-identical across the hop from
+   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:
    * every objectui file this record cites is byte-identical across the hop from
    * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
@@ -1885,10 +1897,9 @@ const DECLARATIVE_UPDATE_REFUSED_KEYS: ReadonlyArray<readonly [key: string, why:
   ['recordIdField',
     "`recordIdField` seeds `recordIdParam` — an `operation: 'update'` action binds the current record from "
     + 'the invocation context and injects nothing. Drop `recordIdField`.'],
-  ['onSuccess',
-    "`onSuccess` is not defined for an `operation: 'update'` action yet — its `${result.*}` scope is a "
-    + "handler's return value, and a declarative update has no handler. Drop it; post-success navigation "
-    + 'for the declarative write is a spec proposal, not a silent key.'],
+  // One text with the page action rows' refusal of the same pairing
+  // (`action-on-success-executor.ts`).
+  ['onSuccess', onSuccessBesideUpdateOperationRefusal("An `operation: 'update'` action's `onSuccess`")],
   ['outcomeMessages',
     "`outcomeMessages` picks success copy by the `outcome` a handler returns — an `operation: 'update'` "
     + 'action has no handler: the platform performs the write and reports no outcome, so no entry could '

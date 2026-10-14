@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { ExecutionContextSchema, SEED_WRITE_EXECUTION_CONTEXT } from './execution-context.zod';
+import {
+  ExecutionContextSchema,
+  SEED_WRITE_EXECUTION_CONTEXT,
+  AuthGateCodeSchema,
+  AuthGateScopeSchema,
+  AUTH_GATE_SCOPES,
+} from './execution-context.zod';
 import { EXPORT_ENTRY_POINTS, exportNamesOf, holdersOf } from '../../scripts/lib/export-origins-testkit';
 
 describe('ExecutionContextSchema', () => {
@@ -110,7 +116,32 @@ describe('ExecutionContextSchema.authGate — the ADR-0069 gate posture is a dec
     const issue = res.success
       ? undefined
       : res.error.issues.find((i) => i.path.join('.') === 'authGate.code');
-    expect(issue?.code).toBe('invalid_type');
+    expect(issue).toBeDefined();
+  });
+
+  // [#23287, ruling C′ item 1] The posture codes are a CLOSED vocabulary: a
+  // code outside it is refused at the declaration, so no producer can mint a
+  // posture whose scope nobody declared.
+  it('REJECTS a code outside the closed posture vocabulary', () => {
+    const res = ExecutionContextSchema.safeParse({
+      userId: 'u1',
+      authGate: { code: 'ACCOUNT_SUSPENDED', message: 'blocked' },
+    });
+    expect(res.success).toBe(false);
+    const issue = res.success
+      ? undefined
+      : res.error.issues.find((i) => i.path.join('.') === 'authGate.code');
+    expect(issue?.code).toBe('invalid_value');
+  });
+
+  it('accepts every member of the closed vocabulary, the forced reset included', () => {
+    for (const code of AuthGateCodeSchema.options) {
+      const res = ExecutionContextSchema.safeParse({ userId: 'u1', authGate: { code, message: 'm' } });
+      expect(res.success, code).toBe(true);
+    }
+    expect([...AuthGateCodeSchema.options].sort()).toEqual(
+      ['MFA_REQUIRED', 'PASSWORD_EXPIRED', 'PASSWORD_RESET_REQUIRED'],
+    );
   });
 
   // Same lesson as #6881 above, applied at the moment the row is ADDED rather
@@ -139,6 +170,33 @@ describe('ExecutionContextSchema.authGate — the ADR-0069 gate posture is a dec
     it('states the server-constructed provenance', () => {
       expect(description).toMatch(/server-constructed|never client-supplied/i);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#23287, ruling C′ items 1 and 2] Each posture code declares ONE scope, in
+// one table beside the codes. The API-key admission seam reads it: an
+// `account` posture holds every credential of the user (the key is refused
+// with the session's code), a `credential` posture holds password sign-in only.
+// ---------------------------------------------------------------------------
+describe('AUTH_GATE_SCOPES — each posture code declares its scope', () => {
+  it('is total over the closed vocabulary and names only declared scopes', () => {
+    expect(Object.keys(AUTH_GATE_SCOPES).sort()).toEqual([...AuthGateCodeSchema.options].sort());
+    for (const scope of Object.values(AUTH_GATE_SCOPES)) {
+      expect(AuthGateScopeSchema.options).toContain(scope);
+    }
+  });
+
+  it('holds the account for enforced MFA, and password sign-in alone for expiry and the forced reset', () => {
+    expect(AUTH_GATE_SCOPES).toEqual({
+      MFA_REQUIRED: 'account',
+      PASSWORD_EXPIRED: 'credential',
+      PASSWORD_RESET_REQUIRED: 'credential',
+    });
+  });
+
+  it('is frozen, so no consumer can re-scope a code at runtime', () => {
+    expect(Object.isFrozen(AUTH_GATE_SCOPES)).toBe(true);
   });
 });
 

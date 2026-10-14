@@ -1163,8 +1163,8 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // rows for either type in-repo at rollback.
   //
   // Blast radius, measured while landing commit ee58392e1: plugin-security's ADR-0094
-  // write-through (`permission-set-projection.ts`) routes data-door edits of
-  // permission sets into `saveMetaItem`. Runtime-created sets — including
+  // write-through (`permission-set-projection.ts`, retired with C3 stage 7a)
+  // routed data-door edits of permission sets into `saveMetaItem`. Runtime-created sets — including
   // package-bound rows MATERIALIZED through the metadata door, whose
   // provenance is `sys_metadata`, not an artifact — ride `allowRuntimeCreate`
   // (still `true`) and keep working; a data-door edit of a CODE-DECLARED

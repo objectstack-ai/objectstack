@@ -1,5 +1,16 @@
 # @objectstack/http-conformance
 
+## 0.1.8-next.1
+
+### Patch Changes
+
+- Updated dependencies [66949b7]
+- Updated dependencies [87e902d]
+- Updated dependencies [ed03834]
+- Updated dependencies [b4d573a]
+- Updated dependencies [37510aa]
+  - @objectstack/core@18.0.0-next.1
+
 ## 0.1.8-next.0
 
 ### Patch Changes

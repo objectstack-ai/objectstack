@@ -84,7 +84,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_user_position: {
     label: "Puesto de usuario",
     pluralLabel: "Puestos de usuario",
-    description: "Asigna un puesto (sys_position.name) a un usuario. Gestionado por la plataforma (ADR-0057 D4, ADR-0090 D3).",
+    description: "Asigna un puesto, por nombre, a un usuario. Gestionado por la plataforma (ADR-0057 D4, ADR-0090 D3).",
     fields: {
       id: {
         label: "ID de asignación",
@@ -100,7 +100,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       position: {
         label: "Puesto",
-        help: "Nombre de máquina del puesto (referencia a sys_position.name)."
+        help: "Nombre de máquina del puesto, resuelto en el catálogo de seguridad."
       },
       business_unit_id: {
         label: "Unidad de negocio",

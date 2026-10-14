@@ -262,6 +262,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.app-package-id-key.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.audit-field-governance.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3342,31 +3347,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/packaged-permission-set-restore-leg.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3383,21 +3363,6 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/permission-set-active.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-duplicate-name-refusal.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-duplicate-name-refusal.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/plugins/plugin-security/src/permission-set-projection.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

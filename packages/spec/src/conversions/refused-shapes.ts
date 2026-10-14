@@ -35,7 +35,9 @@
  *   `controlled_by_parent` refinement's
  *   ({@link controlledByParentMasterRefusal}), `ViewDataSchema`'s parse — for
  *   a page component, through the component's own props row, which the
- *   component-props gate parses — and the value-slot judge
+ *   component-props gate parses and whose verdict on this one retirement the
+ *   page parse shares (`checkPageComponentViewData`, #23357) — and the
+ *   value-slot judge
  *   `AutomationEngine.registerFlow` and `objectstack validate` run
  *   ({@link flowNodeValueTemplateRefusals}). A site is listed here exactly
  *   when that door refuses it.
@@ -205,13 +207,18 @@ interface SafeParseable {
  * when that refusal is this retirement's — `undefined` otherwise (#23317).
  *
  * The page parse leaves a component's `properties` an open record; the door
- * that judges them is the component-props gate, which parses the bag against
+ * that judges the bag is the component-props gate, which parses it against
  * the type's `ComponentPropsMap` row. So the judge here is that row's own
  * `data` member, and the site is listed only when it refuses the binding with
  * the prescription `ViewDataSchema` refuses it with. That holds for every
  * component whose `data` is a view data source and for no other, without a
  * list of types to keep in step: a row whose `data` is a bare array refuses
  * the binding for its shape, never with this prescription.
+ *
+ * Since #23357 the page parse refuses this one binding too
+ * (`checkPageComponentViewData`, `ui/page.zod.ts`), on the same four types and
+ * with the same prescription, so a listed site is refused at the save door as
+ * well; `refused-shapes.test.ts` pins the two judges to one set of types.
  */
 function componentApiBindingRefusal(type: unknown, data: unknown): string | undefined {
   const prescription = apiBindingRefusal(data);
@@ -237,10 +244,11 @@ const VIEW_API_BINDING_FATE =
 const COMPONENT_API_BINDING_FATE =
   'No mechanical move: the successor is a page component\'s `dataSource` binding, which takes a same-origin '
   + '`url` and no other request key, so the request cannot be carried over as written; and deleting `data` '
-  + 'would make the component query its object instead and change what it shows. Left as stored, the page '
-  + 'still loads and saves, because the page parse does not judge a component\'s properties, while '
-  + '`os validate`, `os build` and `os lint` refuse the binding in source. Decide what the component binds now, '
-  + 'and which same-origin endpoint, if any, replaces the request.';
+  + 'would make the component query its object instead and change what it shows. Left as stored, the parse '
+  + 'refuses the page: it still loads and is served, registered under `[metadata_spec_invalid]` with the '
+  + 'refusal in the `_diagnostics` of every read, and its next save through the Studio, REST or MCP is refused '
+  + 'with 422, as `os validate`, `os build` and `os lint` refuse the binding in source. Decide what the component '
+  + 'binds now, and which same-origin endpoint, if any, replaces the request.';
 
 const viewDataApiProvider: RefusedStoredShape = {
   id: 'view-data-api-provider-retired',

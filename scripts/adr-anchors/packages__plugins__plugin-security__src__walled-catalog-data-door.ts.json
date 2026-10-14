@@ -1,7 +1,0 @@
-{
-  "file": "packages/plugins/plugin-security/src/walled-catalog-data-door.ts",
-  "adrs": [
-    "ADR-0131"
-  ],
-  "invariant": "Under a walled posture (`group` / `isolated`) the security catalog — positions, permission sets, capabilities — is environment-level and every organization resolves it by name, so a data-door create, update or delete of a catalog row is the platform operator's alone (ADR-0131 D3: tenants are refused creation and may only assign). Assignment rows are never judged here; `single` is inert."
-}

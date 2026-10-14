@@ -790,7 +790,8 @@ describe('#19542 — group C: wired, dispatched, and silent by ledger (email_tem
     // Without this the two zeros above would be unreadable: a silent rule and
     // an unresolvable ledger directory look identical from the outside. This
     // asks `lintLivenessProperties` the one question whose answer is non-empty
-    // today (`object.externalSharingModel` is `authorWarn` in tree), so the
+    // today (`object.externalSharingModel` warns in tree — a `dead` tombstone
+    // row since #23268), so the
     // zeros are attributable to the empty warn maps and to nothing else.
     const findings = lintLivenessProperties({
       objects: [{ name: 'acme_invoice', externalSharingModel: 'read' }],

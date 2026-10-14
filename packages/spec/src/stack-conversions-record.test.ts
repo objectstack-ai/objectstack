@@ -45,12 +45,15 @@ afterEach(() => {
 });
 
 /**
- * A stack with one `page:header` component whose second line is authored
- * under `headerKey` — `description` is the alias the live conversion
- * `page-header-subtitle-alias` rewrites to `subtitle`; `subtitle` is canonical.
+ * A stack with one `page:header` component whose visibility predicate is
+ * authored under `headerKey` — `visibility` is the alias the live conversion
+ * `page-component-visibility-to-visibleWhen` rewrites to `visibleWhen`;
+ * `visibleWhen` is canonical. (The vehicle used to be the header's
+ * `description` → `subtitle` alias, until that conversion retired from the
+ * load path at 18 — any live page conversion carries what is pinned here.)
  * No standalone actions, so the same built stack can be composed twice.
  */
-const source = (ns: string, headerKey: 'description' | 'subtitle', pageKind: 'jsx' | 'html' = 'html') => ({
+const source = (ns: string, headerKey: 'visibility' | 'visibleWhen', pageKind: 'jsx' | 'html' = 'html') => ({
   manifest: { id: `com.example.${ns}`, name: ns, version: '1.0.0', type: 'app' as const, namespace: ns },
   objects: [{ name: `${ns}_thing`, label: 'Thing', fields: { title: { type: 'text' as const, label: 'Title' } } }],
   pages: [
@@ -60,7 +63,7 @@ const source = (ns: string, headerKey: 'description' | 'subtitle', pageKind: 'js
       regions: [
         {
           name: 'main',
-          components: [{ type: 'page:header', properties: { title: 'Things', [headerKey]: 'All things' } }],
+          components: [{ type: 'page:header', properties: { title: 'Things' }, [headerKey]: "page.mode != 'edit'" }],
         },
       ],
     },
@@ -68,7 +71,7 @@ const source = (ns: string, headerKey: 'description' | 'subtitle', pageKind: 'js
   ],
 });
 
-const HEADER_PATH = 'pages[0].regions[0].components[0].properties.subtitle';
+const HEADER_PATH = 'pages[0].regions[0].components[0].visibleWhen';
 
 /** The substance a door publishes per entry: identity, site, direction, expiry. */
 const substance = (n: ConversionNotice) => ({
@@ -82,11 +85,11 @@ const substance = (n: ConversionNotice) => ({
 
 const HEADER_NOTICE = {
   code: CONVERSION_NOTICE_CODE,
-  conversionId: 'page-header-subtitle-alias',
+  conversionId: 'page-component-visibility-to-visibleWhen',
   path: HEADER_PATH,
-  from: 'description',
-  to: 'subtitle',
-  retiresIn: 18,
+  from: 'visibility',
+  to: 'visibleWhen',
+  retiresIn: 16,
 };
 
 const KIND_NOTICE = {
@@ -102,7 +105,7 @@ const quiet = () => vi.spyOn(console, 'warn').mockImplementation(() => {});
 describe('defineStack records the conversions it applied', () => {
   it('strict: the one conversion, whole, as the conversion layer emitted it', () => {
     quiet();
-    const built = defineStack(source('aa', 'description') as never);
+    const built = defineStack(source('aa', 'visibility') as never);
     const record = stackConversionsOf(built);
     expect(record.map(substance)).toEqual([HEADER_NOTICE]);
     // The element IS the `ConversionNotice` the doors' `conversions` field
@@ -111,21 +114,22 @@ describe('defineStack records the conversions it applied', () => {
       ['code', 'conversionId', 'from', 'message', 'path', 'retiresIn', 'surface', 'to', 'toMajor'].sort(),
     );
     // …and the stack itself IS canonical: the record is of what was done to it.
-    const header = (built.pages as Array<{ regions: Array<{ components: Array<{ properties: Record<string, unknown> }> }> }>)[0]
-      .regions[0].components[0].properties;
-    expect(header.subtitle).toBe('All things');
-    expect('description' in header).toBe(false);
+    const header = (built.pages as Array<{ regions: Array<{ components: Array<Record<string, unknown>> }> }>)[0]
+      .regions[0].components[0];
+    // The canonical key, as the strict parse lowers the predicate it carries.
+    expect(header.visibleWhen).toEqual({ dialect: 'cel', source: "page.mode != 'edit'" });
+    expect('visibility' in header).toBe(false);
   });
 
   it('strict: false records it too — the conversion runs in both modes', () => {
     quiet();
-    const built = defineStack(source('aa', 'description') as never, { strict: false });
+    const built = defineStack(source('aa', 'visibility') as never, { strict: false });
     expect(stackConversionsOf(built).map(substance)).toEqual([HEADER_NOTICE]);
   });
 
   it('two conversions in one source are recorded in the order they were applied', () => {
     quiet();
-    const built = defineStack(source('aa', 'description', 'jsx') as never, { strict: false });
+    const built = defineStack(source('aa', 'visibility', 'jsx') as never, { strict: false });
     const record = stackConversionsOf(built).map(substance);
     expect(record).toHaveLength(2);
     expect(record).toContainEqual(HEADER_NOTICE);
@@ -135,23 +139,23 @@ describe('defineStack records the conversions it applied', () => {
   it('⭐ control: the canonical spelling records nothing, on a stack that IS marked', () => {
     const warn = quiet();
     for (const built of [
-      defineStack(source('aa', 'subtitle') as never),
-      defineStack(source('aa', 'subtitle') as never, { strict: false }),
+      defineStack(source('aa', 'visibleWhen') as never),
+      defineStack(source('aa', 'visibleWhen') as never, { strict: false }),
     ]) {
       expect(hasStackProvenance(built), '`[]` here must not be the unmarked answer').toBe(true);
       expect(stackConversionsOf(built)).toEqual([]);
     }
-    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("conversion 'page-header-subtitle-alias'"));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("conversion 'page-component-visibility-to-visibleWhen'"));
   });
 
   it('is not subject to the stderr warn-once: a second build of the same source carries the record too', () => {
     const warn = quiet();
     const ns = 'warnonce';
-    const first = defineStack(source(ns, 'description') as never);
-    const second = defineStack(source(ns, 'description') as never);
+    const first = defineStack(source(ns, 'visibility') as never);
+    const second = defineStack(source(ns, 'visibility') as never);
     const lines = warn.mock.calls
       .map((c) => String(c[0]))
-      .filter((l) => l.includes("conversion 'page-header-subtitle-alias'") && l.includes(HEADER_PATH));
+      .filter((l) => l.includes("conversion 'page-component-visibility-to-visibleWhen'") && l.includes(HEADER_PATH));
     // stderr says it at most once per process (an earlier test may have said it already)…
     expect(lines.length).toBeLessThanOrEqual(1);
     // …while each built stack keeps its own record.
@@ -161,7 +165,7 @@ describe('defineStack records the conversions it applied', () => {
 
   it('a built stack handed straight back to defineStack keeps the record it was built with', () => {
     quiet();
-    const inner = defineStack(source('aa', 'description') as never, { strict: false });
+    const inner = defineStack(source('aa', 'visibility') as never, { strict: false });
     const outer = defineStack(inner as never, { strict: false });
     expect(outer).not.toBe(inner);
     expect(stackConversionsOf(outer).map(substance)).toEqual([HEADER_NOTICE]);
@@ -171,7 +175,7 @@ describe('defineStack records the conversions it applied', () => {
 describe('the record is invisible to every data reader, and frozen', () => {
   const built = () => {
     quiet();
-    return defineStack(source('aa', 'description') as never);
+    return defineStack(source('aa', 'visibility') as never);
   };
 
   it('is not an own string key and is non-enumerable, non-writable, non-configurable', () => {
@@ -195,7 +199,7 @@ describe('the record is invisible to every data reader, and frozen', () => {
   it('never reaches JSON, and the strict stack schema neither sees nor refuses it', () => {
     const stack = built();
     expect(stackConversionsOf(stack), 'anti-vacuity: there IS a record to leak').toHaveLength(1);
-    expect(JSON.stringify(stack)).not.toContain('page-header-subtitle-alias');
+    expect(JSON.stringify(stack)).not.toContain('page-component-visibility-to-visibleWhen');
     expect(ObjectStackDefinitionSchema.safeParse(stack).success).toBe(true);
   });
 });
@@ -203,12 +207,12 @@ describe('the record is invisible to every data reader, and frozen', () => {
 describe('stackConversionsOf answers [] wherever the mark is absent', () => {
   const built = () => {
     quiet();
-    return defineStack(source('aa', 'description') as never);
+    return defineStack(source('aa', 'visibility') as never);
   };
 
   it('a plain literal, a spread copy and a JSON copy of a built stack', () => {
     const stack = built();
-    expect(stackConversionsOf(source('aa', 'description'))).toEqual([]);
+    expect(stackConversionsOf(source('aa', 'visibility'))).toEqual([]);
     expect(stackConversionsOf({ ...stack })).toEqual([]);
     expect(stackConversionsOf(JSON.parse(JSON.stringify(stack)))).toEqual([]);
     // positive control for the three: the built stack itself
@@ -234,15 +238,15 @@ describe('stackConversionsOf answers [] wherever the mark is absent', () => {
 });
 
 describe('composeStacks records its inputs’ records, in input order, one application once', () => {
-  const build = (ns: string, headerKey: 'description' | 'subtitle') => {
+  const build = (ns: string, headerKey: 'visibility' | 'visibleWhen') => {
     quiet();
     return defineStack(source(ns, headerKey) as never, { strict: false });
   };
 
   it('two inputs: concatenated in input order, each path relative to its own defineStack call', () => {
-    const a = build('aa', 'description');
-    const b = build('bb', 'subtitle');
-    const c = build('cc', 'description');
+    const a = build('aa', 'visibility');
+    const b = build('bb', 'visibleWhen');
+    const c = build('cc', 'visibility');
     const composed = composeStacks([a, b, c] as ObjectStackDefinition[]);
     const record = stackConversionsOf(composed);
     expect(record).toEqual([...stackConversionsOf(a), ...stackConversionsOf(c)]);
@@ -254,15 +258,15 @@ describe('composeStacks records its inputs’ records, in input order, one appli
   });
 
   it('the same built stack passed twice is one application, counted once', () => {
-    const a = build('aa', 'description');
+    const a = build('aa', 'visibility');
     const composed = composeStacks([a, a] as ObjectStackDefinition[], { objectConflict: 'override' });
     expect(stackConversionsOf(composed).map(substance)).toEqual([HEADER_NOTICE]);
   });
 
   it('every arity, the preserve manifest and nesting', () => {
-    const a = build('aa', 'description');
-    const b = build('bb', 'subtitle');
-    const c = build('cc', 'description');
+    const a = build('aa', 'visibility');
+    const b = build('bb', 'visibleWhen');
+    const c = build('cc', 'visibility');
     expect(stackConversionsOf(a), 'anti-vacuity: the inputs carry records').toHaveLength(1);
     expect(stackConversionsOf(c)).toHaveLength(1);
     expect(stackConversionsOf(composeStacks([]))).toEqual([]);
@@ -277,7 +281,7 @@ describe('composeStacks records its inputs’ records, in input order, one appli
   });
 
   it('⭐ control: inputs that converted nothing compose to an empty record on a marked artifact', () => {
-    const composed = composeStacks([build('aa', 'subtitle'), build('bb', 'subtitle')] as ObjectStackDefinition[]);
+    const composed = composeStacks([build('aa', 'visibleWhen'), build('bb', 'visibleWhen')] as ObjectStackDefinition[]);
     expect(hasStackProvenance(composed)).toBe(true);
     expect(stackConversionsOf(composed)).toEqual([]);
   });
@@ -297,10 +301,10 @@ function thrown(run: () => unknown): Error & { code?: string; status?: number; i
 const ownRecord = (value: object) => Object.getOwnPropertyDescriptor(value, Symbol.for('objectstack.stack.conversions'));
 
 describe('a refusing producer carries the conversions it applied on its refusal', () => {
-  it("⭐ triage pin: a convert-then-refuse call's error answers page-header-subtitle-alias", () => {
+  it("⭐ triage pin: a convert-then-refuse call's error answers page-component-visibility-to-visibleWhen", () => {
     quiet();
     const error = thrown(() =>
-      defineStack({ ...source('rf', 'description'), requires: ['no-such-capability'] } as never),
+      defineStack({ ...source('rf', 'visibility'), requires: ['no-such-capability'] } as never),
     );
     expect(error.code).toBe('STACK_CAPABILITY_UNKNOWN');
     expect(error.status).toBe(422);
@@ -317,7 +321,7 @@ describe('a refusing producer carries the conversions it applied on its refusal'
   it('⭐ triage pin: a refusal with no conversion answers an empty record — stamped, not merely absent', () => {
     quiet();
     const error = thrown(() =>
-      defineStack({ ...source('rf', 'subtitle'), requires: ['no-such-capability'] } as never),
+      defineStack({ ...source('rf', 'visibleWhen'), requires: ['no-such-capability'] } as never),
     );
     expect(error.code).toBe('STACK_CAPABILITY_UNKNOWN');
     expect(stackConversionsOf(error)).toEqual([]);
@@ -332,10 +336,10 @@ describe('a refusing producer carries the conversions it applied on its refusal'
   it('the refusal is otherwise the same refusal: code, status, name, message and issues are unchanged', () => {
     quiet();
     const converting = thrown(() =>
-      defineStack({ ...source('rf', 'description'), requires: ['no-such-capability'] } as never),
+      defineStack({ ...source('rf', 'visibility'), requires: ['no-such-capability'] } as never),
     );
     const canonical = thrown(() =>
-      defineStack({ ...source('rf', 'subtitle'), requires: ['no-such-capability'] } as never),
+      defineStack({ ...source('rf', 'visibleWhen'), requires: ['no-such-capability'] } as never),
     );
     for (const key of ['code', 'status', 'name', 'message'] as const) {
       expect(converting[key], key).toBe(canonical[key]);
@@ -347,7 +351,7 @@ describe('a refusing producer carries the conversions it applied on its refusal'
   it('the record on a refusal is invisible to data readers and frozen, like the one on a stack', () => {
     quiet();
     const error = thrown(() =>
-      defineStack({ ...source('rf', 'description'), requires: ['no-such-capability'] } as never),
+      defineStack({ ...source('rf', 'visibility'), requires: ['no-such-capability'] } as never),
     );
     const desc = ownRecord(error);
     expect(desc?.enumerable).toBe(false);
@@ -364,7 +368,7 @@ describe('a refusing producer carries the conversions it applied on its refusal'
     quiet();
     // Built without validation, so the capability refusal is still owed.
     const inner = defineStack(
-      { ...source('rf', 'description'), requires: ['no-such-capability'] } as never,
+      { ...source('rf', 'visibility'), requires: ['no-such-capability'] } as never,
       { strict: false },
     );
     expect(stackConversionsOf(inner), 'anti-vacuity: the inner build recorded one').toHaveLength(1);
@@ -397,13 +401,13 @@ describe('a refusing producer carries the conversions it applied on its refusal'
       }
     };
     const headerLines = (lines: string[]) =>
-      lines.filter((l) => l.includes("conversion 'page-header-subtitle-alias'") && l.includes(HEADER_PATH));
+      lines.filter((l) => l.includes("conversion 'page-component-visibility-to-visibleWhen'") && l.includes(HEADER_PATH));
 
     // A and B author the same notice path, so their warn-once key is one key.
     const error = thrown(() =>
       composeStacks([
-        define(source('ca', 'description')),
-        define({ ...source('cb', 'description'), requires: ['no-such-capability'] }),
+        define(source('ca', 'visibility')),
+        define({ ...source('cb', 'visibility'), requires: ['no-such-capability'] }),
       ] as ObjectStackDefinition[]),
     );
 
@@ -449,8 +453,8 @@ describe('every refusal site in defineStack carries the record — census, both 
     ],
     edges: [{ id: 'e1', source: 'start', target: 'end' }],
   };
-  /** The converting page every row carries: `description` on a `page:header`. */
-  const pages = source('probe', 'description').pages;
+  /** The converting page every row carries: `visibility` on a `page:header`. */
+  const pages = source('probe', 'visibility').pages;
   const grant = { name: 'managers', label: 'Managers', objects: { [task.name]: { allowRead: true, readScope: 'unit_and_below' } } };
 
   const rows: Array<{ site: string; code: string; config: Record<string, unknown>; strict?: false }> = [
@@ -495,7 +499,7 @@ describe('every refusal site in defineStack carries the record — census, both 
 });
 
 describe('a composeStacks refusal carries its inputs’ records', () => {
-  const build = (ns: string, headerKey: 'description' | 'subtitle', objectNs = ns) => {
+  const build = (ns: string, headerKey: 'visibility' | 'visibleWhen', objectNs = ns) => {
     quiet();
     const stack = source(ns, headerKey);
     return defineStack(
@@ -505,9 +509,9 @@ describe('a composeStacks refusal carries its inputs’ records', () => {
   };
 
   it('an object conflict: the inputs’ records, in input order — the record the artifact would have carried', () => {
-    const a = build('ka', 'description', 'kk');
-    const b = build('kb', 'subtitle', 'kk');
-    const c = build('kc', 'description', 'kk');
+    const a = build('ka', 'visibility', 'kk');
+    const b = build('kb', 'visibleWhen', 'kk');
+    const c = build('kc', 'visibility', 'kk');
     const error = thrown(() => composeStacks([a, b, c] as ObjectStackDefinition[]));
     expect(error.code).toBe('STACK_COMPOSE_OBJECT_CONFLICT');
     expect(error.status).toBe(422);
@@ -516,7 +520,7 @@ describe('a composeStacks refusal carries its inputs’ records', () => {
   });
 
   it('an unbuilt input: the built inputs’ records ride the provenance refusal', () => {
-    const a = build('pa', 'description');
+    const a = build('pa', 'visibility');
     const error = thrown(() => composeStacks([a, { ...a }] as ObjectStackDefinition[]));
     expect(error.code).toBe('STACK_PROVENANCE_MISSING');
     expect(stackConversionsOf(error)).toEqual(stackConversionsOf(a));
@@ -525,7 +529,7 @@ describe('a composeStacks refusal carries its inputs’ records', () => {
 
   it('⭐ control: inputs that converted nothing refuse with an empty record — stamped', () => {
     const error = thrown(() =>
-      composeStacks([build('za', 'subtitle', 'zz'), build('zb', 'subtitle', 'zz')] as ObjectStackDefinition[]),
+      composeStacks([build('za', 'visibleWhen', 'zz'), build('zb', 'visibleWhen', 'zz')] as ObjectStackDefinition[]),
     );
     expect(error.code).toBe('STACK_COMPOSE_OBJECT_CONFLICT');
     expect(stackConversionsOf(error)).toEqual([]);
@@ -533,8 +537,8 @@ describe('a composeStacks refusal carries its inputs’ records', () => {
   });
 
   it('a non-refusal throw is not given a record: the options parse error carries none', () => {
-    const a = build('oa', 'description');
-    const b = build('ob', 'subtitle');
+    const a = build('oa', 'visibility');
+    const b = build('ob', 'visibleWhen');
     const error = thrown(() =>
       composeStacks([a, b] as ObjectStackDefinition[], { objectConflict: 'nope' } as never),
     );
@@ -552,7 +556,7 @@ describe('stackConversionsOf reads a refusal’s record and nothing that merely 
   it('a record inherited through the prototype, not stamped on the error itself, is not read', () => {
     quiet();
     const refusal = thrown(() =>
-      defineStack({ ...source('rf', 'description'), requires: ['no-such-capability'] } as never),
+      defineStack({ ...source('rf', 'visibility'), requires: ['no-such-capability'] } as never),
     );
     expect(stackConversionsOf(refusal), 'anti-vacuity: the stamped refusal is read').toHaveLength(1);
     const heir = Object.create(refusal) as Error;

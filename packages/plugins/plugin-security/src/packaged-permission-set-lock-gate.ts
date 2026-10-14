@@ -7,8 +7,9 @@
  *
  * `packaged-permission-set-lock.ts` refuses a write that targets a
  * package-declared permission set. Until this file existed it had exactly one
- * enforcement point: the `sys_permission_set` DATA door
- * (`createPermissionSetWriteThrough`, `permission-set-projection.ts`). The
+ * enforcement point: the `sys_permission_set` DATA door's write-through
+ * (retired with that object in C3 stages 7a and 8; this gate is now the lock's
+ * only enforcement point). The
  * metadata protocol's pre-persistence authoring-gate seam (ADR-0094 addendum;
  * `registerAuthoringGate`) carried an `'object'` registration only — so a
  * metadata-door write targeting the same package-declared set reached
@@ -20,7 +21,7 @@
  *
  *  - ⭐ ONE SPELLING (Prime Directive #8). The gate calls
  *    {@link assertPermissionSetNotPackageDeclared} — the same assertion the
- *    data door calls, consulting the same {@link classifyPackagedPermissionSet}
+ *    retired data door called, consulting the same {@link classifyPackagedPermissionSet}
  *    classifier and throwing the same error classes
  *    (`PackagedPermissionSetLockedError`, and the fail-closed
  *    `PackagedPermissionSetProvenanceUnknownError` when no provenance source
@@ -85,10 +86,9 @@ export function registerPackagedPermissionSetLockGate(protocol: any, ql: any): b
         probe = { status: 'failed', reason: String((e as Error)?.message ?? e) };
       }
     }
-    // `'update'` on purpose: a metadata-door save that targets a
-    // package-declared name is an override of the shipped base whether or not
-    // an overlay row exists yet, so the remedy the refusal teaches is the
-    // clone path, not "choose a different name".
+    // A metadata-door save that targets a package-declared name is an
+    // override of the shipped base whether or not an overlay row exists yet,
+    // so the remedy the refusal teaches is the clone path.
     assertPermissionSetNotPackageDeclared(ctx.name, ql, 'update', probe);
   });
   return true;

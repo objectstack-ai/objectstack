@@ -45,6 +45,7 @@ const EXPECTED_RELEVANCE: Readonly<Record<string, readonly string[]>> = {
   '18:analytics-cube-public-default-visible-enforced': ['analyticsCubes'],
   '18:analytics-cube-single-granularity-default-enforced': ['analyticsCubes'],
   '18:api-endpoint-cache-ttl-unit-in-key': ['apis'],
+  '18:cbp-extension-merged-master-refused': ['objectExtensions'],
   '18:chart-config-aria-retired': ['dashboards', 'reports', 'pages'],
   '18:cube-join-sql-and-relationship-retired': ['analyticsCubes'],
   '18:cube-member-inner-name-retired': ['analyticsCubes'],
@@ -82,11 +83,11 @@ describe('which entries carry a relevance question (ENUMERATION)', () => {
     expect(actual).toEqual(EXPECTED_RELEVANCE);
   });
 
-  it('is 25 entries: 5 of protocol 17 and 20 of protocol 18', () => {
+  it('is 26 entries: 5 of protocol 17 and 21 of protocol 18', () => {
     const keys = Object.keys(EXPECTED_RELEVANCE);
-    expect(keys).toHaveLength(25);
+    expect(keys).toHaveLength(26);
     expect(keys.filter((k) => k.startsWith('17:'))).toHaveLength(5);
-    expect(keys.filter((k) => k.startsWith('18:'))).toHaveLength(20);
+    expect(keys.filter((k) => k.startsWith('18:'))).toHaveLength(21);
   });
 
   it('the table names only registered entries (anti-vacuity for the comparison above)', () => {

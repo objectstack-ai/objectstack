@@ -44,6 +44,7 @@ import type { IDataEngine } from '@objectstack/core';
 // that had drifted from the declared authority and from each other; both
 // now ask the authority. Nothing in this file reads the grant tables.
 import { hasPlatformAdminStanding, resolveUserAuthzGrants } from '@objectstack/core';
+import type { AuthGate } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
 import {
   readEnvWithDeprecation,
@@ -8064,29 +8065,68 @@ export class AuthManager {
   }
 
   /**
-   * ADR-0069 — compute the auth-policy gate posture for a session. Returns an
-   * `{ code, message }` when the user is currently blocked (e.g. password
-   * expired), else undefined. No-op (and no DB read) when no gate feature is
-   * enabled. Fails OPEN on any lookup error — a transient hiccup must never lock
-   * a compliant user out.
+   * ADR-0069 — the auth-policy gate posture for a SESSION: the first, most
+   * urgent posture {@link resolveUserAuthGates} reports for its user in its
+   * active organization, else undefined. Every scope holds a session, because
+   * a session IS the password sign-in (#23287, ruling C′ item 1).
    */
   private async computeAuthGate(
     userId: string,
-    _activeOrgId: string | undefined,
+    activeOrgId: string | undefined,
     _twoFactorEnabledHint: boolean,
-  ): Promise<{ code: string; message: string } | undefined> {
+  ): Promise<AuthGate | undefined> {
+    const gates = await this.resolveUserAuthGates(userId, { organizationId: activeOrgId });
+    return gates[0];
+  }
+
+  /**
+   * [ADR-0069 · #23287, ruling C′ item 3] Every authentication-policy posture
+   * `userId` holds right now, most urgent first; `[]` when no policy holds
+   * them. The ONE per-user posture computation (`IAuthService.resolveUserAuthGates`):
+   *
+   *  - the session gate takes its first entry ({@link computeAuthGate}, onto
+   *    `user.authGate` in `customSession`);
+   *  - the API-key admission seam (`resolveApiKeyAdmission`, `@objectstack/core`)
+   *    asks it for a key's owner and holds the key on an `account`-scope entry
+   *    (`AUTH_GATE_SCOPES`);
+   *  - keyed by user id, so a caller outside both seams can ask it too.
+   *
+   * `organizationId` is the organization the credential operates in: an
+   * organization may require MFA above the global floor.
+   *
+   * Order, most urgent first: the administrator's forced reset, then natural
+   * password expiry, then enforced MFA. The session shows the first; a key is
+   * held only by an `account`-scope entry, wherever it sits in the list — a
+   * user whose password expired AND who owes MFA enrolment holds their keys
+   * on the MFA entry even though their session shows the expiry.
+   *
+   * No-op (no read) when no gate feature is enabled. Fails OPEN on any lookup
+   * error, answering `[]` — a transient hiccup must never lock a compliant user
+   * out, through either credential.
+   */
+  public async resolveUserAuthGates(
+    userId: string,
+    options: { organizationId?: string } = {},
+  ): Promise<AuthGate[]> {
+    // The two lazily-refreshed caches below are kept warm by `isAuthGateActive()`
+    // on the session path; a key seam may ask without that probe running first,
+    // so this computation refreshes them itself (each is a no-op inside its TTL).
+    this.refreshOrgMfaCacheIfStale();
+    this.refreshMustChangeCacheIfStale();
+    const activeOrgId = options.organizationId;
     const expiryDays = Math.floor(Number(this.config.passwordExpiryDays) || 0);
     const mfaGlobal = this.config.mfaRequired === true;
     // Per-org tightening: an org may require MFA above the global floor.
-    const orgMaybeRequires = !mfaGlobal && !!_activeOrgId && this._orgMfaCache.value;
+    const orgMaybeRequires = !mfaGlobal && !!activeOrgId && this._orgMfaCache.value;
     // #2766 V1 — an admin-issued must-change-password flag activates the gate
     // even with every config feature off (per-user state, cached like org MFA).
     const mustChangeMaybe = this._mustChangeCache.value;
     if (expiryDays <= 0 && !mfaGlobal && !orgMaybeRequires && !mustChangeMaybe) {
-      return undefined; // no gate feature active
+      return []; // no gate feature active
     }
     const engine = this.getDataEngine();
-    if (!engine || !userId) return undefined;
+    if (!engine || !userId) return [];
+    const gates: AuthGate[] = [];
     try {
       const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
       const u = await engine.findOne('sys_user', {
@@ -8099,20 +8139,22 @@ export class AuthManager {
       let mfaRequired = mfaGlobal;
       if (!mfaRequired && orgMaybeRequires) {
         const org = await engine.findOne('sys_organization', {
-          where: { id: _activeOrgId }, fields: ['require_mfa'], context: SYSTEM_CTX,
+          where: { id: activeOrgId }, fields: ['require_mfa'], context: SYSTEM_CTX,
         } as any);
         mfaRequired = org?.require_mfa === true || org?.require_mfa === 1;
       }
 
       // ── Admin-issued force change (#2766 V1) ──────────────────────────
-      // Reuses the PASSWORD_EXPIRED code so the existing transport-seam 403
-      // handling and the Console change-password redirect apply unchanged;
-      // the semantic is identical ("must change password to continue").
+      // [#23287, ruling C′ item 2] Its OWN code now, scope `credential`: it
+      // used to reuse `PASSWORD_EXPIRED`, which made an administrator's reset
+      // indistinguishable from natural expiry on the wire. The administrator's
+      // act carries an explicit revocation switch instead
+      // (`runAdminSetUserPassword`, `revokeSessionsAndKeys`).
       if (u?.must_change_password === true || u?.must_change_password === 1) {
-        return {
-          code: 'PASSWORD_EXPIRED',
+        gates.push({
+          code: 'PASSWORD_RESET_REQUIRED',
           message: 'You must change your password before continuing.',
-        };
+        });
       }
 
       // ── Password expiry ───────────────────────────────────────────────
@@ -8120,10 +8162,10 @@ export class AuthManager {
         const changed = u?.password_changed_at;
         // Null = never expires (existing accounts on upgrade) until next change.
         if (changed && Date.now() - new Date(changed).getTime() > expiryDays * 86_400_000) {
-          return {
+          gates.push({
             code: 'PASSWORD_EXPIRED',
             message: 'Your password has expired. Please change it to continue.',
-          };
+          });
         }
       }
 
@@ -8143,17 +8185,17 @@ export class AuthManager {
         }
         const elapsedMs = Date.now() - new Date(requiredAt).getTime();
         if (elapsedMs > graceDays * 86_400_000) {
-          return {
+          gates.push({
             code: 'MFA_REQUIRED',
             message:
               'Multi-factor authentication is required. Please set up an authenticator app to continue.',
-          };
+          });
         }
       }
     } catch {
-      return undefined; // fail-open
+      return []; // fail-open
     }
-    return undefined;
+    return gates;
   }
 
   /**

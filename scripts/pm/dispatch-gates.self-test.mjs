@@ -62,6 +62,7 @@ import {
   COMPOUND_ANCHOR_KEYS,
   CONTRACT_REVIEW_TIER,
   CONTRACT_REVIEW_TIER_NAME,
+  TIER_DEFAULT_NAME,
   DEFAULT_BASE_BRANCH,
   DEFAULT_BASE_REF,
   DEFAULT_BASE_REMOTE,
@@ -9841,13 +9842,19 @@ export function selfTest({ tier = 'full' } = {}) {
   t('the no-mandate rendering claims no mandate', !plainLines.includes('MANDATORY'));
   t('the no-mandate rendering names the floor and the default, so the judgment call has its band', plainLines.includes(TIER_FLOOR) && plainLines.includes(TIER_DEFAULT));
   t('BOTH renderings state that clause ② is out of reach of paths — a no-mandate line is not a clearance', plainLines.includes('Clause ②') && mandLines.includes('Clause ②'));
-  // The lane key (#18536): the maintainer's lane rule restated — the review is
-  // owed in the spec and skills lanes, in-seat at tier or by the at-tier
-  // subagent, and in no other lane; the 2026-09-10 SEAT key and the
-  // 2026-09-16 TIER key are both retired spellings and must not come back.
-  t('BOTH renderings key the clause-② review by LANE — the spec and skills lanes, in-seat at tier or by the at-tier subagent', [plainLines, mandLines].every((l) => l.includes('spec and skills lanes') && l.includes('at-tier subagent')));
-  t('…and neither spells a retired key — no "spec seat" (2026-09-10) and no default-tier review or self-review (2026-09-16)', [plainLines, mandLines].every((l) => !l.includes('spec seat') && !l.includes('default-tier review') && !l.includes('self-review')));
-  t('…and both say a clause-② hit outside those lanes is spec-lane work that MOVES there — lane routing, never a review demand on the lane that found it', [plainLines, mandLines].every((l) => l.includes('spec-lane work and moves there')));
+  // The SURFACE key (#19496 R5, restated by ruling record 6159870311 on #23352): whether the clause-②
+  // review is owed is keyed by surface — the three contract faces — and never by lane, and the
+  // contract-review tier keeps its two routes, in-seat at tier or by the at-tier subagent. Retired
+  // spellings must not come back: the 2026-09-10 SEAT key, the 2026-09-16 TIER key ("default-tier
+  // review", "self-review") and the 2026-09-17 LANE key ("owed in the spec and skills lanes").
+  t('BOTH renderings key whether the clause-② review is OWED by SURFACE, never by lane — and keep the contract-review tier\'s at-tier subagent route', [plainLines, mandLines].every((l) => l.includes('owed by SURFACE, never by lane') && l.includes('at-tier subagent')));
+  t('…and neither spells a retired key — no "spec seat" (2026-09-10), no default-tier review or self-review (2026-09-16), no owed-by-lane (2026-09-17)', [plainLines, mandLines].every((l) => !l.includes('spec seat') && !l.includes('default-tier review') && !l.includes('self-review') && !l.includes('owed in the spec and skills lanes')));
+  t('…and both say a clause-② hit outside the spec lane is spec-lane work that MOVES there — lane routing, never a review demand on the lane that found it', [plainLines, mandLines].every((l) => l.includes('a hit outside the spec lane is spec-lane work and moves there')));
+  // The tier follows the face that made the review owed (ruling record 6159870311 on #23352, letter B′ with C):
+  // the note names BOTH tiers by their constant NAMES, each beside the face it serves, so a no-mandate
+  // line can no longer read as "every clause-② review is at the contract-review tier".
+  t('⭐ BOTH renderings key the clause-② review TIER by FACE — CONTRACT_REVIEW_TIER for a schema or governed rules text, TIER_DEFAULT for the declaration alone', [plainLines, mandLines].every((l) => l.includes(`${CONTRACT_REVIEW_TIER_NAME} for a published schema or governed rules text`) && l.includes(`${TIER_DEFAULT_NAME} for the \`Clause-②: yes\` declaration alone`)));
+  t('the default tier is exported by its NAME beside the contract-review tier\'s, and the name is not the value', TIER_DEFAULT_NAME === 'TIER_DEFAULT' && TIER_DEFAULT_NAME !== TIER_DEFAULT && TIER_DEFAULT_NAME !== CONTRACT_REVIEW_TIER_NAME);
   t('the no-mandate rendering says how many globs it checked, so an empty table cannot read as a clearance', plainLines.includes(`${MANDATORY_TIER_GLOBS.length} declared glob`));
   // Refusals: a contradiction is not printed, and an ambiguity is not guessed.
   let tierRefused = false;

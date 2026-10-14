@@ -19,6 +19,55 @@ import { z } from 'zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { AuthzPostureSchema } from '../security/explain.zod';
+
+/**
+ * [ADR-0069 · #23287, ruling C′ item 1] The CLOSED vocabulary of
+ * authentication-policy posture codes — every `code` an `authGate` may carry.
+ *
+ * - `PASSWORD_EXPIRED` — the password is older than `passwordExpiryDays`.
+ * - `PASSWORD_RESET_REQUIRED` — an administrator forced a password change
+ *   (`sys_user.must_change_password`). It used to reuse `PASSWORD_EXPIRED`;
+ *   the ruling gives the forced act its own code, because the forced reset and
+ *   natural expiry are different events with a different follow-up (the forced
+ *   act carries its own revocation switch).
+ * - `MFA_REQUIRED` — enforced multi-factor is not yet enrolled and the grace
+ *   window has elapsed.
+ *
+ * A new posture is a member added HERE, together with its row in
+ * {@link AUTH_GATE_SCOPES}: the table is typed total over this enum, so a code
+ * without a declared scope does not compile.
+ */
+export const AuthGateCodeSchema = z.enum(['PASSWORD_EXPIRED', 'PASSWORD_RESET_REQUIRED', 'MFA_REQUIRED']);
+export type AuthGateCode = z.input<typeof AuthGateCodeSchema>;
+
+/**
+ * [ADR-0069 · #23287, ruling C′ item 1] What a posture HOLDS.
+ *
+ * - `account` — the user's standing: every credential the user holds is held,
+ *   so an API key whose owner holds such a posture is refused with the same
+ *   code a session gets.
+ * - `credential` — password sign-in alone: the session is held, and the user's
+ *   API keys keep working.
+ */
+export const AuthGateScopeSchema = z.enum(['account', 'credential']);
+export type AuthGateScope = z.input<typeof AuthGateScopeSchema>;
+
+/**
+ * [ADR-0069 · #23287, ruling C′ items 1 and 2] Each posture code's scope,
+ * declared ONCE, beside the codes it scopes. The API-key admission seam
+ * (`resolveApiKeyAdmission`, `@objectstack/core`) reads this table to decide
+ * whether a key's owner is held; no consumer restates it.
+ *
+ * Natural password expiry and the forced reset hold the password sign-in
+ * only. Enforced MFA holds the account. A future account-standing posture (a
+ * suspension, say) is `account`.
+ */
+export const AUTH_GATE_SCOPES: Readonly<Record<AuthGateCode, AuthGateScope>> = Object.freeze({
+  PASSWORD_EXPIRED: 'credential',
+  PASSWORD_RESET_REQUIRED: 'credential',
+  MFA_REQUIRED: 'account',
+});
+
 export const ExecutionContextSchema = lazySchema(() => z.object({
   /** Current user ID (resolved from session) */
   userId: z.string().optional(),
@@ -133,9 +182,9 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
 
   /**
    * [ADR-0090 D10/D11 — P1 shape] Whether the principal is an internal org
-   * member or an external (portal/partner) identity. Externals evaluate
-   * against `externalSharingModel` and skip the BU depth axis. Absent =
-   * 'internal'.
+   * member or an external (portal/partner) identity. Externals reach
+   * explicitly shared rows only (the ADR-0095 `EXTERNAL` rung, never
+   * OWD-derived) and skip the BU depth axis. Absent = 'internal'.
    */
   audience: z.enum(['internal', 'external']).optional(),
 
@@ -163,8 +212,14 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * by the transport entry point, and consumed at the transport seam:
    * REST's `enforceAuth` answers `403 { code, message }` on a non-allow-listed
    * path. Both keys are required because the sole producer always sets both,
-   * and `code` is the stable machine code the client branches on
-   * (`PASSWORD_EXPIRED` / `MFA_REQUIRED`) while `message` is what the user reads.
+   * and `code` is the stable machine code the client branches on (the closed
+   * {@link AuthGateCodeSchema}) while `message` is what the user reads.
+   *
+   * [#23287, ruling C′] An API key answers as the session does for an
+   * `account`-scope posture ({@link AUTH_GATE_SCOPES}): the key-admission seam
+   * asks the auth service for the key owner's postures and carries an
+   * account-scope one here, so the door refuses the key with the session's
+   * `403`. A `credential`-scope posture holds password sign-in only.
    *
    * AUTHENTICATION, not authorization — orthogonal to {@link posture} and to
    * `permissions`/`positions`: it does not narrow what the principal may do, it
@@ -182,11 +237,16 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * transport and missing another.
    */
   authGate: z.object({
-    /** Stable machine code, e.g. `PASSWORD_EXPIRED` / `MFA_REQUIRED`. */
-    code: z.string(),
+    /**
+     * Stable machine code from the closed posture vocabulary
+     * ({@link AuthGateCodeSchema}): `PASSWORD_EXPIRED`,
+     * `PASSWORD_RESET_REQUIRED` or `MFA_REQUIRED`. Its scope (what the posture
+     * holds) is {@link AUTH_GATE_SCOPES}[code].
+     */
+    code: AuthGateCodeSchema,
     /** Human-facing message explaining what must be remediated. */
     message: z.string(),
-  }).optional().describe('ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on (PASSWORD_EXPIRED / MFA_REQUIRED) and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one.'),
+  }).optional().describe('ADR-0069 authentication-policy gate: present only while the principal is blocked from protected resources until they remediate (expired password, enforced MFA), absent for every healthy session. `code` is the stable machine code the client branches on, from the closed vocabulary PASSWORD_EXPIRED / PASSWORD_RESET_REQUIRED (an administrator forced a password change) / MFA_REQUIRED, and `message` is what the blocked user reads; both are required because the transport seam renders them as the 403 body. Each code declares a scope: MFA_REQUIRED holds the account, so an API key whose owner holds it is refused with the same 403; PASSWORD_EXPIRED and PASSWORD_RESET_REQUIRED hold password sign-in alone, and API keys of that owner keep working. AUTHENTICATION, not authorization — it suspends access entirely rather than narrowing it, and nothing in the permission/RLS path reads it, while the allow-listed remediation endpoints stay reachable. Server-constructed only, never client-supplied; a guest/anonymous principal never carries one.'),
 
   /**
    * [ADR-0090 D10 — P1 shape] Delegation link for agent/service principals

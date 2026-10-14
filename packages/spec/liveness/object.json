@@ -238,10 +238,9 @@
       "note": "objectql `$search` executor (ADR-0061: expandSearchToFilter in engine.find) + objectui list/lookup/command-palette; canonical searchable-field source."
     },
     "externalSharingModel": {
-      "status": "planned",
-      "verifiedAt": "2026-07-30",
-      "authorWarn": true,
-      "note": "[ADR-0090 D11] P1 lands the SPEC SHAPE only (validated external<=internal at authoring; Studio surfaces the Ext badge). Runtime consumption (audience-aware evaluator branch substituting the external dial for external principals) is scheduled with the principal-taxonomy semantics phase; tracked on #2696. `planned` + authorWarn per enforce-or-mark: authors get told the dial does not evaluate yet. Was a bespoke 'authorable' status outside the documented vocabulary. Re-verified 2026-07-30: still no runtime consumer (authoring-time external<=internal validation in lint/src/validate-security-posture.ts:175 only, plus the ADR-0090 D4 retired-alias value check); nothing external-principal-shaped evaluates it, matching planned."
+      "status": "dead",
+      "verifiedAt": "2026-10-14",
+      "note": "REMOVED 2026-10-14 (ADR-0049 enforce-or-remove, #23268; ruling of record 6159300530, letter A) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources and stored rows by the protocol-18 conversion `object-external-sharing-model-removed` (the D3 entry `object-external-sharing-model-retired`). The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). It was `planned` against #2696, which closed with no consumer built. Re-measured 2026-10-14 at e4ec6ec1a: no row-pipeline reader in any package (the only readers were the publish linter's alias and wider-than-internal branches and the plugin-security posture gate's env-tighten comparison, which judged the key against itself), and no runtime principal is external (`assemble-execution-context.ts` assembles `audience: undefined`). External visibility is the authorization kernel's `EXTERNAL` rung (ADR-0095 / ADR-0099): explicitly shared rows only, never OWD-derived. Use `sharingModel` for the org-wide default and explicit shares or share links (`publicSharing`) for outside access. The tombstone is packages/spec/src/data/object.zod.ts#ObjectSchema."
     },
     "fileAccessDelegate": {
       "status": "live",

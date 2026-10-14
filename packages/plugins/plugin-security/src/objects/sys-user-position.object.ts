@@ -41,7 +41,7 @@ export const SysUserPosition = ObjectSchema.create({
   // default is full CRUD, so no `userActions` block is needed — the affordance is
   // a declaration only; the DelegatedAdminGate is the authz.
   managedBy: 'system-data',
-  description: 'Assigns a position (sys_position.name) to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).',
+  description: 'Assigns a position, by name, to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).',
   // [ADR-0079] The record title is `display_title`, a text formula over the
   // same two columns `titleFormat` names. With no pointer declared, the
   // registry's designate-only pass stamped `nameField: 'id'` (the first
@@ -89,7 +89,7 @@ export const SysUserPosition = ObjectSchema.create({
       // positions the security catalog serves and stores the chosen NAME.
       // Falls back to a text input where the widget is not registered.
       widget: 'position-ref',
-      description: 'Position machine name (references sys_position.name).',
+      description: 'Position machine name, resolved in the security catalog.',
     }),
 
     business_unit_id: Field.lookup('sys_business_unit', {

@@ -2759,6 +2759,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/service-storage':
+        specifier: workspace:*
+        version: link:../service-storage
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
