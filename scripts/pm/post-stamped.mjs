@@ -4761,8 +4761,8 @@ export function selfTest() {
     );
     const measured = rows(MEASURED);
     t('⭐ THE MEASURED BODY: its four `Carried` lines are refused, one row each, on their own line numbers', measured.length === 4 && measured.every((r) => /^- Carried/u.test(r.line)) && measured.map((r) => r.lineNo).join() === '13,14,15,16');
-    t('⭐ …a carrier clause reading "the next PR touching X" is refused although the line carries a PR number elsewhere', measured[0].why === 'its carrier clause names no card' && /PR #22666/u.test(measured[0].line));
-    t('…and a `Carried` line naming no carrier and no card is refused on its key', /keyed `Carried`/u.test(measured[1].why));
+    t('⭐ …a carrier clause reading "the next PR touching X" is refused although the line carries a PR number elsewhere', measured[0]?.why === 'its carrier clause names no card' && /PR #22666/u.test(measured[0]?.line ?? ''));
+    t('…and a `Carried` line naming no carrier and no card is refused on its key', /keyed `Carried`/u.test(measured[1]?.why ?? ''));
     t('⛔ the stated limit, pinned: an un-carded duty sharing a line with an unrelated `#N` passes — the grain is the LINE', !measured.some((r) => r.line.includes('B′')));
     const FIXED = VACANT(
       '- **#23282 live pin**: the reading is owed on → #24001.',
