@@ -10,9 +10,10 @@
     },
     "label": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "rendered as the record title of sys_permission_set in Setup's generic object views (objectui app-shell list/detail rendering via displayNameField)",
-      "note": "display metadata."
+      "verifiedAt": "2026-10-14",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui @b9814b334d8a, the .objectui-sha pin and unchanged at objectui main @524136ea7: packages/app-shell/src/services/builtinComponents.tsx:206 registers `{ key: 'label', label: 'Label' }` as a list column of the `permission` metadata resource, and packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx:698 renders it as `row.item[c.key]` for every set Studio's permission-set list reads through `client.list('permission')`, which is GET /api/v1/meta/permission; framework: packages/metadata-protocol/src/protocol.ts#getMetaItems serves the authored body unprojected, so the authored label reaches that column.",
+      "note": "display metadata. RE-VERIFIED 2026-10-14 (#23404): the previous evidence named the record title of the sys_permission_set row object in Setup's generic object views, and that object was retired at C3 stage 8; the Studio list column is the reader that remains."
     },
     "description": {
       "status": "live",
