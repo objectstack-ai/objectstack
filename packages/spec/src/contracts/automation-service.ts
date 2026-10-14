@@ -19,6 +19,7 @@ import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
 import type { ConversionNotice, ConversionConflictNotice, ConversionTodoNotice } from '../conversions/types';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
+import type { FlowRegistration } from '../api/protocol.zod';
 
 /**
  * Context passed to a flow/script execution
@@ -1004,6 +1005,31 @@ export interface IAutomationService {
      * @returns One entry per registered flow
      */
     getFlowRuntimeStates?(): FlowRuntimeState[];
+
+    /**
+     * This engine's verdict on ONE flow name — whether it holds a registration
+     * under it, refused the stored flow, or holds nothing (`FlowRegistration`,
+     * `api/protocol.zod.ts`).
+     *
+     * [#23316] Declared for the metadata read, which serves it beside a stored
+     * flow (`registration` on the item read, `registrations` on the list) so a
+     * reader can tell a flow the engine refused from one it runs: the stored
+     * `status` is the author's declared state, and a flow refused at boot was
+     * served as `active` while it never fired. The protocol reads this member
+     * through the kernel's service table by name, as it reads
+     * {@link canonicalizeStoredFlow} — the metadata protocol never imports the
+     * automation service.
+     *
+     * {@link getFlowRuntimeStates} cannot answer it: it enumerates the flows
+     * the engine HOLDS, and a refused flow is exactly the one it does not.
+     *
+     * Optional: an automation implementation that keeps no refusal record does
+     * not declare it, and the read then serves no verdict at all rather than a
+     * guess.
+     *
+     * @param name - Flow name (snake_case)
+     */
+    getFlowRegistration?(name: string): FlowRegistration;
 
     /**
      * Resume a run that suspended at a pausing node (ADR-0019). The run must
