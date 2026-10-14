@@ -10,9 +10,8 @@
  * succeeds. Each branch of `ActionRunner.execute` (a host-registered handler,
  * a built-in, the declarative `operation: 'update'`) ends in
  * `handlePostExecution`, which hands `onSuccess` to `readOnSuccessNavigation`
- * and `navigateOnSuccess` (`core/src/actions/ActionRunner.ts:1384-1422` and
- * `:1639-1642` at the `.objectui-sha` pin `1fb1ced36243`; the file is
- * byte-identical at objectui `main` `72594f29`). So the rule is not that the
+ * and `navigateOnSuccess` (the read points are recorded by symbol in
+ * `packages/spec/liveness/action.json`, row `onSuccess.navigate`). So the rule is not that the
  * other executors leave the hop unread. None does. The rule is about what the
  * hop would follow:
  *
@@ -34,8 +33,8 @@
  *   app-shell `utils/flowResponse.ts`), so the hop fires while that screen or
  *   the refusal notice is still open.
  *
- * `operation: 'update'` is read BEFORE any executor (`ActionRunner.execute`,
- * `:1384-1388` at the pin): the runner performs the declarative write through
+ * `operation: 'update'` is read BEFORE any executor (`ActionRunner.execute`):
+ * the runner performs the declarative write through
  * the platform action route, runs no handler and no executor of its own, and
  * then hands the action to `handlePostExecution` like every other branch. So a
  * hop beside it follows the write, whose success carries neither a handler's

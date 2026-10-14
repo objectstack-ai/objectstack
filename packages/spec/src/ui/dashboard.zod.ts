@@ -517,15 +517,14 @@ const WIDGET_TYPE_DEFAULT = 'metric';
  *     about the dataset, not about the widget, and is not reachable from this
  *     schema.
  *  4. **objectui's CLIENT-SIDE authoring door, which is a `.shape` mirror and
- *     therefore runs no object-level check of this schema's at all.** At the
- *     `.objectui-sha` pin `53ded82bf7a494f54e344e19099dbf00854b8694`,
- *     `packages/types/src/zod/complex.zod.ts:627` builds its own
- *     `DashboardWidgetSchema` from
+ *     therefore runs no object-level check of this schema's at all.**
+ *     `@object-ui/types` builds its own `DashboardWidgetSchema` from
  *     `specFieldsExcept(SpecDashboardWidgetSchema.shape, …).extend({…}).strict()`,
  *     and that package re-attaches NONE of this spec's exported checks — 0
  *     occurrences of any of the five names in `packages/types/src`, against a
  *     lit control of 17 `specFieldsExcept` call sites and the mirror line
- *     itself present. So until objectui imports and chains
+ *     itself present (recorded in `packages/spec/liveness/dashboard.json`, row
+ *     `widgets`). So until objectui imports and chains
  *     {@link checkDashboardWidgetStageOrder}, its door keeps accepting
  *     `stageOrder` on a `bar`: this refusal is the PUBLISH door's, not the
  *     editor's. ⚠️ Note what that mirror does to `type` — it drops the key
@@ -808,7 +807,8 @@ export const DASHBOARD_WIDGET_MULTI_MEASURE_TYPES = [
  * text reads it, and the `values` doc string reads it.
  *
  * Measured in objectui's shared chart renderer (`AdvancedChartImpl` in
- * `@object-ui/plugin-charts`, at the `.objectui-sha` pin `89cad75d5570`): the
+ * `@object-ui/plugin-charts`; recorded in `packages/spec/liveness/dashboard.json`,
+ * row `widgets.values`): the
  * `pie` / `donut`, `funnel`, `treemap` and `sankey` arms each bind
  * `series[0]?.dataKey` and read no other series, so a widget of one of these
  * types WITH a dimension draws its first measure per bucket and drops every
