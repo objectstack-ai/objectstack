@@ -2046,14 +2046,14 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
 
     const rewrite = step(report, 'rewrite');
     expect(rewrite.status).toBe('blocked');
+    const unknown = blockerOf(rewrite, 'the permission set zz_unknown_set,');
+    expect(unknown).not.toContain(COMPOSITION);
+    expect(unknown).toMatch(/or remove the grants/);
     for (const name of ['admin_full_access', 'organization_admin_no_bypass']) {
       const blocker = blockerOf(rewrite, `the permission set ${name},`);
       expect(blocker).toContain(COMPOSITION);
       expect(blocker).not.toMatch(/\bremove\b/);
     }
-    const unknown = blockerOf(rewrite, 'the permission set zz_unknown_set,');
-    expect(unknown).not.toContain(COMPOSITION);
-    expect(unknown).toMatch(/or remove the grants/);
     // Still refused: the gate holds and nothing is deleted.
     expect(step(report, 'mirror-deletion').status).toBe('not-reached');
     expect(deletes()).toEqual([]);
@@ -2072,13 +2072,13 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
 
     const rewrite = step(report, 'rewrite');
     expect(rewrite.status).toBe('blocked');
+    const unknown = blockerOf(rewrite, 'grant_gone_legacy');
+    expect(unknown).not.toContain(COMPOSITION);
+    expect(unknown).toMatch(/name or remove each/);
     const shipped = blockerOf(rewrite, 'grant_admin_legacy');
     expect(shipped).toContain('admin_full_access');
     expect(shipped).toContain(COMPOSITION);
     expect(shipped).not.toMatch(/\bremove\b/);
-    const unknown = blockerOf(rewrite, 'grant_gone_legacy');
-    expect(unknown).not.toContain(COMPOSITION);
-    expect(unknown).toMatch(/name or remove each/);
     expect(step(report, 'mirror-deletion').status).toBe('not-reached');
     expect(deletes()).toEqual([]);
   });
@@ -2089,12 +2089,12 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
 
     const conversion = step(report, 'authored-conversion');
     expect(conversion.status).toBe('blocked');
-    const everyone = blockerOf(conversion, 'position everyone ');
-    expect(everyone).toContain(COMPOSITION);
-    expect(everyone).not.toMatch(/\bremove\b/);
     const undeclared = blockerOf(conversion, 'position zz_undeclared ');
     expect(undeclared).not.toContain(COMPOSITION);
     expect(undeclared).toMatch(/or remove the bindings/);
+    const everyone = blockerOf(conversion, 'position everyone ');
+    expect(everyone).toContain(COMPOSITION);
+    expect(everyone).not.toMatch(/\bremove\b/);
     expect(step(report, 'rewrite').status).toBe('not-reached');
     expect(deletes()).toEqual([]);
   });
@@ -2106,12 +2106,12 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     expect(step(report, 'authored-conversion').status).toBe('done');
     const rewrite = step(report, 'rewrite');
     expect(rewrite.status).toBe('blocked');
-    const everyone = blockerOf(rewrite, 'position everyone ');
-    expect(everyone).toContain(COMPOSITION);
-    expect(everyone).not.toMatch(/\bremove\b/);
     const undeclared = blockerOf(rewrite, 'position zz_undeclared ');
     expect(undeclared).not.toContain(COMPOSITION);
     expect(undeclared).toMatch(/resolve its blocker/);
+    const everyone = blockerOf(rewrite, 'position everyone ');
+    expect(everyone).toContain(COMPOSITION);
+    expect(everyone).not.toMatch(/\bremove\b/);
     expect(deletes()).toEqual([]);
   });
 
