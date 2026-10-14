@@ -305,7 +305,7 @@ function lifecycleRefusalOf(
   const label = keyLabel(row);
   if (row.revoked === true || row.revoked === 1) {
     return {
-      code: API_KEY_REVOKED_CODE,
+      code: API_KEY_REVOKED_REFUSAL.code,
       message: `${label} was revoked, and a revoked key never works again. ${API_KEY_REMEDY}`,
       ...ids,
     };
@@ -316,7 +316,7 @@ function lifecycleRefusalOf(
     if (expiresMs <= nowMs) {
       const at = new Date(expiresMs).toISOString();
       return {
-        code: API_KEY_EXPIRED_CODE,
+        code: API_KEY_EXPIRED_REFUSAL.code,
         message: `${label} expired on ${at}. Keys do not renew. ${API_KEY_REMEDY}`,
         at,
         ...ids,
@@ -327,7 +327,7 @@ function lifecycleRefusalOf(
     if (graceEndMs !== undefined && graceEndMs <= nowMs) {
       const at = new Date(graceEndMs).toISOString();
       return {
-        code: API_KEY_EXPIRED_CODE,
+        code: API_KEY_EXPIRED_REFUSAL.code,
         message:
           `${label} was signed with no expiry, and its one-year grace under the API-key lifecycle policy `
           + `ended on ${at}. ${API_KEY_REMEDY}`,
@@ -346,7 +346,7 @@ function lifecycleRefusalOf(
         ? `has not been used since it was signed on ${at}`
         : `has no recorded use since the API-key lifecycle policy took effect on ${at}`;
     return {
-      code: API_KEY_INACTIVE_CODE,
+      code: API_KEY_INACTIVE_REFUSAL.code,
       message:
         `${label} ${since}, longer than the ${policy.inactivityDays} days the inactivity policy allows, so it `
         + `is refused. It is not revoked. ${API_KEY_REMEDY}`,
