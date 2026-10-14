@@ -6751,10 +6751,6 @@ export class SecurityPlugin implements Plugin {
    * `*Many` paths, out of scope for the by-id pre-image check).
    */
   /**
-    }
-  }
-
-  /**
    * [commit 6feac910b] Does this object declare that its access — writes included — derives
    * from a master record (ADR-0055 `controlled_by_parent`)?
    *
