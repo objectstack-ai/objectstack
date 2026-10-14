@@ -116,27 +116,7 @@ export async function handleKeysRequest(
     const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
     const name = rawName || 'API Key';
 
-    // ── [#23367, ruling A] The lifecycle policy, from the auth service. ──
-    //
-    // The same source the key-admission seam judges with, so the life a key
-    // is signed with and the life it is admitted under cannot disagree. A
-    // kernel with no `auth` service has no auth configuration: the signing
-    // then keeps its pre-policy behaviour (no default, no ceiling). An `auth`
-    // service that is registered and FAILED to build is the outage it is
-    // (#15900's reasoning for `tenancy` below): the policy is an input to the
-    // credential being minted, and an input never read decides nothing.
-    let policy: ApiKeyLifecyclePolicy | undefined;
-    try {
-        const source = apiKeyLifecyclePolicySourceOf(
-            await deps.resolveServiceOrLoud(context, 'auth', context.environmentId),
-        );
-        policy = source ? await source() : undefined;
-    } catch (err) {
-        throw new AuthzStoreUnavailableError('api_key_policy', err);
-    }
-
-    const nowMs = Date.now();
-    let expiresAt: string | undefined;
+    let requestedMs: number | undefined;
     if (body?.expires_at != null && body.expires_at !== '') {
         const ms = typeof body.expires_at === 'number'
             ? (body.expires_at < 1e12 ? body.expires_at * 1000 : body.expires_at)
@@ -144,26 +124,10 @@ export async function handleKeysRequest(
         if (Number.isNaN(ms)) {
             return { handled: true, response: deps.error('Invalid expires_at: must be a parseable date', 400) };
         }
-        if (ms <= nowMs) {
+        if (ms <= Date.now()) {
             return { handled: true, response: deps.error('Invalid expires_at: must be in the future', 400) };
         }
-        if (policy && ms > nowMs + policy.maxExpiryDays * DAY_MS + EXPIRY_CEILING_SKEW_MS) {
-            const latest = new Date(nowMs + policy.maxExpiryDays * DAY_MS).toISOString();
-            return {
-                handled: true,
-                response: deps.error(
-                    `expires_at ${new Date(ms).toISOString()} is further away than this deployment allows: an API key `
-                    + `lives at most ${policy.maxExpiryDays} days, so the latest expiry a key signed now may have is `
-                    + `${latest}. Ask for that date or an earlier one, and rotate the key before it expires.`,
-                    400,
-                    { code: API_KEY_EXPIRY_TOO_LONG_CODE },
-                ),
-            };
-        }
-        expiresAt = new Date(ms).toISOString();
-    } else if (policy) {
-        // No expiry asked for: the policy's default life, never a permanent key.
-        expiresAt = new Date(nowMs + policy.defaultExpiryDays * DAY_MS).toISOString();
+        requestedMs = ms;
     }
 
     const ql = (await deps.getObjectQL(context, context.environmentId))
@@ -218,6 +182,48 @@ export async function handleKeysRequest(
         throw new AuthzStoreUnavailableError('tenancy', err);
     }
     const walled = tenancyPosture ? postureEnforcesWall(tenancyPosture) : false;
+
+    // ── [#23367, ruling A] The lifecycle policy, from the auth service. ──
+    //
+    // The same source the key-admission seam judges with, so the life a key
+    // is signed with and the life it is admitted under cannot disagree. A
+    // kernel with no `auth` service has no auth configuration: the signing
+    // then keeps its pre-policy behaviour (no default, no ceiling). An `auth`
+    // service that is registered and FAILED to build is the outage it is —
+    // the #15900 reasoning above, for the same kind of input: the policy
+    // decides the life of the credential being minted, and an input never
+    // read decides nothing.
+    let policy: ApiKeyLifecyclePolicy | undefined;
+    try {
+        const source = apiKeyLifecyclePolicySourceOf(
+            await deps.resolveServiceOrLoud(context, 'auth', context.environmentId),
+        );
+        policy = source ? await source() : undefined;
+    } catch (err) {
+        throw new AuthzStoreUnavailableError('api_key_policy', err);
+    }
+
+    const nowMs = Date.now();
+    let expiresAt: string | undefined;
+    if (requestedMs !== undefined) {
+        if (policy && requestedMs > nowMs + policy.maxExpiryDays * DAY_MS + EXPIRY_CEILING_SKEW_MS) {
+            const latest = new Date(nowMs + policy.maxExpiryDays * DAY_MS).toISOString();
+            return {
+                handled: true,
+                response: deps.error(
+                    `expires_at ${new Date(requestedMs).toISOString()} is further away than this deployment allows: an `
+                    + `API key lives at most ${policy.maxExpiryDays} days, so the latest expiry a key signed now may `
+                    + `have is ${latest}. Ask for that date or an earlier one, and rotate the key before it expires.`,
+                    400,
+                    { code: API_KEY_EXPIRY_TOO_LONG_CODE },
+                ),
+            };
+        }
+        expiresAt = new Date(requestedMs).toISOString();
+    } else if (policy) {
+        // No expiry asked for: the policy's default life, never a permanent key.
+        expiresAt = new Date(nowMs + policy.defaultExpiryDays * DAY_MS).toISOString();
+    }
 
     if (walled && !activeOrganizationId) {
         // Refuse rather than mint. Under a walled posture an org-less key

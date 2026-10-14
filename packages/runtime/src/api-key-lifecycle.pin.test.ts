@@ -18,8 +18,8 @@
  *
  * `HttpDispatcher`'s identity step re-raises only the store outage by brand,
  * so the branded lifecycle refusal is answered there as an anonymous request:
- * the generic 401, the route never runs, and a cookie beside the dead key
- * never answers for it. Pinned so a later change cannot turn that into an
+ * the generic 401 at a door that refuses anonymity (`POST /keys` here),
+ * nothing is minted, and a cookie beside the dead key never answers for it. Pinned so a later change cannot turn that into an
  * admission or a 500.
  */
 
@@ -136,7 +136,8 @@ describe('[#23367] POST /keys — the default life and the ceiling', () => {
 // ── The dispatcher face: a refused key fails CLOSED ──────────────────────────
 
 const KEY = 'osk_dispatcher_lifecycle_pin';
-const ROUTE = '/webhooks/redeliver';
+/** `/keys` takes its anonymous decision as its first statement (ADR-0138 D2), so it shows what the face resolved. */
+const ROUTE = '/keys';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 function dispatcherWithKey(row: Record<string, unknown>) {
@@ -144,21 +145,21 @@ function dispatcherWithKey(row: Record<string, unknown>) {
   const getSession = vi.fn(async ({ headers }: { headers: Headers }) => (
     headers.get('cookie') ? { user: { id: 'u_cookie' }, session: { userId: 'u_cookie' } } : null
   ));
+  const inserted: any[] = [];
   const objectql = {
     find: vi.fn(async (object: string, q: any) => (
       object === 'sys_api_key' && q?.where?.key === keyHash
         ? [{ id: 'key_1', key: keyHash, prefix: 'osk_dispatch', user_id: 'u_owner', revoked: false, scopes: '[]', ...row }]
         : []
     )),
+    insert: vi.fn(async (_object: string, data: any) => { inserted.push(data); return { id: 'key_new' }; }),
     update: vi.fn(async () => ({})),
     getObjects: vi.fn().mockReturnValue({}),
     registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
   };
-  const handleRedeliver = vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200, headers: JSON_HEADERS }));
   const services: Record<string, unknown> = {
     objectql,
     auth: { isAuthGateActive: () => false, getApi: async () => ({ getSession }), ...policyService() },
-    webhooks: { handleRedeliver },
   };
   const kernel: any = {
     getState: () => 'running',
@@ -168,13 +169,13 @@ function dispatcherWithKey(row: Record<string, unknown>) {
   };
   const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
   (dispatcher as any).domainDeps.logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
-  return { dispatcher, handleRedeliver, getSession };
+  return { dispatcher, inserted, getSession };
 }
 
 const post = (headers: Record<string, string>) => new Request(`http://tenant.example/api/v1${ROUTE}`, {
   method: 'POST',
   headers: { ...JSON_HEADERS, ...headers },
-  body: JSON.stringify({ deliveryId: 'del_1' }),
+  body: JSON.stringify({ name: 'minted by a key' }),
 });
 const pctx = (r: Request): HttpProtocolContext => ({ request: r });
 
@@ -183,25 +184,25 @@ describe('[#23367] the dispatcher face fails CLOSED on a key its lifecycle refus
   beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
   afterEach(() => { warn.mockRestore(); });
 
-  it('a revoked key is answered the generic 401, and the route never runs', async () => {
-    const { dispatcher, handleRedeliver } = dispatcherWithKey({ revoked: true });
-    const result: any = await dispatcher.dispatch('POST', ROUTE, {}, {}, pctx(post({ 'x-api-key': KEY })));
+  it('a revoked key is answered the generic 401, and nothing is minted', async () => {
+    const { dispatcher, inserted } = dispatcherWithKey({ revoked: true });
+    const result: any = await dispatcher.dispatch('POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY })));
     expect(result.response?.status).toBe(401);
-    expect(handleRedeliver).not.toHaveBeenCalled();
+    expect(inserted).toEqual([]);
   });
 
   it('a cookie beside the dead key never answers for it', async () => {
-    const { dispatcher, handleRedeliver } = dispatcherWithKey({ expires_at: '2000-01-01T00:00:00.000Z' });
+    const { dispatcher, inserted } = dispatcherWithKey({ expires_at: '2000-01-01T00:00:00.000Z' });
     const result: any = await dispatcher.dispatch(
-      'POST', ROUTE, {}, {}, pctx(post({ 'x-api-key': KEY, cookie: 'session=ok' })));
+      'POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY, cookie: 'session=ok' })));
     expect(result.response?.status).toBe(401);
-    expect(handleRedeliver).not.toHaveBeenCalled();
+    expect(inserted).toEqual([]);
   });
 
   it('control: the same key, live, is served', async () => {
-    const { dispatcher, handleRedeliver } = dispatcherWithKey({ expires_at: '2999-01-01T00:00:00.000Z' });
-    const result: any = await dispatcher.dispatch('POST', ROUTE, {}, {}, pctx(post({ 'x-api-key': KEY })));
-    expect(result.response?.status).not.toBe(401);
-    expect(handleRedeliver).toHaveBeenCalledTimes(1);
+    const { dispatcher, inserted } = dispatcherWithKey({ expires_at: '2999-01-01T00:00:00.000Z' });
+    const result: any = await dispatcher.dispatch('POST', ROUTE, { name: 'x' }, {}, pctx(post({ 'x-api-key': KEY })));
+    expect(result.response?.status).toBe(201);
+    expect(inserted).toHaveLength(1);
   });
 });
