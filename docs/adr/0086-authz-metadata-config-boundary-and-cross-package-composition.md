@@ -1,6 +1,6 @@
 # ADR-0086: Authorization metadata↔config boundary + cross-package composition — DEFINITION travels, ASSIGNMENT stays, packages ship their own sets
 
-**Status**: Accepted (2026-07-04) — **substantially implemented**; parts refined/superseded by [ADR-0090](./0090-permission-model-v2-concept-convergence.md) and [ADR-0094](./0094-sys-permission-set-pure-projection.md). See the **Re-evaluation (2026-07-16)** addendum for the current, code-grounded status of every decision.
+**Status**: Accepted (2026-07-04) — **substantially implemented**; parts refined/superseded by [ADR-0090](./0090-permission-model-v2-concept-convergence.md) and [ADR-0094](./0094-sys-permission-set-pure-projection.md). See the **Re-evaluation (2026-07-16)** addendum for the current, code-grounded status of every decision. · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D2/D3/D13): the ADR-0094 projection the Re-evaluation describes, and the `sys_permission_set` and `sys_position_permission_set` row objects, are retired by #15204 stage 8 (`66949b7729`, 2026-10-13); the DEFINITION↔ASSIGNMENT thesis stands, and ADR-0131 completes it. See the notes in the Re-evaluation.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0066](./0066-unified-authorization-model.md) (three-way separation: Capability / Assignment / Requirement — this ADR operationalizes its **D5** for the packaging axis), [ADR-0056](./0056-permission-model-landing-verification.md) (whole-model enforce/prove; **D7** app-declared default profile), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (`readScope`/`writeScope` depth), [ADR-0005](./0005-metadata-customization-overlay.md) (per-org overlay = the subtract/adjust layer), [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) / [ADR-0048](./0048-cross-package-metadata-collision.md) (namespaced api names = collision-proof keys), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-never-seeded metadata), [ADR-0016](./0016-studio-package-authoring-and-publish.md) / [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (draft/publish), [ADR-0084](./0084-application-builder-information-architecture.md) (Access pillar = matrix; defers composition), [ADR-0025](./0025-plugin-package-distribution.md) (manifest `permissions` = install-consent scopes, **not** RBAC grants), [ADR-0003](./0003-package-as-first-class-citizen.md) / [ADR-0070](./0070-package-first-authoring.md) (package-first), [ADR-0006](./0006-project-environment-split.v4.md) (environment split)
 **Consumers**: `@objectstack/spec` (`security/permission.zod.ts`, `stack.zod.ts`, `system/metadata-persistence.zod.ts`), `@objectstack/plugin-security` (`bootstrap-declared-*`, `permission-evaluator`), `@objectstack/core` (`resolve-authz-context`), `@objectstack/metadata` (overlay), `../objectui` (`AccessPillar`, `PermissionMatrixEditor`, `metadata-admin`)
@@ -382,6 +382,13 @@ flagged inline below.
 | **P1** framework `packageId` + seeder | **Done** | = D3 + D5 above. |
 | **P2** two doors + overlay/subtract | **Two doors done; the overlay subtract layer is RETIRED for `permission`** | Two doors shipped (D6/D7). The subtract layer had landed as an **ADR-0005 first-class overlay** (ADR-0094 D5) rather than the Salesforce-muting/explicit-deny path this ADR sketched — **retired 2026-08-09 (ADR-0094 D5-R)**, so for an artifact-backed set there is no overlay customization channel at all. The ADR-0066 precedence-step-4 explicit-deny layer remains deferred and **evidence-gated**; with the overlay channel withdrawn, a package set is customized by editing the package and re-publishing. |
 
+> **Note (2026-10-14) — the D5/P1 seeder and the row it seeded are gone.**
+> `bootstrap-declared-permissions.ts` was deleted by #15204 stage 6b-2 (`c8a9783eca`; ADR-0131 D2:
+> no seeder writes a declared item into any table), and the `sys_permission_set` row object it
+> filled is retired by stage 8 (`66949b7729`, 2026-10-13;
+> [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13). A package's sets reach a
+> deployment as metadata-registry definitions; D3's `packageId` / `managedBy` stay on the definition.
+
 ### ⚠️ Two mechanisms in the original text are superseded by a better realization
 
 1. **P0's "slice-merge the shared *data record*" premise → ADR-0094 projection + overlay.**
@@ -395,6 +402,11 @@ flagged inline below.
    raw shared row. *Note the inline `objects`/`fields` dict shape survived — ADR-0094 moved
    the store, not the body shape — so this ADR's load-bearing claim that namespaced keys make
    a package's slice unambiguous still holds and underpins both slice-merge and overlay.*
+
+   > **RETIRED 2026-10-13 (#15204 stage 8, by execution of ADR-0131 D2/D3/D13).** The projection
+   > and the data-door write-through this item describes are unregistered, and the
+   > `sys_permission_set` row object is retired: there is no derived row any more, so "no second
+   > writable authority" now holds with no row at all.
 
 2. **D4's "Salesforce muting / clone-to-customize" subtract layer → ADR-0005 whole-document
    overlay — ⛔ RETIRED 2026-08-09, see ADR-0094 D5-R.** ADR-0094 D5 (revised 2026-07-14) had
@@ -433,6 +445,13 @@ except where noted:
 | **Assignment** `sys_user_position` / `sys_position_permission_set` (was `sys_user_permission_set` / `sys_role_permission_set`) | **config / data** | Tables renamed (ADR-0090 D3); still the universal DEFINITION↔ASSIGNMENT line. ADR-0091 adds `valid_from`/`valid_until` — assignment is now *time-boxed* config. |
 | Delegated-admin **`adminScope`** on a set | **metadata (definition) + config (grant)** | NEW (ADR-0090 D12): admin capability itself is scoped (BU subtree + assignable-set allowlist + no self-escalation); `authorEnvironmentSets` keeps package-managed rows publish-only per this ADR. |
 | Organization / tenancy / actual users & teams | **config / data** | Unchanged. Tenancy is now an explicit kernel service (ADR-0093) and tenant isolation an always-first Layer 0 (ADR-0095). Teams *receive* sharing, never carry capability (ADR-0090 D8). |
+
+> **Note (2026-10-14) — the position → permission-set binding is a definition now.**
+> `sys_position_permission_set` is retired by #15204 stage 8 (`66949b7729`, 2026-10-13), by
+> execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13: a position names its
+> sets in its own definition (`PositionSchema.permissionSets`), so the binding leaves the
+> **Assignment** row for the **Position** definition row. `sys_user_position` and
+> `sys_user_permission_set` remain the assignment line.
 
 ### Net assessment
 

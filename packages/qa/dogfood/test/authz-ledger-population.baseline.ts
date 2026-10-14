@@ -96,16 +96,16 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
 
   // ── dispatcher domains (`packages/runtime/src/route-ledger.ts`) ─────────
   // Absent because classified: `/meta`, `/actions`, `/automation`,
-  // `/packages`, `/mcp`, `/analytics`, `/i18n` (#22432), and `/notifications`,
+  // `/packages`, `/mcp`, `/analytics`, `/i18n` (#22432), `/notifications`,
   // `/keys` and `/share-links` (ADR-0138 D2: each domain's anonymous decision
-  // moved to its first statement). `/approvals/act` and `/webhooks/redeliver`
-  // were never enumerated here: they arrived classified. The other 11 domains
-  // are here.
+  // moved to its first statement), and `/ui` and `/data` (ADR-0138 D2's second
+  // slice: each domain's anonymous decision became its first statement).
+  // `/approvals/act` and `/webhooks/redeliver` were never enumerated here: they
+  // arrived classified. The other 9 domains are here.
   'dispatcher-domain:route-ledger.ts:/.well-known/objectstack',
   'dispatcher-domain:route-ledger.ts:/ai',
   'dispatcher-domain:route-ledger.ts:/apps',
   'dispatcher-domain:route-ledger.ts:/auth',
-  'dispatcher-domain:route-ledger.ts:/data',
   'dispatcher-domain:route-ledger.ts:/discovery',
   'dispatcher-domain:route-ledger.ts:/health',
   // ⚠️ Separate from `/mcp`, deliberately. The `/mcp` key is classified by
@@ -115,7 +115,6 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
   'dispatcher-domain:route-ledger.ts:/mcp/skill',
   'dispatcher-domain:route-ledger.ts:/ready',
   'dispatcher-domain:route-ledger.ts:/security',
-  'dispatcher-domain:route-ledger.ts:/ui',
 ];
 
 /**
@@ -138,5 +137,9 @@ export const LEDGER_POPULATION_BASELINE: readonly string[] = [
  * `/keys` and `/share-links` left classified by `anonymous-deny-notifications`,
  * `anonymous-deny-keys` and `anonymous-deny-share-links`, each with its domain
  * gate pin, once each domain's anonymous decision moved to its first statement.
+ * 24 at 2026-10-14 (ADR-0138 card E2, second slice):
+ * `dispatcher-domain:route-ledger.ts:/ui` and `/data` left classified by
+ * `anonymous-deny-ui` and `anonymous-deny-data`, each with its domain gate pin,
+ * once each domain's anonymous decision became its first statement.
  */
-export const LEDGER_POPULATION_BASELINE_MAX = 26;
+export const LEDGER_POPULATION_BASELINE_MAX = 24;

@@ -419,17 +419,28 @@ describe('HttpDispatcher extracted domains (PR-3: keys/storage/ui)', () => {
     });
 
     it('/ui/view/:object serves the protocol getUiView result; 501 without a protocol service', async () => {
+        // Signed in through the dispatcher's own identity step: since ADR-0138
+        // D2 the domain refuses an anonymous caller 401 as its first statement,
+        // ahead of the protocol probe — asserted below.
+        const auth = { api: { getSession: async () => ({ user: { id: 'u1' } }) } };
         const getUiView = vi.fn().mockResolvedValue({ view: 'list-def' });
-        const ok = await makeDispatcher({ protocol: { getUiView } }).dispatch('GET', '/ui/view/account/list', undefined, {}, {} as any);
+        const ok = await makeDispatcher({ protocol: { getUiView }, auth }).dispatch('GET', '/ui/view/account/list', undefined, {}, {} as any);
         expect(ok.response?.status).toBe(200);
         expect(getUiView).toHaveBeenCalledWith({ object: 'account', type: 'list' });
 
         // [#4093 follow-up] Was 503. The route is mounted and the
         // implementation is absent — 501. 503 claimed the condition was
         // temporary; an uninstalled MetadataPlugin does not install itself.
-        const missing = await makeDispatcher().dispatch('GET', '/ui/view/account', undefined, {}, {} as any);
+        const missing = await makeDispatcher({ auth }).dispatch('GET', '/ui/view/account', undefined, {}, {} as any);
         expect(missing.response?.status).toBe(501);
         expect(missing.response?.body?.error?.message ?? '').toContain('MetadataPlugin');
+
+        // The same request with no session is the domain floor's answer, and
+        // the protocol is never asked.
+        const anonymous = await makeDispatcher({ protocol: { getUiView } }).dispatch('GET', '/ui/view/account/list', undefined, {}, {} as any);
+        expect(anonymous.response?.status).toBe(401);
+        expect(anonymous.response?.body?.error?.code).toBe('UNAUTHENTICATED');
+        expect(getUiView).toHaveBeenCalledTimes(1);
     });
 });
 

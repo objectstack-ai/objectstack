@@ -308,7 +308,12 @@ export interface ProbeTableReading {
 // statement; the three `anonymous-deny-*` rows cover each gate key plus its
 // dispatcher-domain key, and `anonymous-door-public-form` covers the `forms`
 // REST family key — four keys that left the shrink-only baseline (30 -> 26).
-export const PROBE_TABLE: ProbeTableReading = { entries: 23, files: 18, keys: 29 };
+// [ADR-0138 E2, second slice] 23 / 18 / 29 -> 25 / 20 / 33: the `/ui` and
+// `/data` domain gates joined the table as GATE_PINs on their two domain
+// files, once each domain's anonymous decision became its first statement;
+// `anonymous-deny-ui` and `anonymous-deny-data` cover each gate key plus its
+// dispatcher-domain key — two keys that left the baseline (26 -> 24).
+export const PROBE_TABLE: ProbeTableReading = { entries: 25, files: 20, keys: 33 };
 
 /**
  * The probe count `authz-conformance.matrix.ts`'s header states.
@@ -333,8 +338,10 @@ export const PROBE_TABLE: ProbeTableReading = { entries: 23, files: 18, keys: 29
  * sentence moved together.
  * [ADR-0138 E2] 20 -> 23, the same way: the three domain gate pins and the
  * header sentence moved together.
+ * [ADR-0138 E2, second slice] 23 -> 25, the same way: the `/ui` and `/data`
+ * gate pins and the header sentence moved together.
  */
-export const MATRIX_HEADER_PROBE_CLAIM = 23;
+export const MATRIX_HEADER_PROBE_CLAIM = 25;
 
 export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
   // ── the two LEDGER files: the population source since 2026-08-31 ───────
@@ -478,15 +485,19 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `domains/share-links.ts` are now named by a probe (their domain floors'
     // gate pins), and their three keys are the tenth to twelfth classified:
     // 23 domains, 11 still in the baseline, 8 domain files no probe names.
+    // [ADR-0138 E2, second slice] `domains/ui.ts` and `domains/data.ts` are now
+    // named by a probe too (their domain floors' gate pins), and their two keys
+    // are the thirteenth and fourteenth classified: 23 domains, 9 still in the
+    // baseline, 6 domain files no probe names.
     note:
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
       'registered domain needs a row, and every ledger domain must be a live prefix or a pinned legacy / ' +
       'non-dispatch branch. That two-way guard is what settles the FILE-SELECTION layer by ' +
       'construction — all 18 DomainRoute prefixes declared across the 17 domain files that declare one are ' +
-      'ledger domains today, including the 8 files no probe names. 23 domains; 12 classified ' +
+      'ledger domains today, including the 6 files no probe names. 23 domains; 14 classified ' +
       '(/meta, /actions, /automation, /packages, /mcp, /analytics, /i18n, /approvals/act, ' +
-      '/webhooks/redeliver, /notifications, /keys, /share-links), 11 in the shrink-only baseline.',
+      '/webhooks/redeliver, /notifications, /keys, /share-links, /ui, /data), 9 in the shrink-only baseline.',
   },
   {
     file: 'packages/rest/src/rest-server.ts',
@@ -768,6 +779,34 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     note:
       'Same shape as domains/actions.ts, with the one exception ADR-0138 D2 names for this domain: the two ' +
       'token faces (class 2) are selected past the floor by the predicate that marks them public.',
+  },
+  {
+    // [ADR-0138 E2, second slice] The two domains that made no anonymous
+    // decision of their own until it became the handler's first statement;
+    // each row has the actions.ts shape. The handler-name control counts the
+    // declaration and the DomainRoute call site, twice in each file.
+    file: 'packages/runtime/src/domains/ui.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleUiRequest: 2 },
+    note: 'Same shape as domains/actions.ts.',
+  },
+  {
+    file: 'packages/runtime/src/domains/data.ts',
+    kinds: ['GATE_PIN'],
+    probes: 1,
+    keys: 1,
+    population: 1,
+    reachable: 1,
+    blindSpot: 0,
+    populationRule: '`export async function handle*Request` entry points',
+    controls: { 'shouldDenyAnonymous(': 1, handleDataRequest: 2 },
+    note: 'Same shape as domains/actions.ts.',
   },
   {
     file: 'packages/runtime/src/domains/mcp.ts',
@@ -1113,7 +1152,7 @@ export function deriveProbeFileCensus(): {
     });
   }
 
-  // ── the eight runtime domain files whose floor is a GATE_PIN ─────────────
+  // ── the ten runtime domain files whose floor is a GATE_PIN ───────────────
   //
   // [#22432] The handler-name class admits digits: `handleI18nRequest` is a
   // `handle*Request` entry point like the others, and a letters-only class
@@ -1129,6 +1168,8 @@ export function deriveProbeFileCensus(): {
     ['packages/runtime/src/domains/notifications.ts', 'shouldDenyAnonymous(', 'handleNotificationRequest'],
     ['packages/runtime/src/domains/keys.ts', 'shouldDenyAnonymous(', 'handleKeysRequest'],
     ['packages/runtime/src/domains/share-links.ts', 'shouldDenyAnonymous(', 'handleShareLinksRequest'],
+    ['packages/runtime/src/domains/ui.ts', 'shouldDenyAnonymous(', 'handleUiRequest'],
+    ['packages/runtime/src/domains/data.ts', 'shouldDenyAnonymous(', 'handleDataRequest'],
   ];
   for (const [rel, gate, handler] of domains) {
     const src = read(rel);

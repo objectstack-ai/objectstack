@@ -22,7 +22,29 @@
  * it for a platform admin (ADR-0068 D2; re-synthesizing it is permanently
  * vetoed by the maintainer's 2026-08-18 ruling). It stays readable so a
  * deployment that still carries the scalar from before D2 is not locked out.
+ *
+ * ## A held session is refused here too (ADR-0069 D3)
+ *
+ * The platform-admin surface is a protected resource, and ADR-0069 D3 gates a
+ * held session (an expired or administrator-forced password, enforced MFA not
+ * yet enrolled) out of every protected resource until it remediates. These
+ * mounts sit under the auth namespace on the raw host app, so neither ADR-0069
+ * transport seam (the REST server, the runtime dispatcher) ever sees them:
+ * measured on a real boot, a held platform admin was refused on a data read
+ * and admitted to every mount judged here, in both held states. So the judge
+ * consults the gate's ONE shared decision, `evaluateAuthGate`, exactly as the
+ * other raw route families do at their own doors, and every mount that calls
+ * the judge is covered without re-implementing it.
+ *
+ * ⛔ No request path is passed. The empty path is the shared allow-list's
+ * declared fail-closed input, so no mount can earn an exemption here. Passing
+ * the real path would let this family inherit the auth-namespace exemption,
+ * which exists so a held user can remediate (change-password, two-factor
+ * enrollment, sign-out) and was never a declaration about administration.
+ * None of those remediation endpoints is judged here, so none changes.
  */
+
+import { evaluateAuthGate } from '@objectstack/core';
 
 /** The caller a passing gate hands back to the route. */
 export interface PlatformAdminActor {
@@ -96,6 +118,12 @@ export function isPlatformAdminUser(sessionUser: unknown): boolean {
  * are), a signed-in non-admin is 403 `PERMISSION_DENIED` (we do, and the
  * answer is no). Collapsing them into one status would make the sweep unable
  * to tell "the payload never reached the gate" from "the gate said no".
+ *
+ * A held session is refused between the two, with `403` and the gate's own
+ * `code` and `message` (`PASSWORD_EXPIRED` / `MFA_REQUIRED`): identity first,
+ * then the authentication-policy posture, then authorization, the order the
+ * REST and dispatcher seams already apply. A held non-admin therefore reads
+ * the posture refusal rather than `PERMISSION_DENIED`, the same 403 status.
  */
 export function judgePlatformAdmin(session: unknown): PlatformAdminVerdict {
   const user = (session as { user?: unknown } | null | undefined)?.user as
@@ -111,6 +139,18 @@ export function judgePlatformAdmin(session: unknown): PlatformAdminVerdict {
           success: false,
           error: { code: 'UNAUTHENTICATED', message: PLATFORM_ADMIN_REFUSAL_MESSAGES[401] },
         },
+      },
+    };
+  }
+
+  // ADR-0069 D3: the gate's shared decision, pathless (see the header).
+  const held = evaluateAuthGate(user, '');
+  if (held) {
+    return {
+      ok: false,
+      refusal: {
+        status: 403,
+        body: { success: false, error: { code: held.code, message: held.message } },
       },
     };
   }
