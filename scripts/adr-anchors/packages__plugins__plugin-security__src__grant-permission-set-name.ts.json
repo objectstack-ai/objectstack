@@ -3,5 +3,5 @@
   "adrs": [
     "ADR-0131"
   ],
-  "invariant": "A grant names its permission set BY NAME alone (D4): the legacy permission_set_id is retired (D10), so nothing derives a name from an id, and a non-system write naming a set the security catalog does not hold is refused 400 reference_not_found. One grant per user, set and organization: the declared unique index refuses a second, and these hooks refuse the one duplicate the index cannot see (a second platform-wide grant, organization NULL) for every writer with the index's own 409, so a revoke never leaves a grant of that set in force."
+  "invariant": "A grant names its permission set BY NAME alone (D4): the legacy permission_set_id is retired (D10), so nothing derives a name from an id, and a non-system write naming a set the security catalog does not hold is refused 400 reference_not_found. One grant per user, set and organization: the declared unique index refuses a second, and these hooks refuse the one duplicate the index cannot see (a second platform-wide grant, organization NULL) for every writer, against the stored grants and within one caller write's dispatch scope, with the index's own 409, so a revoke never leaves a grant of that set in force. Two concurrent single writes are outside what a door can see."
 }

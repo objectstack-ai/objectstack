@@ -16,13 +16,15 @@ export const entry: SemanticMigration = {
     + 'src/objects/sys-user-permission-set.object.ts), with its (permission_set_id) index. The unique '
     + 'index (user_id, permission_set_id, organization_id) is replaced by one on (user_id, '
     + 'permission_set, organization_id), and a second platform-wide grant (organization NULL) of one '
-    + 'set to one user is refused at the write door with 409 UNIQUE_VIOLATION',
+    + 'set to one user is refused at the write door with 409 UNIQUE_VIOLATION, for every writer, '
+    + 'within one batch or multi-row write too',
   replacement:
     '`permission_set`, the machine name of the permission set the grant holds (ADR-0131 D4). Delete '
     + 'the key from any authored `sys_user_permission_set` seed row or data-door write that still '
     + 'carries it, and name the set instead. Existing databases: run the v18 ceremony, '
     + '`os migrate organization-ownership --apply`, whose verified rewrite names every grant from the '
-    + 'column and whose column-drops step then drops it',
+    + 'column and whose column-drops step then drops the two retired indexes and then the column; '
+    + 'restart the server afterwards',
   reason:
     'ADR-0131 D4 makes every reference to a catalog item a name, and D3 retired the permission-set '
     + 'catalog rows the id pointed at. Since then no writer fills the column and no reader confers '
@@ -34,12 +36,14 @@ export const entry: SemanticMigration = {
     + 'backfill that did the same job is retired with it. The old unique index keyed the id, which '
     + 'grants written by name leave NULL, so it never refused a duplicate grant; a duplicate confers '
     + 'nothing more, but a revoke that deletes one row leaves the other granting. The new index keys '
-    + 'the name. The ceremony reports existing duplicate grants, deletes none, and does not drop the '
-    + 'column until the operator has removed them.',
+    + 'the name. The ceremony deletes no grant: a legacy grant whose name its user already holds in '
+    + 'its organization (the first v18 boot\'s organization-administrator sweep writes one beside each '
+    + 'legacy grant) is not named and blocks the rewrite, naming both ids, and named duplicates block '
+    + 'the column\'s drop, until the operator has removed one of each pair.',
   acceptanceCriteria:
     'No authored stack seed or client write names `permission_set_id` on `sys_user_permission_set`: '
     + 'the engine refuses the undeclared field with 400 INVALID_FIELD. A second grant of one set to '
     + 'one user in one organization is refused with 409 UNIQUE_VIOLATION, platform-wide grants '
-    + 'included. On a legacy database, after `os migrate organization-ownership --apply` the column '
+    + 'included, whether stored or repeated within one batch or multi-row write. On a legacy database, after `os migrate organization-ownership --apply` the column '
     + 'is gone and the boot no longer reports it orphaned.',
 };

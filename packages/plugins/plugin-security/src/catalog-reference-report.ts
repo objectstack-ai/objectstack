@@ -380,9 +380,10 @@ function logReport(report: CatalogReferenceReport, logger?: CatalogReferenceRepo
     logError(
       logger,
       `[security] ${unnamed.count} ${GRANT_OBJECT} grant(s) name no permission set (${GRANT_SET_NAME_FIELD} is ` +
-        'empty), so each confers nothing (ADR-0131 D4). The v18 ceremony (os migrate organization-ownership ' +
-        '--apply) names every grant it can and lists the rest. Nothing was changed. Fix: grant the intended ' +
-        'permission set again by name, or remove these grants.',
+        'empty), so each confers nothing (ADR-0131 D4). Nothing was changed. Fix: run the v18 ceremony, ' +
+        'os migrate organization-ownership --apply, which names each legacy grant from its retired id and lists ' +
+        'the ones it cannot name; then restart. Granting the set again by name before it runs makes a second ' +
+        'grant the ceremony will report, not name.',
       { count: unnamed.count, organizations: unnamed.organizations },
     );
   }

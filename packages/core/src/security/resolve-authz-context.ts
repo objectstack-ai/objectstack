@@ -743,8 +743,8 @@ function grantAppliesInTenant(organizationId: unknown, tenantId: string | undefi
  * [ADR-0131 D4] The permission set a stored `sys_user_permission_set` grant
  * names: its `permission_set`, or `undefined` for a grant that names none —
  * `NULL` or blank, which is a grant written before the column existed that the
- * one-time backfill has not named yet, or one it could not name (an id with no
- * set row, or a set row of another organization).
+ * v18 ceremony's verified rewrite (`os migrate organization-ownership
+ * --apply`, ADR-0131 D10) has not named yet, or one it could not name.
  *
  * A grant that names nothing confers nothing through this resolver. The same
  * rule the `plugin-security` and `plugin-auth` grant readers apply, each
