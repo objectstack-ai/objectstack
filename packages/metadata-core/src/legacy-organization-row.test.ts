@@ -121,3 +121,33 @@ describe('readLegacyOrganizationRows — fails closed', () => {
     expect(driver.seen).toHaveLength(0);
   });
 });
+
+describe('readLegacyOrganizationRows — the presence check is the driver\'s catalog read, not execute()', () => {
+  /** A `SqlDriver`-shaped double: `listPhysicalColumns`, and an `execute` that answers the legacy select only. */
+  function catalogDriver(columns: unknown, rows: unknown = []) {
+    const calls: string[] = [];
+    return {
+      calls,
+      dialectName: 'sqlite',
+      async listPhysicalColumns(object: string) { calls.push(`columns:${object}`); return columns; },
+      async execute(sql: string) { calls.push(/column_name/.test(sql) ? 'execute:catalog' : 'execute:legacy'); return rows; },
+    };
+  }
+
+  it('a migrated or fresh table: one catalog read, and execute() is never called', async () => {
+    const driver = catalogDriver(['id', 'type']);
+    expect((await readLegacyOrganizationRows(driver)).size).toBe(0);
+    expect(driver.calls).toEqual(['columns:sys_metadata']);
+  });
+
+  it('a v17-shape table: the catalog read, then the legacy select', async () => {
+    const driver = catalogDriver(['id', 'organization_id'], [{ id: 'r1', organization_id: 'org_a' }]);
+    expect([...(await readLegacyOrganizationRows(driver))]).toEqual([['r1', 'org_a']]);
+    expect(driver.calls).toEqual(['columns:sys_metadata', 'execute:legacy']);
+  });
+
+  it('a column list that is not a list, or is empty, is refused', async () => {
+    await expect(readLegacyOrganizationRows(catalogDriver(null))).rejects.toThrow(/not a list/);
+    await expect(readLegacyOrganizationRows(catalogDriver([]))).rejects.toThrow(/column list came back empty/);
+  });
+});

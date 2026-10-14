@@ -84,6 +84,8 @@ export class LegacyOrganizationRowsUnreadable extends Error {
 interface RawDriver {
   dialectName?: unknown;
   config?: { client?: unknown };
+  /** `SqlDriver`'s read-only catalog read — preferred: it is not `execute()`. */
+  listPhysicalColumns?: (object: string, options?: { transaction?: unknown }) => Promise<unknown>;
   execute?: (sql: string, params?: unknown[], options?: { transaction?: unknown }) => Promise<unknown>;
   raw?: (sql: string) => Promise<unknown>;
 }
@@ -139,6 +141,14 @@ function columnNameOf(row: Record<string, unknown>): string | null {
  */
 const COLUMN_ABSENT = new WeakMap<object, Set<string>>();
 
+/** Remember `table` has no organization column on this driver; answer "none". */
+function rememberAbsent(driver: object, table: string): ReadonlyMap<string, string> {
+  const absent = COLUMN_ABSENT.get(driver) ?? new Set<string>();
+  absent.add(table);
+  COLUMN_ABSENT.set(driver, absent);
+  return new Map();
+}
+
 /**
  * Every legacy organization row of `table`, id → organization (module header).
  *
@@ -171,18 +181,30 @@ export async function readLegacyOrganizationRows(
       : null;
   if (!exec) throw new LegacyOrganizationRowsUnreadable(table, 'the SQL driver has no raw-SQL seam');
 
-  const columnResult = await exec(columnListSql(dialect, table));
-  if (!isResultSet(columnResult)) throw new LegacyOrganizationRowsUnreadable(table, SEAM_NO_ANSWER_DETAIL);
-  const columns = normalizeRows(columnResult).map(columnNameOf);
+  // Is the column there? Asked on EVERY database, so through the driver's own
+  // catalog read when it has one (`SqlDriver.listPhysicalColumns`): not
+  // `execute()`, so a declaration boot's write guard — which counts every raw
+  // statement, since it cannot tell a read from a write — has nothing to count
+  // and a plan keeps its "writes nothing" claim. The catalog statement is the
+  // fallback for a driver without it.
+  let columns: Array<string | null>;
+  if (typeof d!.listPhysicalColumns === 'function') {
+    const listed = await d!.listPhysicalColumns(table, opts.transaction !== undefined ? { transaction: opts.transaction } : undefined);
+    if (!Array.isArray(listed)) throw new LegacyOrganizationRowsUnreadable(table, 'the driver\'s column list is not a list');
+    columns = listed.map((c) => (typeof c === 'string' && c ? c : null));
+  } else {
+    const columnResult = await exec(columnListSql(dialect, table));
+    if (!isResultSet(columnResult)) throw new LegacyOrganizationRowsUnreadable(table, SEAM_NO_ANSWER_DETAIL);
+    columns = normalizeRows(columnResult).map(columnNameOf);
+  }
   if (columns.length === 0) {
     throw new LegacyOrganizationRowsUnreadable(table, 'its column list came back empty for a table that exists');
   }
-  if (!columns.includes('organization_id')) {
-    const absent = COLUMN_ABSENT.get(d as object) ?? new Set<string>();
-    absent.add(table);
-    COLUMN_ABSENT.set(d as object, absent);
-    return new Map();
-  }
+  if (!columns.includes('organization_id')) return rememberAbsent(d as object, table);
+
+  // The column is there: a database the ceremony has not migrated. The rows
+  // are read with a raw statement, which every SQL face runs (a driver's
+  // `find` compiles against the DECLARED columns on some faces).
 
   const rowResult = await exec(
     `SELECT id, organization_id FROM ${table} WHERE organization_id IS NOT NULL AND organization_id <> ''`,

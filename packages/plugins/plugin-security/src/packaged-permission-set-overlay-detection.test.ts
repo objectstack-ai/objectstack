@@ -70,7 +70,26 @@ function makeQl(declared: any[] = []) {
       const rows = tableFor(object);
       if (!rows) return [];
       const hit = rows.filter((r) => matches(r, q?.where));
-      return typeof q?.limit === 'number' ? hit.slice(0, q.limit) : hit;
+      // [ADR-0131 D7] The engine shapes a read to the declared columns, and
+      // the family declares no `organization_id`: the key never comes back.
+      const shaped = object === 'sys_metadata'
+        ? hit.map(({ organization_id: _physical, ...declared }) => declared)
+        : hit;
+      return typeof q?.limit === 'number' ? shaped.slice(0, q.limit) : shaped;
+    },
+    // The physical column, as a database the ceremony has not migrated still
+    // holds it, read through the table's driver.
+    getDriverForObject(object: string) {
+      if (object !== 'sys_metadata') return undefined;
+      return {
+        dialectName: 'sqlite',
+        async execute(sql: string) {
+          return /column_name/.test(sql)
+            ? [{ column_name: 'id' }, { column_name: 'organization_id' }]
+            : metaRows.filter((r) => r.organization_id != null && r.organization_id !== '')
+              .map((r) => ({ id: r.id, organization_id: r.organization_id }));
+        },
+      };
     },
   };
 }
@@ -181,7 +200,9 @@ describe('pin 4 — the detection reading NAMES the forked sets', () => {
 
   it('an ORG-scoped overlay row is out of scope, the same as everywhere else in this family', async () => {
     // Env-wide overlays only (#10103 residue, deliberately out of scope), the
-    // boundary the retired reconciler and drift diagnostic drew.
+    // boundary the retired reconciler and drift diagnostic drew. [ADR-0131 D7]
+    // Told apart by the physical column on a database the ceremony has not
+    // migrated: the engine row never carries the key.
     const a = declaredSet();
     const ql = makeQl([a]);
     ql.permRows.push(rowFor(a));

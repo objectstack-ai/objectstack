@@ -8,6 +8,8 @@
 '@objectstack/plugin-security': minor
 '@objectstack/service-datasource': minor
 '@objectstack/platform-objects': minor
+'@objectstack/driver-sql': minor
+'@objectstack/driver-turso': minor
 '@objectstack/cli': patch
 ---
 
@@ -51,5 +53,6 @@ What else changes:
   - `os migrate security-catalog-overlays` neither lists nor deletes it;
   - a commit recorded in a legacy organization's layer is still refused by the revert;
   - the runtime-datasource reads and the packaged permission-set overlay reading leave them out.
+- `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
 - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
 - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.

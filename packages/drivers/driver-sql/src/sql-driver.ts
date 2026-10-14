@@ -15344,6 +15344,24 @@ export class SqlDriver implements IDataDriver {
   // Schema Introspection
   // ===================================
 
+  /**
+   * [ADR-0131 D7 · #23429] The PHYSICAL column names of `object`'s table, as
+   * the catalog holds them — the declared ones and any a past release left
+   * behind. Read-only, one table, through the builder every read uses (so it
+   * resolves a federated object's remote table, and joins
+   * `options.transaction` like any read: a single-connection pool would
+   * otherwise wait on the connection the caller's transaction holds).
+   *
+   * A table that does not exist answers `[]`. It is not `execute()`, so a
+   * declaration boot's write guard has nothing to count: a question every
+   * boot asks (does a retired column still physically exist?) must not cost a
+   * plan its "writes nothing" claim.
+   */
+  async listPhysicalColumns(object: string, options?: DriverOptions): Promise<string[]> {
+    const info = (await this.getBuilder(object, options).columnInfo()) as Record<string, unknown>;
+    return Object.keys(info ?? {});
+  }
+
   async introspectSchema(): Promise<IntrospectedSchema> {
     const tables: Record<string, IntrospectedTable> = {};
     // Stamped BEFORE the reads, not after: a consumer asking "has the remote
