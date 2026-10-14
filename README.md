@@ -387,6 +387,7 @@ control plane.
 | [`@objectstack/connector-openapi`](packages/connectors/connector-openapi) | Connector actions generated from an OpenAPI document |
 | [`@objectstack/connector-mcp`](packages/connectors/connector-mcp) | Any MCP server's tools as connector actions |
 | [`@objectstack/connector-slack`](packages/connectors/connector-slack) | Slack Web API connector |
+| [`@objectstack/connector-imap`](packages/connectors/connector-imap) | Read-only IMAP session and mail account abstraction for the mailbox sync |
 | [`@objectstack/trigger-record-change`](packages/triggers/trigger-record-change) | Launch flows on insert / update / delete |
 | [`@objectstack/trigger-schedule`](packages/triggers/trigger-schedule) | Launch flows on a cron, interval, or one-off schedule |
 | [`@objectstack/trigger-api`](packages/triggers/trigger-api) | Inbound HTTP / webhook flow trigger with HMAC verification |

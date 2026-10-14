@@ -149,8 +149,13 @@ describe('loadMetaFromDb — ADR-0048 package-scoped protection graft at boot (#
         // it — `_provenance: 'org'`, the same one the `object` branch has
         // always stated — because every row this hydrator sees came out of a
         // `sys_metadata` write. That is a statement of authorship, not a graft
-        // from an artifact: `_lock` and `_packageId` stay absent, which is what
-        // this case is about.
+        // from an artifact: `_lock` stays absent, which is what this case is
+        // about.
+        //
+        // [#23233] `_packageId` is no longer absent: the hydrator states the
+        // row's OWN package binding (its `package_id` column), as a list read
+        // always did. That is read from the row, not grafted from an artifact —
+        // which is why `_provenance` below stays `'org'` and not `'package'`.
         const registry = new SchemaRegistry({ multiTenant: false });
         registry.logLevel = 'silent';
         const rows = [
@@ -169,7 +174,7 @@ describe('loadMetaFromDb — ADR-0048 package-scoped protection graft at boot (#
         const direct: any = registry.getItem('page', 'home');
         expect(direct.label).toBe('B Home (customized)');
         expect(direct._lock).toBeUndefined();
-        expect(direct._packageId).toBeUndefined();
+        expect(direct._packageId).toBe(PKG_B);
         // [#16702] NOT `undefined` — the hydrator states tenant authorship.
         expect(direct._provenance).toBe('org');
     });

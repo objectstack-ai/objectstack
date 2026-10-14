@@ -7,7 +7,10 @@ import type { II18nService } from '@objectstack/spec/contracts';
 import type { TranslationData } from '@objectstack/spec/system';
 import { resolveObjectFieldLabels, toLocaleDescriptors } from '@objectstack/spec/system';
 // The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError } from '@objectstack/types';
+// [#23174] A route's catch-all 5xx answers through `sendServerFault`: the
+// route's generic text on the wire, the caught error with its stack in the
+// fault log.
+import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 import { FileI18nAdapter } from './file-i18n-adapter.js';
 import type { FileI18nAdapterOptions } from './file-i18n-adapter.js';
 
@@ -175,7 +178,7 @@ export class I18nServicePlugin implements Plugin {
         const locales = toLocaleDescriptors(i18n.getLocales(), i18n.getDefaultLocale?.() ?? 'en');
         sendOk(res, { locales });
       } catch (error: any) {
-        sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
+        sendServerFault(res, 500, 'INTERNAL', 'Internal error', error);
       }
     });
 
@@ -190,7 +193,7 @@ export class I18nServicePlugin implements Plugin {
         const translations = i18n.getTranslations(locale);
         sendOk(res, { locale, translations });
       } catch (error: any) {
-        sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
+        sendServerFault(res, 500, 'INTERNAL', 'Internal error', error);
       }
     });
 
@@ -225,7 +228,7 @@ export class I18nServicePlugin implements Plugin {
           sendOk(res, { object: objectName, locale, labels });
         }
       } catch (error: any) {
-        sendError(res, 500, 'INTERNAL', error?.message ?? 'Internal error');
+        sendServerFault(res, 500, 'INTERNAL', 'Internal error', error);
       }
     });
 

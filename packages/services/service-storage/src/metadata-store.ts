@@ -284,8 +284,11 @@ export type StorageMetadataOperation = 'insert' | 'update' | 'delete' | 'findOne
  *
  * `message` carries the two things AGENTS.md → "Degradation log levels" makes
  * a durability failure owe — the CONSEQUENCE (what is not persisted) and the
- * FIX — because that string is what reaches the operator, through the REST
- * layer's 500 body and through whatever logs the host keeps.
+ * FIX — because that string is what reaches the operator. On the storage
+ * routes it reaches the operator through the server-fault log, where the
+ * routes' catch-all hands the caught error (`sendServerFault`,
+ * `@objectstack/types`); the caller gets the route's generic text, because the
+ * `Cause:` tail carries the engine's own message (#23174).
  */
 export class StorageMetadataStoreError extends Error {
   override readonly name = 'StorageMetadataStoreError';

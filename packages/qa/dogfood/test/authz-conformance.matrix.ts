@@ -10,7 +10,7 @@
 // file exists and that the row ↔ proof pairing is MUTUAL (#7976 below), AND
 // ratchets completeness at ROUTE-FAMILY AND DISPATCHER-DOMAIN granularity over
 // the two route ledgers, plus a curated table of named gates and transport
-// tripwires (`discover()`: 23 probes over 18 named source files) — a new REST
+// tripwires (`discover()`: 25 probes over 20 named source files) — a new REST
 // route FAMILY or dispatcher DOMAIN is UNCLASSIFIED, a deleted named guard is
 // STALE, and either breaks CI.
 //
@@ -67,11 +67,12 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 41 ledger keys, 15 are classified by rows below (re-derived when the
-// `forms` family and the `/notifications`, `/keys` and `/share-links` domains
-// arrived classified under ADR-0138 D2, after the `/webhooks/redeliver` domain
+// Of the 41 ledger keys, 17 are classified by rows below (re-derived when the
+// `/ui` and `/data` domains arrived classified under ADR-0138 D2's second
+// slice, after the `forms` family and the `/notifications`, `/keys` and
+// `/share-links` domains did under its first, the `/webhooks/redeliver` domain
 // did, #22755, `/approvals/act` did, #22576, and `/i18n` left the baseline,
-// #22432); the other 26 are enumerated one by one,
+// #22432); the other 24 are enumerated one by one,
 // dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
 // whose MAX note dates every step down from the 34 of 40 it held on the
 // 2026-08-31 adoption day. That list can only get shorter: growth, staleness,
@@ -79,7 +80,7 @@
 // 2026-08-31 those surfaces minted no key at all, so nothing about them was
 // visible in either direction.
 //
-// Each of the 20 probes DECLARES its instrument kind
+// Each of the 25 probes DECLARES its instrument kind
 // (ROUTE_ENUMERATION / GATE_PIN / TRIPWIRE — see the companion test), and a
 // non-tripwire probe that mints ZERO keys fails as a DEAD PROBE. That closes a
 // blind-spot mechanism neither UNCLASSIFIED nor STALE can reach: both are
@@ -101,16 +102,16 @@
 // [commit 2ce1eb41b] That completeness is over ROUTES, not over primitives: a primitive
 // enforced by a predicate inside an existing resolver adds no entry point, so
 // it can be neither UNCLASSIFIED nor STALE. Measured against the rows below:
-// 49 of 65 carry no `covers` key at all (16 rows, 29 keys, every one an
-// HTTP/transport pin), and 43 of the file's 58 `enforced` rows carry none:
+// 49 of 67 carry no `covers` key at all (18 rows, 33 keys, every one an
+// HTTP/transport pin), and 43 of the file's 60 `enforced` rows carry none:
 // the in-resolver shape — the ADR-0049/#8613 `active` rows and the ADR-0091
 // grant-validity-window row among them (see their own blocks further down)
 // are the normal case, not an exception — plus five ADR-0138 D2 door-class
 // rows whose admission their proof drives on a booted deployment. Of the
-// 29 `covers` keys that DO exist, 10 are GATE pins tied to the enforcement call
+// 33 `covers` keys that DO exist, 12 are GATE pins tied to the enforcement call
 // itself, not merely a function name — delete `shouldDenyAnonymous` from
 // `/actions`, `/automation`, `/packages`, `/analytics`, `/i18n`,
-// `/notifications`, `/keys` or `/share-links`, or drop the MCP
+// `/notifications`, `/keys`, `/share-links`, `/ui` or `/data`, or drop the MCP
 // context-threading / stdio principal binding, and the pinned key vanishes from source, its row
 // goes STALE, and CI catches the regression. That anti-regression property is
 // real and is what this file mechanically delivers. Outside the curated
@@ -331,6 +332,21 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'runtime/domains/share-links.ts handleShareLinksRequest — shouldDenyAnonymous DOMAIN-WIDE as the domain\'s first decision, ahead of the share-link service probe and every face, with the ONE exception ADR-0138 D2 names for this domain: the two token faces (GET /:token/resolve, GET /:token/messages), selected by the same isPublicShareLinkRoute predicate that marks them public, which the capability token admits (class 2). Every other face, and every path or verb the domain does not serve, answers the dispatcher-wrapper 401 UNAUTHENTICATED',
     covers: ['share-links:domains/share-links.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/share-links'],
     note: 'The DISPATCHER domain only: the dispatcher twin of the plugin-sharing mount, the surface a per-environment kernel serves share links from, and unobservable on the standalone showcase boot, where plugin-sharing mounts its own routes. Before the move the decision was the management faces\' own user-id check, written inside the body below the service probe, so a deployment without the share-link service answered an anonymous caller 501. A new public face here is an amendment of ADR-0138, never an edit to the predicate alone. Unit-proven in runtime/domains/domain-floor-anonymous-deny.test.ts (each management face and every unserved path or verb refused 401 before any service is resolved, both anonymous shapes; the token faces still admitted and judged by the token; the signed-in control unchanged).' },
+  // ── ADR-0138 D2 (card E2), the second slice — the two dispatcher domains
+  // that made NO anonymous decision of their own: an unauthenticated caller
+  // was answered by whichever face it named. Same shape as the three above:
+  // the decision is the handler's first statement, a gate pin goes STALE when
+  // it is deleted, and the domain's ledger key is classified beside it. No D2
+  // door class runs through either domain (class 4 reaches the CRUD pipeline
+  // from the transport's fallback seam, never through `/data`).
+  { id: 'anonymous-deny-ui', summary: 'anonymous-deny on the rendered-view surface of the dispatcher', state: 'enforced',
+    enforcement: 'runtime/domains/ui.ts handleUiRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the path parse, the type-parameter check and the protocol probe; every face, and every path the domain does not serve, answers the dispatcher-wrapper 401 UNAUTHENTICATED, and a signed-in caller is served as before',
+    covers: ['ui:domains/ui.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/ui'],
+    note: 'The DISPATCHER domain only: where @objectstack/rest is mounted, its guarded `ui` family serves the same paths and answers an anonymous caller 401, so the booted showcase never reaches this handler and its pins are unit pins. Before the move this domain made no anonymous decision of its own. Unit-proven in runtime/domains/domain-floor-anonymous-deny.test.ts (every spelling of the view face and every unserved path refused 401 before any service is resolved, both anonymous shapes; no protocol and a repeated type still 401; the signed-in control unchanged: served, 501 without a protocol, 400 for a repeated type); the registry route to the domain through dispatch() is pinned anonymous 401 and signed-in 200 in runtime/domain-handler-registry.test.ts.' },
+  { id: 'anonymous-deny-data', summary: 'anonymous-deny on the CRUD data surface of the dispatcher', state: 'enforced',
+    enforcement: 'runtime/domains/data.ts handleDataRequest — shouldDenyAnonymous DOMAIN-WIDE as the handler\'s FIRST statement, ahead of the path parse, the multi-tenant environment check and every read and write face; every face, and every path or verb the domain does not serve, answers the dispatcher-wrapper 401 UNAUTHENTICATED (a CORS preflight keeps its pass), and a signed-in caller reaches the CRUD pipeline exactly as before',
+    covers: ['data:domains/data.ts:anonymous-gate', 'dispatcher-domain:route-ledger.ts:/data'],
+    note: 'The DISPATCHER domain only: where @objectstack/rest is mounted, its `crud` family serves the same paths behind its own per-route check, so the booted showcase never reaches this handler and its pins are unit pins. Before the move this domain made no anonymous decision of its own, so an anonymous caller was answered by the face it named: the CRUD gate\'s refusal of the guest envelope (403), a validation answer (400) or the environment check (428). D2 class 4 is unaffected: a declared object_operation endpoint reaches callData from the fallback seam, not through this handler, and the anonymous door sweep keeps proving it. Unit-proven in runtime/domains/domain-floor-anonymous-deny.test.ts (every read and write face and every unserved path or verb refused 401 before any service is resolved, both anonymous shapes; the 400 and 428 answers behind the floor; the signed-in control unchanged) and through dispatch() in runtime/domains/data-permission-denied-envelope.test.ts (anonymous 401 before the engine is asked).' },
 
   // #22576 — the `/approvals/act` dispatcher domain (segment 2 of ruling A on
   // #22438, "token-only, aligned with self-hosted"). Unlike every

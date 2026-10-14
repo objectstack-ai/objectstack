@@ -43,7 +43,7 @@ name: Release
 #   schedule (6-hourly)  →  `version-pr`  keeps the "chore: version packages" PR
 #   or a dispatch with                     (#4935) current. Carries NO publish
 #   `refresh_version_pr`                   capability: the changesets step is
-#                                          invoked WITHOUT a `publish:` script,
+#                                          invoked WITHOUT a `publish-script:`,
 #                                          so the action's publish branch is
 #                                          unreachable by construction, not by
 #                                          an `if:` someone can get wrong.
@@ -496,11 +496,31 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
 
+          # Whether `.changeset/pre/*.md` is pending depends on the prerelease
+          # mode. @changesets/cli v3 moves every changeset a prerelease version
+          # pass consumes into `.changeset/pre/` (the layout the 18.0.0-next.0
+          # cut created, #23282). In `pre` mode those are CONSUMED: the version
+          # pass skips them. On `pre exit` the GA version consumes them all
+          # again. That is the CLI's own rule (`getRelevantChangesets`,
+          # @changesets/assemble-release-plan), and the PR step's reader applies
+          # the same split. Counting `pre/` in `pre` mode made a tree with no
+          # new changeset read as hundreds pending: the version pass then moved
+          # nothing and the validation below went red on a lane with nothing
+          # to do. Measured on the post-version tree: 539 counted, 0 moved.
+          pre_mode=''
+          if [ -f .changeset/pre.json ]; then
+            pre_mode="$(node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(".changeset/pre.json", "utf8")).mode ?? ""))')"
+          fi
+
           # `/^README\.md$/i` is how `@changesets/read` spells its exclusion, so
           # the count is case-folded rather than matching one spelling.
           count_pending() {
             local n=0 file
-            for file in .changeset/*.md .changeset/pre/*.md; do
+            local globs=(.changeset/*.md)
+            if [ "${pre_mode}" = 'exit' ]; then
+              globs+=(.changeset/pre/*.md)
+            fi
+            for file in "${globs[@]}"; do
               if [ "$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')" = 'readme.md' ]; then
                 continue
               fi
@@ -729,13 +749,89 @@ jobs:
           fi
           echo 'Post-version tree validated.'
 
+      # ══════════════════════════════════════════════════════════════════════
+      # THE READ REHEARSAL — THE PR STEP'S OWN READER, ON THE TREE THE CUT LANDS
+      # (#23282)
+      # ══════════════════════════════════════════════════════════════════════
+      # changesets/action does not use this repository's @changesets/cli to
+      # decide whether anything is pending. It bundles its own @changesets/read,
+      # so two readers of `.changeset/` meet on this lane, released on two
+      # schedules. They disagreed for the first time at the 18.0.0-next.0 cut:
+      # that version pass moved 507 consumed changesets into `.changeset/pre/`,
+      # and the reader bundled in v1.9.0 (what `@v1` resolved to) takes any
+      # directory under `.changeset/` for a legacy v1 folder changeset, so it
+      # opened `.changeset/pre/changes.md` and failed with ENOENT on every
+      # refresh after the cut. Nothing failed BEFORE the cut, because no tree
+      # main had carried until then held `.changeset/pre/`.
+      #
+      # The tree rendered above IS the tree the next cut lands on main. So the
+      # PR step's reader (same action, same pinned commit) reads it here, every
+      # refresh, and must answer "nothing left to version". A reader that
+      # cannot read what the CLI just wrote now fails while the Version
+      # Packages PR is still open, instead of on the first refresh after it
+      # merges. Measured against the next.0-shaped tree: v1.9.0 fails here with
+      # the same ENOENT; v2.1.2 answers `has-changesets` false.
+      #
+      # ⛔ WHY IT CANNOT WRITE ANYTHING. The rehearsal runs on a COPY of the
+      # changeset inputs outside every git work tree, and is handed no
+      # credential. The only path out of a "pending" read is `runVersion`,
+      # whose first act is `git checkout` (src/run.ts) and which fails there,
+      # before any push or API call. Measured on the pre-version tree:
+      # `has-changesets` true, then exit 1 at that checkout, zero API requests.
+      # The copy carries the root `package.json` and `node_modules` so the
+      # action's own Changesets CLI generation check runs against the
+      # installed CLI too.
+      - name: Stage the post-version changesets for the read rehearsal
+        if: steps.post_version.outputs.pending_before != '0'
+        run: |
+          set -euo pipefail
+          REHEARSAL="${RUNNER_TEMP}/changeset-read-rehearsal"
+          rm -rf "${REHEARSAL}"
+          mkdir -p "${REHEARSAL}"
+          cp package.json pnpm-workspace.yaml "${REHEARSAL}/"
+          cp -R .changeset "${REHEARSAL}/.changeset"
+          ln -s "${GITHUB_WORKSPACE}/node_modules" "${REHEARSAL}/node_modules"
+          if git -C "${REHEARSAL}" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+            echo "::error::${REHEARSAL} is inside a git work tree, so the read rehearsal could reach a branch. Refusing to run it."
+            exit 1
+          fi
+          echo "Staged $(find "${REHEARSAL}/.changeset" -name '*.md' | wc -l | tr -d ' ') changeset file(s) outside any git work tree: ${REHEARSAL}"
+
+      - name: Rehearse the version-PR changeset read on the post-version tree
+        id: read_rehearsal
+        if: steps.post_version.outputs.pending_before != '0'
+        # ⛔ Keep this ref identical to the PR step's below. A rehearsal of a
+        # different reader proves nothing about the one that runs.
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          cwd: ${{ runner.temp }}/changeset-read-rehearsal
+          # Not a credential. The rehearsal only reads files.
+          github-token: no-credential-the-read-rehearsal-only-reads
+
+      - name: Assert the read rehearsal found nothing left to version
+        if: steps.post_version.outputs.pending_before != '0'
+        env:
+          HAS_CHANGESETS: ${{ steps.read_rehearsal.outputs.has-changesets }}
+        run: |
+          set -euo pipefail
+          # `false` is the only passing answer. `true` on a zero exit is the
+          # action's "all changesets are empty" branch: after the cut the PR
+          # step would then refresh nothing, forever, with nothing red. Empty
+          # means the output was renamed, so the pin no longer reads anything.
+          if [ "${HAS_CHANGESETS}" != 'false' ]; then
+            echo "::error::the version PR step's changeset reader, run on the post-version tree, answered has-changesets='${HAS_CHANGESETS}' where only 'false' is right: once this tree lands on main the PR step would misread it. Re-verify the pinned changesets/action against the changeset layout @changesets/cli writes before this version PR merges."
+            exit 1
+          fi
+          echo "The PR step's reader reads the post-version tree as fully versioned: has-changesets=${HAS_CHANGESETS}."
+
       # ⚠️ LOAD-BEARING — DO NOT DROP THIS STEP. The steps above render the
       # version into the runner's working tree, and changesets/action picks its
       # branch from that tree. With `.changeset/` already consumed it finds
-      # `hasChangesets` false, and this lane deliberately passes no `publish:`
-      # input, so `hasPublishScript` is false too — v1 then takes
-      # `case !hasChangesets && !hasPublishScript` (src/index.ts), logs "No
-      # changesets present or were removed by merging release PR" and RETURNS.
+      # `hasChangesets` false, and this lane deliberately passes no
+      # `publish-script:` input, so `hasPublishScript` is false too — the pinned
+      # v2.1.2 then takes `case !hasChangesets && !hasPublishScript`
+      # (src/index.ts), logs "No changesets present or were removed by merging
+      # version PR" and RETURNS.
       # The refresh becomes a permanent no-op and #4935 fossilises with nothing
       # red anywhere: this file's own failure class, one lane over. So the tree
       # is put back, and the restoration is ASSERTED rather than assumed.
@@ -758,9 +854,20 @@ jobs:
           # branch should never be able to reach further than the thing it undoes.
           git clean -fdq -- .changeset packages examples content docker
 
+          # The render step's count, read the same way and only now: `pre exit`
+          # versions delete `.changeset/pre.json`, so the mode is read from the
+          # RESTORED tree.
+          pre_mode=''
+          if [ -f .changeset/pre.json ]; then
+            pre_mode="$(node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(".changeset/pre.json", "utf8")).mode ?? ""))')"
+          fi
           count_pending() {
             local n=0 file
-            for file in .changeset/*.md .changeset/pre/*.md; do
+            local globs=(.changeset/*.md)
+            if [ "${pre_mode}" = 'exit' ]; then
+              globs+=(.changeset/pre/*.md)
+            fi
+            for file in "${globs[@]}"; do
               if [ "$(printf '%s' "${file##*/}" | tr '[:upper:]' '[:lower:]')" = 'readme.md' ]; then
                 continue
               fi
@@ -793,36 +900,58 @@ jobs:
       # nested mapping (caught by check:workflow-status-functions' self-test).
       - name: 'Create or update the "chore: version packages" PR'
         id: changesets
-        uses: changesets/action@v1
+        # PINNED BY COMMIT (#23282). v2 is the major upstream pairs with
+        # @changesets/cli v3: its bundled reader reads `.changeset/pre/` and, in
+        # `pre` mode, leaves those consumed changesets out of `hasChangesets`
+        # (src/readChangesetState.ts), and its CLI generation check refuses a
+        # CLI v2 project. v1 was held on 2026-08-19 (#9208) because its
+        # replacement's publish property had not been read, and the hold named
+        # how to reopen it: read v2's source for that property and for the
+        # bundled reader. Both were read at this commit, and the bundle was run
+        # end to end on the next.0-shaped tree. A commit, not `@v2`: `v2` is a
+        # BRANCH upstream, so a moving ref would change the bundled reader with
+        # no diff here, and the read rehearsal above runs this same commit.
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          # ⛔ THERE IS NO `publish:` INPUT HERE, AND THAT IS THE FIX. ⛔
+          # ⛔ THERE IS NO `publish-script:` INPUT HERE, AND THAT IS THE FIX. ⛔
           #
           # Not an oversight and not a style choice — it is what makes this lane
-          # structurally unable to publish, per #6170. changesets/action@v1
-          # branches on `hasPublishScript = !!publishScript` (src/index.ts):
+          # structurally unable to publish, per #6170. The pinned v2.1.2
+          # branches on `hasPublishScript = !!publishScript` (src/index.ts),
+          # where `publishScript = core.getInput("publish-script")`:
           #
           #     case !hasChangesets && !hasPublishScript:
           #       core.info("No changesets present or were removed by merging
-          #                  release PR. Not publishing because no publish
-          #                  script found.");
+          #                  version PR. Not publishing because publish-script
+          #                  is not set.");
           #       return;
+          #     case !hasChangesets && hasPublishScript:
+          #       await runPublish({...});   // unreachable: no publish-script
           #     case hasChangesets:
           #       await runVersion({...});   // version PR only
           #
           # With no publish script, `runPublish` is not reachable from any input
           # state the action can observe. Adding one back here re-arms the exact
-          # lane that minted rc.3 and rc.4 without a human.
-          version: pnpm run version
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
-          # No-op without a publish script. Kept so that re-adding one can never
-          # silently resurrect #4900: the action posts each package's raw
+          # lane that minted rc.3 and rc.4 without a human. v1's input names
+          # (`publish:`, `version:`, `commit:`, `title:`) are not accepted
+          # silently by v2: it throws on each one by name.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version-script: pnpm run version
+          commit-message: 'chore: version packages'
+          pr-title: 'chore: version packages'
+          # v1's `commitMode: git-cli` default, spelled the v2 way. v2 otherwise
+          # pushes the version commit through the GitHub API, a different path
+          # whose commit and size behaviour this lane has never been measured on.
+          push-with-git-cli: true
+          # Both no-ops without a publish script. Kept so that re-adding one can
+          # never silently resurrect #4900: the action posts each package's raw
           # CHANGELOG section as the Release body, and @objectstack/spec's
           # section for a single v17 RC is ~343k characters against the API's
-          # 125,000 limit. Releases are created by scripts/release-github-releases.mjs.
-          createGithubReleases: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 125,000 limit. Releases are created by scripts/release-github-releases.mjs,
+          # and version tags are pushed only by the publish job below. v2 also
+          # pushes tags on its own unless told not to, so that one is off too.
+          create-github-releases: false
+          push-git-tags: false
 
   # ══════════════════════════════════════════════════════════════════════════
   # PUSH LANE 2 — release integrity audit. Never mints. Reads github.sha and the

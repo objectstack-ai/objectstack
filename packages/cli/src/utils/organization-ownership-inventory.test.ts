@@ -8,12 +8,24 @@
  * table on a real database, and this says so before any database does.
  */
 
-import { describe, expect, it } from 'vitest';
-import { CLOUD_PROVIDED_OBJECT_NAMES, PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
+  CLOUD_PROVIDED_OBJECT_NAMES,
+  OrganizationOwnershipSupplementEntrySchema,
+  PLATFORM_OBJECTS_BY_PACKAGE,
+  type OrganizationOwnershipSupplementEntry,
+} from '@objectstack/spec/system';
+import {
+  HostFateSupplementRefusal,
   ORGANIZATION_OWNERSHIP_FATES,
   ORGANIZATION_OWNERSHIP_INVENTORY,
   inventoryEntryFor,
+  mergeHostFateSupplement,
+  readHostFateSupplement,
+  type InventoryEntry,
 } from './organization-ownership-inventory.js';
 
 /**
@@ -134,5 +146,167 @@ describe('ADR-0131 D10 inventory — every censused object has one fate and a ci
         if (target) expect(inventoryEntryFor(target), `${entry.object} → ${target}`).toBeDefined();
       }
     }
+  });
+});
+
+// ── The host fate supplement (ADR-0131 D10, the inventory's C10 stage) ────────
+
+/**
+ * The keys a host authors are the inventory row's keys minus what only the
+ * platform states. Compile-time: both directions of `extends` must hold, so a
+ * key added to either side without the other fails `tsc` on this file.
+ */
+type HostAuthoredKeys = Exclude<keyof InventoryEntry, 'census' | 'cloudCarried' | 'external'>;
+type SpecRowKeys = OrganizationOwnershipSupplementEntry extends infer Row ? (Row extends unknown ? keyof Row : never) : never;
+const KEYS_AGREE: [HostAuthoredKeys] extends [SpecRowKeys] ? ([SpecRowKeys] extends [HostAuthoredKeys] ? true : false) : false = true;
+
+const FILE = 'host-fates.json';
+const CITE = 'fixture: a host-declared fate (test data, not any host\'s declaration)';
+/** A supplement row; fate 4 unless `extra` says otherwise. */
+const host = (object: string, extra: Record<string, unknown> = {}): OrganizationOwnershipSupplementEntry =>
+  ({ object, fate: 'report', citation: CITE, ...extra }) as OrganizationOwnershipSupplementEntry;
+
+function refusalOf(run: () => unknown): HostFateSupplementRefusal {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof HostFateSupplementRefusal) return error;
+    throw error;
+  }
+  throw new Error('the supplement was not refused');
+}
+
+async function refusalOfAsync(run: () => Promise<unknown>): Promise<HostFateSupplementRefusal> {
+  try {
+    await run();
+  } catch (error) {
+    if (error instanceof HostFateSupplementRefusal) return error;
+    throw error;
+  }
+  throw new Error('the supplement was not refused');
+}
+
+describe('the inventory row and the spec\'s supplement row are one shape', () => {
+  it('the host-authored keys equal the spec row\'s keys (compile-time)', () => {
+    expect(KEYS_AGREE).toBe(true);
+  });
+
+  it('every platform row, less what only the platform states, is a row the spec admits', () => {
+    // The CLI's vocabulary as the platform actually uses it (every condition,
+    // anchor, category and departure form) is declared in the spec: a host can
+    // author anything the platform's own rows say.
+    const refused: string[] = [];
+    for (const { census: _census, cloudCarried: _cloud, external: _external, ...row } of ORGANIZATION_OWNERSHIP_INVENTORY) {
+      const result = OrganizationOwnershipSupplementEntrySchema.safeParse(row);
+      if (!result.success) refused.push(`${row.object}: ${result.error.issues[0]?.message}`);
+    }
+    expect(refused).toEqual([]);
+  });
+});
+
+describe('mergeHostFateSupplement — host rows join the inventory on the platform\'s terms', () => {
+  it('a host row joins with census host-supplement and the fields it declared', () => {
+    const merged = mergeHostFateSupplement(
+      [host('sys_fixture_quota', { fate: 'attribution', anchors: [{ kind: 'parent', childKey: 'environment_id', parentObject: 'sys_environment' }] })],
+      FILE,
+    );
+    expect(merged).toHaveLength(ORGANIZATION_OWNERSHIP_INVENTORY.length + 1);
+    expect(merged.find((e) => e.object === 'sys_fixture_quota')).toEqual({
+      object: 'sys_fixture_quota',
+      census: ['host-supplement'],
+      fate: 'attribution',
+      citation: CITE,
+      anchors: [{ kind: 'parent', childKey: 'environment_id', parentObject: 'sys_environment' }],
+    });
+    // Control: the platform's own inventory is untouched.
+    expect(inventoryEntryFor('sys_fixture_quota')).toBeUndefined();
+  });
+
+  it('without a supplement the inventory is exactly the platform\'s', () => {
+    expect(mergeHostFateSupplement([], FILE)).toEqual(ORGANIZATION_OWNERSHIP_INVENTORY);
+  });
+
+  it('a row naming a platform object is refused, naming the row and the object', () => {
+    const r = refusalOf(() => mergeHostFateSupplement([host('sys_fixture_ok'), host('sys_file')], FILE));
+    expect(r).toMatchObject({ reason: 'fate-supplement-platform-object', file: FILE, row: 1, object: 'sys_file' });
+    // An example object the inventory gives a fate is a platform row too.
+    expect(refusalOf(() => mergeHostFateSupplement([host('crm_account')], FILE)).reason).toBe('fate-supplement-platform-object');
+    // Control: the same row naming an object the inventory does not hold joins.
+    expect(() => mergeHostFateSupplement([host('sys_fixture_ok'), host('sys_fixture_file')], FILE)).not.toThrow();
+  });
+
+  it('a row naming a cloud-provided placeholder replaces it in place; without one the placeholder stands', () => {
+    const at = ORGANIZATION_OWNERSHIP_INVENTORY.findIndex((e) => e.object === 'sys_environment');
+    expect(ORGANIZATION_OWNERSHIP_INVENTORY[at]).toMatchObject({ census: ['cloud-supplement'], fate: 'report', cloudCarried: true });
+    const merged = mergeHostFateSupplement([host('sys_environment', { fate: 'column-drop' })], FILE);
+    expect(merged).toHaveLength(ORGANIZATION_OWNERSHIP_INVENTORY.length);
+    expect(merged[at]).toEqual({ object: 'sys_environment', census: ['host-supplement'], fate: 'column-drop', citation: CITE });
+    // Control: every other placeholder still carries no declared fate.
+    for (const name of CLOUD_PROVIDED_OBJECT_NAMES.filter((n) => n !== 'sys_environment')) {
+      expect(merged.find((e) => e.object === name), name).toMatchObject({ fate: 'report', cloudCarried: true });
+    }
+  });
+
+  it('two rows naming one object are refused', () => {
+    const r = refusalOf(() => mergeHostFateSupplement([host('sys_fixture_a'), host('sys_fixture_b'), host('sys_fixture_a')], FILE));
+    expect(r).toMatchObject({ reason: 'fate-supplement-duplicate-object', row: 2, object: 'sys_fixture_a' });
+    expect(r.message).toContain('[0]');
+  });
+
+  it('new rows are appended in object order, so the merged list names the content, not the file order', () => {
+    const forward = mergeHostFateSupplement([host('sys_fixture_a'), host('sys_fixture_b')], FILE);
+    const backward = mergeHostFateSupplement([host('sys_fixture_b'), host('sys_fixture_a')], FILE);
+    expect(JSON.stringify(forward)).toBe(JSON.stringify(backward));
+  });
+});
+
+describe('readHostFateSupplement — a file it cannot use is refused, naming the file and the row', () => {
+  let dir: string;
+  const write = (name: string, body: string): string => {
+    const path = join(dir, name);
+    writeFileSync(path, body);
+    return path;
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'os-fate-supplement-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads a valid file into the merged inventory', async () => {
+    const file = write('ok.json', JSON.stringify([host('sys_fixture_a')]));
+    const merged = await readHostFateSupplement(file);
+    expect(merged.find((e) => e.object === 'sys_fixture_a')).toMatchObject({ census: ['host-supplement'], fate: 'report' });
+  });
+
+  it('a missing file', async () => {
+    const file = join(dir, 'absent.json');
+    expect(await refusalOfAsync(() => readHostFateSupplement(file))).toMatchObject({ reason: 'fate-supplement-unreadable', file });
+  });
+
+  it('a file that is not JSON', async () => {
+    const file = write('bad.json', '[{ "object": ');
+    expect(await refusalOfAsync(() => readHostFateSupplement(file))).toMatchObject({ reason: 'fate-supplement-unparsable', file });
+  });
+
+  it('a file that is not an array of rows', async () => {
+    const file = write('object.json', JSON.stringify({ rows: [host('sys_fixture_a')] }));
+    const r = await refusalOfAsync(() => readHostFateSupplement(file));
+    expect(r).toMatchObject({ reason: 'fate-supplement-invalid', file });
+    expect(r.row).toBeUndefined();
+  });
+
+  it('a row the spec refuses, by index and object, with where in the row', async () => {
+    const file = write('row.json', JSON.stringify([host('sys_fixture_a'), { object: 'sys_fixture_b', fate: 'attribution', citation: CITE }]));
+    const r = await refusalOfAsync(() => readHostFateSupplement(file));
+    expect(r).toMatchObject({ reason: 'fate-supplement-invalid', file, row: 1, object: 'sys_fixture_b' });
+    expect(r.message).toContain('anchors');
+  });
+
+  it('the merge refusals reach the caller from the file too', async () => {
+    const file = write('platform.json', JSON.stringify([host('sys_member')]));
+    expect(await refusalOfAsync(() => readHostFateSupplement(file))).toMatchObject({ reason: 'fate-supplement-platform-object', file, row: 0, object: 'sys_member' });
   });
 });

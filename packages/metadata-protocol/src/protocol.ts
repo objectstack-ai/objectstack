@@ -2403,6 +2403,20 @@ function stateTenantAuthorship(data: unknown): unknown {
 }
 
 /**
+ * [#23233] A stored row's body with its package binding stated as `_packageId`,
+ * the way `getMetaItems` stamps a row from its `package_id` column. The binding
+ * is read, never derived: a row bound to no package ({@link boundPackageOf}),
+ * or a body that already names a `_packageId`, is returned as it is. A copy,
+ * so the caller's body is never written.
+ */
+function withRowBinding(data: unknown, packageId: unknown): unknown {
+    const binding = boundPackageOf(packageId);
+    if (binding === undefined || !data || typeof data !== 'object' || Array.isArray(data)) return data;
+    if ((data as { _packageId?: unknown })._packageId !== undefined) return data;
+    return { ...(data as Record<string, unknown>), _packageId: binding };
+}
+
+/**
  * [#21639, #21638] Is this artifact a view ITEM — a view a package ships under
  * its own name, `viewKind` set (the spec's ViewItem) — rather than a container
  * or anything else? The save door's "a view item a package ships" and the
@@ -6341,8 +6355,19 @@ export class ObjectStackProtocolImplementation implements
      * `environmentId !== undefined` wrapper #6710 had just retired next door —
      * so the identical proxy-signal defect outlived its own diagnosis on the
      * sibling gate. Both doors read {@link authoringChannel} now.
+     *
+     * [#23298] …and no longer, alone, whether a write registers its body into
+     * the engine registry. That is {@link registryTakesStoredRows}, which also
+     * reads {@link storeHydratedIntoRegistry}.
      */
     private environmentId?: string;
+
+    /**
+     * [#23298] Set by {@link loadMetaFromDb}: this protocol has hydrated its
+     * own store into its engine registry, so every body the store holds is in
+     * that registry already. Read by {@link registryTakesStoredRows} alone.
+     */
+    private storeHydratedIntoRegistry = false;
 
     /**
      * The declared authoring channel (#6710). Defaults to `'environment'`,
@@ -7669,8 +7694,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * Scope parity is INHERITED, not re-decided: `applyRegistryWriteThrough`
      * carries the org/environment gates (#6602: an org-scoped overlay never
-     * enters the shared registry; the non-object branch stays
-     * control-plane-only) and `restoreArtifactRegistryView` refuses org
+     * enters the shared registry; the non-object branch registers only where
+     * the registry takes this kernel's stored rows, #23298) and
+     * `restoreArtifactRegistryView` refuses org
      * scopes on its own — so a peer applies exactly what the writer's own
      * kernel shape would have applied locally.
      *
@@ -10456,7 +10482,8 @@ export class ObjectStackProtocolImplementation implements
      * container it reads into its own answer, so `GET /meta/view?object=`
      * lists the container's views. Nothing else stores or registers those
      * views on every kernel: the registry hydration that does
-     * ({@link hydrateExpandedViewItems}) runs only on an unscoped kernel and
+     * ({@link hydrateExpandedViewItems}) ran on a save only on an unscoped
+     * kernel ([#23298]: now wherever {@link registryTakesStoredRows}), and
      * only for an environment-wide row. So the by-name read answered an
      * expanded name only there, and answered nothing on an
      * environment-scoped kernel or for an organization-scoped container — and,
@@ -19224,7 +19251,8 @@ export class ObjectStackProtocolImplementation implements
      * no package. The list merges it into its package's slot. An aggregated
      * container row still has its expansions judged one by one. The
      * environment-scoped kernel's running answer was already this one, because
-     * it registers nothing on a save.
+     * it registered nothing on a save then ([#23298]: a kernel that hydrates
+     * its own store now registers a save as its boot does, by this rule).
      *
      * ⛔ `view` only, judged on the canonical type. Every other type registers
      * as before: a row bound to one package, of a name two packages ship, holds
@@ -19235,6 +19263,24 @@ export class ObjectStackProtocolImplementation implements
      * which body they should see for such a name is not ruled here. A
      * package-less view row, and a view row of a name only its own package
      * ships or no package ships, register as before too.
+     *
+     * ## [#23233] The entry carries the row's package binding
+     *
+     * The registered body is stamped with the row's package binding as
+     * `_packageId` ({@link withRowBinding}), as `getMetaItems` stamps it from
+     * the row's `package_id` before it hydrates. This hydrator is the one the
+     * boot and the write-through share, so every registration of a stored row
+     * now names the package the row is bound to, not only the one a list read
+     * makes. Before this, the write-through and the boot registered a runtime
+     * package's body with no `_packageId`, and every registry reader that takes
+     * the owner from it (the security catalog, and through it the `everyone`
+     * suggestion of an `isDefault` set) saw the item as unowned: on a host
+     * kernel until the next list read, and on an environment kernel that
+     * hydrates its own store until never. ⛔ No owner is derived: the binding is
+     * only read, a body that already names a `_packageId` keeps it, a row with
+     * no binding stays unowned, and an artifact's envelope still wins over the
+     * stamp ({@link mergeArtifactProtection}). The expansions of a view
+     * container are registered from the unstamped row, as before.
      *
      * ## [#9111] `type` is an ASSERTED input, not a silently-trusted one
      *
@@ -19383,7 +19429,11 @@ export class ObjectStackProtocolImplementation implements
         // and its receipt rendered both as the package. Registered as the
         // tenant row it is, it is reported as one and never armed.
         const envelope = canonicalType === 'flow' ? undefined : artifact;
-        registry.registerItem(type, mergeArtifactProtection(type, stateTenantAuthorship(data), envelope), 'name' as any);
+        registry.registerItem(
+            type,
+            mergeArtifactProtection(type, stateTenantAuthorship(withRowBinding(data, options.packageId)), envelope),
+            'name' as any,
+        );
         await this.hydrateExpandedViewItems(type, data, options);
         return true;
     }
@@ -19742,10 +19792,13 @@ export class ObjectStackProtocolImplementation implements
      *
      * This is registry-MUTATING, and both its callers gate it off exactly
      * where {@link hydrateOverlayIntoRegistry}'s own comments say why:
-     * write-through (`applyRegistryWriteThrough`) never calls it when
-     * `this.environmentId !== undefined` (a real per-environment kernel —
-     * `assembleMetadataProtocol`'s own comment: "per-project (cloud) kernels
-     * source metadata from the control plane"), and `hydrateOverlayIntoRegistry`
+     * write-through (`applyRegistryWriteThrough`) never calls it where the
+     * registry does not take this kernel's stored rows
+     * ({@link registryTakesStoredRows}: an environment kernel whose own store
+     * was never hydrated into it — `assembleMetadataProtocol`'s own comment:
+     * "per-project (cloud) kernels source metadata from the control plane";
+     * [#23298] it read `this.environmentId !== undefined` until then), and
+     * `hydrateOverlayIntoRegistry`
      * itself refuses ANY org-scoped row before ever reaching this function
      * ("[#6602] a per-org overlay is served on demand, never grafted into the
      * registry every org in this process shares") — REGARDLESS of
@@ -19764,8 +19817,9 @@ export class ObjectStackProtocolImplementation implements
      * `getMetaItems` already read for THIS request's own scope, and never
      * writes them anywhere shared. This function keeps serving the case it
      * always did (env-wide rows on an unscoped/control-plane kernel — the ONLY
-     * combination #7736's own pin ever exercised), now with the corrected
-     * derivation chain.
+     * combination #7736's own pin ever exercised — and, at boot and since
+     * #23298 on a save, on an environment kernel that hydrates its own store),
+     * now with the corrected derivation chain.
      *
      * ## [#21511] An expansion inherits its container's authorship
      *
@@ -19779,7 +19833,8 @@ export class ObjectStackProtocolImplementation implements
      * for a code artifact: on an unscoped kernel the by-name read reported
      * the expanded view `resettable` and the layers read reported it as its
      * own `code` layer (for a package-less container too, through the
-     * runtime-only `getItem` arm), where `env_local`, which registers nothing,
+     * runtime-only `getItem` arm), where `env_local`, which then registered
+     * nothing on a save,
      * reported neither. With the marker both kernels give one answer.
      *
      * ## [#21980] Never under a name another package ships
@@ -19851,8 +19906,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * Every gate the walk carries applies here too. An organization-scoped
      * write registers nothing and heals nothing (#6602 / #6780: the bare
-     * entries belong to the environment-wide row). Only a control-plane kernel
-     * re-registers a baseline. A walk that stops on a degraded baseline read
+     * entries belong to the environment-wide row). Only a kernel whose registry
+     * takes its stored rows ({@link registryTakesStoredRows}) re-registers a
+     * baseline. A walk that stops on a degraded baseline read
      * retires nothing, and that name stays registered, unrecorded, until a
      * restart: there is no retry ([#23149]'s residual, now reached from a
      * republish as well as a reset).
@@ -19969,6 +20025,43 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23298] Does this protocol's engine registry take the rows this kernel
+     * stores? The ONE answer to the kernel-scope question both registry writes
+     * ask: the write-through ({@link applyRegistryWriteThrough}) and the
+     * delete's heal re-registering a baseline ({@link restoreArtifactRegistryView}).
+     * One predicate, so a save and the reset after it cannot disagree about
+     * whose registry it is.
+     *
+     *  - **An unscoped (control-plane) kernel: yes**, as always. Its rows are
+     *    the ones its registry's unscoped callers read.
+     *  - **An environment kernel that has hydrated its own store into the
+     *    registry ({@link loadMetaFromDb}): yes.** That registry takes every
+     *    body the store holds at each boot, so registering the body a write
+     *    just made live registers nothing the next boot would not; it only
+     *    stops the registry serving the boot-time body, or no body, until a
+     *    rebuild.
+     *    `ObjectQLPlugin.start()` calls `loadMetaFromDb` on an environment
+     *    kernel only when the composition declares `hydrateMetadataFromDb`,
+     *    whose stated precondition is that the kernel's registry is
+     *    per-instance isolated and its `sys_metadata` lives on its own driver.
+     *    The standalone stack declares it on every serving boot (`env_local`);
+     *    a hosted tenant kernel that persists its own `sys_metadata` declares
+     *    it too.
+     *  - **Any other environment kernel: no.** Its store was never hydrated
+     *    into its registry, which may be one it shares with unscoped callers,
+     *    and a project-scoped row must never be registered there.
+     *
+     * ⛔ `environmentId` alone does not answer this. It says the kernel serves
+     * one environment, not whose registry the protocol writes into, and reading
+     * it as the answer left every hydrating environment kernel serving the
+     * boot-time body of anything saved after boot — a narrowed permission
+     * set's wider grant included.
+     */
+    private registryTakesStoredRows(): boolean {
+        return this.environmentId === undefined || this.storeHydratedIntoRegistry;
+    }
+
+    /**
      * [#4521] Write-through the SchemaRegistry after a mutation goes LIVE, so
      * a just-saved item is dispatchable — not merely listable.
      *
@@ -19996,12 +20089,21 @@ export class ObjectStackProtocolImplementation implements
      *  • `runPublishSideEffects` — the draft→active promotion;
      *  • `rollbackMetaItem` — the restored body is the live one.
      *
-     * The non-object branch carries the same `environmentId === undefined`
-     * gate the read-side hydration carries: a project-scoped row must not be
-     * registered into a registry that unscoped (control-plane) callers share.
-     * The write must not be more permissive about that than the read is.
+     * The non-object branch registers only where the registry takes this
+     * kernel's stored rows ({@link registryTakesStoredRows}): a project-scoped
+     * row must not be registered into a registry that unscoped (control-plane)
+     * callers share. The write must not be more permissive about that than the
+     * read is.
      *
-     * [#6602] That sentence was true of the ENVIRONMENT dimension and false
+     * [#23298] …nor less permissive than the BOOT read. The gate used to be
+     * `environmentId === undefined`, so an environment kernel that hydrates its
+     * own store ({@link loadMetaFromDb}) registered every stored body at boot
+     * and none that a write made live after it: the registry, and the security
+     * catalog that reads it first, kept the boot-time body until a rebuild, and
+     * a narrowed permission set kept granting its wider one. The gate now asks
+     * whose registry this is, not whether the kernel has an environment.
+     *
+     * [#6602] That reason was true of the ENVIRONMENT dimension and false
      * of the ORGANIZATION one: the gate above says nothing about
      * `organization_id`, so on an unscoped kernel a per-org overlay write
      * hydrated straight into the process-wide registry under the plain key —
@@ -20069,11 +20171,12 @@ export class ObjectStackProtocolImplementation implements
             // fails CLOSED on a missing entry, and refusing to register here
             // would make a runtime-created object unreachable for data CRUD
             // rather than merely un-listed. This branch has never carried the
-            // `environmentId` gate either, for the same reason.
+            // kernel-scope gate below either, for the same reason.
             this.applyObjectRegistryMutation(request);
             return;
         }
-        if (this.environmentId !== undefined) return;
+        // [#23298] Whose registry this is — never `environmentId` alone.
+        if (!this.registryTakesStoredRows()) return;
         try {
             await this.hydrateOverlayIntoRegistry(request.type, request.item, {
                 packageId: request.packageId ?? undefined,
@@ -20149,10 +20252,14 @@ export class ObjectStackProtocolImplementation implements
      * same helper also folds in the singular/plural retry, so a baseline
      * stored under the twin spelling is found rather than retired.
      *
-     * RE-REGISTRATION stays control-plane-only (`environmentId === undefined`)
-     * — the historical refresh semantics of the original call sites, unchanged.
-     * Only the READ is now unconditional, because a project kernel needs the
-     * same evidence before retiring an entry.
+     * RE-REGISTRATION runs only where the registry takes this kernel's stored
+     * rows ({@link registryTakesStoredRows}) — the kernels the write-through
+     * registers on. Only the READ is unconditional, because a project kernel
+     * needs the same evidence before retiring an entry. [#23298] It used to be
+     * control-plane-only (`environmentId === undefined`), the gate the
+     * write-through had: once a save on an environment kernel that hydrates its
+     * own store registers its body, a reset that found a baseline and did not
+     * re-register it would leave the deleted body in the registry.
      *
      * ## Why `organizationId` is a REQUIRED parameter (#6780)
      *
@@ -20192,9 +20299,10 @@ export class ObjectStackProtocolImplementation implements
      * heals it, while a wrongly retired entry 404s data CRUD for every tenant.
      * The two costs are not symmetric, so the two gates are not either.
      *
-     * The KERNEL-scope gate stays where it was: `environmentId === undefined`
-     * still guards re-registration only, because that is a fact about the
-     * kernel this protocol instance serves, not about the row in hand.
+     * The KERNEL-scope gate stays where it was: it guards re-registration
+     * only, because whose registry this is ({@link registryTakesStoredRows})
+     * is a fact about the kernel this protocol instance serves, not about the
+     * row in hand.
      *
      * ## [#23149] A view container's expansions are healed too
      *
@@ -20295,7 +20403,8 @@ export class ObjectStackProtocolImplementation implements
             const baselineServesMember = memberKey === undefined
                 || itemDiscriminator(singular, baseline.data) === memberKey;
             if (baseline.data !== undefined && baseline.data !== null && baselineServesMember) {
-                if (this.environmentId === undefined) {
+                // [#23298] The write-through's own kernel-scope gate.
+                if (this.registryTakesStoredRows()) {
                     // [#22057] See tier 2 in the header. ⛔ View only.
                     const bound = canonicalMetaType(type) === 'view'
                         ? boundPackageOf((baseline.data as { _packageId?: unknown })._packageId)
@@ -28688,6 +28797,11 @@ export class ObjectStackProtocolImplementation implements
      * `environment_id` constraint — ADR-0005 (revised 2026-05) gave each
      * environment its own database.
      *
+     * [#23298] The call is also how an environment kernel's protocol learns
+     * that its registry is its own: from it on, a write registers the body it
+     * made live as this load registers each row, so the registry never keeps a
+     * boot-time body ({@link registryTakesStoredRows}).
+     *
      * [ADR-0131 D6, triage ruling Q1 → C] An environment row that overlays
      * SEALED managed content ({@link isUnservedSealedOverlay}) is named by
      * {@link reportSealedOverlayRows} with its remedies. An `object` such row
@@ -28756,6 +28870,12 @@ export class ObjectStackProtocolImplementation implements
         let invalid = 0;
         /** #5897 — see the TSDoc: set only on the non-benign outer-catch branch. */
         let storeUnavailable = false;
+        // [#23298] From here on the registry takes this kernel's stored rows,
+        // so a write registers its live body as this load registers each row
+        // ({@link registryTakesStoredRows}). Set on the call, not on the read's
+        // outcome: a store this load could not read is still the store whose
+        // rows this registry takes.
+        this.storeHydratedIntoRegistry = true;
         try {
             // [ADR-0131 D6] Hydrate only the environment's rows
             // (organization_id IS NULL); no read serves any other.

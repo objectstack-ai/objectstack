@@ -2,7 +2,7 @@
 
 /**
  * Stored shapes protocol 18 refuses, and no conversion rewrites — LISTED, never
- * rewritten (#23269, #23270, #23271).
+ * rewritten (#23269, #23270, #23271, #23317).
  *
  * ADR-0087's model is "convert where lossless, a structured TODO otherwise —
  * never silence". A D2 conversion carries the lossless half. For the shapes
@@ -33,10 +33,12 @@
  *   touched, and the shape stays as stored.
  * - It never decides. The predicate is the refusing door's own: the
  *   `controlled_by_parent` refinement's
- *   ({@link controlledByParentMasterRefusal}), `ViewDataSchema`'s parse, and
- *   the value-slot judge `AutomationEngine.registerFlow` and `objectstack
- *   validate` run ({@link flowNodeValueTemplateRefusals}). A site is listed
- *   here exactly when that door refuses it.
+ *   ({@link controlledByParentMasterRefusal}), `ViewDataSchema`'s parse — for
+ *   a page component, through the component's own props row, which the
+ *   component-props gate parses — and the value-slot judge
+ *   `AutomationEngine.registerFlow` and `objectstack validate` run
+ *   ({@link flowNodeValueTemplateRefusals}). A site is listed here exactly
+ *   when that door refuses it.
  * - It never prints a credential. A view-level API source could carry request
  *   `headers`. The listing names the URL and the method, and withholds the rest.
  *
@@ -49,9 +51,10 @@ import {
   controlledByParentMasterRefusal,
   type ControlledByParentMasterRefusal,
 } from '../data/controlled-by-parent-master.js';
+import { ComponentPropsMap } from '../ui/component.zod.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
 import type { ConversionTodoDetail } from './types.js';
-import { mapCollection, mapFlowNodeList, mapViewPayloads } from './walk.js';
+import { mapCollection, mapFlowNodeList, mapPageComponents, mapViewPayloads } from './walk.js';
 
 type Dict = Record<string, unknown>;
 
@@ -192,6 +195,38 @@ function apiBindingRefusal(data: unknown): string | undefined {
   return issue?.message;
 }
 
+/** What the detector needs of a schema: a parse that reports issues. */
+interface SafeParseable {
+  safeParse(value: unknown): { success: true } | { success: false; error: { issues: ReadonlyArray<{ message: string }> } };
+}
+
+/**
+ * The prescription a page component's own props row refuses its `data` with,
+ * when that refusal is this retirement's — `undefined` otherwise (#23317).
+ *
+ * The page parse leaves a component's `properties` an open record; the door
+ * that judges them is the component-props gate, which parses the bag against
+ * the type's `ComponentPropsMap` row. So the judge here is that row's own
+ * `data` member, and the site is listed only when it refuses the binding with
+ * the prescription `ViewDataSchema` refuses it with. That holds for every
+ * component whose `data` is a view data source and for no other, without a
+ * list of types to keep in step: a row whose `data` is a bare array refuses
+ * the binding for its shape, never with this prescription.
+ */
+function componentApiBindingRefusal(type: unknown, data: unknown): string | undefined {
+  const prescription = apiBindingRefusal(data);
+  if (prescription === undefined || typeof type !== 'string') return undefined;
+  if (!Object.prototype.hasOwnProperty.call(ComponentPropsMap, type)) return undefined;
+  const row = (ComponentPropsMap as Readonly<Record<string, unknown>>)[type];
+  const shape = (row as { shape?: unknown } | undefined)?.shape;
+  if (!isDict(shape)) return undefined;
+  const member = shape.data as Partial<SafeParseable> | undefined;
+  if (typeof member?.safeParse !== 'function') return undefined;
+  const verdict = (member as SafeParseable).safeParse(data);
+  if (verdict.success) return undefined;
+  return verdict.error.issues.some((issue) => issue.message === prescription) ? prescription : undefined;
+}
+
 const VIEW_API_BINDING_FATE =
   'No mechanical move: the replacement is a `dataSource` binding on a page component, so a page must exist '
   + 'to carry it, and the view stays a view. The one edit a pass could make, deleting the view\'s `data`, '
@@ -199,10 +234,19 @@ const VIEW_API_BINDING_FATE =
   + 'refuses the view: it registers under `[metadata_spec_invalid]` and its next save is refused with 422. '
   + 'Decide which page composes the endpoint, and what the view itself binds now.';
 
+const COMPONENT_API_BINDING_FATE =
+  'No mechanical move: the successor is a page component\'s `dataSource` binding, which takes a same-origin '
+  + '`url` and no other request key, so the request cannot be carried over as written; and deleting `data` '
+  + 'would make the component query its object instead and change what it shows. Left as stored, the page '
+  + 'still loads and saves, because the page parse does not judge a component\'s properties, while '
+  + '`os validate`, `os build` and `os lint` refuse the binding in source. Decide what the component binds now, '
+  + 'and which same-origin endpoint, if any, replaces the request.';
+
 const viewDataApiProvider: RefusedStoredShape = {
   id: 'view-data-api-provider-retired',
   toMajor: 18,
-  surface: 'view.data — a list or form view\'s data source, in a view body or an object\'s listViews',
+  surface: 'view.data — a list or form view\'s data source, in a view body or an object\'s listViews, '
+    + 'and the `data` prop of a page component that takes one (object-grid, object-map, object-gantt, object-tree)',
   detect(stack, report) {
     const judge = (payload: Dict, path: string, where: string): void => {
       const prescription = apiBindingRefusal(payload.data);
@@ -224,6 +268,24 @@ const viewDataApiProvider: RefusedStoredShape = {
         if (isDict(entry)) judge(entry, `${path}.listViews.${name}`, `The list view \`${name}\` of object \`${String(obj.name)}\``);
       }
       return obj;
+    });
+    // [#23317] A page component whose `data` prop is a view data source.
+    const pages = Array.isArray(stack.pages) ? stack.pages : [];
+    mapPageComponents(stack, (component, path) => {
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const prescription = componentApiBindingRefusal(component.type, properties.data);
+      if (prescription === undefined) return component;
+      const page = pages[Number(/^pages\[(\d+)\]/.exec(path)?.[1])];
+      const pageName = isDict(page) && typeof page.name === 'string' ? page.name : path.split('.')[0]!;
+      const id = typeof component.id === 'string' ? ` \`${component.id}\`` : '';
+      report({
+        path: `${path}.properties.data`,
+        from: describeApiBinding(properties.data as Dict),
+        reason: `The \`${String(component.type)}\` component${id} of page \`${pageName}\`, at ${path}, binds the `
+          + `retired view-level API data source. ${COMPONENT_API_BINDING_FATE} ${prescription}`,
+      });
+      return component;
     });
   },
 };

@@ -61,8 +61,10 @@ export interface StoredFlowCanonicalization {
   /**
    * Sites the chain left as stored because no lossless rewrite exists (#23269)
    * — above all a value slot carrying a `{…}` template token, which
-   * `registerFlow` refuses although the parse accepts the flow. Listed under
-   * the row exactly as a non-flow row's TODOs are ({@link StoredMigrationTodo}).
+   * `registerFlow` refuses although the parse accepts the flow — and every
+   * other site `registerFlow` refuses once the parse has accepted it (#23317),
+   * each under `conversionId: 'registerFlow'`. Listed under the row exactly as
+   * a non-flow row's TODOs are ({@link StoredMigrationTodo}).
    * It restates the contract's own optional member,
    * `IAutomationService.canonicalizeStoredFlow(...).todos?` (`@objectstack/spec`):
    * a canonicalizer that reports none still conforms, and absent reads as none.
@@ -119,7 +121,11 @@ export interface StoredMigrationNotice {
  * this list the row would read as already on protocol.
  */
 export interface StoredMigrationTodo {
-  /** The `MetadataConversion.id` whose surface the site is on. */
+  /**
+   * The `MetadataConversion.id` whose surface the site is on — or the D3 entry
+   * that refuses a stored shape no conversion covers, or `registerFlow` for a
+   * site flow registration refuses.
+   */
   conversionId: string;
   /** Dotted surface that conversion governs. */
   surface: string;

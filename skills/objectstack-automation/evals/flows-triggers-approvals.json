@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Every night at 02:00, mark `subscription` records whose `renewal_date` is in the past as `lapsed`. `status` is a readonly field that only automation may change.",
-      "expected_output": "Emits a `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (no top-level `schedule`; no cron tag), `runAs: 'system'` because a scheduled run has no trigger user and a readonly field is stripped under `runAs: 'user'`. One `update_record` node with `filter` as an ObjectQL where-map (`renewal_date: { $lt: '{TODAY()}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
+      "expected_output": "Emits a `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (no top-level `schedule`; no cron tag), `runAs: 'system'` because a scheduled run has no trigger user and a readonly field is stripped under `runAs: 'user'`. One `update_record` node with `filter` as an ObjectQL where-map (`renewal_date: { $lt: '{today}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
       "files": [],
       "assertions": {
         "must_contain": ["defineFlow", "type: 'schedule'", "runAs: 'system'", "update_record", "edges"],
@@ -14,7 +14,7 @@
     {
       "id": 2,
       "prompt": "When an opportunity moves into stage `closed_won`, send the account owner an inbox notification with the deal name.",
-      "expected_output": "Emits a `record_change` flow whose binding lives on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, and a bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'` so it fires only on the transition. A `notify` node with `recipients: '{record.owner_id}'`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`. Reminds that `requires` must list `automation`, `triggers` and `messaging` (otherwise notify reports success with `skipped: true`).",
+      "expected_output": "Emits a `record_change` flow whose binding lives on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, and a bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'` so it fires only on the transition. A `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`. `requires` must list `automation`, `triggers` and `messaging`, else notify reports success with `skipped: true`.",
       "files": [],
       "assertions": {
         "must_contain": ["triggerType", "record-after-update", "previous.", "notify", "recipients", "messaging", "{{"],

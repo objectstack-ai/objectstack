@@ -618,6 +618,20 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'carries no `code` there. A callback payload, not a thrown error and not a response body.',
     },
     {
+        code: 'OS_METADATA_CONVERSION_TODO',
+        file: 'packages/services/service-automation/src/engine.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The same conversion-TODO vocabulary as the apply.ts row above, stamped by the automation ' +
+            'engine for a site its flow registration refuses once the parse has accepted the flow: ' +
+            "`canonicalizeStoredFlow` returns it in `todos` beside the chain's own TODOs, and the " +
+            'stored-metadata migration pass flattens it onto its report rows exactly as it does those, ' +
+            'with no `code`. A returned record, not a thrown error and not a response body: ' +
+            '`registerFlow` throws its own plain refusal and never this.',
+    },
+    {
         code: 'ERR_BULK_PER_ROW_HOOK_LIMIT',
         file: 'packages/spec/src/data/bulk-write-hook-conformance.ts',
         shape: 'objlitconst',
@@ -1402,6 +1416,33 @@ export const UNRESOLVED_CODE_HELPERS: readonly UnresolvedCodeHelper[] = [
             'helper has zero in-file callers, being the shared envelope responder other packages import. ' +
             'The same reasoning `CodeDoor` above already records for the REST door\'s author-side ' +
             'responder, which takes the identical parameter type.',
+    },
+    {
+        file: 'packages/types/src/response-envelope.ts',
+        helper: 'sendServerFault',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'rest',
+        verdict: 'compiler-narrowed',
+        why:
+            'The caught-fault sibling of `sendError`: `sendServerFault(res, status, code: ErrorCode, ' +
+            'message, thrown, request?)` types the parameter to the same CLOSED union, so an unregistered ' +
+            'literal fails the build; an `any`-typed value is not checked, so callers pass literals. Like `sendError` it has ' +
+            'zero in-file callers: the route families that answer a caught fault import it, and their own ' +
+            'call sites spell the codes.',
+    },
+    {
+        file: 'packages/types/src/response-envelope.ts',
+        helper: 'writeErrorEnvelope',
+        param: 'code',
+        shape: 'objlithelper',
+        door: 'rest',
+        verdict: 'compiler-narrowed',
+        why:
+            'The module-private write the two exported envelope writers share, so the error ' +
+            'envelope is still written in one place. Its parameter is typed `code: ErrorCode`, and its only ' +
+            'callers are `sendError` and `sendServerFault`, which pass their own `ErrorCode` parameter ' +
+            'through: nothing reduces in-file because nothing is authored here.',
     },
     {
         file: 'packages/runtime/src/http-dispatcher.ts',

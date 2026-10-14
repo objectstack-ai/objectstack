@@ -95,9 +95,11 @@ const SITES: ReadonlyArray<Site & {
             + 'and a row bound to another package is refused (D9.9, OBJECT_OVERLAY_PACKAGE_MISMATCH)',
     },
     {
-        member: 'hydrateOverlayIntoRegistry', args: 'type, mergeArtifactProtection(type, stateTenantAuthorship(data), envelope), \'name\' as any',
+        // [#23233] The body carries the row's package binding (`withRowBinding`); the disposition is unchanged.
+        member: 'hydrateOverlayIntoRegistry', args: 'type, mergeArtifactProtection(type, stateTenantAuthorship(withRowBinding(data, options.packageId)), envelope), \'name\' as any',
         disposition: 'yes, view only: skips a name another package ships',
-        path: 'the list\'s hydration and the write-through on an unscoped kernel; the boot\'s loadMetaFromDb on every kernel',
+        // [#23298] The write-through runs wherever the registry takes the kernel's stored rows.
+        path: 'the list\'s hydration on an unscoped kernel; the write-through on an unscoped kernel and on an environment kernel that hydrated its own store; the boot\'s loadMetaFromDb on every kernel',
         why: 'a stored row: a view row bound to a package is not registered where another package ships its name, and the '
             + 'reads answer it from its row; a package-less row, and every other type, register as before (#4624)',
         viewOnlyBy: 'const bound = canonicalType === \'view\' ? boundPackageOf(options.packageId) : undefined;',
