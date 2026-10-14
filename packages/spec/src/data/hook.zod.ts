@@ -1243,6 +1243,74 @@ export const HookContextSchema = lazySchema(() => z.object({
   ),
 
   /**
+   * Cascade-Delete Marker
+   * `true` exactly when THIS delete is one the engine's cascade issued — the
+   * child DELETE `cascadeDeleteRelations` performs for each row that
+   * references a record being deleted through a relation whose
+   * `deleteBehavior` resolves to `cascade` (a `master_detail` unless it
+   * declares `restrict`; a `lookup` or `tree` that declares `cascade`), at any
+   * depth: a grandchild the child's own cascade removes is marked too. Present
+   * in both phases of that delete (`beforeDelete`, `afterDelete`). Absent on
+   * every other dispatch; read it as `ctx.referentialCascadeDelete === true`.
+   *
+   * The delete twin of {@link referentialFieldClear}. That key marks the
+   * `set_null` cleanup UPDATE; this one marks the `cascade` child DELETE. A
+   * cleanup update never carries this key, and a cascade child delete never
+   * carries that one.
+   *
+   * ## Why a declared key
+   *
+   * The engine deletes each child AS THE CALLER: the cascade recurses through
+   * the public delete with the caller's own context, so on the path a real
+   * request takes (a REST `DELETE` carrying a `userId`) `ctx.user`,
+   * `ctx.session` and `ctx.input` are identical between a child the cascade
+   * removes and a user's hand delete of that same child. An app guard that
+   * freezes settled records (a quote's lines once the quote is accepted) had
+   * no declared way to refuse the hand delete while yielding to the cascade,
+   * and refusing both leaves the parent, and every record whose own cascade
+   * reaches it, undeletable.
+   *
+   * ## No operation-private spelling: this key is the only channel
+   *
+   * Unlike `referentialFieldClear`, this fact has no `__`-prefixed twin on the
+   * ExecutionContext, and nothing on that envelope is the contract. The engine
+   * recognises the delete it issued through an engine-private ambient record
+   * keyed on the exact object and id its cascade is deleting, claimed by that
+   * one delete. Two consequences follow, and both are part of the contract:
+   *
+   *  - it does not ride the envelope, so a write a hook issues through
+   *    `ctx.api` during a cascade dispatch is NOT marked, a delete included:
+   *    that is the hook's own write, not one the cascade issued;
+   *  - it does not turn a caller's absent context into a present one, so the
+   *    child of a cascade that carried no context still sees no `ctx.session`.
+   *
+   * Being declared, it is carried across the QuickJS sandbox boundary by
+   * contract (`buildSandboxContext` / `installCtx` in `packages/runtime`), so a
+   * lowered `*.hook.ts` body reads it exactly as an in-process handler does.
+   *
+   * ## Trust model
+   *
+   * Server-derived, like `session.isSystem`: only the engine's cascade walk
+   * sets it, and nothing a request carries can reach the record it is read
+   * from. It is a signal to app code, not an authorization input: each child
+   * delete is still authorized as the caller, exactly as before.
+   *
+   * OPTIONAL for the same reason `referentialFieldClear` is: making it
+   * required would reject the partial contexts `HookContextSchema.parse`
+   * accepts today. The engine writes `true` or omits it — it never writes
+   * `false`.
+   */
+  referentialCascadeDelete: z.boolean().optional().describe(
+    "Engine-produced marker: true exactly when this delete is one the engine's cascade issued "
+    + '(the child delete removing a row that references a record being deleted through a relation '
+    + 'whose deleteBehavior resolves to cascade, at any depth), in both phases of that delete. '
+    + 'Absent on every other delete, including a user hand-deleting the same child and a delete a '
+    + 'hook issues through ctx.api; read as `ctx.referentialCascadeDelete === true`. The delete twin '
+    + 'of referentialFieldClear, carried across the sandbox boundary by contract; server-derived, '
+    + 'never client-supplied, and with no operation-private spelling to read instead.',
+  ),
+
+  /**
    * Transaction Handle
    * If the operation is part of a transaction, use this handle for side-effects.
    */

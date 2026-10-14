@@ -4128,6 +4128,25 @@ function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unkn
 }
 
 /**
+ * [#23221] The one child delete a cascade walk is issuing, for that delete to
+ * recognise itself by — see {@link ObjectQL.cascadeIssuedDeletes}. The walk
+ * opens one per `cascade` dependent, around its own `delete()` call, and the
+ * `delete()` whose object and id match claims it.
+ */
+interface CascadeIssuedDelete {
+  /** The child object the walk is deleting from, as the registry names it. */
+  readonly object: string;
+  /** The child row's id, as a string (the walk's `String(depId)`). */
+  readonly id: string;
+  /**
+   * Set by the `delete()` that recognised itself. One token, one dispatch: a
+   * later delete of the same row inside that call (a hook's own) finds it
+   * claimed and is not marked.
+   */
+  claimed: boolean;
+}
+
+/**
  * [ADR-0010 §3.7] Stamp a manifest item with its owning package's
  * `(packageId, packageVersion)` before the registry stores it: the call the
  * artifact loader makes (`metadata/plugin.ts`), so both load paths serve one
@@ -4268,6 +4287,27 @@ export class ObjectQL implements IObjectQLEngine {
    * into a present one on every nested delete.
    */
   private readonly cascadeDeleteSets = new AsyncLocalStorage<CascadeDeleteSet>();
+
+  /**
+   * [#23221] The child delete {@link walkReferencingRelations} is issuing right
+   * now, so that `delete()` can tell the cascade's own child delete from every
+   * other delete and project the fact onto the DECLARED
+   * `HookContext.referentialCascadeDelete` (see
+   * {@link claimReferentialCascadeDelete}).
+   *
+   * Ambient, for {@link cascadeDeleteSets}' reason — a context key would turn a
+   * caller's absent context into a present one on the child delete, and both
+   * `buildSession` and `buildHookApi` branch on its absence — and for one more
+   * the update twin's `__referentialFieldClear` never had to weigh, because its
+   * envelope semantics predated its declared projection: the child delete's
+   * context is the very object `buildHookApi` hands to `ScopedContext`, so a
+   * key stamped on it would ride into every write that child's hooks issue
+   * through `ctx.api`, and a hook's own delete during the cascade would read
+   * as cascade-issued. Keyed on the exact object and id the walk issues, and
+   * claimed once, the marker reaches that one delete's dispatches and no other.
+   * Engine-private: nothing a request carries can name a record into it.
+   */
+  private readonly cascadeIssuedDeletes = new AsyncLocalStorage<CascadeIssuedDelete>();
 
   private drivers = new Map<string, IDataDriver>();
   private defaultDriver: string | null = null;
@@ -6361,6 +6401,28 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private buildReferentialFieldClear(execCtx?: ExecutionContext): true | undefined {
     return (execCtx as any)?.__referentialFieldClear === true ? true : undefined;
+  }
+
+  /**
+   * [#23221] Build the declared `HookContext.referentialCascadeDelete` marker,
+   * the delete twin of {@link buildReferentialFieldClear}: `true` when THIS
+   * `delete()` of `object`/`id` is the child delete
+   * {@link walkReferencingRelations} issued for a `cascade` relation, and
+   * `undefined` for every other delete — the same "absent unless true"
+   * contract, so a handler reads `ctx.referentialCascadeDelete === true`.
+   *
+   * Reads {@link cascadeIssuedDeletes}, not the envelope (that field says why),
+   * and CLAIMS the token it matches: called once per `delete()`, after the
+   * `afterDelete` unit re-entry has returned, so the call that recognises
+   * itself is the one that dispatches the hooks, and nothing later inside it
+   * can match the same token again.
+   */
+  private claimReferentialCascadeDelete(object: string, id: unknown): true | undefined {
+    const issued = this.cascadeIssuedDeletes.getStore();
+    if (!issued || issued.claimed || id == null) return undefined;
+    if (issued.object !== object || issued.id !== String(id)) return undefined;
+    issued.claimed = true;
+    return true;
   }
 
   /**
@@ -18688,7 +18750,21 @@ export class ObjectQL implements IObjectQLEngine {
             if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
             // Recurse via the public delete so the child's own cascade,
             // hooks and events fire.
-            await this.delete(childName, { where: { id: depId }, context } as any);
+            //
+            // [#23221] Inside a token naming exactly this child, which that
+            // delete claims and projects onto the DECLARED
+            // `HookContext.referentialCascadeDelete` (see
+            // claimReferentialCascadeDelete): on the real request path the
+            // caller's context reaches the child unchanged, so without it a
+            // freeze guard cannot tell this delete from a hand delete of the
+            // same row. The context is passed as before, by reference and
+            // unmarked — see `cascadeIssuedDeletes` for why the marker is not
+            // a context key. A grandchild is issued by the child's own walk,
+            // inside a token of its own.
+            await this.cascadeIssuedDeletes.run(
+              { object: childName, id: String(depId), claimed: false },
+              () => this.delete(childName, { where: { id: depId }, context } as any),
+            );
           } else {
             // [#3023] Clear the FK as an engine-internal referential-integrity
             // write, tagged so plugin-security's ownership-anchor guard (#3004)
@@ -18799,6 +18875,9 @@ export class ObjectQL implements IObjectQLEngine {
     // reads THIS predicate cannot be looser than this method.
     const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
     const id: any = dispatch.kind === 'by-id' ? dispatch.id : undefined;
+    // [#23221] Is this the child delete a cascade issued? Decided here, once,
+    // before any middleware or hook runs, so the claim is this call's alone.
+    const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id);
 
     const opCtx: OperationContext = {
       object,
@@ -18828,6 +18907,11 @@ export class ObjectQL implements IObjectQLEngine {
           input: { id, options: opCtx.options },
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
+          // [#23221] The declared cascade-delete marker, the delete twin of
+          // `update()`'s `referentialFieldClear` spread: conditional for the
+          // same reason, "absent unless true". Bound once on this context,
+          // which `afterDelete` reuses, so both phases carry it.
+          ...(referentialCascadeDelete ? { referentialCascadeDelete: true as const } : {}),
           user: this.buildUser(opCtx.context),
           api: this.buildHookApi(opCtx.context),
           transaction: opCtx.context?.transaction,
