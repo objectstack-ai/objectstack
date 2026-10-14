@@ -68,6 +68,8 @@
       "Bash(node --use-env-proxy scripts/pm/label-write.mjs *)",
       "Bash(node scripts/pm/post-stamped.mjs *)",
       "Bash(node scripts/pm/label-write.mjs *)",
+      "Bash(node scripts/pm/fleet-write/dispatch.mjs *)",
+      "Bash(node --use-env-proxy scripts/pm/fleet-write/dispatch.mjs *)",
       "Bash(node scripts/pm/close-cards.mjs *)",
       "Bash(node --use-env-proxy scripts/pm/close-cards.mjs *)",
       "Bash(node scripts/pm/issue-create.mjs *)",

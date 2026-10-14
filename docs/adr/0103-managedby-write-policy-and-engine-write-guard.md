@@ -49,9 +49,14 @@ write policy **expressible and enforced** without breaking the writable set.
 
 > **Not to be confused with** the row-level `managed_by` *provenance* column
 > (`'platform' | 'package' | 'admin'`) on `sys_sharing_rule` / `sys_position` /
-> `sys_capability`, guarded by `assertSystemRowWriteGate` (ADR-0066). That is a
-> per-row provenance axis; this ADR is about the per-object schema bucket. The
-> shared word is a coincidence.
+> `sys_capability` (ADR-0066). That is a per-row provenance axis; this ADR is about
+> the per-object schema bucket. The shared word is a coincidence. Of the three
+> objects named here, only `sys_sharing_rule` is still registered on `main`, and its admin
+> edits are stamped `customized` by plugin-sharing's provenance hook
+> (`packages/plugins/plugin-sharing/src/sharing-rule-provenance.ts`), not refused.
+> `SecurityPlugin.assertSystemRowWriteGate` guarded `sys_position` and
+> `sys_capability` (never `sys_sharing_rule`), and no write reaches it since
+> #15204 stage 8 unregistered both.
 
 > **Note (2026-10-14) — three objects named above are retired.** `sys_position_permission_set`
 > (item 2), `sys_position` and `sys_capability` are no longer registered since #15204 stage 8

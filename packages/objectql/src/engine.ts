@@ -5555,9 +5555,10 @@ export class ObjectQL implements IObjectQLEngine {
    *  - **The remaining PRE-RESOLUTION gates, which run beside the two named
    *    above.** Two judge a row's PROVENANCE, which the preview holds no row to
    *    carry: the ADR-0086/0094 package-managed write gate and the ADR-0066
-   *    system-row write gate. Two judge a payload VALUE: the ADR-0066 D1
-   *    curated-capability-name refusal and the ADR-0090 D5/D9 audience-anchor
-   *    binding guard. And the ADR-0056 `publicFormGrant` scope, which admits
+   *    system-row write gate. One judges a payload VALUE: the ADR-0066 D1
+   *    curated-capability-name refusal (the ADR-0090 D5/D9 audience-anchor
+   *    binding guard retired with `sys_position_permission_set`, C3 stage 8).
+   *    And the ADR-0056 `publicFormGrant` scope, which admits
    *    create plus read-back on exactly the granted object and refuses
    *    everything else — not asked because no wire caller and no constructor
    *    in the tree presents that grant here (only the public form-submit route
@@ -8919,9 +8920,10 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * On the RBAC link tables that is a security-surface record that resolves to
    * nothing: an administrator auditing permissions sees a binding whose target
-   * cannot be inspected, and the audience-anchor gate has to resolve that very
-   * set to evaluate the grant — so a dangling row is an unevaluable gate input,
-   * not merely an untidy one.
+   * cannot be inspected, and the audience-anchor gate had to resolve that very
+   * set to evaluate the grant — so a dangling row was an unevaluable gate input,
+   * not merely an untidy one. (That gate and `sys_position_permission_set` are
+   * retired since C3 stage 8; the check stands for the link tables that remain.)
    *
    * ## Scope, deliberately narrow
    *
@@ -20924,7 +20926,8 @@ export class ObjectRepository implements IScopedObjectRepository {
    * middleware (`:1616`, `canExport` at `:4573`); the ADR-0103 engine-owned/
    * append-only write guard (`system-write-guard.ts:96,120`, called at
    * `security-plugin.ts:1736`); the package-managed / system-row /
-   * curated-capability-name / audience-anchor write gates
+   * curated-capability-name write gates (and, until C3 stage 8, the
+   * audience-anchor gate)
    * (`security-plugin.ts:1690-1724`); the referential-integrity check
    * (`:5892` in this file) and the tenant-audit mute (`:3773`) — in addition
    * to the static `readonly`/runtime-owned strip on BOTH update paths

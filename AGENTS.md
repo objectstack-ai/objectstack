@@ -299,20 +299,20 @@ localStorage / auth gotchas.
     approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
-    triggers a release workflow, and none merges the Version Packages PR.** A rule that binds every seat lives here,
+    triggers a release, and none merges the Version Packages PR.** A rule that binds every seat lives here,
     not only in a lane-specific skill file. **Release-adjacent work stays open to every seat**: the release board,
     `.objectui-sha` pin bumps, version reconciliation, writing changesets, compiling release notes when asked, and
     *verifying* release state (`npm view`, `git ls-remote --tags`) are ordinary tasks. What is reserved is the
     **release act itself**: ⛔ running `changeset publish` / `pnpm run release`, ⛔ pushing a version tag, ⛔
-    cutting a GitHub Release, ⛔ pushing a runtime image, ⛔ `workflow_dispatch`-ing `release.yml` or any other
-    publish-capable workflow, ⛔ **approving a pending `release` environment deployment** (ADR-0125: that click IS
-    the publish authorisation, and a deployment waiting for hours is the system working, not a state you clear), and
-    ⛔ merging — or queueing, or arming auto-merge on — the **Version Packages** PR (`chore: version packages`).
-    That PR is bot-authored and standing-open by design: it is regenerated six-hourly by `release.yml`'s `version-pr`
-    job — never on a push to `main`; push drives the publish lane — so "green, current, and nobody has objected"
-    is its permanent resting state, not a signal that it is due. When you find a publish nobody ordered — a tag or
-    an npm version that simply appeared — ⛔ do not "repair" it with a counter-publish: file it as an incident for
-    the maintainer.
+    cutting a GitHub Release, ⛔ pushing a runtime image, ⛔ `workflow_dispatch`-ing `release.yml` in any lane but
+    the fleet-write relay's refresh stroke (`refresh_version_pr: true` alone), or any other publish-capable workflow,
+    ⛔ **approving a pending `release` environment deployment** (ADR-0125: that click IS the publish authorisation,
+    and a deployment waiting for hours is the system working, not a state you clear), and ⛔ merging — or queueing,
+    or arming auto-merge on — the **Version Packages** PR (`chore: version packages`). That PR is bot-authored and
+    standing-open by design: it is regenerated six-hourly by `release.yml`'s `version-pr` job — never on a push to
+    `main`; push drives the publish lane — so "green, current, and nobody has objected" is its permanent resting
+    state, not a signal that it is due. When you find a publish nobody ordered — a tag or an npm version that simply
+    appeared — ⛔ do not "repair" it with a counter-publish: file it as an incident for the maintainer.
 
     **The existence of a path to a release is not authorization to walk it, and the YAML is not a barrier that
     holds against you.** The publish job is triggered by the **push that lands the Version Packages PR** and held at

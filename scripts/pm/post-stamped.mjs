@@ -866,6 +866,7 @@ import {
   resolveSweepRepo,
   stampDriftMinutes,
   stampSpan,
+  stripMarkdownCode,
   threadReadField,
 } from './check-half-states.mjs';
 import { readClause2Line } from './clause2-line.mjs';
@@ -1988,6 +1989,214 @@ export function recordLineRefusalText(rows) {
     '\n\n  `readLocalRuns` (`record-recognisers.mjs`) is imported HERE, so this IS the reading the record would get later —\n' +
     '  on your own record, before the write. A record without the line is not re-judged; only a line that is present and\n' +
     '  unreadable is refused. ⛔ No flag turns it off.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A VACANT seat body's ledger — refused BEFORE the write (#23396, ruling 6162084315, letter A)
+// ---------------------------------------------------------------------------
+//
+// A seat that clocks out rewrites its seat post as `⏳ vacant` plus the successor's ledger
+// (`seat-post-protocol.md`, 交接收尾清单). The ruling makes that ledger a list of POINTERS: every obligation a
+// successor inherits carries a card number, so the duty lives on a card a reader is sent to, ⛔ never in a body
+// nobody re-reads. Measured on the devx seat's vacant body (#6023, the card's own reading): six obligations sat in
+// it with no card of their own — an audit card owed "after next ships", a live pin owed on a CLOSED card, and four
+// `Carried` notes whose carrier was "the next PR touching X", or nobody.
+//
+// ## The three definitions, and the exact strings they key on
+//
+//   VACANT      the body's Current-PM section — the first `##` heading whose text matches `CURRENT_PM_HEADING`
+//               (`Current PM` / `当前 PM`), down to the next `##` — states the vacant status: the FIRST
+//               seat-status token in it (`SEAT_STATUS_TOKENS`, the protocol's vocabulary `🟢` / `⏳` / `⏸`) is
+//               `⏳`, and its next word, emphasis skipped, is `vacant`. ⛔ Positional, never a containment test:
+//               a SEATED body names another seat as `⏳ vacant` in its own Current-PM section (#7623 does, two
+//               lines under its `🟢`), and a refresh of a seated post must never meet this refusal.
+//   LEDGER      every line AFTER that section — the template's ledger, hot-file queue and notes — with fenced
+//               code, inline code, table rows, blockquotes and headings set aside. ⛔ Not the `Ledger` heading
+//               alone: four of the six measured obligations sat under `## 4. Notes`, as `Carried` lines.
+//   OBLIGATION  a ledger line carrying a key of `LEDGER_OBLIGATION_KEYS` where that key means a duty (each key
+//               frozen beside the line it was measured on, with the position it is read in), or a list item
+//               under a GROUP LABEL — a keyed line ending in `:` (`Readings owed:`, `Carried forward, open:`) or
+//               a keyed heading (`### 欠账`); the label itself is a heading and is not judged.
+//
+// An obligation line PASSES when it carries a card reference (`#N` or `owner/repo#N`, outside code — GitHub's
+// reference parser does not fire inside a code span), or is nested under a list item that does (the duty is that
+// card's). A line that NAMES its carrier (`Carrier:` / `承接者:`) passes only when the clause after the key is a
+// card reference: "the next PR touching X" is what the same ruling's filing-gate sentence says is not a carrier,
+// and on the measured body the line's other `#N` was the PR the stale comment came from.
+//
+// Left alone, by construction: a pointer line (`→ #N` carries its card); a fact line (`Landed: …`, `Closed this
+// shift:`) carries no key; a body that is not vacant; and `--comment`, which is never the seat post.
+//
+// ## What it cannot see, stated rather than implied
+//
+// The ruling's grain is the LINE, so an un-carded duty sharing a line with an unrelated `#N` passes — the measured
+// `B′ (an audit card) is owed …` sits on `#23177`'s line and passes here. And a number on a CLOSED card is still a
+// number: whether the card is open is a live read, and this core is offline by contract. Both are a reviewer's
+// half, ⛔ never a reason to widen the keys from imagination: a key is added when a vacant body is MEASURED
+// carrying it, with the line it was measured on.
+
+/** The Current-PM section's heading — the four-section template's first section, in both languages the fleet writes. */
+export const CURRENT_PM_HEADING = /\bcurrent\s+pm\b|当前\s*pm/iu;
+
+/** The seat-status vocabulary (`seat-post-protocol.md`: `🟢 <login>`, `🟢 Routine`, `⏳ vacant`, `⏸️ paused`). */
+export const SEAT_STATUS_TOKENS = Object.freeze(['🟢', '⏳', '⏸']);
+
+/** The vacant marker as the protocol spells it — what the refusal names. */
+export const VACANT_MARKER = '⏳ vacant';
+
+/**
+ * The words that make a ledger line an OBLIGATION, each frozen beside the live line it was measured on, and each
+ * read only WHERE it means a duty — measured both ways on every open `pm:seat` body (22): read anywhere, `owe` and
+ * `carrier` refused five lesson bullets of one vacant body (`no objection owed`, `owes a changeset`, `DUAL
+ * carrier:`), none of them a duty. So:
+ *
+ *   `lead`    the item's first word — `Carried` heads a carried duty, while `carried forward` mid-sentence is the
+ *             measured seated-body fact `Brief lessons carried forward: …`, which owes nothing.
+ *   `label`   only on a group label or a heading (`**Readings owed:**`, `### 欠账`), which makes its list a group.
+ *   `clause`  a carrier CLAUSE, capitalised, at the start of a clause: `… . Carrier: the next PR touching that job.`
+ *   `line`    anywhere on the line — the carrier phrase itself, which the filing gate names as no carrier.
+ */
+export const LEDGER_OBLIGATION_KEYS = Object.freeze([
+  Object.freeze({ key: 'Carried', re: /^carried\b/iu, where: 'lead', measured: '`Carried, open to the maintainer: …` · `**Carried forward, open:**`' }),
+  Object.freeze({ key: '欠', re: /^(?:仍|还)?欠/u, where: 'lead', measured: 'the filing gate\'s own word for a duty (`欠账`)' }),
+  Object.freeze({ key: 'owed', re: /\bow(?:e|es|ed|ing)\b|欠/iu, where: 'label', measured: '`**Readings owed:**` · `### ⛔ 留给下任的欠账`' }),
+  Object.freeze({ key: 'Carrier:', re: /(?:^|[.;!?。;]\s*|[(（]\s*)[*_]*(?:Carrier|承接者?)[*_]*[ \t]*[:：]/u, where: 'clause', measured: '`Carrier: the next PR touching that job.`' }),
+  Object.freeze({ key: 'next PR', re: /\bnext (?:PR|change|edit|push)(?:es|s)?\b|下一个碰/iu, where: 'line', measured: '`**Stale comments to ride the next edit of their files:**`' }),
+]);
+
+const H2_LINE = /^ {0,3}##(?!#)[ \t]+(.*)$/u;
+const ANY_HEADING = /^ {0,3}#{1,6}[ \t]/u;
+const LEDGER_SKIPPED = /^[ \t]*(?:\||>|<!--|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/u;
+const LEDGER_LIST_ITEM = /^([ \t]*)(?:[-*+]|\d{1,9}[.)])[ \t]+(.*)$/u;
+/** `#N` or `owner/repo#N`; ⛔ no `g` flag — a shared regex carrying `lastIndex` between callers is a state bug. */
+export const LEDGER_CARD_REF = /(?:^|[^\w&#/])#\d+(?!\w)|[\w.-]+\/[\w.-]+#\d+(?!\w)/u;
+const CARRIER_CLAUSE = /(?:^|[.;!?。;]\s*|[(（]\s*)[*_]*(?:Carrier|承接者?)[*_]*[ \t]*[:：][*_]*(.*)$/u;
+
+const indentOf = (ws) => ws.replace(/\t/g, '    ').length;
+const leadWordOf = (text) => text.replace(/^[\s*_~⭐⛔⚠️]+/u, '');
+const isGroupLabel = (text) => /[:：]$/u.test(text.replace(/[\s*_]+$/u, ''));
+const labelText = (text) => text.replace(/\*+/gu, '').replace(/^[\s_]+|[\s_]+$/gu, '');
+
+/**
+ * Is this body a VACANT seat post, by its Current-PM section's first status token?
+ * @returns {{ vacant: boolean, status: 'vacant'|'seated'|'paused'|'other'|null, ledgerFrom: number|null }}
+ *   `ledgerFrom` is the 0-based line the ledger starts on (the line after the Current-PM section), `null` when
+ *   the body has no Current-PM section at all — then it is not a seat post this rule reads.
+ */
+export function seatPostVacancy(body) {
+  const lines = stripMarkdownCode(String(body ?? ''), { inline: false }).split('\n');
+  const start = lines.findIndex((line) => {
+    const m = H2_LINE.exec(line);
+    return m !== null && CURRENT_PM_HEADING.test(m[1]);
+  });
+  if (start < 0) return { vacant: false, status: null, ledgerFrom: null };
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (H2_LINE.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  const section = lines.slice(start, end).join('\n');
+  let first = null;
+  for (const token of SEAT_STATUS_TOKENS) {
+    const at = section.indexOf(token);
+    if (at >= 0 && (first === null || at < first.at)) first = { token, at };
+  }
+  const status =
+    first === null
+      ? null
+      : first.token === '🟢'
+        ? 'seated'
+        : first.token === '⏸'
+          ? 'paused'
+          : /^vacant\b/iu.test(section.slice(first.at + first.token.length).replace(/^[\s*_`️]+/u, ''))
+            ? 'vacant'
+            : 'other';
+  return { vacant: status === 'vacant', status, ledgerFrom: end };
+}
+
+/** The obligation keys a ledger line (code already blanked) carries, by name; `label` keys count on a label only. */
+function ledgerKeysOn(text, { label = false } = {}) {
+  const lead = leadWordOf(text);
+  return LEDGER_OBLIGATION_KEYS.filter((k) => (k.where === 'lead' ? k.re.test(lead) : k.where === 'label' ? label && k.re.test(text) : k.re.test(text))).map((k) => k.key);
+}
+
+/**
+ * Every obligation line in a VACANT body's ledger that carries no card — empty for a body that is not vacant.
+ * Pure and offline; `--self-test` pins each definition in the banner above.
+ * @returns {{ lineNo: number, line: string, keys: string[], why: string }[]}
+ */
+export function vacantLedgerRefusals(body) {
+  const raw = String(body ?? '');
+  const vacancy = seatPostVacancy(raw);
+  if (!vacancy.vacant) return [];
+  const rawLines = raw.split('\n');
+  const lines = stripMarkdownCode(raw).split('\n');
+  const rows = [];
+  let stack = []; // the open list items above this line: { indent, card, label }
+  let base = null; // an unindented paragraph ending in `:` — the label of the list under it
+  for (let i = vacancy.ledgerFrom; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '') continue;
+    if (ANY_HEADING.test(line) || LEDGER_SKIPPED.test(line)) {
+      stack = [];
+      base = null;
+      // A heading that names a duty (`### 欠账`, `### Carried`) is the label of everything under it.
+      const heading = ANY_HEADING.test(line) ? line.replace(/^ {0,3}#{1,6}[ \t]+/u, '') : null;
+      if (heading !== null && ledgerKeysOn(heading, { label: true }).length > 0) {
+        base = { indent: -1, card: LEDGER_CARD_REF.test(heading), label: labelText(heading) };
+      }
+      continue;
+    }
+    const item = LEDGER_LIST_ITEM.exec(line);
+    // An indented non-item line under an open item is that item's continuation paragraph.
+    const continuation = item === null && /^[ \t]/u.test(line) && stack.length > 0;
+    if (item !== null) {
+      const indent = indentOf(item[1]);
+      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop();
+    } else if (!continuation) {
+      stack = [];
+      base = null;
+    }
+    const text = item !== null ? item[2] : line.trim();
+    const ancestors = base === null ? [...stack] : [base, ...stack];
+    const labelShaped = isGroupLabel(text);
+    const keys = ledgerKeysOn(text, { label: labelShaped });
+    const card = LEDGER_CARD_REF.test(text);
+    const label = keys.length > 0 && labelShaped ? labelText(text) : null;
+    if (item !== null) stack.push({ indent: indentOf(item[1]), card, label });
+    else if (!continuation && labelShaped) base = { indent: -1, card, label };
+    if (label !== null) continue; // a group label is a heading over its list, never judged itself
+    const group = ancestors.find((a) => a.label !== null) ?? null;
+    if (keys.length === 0 && group === null) continue;
+    const carrier = CARRIER_CLAUSE.exec(text);
+    let why = null;
+    if (carrier !== null) {
+      if (!LEDGER_CARD_REF.test(carrier[1])) why = 'its carrier clause names no card';
+    } else if (!card && !ancestors.some((a) => a.card)) {
+      why =
+        keys.length > 0
+          ? `keyed \`${keys.join('`, `')}\`, with no card reference on it or on an item above it`
+          : `a member of the group \`${group.label}\`, with no card reference`;
+    }
+    if (why !== null) rows.push({ lineNo: i + 1, line: rawLines[i], keys, why });
+  }
+  return rows;
+}
+
+/** The refusal a caller reads, from `vacantLedgerRefusals`' rows — the bare-stamp refusal's shape. */
+export function vacantLedgerRefusalText(rows) {
+  return (
+    `post-stamped: REFUSED — this body is a VACANT seat post (\`${VACANT_MARKER}\` in its Current PM section) and ` +
+    `${rows.length} obligation line(s) in its ledger carry no card. Nothing was written.\n` +
+    rows.map((r, i) => `  ${i + 1}. [vacant-ledger] line ${r.lineNo}: ${r.why}\n      ${offendingSpan(r.line.trim(), 160)}`).join('\n') +
+    '\n\n  A vacant body holds POINTERS, never obligations: the successor reads cards, not this body. File each\n' +
+    '  obligation as a card — a conditional one at `pm:blocked` with a `Blocked-by:` line, a time-triggered one\n' +
+    '  with `Restart-when:` — and leave its number on the line (`→ #N`). A carrier clause names a card; "the next\n' +
+    '  PR that touches X" is not a carrier. A line that records a fact carries no obligation word and is not judged.\n' +
+    '  ⛔ No flag turns it off.'
   );
 }
 
@@ -3252,6 +3461,13 @@ async function main(argv) {
     console.error(recordLineRefusalText(record));
     return EXIT_REFUSED;
   }
+  // ⛔ Bodies only: a VACANT seat post's ledger holds pointers, never obligations (#23396). Before the transport,
+  // so a dry run is refused exactly as a live write is.
+  const vacant = options.mode === 'body' ? vacantLedgerRefusals(rendered.body) : [];
+  if (vacant.length > 0) {
+    console.error(vacantLedgerRefusalText(vacant));
+    return EXIT_REFUSED;
+  }
 
   // The transport, decided and SAID before anything leaves. A dry run makes no
   // request, so a route that cannot be resolved is a note there, not a refusal.
@@ -3421,6 +3637,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
   'the record line: a `## Contract review` record\'s `Local-runs:` value, judged when present — an absent line is not re-judged': 9,
+  'the vacant body: a VACANT seat post\'s ledger holds pointers, never obligations': 27,
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 13,
   "the size route: over the relay's body cap under auto THIS write goes direct with one line naming bytes, cap and identity; at or under it the relay; explicit dispatch refuses naming the bytes; nothing else re-routes": 13,
 });
@@ -4519,6 +4736,79 @@ export function selfTest() {
     t('⛔ NOT a record: a claim or a report carrying a `Local-runs:` line is untouched — the reader runs on the record\'s heading only', rkeys('Claim: x\nLocal-runs: probe') === '' && rkeys('os-dev-report\n\nLocal-runs: probe') === '');
     t('⛔ a `###` sub-heading is not the record marker, exactly as the locator reads it', rkeys('### Contract review\nLocal-runs: probe') === '');
     t('structural: the CLI runs this on `--comment` only, and the reader is imported from the record\'s own file, ⛔ never restated', /const record = options\.mode === 'comment' \? recordKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && /import \{[^}]*\breadLocalRuns\b[^}]*\} from '\.\/record-recognisers\.mjs';/u.test(stampSource) && new RegExp('function\\s+(readLocalRuns|localRunsStand)\\b').test(stampSource) === false);
+  }
+
+  // ── the vacant seat body (#23396, ruling 6162084315 letter A) ──────────────
+  // Fixtures are the measured bodies, trimmed: #6023's vacant post (the card's own reading), #7623's seated post
+  // naming another seat as vacant, #18883's ledger read as if vacant, and #6024's lesson bullets — the false
+  // positives a reader-anywhere key produced when the keys were first run over every open seat post.
+  battery('the vacant body: a VACANT seat post\'s ledger holds pointers, never obligations');
+  {
+    const POST = (status, ...ledger) => ['## 1. Current PM' + (status === null ? '' : ` — ${status}`), '', '- **Previous holder:** `session_x`.', '', '## 2. Ledger (snapshot at clock-out)', '', ...ledger].join('\n');
+    const VACANT = (...ledger) => POST('⏳ vacant', ...ledger);
+    const rows = (body) => vacantLedgerRefusals(body);
+    const MEASURED = VACANT(
+      '- **#23282 live pin** (card closed). Record the run on #23282; a red reopens it.',
+      '- **#23177** (gate strictness): A1 landed. **B′** (an audit card) is owed after next ships.',
+      '',
+      '## 4. Notes',
+      '',
+      '- Round markers and round reports go on this thread; states live on cards.',
+      '- Carried: `dogfood-gate`\'s two comments in `ci.yml` (from PR #22666) still describe one leg. Carrier: the next PR touching that job.',
+      '- Carried, open to the maintainer: the example-CRM line count on three pages reads 1,932 against the stated 1,929.',
+      '- Carried, pointer `6110276158`: the approvals item still reads "only via the #3424 privileged override". Carrier: the next checklist-author sweep.',
+      '- Carried, noted not filed: `invitation-role-cap.ts:22-25` gives the stale reason PR #23341 corrected. Carrier: the next PR touching that file.',
+    );
+    const measured = rows(MEASURED);
+    t('⭐ THE MEASURED BODY: its four `Carried` lines are refused, one row each, on their own line numbers', measured.length === 4 && measured.every((r) => /^- Carried/u.test(r.line)) && measured.map((r) => r.lineNo).join() === '13,14,15,16');
+    t('⭐ …a carrier clause reading "the next PR touching X" is refused although the line carries a PR number elsewhere', measured[0]?.why === 'its carrier clause names no card' && /PR #22666/u.test(measured[0]?.line ?? ''));
+    t('…and a `Carried` line naming no carrier and no card is refused on its key', /keyed `Carried`/u.test(measured[1]?.why ?? ''));
+    t('⛔ the stated limit, pinned: an un-carded duty sharing a line with an unrelated `#N` passes — the grain is the LINE', !measured.some((r) => r.line.includes('B′')));
+    const FIXED = VACANT(
+      '- **#23282 live pin**: the reading is owed on → #24001.',
+      '',
+      '## 4. Notes',
+      '',
+      '- Carried: `dogfood-gate`\'s comments describe one leg → #24002.',
+      '- Carried, open to the maintainer: the CRM line count → #24003.',
+      '- Carried, noted not filed: a stale header. Carrier: #24004.',
+      '- Landed this shift: the template half; nothing owed by it.',
+    );
+    t('⭐ the same duties, each pointing at its card, are ACCEPTED — a pointer line `→ #N` is never refused', rows(FIXED).length === 0);
+    t('⭐ a carrier clause naming a card passes, while one naming the next PR does not', rows(VACANT('- Carried: x. Carrier: #24005.')).length === 0 && rows(VACANT('- Carried: x. Carrier: the next PR.')).length === 1);
+    t('a cross-repo card reference reads as a card', rows(VACANT('- Carried: a stale comment → objectstack-ai/objectui#12212.')).length === 0);
+    t('⛔ a `#N` inside a code span is no card — GitHub does not link it — so the line is refused', rows(VACANT('- Carried: the `#21197` comment still names two doors.')).length === 1);
+    t('⛔ a fact line carries no obligation word and is not judged', rows(VACANT('- Round markers go on this thread.', '- **Closed this shift:**', '- `18.0.0-next.0` was published.')).length === 0);
+    const LESSONS = VACANT(
+      '## 4. Notes',
+      '',
+      '- **Read, no objection owed:** every comment on this post through `6157966752`.',
+      '- ⭐ **`files[]` does NOT decide what ships.** A change to a bin script owes a changeset.',
+      '- ⛔ **DUAL carrier: hung in one stroke, cleared in one stroke.**',
+      '- ⚠️ This post is not a parsed carrier, which is why the spellings appear here in full.',
+      '- **Brief lessons carried forward:** a dev merges `main` before opening the PR.',
+    );
+    t('⛔ the measured false positives stay clean: `owed` / `owes` / `carrier` in a lesson, and `carried forward` mid-sentence', rows(LESSONS).length === 0);
+    t('⭐ a keyed group label makes its list a group: an un-carded member is refused, a carded one passes', rows(VACANT('**Readings owed:**', '- the first scheduled run should be green.')).length === 1 && rows(VACANT('**Readings owed:**', '- #22148: the first scheduled run should be green.')).length === 0);
+    t('…and the label itself is a heading, never a row', rows(VACANT('**Readings owed:**')).length === 0 && rows(VACANT('- **Carried forward, open:**')).length === 0);
+    t('a keyed HEADING opens a group too (`### 欠账`)', rows(VACANT('### 欠账', '', '- 某项后续,无卡。')).length === 1 && rows(VACANT('### 欠账', '', '- #24006 某项后续。')).length === 0);
+    t('⭐ a nested item inherits its parent item\'s card — the duty is that card\'s — and not without it', rows(VACANT('- **Carried forward, open:**', '  - #22590: verify the two pins on `main`.', '    - then close it after the next change lands.')).length === 0 && rows(VACANT('- **Carried forward, open:**', '  - verify the two pins on `main`.')).length === 1);
+    t('⛔ a group ends at the next unindented paragraph: a fact under it is not a member', rows(VACANT('**Readings owed:**', '- #22148: a run.', '', 'Lane snapshot, read fresh at every pick.', '- `pm:queue`: two cards.')).length === 0);
+    t('fenced code, tables and blockquotes in the ledger are set aside', rows(VACANT('```', '- Carried: quoted in a fence.', '```', '| Carried: a cell | x |', '> Carried: a quotation.')).length === 0);
+    const SEATED = ['## Current PM', '', '🟢 **huangyiirene** · `session_x`. Seat 2 (#19287) ⏳ vacant.', '', '## Ledger', '', '- Carried, open: no card at all.'].join('\n');
+    t('⭐ a SEATED body is untouched although its Current-PM section names another seat `⏳ vacant` — the FIRST status token decides', seatPostVacancy(SEATED).status === 'seated' && rows(SEATED).length === 0);
+    t('a paused body, and a body with no Current-PM section, are not judged', rows(POST('⏸️ paused', '- Carried: no card.')).length === 0 && rows('Card body.\n\n- Carried: no card.').length === 0 && seatPostVacancy('Card body.').ledgerFrom === null);
+    t('the vacant status reads through emphasis and in either language', ['## 1. 当前 PM\n\n**⏳ vacant** since then.\n\n## 2. 继承台账', '## Current PM\n\n- ⏳ **vacant** since then.\n\n## Ledger', '## Current PM — ⏳ vacant\n\n## Ledger'].every((b) => seatPostVacancy(b).vacant === true));
+    t('⛔ an hourglass that is not followed by `vacant` is not the vacant marker', seatPostVacancy('## 当前 PM\n\n⏳ **第 41 场 — 已收班。**\n\n## Ledger').vacant === false);
+    const SPEC3 = VACANT('**Inherited:**', '- #23268 ruled **A**: retire `externalSharingModel`. In `pm:queue`.', '- Decision box: #23388 and #23367.', '', '## ④ Notes', '', '- **Publication:** a merge to `main` publishes nothing.', '- **Brief lessons carried forward:** a reviewer reads heads by 40-hex sha.');
+    t('⭐ #18883\'s ledger and notes, read as if vacant, are clean', rows(SPEC3).length === 0);
+    const refusal = vacantLedgerRefusalText(measured);
+    t('the refusal names the marker, each row\'s line and reason, the remedy lines, and that nothing was written', refusal.includes(VACANT_MARKER) && refusal.includes('[vacant-ledger] line 13') && refusal.includes('Blocked-by:') && refusal.includes('Restart-when:') && refusal.includes('Nothing was written') && refusal.includes('No flag turns it off'));
+    t('⛔ the refusal\'s own words carry no tracker number — a runtime string an author is shown', /#\d/u.test(vacantLedgerRefusalText([])) === false);
+    t('the keys are frozen with the line each was measured on and the position it is read in', LEDGER_OBLIGATION_KEYS.every((k) => typeof k.measured === 'string' && ['lead', 'label', 'clause', 'line'].includes(k.where)) && Object.isFrozen(LEDGER_OBLIGATION_KEYS));
+    t('⛔ the card-reference regex is NOT global — an exported `g` regex carries a cursor between callers', LEDGER_CARD_REF.global === false && CURRENT_PM_HEADING.global === false);
+    t('structural: the CLI runs this on `--body` only, BEFORE the transport, so a dry run is refused as a live write is', /const vacant = options\.mode === 'body' \? vacantLedgerRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && stampSource.indexOf('vacantLedgerRefusals(rendered.body)') < stampSource.indexOf('await resolveRoute(process.env)'));
+    t('structural: code is blanked by the patrol\'s own fence reader, imported and ⛔ never restated', /\bstripMarkdownCode,\n/u.test(stampSource) && /function\s+stripMarkdownCode\b/u.test(stampSource) === false);
   }
 
   // ── the relay transport ──────────────────────────────────────────────────
