@@ -22,7 +22,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { permissionSetDefinitionFromRow } from '@objectstack/core';
-import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn } from '@objectstack/metadata-core';
+import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, hashSpec } from '@objectstack/metadata-core';
 import { buildOrganizationOwnershipPlan, inventoryDigest } from './organization-ownership-plan.js';
 import {
   applyOrganizationOwnership,
@@ -37,6 +37,7 @@ import {
   type CeremonyLedgerPort,
   type ColumnDropPort,
   type MetadataDoorPort,
+  type MetadataLockPort,
   type OrganizationOwnershipApplyReport,
   type ReviewedConflict,
   type ReviewedPlan,
@@ -418,11 +419,13 @@ const apply = (
     views?: ServedViewsPort;
     columnDrops?: ColumnDropPort;
     reviewed?: Partial<ReviewedPlan>;
+    lock?: MetadataLockPort;
   } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
   return reviewedConflictsNow(opts.posture ?? 'single').then((conflicts) => applyOrganizationOwnership({
     views: opts.views ?? servedViews(c),
+    lock: opts.lock ?? { verdict: async () => ({ editable: true }) },
     // The plan the operator reviewed: by default, the one a plan run computes
     // over the database as it stands, conflict groups included.
     reviewedPlan: {
@@ -1317,6 +1320,64 @@ describe('ADR-0131 D10 --apply — a customization conflict resolved by --metada
     expect(owners()).toEqual([['md_env', null], ['md_org', 'org_default']]);
   });
 
+  describe('the in-place write does what the door does to that row (N2)', () => {
+    const withChecksum = (): void => {
+      db.exec(`ALTER TABLE sys_metadata ADD COLUMN checksum TEXT; UPDATE sys_metadata SET checksum = 'sha256:stale';`);
+    };
+
+    it('⭐ restamps checksum from the written body, as the door does (the version, the etag, the no-op check)', async () => {
+      metadataTable(conflictRows);
+      withChecksum();
+      await apply(storingDoor(catalog()), ledger(), { metadataChoices: ['md_org'] });
+      const [row] = rows(`SELECT metadata, checksum FROM sys_metadata WHERE id = 'md_env'`);
+      expect(row!.checksum).toBe(hashSpec(JSON.parse(String(row!.metadata)), 'view'));
+      expect(row!.checksum).not.toBe('sha256:stale');
+    });
+
+    it('⭐ keeps the lock family the environment row stores, whatever the chosen body carries', async () => {
+      metadataTable([
+        md('md_org', 'org_default', 'view', 'deal_list', { name: 'deal_list', label: 'Org list', _lock: 'none' }),
+        md('md_env', null, 'view', 'deal_list', { name: 'deal_list', label: 'Env list', _lock: 'customize', _lockReason: 'stamped' }),
+      ].join(', '));
+      await apply(storingDoor(catalog()), ledger(), { metadataChoices: ['md_org'] });
+      const body = JSON.parse(String(rows(`SELECT metadata FROM sys_metadata WHERE id = 'md_env'`)[0]!.metadata)) as Record<string, unknown>;
+      expect(body).toMatchObject({ label: 'Org list', _lock: 'customize', _lockReason: 'stamped' });
+    });
+
+    it('⭐ a locked item stays locked: the door\'s verdict refuses the write, and nothing is written or deleted', async () => {
+      metadataTable(conflictRows);
+      const asked: Array<[string, string, string | null]> = [];
+      const report = await apply(storingDoor(catalog()), ledger(), {
+        metadataChoices: ['md_org'],
+        lock: {
+          verdict: async (type, name, packageId) => {
+            asked.push([type, name, packageId]);
+            return { editable: false, lock: 'full', lockReason: 'shipped locked' };
+          },
+        },
+      });
+      expect(asked).toEqual([['view', 'deal_list', null]]);
+      expect(step(report).status).toBe('blocked');
+      expect(step(report).blockers.join('\n')).toMatch(/is locked \(_lock=full: shipped locked\).*Nothing was deleted/s);
+      expect(labelOf('md_env')).toBe('Env list');
+      expect(deletes()).toEqual([]);
+    });
+  });
+
+  it('two conflicts of one item that differ only by bundle member are two conflicts, each chosen for', async () => {
+    db.exec(`
+      CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT,
+        package_id TEXT, bundle_member TEXT, metadata TEXT);
+      INSERT INTO sys_metadata VALUES
+        ('en_org', 'org_default', 'email_template', 'crm.note', 'active', NULL, 'en-US', '{"name":"crm.note","locale":"en-US","s":"o"}'),
+        ('en_env', NULL, 'email_template', 'crm.note', 'active', NULL, 'en-US', '{"name":"crm.note","locale":"en-US","s":"e"}'),
+        ('fr_org', 'org_default', 'email_template', 'crm.note', 'active', NULL, 'fr-FR', '{"name":"crm.note","locale":"fr-FR","s":"o"}'),
+        ('fr_env', NULL, 'email_template', 'crm.note', 'active', NULL, 'fr-FR', '{"name":"crm.note","locale":"fr-FR","s":"e"}');
+    `);
+    const report = await apply(storingDoor(catalog()), ledger(), { metadataChoices: ['en_org', 'fr_env'] });
+    expect(step(report)).toMatchObject({ status: 'done', summary: { chosen: 2 } });
+  });
+
   describe('under a wall (ruling 6163114098, Q6 A: the ceremony never deletes the unchosen rows)', () => {
     it('⭐ a chosen organization row defines the environment row, and nothing is deleted', async () => {
       metadataTable(conflictRows);
@@ -1325,7 +1386,12 @@ describe('ADR-0131 D10 --apply — a customization conflict resolved by --metada
       expect(deletes()).toEqual([]);
       expect(owners()).toEqual([['md_env', null], ['md_org', 'org_default']]);
       expect(labelOf('md_env')).toBe('Org list');
-      expect(step(report).notes.join('\n')).toMatch(/organization rows md_org are never deleted/);
+      // The ruled report line: each organization row left, named as remaining and blocking column-drops, with the remedy.
+      expect(step(report).notes).toContainEqual(
+        expect.stringMatching(
+          /^Remaining: sys_metadata row md_org \(organization org_default, the chosen row, whose body the environment row md_env now holds\) of the view deal_list blocks column-drops on sys_metadata: .*never deletes it\. Remedy: check the environment row, then delete this row yourself/,
+        ),
+      );
     });
 
     it('⭐ two organizations on one key: the chosen one is promoted, the other stays', async () => {
@@ -1672,6 +1738,47 @@ describe('ADR-0131 D10 --apply — history renumbering (seat answers 6162538253,
     expect((JSON.parse(String(rows(`SELECT metadata FROM sys_metadata WHERE id = 'md_b'`)[0]!.metadata)) as any).config.sharing.enabled).toBe(false);
     await c.save('view', 'crm_lead.intake', formView(false, 'Edited'), { packageId: null });
     expect(duplicates()).toEqual([]);
+  });
+
+  it('⭐ N1: folding one item of an organization never lands on that organization\'s other events, on a rerun too', async () => {
+    // The review's smallest case: the environment holds event 1; the
+    // organization holds view A at 1-2 and view B at 3-4, both lone under single.
+    viewWithHistory(
+      `('md_a', 'org_default', 'view', 'view_a', 'active', NULL, NULL, 2, '{"name":"view_a"}'),
+       ('md_b', 'org_default', 'view', 'view_b', 'active', NULL, NULL, 4, '{"name":"view_b"}')`,
+      `('h_env', NULL, 'object', 'deal', 1, 1, 'e'),
+       ('h_a1', 'org_default', 'view', 'view_a', 1, 1, 'a1'), ('h_a2', 'org_default', 'view', 'view_a', 2, 2, 'a2'),
+       ('h_b1', 'org_default', 'view', 'view_b', 3, 3, 'b1'), ('h_b2', 'org_default', 'view', 'view_b', 4, 4, 'b2')`,
+    );
+    const c = storingDoor(catalog());
+    // A crash right after the first fold's event move, then the rerun.
+    await expect(apply(c, ledger(), { views: servedViews(c, []), columnDrops: keepColumn, executor: executor({ failOnceOn: /^UPDATE "sys_metadata_history" SET "organization_id" = NULL/ }) }))
+      .rejects.toThrow(/killed mid-step/);
+    const report = await apply(c, ledger(), { views: servedViews(c, []), columnDrops: keepColumn });
+    expect(report.steps.find((s) => s.step === 'metadata-promotion')!.summary).toMatchObject({ promoted: 2 });
+    expect(duplicates()).toEqual([]);
+    expect(snapshotOf('md_a')).toEqual(['a2']);
+    expect(snapshotOf('md_b')).toEqual(['b2']);
+    expect(rows(`SELECT checksum FROM sys_metadata_history WHERE id LIKE 'h_a%' OR id LIKE 'h_b%' ORDER BY event_seq`).map((r) => r.checksum))
+      .toEqual(['a1', 'a2', 'b1', 'b2']);
+  });
+
+  it('⭐ column-drops never runs unless this apply\'s history-renumber verified uniqueness environment-wide', async () => {
+    // Two environment events share a number: the 17.x index never covered the
+    // environment scope (NULL is distinct), and no layout can move them.
+    viewWithHistory(
+      `('md_env', NULL, 'object', 'deal', 'active', NULL, NULL, 1, '{"name":"deal"}')`,
+      `('h_e1', NULL, 'object', 'deal', 1, 7, 'e1'), ('h_e2', NULL, 'object', 'deal', 2, 7, 'e2')`,
+    );
+    const drops: string[][] = [];
+    const report = await apply(catalog(), ledger(), {
+      columnDrops: { drop: async (tables) => { drops.push([...tables]); return tables.map((table) => ({ table, outcome: 'dropped' as const })); } },
+    });
+    const renumber = report.steps.find((s) => s.step === 'history-renumber')!;
+    expect(renumber.status).toBe('blocked');
+    expect(renumber.blockers.join('\n')).toMatch(/event_seq is not unique environment-wide: 7 \(2 rows\)/);
+    expect(report.steps.find((s) => s.step === 'column-drops')!.status).toBe('not-reached');
+    expect(drops).toEqual([]);
   });
 
   it('an environment save made between two runs is renumbered by the next one, the checkpoint notwithstanding', async () => {

@@ -496,6 +496,7 @@ export default class MigrateOrganizationOwnership extends Command {
         saveMetaItem?: (request: Record<string, unknown>) => Promise<unknown>;
         getMetaItems?: (request: { type: string }) => Promise<{ items?: unknown[] } | unknown[]>;
         getMetaItemsForExecution?: (request: { type: string }) => Promise<{ items?: unknown[] }>;
+        getMetaItem?: (request: { type: string; name: string; packageId?: string }) => Promise<unknown>;
       } | undefined;
       const catalog = createSecurityCatalogReader({
         registry: engine.registry as never,
@@ -542,6 +543,23 @@ export default class MigrateOrganizationOwnership extends Command {
               actor: CEREMONY_ACTOR,
               ...(target ? { packageId: target.packageId } : {}),
             });
+          },
+        },
+        lock: {
+          // The save door's own verdict: the item read reports it as `editable`.
+          verdict: async (type, name, packageId) => {
+            if (typeof protocol?.getMetaItem !== 'function') {
+              throw new Error('no metadata protocol is composed on this stack');
+            }
+            const read = (await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) })) as
+              | { editable?: unknown; lock?: unknown; lockReason?: unknown }
+              | null
+              | undefined;
+            return {
+              editable: read?.editable !== false,
+              ...(typeof read?.lock === 'string' ? { lock: read.lock } : {}),
+              ...(typeof read?.lockReason === 'string' ? { lockReason: read.lockReason } : {}),
+            };
           },
         },
         views: {

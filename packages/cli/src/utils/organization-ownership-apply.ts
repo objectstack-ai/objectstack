@@ -5,7 +5,7 @@ import {
   permissionSetDefinitionFromRow,
   positionDefinitionFromRow,
 } from '@objectstack/core';
-import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn } from '@objectstack/metadata-core';
+import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, hashSpec } from '@objectstack/metadata-core';
 import {
   inventoryEntryFor,
   type InventoryEntry,
@@ -188,6 +188,15 @@ export interface MetadataDoorPort {
 /** The env-wide `view` list the anonymous form doors read (every package's item of a name). */
 export interface ServedViewsPort {
   list(): Promise<ReadonlyArray<Readonly<Record<string, unknown>>>>;
+}
+
+/**
+ * The metadata door's own verdict on a write to an item (ADR-0010 §3.3): the
+ * item read's `editable`, which reports the save door's lock gate. A write the
+ * ceremony makes in place, not through the door, asks it first.
+ */
+export interface MetadataLockPort {
+  verdict(type: string, name: string, packageId: string | null): Promise<{ editable: boolean; lock?: string; lockReason?: string }>;
 }
 
 /** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
@@ -431,6 +440,8 @@ export interface ApplyOptions {
   templates: TemplatePort;
   /** The served views, for carrying form withdrawals. */
   views: ServedViewsPort;
+  /** The door's lock verdict, for the one write the ceremony makes in place. */
+  lock: MetadataLockPort;
   columnDrops: ColumnDropPort;
   ledger: CeremonyLedgerPort;
   /** The kept plan file the operator reviewed; the run refuses unless it matches (see the module doc). */
@@ -505,6 +516,8 @@ interface Run {
   verifiedTemplateIds: Set<string>;
   /** The checkpoint this run writes into (set once the ledger is read). */
   checkpoint?: CeremonyCheckpoint;
+  /** This apply's `history-renumber` verified `event_seq` and version uniqueness environment-wide. */
+  historyVerified?: boolean;
 }
 
 /** A `--metadata-choice` that names no row awaiting a choice, or two of one conflict. Nothing is written. */
@@ -907,12 +920,17 @@ async function historyShape(run: Run): Promise<{ version: boolean; seq: boolean 
 
 /**
  * Make one organization's lineage of `(type, name)` environment history, so the
- * row about to be promoted keeps it: its versions moved above the environment
- * lineage of the item (the organization's overlay rows of the item with them),
- * its events moved above the environment's last event (order kept), then the
- * rows re-tagged. Each statement is conditioned on the state it changes, so a
- * rerun after a crash anywhere in it finishes it. Commit ranges are not moved
- * (no reader resolves history through them).
+ * row about to be promoted keeps it: its versions and its events each moved, by
+ * one offset that keeps their order, above BOTH the environment's numbers and
+ * every other number the same organization holds, then the rows re-tagged. The
+ * organization's whole history is the base because 17.x numbered `event_seq`
+ * per organization across all its items and holds it under a unique
+ * `(organization_id, event_seq)` index, checked row by row: an offset measured
+ * on the item alone lands on the organization's own other events. Versions take
+ * the same base, as ruled. The base excludes the lineage being moved, so once
+ * moved it sits above the base, and a rerun after a crash anywhere in this moves
+ * nothing twice. Commit ranges are not moved (no reader resolves history
+ * through them).
  */
 async function foldLineage(run: Run, organizationId: string, type: string, name: string): Promise<void> {
   const shape = await historyShape(run);
@@ -929,10 +947,15 @@ async function foldLineage(run: Run, organizationId: string, type: string, name:
     const [own] = await sql.read(HISTORY, `SELECT MIN(${v}) AS lo, MAX(${v}) AS hi, COUNT(*) AS n FROM ${h} WHERE ${mine}`, args);
     if (num(own?.n) > 0) {
       const [env] = await sql.read(HISTORY, `SELECT MAX(${v}) AS m FROM ${h} WHERE ${o} IS NULL AND ${ty} = ? AND ${nm} = ?`, [type, name]);
+      const [others] = await sql.read(
+        HISTORY,
+        `SELECT MAX(${v}) AS m FROM ${h} WHERE ${o} = ? AND NOT (${ty} = ? AND ${nm} = ?)`,
+        args,
+      );
       const mcols = await columnsOf(run, OVERLAYS);
       await shiftRange(
         { min: num(own!.lo), max: num(own!.hi) },
-        num(env?.m),
+        Math.max(num(env?.m), num(others?.m)),
         async (offset, oldMax) => {
           if (!mcols?.has(ORG) || !mcols.has('version')) return;
           const m = sql.q(OVERLAYS, OVERLAYS);
@@ -955,10 +978,16 @@ async function foldLineage(run: Run, organizationId: string, type: string, name:
     const seq = sql.q('event_seq', HISTORY);
     const [own] = await sql.read(HISTORY, `SELECT MIN(${seq}) AS lo, MAX(${seq}) AS hi, COUNT(*) AS n FROM ${h} WHERE ${mine}`, args);
     const [env] = await sql.read(HISTORY, `SELECT MAX(${seq}) AS m FROM ${h} WHERE ${o} IS NULL`);
-    if (num(own?.n) > 0 && num(own!.lo) <= num(env?.m)) {
-      // Wholly above the old range too: a unique (organization_id, event_seq)
-      // index is checked row by row, so no row may land on a sibling's number.
-      const offset = Math.max(num(env?.m), num(own!.hi)) - num(own!.lo) + 1;
+    const [others] = await sql.read(
+      HISTORY,
+      `SELECT MAX(${seq}) AS m FROM ${h} WHERE ${o} = ? AND NOT (${ty} = ? AND ${nm} = ?)`,
+      args,
+    );
+    const base = Math.max(num(env?.m), num(others?.m));
+    if (num(own?.n) > 0 && num(own!.lo) <= base) {
+      // Wholly above the base and the old range: no row may land on the
+      // environment's numbers, the organization's other events, or a sibling's.
+      const offset = Math.max(base, num(own!.hi)) - num(own!.lo) + 1;
       await execute(run, HISTORY, `UPDATE ${h} SET ${seq} = ${seq} + ? WHERE ${mine}`, [offset, ...args]);
     }
   }
@@ -975,6 +1004,56 @@ async function foldLineage(run: Run, organizationId: string, type: string, name:
  * organization, and the snapshot each row's version names, are unchanged.
  */
 async function runHistoryRenumber(run: Run): Promise<StepReport> {
+  run.historyVerified = false;
+  const report = await renumberHistory(run);
+  const blockers = await historyDuplicates(run);
+  if (blockers.length) return { ...report, status: 'blocked', blockers };
+  run.historyVerified = true;
+  return report;
+}
+
+/**
+ * `event_seq` and `(type, name, version)` duplicated anywhere in history, as
+ * blockers: `column-drops` runs only once this reads none (the seat's ruling on
+ * uniqueness under a wall). The layout above leaves none between scopes; a
+ * duplicate within one scope is a database's own, and is named, never guessed.
+ */
+async function historyDuplicates(run: Run): Promise<string[]> {
+  const hcols = await columnsOf(run, HISTORY);
+  if (!hcols) return [];
+  const sql = run.sql;
+  const h = sql.q(HISTORY, HISTORY);
+  const out: string[] = [];
+  if (hcols.has('event_seq')) {
+    const seq = sql.q('event_seq', HISTORY);
+    const dup = await sql.read(HISTORY, `SELECT ${seq} AS s, COUNT(*) AS n FROM ${h} GROUP BY ${seq} HAVING COUNT(*) > 1 ORDER BY ${seq}`);
+    if (dup.length) {
+      out.push(
+        `${HISTORY}.event_seq is not unique environment-wide: ${dup.slice(0, 10).map((d) => `${String(d.s)} (${String(d.n)} rows)`).join(', ')}` +
+          `${dup.length > 10 ? `, and ${dup.length - 10} more` : ''}. The column is not dropped until every event has its own ` +
+          'number. Renumber or remove the duplicated events, then re-run --apply.',
+      );
+    }
+  }
+  if (hcols.has('version')) {
+    const [ty, nm, v] = ['type', 'name', 'version'].map((c) => sql.q(c, HISTORY));
+    const dup = await sql.read(
+      HISTORY,
+      `SELECT ${ty} AS t, ${nm} AS n, ${v} AS v, COUNT(*) AS c FROM ${h} GROUP BY ${ty}, ${nm}, ${v} HAVING COUNT(*) > 1 ORDER BY ${ty}, ${nm}, ${v}`,
+    );
+    if (dup.length) {
+      out.push(
+        `${HISTORY} holds one version of an item more than once: ` +
+          `${dup.slice(0, 10).map((d) => `${String(d.t)} ${String(d.n)} v${String(d.v)} (${String(d.c)} rows)`).join(', ')}` +
+          `${dup.length > 10 ? `, and ${dup.length - 10} more` : ''}. The column is not dropped until every version names one ` +
+          'snapshot. Renumber or remove the duplicated versions, then re-run --apply.',
+      );
+    }
+  }
+  return out;
+}
+
+async function renumberHistory(run: Run): Promise<StepReport> {
   const summary: Record<string, number> = { organizationsShifted: 0, lineagesShifted: 0 };
   const shape = await historyShape(run);
   if (!shape) return { step: 'history-renumber', status: 'done', summary, blockers: [], notes: [] };
@@ -1261,18 +1340,48 @@ async function environmentRowOf(run: Run, conflict: MetadataConflict): Promise<A
   return found.map((row) => ({ id: String(row.id), body: parseBody(row) }));
 }
 
-/** One `sys_metadata` row takes a body in place, by ONE statement (its version too, when given and stored). */
-async function writeBody(run: Run, rowId: string, body: Record<string, unknown>, version?: number): Promise<void> {
+/**
+ * One `sys_metadata` row takes a body in place, by ONE statement, doing to the
+ * row what the metadata door does on a save: the door's lock gate first (a
+ * locked item stays locked: the write is refused, nothing written); the row's
+ * stored `_lock` family kept (the door never sets, changes or removes it,
+ * ADR-0010 §3.5), whatever the body carries; and `checksum` restamped from the
+ * written body (`hashSpec`, the door's own), which the repository serves as
+ * the row's version and etag and the view save's no-op check compares. The
+ * version moves too, when given and stored. Returns the body written.
+ */
+async function writeBody(
+  run: Run,
+  row: { id: string; stored: Readonly<Record<string, unknown>> | null | undefined },
+  body: Record<string, unknown>,
+  address: { type: string; name: string; packageId: string | null },
+  version?: number,
+): Promise<Record<string, unknown>> {
+  const verdict = await run.opts.lock.verdict(address.type, address.name, address.packageId);
+  if (!verdict.editable) {
+    throw new Error(
+      `the ${address.type} ${address.name} is locked (_lock=${verdict.lock ?? 'unknown'}` +
+        `${verdict.lockReason ? `: ${verdict.lockReason}` : ''}), so the metadata door would refuse this write, and the ` +
+        'ceremony does not make it',
+    );
+  }
+  const written: Record<string, unknown> = Object.fromEntries(Object.entries(body).filter(([k]) => !k.startsWith('_lock')));
+  for (const [k, v] of Object.entries(row.stored ?? {})) if (k.startsWith('_lock')) written[k] = v;
   const sql = run.sql;
   const t = METADATA_OBJECT;
   const cols = (await columnsOf(run, t)) ?? new Set<string>();
   const sets = [`${sql.q('metadata', t)} = ?`];
-  const params: unknown[] = [JSON.stringify(body)];
+  const params: unknown[] = [JSON.stringify(written)];
+  if (cols.has('checksum')) {
+    sets.push(`${sql.q('checksum', t)} = ?`);
+    params.push(hashSpec(written, address.type));
+  }
   if (version !== undefined && cols.has('version')) {
     sets.push(`${sql.q('version', t)} = ?`);
     params.push(version);
   }
-  await execute(run, t, `UPDATE ${sql.q(t, t)} SET ${sets.join(', ')} WHERE ${sql.q('id', t)} = ?`, [...params, rowId]);
+  await execute(run, t, `UPDATE ${sql.q(t, t)} SET ${sets.join(', ')} WHERE ${sql.q('id', t)} = ?`, [...params, row.id]);
+  return written;
 }
 
 /** A `sys_metadata` row's stored version, when the table stores one. */
@@ -1351,11 +1460,16 @@ async function resolveMetadataConflict(run: Run, r: MetadataResolution, notes: s
     );
   }
   const env = environment[0];
+  const address = { type: conflict.type, name: conflict.name, packageId: conflict.packageId };
+  // The body the key's environment row must read back with: the chosen body, as written.
+  let expected: Record<string, unknown> = env?.body && sameBody(env.body, body) ? env.body : body;
   try {
     if (!env) {
       if (chosen.organizationId !== null) {
         await promoteRows(run, chosen.organizationId, [{ id: chosen.id, type: conflict.type, name: conflict.name }]);
-        if (closing.length) await writeBody(run, chosen.id, body);
+        if (closing.length) {
+          expected = await writeBody(run, { id: chosen.id, stored: chosenBody }, body, address);
+        }
       }
     } else if (!(env.body && sameBody(env.body, body))) {
       let version: number | undefined;
@@ -1363,7 +1477,7 @@ async function resolveMetadataConflict(run: Run, r: MetadataResolution, notes: s
         await foldLineage(run, chosen.organizationId, conflict.type, conflict.name);
         version = await versionOf(run, chosen.id);
       }
-      await writeBody(run, env.id, body, version);
+      expected = await writeBody(run, { id: env.id, stored: env.body }, body, address, version);
     }
     if (closing.length) await run.opts.door.save(conflict.type as never, conflict.name, body, { packageId: conflict.packageId });
   } catch (error) {
@@ -1374,7 +1488,7 @@ async function resolveMetadataConflict(run: Run, r: MetadataResolution, notes: s
     );
   }
   const after = await environmentRowOf(run, conflict);
-  if (after.length !== 1 || !after[0]!.body || !sameBody(after[0]!.body, body)) {
+  if (after.length !== 1 || !after[0]!.body || !sameBody(after[0]!.body, expected)) {
     throw new Error(
       `${what} did not read back as one environment row defining the chosen row ${chosen.id}'s body; none of the ` +
         `rows ${others.map((o) => o.id).join(', ')} was deleted.`,
@@ -1388,11 +1502,13 @@ async function resolveMetadataConflict(run: Run, r: MetadataResolution, notes: s
   const keeper = after[0]!.id;
   const leaving = conflict.candidates.filter((c) => c.organizationId !== null && c.id !== keeper).map((c) => c.id);
   if (run.opts.posture !== 'single') {
-    if (leaving.length) {
+    for (const remaining of conflict.candidates.filter((c) => c.organizationId !== null && c.id !== keeper)) {
       notes.push(
-        `${what}: the environment row ${keeper} keeps the chosen row ${chosen.id}'s body; under the ${run.opts.posture} ` +
-          `posture the organization rows ${leaving.join(', ')} are never deleted. They stay reported, and keep the ` +
-          `${METADATA_OBJECT} column from being dropped.`,
+        `Remaining: ${METADATA_OBJECT} row ${remaining.id} (organization ${remaining.organizationId}` +
+          `${remaining.id === chosen.id ? `, the chosen row, whose body the environment row ${keeper} now holds` : ''}) ` +
+          `of ${what} blocks column-drops on ${METADATA_OBJECT}: under the ${run.opts.posture} posture the ceremony ` +
+          'never deletes it. Remedy: check the environment row, then delete this row yourself, or keep it and the ' +
+          'column stays; re-run --apply.',
       );
     }
     run.opts.onProgress?.(`promotion: ${what} is defined by row ${chosen.id}'s body; nothing deleted under a wall`);
@@ -1505,7 +1621,8 @@ async function validateMetadataChoices(run: Run, applied: ReadonlySet<string>): 
   const cols = await columnsOf(run, METADATA_OBJECT);
   const rows = cols?.has(ORG) ? await readMetadataKeyRows(run.sql, METADATA_OBJECT, cols) : [];
   const { promotable, conflicts } = groupMetadataKeyRows(rows);
-  const keyOf = (c: MetadataConflict): string => `${c.type} ${c.name}${c.packageId ? ` (package ${c.packageId})` : ''}`;
+  const keyOf = (c: MetadataConflict): string =>
+    `${c.type} ${c.name}${c.packageId ? ` (package ${c.packageId})` : ''}${c.bundleMember ? ` [${c.bundleMember}]` : ''}`;
   const groupOf = new Map<string, string>();
   for (const c of conflicts) for (const cand of c.candidates) groupOf.set(cand.id, keyOf(c));
   for (const row of promotable) groupOf.set(row.id, `the ${row.type} ${row.name} (row ${row.id})`);
@@ -2003,6 +2120,18 @@ async function deletePromotedTemplates(run: Run, tables: readonly string[]): Pro
 // ── Step 5: column drops (fate 1) ────────────────────────────────────────────
 
 async function runColumnDrops(run: Run): Promise<StepReport> {
+  if (!run.historyVerified) {
+    return {
+      step: 'column-drops',
+      status: 'blocked',
+      summary: { dropped: 0, due: 0 },
+      blockers: [
+        'column-drops runs only after this apply\'s history-renumber verified sys_metadata_history\'s event_seq and ' +
+          'versions unique environment-wide, and it did not. Re-run --apply.',
+      ],
+      notes: [],
+    };
+  }
   const plan = await planFor(run);
   const blockers: string[] = [];
   const due: string[] = [];
@@ -2246,6 +2375,11 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       // not keep a number that run handed an organization.
       if (step === 'history-renumber') {
         const again = await RUNNERS[step](run);
+        if (again.status !== 'done') {
+          steps.push(again);
+          stopped = true;
+          continue;
+        }
         if (Object.values(again.summary).some((n) => n > 0)) {
           steps.push(again);
           checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };

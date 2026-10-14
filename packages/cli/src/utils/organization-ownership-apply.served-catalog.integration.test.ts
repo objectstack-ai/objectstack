@@ -132,6 +132,7 @@ async function ceremony(posture: string, db: Database.Database): Promise<Organiz
     catalog,
     // No view is served here: the form-withdrawal carry has nothing to judge.
     views: { list: async () => [] },
+    lock: { verdict: async () => ({ editable: true }) },
     door: { save: async (type, name) => { throw new Error(`the door was asked to save ${type} ${name}`); } },
     templates: { find: async () => undefined },
     columnDrops: { drop: async (tables) => tables.map((table) => ({ table, outcome: 'not-proposed' as const })) },
