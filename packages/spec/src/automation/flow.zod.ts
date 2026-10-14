@@ -26,6 +26,11 @@ import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
+// [#23320] The two slot judges, asked here as at every other door — never a
+// second reading of the dialect. `flow-node-config-refusals.ts` already reads
+// both (its "reported once" exemption), so the import graph gains nothing.
+import { flowNodeTextSlotSources, textSlotTemplateRefusal } from './flow-text-slot-template';
+import { flowNodeValueTemplateRefusals } from './flow-value-slot-template';
 import { EndConfigSchema } from './builtin-node-config.zod';
 // [#22572] The `$` names are the flow engine's at every binding door — the one
 // rule, composed into a declared variable's `name` and judging an `assignment`
@@ -1530,6 +1535,31 @@ export const FlowSchema = lazySchema(() => strictObject(
           path: [...graph.path, 'nodes', index, 'config', ...ledgerPathSegments(refusal.path)],
           message: refusal.message,
         });
+      }
+    });
+  }
+
+  // [#23320] A `{…}` token at a VALUE slot or a TEXT slot — the two slot
+  // judges, `flowNodeValueTemplateRefusals` and `textSlotTemplateRefusal` over
+  // `flowNodeTextSlotSources`, the same calls `registerFlow` and `objectstack
+  // validate` make — refused here too, at the path the author wrote, each
+  // once: the contract arm above stands aside at exactly these paths
+  // (`slotJudgeRefusedPaths`, #23260). An `end` node's `message` is judged by
+  // `parseEndNodeConfig` (its contract composes the text-slot judge), so it is
+  // not judged twice here.
+  for (const graph of collectFlowGraphs(flow)) {
+    graph.nodes.forEach((node, index) => {
+      const type: unknown = (node as { type?: unknown } | null)?.type;
+      if (typeof type !== 'string') return;
+      const config = (node as { config?: unknown }).config;
+      const at = [...graph.path, 'nodes', index, 'config'];
+      for (const refusal of flowNodeValueTemplateRefusals(type, config)) {
+        ctx.addIssue({ code: 'custom', path: [...at, ...ledgerPathSegments(refusal.path)], message: refusal.message });
+      }
+      if (type === 'end') return;
+      for (const slot of flowNodeTextSlotSources(type, config)) {
+        const message = textSlotTemplateRefusal(slot.source);
+        if (message !== undefined) ctx.addIssue({ code: 'custom', path: [...at, ...ledgerPathSegments(slot.path)], message });
       }
     });
   }
