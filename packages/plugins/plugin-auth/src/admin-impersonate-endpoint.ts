@@ -291,7 +291,12 @@ export async function applyPlatformAdminImpersonation(
         const held = judgeHeldSession({
           authGate: await postureOf(callerId, typeof activeOrgId === 'string' && activeOrgId ? activeOrgId : undefined),
         });
-        if (held) throw new APIError('FORBIDDEN', held.body);
+        if (held) {
+          // The judge's own record: its object literal (`judgeHeldSession`)
+          // carries the posture `code`, from the closed `AuthGateCodeSchema`.
+          const { body } = held;
+          throw new APIError('FORBIDDEN', body);
+        }
       }
 
       // ── THE changed predicate (1/2): who may impersonate ─────────────────

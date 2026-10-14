@@ -7265,7 +7265,10 @@ export class AuthManager {
     });
     if (!held) return;
     const { APIError } = await import('better-auth/api');
-    throw new APIError('FORBIDDEN', held.body);
+    // The judge's own record: its object literal (`judgeHeldSession`) carries
+    // the posture `code`, from the closed `AuthGateCodeSchema` vocabulary.
+    const { body } = held;
+    throw new APIError('FORBIDDEN', body);
   }
 
   /**
