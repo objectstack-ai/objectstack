@@ -36,6 +36,16 @@
  * The end-to-end half — the text read back from the recipient's
  * `GET /api/v1/notifications` through the real messaging service — is the
  * dogfood pin `packages/qa/dogfood/test/approval-notification-body.dogfood.test.ts`.
+ *
+ * ## And whose notification it is (#23284)
+ *
+ * The same battery pins the organization every call site hands messaging: the
+ * request's own `organization_id`, read back from the stored request row.
+ * Before it, `notify()` passed none, so every approval notification —
+ * `approval.requested` from a user's own submission included — reached
+ * `sys_notification` with `organization_id` NULL. The deals live in two
+ * organizations, so a site that passed one fixed organization, or the actor's,
+ * would not satisfy the pin.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -62,6 +72,15 @@ const USERS = [
 const COMMENT = 'The signed contract is attached to the record now.';
 const QUESTION = 'Which cost centre should this be booked against?';
 const SEND_BACK = 'Split the total by quarter, please.';
+
+/**
+ * [#23284] The two organizations the battery's deals live in. The SLA pair sits
+ * in the second, every other request in the first — so "the request's
+ * organization" cannot be satisfied by a constant.
+ */
+const ORG_A = 'org_battery_a';
+const ORG_B = 'org_battery_b';
+const orgOfDeal = (key: string): string => (key.startsWith('sla_') ? ORG_B : ORG_A);
 
 /** The fields `notify()` declares for a notification's payload. */
 const PAYLOAD_FIELDS = new Set(['title', 'body', 'actionUrl', 'actions']);
@@ -113,6 +132,7 @@ interface Emitted {
   audience: string[];
   source?: { object: string; id: string };
   payload?: Record<string, unknown>;
+  organizationId?: string;
 }
 
 describe('every approval notification carries its text in body', () => {
@@ -123,7 +143,7 @@ describe('every approval notification carries its text in body', () => {
   const ids: Record<string, string> = {};
 
   const open = async (key: string, approvers: any[], extra: Record<string, unknown> = {}) => {
-    await engine.insert('crm_deal', { id: `D_${key}`, title: key }, { context: SYSTEM } as any);
+    await engine.insert('crm_deal', { id: `D_${key}`, title: key, organization_id: orgOfDeal(key) }, { context: SYSTEM } as any);
     const row: any = await svc.openNodeRequest({
       object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: FLOW.name,
       config: { approvers, behavior: 'first_response', ...extra } as any,
@@ -254,6 +274,23 @@ describe('every approval notification carries its text in body', () => {
         if (!PAYLOAD_FIELDS.has(field)) offenders.push(`${siteOf(e)}: undeclared payload field '${field}'`);
       }
     }
+    expect(offenders).toEqual([]);
+  });
+
+  it("[#23284] every notification carries its request's organization, read back from the stored request", async () => {
+    const stored = new Map<string, string | null>();
+    for (const id of Object.values(ids)) {
+      const row = await engine.findOne('sys_approval_request', { where: { id }, fields: ['id', 'organization_id'] }, { context: SYSTEM });
+      stored.set(id, row?.organization_id ?? null);
+    }
+    // The fixture really is two organizations, and each request landed in its
+    // deal's — otherwise the identity below could hold for a constant.
+    expect(new Set(stored.values())).toEqual(new Set([ORG_A, ORG_B]));
+    for (const [key, id] of Object.entries(ids)) expect(stored.get(id), key).toBe(orgOfDeal(key));
+
+    const offenders = emits
+      .filter((e) => e.organizationId !== stored.get(e.source?.id ?? ''))
+      .map((e) => `${siteOf(e)}: organizationId ${JSON.stringify(e.organizationId)}, request ${JSON.stringify(stored.get(e.source?.id ?? ''))}`);
     expect(offenders).toEqual([]);
   });
 });

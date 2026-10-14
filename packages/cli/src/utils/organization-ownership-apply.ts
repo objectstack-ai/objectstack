@@ -13,11 +13,17 @@ import {
 import {
   buildOrganizationOwnershipPlan,
   columnListSql,
+  definitionKey,
+  groupTemplateRows,
+  templatePromotionSql,
+  SEEDED_BY,
+  TEMPLATE_OBJECT,
   columnNameOf,
   dialectOf,
   predicateSql,
   Sql,
   type AttributionSink,
+  type TemplateConflict,
   type OrganizationOwnershipPlan,
   type PlanReader,
   type TablePlan,
@@ -42,6 +48,19 @@ import {
  *     (`convertPositionBindingRows`). Only under `single` (ADR-0131 D3: a
  *     Setup catalog write is an environment metadata write under `single` and
  *     refused under a wall); under a wall the rows are reported.
+ *  2b. `template-promotion` — ruling C on ADR-0131 §6 Q1: every
+ *     `sys_email_template` row an organization customized or authored becomes
+ *     an environment `email_template` item through the metadata door (core's
+ *     `emailTemplateDefinitionFromRow`), so the deletion that follows loses no
+ *     customer edit, under every posture. One `(name, locale)` held by rows
+ *     that differ is a conflict: listed, kept, and blocking until the operator
+ *     chooses one row with `--template-choice ROW_ID`; a nameless row blocks.
+ *  2c. `settings-move` — the inventory's `global-rung-move` departure,
+ *     executed (#15207's ruling: "C7's ceremony moving the existing rows"):
+ *     each `sys_setting` row of `scope = 'global'` with no organization is
+ *     copied, by the database itself, into `sys_platform_setting`, read back,
+ *     and only then removed from `sys_setting`.
+ *     A key the new table already holds with a different value is a blocker.
  *  3. `rewrite` — the verified id→name rewrite (D4):
  *     `sys_user_permission_set.permission_set` is named from the set row its
  *     `permission_set_id` points at, then EVERY grant is verified to name a set
@@ -49,7 +68,9 @@ import {
  *  4. `mirror-deletion` (fate 2) — gated on the rewrite's verification, which
  *     is read again immediately before the first delete. Only rows of a
  *     `mirror-deletion` object that match its mirror selector and none of its
- *     named categories are deleted.
+ *     named categories are deleted. Templates: the promotion runs again first,
+ *     and beyond the seeded mirrors only the rows whose environment copy that
+ *     pass verified are deleted, by id.
  *  5. `column-drops` (fate 1) — `organization_id` leaves the D7 objects
  *     through the schema-drift ceremony ({@link ColumnDropPort}), never a hand
  *     `ALTER`.
@@ -77,7 +98,15 @@ import {
 /** The `sys_migration` row the ceremony checkpoints into and completes. */
 export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-ownership';
 
-export const CEREMONY_STEPS = ['attribution', 'authored-conversion', 'rewrite', 'mirror-deletion', 'column-drops'] as const;
+export const CEREMONY_STEPS = [
+  'attribution',
+  'authored-conversion',
+  'template-promotion',
+  'settings-move',
+  'rewrite',
+  'mirror-deletion',
+  'column-drops',
+] as const;
 export type CeremonyStep = (typeof CEREMONY_STEPS)[number];
 
 /** The raw-SQL seam: the plan's reader plus the one write verb. */
@@ -92,7 +121,12 @@ export interface CatalogPort {
 
 /** The metadata door: an environment metadata save. Throws when the door refuses. */
 export interface MetadataDoorPort {
-  save(type: 'position' | 'permission', name: string, body: Record<string, unknown>): Promise<void>;
+  save(type: 'position' | 'permission' | 'email_template', name: string, body: Record<string, unknown>): Promise<void>;
+}
+
+/** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
+export interface TemplatePort {
+  find(name: string, locale: string): Promise<{ definition: Readonly<Record<string, unknown>>; environment: boolean } | undefined>;
 }
 
 /** One table's column drop, as the schema-drift ceremony answered it. */
@@ -138,6 +172,9 @@ export interface TableOutcome {
   after: { total: number; organizationNull: number } | null;
   attributed: number;
   deleted: number;
+  /** Rows a `moved` departure carried out of this table, and into it. */
+  movedOut: number;
+  movedIn: number;
   /** Fate 1: the column is gone after this run. */
   columnDropped: boolean;
   /** Rows still NULL and listed by id — reported, never guessed. */
@@ -148,6 +185,8 @@ export interface TableOutcome {
    * until it is gone, and its label is the remedy.
    */
   departures: Array<{ id: string; label: string; as: 'mirror-deletion' | 'moved'; rows: number }>;
+  /** Templates: each `(name, locale)` whose rows still differ, with every candidate row and its organization. */
+  templateConflicts?: TemplateConflict[];
   /** Post-check: what is left for this table's fate, `0` when the fate is done. */
   remaining: number;
   notNull: TablePlan['notNull'];
@@ -179,9 +218,16 @@ export interface ApplyOptions {
   database: string;
   catalog: CatalogPort;
   door: MetadataDoorPort;
+  templates: TemplatePort;
   columnDrops: ColumnDropPort;
   ledger: CeremonyLedgerPort;
   inventory?: readonly InventoryEntry[];
+  /**
+   * The operator's choice for each template conflict: one candidate row id per
+   * `(name, locale)` whose customized or authored rows differ. Validated before
+   * anything is written ({@link TemplateChoiceRefusal}).
+   */
+  templateChoices?: readonly string[];
   now?: () => Date;
   /** One line per milestone, for the command's human face. */
   onProgress?: (message: string) => void;
@@ -197,6 +243,19 @@ const SETS = 'sys_permission_set';
 const POSITIONS = 'sys_position';
 const BINDINGS = 'sys_position_permission_set';
 const CAPABILITIES = 'sys_capability';
+const TEMPLATES = TEMPLATE_OBJECT;
+const SETTINGS = 'sys_setting';
+const PLATFORM_SETTINGS = 'sys_platform_setting';
+
+/** The `moved` departures the ceremony executes, by departure id. */
+const MOVES: Readonly<Record<string, { from: string; to: string; key: readonly string[]; compare: readonly string[] }>> = {
+  'global-rung-move': {
+    from: SETTINGS,
+    to: PLATFORM_SETTINGS,
+    key: ['namespace', 'key'],
+    compare: ['value', 'value_enc', 'encrypted', 'locked', 'locked_reason'],
+  },
+};
 
 const text = (value: unknown): string | null =>
   value === null || value === undefined || String(value) === '' ? null : String(value);
@@ -209,12 +268,28 @@ interface Run {
   columns: Map<string, Set<string> | null>;
   attributed: Map<string, number>;
   deleted: Map<string, number>;
+  movedOut: Map<string, number>;
+  movedIn: Map<string, number>;
   /**
    * What the door accepted this run. The registry hydrates environment
    * metadata at boot, so a definition saved a moment ago is not in it until
    * the next one; the door's acceptance is what makes it resolve now.
    */
   saved: Map<string, Readonly<Record<string, unknown>>>;
+  /**
+   * Template rows whose environment copy this run verified (promoted, or found
+   * equal): only these, and seeded mirrors, may be deleted. Rebuilt by the
+   * promotion pass mirror deletion re-runs, so a resumed run verifies afresh.
+   */
+  verifiedTemplateIds: Set<string>;
+}
+
+/** A `--template-choice` that names no candidate of a listed conflict, or two of one. Nothing is written. */
+export class TemplateChoiceRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TemplateChoiceRefusal';
+  }
 }
 
 /** The catalog read, then what the door accepted this run. */
@@ -350,8 +425,7 @@ function authoredWhere(object: string, inventory: readonly InventoryEntry[] | un
 const rowIsOff = (value: unknown): boolean => value === false || value === 0 || value === '0' || value === 'false';
 
 /** The JSON of a definition's own keys, for comparing two bodies. */
-const bodyKey = (body: Readonly<Record<string, unknown>>, keys: readonly string[]): string =>
-  JSON.stringify(keys.map((k) => [k, body[k] ?? null]));
+const bodyKey = definitionKey;
 
 interface CatalogRows {
   positions: Record<string, unknown>[];
@@ -541,6 +615,195 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
   return { step: 'authored-conversion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
 }
 
+// ── Step 2b: template promotion (ruling C) ──────────────────────────────────
+
+async function runTemplatePromotion(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { promoted: 0, alreadyPromoted: 0, conflicts: 0 };
+  const blockers: string[] = [];
+  const notes: string[] = [];
+  run.verifiedTemplateIds.clear();
+  const cols = await columnsOf(run, TEMPLATES);
+  if (!cols) return { step: 'template-promotion', status: 'done', summary, blockers, notes };
+  const rows = await readAll(run, TEMPLATES, [...cols], templatePromotionSql(run.sql, cols));
+  const { groups, nameless } = groupTemplateRows(rows);
+  if (nameless.length) {
+    blockers.push(
+      `${nameless.length} customized or authored ${TEMPLATES} row(s) carry no name (${nameless.join(', ')}), so no ` +
+        'environment template can hold them, and they are never deleted unpromoted. Name each row, or delete it, then re-run.',
+    );
+  }
+  const choices = new Set(run.opts.templateChoices ?? []);
+  for (const group of groups) {
+    const { name, locale } = group;
+    let body = group.bodies[0]!;
+    if (group.conflict) {
+      summary.conflicts++;
+      const chosen = group.rows.findIndex((r) => choices.has(String(r.id)));
+      if (chosen < 0) {
+        blockers.push(
+          `The template ${name} (${locale}) is held by ${group.rows.length} customized or authored rows that differ: ` +
+            group.rows.map((r) => `${String(r.id)} (organization ${text(r.organization_id) ?? 'none'})`).join(', ') +
+            '. Which one the environment keeps is never guessed: choose one with --template-choice ROW_ID, then re-run.',
+        );
+        continue;
+      }
+      body = group.bodies[chosen]!;
+    }
+    const existing = await run.opts.templates.find(name, locale);
+    const saved = run.saved.get(`email_template|${name}|${locale}`);
+    const current = saved ?? existing?.definition;
+    if (current && bodyKey(current, Object.keys(body)) === bodyKey(body, Object.keys(body))) {
+      summary.alreadyPromoted++;
+      for (const r of group.rows) run.verifiedTemplateIds.add(String(r.id));
+      continue;
+    }
+    if (existing?.environment && !saved) {
+      blockers.push(
+        `The environment already holds its own template ${name} (${locale}), and it differs from the customized row(s) ` +
+          `${group.rows.map((r) => String(r.id)).join(', ')}. The environment's edit is never overwritten: carry the ` +
+          'row\'s change into it in Studio (or delete the row), then re-run.',
+      );
+      continue;
+    }
+    try {
+      await run.opts.door.save('email_template', name, body);
+      run.saved.set(`email_template|${name}|${locale}`, body);
+      for (const r of group.rows) run.verifiedTemplateIds.add(String(r.id));
+      summary.promoted++;
+      run.opts.onProgress?.(`promoted the template ${name} (${locale}) to environment metadata`);
+    } catch (error) {
+      blockers.push(
+        `The metadata door refused the template ${name} (${locale}): ${error instanceof Error ? error.message : String(error)}. ` +
+          'Correct the row so the definition validates, then re-run.',
+      );
+    }
+  }
+  return { step: 'template-promotion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+}
+
+/**
+ * Refuse, before anything is written, a `--template-choice` that names no
+ * candidate row of a listed conflict, or two candidates of one conflict.
+ */
+function validateTemplateChoices(run: Run): void {
+  const choices = run.opts.templateChoices ?? [];
+  if (choices.length === 0) return;
+  const conflicts = run.plan.tables.find((t) => t.object === TEMPLATES)?.templateConflicts ?? [];
+  const groupOf = new Map<string, string>();
+  for (const c of conflicts) for (const cand of c.candidates) groupOf.set(cand.id, `${c.name} (${c.locale})`);
+  const listed = conflicts.length
+    ? conflicts.map((c) => `${c.name} (${c.locale}): ${c.candidates.map((cand) => cand.id).join(', ')}`).join('; ')
+    : 'none';
+  const seen = new Map<string, string>();
+  for (const id of choices) {
+    const group = groupOf.get(id);
+    if (!group) {
+      throw new TemplateChoiceRefusal(
+        `--template-choice ${id} names no candidate row of a listed template conflict. The conflicts are: ${listed}.`,
+      );
+    }
+    const other = seen.get(group);
+    if (other !== undefined && other !== id) {
+      throw new TemplateChoiceRefusal(
+        `--template-choice ${other} and ${id} both choose for the template ${group}; choose exactly one row per conflict.`,
+      );
+    }
+    seen.set(group, id);
+  }
+}
+
+// ── Step 2c: the settings global rung moves (D7) ────────────────────────────
+
+async function runSettingsMove(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { moved: 0, alreadyMoved: 0 };
+  const blockers: string[] = [];
+  for (const entry of run.opts.inventory ?? [inventoryEntryFor(SETTINGS)!]) {
+    for (const departure of entry?.departures ?? []) {
+      const move = MOVES[departure.id];
+      if (departure.as !== 'moved' || !move || entry.object !== move.from) continue;
+      const fromCols = await columnsOf(run, move.from);
+      if (!fromCols) continue;
+      const selector = predicateSql(run.sql, move.from, fromCols, departure.where);
+      // Only the environment's own rung moves: an organization's row is not global.
+      const where = fromCols.has('organization_id')
+        ? { text: `(${selector.text}) AND ${run.sql.q('organization_id', move.from)} IS NULL`, params: selector.params }
+        : selector;
+      const rows = await readAll(run, move.from, [...move.key, ...move.compare].filter((c) => fromCols.has(c)), where);
+      if (rows.length === 0) continue;
+      const toCols = await columnsOf(run, move.to);
+      if (!toCols) {
+        blockers.push(
+          `${rows.length} ${move.from} row(s) move to ${move.to}, which this database does not have. Boot this release ` +
+            'against it once (its schema sync creates the table), then re-run.',
+        );
+        continue;
+      }
+      const same = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
+        move.compare.every((c) => JSON.stringify(a[c] ?? null) === JSON.stringify(b[c] ?? null));
+      const keyOf = (r: Record<string, unknown>): string => move.key.map((k) => String(r[k])).join('.');
+      const byKey = new Map<string, Record<string, unknown>[]>();
+      for (const row of rows) byKey.set(keyOf(row), [...(byKey.get(keyOf(row)) ?? []), row]);
+      const shared = [...fromCols].filter((c) => toCols.has(c));
+      const sql = run.sql;
+      for (const [key, group] of byKey) {
+        if (group.some((r) => !same(r, group[0]!))) {
+          blockers.push(
+            `${move.from} holds ${group.length} differing ${departure.id} rows for ${key} (${group.map((r) => String(r.id)).join(', ')}). ` +
+              'Which value the deployment keeps is never guessed: delete all but one, then re-run.',
+          );
+          continue;
+        }
+        const readTarget = () =>
+          readAll(run, move.to, move.compare.filter((c) => toCols.has(c)), {
+            text: move.key.map((k) => `${sql.q(k, move.to)} = ?`).join(' AND '),
+            params: move.key.map((k) => group[0]![k]),
+          });
+        const target = await readTarget();
+        if (target.length > 0 && !same(target[0]!, group[0]!)) {
+          blockers.push(
+            `${move.to} already holds ${key} with a different value — the one the runtime serves — and the ${move.from} ` +
+              `row(s) ${group.map((r) => String(r.id)).join(', ')} hold another. Delete the stale ${move.from} row(s) or ` +
+              'align them, then re-run.',
+          );
+          continue;
+        }
+        if (target.length === 0) {
+          const list = shared.map((c) => sql.q(c, move.to)).join(', ');
+          await execute(
+            run,
+            move.to,
+            `INSERT INTO ${sql.q(move.to, move.to)} (${list}) SELECT ${shared.map((c) => sql.q(c, move.from)).join(', ')} ` +
+              `FROM ${sql.q(move.from, move.from)} WHERE ${sql.q('id', move.from)} = ?`,
+            [group[0]!.id],
+          );
+          // The source leaves only once its destination row reads back equal.
+          const landed = await readTarget();
+          if (landed.length !== 1 || !same(landed[0]!, group[0]!)) {
+            throw new Error(
+              `The move of ${key} into ${move.to} did not read back equal; the ${move.from} row(s) ` +
+                `${group.map((r) => String(r.id)).join(', ')} were kept.`,
+            );
+          }
+          summary.moved++;
+          run.movedIn.set(move.to, (run.movedIn.get(move.to) ?? 0) + 1);
+        } else {
+          summary.alreadyMoved++;
+        }
+        const ids = group.map((r) => r.id);
+        await execute(
+          run,
+          move.from,
+          `DELETE FROM ${sql.q(move.from, move.from)} WHERE (${where.text}) AND ${sql.q('id', move.from)} IN (${ids.map(() => '?').join(', ')})`,
+          [...where.params, ...ids],
+        );
+        run.movedOut.set(move.from, (run.movedOut.get(move.from) ?? 0) + ids.length);
+      }
+      if (summary.moved) run.opts.onProgress?.(`settings move: ${summary.moved} ${departure.id} key(s) now in ${move.to}`);
+    }
+  }
+  return { step: 'settings-move', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes: [] };
+}
+
 // ── Step 3: the verified id→name rewrite (D4) ───────────────────────────────
 
 interface Verification {
@@ -692,9 +955,6 @@ async function runRewrite(run: Run): Promise<StepReport> {
 
 // ── Step 4: mirror deletion (fate 2) ─────────────────────────────────────────
 
-/** Provenance the seeders stamped: only such a row can be a copy of code. */
-const SEEDED_BY = ['package', 'platform', 'system'];
-
 /**
  * The rows of a fate-2 object that are deleted: its mirror selector (every
  * row when it names none), minus every row a claim keeps —
@@ -721,6 +981,13 @@ function deletableWhere(run: Run, table: string, cols: ReadonlySet<string>, entr
     parts.push(`(CASE WHEN ${claimed.text} THEN 1 WHEN NOT (${claimed.text}) THEN 0 ELSE 1 END) = 0`);
     params.push(...claimed.params, ...claimed.params);
   };
+  // Templates: a mirror is a seeded, uncustomized copy (with an organization
+  // or without); every promotion row is kept here, and is deleted only by id
+  // once this run has verified its environment copy (`runMirrorDeletion`).
+  if (entry.object === TEMPLATES) {
+    keep(templatePromotionSql(run.sql, cols));
+    return { text: parts.join(' AND '), params };
+  }
   for (const category of entry.categories ?? []) {
     if (!category.where || category.conflictBy) continue;
     keep(predicateSql(run.sql, table, cols, category.where));
@@ -750,6 +1017,21 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
       notes: [],
     };
   }
+  // The promotion, run again now: on a resumed run its checkpoint says nothing
+  // about a row customized or authored since, and only a row whose copy this
+  // pass verifies may be deleted. It is idempotent: an equal copy is found.
+  if (await columnsOf(run, TEMPLATES)) {
+    const pass = await runTemplatePromotion(run);
+    if (pass.status !== 'done') {
+      return {
+        step: 'mirror-deletion',
+        status: 'blocked',
+        summary: { deleted: 0 },
+        blockers: ['Mirror deletion re-runs the template promotion first, and it no longer completes:', ...pass.blockers],
+        notes: [],
+      };
+    }
+  }
   const notes: string[] = [];
   let total = 0;
   for (const table of run.plan.tables) {
@@ -761,6 +1043,7 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
       const where = deletableWhere(run, physical, cols, entry);
       const before = await countWhere(run, physical, where);
       if (before === 0) continue;
+
       await execute(run, physical, `DELETE FROM ${run.sql.q(physical, physical)} WHERE ${where.text}`, where.params);
       const left = await countWhere(run, physical, where);
       if (left !== 0) {
@@ -770,10 +1053,34 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
       total += before;
       run.opts.onProgress?.(`mirror deletion: ${before} row(s) of ${physical}`);
     }
+    if (table.object === TEMPLATES) total += await deletePromotedTemplates(run, table.tables);
     const kept = Math.max(0, table.rows!.total - (run.deleted.get(table.object) ?? 0));
     if (kept > 0) notes.push(`${table.object}: ${kept} row(s) are not mirrors (a named category or their non-seeded provenance claims them) and stay.`);
   }
   return { step: 'mirror-deletion', status: 'done', summary: { deleted: total }, blockers: [], notes };
+}
+
+/** Delete, by id, the promotion rows whose environment copy this run verified; nothing else. */
+async function deletePromotedTemplates(run: Run, tables: readonly string[]): Promise<number> {
+  const ids = [...run.verifiedTemplateIds];
+  let deleted = 0;
+  for (const physical of tables) {
+    const id = run.sql.q('id', physical);
+    for (let i = 0; i < ids.length; i += IN_CHUNK) {
+      const chunk = ids.slice(i, i + IN_CHUNK);
+      const where = { text: `${id} IN (${chunk.map(() => '?').join(', ')})`, params: chunk as unknown[] };
+      const before = await countWhere(run, physical, where);
+      if (before === 0) continue;
+      await execute(run, physical, `DELETE FROM ${run.sql.q(physical, physical)} WHERE ${where.text}`, where.params);
+      if ((await countWhere(run, physical, where)) !== 0) {
+        throw new Error(`The delete of promoted template rows on ${physical} left rows behind; nothing past this table was deleted.`);
+      }
+      deleted += before;
+    }
+  }
+  run.deleted.set(TEMPLATES, (run.deleted.get(TEMPLATES) ?? 0) + deleted);
+  if (deleted) run.opts.onProgress?.(`mirror deletion: ${deleted} promoted template row(s), each with its environment copy`);
+  return deleted;
 }
 
 // ── Step 5: column drops (fate 1) ────────────────────────────────────────────
@@ -818,6 +1125,8 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
 const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   attribution: runAttribution,
   'authored-conversion': runAuthoredConversion,
+  'template-promotion': runTemplatePromotion,
+  'settings-move': runSettingsMove,
   rewrite: runRewrite,
   'mirror-deletion': runMirrorDeletion,
   'column-drops': runColumnDrops,
@@ -839,7 +1148,13 @@ async function remainingFor(run: Run, table: TablePlan, complete: boolean): Prom
       if (!entry) return 0;
       let left = 0;
       for (const physical of table.tables) {
-        left += await countWhere(run, physical, deletableWhere(run, physical, (await columnsOf(run, physical))!, entry));
+        const cols = (await columnsOf(run, physical))!;
+        left += await countWhere(run, physical, deletableWhere(run, physical, cols, entry));
+        // A promotion row leaves only once its environment copy is verified:
+        // until then it remains, under every posture.
+        if (table.object === TEMPLATES) {
+          left += await countWhere(run, physical, templatePromotionSql(run.sql, cols));
+        }
       }
       return left;
     }
@@ -866,10 +1181,14 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     columns: new Map(),
     attributed: new Map(),
     deleted: new Map(),
+    movedOut: new Map(),
+    movedIn: new Map(),
     saved: new Map(),
+    verifiedTemplateIds: new Set(),
   };
   // Refuses (driver, catalog, an uninventoried table) before anything is written.
   run.plan = await planFor(run);
+  validateTemplateChoices(run);
   const before = run.plan;
 
   const stored = await opts.ledger.read();
@@ -920,6 +1239,22 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     const ref = a ?? b!;
     const remaining = a ? await remainingFor(run, a, complete) : 0;
     if (complete) discrepancies += remaining;
+    const departures = (a?.departures ?? []).filter((d) => d.rows > 0).map((d) => ({ id: d.id, label: d.label, as: d.as, rows: d.rows }));
+    if (a?.physical === 'present' && object === TEMPLATES) {
+      let unpromoted = 0;
+      for (const physical of a.tables) {
+        unpromoted += await countWhere(run, physical, templatePromotionSql(run.sql, (await columnsOf(run, physical))!));
+      }
+      if (unpromoted > 0) {
+        departures.push({
+          id: 'template-promotion',
+          label: 'customized or admin-authored templates not yet promoted (a conflict, a nameless row or a blocker names each)',
+          as: 'moved',
+          rows: unpromoted,
+        });
+      }
+    }
+    const waiting = departures.reduce((n, d) => n + d.rows, 0);
     tables.push({
       object,
       fate: ref.fate,
@@ -927,12 +1262,15 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       after: a?.rows ? { total: a.rows.total, organizationNull: a.rows.organizationNull } : null,
       attributed: run.attributed.get(object) ?? 0,
       deleted: run.deleted.get(object) ?? 0,
+      movedOut: run.movedOut.get(object) ?? 0,
+      movedIn: run.movedIn.get(object) ?? 0,
       columnDropped: b?.organizationColumn === 'present' && a?.organizationColumn === 'absent',
       unattributable: a?.unattributable ?? [],
-      departures: (a?.departures ?? []).filter((d) => d.rows > 0).map((d) => ({ id: d.id, label: d.label, as: d.as, rows: d.rows })),
+      departures,
+      ...(a?.templateConflicts?.length ? { templateConflicts: a.templateConflicts } : {}),
       remaining,
-      notNull: a && departingRows(a) > 0
-        ? { willReceive: false, reason: `${departingRows(a)} row(s) still wait for a step not yet run: ${a.departures.filter((d) => d.rows > 0).map((d) => d.label).join('; ')}` }
+      notNull: waiting > 0
+        ? { willReceive: false, reason: `${waiting} row(s) still wait for a step not yet run: ${departures.map((d) => d.label).join('; ')}` }
         : ref.notNull,
     });
   }

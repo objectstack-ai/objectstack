@@ -1089,8 +1089,24 @@ export class MessagingService {
         //    convergence. (Drivers that don't enforce the index fall back to the
         //    best-effort fast-path — the catch is then simply never taken.)
         let notificationId: string;
+        // [#23284] The organization every row BELOW the event carries: the one
+        // the producer threaded, else the one the engine stamped on the event
+        // row itself. A producer that could attribute the notification to no
+        // organization leaves the owner to the engine's system-write rule
+        // (ADR-0131 D9, which now reaches `sys_notification`): the sole
+        // organization under `single`, a refusal where none is derivable. The
+        // delivery, inbox row and receipt then follow their notification, so the
+        // family cannot split into an owned event over org-less children — which
+        // the inline fan-out produced, because it stamped only what the producer
+        // passed. ⛔ Never a guess: the value is read off the stored event row,
+        // and a write that stamped nothing leaves it absent, as before.
+        let owned: EmitInput = input;
         try {
-            notificationId = await this.writeEvent(data, input, suppressed);
+            const event = await this.writeEvent(data, input, suppressed);
+            notificationId = event.id;
+            if (input.organizationId === undefined && event.organizationId !== undefined) {
+                owned = { ...input, organizationId: event.organizationId };
+            }
         } catch (err) {
             if (input.dedupKey && data) {
                 const winner = await this.findEventByDedupKey(data, input.dedupKey);
@@ -1141,7 +1157,7 @@ export class MessagingService {
 
         // 4) Either enqueue durable deliveries (P1 outbox) or fan out inline (P0).
         if (this.outbox) {
-            const deliveries = await this.enqueueDeliveries(this.outbox, notificationId, targets, input, payload);
+            const deliveries = await this.enqueueDeliveries(this.outbox, notificationId, targets, owned, payload);
             // An accepted row here is ENQUEUED, not delivered — the dispatcher
             // decides that later and records it on `sys_notification_delivery`.
             // Reporting it as `delivered` is what let a run summary claim a
@@ -1162,7 +1178,7 @@ export class MessagingService {
 
         const notification: Notification = {
             notificationId,
-            organizationId: input.organizationId,
+            organizationId: owned.organizationId,
             topic: input.topic,
             title: str(payload.title) ?? input.topic,
             body: str(payload.body) ?? '',
@@ -1375,17 +1391,19 @@ export class MessagingService {
     }
 
     /**
-     * Persist the L2 event and return its id. With no data layer (minimal/test
-     * stacks) we warn and synthesize an id so fan-out can still be exercised.
+     * Persist the L2 event and return its id, with the organization the stored
+     * row carries (#23284) — the producer's, or the one the engine stamped on a
+     * system write that carried none. With no data layer (minimal/test stacks)
+     * we warn and synthesize an id so fan-out can still be exercised.
      */
     private async writeEvent(
         data: IDataEngine | undefined,
         input: EmitInput,
         suppressed: readonly ChannelSuppression[],
-    ): Promise<string> {
+    ): Promise<{ id: string; organizationId?: string }> {
         if (!data) {
             this.ctx.logger.warn('[messaging] no data engine registered; event not persisted');
-            return `evt_${Math.random().toString(36).slice(2)}`;
+            return { id: `evt_${Math.random().toString(36).slice(2)}` };
         }
         const row: Record<string, unknown> = {
             topic: input.topic,
@@ -1422,7 +1440,14 @@ export class MessagingService {
         await assertActorReferenceResolves(data, NOTIFICATION_EVENT_OBJECT, row.actor_id);
         const created = await data.insert(NOTIFICATION_EVENT_OBJECT, row, { context: FAN_OUT_SYSTEM_CONTEXT });
         const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
-        return id != null ? String(id) : `evt_${Math.random().toString(36).slice(2)}`;
+        const stored: unknown = Array.isArray(created) ? created[0] : created;
+        const organizationId = stored !== null && typeof stored === 'object'
+            ? str((stored as Record<string, unknown>).organization_id)
+            : undefined;
+        return {
+            id: id != null ? String(id) : `evt_${Math.random().toString(36).slice(2)}`,
+            ...(organizationId !== undefined ? { organizationId } : {}),
+        };
     }
 
     /**
