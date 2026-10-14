@@ -50,11 +50,12 @@
  *
  * ## Loud, never empty
  *
- * Git answers a pathspec that matches nothing with nothing, at exit 0, so a
- * renamed root would silently cover nothing. Each root is therefore required to
- * exist as a directory (the `readdirSync` it replaces threw on a missing root
- * the same way), and any non-zero git exit throws with git's own message —
- * ⛔ never an empty answer, which would read as a clean tree.
+ * An empty listing reads as a clean tree, so nothing here may produce one by
+ * accident: the walked directory must exist as a directory (the `readdirSync`
+ * it replaces threw on a missing root the same way, and a renamed root must not
+ * quietly cover nothing), and any non-zero git exit — outside a checkout, or a
+ * `.git` pointing nowhere — throws with git's own message. ⛔ Never an empty
+ * answer in place of an error.
  *
  * A path git lists that is gone from disk (a tracked file deleted in the work
  * tree, or one removed between the listing and the stat) cannot hold a
@@ -63,7 +64,7 @@
  *
  * The git child runs with `gitFreeEnv()` (scripts/git-env.mjs): under a git
  * hook the inherited `GIT_DIR` / `GIT_INDEX_FILE` outrank `cwd`, and the listing
- * must describe the checkout `repoRoot` names.
+ * must describe the checkout the walked directory lies in.
  *
  * It lives in `scripts/lib/` for the reason `export-origins-testkit.ts` records:
  * the BUILD config compiles `src/` as CommonJS, and a shared test helper there
@@ -77,66 +78,61 @@ import path from 'node:path';
 import { gitFreeEnv } from '../../../../scripts/git-env.mjs';
 
 /** Tracked files, plus untracked files git does not ignore — what `git add -A` would commit. */
-const GIT_VISIBLE_LISTING = ['ls-files', '-z', '--cached', '--others', '--exclude-standard'] as const;
+const GIT_VISIBLE_LISTING = ['ls-files', '-z', '--cached', '--others', '--exclude-standard'];
 
 export interface RepoWalkOptions {
   /**
-   * A directory BELOW a root whose subtree the walk never enters, judged by the
-   * directory's own name at any depth — the filesystem walk's `SKIPPED_DIRS`
-   * rule, unchanged. The root's own path segments are never judged.
+   * A directory BELOW the walked directory whose subtree the walk never enters,
+   * judged by the directory's own name at any depth — the filesystem walk's
+   * `SKIPPED_DIRS` rule, unchanged. The walked directory's own path is never judged.
    */
   skipDir?: (name: string) => boolean;
 }
 
 /**
- * Every file under `roots` that git does not ignore, as `/`-separated paths
- * relative to `repoRoot`, root by root, each root's files sorted.
+ * Every file below `dir` that git does not ignore, as absolute paths in the
+ * order of their path below `dir` — the files a `readdirSync` descent from
+ * `dir` would reach, minus what `.gitignore` keeps out of git.
  *
- * @param repoRoot the checkout's top level; every root is resolved against it.
- * @param roots repo-relative directories (`'content'`, `'packages/spec/src'`).
+ * Takes ONE directory, the way the descent it replaces did, so a caller keeps
+ * its `for (const root of WALK_ROOTS)` loop over `path.join(REPO_ROOT, root)`:
+ * that is the spelling `check:cross-package-test-inputs` folds into the walked
+ * roots it holds against the declared globs.
  */
-export function listRepoWalkFiles(
-  repoRoot: string,
-  roots: readonly string[],
-  options: RepoWalkOptions = {},
-): string[] {
+export function listRepoWalkFiles(dir: string, options: RepoWalkOptions = {}): string[] {
   const skipDir = options.skipDir ?? (() => false);
+  if (!fs.statSync(dir).isDirectory()) {
+    throw new Error(`listRepoWalkFiles: ${dir} is not a directory`);
+  }
+  // With `cwd` inside the checkout and no pathspec, git lists the subtree below
+  // `cwd`, each path relative to it.
+  const listing = spawnSync('git', GIT_VISIBLE_LISTING, {
+    cwd: dir,
+    encoding: 'utf8',
+    env: gitFreeEnv(),
+    maxBuffer: 1 << 28,
+  });
+  if (listing.error) throw listing.error;
+  if (listing.status !== 0) {
+    throw new Error(
+      `listRepoWalkFiles: \`git ${GIT_VISIBLE_LISTING.join(' ')}\` in ${dir} exited ` +
+        `${listing.status}: ${listing.stderr.trim()}`,
+    );
+  }
   const files: string[] = [];
-  for (const root of roots) {
-    const rootDir = path.join(repoRoot, root);
-    if (!fs.statSync(rootDir).isDirectory()) {
-      throw new Error(`listRepoWalkFiles: walk root '${root}' is not a directory under ${repoRoot}`);
+  for (const rel of [...new Set(listing.stdout.split('\0').filter(Boolean))].sort()) {
+    if (rel.split('/').slice(0, -1).some(skipDir)) continue;
+    const full = path.join(dir, rel);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(full);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
+      throw err;
     }
-    const listing = spawnSync('git', [...GIT_VISIBLE_LISTING, '--', root], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      env: gitFreeEnv(),
-      maxBuffer: 1 << 28,
-    });
-    if (listing.error) throw listing.error;
-    if (listing.status !== 0) {
-      throw new Error(
-        `listRepoWalkFiles: \`git ${GIT_VISIBLE_LISTING.join(' ')} -- ${root}\` in ${repoRoot} exited ` +
-          `${listing.status}: ${listing.stderr.trim()}`,
-      );
-    }
-    const prefix = `${root.split(path.sep).join('/').replace(/\/+$/, '')}/`;
-    const listed = [...new Set(listing.stdout.split('\0').filter(Boolean))].sort();
-    for (const rel of listed) {
-      if (!rel.startsWith(prefix)) {
-        throw new Error(`listRepoWalkFiles: git listed '${rel}' for walk root '${root}', which does not contain it`);
-      }
-      if (rel.slice(prefix.length).split('/').slice(0, -1).some(skipDir)) continue;
-      let stat: fs.Stats;
-      try {
-        stat = fs.lstatSync(path.join(repoRoot, rel));
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
-        throw err;
-      }
-      // `isFile()` is false for a symlink, as `Dirent.isFile()` was in the walk this replaces.
-      if (stat.isFile()) files.push(rel);
-    }
+    // `isFile()` is false for a symlink and for a nested repository's directory
+    // entry, as `Dirent.isFile()` was in the walk this replaces.
+    if (stat.isFile()) files.push(full);
   }
   return files;
 }

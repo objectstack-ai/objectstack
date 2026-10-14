@@ -474,17 +474,20 @@ describe('tree-scoped absence: nothing inside the declared radius references a r
     // output (the docs build's upgrade guide names every retired def) is not a
     // source and never reaches CI's checkout (`scripts/lib/repo-walk-testkit.ts`).
     const skipDir = (name: string) => SKIPPED_DIRS.has(name) || name.startsWith('.');
-    for (const rel of listRepoWalkFiles(REPO_ROOT, WALK_ROOTS, { skipDir })) {
-      const name = path.posix.basename(rel);
-      if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(path.extname(name))) continue;
-      if (name === 'CHANGELOG.md') continue; // release prose records the removal
-      if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
-      if (TSUP_BUNDLED_CONFIG.test(name)) continue;
-      visited += 1;
-      const text = readIfPresent(path.join(REPO_ROOT, rel), rel);
-      if (text === undefined) continue;
-      const m = REFERENCE.exec(text);
-      if (m) offenders.push(`${rel} references \`${m[0].trim()}\``);
+    for (const root of WALK_ROOTS) {
+      for (const full of listRepoWalkFiles(path.join(REPO_ROOT, root), { skipDir })) {
+        const rel = path.relative(REPO_ROOT, full).split(path.sep).join('/');
+        const name = path.basename(full);
+        if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(path.extname(name))) continue;
+        if (name === 'CHANGELOG.md') continue; // release prose records the removal
+        if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
+        if (TSUP_BUNDLED_CONFIG.test(name)) continue;
+        visited += 1;
+        const text = readIfPresent(full, rel);
+        if (text === undefined) continue;
+        const m = REFERENCE.exec(text);
+        if (m) offenders.push(`${rel} references \`${m[0].trim()}\``);
+      }
     }
     // Anti-vacuity: the walk really covered the tree.
     expect(visited).toBeGreaterThan(1000);

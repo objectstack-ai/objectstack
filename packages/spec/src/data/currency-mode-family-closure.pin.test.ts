@@ -119,7 +119,12 @@ function inCorpusA(rel: string): boolean {
 // gitignored upgrade guide summarises a whole major in one paragraph, where the
 // date record and a currency change share a line, and CI's checkout never holds
 // it (`scripts/lib/repo-walk-testkit.ts`).
-const ALL_FILES: string[] = listRepoWalkFiles(REPO_ROOT, WALK_ROOTS, { skipDir: (name) => SKIPPED_DIRS.has(name) });
+const ALL_FILES: string[] = [];
+for (const root of WALK_ROOTS) {
+  for (const full of listRepoWalkFiles(path.join(REPO_ROOT, root), { skipDir: (name) => SKIPPED_DIRS.has(name) })) {
+    ALL_FILES.push(path.relative(REPO_ROOT, full).split(path.sep).join('/'));
+  }
+}
 const CORPUS_A = ALL_FILES.filter(inCorpusA);
 const CORPUS_B = ALL_FILES.filter(inCorpusB);
 const read = (rel: string): string => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');

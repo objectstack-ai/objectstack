@@ -70,13 +70,13 @@ const FIXTURE = [
 const HERMETIC_ENV: NodeJS.ProcessEnv = { ...gitFreeEnv(), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 const GIT_ARGS = ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'gc.auto=0'];
 
-const git = (cwd: string, args: string[], env: NodeJS.ProcessEnv = HERMETIC_ENV) => {
+const git = (args: string[], cwd: string, env: NodeJS.ProcessEnv = HERMETIC_ENV) => {
   const r = spawnSync('git', [...GIT_ARGS, ...args], { cwd, encoding: 'utf8', env });
   if (r.error) throw r.error;
   return r;
 };
-const mustGit = (cwd: string, ...args: string[]) => {
-  const r = git(cwd, args);
+const mustGit = (args: string[], cwd: string) => {
+  const r = git(args, cwd);
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} exited ${r.status}: ${r.stderr}`);
 };
 
@@ -86,13 +86,18 @@ describe('repo-walk-testkit — a repo-radius walk reads what git does not ignor
     fs.mkdirSync(path.dirname(path.join(sandbox, rel)), { recursive: true });
     fs.writeFileSync(path.join(sandbox, rel), text);
   };
+  /** The listing for each root, as `/`-separated paths relative to `base`. */
+  const listUnder = (base: string, roots: string[], skipDir?: (name: string) => boolean) =>
+    roots.flatMap((root) =>
+      listRepoWalkFiles(path.join(base, root), { skipDir }).map((full) => path.relative(base, full).split(path.sep).join('/')),
+    );
 
   beforeAll(() => {
     sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'os-repo-walk-testkit-'));
-    mustGit(sandbox, 'init', '-q');
+    mustGit(['init', '-q'], sandbox);
     // The listing runs with the caller's own git config; a personal global
     // excludes file must not decide what this sandbox ignores.
-    mustGit(sandbox, 'config', 'core.excludesFile', '/dev/null');
+    mustGit(['config', 'core.excludesFile', '/dev/null'], sandbox);
     // The real repository's two lines for the guide's generated outputs, plus one ignored tree to force-add into.
     put('.gitignore', `${path.posix.dirname(GUIDE_PAGE)}/\n${GUIDE_COPY}\ngenerated/\n`);
 
@@ -101,9 +106,9 @@ describe('repo-walk-testkit — a repo-radius walk reads what git does not ignor
     put('content/docs/dist/bundle.md', FIXTURE); // tracked, under a directory the caller skips by name
     put('content/docs/deleted.md', FIXTURE); // tracked, then deleted from the work tree
     put('content/generated/forced.md', FIXTURE); // tracked although its directory is ignored
-    mustGit(sandbox, 'add', '-A');
-    mustGit(sandbox, 'add', '-f', 'content/generated/forced.md');
-    mustGit(sandbox, 'commit', '-q', '-m', 'fixture');
+    mustGit(['add', '-A'], sandbox);
+    mustGit(['add', '-f', 'content/generated/forced.md'], sandbox);
+    mustGit(['commit', '-q', '-m', 'fixture'], sandbox);
     fs.rmSync(path.join(sandbox, 'content/docs/deleted.md'));
 
     put(GUIDE_PAGE, FIXTURE); // THE FIXTURE: generated, ignored, never committed
@@ -123,7 +128,7 @@ describe('repo-walk-testkit — a repo-radius walk reads what git does not ignor
     // Positive control: the excluded pages are ON DISK, so their absence below is the ignore working.
     for (const rel of [GUIDE_PAGE, GUIDE_COPY]) expect(fs.readFileSync(path.join(sandbox, rel), 'utf8')).toBe(FIXTURE);
 
-    const listed = listRepoWalkFiles(sandbox, ['content', 'packages'], { skipDir: (name) => name === 'dist' });
+    const listed = listUnder(sandbox, ['content', 'packages'], (name) => name === 'dist');
     expect(listed).toEqual([
       'content/docs/guides/upgrade.md', // tracked: the control
       // untracked and NOT ignored: a page not yet added is still judged, and the
@@ -137,22 +142,22 @@ describe('repo-walk-testkit — a repo-radius walk reads what git does not ignor
   });
 
   it('loud, never empty: a missing root, a root that is a file, and a tree git cannot read all throw', () => {
-    expect(() => listRepoWalkFiles(sandbox, ['content/no-such-root'])).toThrow(/ENOENT/);
-    expect(() => listRepoWalkFiles(sandbox, ['packages/spec/README.md'])).toThrow(/not a directory/);
+    expect(() => listUnder(sandbox, ['content/no-such-root'])).toThrow(/ENOENT/);
+    expect(() => listUnder(sandbox, ['packages/spec/README.md'])).toThrow(/not a directory/);
     // A `.git` file pointing nowhere: git refuses (exit 128), whatever encloses the temp dir.
     const broken = fs.mkdtempSync(path.join(os.tmpdir(), 'os-repo-walk-testkit-broken-'));
     try {
       fs.mkdirSync(path.join(broken, 'content'));
       fs.writeFileSync(path.join(broken, 'content', 'page.md'), FIXTURE);
       fs.writeFileSync(path.join(broken, '.git'), `gitdir: ${path.join(broken, 'missing')}\n`);
-      expect(() => listRepoWalkFiles(broken, ['content'])).toThrow(/exited 128/);
+      expect(() => listUnder(broken, ['content'])).toThrow(/exited 128/);
     } finally {
       fs.rmSync(broken, { recursive: true, force: true });
     }
   });
 
   it('the real checkout ignores the guide\'s two generated outputs, and keeps an authored docs page', () => {
-    const ignored = (rel: string) => git(REPO_ROOT, ['check-ignore', '-q', '--', rel], gitFreeEnv()).status;
+    const ignored = (rel: string) => git(['check-ignore', '-q', '--', rel], REPO_ROOT, gitFreeEnv()).status;
     expect(ignored(GUIDE_PAGE), `${GUIDE_PAGE} must be gitignored here`).toBe(0);
     expect(ignored(GUIDE_COPY), `${GUIDE_COPY} must be gitignored here`).toBe(0);
     // Control: a tracked, authored page answers "not ignored", so the two zeros above are not a blanket answer.
@@ -160,7 +165,9 @@ describe('repo-walk-testkit — a repo-radius walk reads what git does not ignor
     // Live on a checkout that has built the docs, vacuous on a fresh one (the
     // sandbox cases above are what can fail everywhere): nothing listed lies
     // under the generated tree, and the listing reaches the docs tree at all.
-    const listed = listRepoWalkFiles(REPO_ROOT, ['content']);
+    const listed = listRepoWalkFiles(path.join(REPO_ROOT, 'content')).map((full) =>
+      path.relative(REPO_ROOT, full).split(path.sep).join('/'),
+    );
     expect(listed).toContain('content/docs/meta.json');
     expect(listed.filter((rel) => rel.startsWith(`${path.posix.dirname(GUIDE_PAGE)}/`))).toEqual([]);
   });

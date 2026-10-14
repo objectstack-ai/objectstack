@@ -392,7 +392,8 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     // GITIGNORED build output (`.gitignore` line for `packages/spec/json-schema/`),
     // reached while this was a FILESYSTEM walk; the git listing the walk now
     // reads (`scripts/lib/repo-walk-testkit.ts`) leaves it out, and the entry
-    // stays because its reason is the CONTENT, not the ignore. `retiredKey()` emits the tombstoned property into the generated JSON
+    // stays because its reason is the CONTENT, not the ignore. `retiredKey()`
+    // emits the tombstoned property into the generated JSON
     // Schema, exactly as it already does for the two retired siblings on this
     // same schema — measured: `Connector.json` carries `rateLimitConfig` and
     // `errorMapping` the same way. Excluding it costs no coverage: the source
@@ -463,17 +464,20 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     // output (the docs build's upgrade guide names the retired key) is not a
     // source and never reaches CI's checkout (`scripts/lib/repo-walk-testkit.ts`).
     const skipDir = (name: string) => SKIPPED_DIRS.has(name) || name.startsWith('.');
-    for (const rel of listRepoWalkFiles(REPO_ROOT, WALK_ROOTS, { skipDir })) {
-      const name = path.posix.basename(rel);
-      if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(path.extname(name))) continue;
-      if (name === 'CHANGELOG.md') continue; // release prose records the removal
-      if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
-      if (TSUP_BUNDLED_CONFIG.test(name)) continue;
-      visited += 1;
-      const text = readIfPresent(path.join(REPO_ROOT, rel), rel);
-      if (text === undefined) continue;
-      const m = AUTHORING.exec(stripInlineCode(text));
-      if (m) offenders.push(`${rel} authors \`${m[0].trim()}\``);
+    for (const root of WALK_ROOTS) {
+      for (const full of listRepoWalkFiles(path.join(REPO_ROOT, root), { skipDir })) {
+        const rel = path.relative(REPO_ROOT, full).split(path.sep).join('/');
+        const name = path.basename(full);
+        if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(path.extname(name))) continue;
+        if (name === 'CHANGELOG.md') continue; // release prose records the removal
+        if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
+        if (TSUP_BUNDLED_CONFIG.test(name)) continue;
+        visited += 1;
+        const text = readIfPresent(full, rel);
+        if (text === undefined) continue;
+        const m = AUTHORING.exec(stripInlineCode(text));
+        if (m) offenders.push(`${rel} authors \`${m[0].trim()}\``);
+      }
     }
     // Anti-vacuity: the walk really covered the tree.
     expect(visited).toBeGreaterThan(1000);
