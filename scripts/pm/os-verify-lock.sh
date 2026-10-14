@@ -149,6 +149,8 @@
 # family) are neither a build nor a suite, so nothing routes them; neither is a
 # dev server, a `pnpm install`, a docs build, or any free-hand command a sibling
 # agent types at a prompt. All of it runs ALONGSIDE a holder, on the same cores.
+# (One gate routes the single step of its own that IS a build: `check:type-check-debt`
+# takes this lock around its closure build, #23470. Its reads still run unlocked.)
 #
 # ⚠️ THE FAILURE MODE IS SILENCE, which is why this is stated and not merely
 # true. Nothing is red, nothing is skipped, no verdict changes, and a wall-clock
@@ -218,6 +220,38 @@
 # Everything above this block is unchanged by that mode: where `flock` works,
 # the acquisition path, the ordering layer, the budget and every verdict are
 # exactly what they were.
+#
+# ---------------------------------------------------------------------------
+# A CALL MADE FROM INSIDE A HOLD RUNS IN THAT HOLD — IT DOES NOT QUEUE BEHIND IT
+#
+# A locked command can reach this entry point again: a gate that takes the lock
+# around the one step of its own that rewrites `dist/` (`check:type-check-debt`'s
+# closure build, #23470), run by a caller who already wrapped the whole gate.
+# Nothing here could tell that call from a stranger's. The wrapped command gets
+# no lock fd (`9>&-`, mechanism 3 above), a `flock(2)` lock belongs to an open
+# file description and not to a process tree, and no marker was exported — so
+# the inner call queued behind its own ancestor for its whole budget and exited
+# 99. Measured on a private lock: a 6s inner budget, `VERDICT queue-timeout
+# (exit 99)`, waiting on the holder that had started it.
+#
+# So the wrapped command is told whose hold it runs in —
+# `OS_VERIFY_LOCK_HELD_BY=<holder pid>:<lock file>`, exported to that command
+# and nothing else — and a call carrying it runs its command at once, inside
+# that hold, with NESTED on its VERDICT line, when ALL of these hold. Anything
+# less queues like any other call, so a wrong "no" costs the old bounded wait
+# and never an unlocked run:
+#
+#   - the marker names THIS lock file: a hold on another lock excludes nothing
+#     here;
+#   - the holder record names the same pid: it is this lock's registered
+#     holder, not a string somebody typed;
+#   - that pid is an ANCESTOR of this call. The marker is an inherited string,
+#     and a process the wrapped command leaves behind still carries it after the
+#     hold has ended. Ancestry is what proves the hold is the one we are inside.
+#
+# A nested run creates nothing — no ticket, no holder record, no ledger row:
+# the hold, its wait and its duration are the outer call's, and the outer call
+# records them. The filter preflight and the verdict word still apply to it.
 #
 # ---------------------------------------------------------------------------
 # WHAT `command-exit` CERTIFIES, AND WHY A BATCH GETS A DIFFERENT WORD
@@ -2325,6 +2359,11 @@ The lock is declared Linux-only. A host with no usable `flock` does not refuse:
 the command runs UNLOCKED with no mutual exclusion, its own exit code passes
 through, and the VERDICT line says `UNLOCKED (declared)`. That run prints the
 disclosure its PR body must carry — paste it, do not rewrite it.
+
+A call made from INSIDE a locked command runs inside that hold at once instead
+of queueing behind its own holder: the wrapped command's environment carries
+OS_VERIFY_LOCK_HELD_BY, and a call whose ancestor is the holder it names says
+NESTED on its VERDICT line. It takes no second lock and writes no ledger row.
 USAGE
 }
 
@@ -2408,6 +2447,75 @@ run_unlocked() {
   ran=$((ended - started))
   log "$(verdict_head "$rc") · UNLOCKED (declared) · no usable \`${FLOCK_BIN}\` on this host, so the shared verify lock was NEVER taken and NOTHING was serialized · ran $(human_s "$ran") · declare it in the PR body · ${label}"
   ledger_append unlocked 0 "$ran" "$rc" "$label"
+  exit "$rc"
+}
+
+# --- nested calls -----------------------------------------------------------
+
+# The parent of a pid, or failure. Same two readers as `proc_starttime`, same
+# order: `/proc/<pid>/stat` field 4 (ppid) stripped through the LAST ') ' —
+# field 2 is the comm and may hold spaces and parens — and `ps` where there is
+# no `/proc`.
+parent_pid() {
+  local pid="$1" stat rest out
+  if [[ -r "/proc/${pid}/stat" ]]; then
+    stat="$(< "/proc/${pid}/stat")" || return 1
+    rest="${stat##*) }"
+    [[ "$rest" != "$stat" ]] || return 1
+    out="$(awk '{ print $2 }' <<< "$rest")"
+  else
+    [[ -d /proc/self ]] && return 1
+    out="$(ps -o ppid= -p "$pid" 2> /dev/null | tr -d ' ')"
+  fi
+  case "$out" in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s' "$out"
+}
+
+# Is pid $1 a strict ancestor of this process? Bounded: a chain that does not
+# reach pid 1 inside 64 hops is unreadable, and unreadable is "no".
+is_ancestor() {
+  local want="$1" pid="$$" hops=0
+  while ((hops < 64)); do
+    pid="$(parent_pid "$pid")" || return 1
+    [[ "$pid" == "$want" ]] && return 0
+    ((pid <= 1)) && return 1
+    hops=$((hops + 1))
+  done
+  return 1
+}
+
+# Does this call run inside a hold of THIS lock, taken by one of its own
+# ancestors? Every clause is in the header's nested-calls block; each failing
+# clause answers "no", which queues the call like any other.
+NESTED_HOLDER=""
+nested_hold() {
+  local marker="${OS_VERIFY_LOCK_HELD_BY:-}" pid file hpid _rest
+  [[ -n "$marker" ]] || return 1
+  pid="${marker%%:*}"
+  file="${marker#*:}"
+  case "$pid" in '' | *[!0-9]*) return 1 ;; esac
+  [[ "$file" == "$LOCK_FILE" ]] || return 1
+  [[ -f "$HOLDER_FILE" ]] && read -r hpid _rest < "$HOLDER_FILE" 2> /dev/null || return 1
+  [[ "$hpid" == "$pid" ]] || return 1
+  is_ancestor "$pid" || return 1
+  NESTED_HOLDER="$pid"
+  return 0
+}
+
+# Run the command inside the ancestor's hold, and exit with its code. Like
+# `run_unlocked`, it creates nothing: the outer call holds the lock, owns the
+# holder record and writes the ledger row for the whole hold.
+run_nested() {
+  local kind="$1" label="$2"
+  shift 2
+  local rc=0
+  log "NESTED — this call runs inside a hold its own ancestor (pid ${NESTED_HOLDER}) already has on ${LOCK_FILE}, so it takes no second lock and waits for nothing — running: ${label}"
+  if [[ "$kind" == shell ]]; then
+    bash -c "$1" || rc=$?
+  else
+    "$@" || rc=$?
+  fi
+  log "$(verdict_head "$rc") · NESTED inside the hold of pid ${NESTED_HOLDER} · no second acquisition and no ledger row of its own — the outer call holds the lock and records the hold · ${label}"
   exit "$rc"
 }
 
@@ -2946,6 +3054,14 @@ mode_run() {
     run_unlocked "$kind" "$label" "$@"
   fi
 
+  # Inside a hold this call's own ancestor already has: run there, never queue
+  # behind it (the nested-calls block at the top). After both refusals, which
+  # apply to a nested call too; after the unlocked branch, because a host with
+  # no flock exports no marker to recognise.
+  if nested_hold; then
+    run_nested "$kind" "$label" "$@"
+  fi
+
   effective_budget
   [[ -n "$BUDGET_NOTE" ]] && log "⚠ $BUDGET_NOTE"
 
@@ -3183,11 +3299,13 @@ mode_run() {
   log "ACQUIRED after $(human_s "$waited") — running: ${label}"
   coverage_note
 
+  # The marker goes to the wrapped command alone, never into this shell's own
+  # environment: it is how a call that command makes is recognised as NESTED.
   local rc=0
   if [[ "$kind" == shell ]]; then
-    bash -c "$1" 9>&- || rc=$?
+    OS_VERIFY_LOCK_HELD_BY="$$:${LOCK_FILE}" bash -c "$1" 9>&- || rc=$?
   else
-    "$@" 9>&- || rc=$?
+    OS_VERIFY_LOCK_HELD_BY="$$:${LOCK_FILE}" "$@" 9>&- || rc=$?
   fi
 
   local held
@@ -3237,8 +3355,10 @@ mode_self_test() {
   # silence a case instead (OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips the very
   # check two cases below assert). The cases that want one of these set it
   # themselves, per command, which still works.
+  # OS_VERIFY_LOCK_HELD_BY too: run from inside a real hold, this suite would
+  # otherwise carry the marker of a lock it is not testing.
   unset OS_VERIFY_LOCK_SLOT OS_VERIFY_LOCK_WAIT OS_VERIFY_LOCK_NO_FILTER_CHECK OS_VERIFY_LOCK_BOOTS \
-    OS_VERIFY_LOCK_SIM_LIVENESS
+    OS_VERIFY_LOCK_SIM_LIVENESS OS_VERIFY_LOCK_HELD_BY
 
   # Both halves matter: the export reaches the child invocations, and the three
   # globals redirect the helpers called IN THIS PROCESS. Without the second, a
@@ -4242,10 +4362,30 @@ FAKEDATE
   st_case 'the holder record is cleared on release' \
     "$([[ -e "$HOLDER_FILE" ]] && echo yes || echo no)" no
 
+  # (n) NESTED: a call made from inside a hold runs in it (#23470). The inner
+  # call is given a 1s budget, so without recognition it queues behind its own
+  # ancestor and exits 99 — the measured defect — rather than 5.
+  local nout nrc nrows
+  nout="$(bash "$SELF" -c 'printf "%s|%s" "$OS_VERIFY_LOCK_HELD_BY" "$PPID"' 2> /dev/null)"
+  st_case 'the wrapped command is told whose hold it runs in: <holder pid>:<lock file>' \
+    "$([[ "$nout" == "${nout##*|}:${L}|${nout##*|}" ]] && echo yes || echo "no: ${nout}")" yes
+  nrows="$(wc -l < "$LEDGER_FILE" | tr -d ' ')"
+  nout="$(bash "$SELF" -- env OS_VERIFY_LOCK_WAIT=1 bash "$SELF" -- sh -c 'exit 5' 2>&1)"
+  nrc=$?
+  st_case 'a call from inside a hold runs at once and passes its exit code out' "$nrc" 5
+  st_case 'and its verdict says NESTED, with the certified word' \
+    "$(printf '%s\n' "$nout" | grep -c 'VERDICT command-exit 5 · NESTED inside the hold of pid')" 1
+  st_case 'and only the outer call writes a ledger row' \
+    "$(($(wc -l < "$LEDGER_FILE" | tr -d ' ') - nrows))" 1
+  nout="$(bash "$SELF" -- env OS_VERIFY_LOCK_FILE="${L}.other" bash "$SELF" -- true 2>&1)"
+  st_case 'a hold on ANOTHER lock file is not nesting: the inner call acquires its own' \
+    "$(printf '%s\n' "$nout" | grep -c 'NESTED')" 0
+  rm -rf "${L}.other"*
+
   # --- real contention, on this test's private lock only --------------------
 
   # queue timeout: a holder we started, a waiter with a 2s budget.
-  bash "$SELF" -c 'sleep 6' > /dev/null 2>&1 &
+  bash "$SELF" -c 'sleep 7' > /dev/null 2>&1 &
   local holder_pid=$!
   sleep 1.5
   local out rc
@@ -4256,6 +4396,13 @@ FAKEDATE
     "$([[ "$out" == *'VERDICT queue-timeout'* ]] && echo yes || echo no)" yes
   st_case 'and names the holder it waited on, with a duration' \
     "$([[ "$out" == *'holder pid'*'held '* ]] && echo yes || echo no)" yes
+
+  # (n) the NESTED marker is an inherited STRING. One naming this live holder
+  # from OUTSIDE its process tree -- what a process the wrapped command left
+  # behind carries -- must queue like any other call, never run unlocked.
+  # Everything else about it is genuine: this lock file, the registered pid.
+  OS_VERIFY_LOCK_HELD_BY="${holder_pid}:${L}" OS_VERIFY_LOCK_WAIT=1 bash "$SELF" -c true > /dev/null 2>&1
+  st_case 'a marker naming the live holder from OUTSIDE its tree does not nest: it queues, exit 99' "$?" 99
 
   # --status sees the same holder while it is still running.
   out="$(bash "$SELF" --status 2>&1)"

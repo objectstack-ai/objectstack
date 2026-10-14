@@ -215,7 +215,7 @@ describe('mixing rule: one refusal per contradiction, at the contradicting key',
     ['bodyShape', { wrap: 'data' }, /^`bodyShape` shapes a `type: 'api'` request body — an `operation: 'update'` action sends no request body of its own/],
     ['recordIdParam', 'id', /^`recordIdParam` injects the row id into a request body — an `operation: 'update'` action binds the current record from the invocation context/],
     ['recordIdField', 'token', /^`recordIdField` seeds `recordIdParam` — an `operation: 'update'` action binds the current record from the invocation context/],
-    ['onSuccess', { navigate: '/tasks' }, /^`onSuccess` is not defined for an `operation: 'update'` action yet/],
+    ['onSuccess', { navigate: '/tasks' }, /^An `operation: 'update'` action's `onSuccess` would follow a result the contract does not declare: the console's action runner reads `operation` before any executor, so an `operation: 'update'` action runs no handler and no executor of its own/],
     ['opensInNewTab', true, /^`opensInNewTab` pre-opens a tab for a handler-returned `\{ redirectUrl \}` — an `operation: 'update'` action has no handler/],
     ['newTabUrl', '/open/{recordId}', /^`newTabUrl` is the zero-roundtrip target of the pre-opened-tab flow — an `operation: 'update'` action has no such flow/],
   ];
@@ -231,6 +231,17 @@ describe('mixing rule: one refusal per contradiction, at the contradicting key',
       expect(issue?.message).toMatch(opening);
     });
   }
+
+  it('refuses `onSuccess` beside `operation: \'update\'` on every `type` it parses with, ONE issue at `onSuccess` (negative control: the same action without it parses)', () => {
+    for (const typed of [{}, { type: 'script' as const }]) {
+      const refused = ActionSchema.safeParse({ ...duly, ...typed, onSuccess: { navigate: '/tasks' } });
+      expect(paths(refused), JSON.stringify(typed)).toEqual(['onSuccess']);
+      expect(issueAt(refused, 'onSuccess')?.code).toBe('custom');
+      expect(issueAt(refused, 'onSuccess')?.message).toContain('Drop `onSuccess`');
+      const control = ActionSchema.safeParse({ ...duly, ...typed });
+      expect(control.success, JSON.stringify(typed)).toBe(true);
+    }
+  });
 
   it('refuses `patch` on an action WITHOUT `operation: \'update\'` — it would be silently dropped', () => {
     for (const base of [

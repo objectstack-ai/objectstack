@@ -61,8 +61,8 @@ export const PositionSchema = lazySchema(() => strictObject(
       permissions:
         '`permissions` is not a Position field — there are no direct position-level ' +
         'permission strings anywhere on the platform: capability reaches a position ' +
-        'ONLY through the permission sets it names in `permissionSets`. The `sys_position` ' +
-        'row column of the same name — a "JSON-serialized array of permission ' +
+        'ONLY through the permission sets it names in `permissionSets`. The column of the same ' +
+        'name on the retired `sys_position` row — a "JSON-serialized array of permission ' +
         'strings" textarea no producer ever wrote and no runtime path ever read — ' +
         'was retired under ADR-0049 enforce-or-remove. Delete the key; to ' +
         'grant capability, name permission sets in `permissionSets` instead.',
@@ -73,14 +73,14 @@ export const PositionSchema = lazySchema(() => strictObject(
   },
   {
   /** Identity */
-  // [#8468] "unique per organization", not bare "unique". This `describe()` is
-  // the source of the generated reference page's `name` row
-  // (`content/docs/references/identity/position.mdx`), so the bare wording
-  // published the installation-wide reading that `sys_position`'s declared
-  // index accidentally materialized — as if it had been intended. The ruling of
-  // 2026-08-13 scopes the name per organization; the text now says so.
+  // [ADR-0131 D3] The catalog is environment-level: there is no
+  // organization-level catalog, so a name is one item in the security catalog
+  // the environment serves. This `describe()` is the source of the generated
+  // reference page's `name` row (`content/docs/references/identity/position.mdx`);
+  // its earlier "unique per organization" (#8468) read the retired
+  // `sys_position` row's index.
   name: SnakeCaseIdentifierSchema.describe(
-    'Position name, unique per organization (lowercase snake_case)',
+    'Position name, unique within the security catalog the environment serves (lowercase snake_case)',
   ),
   label: z.string().describe('Display label (e.g. VP of Sales)'),
 
@@ -96,8 +96,8 @@ export const PositionSchema = lazySchema(() => strictObject(
    * This key replaced the `sys_position_permission_set` junction as the
    * position → set binding: the authorization resolver reads this list and no
    * junction row. A name that resolves to no permission set confers nothing.
-   * A set the catalog row deactivates confers nothing either: the `active`
-   * flag stays on the row until it gains a definition home.
+   * A set deactivated in the activation ledger (`sys_metadata_activation`)
+   * confers nothing either.
    *
    * The built-in `everyone` anchor (ADR-0090 D5) is declared by the platform
    * with the deployment's baseline sets; a package does not name it here, it

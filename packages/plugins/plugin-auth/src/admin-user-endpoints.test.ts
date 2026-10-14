@@ -845,7 +845,16 @@ describe('Setup dialogs: one password rule (sys_user create_user / set_user_pass
 // row to its decisions and its reference (`object_name` + `record_id`).
 describe('admin ledger rows: decisions and a reference, never a field value of the user', () => {
   const CREATE_DECISIONS = ['event', 'membershipCreated', 'passwordGenerated', 'placeholderEmail'];
-  const PASSWORD_SET_DECISIONS = ['event', 'passwordGenerated'];
+  // [#23287] The forced reset's revocation switch is a decision too (on by
+  // default), and what it landed is recorded as counts beside it.
+  const PASSWORD_SET_DECISIONS = [
+    'event',
+    'passwordGenerated',
+    'revocationComplete',
+    'revokeSessionsAndKeys',
+    'revokedApiKeys',
+    'revokedSessions',
+  ];
 
   /** Normalise a key so a camelCase metadata key and a snake_case field name compare equal. */
   const norm = (k: string) => k.replace(/_/g, '').toLowerCase();
@@ -967,5 +976,127 @@ describe('admin ledger rows: decisions and a reference, never a field value of t
     expect(Object.keys(metadata).sort()).toEqual(PASSWORD_SET_DECISIONS);
     expect(metadata).toMatchObject({ event: 'user.admin_password_set', passwordGenerated: true });
     expectNoFieldValue(metadata, writes);
+  });
+});
+
+// ── [#23287 — ruling C′ item 2] the forced reset's revocation switch ──────
+//
+// The forced reset raises `PASSWORD_RESET_REQUIRED`, a `credential`-scope
+// posture: it holds the password sign-in and NOT the user's API keys. The
+// administrator's act therefore carries an explicit switch that revokes the
+// user's sessions and keys, ON by default (the act records no reason, and the
+// default is the one for a suspected compromise). Both positions pinned, plus
+// the honesty of an incomplete revocation.
+describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () => {
+  const FUTURE = () => new Date(Date.now() + 86_400_000).toISOString();
+  const PAST = () => new Date(Date.now() - 86_400_000).toISOString();
+
+  /** The data engine with a read surface over the user's sessions and keys. */
+  function withCredentials(m: ReturnType<typeof makeDeps>) {
+    const find = vi.fn(async (object: string, q: any) => {
+      if (object === 'sys_session') {
+        return [
+          { id: 'sess_live', expires_at: FUTURE() },
+          { id: 'sess_no_expiry' },
+          { id: 'sess_already_revoked', expires_at: FUTURE(), revoked_at: PAST() },
+          { id: 'sess_expired', expires_at: PAST() },
+        ];
+      }
+      if (object === 'sys_api_key') return q?.where?.revoked === false && q?.where?.user_id === 'user-9' ? [{ id: 'key_1' }, { id: 'key_2' }] : [];
+      return [];
+    });
+    m.deps.getDataEngine = () => ({ update: m.engineUpdate, insert: m.engineCreate, find });
+    return find;
+  }
+
+  const writesTo = (m: ReturnType<typeof makeDeps>, object: string) =>
+    callsOf(m.engineUpdate).filter(([o]) => o === object).map(([, doc]) => doc);
+
+  it('DEFAULT ON: revokes every live session and every unrevoked API key, after the password is set', async () => {
+    const m = makeDeps();
+    withCredentials(m);
+    const res = await runAdminSetUserPassword(
+      m.deps,
+      makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const data = res.body.data as any;
+    expect(data.revokeSessionsAndKeys).toBe(true);
+    expect(data.revoked).toEqual({ sessions: 2, apiKeys: 2, failed: 0, complete: true });
+
+    const sessions = writesTo(m, 'sys_session');
+    expect(sessions.map((d) => d.id).sort()).toEqual(['sess_live', 'sess_no_expiry']);
+    for (const doc of sessions) {
+      expect(doc.revoke_reason).toBe('admin_password_reset');
+      expect(doc.expires_at instanceof Date && doc.expires_at.getTime() < Date.now()).toBe(true);
+      expect(doc.revoked_at instanceof Date).toBe(true);
+    }
+    expect(writesTo(m, 'sys_api_key')).toEqual([
+      { id: 'key_1', revoked: true },
+      { id: 'key_2', revoked: true },
+    ]);
+    // The new password landed BEFORE anything was revoked.
+    const pw = m.authCtx.internalAdapter.updatePassword.mock.invocationCallOrder[0];
+    const firstRevoke = m.engineUpdate.mock.invocationCallOrder[
+      callsOf(m.engineUpdate).findIndex(([o]) => o === 'sys_session')
+    ];
+    expect(pw).toBeLessThan(firstRevoke);
+    expectNoPasswordLeak(m, 'Str0ng!Pass');
+  });
+
+  it('OFF: `revokeSessionsAndKeys: false` revokes nothing and says so', async () => {
+    const m = makeDeps();
+    const find = withCredentials(m);
+    const res = await runAdminSetUserPassword(
+      m.deps,
+      makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass', revokeSessionsAndKeys: false }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    const data = res.body.data as any;
+    expect(data.revokeSessionsAndKeys).toBe(false);
+    expect(data.revoked).toBeUndefined();
+    expect(writesTo(m, 'sys_session')).toEqual([]);
+    expect(writesTo(m, 'sys_api_key')).toEqual([]);
+    expect(find.mock.calls.filter(([o]) => o === 'sys_session' || o === 'sys_api_key')).toEqual([]);
+  });
+
+  it('only a literal `false` turns it off: a malformed value keeps the safe default', async () => {
+    const m = makeDeps();
+    withCredentials(m);
+    const res = await runAdminSetUserPassword(
+      m.deps,
+      makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass', revokeSessionsAndKeys: 'no' }),
+      ACTOR,
+    );
+    expect((res.body.data as any).revoked).toEqual({ sessions: 2, apiKeys: 2, failed: 0, complete: true });
+  });
+
+  it('a refused write is reported, never silent: complete false, the reset still succeeds', async () => {
+    const m = makeDeps();
+    withCredentials(m);
+    m.engineUpdate.mockImplementation((async (object: string, doc: any) => {
+      if (object === 'sys_api_key' && doc?.id === 'key_2') throw new Error('write refused');
+      return {};
+    }) as any);
+    const res = await runAdminSetUserPassword(
+      m.deps,
+      makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass' }),
+      ACTOR,
+    );
+    expect(res.status).toBe(200);
+    expect((res.body.data as any).revoked).toEqual({ sessions: 2, apiKeys: 1, failed: 1, complete: false });
+    expect(m.warn.mock.calls.map((c) => String(c[0])).some((l) => l.includes('revocation INCOMPLETE'))).toBe(true);
+  });
+
+  it('an engine with no read surface cannot measure the revocation, so it is never reported complete', async () => {
+    const m = makeDeps();
+    const res = await runAdminSetUserPassword(
+      m.deps,
+      makeRequest({ userId: 'user-9', newPassword: 'Str0ng!Pass' }),
+      ACTOR,
+    );
+    expect((res.body.data as any).revoked).toEqual({ sessions: 0, apiKeys: 0, failed: 0, complete: false });
   });
 });

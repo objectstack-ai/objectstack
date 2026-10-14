@@ -14,7 +14,7 @@ import {
   parseMatchAddresses,
   serializeMatchAddresses,
 } from './match-addresses.js';
-import { forwardAsAttachment, plainMessage, rfc822 } from './messages.fixture.js';
+import { binaryBytes, forwardAsAttachment, messageWithParts, plainMessage, rfc822 } from './messages.fixture.js';
 
 const ORIGINAL = rfc822(
   [
@@ -137,6 +137,9 @@ describe('parseInboundMessage — a message forwarded as an attachment (source `
     const parsed = await parseInboundMessage(raw);
     expect(parsed.forwarded).toHaveLength(MAX_FORWARDED_PARTS);
     expect(parsed.unreadForwardedParts).toBe(2);
+    // Their addresses are not read, but their bytes are kept as attachments.
+    expect(parsed.attachments).toHaveLength(MAX_FORWARDED_PARTS + 2);
+    expect(parsed.attachments.slice(-2).map((a) => a.forwarded)).toEqual([{ subject: null }, { subject: null }]);
   });
 
   it('control: a forward quoted inline in the body names no forwarded participants (that is the `inline` source)', async () => {
@@ -151,6 +154,50 @@ describe('parseInboundMessage — a message forwarded as an attachment (source `
   });
 });
 
+describe('parseInboundMessage — the parts stored as attachments of the row', () => {
+  it('lists every part besides the bodies, in message order, with its bytes as carried', async () => {
+    const png = binaryBytes();
+    const pdf = binaryBytes(7);
+    const parsed = await parseInboundMessage(
+      messageWithParts({
+        messageId: '<parts-1@corp.test>',
+        parts: [
+          { contentType: 'image/png', disposition: 'inline; filename="logo.png"', contentId: '<logo@corp.test>', bytes: png },
+          { contentType: 'application/pdf; name="apple.pdf"', disposition: 'inline; filename="apple.pdf"', bytes: pdf },
+          { contentType: 'application/octet-stream', bytes: pdf },
+          { contentType: 'message/rfc822', disposition: 'attachment; filename="question.eml"', message: ORIGINAL },
+          { contentType: 'message/global', message: ORIGINAL },
+        ],
+      }),
+    );
+    expect(parsed.attachments.map((a) => [a.filename, a.mimeType, a.forwarded])).toEqual([
+      ['logo.png', 'image/png', null],
+      ['apple.pdf', 'application/pdf', null],
+      [null, 'application/octet-stream', null],
+      ['question.eml', 'message/rfc822', { subject: 'A question' }],
+      [null, 'message/global', { subject: 'A question' }],
+    ]);
+    expect(parsed.attachments[0]!.content).toEqual(png);
+    expect(parsed.attachments[1]!.content).toEqual(pdf);
+    // A forwarded message is kept exactly as it travels in its part.
+    expect(new TextDecoder().decode(parsed.attachments[3]!.content)).toBe(ORIGINAL);
+    expect(parsed.text?.trim()).toBe('See attached.');
+  });
+
+  it('control: a message with no part besides its body lists none, and a second text part joins the body', async () => {
+    expect((await parseInboundMessage(plainMessage())).attachments).toEqual([]);
+    const boundary = 'two-texts';
+    const parsed = await parseInboundMessage(
+      rfc822(
+        [['From', 'rep@corp.test'], ['MIME-Version', '1.0'], ['Content-Type', `multipart/mixed; boundary="${boundary}"`]],
+        [`--${boundary}`, 'Content-Type: text/plain', '', 'one', `--${boundary}`, 'Content-Type: text/plain', '', 'two', `--${boundary}--`, ''].join('\r\n'),
+      ),
+    );
+    expect(parsed.attachments).toEqual([]);
+    expect(parsed.text).toContain('two');
+  });
+});
+
 describe('the participant set (`match_addresses`)', () => {
   it('normalizes ASCII letters only, and refuses what is not an addr-spec', () => {
     expect(normalizeMailAddress('  Jane.DOE@Acme.TEST ')).toBe('jane.doe@acme.test');
@@ -160,11 +207,12 @@ describe('the participant set (`match_addresses`)', () => {
     }
   });
 
-  it('lists outer addresses first, drops the mailbox own address, and keeps each (address, source) pair once', () => {
+  it('lists outer addresses first, then attachment, then inline, drops the mailbox own address, and keeps each (address, source) pair once', () => {
     const set = collectMatchAddresses(
       [
         { source: 'outer', addresses: ['Rep@Corp.test', 'INBOX@corp.test', 'rep@corp.test', 'nonsense'] },
         { source: 'attachment', addresses: ['customer@acme.test', 'rep@corp.test', 'Inbox@Corp.Test'] },
+        { source: 'inline', addresses: ['Quoted@Acme.test', 'customer@acme.test', 'inbox@corp.test'] },
       ],
       ['inbox@corp.test'],
     );
@@ -172,10 +220,12 @@ describe('the participant set (`match_addresses`)', () => {
       { address: 'rep@corp.test', source: 'outer' },
       { address: 'customer@acme.test', source: 'attachment' },
       { address: 'rep@corp.test', source: 'attachment' },
+      { address: 'quoted@acme.test', source: 'inline' },
+      { address: 'customer@acme.test', source: 'inline' },
     ]);
   });
 
-  it('round-trips through its stored spelling, and accepts the declared `inline` source a later parser writes', () => {
+  it('round-trips through its stored spelling, the `inline` source included', () => {
     const set = [
       { address: 'a@acme.test', source: 'outer' as const },
       { address: 'b@acme.test', source: 'inline' as const },

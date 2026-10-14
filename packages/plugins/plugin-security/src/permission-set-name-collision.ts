@@ -56,10 +56,8 @@
 /**
  * The minimal sink this module reports through.
  *
- * Structurally satisfied by both `ProjectionLogger` and the catalog's
- * `SeedLogger` — declared here rather than imported so this module stays a leaf
- * and `permission-set-projection.ts` can name the diagnostic type without a
- * cycle. `warn` is non-optional for the #9754 reason its two siblings give: a
+ * Structurally satisfied by the catalog's `SeedLogger` — declared here rather
+ * than imported so this module stays a leaf. `warn` is non-optional for the #9754 reason its two siblings give: a
  * fallback channel that may itself be absent is not a fallback.
  */
 export interface CollisionReportSink {

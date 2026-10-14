@@ -137,11 +137,14 @@ describe('#13491 the inventory — a verdict per object, never a namespace', () 
 
   it('#8672 inherits PER OBJECT — the same namespace holds both verdicts', () => {
     expect(classifyPlatformObjectTenancy('sys_file')).toBe('tenant-scoped');
+    // The inventory's one `global` entry, `sys_permission_set`, retired with
+    // its object (C3 stage 8): no `global` verdict is recorded today. A new one
+    // brings its own discriminating pair here.
+    expect(Object.entries(PLATFORM_OBJECT_TENANCY).filter(([, e]) => e.tenancy === 'global')).toEqual([]);
+    expect(classifyPlatformObjectTenancy('sys_permission_set')).toBe('unclassified');
     // The discriminating half: the old blanket predicate answered the SAME
-    // thing for every platform object, which is the exemption the ruling
-    // withdrew. Each verdict the inventory records is honoured as recorded —
-    // read off the inventory, since its one `global` entry
-    // (`sys_permission_set`) retired with its object (C3 stage 8).
+    // thing for both of these, which is the exemption the ruling withdrew.
+    expect(isPlatformObjectOutOfTenantAuditScope('sys_permission_set')).toBe(true);
     expect(isPlatformObjectOutOfTenantAuditScope('sys_file')).toBe(false);
     for (const [name, entry] of Object.entries(PLATFORM_OBJECT_TENANCY)) {
       expect(classifyPlatformObjectTenancy(name), name).toBe(entry.tenancy);

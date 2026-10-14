@@ -46,8 +46,8 @@
 - 收敛期转红走补丁轮续派原 dev,⛔ 不作 REWORK 的理由;重量级卡可在派发令写本单等 CI。
 - 每个门禁读数先钉到 PR 当前 head:比对 run `head_sha` 与 `head.sha`,不一致的双向都不入账。
 - ⛔ 非当前 head 上的 `cancelled` 零动作、永不重跑:新推送自带全套 run。
+- 席位核对门禁证据 = 钉 head 的 check-runs(名+结论);本地并集只证本地子集,⛔ 不替缺席者。
 - dev 本地并集钉 head:所抄 `git rev-parse --short HEAD` 不符 PR `head.sha` 或没抄 ⇒ 双向都不入账。
-- 复核后又推提交而 HEAD 未动 ⇒ 补跑并集(至少棘轮族)再更新报告。
 
 ## 断言与收益
 

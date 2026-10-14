@@ -332,12 +332,13 @@ describe('conversion layer (ADR-0087 D2)', () => {
         (stack.pages as Array<{ regions: Array<{ components: Array<{ properties: unknown }> }> }>)[0]!
           .regions[0]!.components[0]!.properties;
 
-      const equal = collectConversionNotices(header({ title: 'T', subtitle: 'One', description: 'One' }));
+      // A retired entry (#23421), so the data-at-rest posture replays it.
+      const equal = collectConversionNotices(header({ title: 'T', subtitle: 'One', description: 'One' }), { includeRetired: true });
       expect(propsOf(equal.stack)).toEqual({ title: 'T', subtitle: 'One' });
       expect(equal.notices).toHaveLength(1);
 
       const differs = header({ title: 'T', subtitle: 'One', description: 'Another' });
-      const kept = collectConversionNotices(structuredClone(differs));
+      const kept = collectConversionNotices(structuredClone(differs), { includeRetired: true });
       expect(kept.stack).toEqual(differs);
       expect(kept.notices).toHaveLength(0);
     });
@@ -1107,9 +1108,12 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * `page-header-subtitle-alias` (#4827, objectui#3226).
    *
    * The PD #12 retirement of objectui's `subtitle ?? description` fallback on
-   * the page header. Unlike the entries above this one is a LIVE window, so
-   * every case here runs the plain load posture (no `includeRetired`) — that
-   * the rewrite happens without it is the property objectui is waiting on.
+   * the page header. Its protocol-17 window has run: the entry is retired from
+   * the load path at 18 (#23421), so the authoring funnel no longer rewrites
+   * the key and an author meets `PageHeaderProps`' refusal naming the rename.
+   * The rewrite cases below therefore run the data-at-rest posture
+   * (`includeRetired`) — the replay stored rows, the artifact door and
+   * `os migrate meta` still perform — and one case pins the authoring posture.
    */
   describe('page-header-subtitle-alias (the `subtitle ?? description` retirement)', () => {
     const pageWith = (...components: Record<string, unknown>[]) => ({
@@ -1126,7 +1130,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       // looks like on the way in.
       expect(componentsOf(before)[0]!.properties).toEqual({ title: 'Leads', description: 'All open leads' });
 
-      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
 
       // …and this is what the runtime sees: the second line survives under the
       // canonical key, and the dialect spelling is gone rather than shadowing it.
@@ -1138,6 +1142,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('rewrites it on the CANONICAL `page:header` node too — where it is dropped on the floor today', () => {
       const { stack, notices } = collectConversionNotices(
         pageWith({ type: 'page:header', properties: { title: 'Lead', description: 'One lead' } }),
+        { includeRetired: true },
       );
       expect(componentsOf(stack)[0]!.properties).toEqual({ title: 'Lead', subtitle: 'One lead' });
       expect(notices).toHaveLength(1);
@@ -1146,6 +1151,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('does NOT rewrite the node TYPE — the kebab alias is objectui\'s to retire', () => {
       const { stack } = collectConversionNotices(
         pageWith({ type: 'page-header', properties: { title: 'Leads', description: 'All open leads' } }),
+        { includeRetired: true },
       );
       expect(componentsOf(stack)[0]!.type).toBe('page-header');
     });
@@ -1158,7 +1164,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
         type: 'page:header',
         properties: { title: 'Both', subtitle: 'wins', description: 'other' },
       });
-      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
       expect(stack).toEqual(before);
       expect(notices).toHaveLength(0);
     });
@@ -1170,17 +1176,18 @@ describe('conversion layer (ADR-0087 D2)', () => {
         { type: 'element:text_input', properties: { label: 'Note', description: 'Helper text' } },
         { type: 'record:details', properties: { description: 'not a subtitle' } },
       );
-      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
       expect(stack).toEqual(before);
       expect(notices).toHaveLength(0);
     });
 
-    it('emits a notice that names the surface, the site and the live window', () => {
+    it('emits a notice that names the surface, the site and the window it had', () => {
       const { notices } = collectConversionNotices(
         pageWith(
           { type: 'element:divider' },
           { type: 'page-header', properties: { title: 'Leads', description: 'All open leads' } },
         ),
+        { includeRetired: true },
       );
       expect(notices).toHaveLength(1);
       expect(notices[0]).toMatchObject({
@@ -1196,14 +1203,31 @@ describe('conversion layer (ADR-0087 D2)', () => {
 
     it('is idempotent — the canonical shape is not a match', () => {
       const before = pageWith({ type: 'page:header', properties: { title: 'Leads', subtitle: 'All open leads' } });
-      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      const { stack, notices } = collectConversionNotices(structuredClone(before), { includeRetired: true });
       expect(stack).toEqual(before);
       expect(notices).toHaveLength(0);
     });
 
     it('copies on write — a page with no header passes through by reference', () => {
       const stack = pageWith({ type: 'record:details' });
-      expect(applyConversions(stack)).toBe(stack);
+      expect(applyConversions(stack, { includeRetired: true })).toBe(stack);
+    });
+
+    it('is retired from the load path at 18 — the authoring posture rewrites nothing, on either node type', () => {
+      // Without `includeRetired` (the normalizeStackInput posture) the authored
+      // `description` reaches the props gate as written, where the rename is
+      // said to the author (the premise pin below) instead of absorbed.
+      expect(ALL_CONVERSIONS.find((c) => c.id === 'page-header-subtitle-alias')).toMatchObject({
+        toMajor: 17,
+        retiredFromLoadPath: true,
+        retiredAfter: '17.7.0',
+      });
+      for (const type of ['page:header', 'page-header']) {
+        const before = pageWith({ type, properties: { title: 'Leads', description: 'All open leads' } });
+        const { stack, notices } = collectConversionNotices(structuredClone(before));
+        expect(stack).toEqual(before);
+        expect(notices).toHaveLength(0);
+      }
     });
 
     it('reaches a STORED page row, so data at rest canonicalizes on rehydration', () => {
@@ -1235,11 +1259,12 @@ describe('conversion layer (ADR-0087 D2)', () => {
      * the conversion did not fire there, `PageSchema` stayed green, and the
      * props gate is CLI-only.
      *
-     * With the shape closed there are two lines of defence rather than one: the
-     * conversion still canonicalizes on every load and rehydration (the tests
-     * above, unchanged), and a `description` that reaches this parse
-     * unconverted is now rejected BY NAME carrying the rename. The alias entry
-     * is what makes the second one useful rather than merely loud.
+     * With the shape closed, a `description` that reaches this parse is
+     * rejected BY NAME carrying the rename — and since the conversion retired
+     * from the load path at 18 (#23421), every authored `description` reaches
+     * it: this refusal is now the authoring answer at every door that judges
+     * page props, while the conversion canonicalizes data at rest only. The
+     * alias entry is what makes the refusal teach rather than merely refuse.
      */
     it('the canonical props schema declares `subtitle` and no `description`', () => {
       expect(PageHeaderProps.parse({ title: 'Leads', subtitle: 'All open leads' }).subtitle)
@@ -1284,6 +1309,11 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * a payload from the `${param.X}` interpolation scope a `url` action reads
    * out of the same key. Both are ways this rewrite could be lossy, and neither
    * is visible in a fixture that only carries the happy path.
+   *
+   * Retired from the load path at 18 (#23421): the rewrite cases run the
+   * data-at-rest posture (`includeRetired`), and one case pins that the
+   * authoring posture rewrites nothing, so the array-only field's refusal
+   * naming `bodyExtra` is what an author meets.
    */
   describe('inline-action-api-params-to-body-extra', () => {
     const button = (action: Record<string, unknown>) => ({
@@ -1300,7 +1330,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const notices: ConversionNotice[] = [];
       const out = applyConversions(
         button({ type: 'api', target: '/api/v1/forms/contact-us/submit', params: { name: '{{page.inquiryName}}' } }),
-        { onNotice: (n) => notices.push(n) },
+        { includeRetired: true, onNotice: (n) => notices.push(n) },
       );
       expect(actionOf(out)).toEqual({
         type: 'api',
@@ -1314,7 +1344,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('leaves an ActionParam[] definition array alone — that meaning of the key survives', () => {
       const params = [{ name: 'reason', label: 'Reason', type: 'text' }];
       const stack = button({ type: 'api', target: '/x', params });
-      const out = applyConversions(stack);
+      const out = applyConversions(stack, { includeRetired: true });
       // Identity, not just equality: nothing converted, so copy-on-write shares.
       expect(out).toBe(stack);
     });
@@ -1325,22 +1355,38 @@ describe('conversion layer (ADR-0087 D2)', () => {
       // those into an api request body would be lossy, so the guard is not a
       // conservatism — it is the difference between lossless and not.
       const stack = button({ type: 'url', target: '/x?id=${param.id}', params: { id: 'abc' } });
-      expect(applyConversions(stack)).toBe(stack);
+      expect(applyConversions(stack, { includeRetired: true })).toBe(stack);
     });
 
     it('keeps BOTH when `bodyExtra` already says something different', () => {
       const stack = button({ type: 'api', target: '/x', params: { a: 1 }, bodyExtra: { b: 2 } });
-      const out = applyConversions(stack);
+      const out = applyConversions(stack, { includeRetired: true });
       expect(out).toBe(stack);
       expect(actionOf(out)).toEqual({ type: 'api', target: '/x', params: { a: 1 }, bodyExtra: { b: 2 } });
     });
 
     it('is idempotent — the converted result replays to itself with no second notice', () => {
-      const once = applyConversions(button({ type: 'api', target: '/x', params: { a: 1 } }));
+      const once = applyConversions(button({ type: 'api', target: '/x', params: { a: 1 } }), { includeRetired: true });
       const notices: ConversionNotice[] = [];
-      const twice = applyConversions(once, { onNotice: (n) => notices.push(n) });
+      const twice = applyConversions(once, { includeRetired: true, onNotice: (n) => notices.push(n) });
       expect(twice).toBe(once);
       expect(notices).toEqual([]);
+    });
+
+    it('is retired from the load path at 18 — the authoring posture leaves the object form for the props gate', () => {
+      expect(ALL_CONVERSIONS.find((c) => c.id === 'inline-action-api-params-to-body-extra')).toMatchObject({
+        toMajor: 17,
+        retiredFromLoadPath: true,
+        retiredAfter: '17.7.0',
+      });
+      const before = button({ type: 'api', target: '/api/v1/forms/contact-us/submit', params: { name: '{{page.n}}' } });
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+      // …where the refusal names the rename the conversion used to perform.
+      const refused = ElementButtonPropsSchema.safeParse({ label: 'Go', action: actionOf(stack) });
+      expect(refused.success).toBe(false);
+      expect(refused.error!.issues.map((i) => i.message).join('\n')).toContain('bodyExtra');
     });
 
     /**

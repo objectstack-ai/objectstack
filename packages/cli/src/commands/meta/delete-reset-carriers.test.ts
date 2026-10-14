@@ -78,7 +78,11 @@ import {
 } from '@objectstack/platform-objects';
 import { RestServer } from '@objectstack/runtime';
 import { ObjectStackClient } from '@objectstack/client';
-import MetaDelete, { metaDeleteOptions, EMPTY_IF_MATCH_REFUSAL } from './delete.js';
+import MetaDelete, {
+  metaDeleteOptions,
+  EMPTY_IF_MATCH_REFUSAL,
+  EMPTY_PACKAGE_DELETE_REFUSAL,
+} from './delete.js';
 
 /**
  * The state the `createApiClient` stub reads, and the call counter that makes
@@ -388,10 +392,10 @@ describe('[#13024] the flags `os meta delete` declares', () => {
     expect(String((refused.thrown as Error)?.message)).toMatch(/state/i);
   }, 60_000);
 
-  it('the withheld third carrier has no flag, under either spelling', () => {
+  it('the withheld `?dropStorage` carrier has no flag, under either spelling', () => {
     const names = Object.keys(MetaDelete.flags as Record<string, unknown>);
-    // Commit cf71d73f8 shipped two of the door's three carriers on purpose; `?dropStorage`
-    // is the one that ADDS destructive reach. A CLI flag for it would reverse
+    // `?dropStorage` is withheld on purpose (commit cf71d73f8): it is the
+    // carrier that ADDS destructive reach. A CLI flag for it would reverse
     // that ruling from the layer above.
     expect(names).not.toContain('dropStorage');
     expect(names).not.toContain('drop-storage');
@@ -399,6 +403,7 @@ describe('[#13024] the flags `os meta delete` declares', () => {
     // object sees the flags that ARE declared.
     expect(names).toContain('if-match');
     expect(names).toContain('draft');
+    expect(names).toContain('package');
   });
 
   it('`metaDeleteOptions` returns UNDEFINED when neither flag is given', () => {
@@ -760,5 +765,159 @@ describe('[#13024] the CLI\'s option bag behaves identically through both SDK tw
     expect(scoped.search).toBe('');
     expect(Object.keys(unscoped.headers).sort()).toEqual(['content-type']);
     expect(Object.keys(scoped.headers).sort()).toEqual(['content-type']);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// Part 6 — `--package`: the remedy the door's 409 RESOURCE_CONFLICT prescribes
+// ---------------------------------------------------------------------------
+
+/**
+ * [#23350] Since #23165 the reset door refuses a delete that names no package
+ * of an item two or more packages hold — `409 RESOURCE_CONFLICT`, naming the
+ * packages, prescribing `?package=` — and since #23293 the SDK can send it
+ * (`DeleteMetaItemOptions.packageId`). This command declared no flag for it,
+ * so a CLI operator who met that refusal was told to do something the command
+ * could not send. These cases drive the same real door as the parts above.
+ */
+const PKG = 'com.qa.alpha';
+const OTHER_PKG = 'com.qa.beta';
+
+/** One item saved into two packages THROUGH THE SDK: one row per package (ADR-0048). */
+async function twoPackageItem(client: ObjectStackClient, name: string) {
+  await client.meta.saveItem('view', name, VIEW(name, 'A'), { packageId: PKG });
+  await client.meta.saveItem('view', name, VIEW(name, 'B'), { packageId: OTHER_PKG });
+}
+
+/** The package each stored row of `name` is bound to, sorted. */
+async function packagesOf(engine: any, name: string): Promise<string[]> {
+  return (await overlayRows(engine, name)).map((r: any) => String(r.package_id)).sort();
+}
+
+describe('[#23350] the `--package` flag `os meta delete` declares', () => {
+  it('declares `--package` as a value flag whose help names the refusal it answers', () => {
+    const flags = MetaDelete.flags as Record<string, any>;
+    expect(flags.package.type).toBe('option');
+    // An operator who meets the 409 has to be able to find the remedy from
+    // `--help`: the flag says which refusal it answers.
+    expect(flags.package.description).toMatch(/409/);
+    expect(flags.package.description).toMatch(/RESOURCE_CONFLICT/);
+    const examples = (MetaDelete.examples as string[]).join('\n');
+    expect(examples).toContain('--package');
+  });
+
+  it('`metaDeleteOptions` forwards the id VERBATIM as `packageId`, beside the other two flags', () => {
+    expect(metaDeleteOptions({ package: PKG })).toEqual({ packageId: PKG });
+    expect(metaDeleteOptions({ package: PKG, draft: true, 'if-match': 'v1' }))
+      .toEqual({ packageId: PKG, state: 'draft', ifMatch: 'v1' });
+    // No reshaping: the door, not this command, decides what an id names.
+    expect(metaDeleteOptions({ package: ' com.qa.alpha ' })).toEqual({ packageId: ' com.qa.alpha ' });
+    // Unset stays `undefined`, so the unflagged request is unchanged.
+    expect(metaDeleteOptions({ package: undefined })).toBeUndefined();
+  });
+
+  it('an empty or blank `--package` is refused, never sent as a package-less delete', () => {
+    expect(() => metaDeleteOptions({ package: '' })).toThrow(EMPTY_PACKAGE_DELETE_REFUSAL);
+    expect(() => metaDeleteOptions({ package: '   ' })).toThrow(EMPTY_PACKAGE_DELETE_REFUSAL);
+  });
+});
+
+describe('[#23350] `os meta delete --package` against the real reset door', () => {
+  it('NAMING NONE (the only delete this command could express before): the command reports the 409 and nothing is deleted', async () => {
+    const { engine, client, deleteRequests, wire } = await bootDoor();
+    await twoPackageItem(client, 'two_pkg_probe');
+    // The two-package state is reachable through the door: one row per package.
+    expect(await packagesOf(engine, 'two_pkg_probe')).toEqual([PKG, OTHER_PKG].sort());
+
+    const run = await runCli(['view', 'two_pkg_probe', '--format', 'json']);
+
+    // The refusal reaches the operator in the machine-readable envelope —
+    // `code` and `httpStatus`, not merely a failure.
+    expect(run.exitCode).toBe(1);
+    const payload = JSON.parse(run.out);
+    expect(payload.success).toBe(false);
+    expect(payload.code).toBe('RESOURCE_CONFLICT');
+    expect(payload.httpStatus).toBe(409);
+    // It names both packages, so the operator can pick one for `--package`.
+    expect(String(payload.error)).toContain(PKG);
+    expect(String(payload.error)).toContain(OTHER_PKG);
+    // Nothing was deleted.
+    expect(await packagesOf(engine, 'two_pkg_probe')).toEqual([PKG, OTHER_PKG].sort());
+    // The probe: no package reached the protocol, and none was on the wire.
+    expect(deleteRequests).toHaveLength(1);
+    expect(deleteRequests[0]).not.toHaveProperty('packageId');
+    expect(wire.filter((w) => w.method === 'DELETE').at(-1)!.search).toBe('');
+  }, 60_000);
+
+  it('NAMING ONE: `--package` removes that package\'s row only, and the other package\'s row stays', async () => {
+    const { engine, client, deleteRequests, wire } = await bootDoor();
+    await twoPackageItem(client, 'two_pkg_probe');
+
+    const run = await runCli(['view', 'two_pkg_probe', '--package', PKG, '--format', 'json']);
+
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(run.out)).toMatchObject({ success: true, deleted: true });
+    expect(await packagesOf(engine, 'two_pkg_probe')).toEqual([OTHER_PKG]);
+    // POSITIVE CONTROL for the previous case's absence: the same probe sees
+    // the package arrive, read off `?package=` by the door.
+    expect(deleteRequests).toHaveLength(1);
+    expect(deleteRequests[0].packageId).toBe(PKG);
+    expect(wire.filter((w) => w.method === 'DELETE').at(-1)!.search).toBe(`?package=${PKG}`);
+  }, 60_000);
+
+  it('NAMING A PACKAGE THAT HOLDS NO ROW: nothing is removed — the flag scopes the delete, it does not widen it', async () => {
+    const { engine, client, deleteRequests } = await bootDoor();
+    await twoPackageItem(client, 'two_pkg_probe');
+
+    const run = await runCli(['view', 'two_pkg_probe', '--package', 'com.qa.gamma', '--format', 'json']);
+
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(run.out)).toMatchObject({ success: true, deleted: false });
+    expect(await packagesOf(engine, 'two_pkg_probe')).toEqual([PKG, OTHER_PKG].sort());
+    expect(deleteRequests.at(-1).packageId).toBe('com.qa.gamma');
+  }, 60_000);
+
+  it('`--package` composes with `--draft` and `--if-match` on the wire', async () => {
+    const { client, wire } = await bootDoor();
+    await client.meta.saveItem('view', 'compose_probe', VIEW('compose_probe', 'A'), { packageId: PKG });
+    await runCli(['view', 'compose_probe', '--draft', '--package', PKG, '--if-match', 'sha256:probe']);
+    const sent = wire.filter((w) => w.method === 'DELETE').at(-1)!;
+    expect(sent.search).toBe(`?state=draft&package=${PKG}`);
+    expect(sent.headers['if-match']).toBe('sha256:probe');
+  }, 60_000);
+
+  it('an empty `--package` is refused BEFORE the client is built — nothing reaches the door', async () => {
+    const { engine, client, deleteRequests } = await bootDoor();
+    await client.meta.saveItem('view', 'empty_pkg', VIEW('empty_pkg', 'A'), { packageId: PKG });
+    const requestsBefore = deleteRequests.length;
+    stub.createCalls = 0;
+
+    // `--package "$PKG"` with `PKG` unset. Sent as the package-less delete,
+    // the door would resolve the item's one package and remove its row while
+    // the operator's command line reads as naming a package.
+    const run = await runCli(['view', 'empty_pkg', '--package', '']);
+    expect(run.exitCode).toBe(1);
+    expect(run.out).toContain(EMPTY_PACKAGE_DELETE_REFUSAL);
+    expect(stub.createCalls).toBe(0);
+    expect(deleteRequests).toHaveLength(requestsBefore);
+    expect(await packagesOf(engine, 'empty_pkg')).toEqual([PKG]);
+
+    // POSITIVE CONTROL — the same instruments move on a run that is let through.
+    const ok = await runCli(['view', 'empty_pkg', '--package', PKG]);
+    expect(ok.exitCode).toBe(0);
+    expect(stub.createCalls).toBe(1);
+    expect(deleteRequests).toHaveLength(requestsBefore + 1);
+    expect(await packagesOf(engine, 'empty_pkg')).toEqual([]);
+  }, 60_000);
+
+  it('the bag the CLI builds for `--package` sends identical bytes through both SDK twins', async () => {
+    const { client, wire } = await bootDoor();
+    const options = metaDeleteOptions({ package: PKG });
+    await client.meta.deleteItem('view', 'in_step_pkg', options).catch(() => undefined);
+    await client.environment('env-23350').meta.deleteItem('view', 'in_step_pkg', options).catch(() => undefined);
+
+    const [unscoped, scoped] = wire.filter((w) => w.method === 'DELETE');
+    expect(scoped.search).toBe(unscoped.search);
+    expect(unscoped.search).toBe(`?package=${PKG}`);
   }, 60_000);
 });

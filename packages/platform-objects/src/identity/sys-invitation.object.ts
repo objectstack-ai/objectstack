@@ -302,7 +302,7 @@ export const SysInvitation = ObjectSchema.create({
       label: 'Placement Positions',
       required: false,
       description:
-        'sys_position names assigned on acceptance (ADR-0105 D8). Every position\'s permission sets must be allowlisted by the issuer\'s adminScope.',
+        'Position names assigned on acceptance (ADR-0105 D8). Every position\'s permission sets must be allowlisted by the issuer\'s adminScope.',
     }),
   },
   

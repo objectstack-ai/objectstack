@@ -7,7 +7,7 @@
 ## 候选与批次
 
 - 整车道一次读全,本地求交:`list_issues` 带 `labels: [domain:X]` + 最小字段拿回全车道 open 集。
-- 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除两行皆无的 `tooling` 卡。
+- 候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`;⛔ 排除三门皆无的 `tooling` 卡。
 - 已排队父单的 open sub-issue 自动是候选,`pm:epic` 父单的子树除外。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
 - 维护者裁决逐字引入派发词裁决分区作约束,无则写明无裁决。
@@ -176,7 +176,7 @@
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
-- 判决 ACCEPT:issue 英文短评论,核对清单结论 + 抽查读数 + 偏差,链接 PR,⛔ 不复述其叙事。
+- 判决 ACCEPT:PR 评论 `## 席位核对`,清单结论+抽查读数+偏差,⛔ 不复述其叙事;卡留指针行。
 - `mcp_calls` 点名写工具(`settings.json` deny 清单 + `update_pull_request`)⇒ 拒收,⛔ 不带注放行。
 - 判决 REWORK:逐项反馈,同认领重派;补丁轮优先 SendMessage 续派原 dev;最多 2 轮,第三次升级。
 - 判决 ESCALATE:见〈升级与决策〉;熔断任一命中亦判,PR 暂停,答复前 ⛔ 不派下一轮。

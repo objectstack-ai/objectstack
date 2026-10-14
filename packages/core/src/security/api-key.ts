@@ -26,6 +26,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { postureEnforcesWall, postureUsesUnionScope, normalizeTenancyPosture } from '@objectstack/spec/security';
 import type { TenancyPosture } from '@objectstack/spec/security';
 
+import { accountScopeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
+import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
+
 /** Default visible prefix for generated keys (helps users identify a key). */
 export const API_KEY_PREFIX = 'osk_';
 
@@ -165,12 +168,21 @@ export interface ApiKeyPrincipal {
 export type ApiKeyRefusalReason = 'organization_required' | 'organization_membership_ended';
 
 /**
- * The verdict on an inbound API key. Three outcomes, deliberately distinct:
+ * The verdict on an inbound API key. Four outcomes, deliberately distinct:
  *
  *  - `none` — no key header, or a key that is unknown / revoked / expired /
  *    owner-less. Indistinguishable by design (never tell a prober which), and
  *    the caller MAY fall through to the session path exactly as before.
  *  - `admitted` — a usable principal.
+ *  - `held` — [#23287, ruling C′ item 3] a real, intact key whose OWNER holds
+ *    an `account`-scope ADR-0069 posture (`AUTH_GATE_SCOPES`): the account's
+ *    standing holds every credential, so the key answers as the session does —
+ *    the door refuses it with the posture's `403` (`gate.code`,
+ *    `gate.message`). The principal is carried because the answer is a held
+ *    PRINCIPAL, exactly like a held session, and not an anonymous caller. The
+ *    caller must NOT fall through to the session path, for the reason the
+ *    `refused` arm gives. ⛔ Not a revocation: nothing is written, and the same
+ *    key is admitted again the moment the owner remediates.
  *  - `refused` — a real, intact key the posture cannot admit. The caller must
  *    NOT fall through to the session path: falling through would be more
  *    permissive than today's behaviour (an API key already outranks a session),
@@ -179,6 +191,7 @@ export type ApiKeyRefusalReason = 'organization_required' | 'organization_member
 export type ApiKeyAdmission =
   | { outcome: 'none' }
   | { outcome: 'admitted'; principal: ApiKeyPrincipal }
+  | { outcome: 'held'; principal: ApiKeyPrincipal; gate: AuthGate }
   | {
       outcome: 'refused';
       reason: ApiKeyRefusalReason;
@@ -273,6 +286,14 @@ export async function resolveApiKeyAdmission(
   headers: any,
   nowMs: number = Date.now(),
   tenancyPosture?: TenancyPosture,
+  /**
+   * [#23287, ruling C′ item 3] The auth service's per-user posture
+   * computation (`userAuthGateSourceOf`). OMITTING it leaves the key's owner
+   * unasked — the behaviour before the ruling — so an unwired caller is never
+   * made worse, only less strict. A kernel without `plugin-auth` has no policy
+   * to hold anyone with, and supplies nothing.
+   */
+  userAuthGates?: UserAuthGateSource,
 ): Promise<ApiKeyAdmission> {
   const apiKey = extractApiKey(headers);
   if (!apiKey) return { outcome: 'none' };
@@ -381,10 +402,43 @@ export async function resolveApiKeyAdmission(
     }
   }
 
-  return {
-    outcome: 'admitted',
-    principal: { userId, keyId, tenantId, scopes: parseScopes(row.scopes) },
-  };
+  const principal: ApiKeyPrincipal = { userId, keyId, tenantId, scopes: parseScopes(row.scopes) };
+
+  // [#23287 — ruling C′ item 3, maintainer 「同意」 2026-10-14] ONE judgment, at
+  // this seam: the account's standing holds every credential of the user, so a
+  // key whose OWNER holds an `account`-scope ADR-0069 posture (enforced MFA not
+  // yet enrolled) answers as that owner's session does. A `credential`-scope
+  // posture (password expiry, an administrator's forced reset) holds password
+  // sign-in alone, and the key keeps working.
+  //
+  // Asked AFTER the org-less refusal: a key the tenancy posture refuses is no
+  // credential at all, and its answer stays the generic 401.
+  //
+  // The organization is the KEY's own (`active_organization_id`), so a
+  // per-organization MFA requirement holds the key exactly as it holds a
+  // session whose active organization it is.
+  //
+  // ⛔ Not a revocation (ruling item 4): nothing is written here. The same key
+  // is admitted again the moment the owner enrols, with nothing reissued.
+  //
+  // A posture computation that REJECTS leaves the owner's standing unknown,
+  // and an unknown answer is not an admission: the branded store outage, which
+  // every transport answers `503` (#13906 decision 2 option B, the answer an
+  // active gate whose session re-read fails gets). The computation itself fails
+  // open on a lookup error, exactly as the session gate does, so this arm is a
+  // fault in the service, not in its store.
+  if (userAuthGates) {
+    let gates: readonly AuthGate[];
+    try {
+      gates = await userAuthGates(userId, { organizationId: tenantId });
+    } catch (err) {
+      throw new AuthzStoreUnavailableError('auth_gate', err);
+    }
+    const gate = accountScopeAuthGate(gates);
+    if (gate) return { outcome: 'held', principal, gate };
+  }
+
+  return { outcome: 'admitted', principal };
 }
 
 function readHeader(headers: any, name: string): string | undefined {

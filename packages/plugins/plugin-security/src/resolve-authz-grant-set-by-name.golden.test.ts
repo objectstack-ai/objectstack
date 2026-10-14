@@ -253,6 +253,11 @@ describe('[ADR-0131 D4] the resolver reads a grant’s set by name — every pri
  * `organization_admin_no_bypass`, ADR-0105 D4); platform standing is a grant
  * row under `single` and the declared owner under a wall, and both answer the
  * same.
+ * One recorded move since, the same in every principal: `member_default` through
+ * `everyone`. `init()` declares the deployment's baseline on that anchor
+ * (`builtin-positions.declaration-phase.test.ts`), and this harness runs
+ * `init()` and `start()` but fires no `kernel:ready`, where a started kernel
+ * has always derived it (`builtin-positions.boot.test.ts`'s grant golden).
  */
 const SINGLE: unknown = {
   agent: {
@@ -267,7 +272,8 @@ const SINGLE: unknown = {
         'usr_orgadmin'
       ],
       permissions: [
-        'mcp_agent_data_read'
+        'mcp_agent_data_read',
+        'member_default'
       ],
       positions: [
         'everyone',
@@ -284,7 +290,7 @@ const SINGLE: unknown = {
       org_user_ids: [
         'usr_agent'
       ],
-      permissions: [],
+      permissions: ['member_default'],
       positions: [
         'everyone',
         'org_member'
@@ -306,6 +312,7 @@ const SINGLE: unknown = {
         'usr_orgadmin'
       ],
       permissions: [
+        'member_default',
         'viewer_readonly'
       ],
       positions: [
@@ -323,7 +330,7 @@ const SINGLE: unknown = {
       org_user_ids: [
         'usr_member'
       ],
-      permissions: [],
+      permissions: ['member_default'],
       positions: [
         'everyone',
         'org_member'
@@ -345,6 +352,7 @@ const SINGLE: unknown = {
         'usr_orgadmin'
       ],
       permissions: [
+        'member_default',
         'organization_admin_no_bypass'
       ],
       positions: [
@@ -367,7 +375,7 @@ const SINGLE: unknown = {
       org_user_ids: [
         'usr_orgadmin'
       ],
-      permissions: [],
+      permissions: ['member_default'],
       positions: [
         'everyone',
         'org_owner'
@@ -388,7 +396,8 @@ const SINGLE: unknown = {
         'usr_orgadmin'
       ],
       permissions: [
-        'admin_full_access'
+        'admin_full_access',
+        'member_default'
       ],
       positions: [
         'everyone',
@@ -414,7 +423,8 @@ const SINGLE: unknown = {
         'usr_admin'
       ],
       permissions: [
-        'admin_full_access'
+        'admin_full_access',
+        'member_default'
       ],
       positions: [
         'everyone',
@@ -450,7 +460,8 @@ const WALLED: unknown = {
         'usr_orgadmin'
       ],
       permissions: [
-        'mcp_agent_data_read'
+        'mcp_agent_data_read',
+        'member_default'
       ],
       positions: [
         'everyone',
@@ -467,7 +478,7 @@ const WALLED: unknown = {
       org_user_ids: [
         'usr_agent'
       ],
-      permissions: [],
+      permissions: ['member_default'],
       positions: [
         'everyone',
         'org_member'
@@ -489,6 +500,7 @@ const WALLED: unknown = {
         'usr_orgadmin'
       ],
       permissions: [
+        'member_default',
         'viewer_readonly'
       ],
       positions: [
@@ -506,7 +518,7 @@ const WALLED: unknown = {
       org_user_ids: [
         'usr_member'
       ],
-      permissions: [],
+      permissions: ['member_default'],
       positions: [
         'everyone',
         'org_member'
@@ -528,6 +540,7 @@ const WALLED: unknown = {
         'usr_orgadmin'
       ],
       permissions: [
+        'member_default',
         'organization_admin'
       ],
       positions: [
@@ -550,7 +563,7 @@ const WALLED: unknown = {
       org_user_ids: [
         'usr_orgadmin'
       ],
-      permissions: [],
+      permissions: ['member_default'],
       positions: [
         'everyone',
         'org_owner'
@@ -571,7 +584,8 @@ const WALLED: unknown = {
         'usr_orgadmin'
       ],
       permissions: [
-        'admin_full_access'
+        'admin_full_access',
+        'member_default'
       ],
       positions: [
         'everyone',
@@ -597,7 +611,8 @@ const WALLED: unknown = {
         'usr_admin'
       ],
       permissions: [
-        'admin_full_access'
+        'admin_full_access',
+        'member_default'
       ],
       positions: [
         'everyone',

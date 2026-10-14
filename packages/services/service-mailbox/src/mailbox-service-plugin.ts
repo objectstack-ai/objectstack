@@ -1,7 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { II18nService, IJobService, JobRunOutcome } from '@objectstack/spec/contracts';
+import {
+  FILE_ATTACHMENT_SERVICE,
+  type IFileAttachmentService,
+  type II18nService,
+  type IJobService,
+  type JobRunOutcome,
+} from '@objectstack/spec/contracts';
 import { SysMailAssociation, SysMailbox, SysMailMessage } from './objects/index.js';
 import { installMailReadVisibility, type MailGateEngine } from './mail-read-visibility.js';
 import { MAILBOX_SERVICE, MailIngestService, type MailIngestEngine } from './ingest/index.js';
@@ -59,7 +65,13 @@ export interface MailboxServicePluginOptions {
  * mailbox, with automatic mail (auto-replies, bounces) suppressed, and stamps
  * its associations from the email fields an app flags with `mailAssociation`;
  * `rematch` replays a mailbox's stored participant sets against the records
- * that exist now and adds the missing links.
+ * that exist now and adds the missing links. A stored message's attachments,
+ * and each message it forwards as an attachment (as an `.eml` file), are
+ * stored as files of its `sys_mail_message` row through the kernel service
+ * `file-attachments` ({@link FILE_ATTACHMENT_SERVICE}), which the storage
+ * capability registers; the seam resolves it per message, so plugin order does
+ * not matter, and where none is composed it stores the message without them
+ * and says so once.
  *
  * With `imap` composed, it also feeds the seam: the mailbox sync
  * ({@link MailboxSyncService}) runs as the interval job
@@ -101,6 +113,14 @@ export class MailboxServicePlugin implements Plugin {
     const ingest = new MailIngestService({
       engine: () => ctx.getService<MailIngestEngine>('objectql'),
       logger: ctx.logger,
+      attachments: () => {
+        try {
+          return ctx.getService<IFileAttachmentService>(FILE_ATTACHMENT_SERVICE);
+        } catch {
+          // Not composed: the storage capability is not mounted in this kernel.
+          return undefined;
+        }
+      },
     });
     ctx.registerService(MAILBOX_SERVICE, ingest);
 

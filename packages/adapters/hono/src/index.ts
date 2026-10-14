@@ -329,6 +329,44 @@ async function readDispatchBody(c: Context): Promise<any> {
 }
 
 /**
+ * The query the catch-all hands `dispatch()`: a REPEATED name as an array, a
+ * single-valued one as a plain string (#23214).
+ *
+ * The twin is `readQuery` in `@objectstack/plugin-hono-server`
+ * (`src/adapter.ts`), which every `plugin-hono-server` route reads its query
+ * through. It is mirrored here, not imported: it is module-private there, and
+ * that package's `exports` has only `.`. Keep the two in step.
+ *
+ * The catch-all used to copy `URLSearchParams.forEach` into an object, so a
+ * repeated name arrived as its LAST value: `?package=a&package=b` reached a
+ * dispatcher domain as `'b'`. Every arity rule the dispatcher declares
+ * (`repeatedQueryParamMessage`, answered `400` through `plugin-hono-server`
+ * and the node reference adapter) was unreachable on a `createHonoApp` host,
+ * and the request was answered with one of the two values the caller sent.
+ * The cli-lane ruling on #6878 decided the direction for every adapter: the
+ * handler must be able to SEE the ambiguity in order to refuse it.
+ *
+ * ⚠️ The normalisation is NOT optional. `c.req.queries()` returns an array
+ * for EVERY key, single-valued ones included (measured on hono 4.13:
+ * `?a=1&a=2&b=3` gives `{ a: ['1', '2'], b: ['3'] }`), so a bare swap would
+ * turn every single-value read point in the dispatcher into an array.
+ *
+ * Built with `Object.fromEntries`, never dynamic property writes: the keys
+ * come straight off the wire, and `fromEntries` creates own data properties
+ * only, so `?__proto__=x` is an own key named `__proto__` and no prototype is
+ * touched. The old `queryParams[key] = val` write silently dropped that name.
+ */
+function readDispatchQuery(c: Context): Record<string, string | string[]> {
+  const all: Record<string, string[]> = c.req.queries() ?? {};
+  return Object.fromEntries(
+    Object.entries(all).map(([key, values]) => [
+      key,
+      values.length > 1 ? values : values[0],
+    ]),
+  ) as Record<string, string | string[]>;
+}
+
+/**
  * Creates a full-featured Hono app with all ObjectStack route dispatchers.
  *
  * Only routes that need framework-specific handling (auth service,
@@ -784,9 +822,8 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
         body = await readDispatchBody(c);
       }
 
-      const queryParams: Record<string, any> = {};
-      const url = new URL(c.req.url);
-      url.searchParams.forEach((val, key) => { queryParams[key] = val; });
+      // [#23214] A repeated name stays an array (`readDispatchQuery`).
+      const queryParams = readDispatchQuery(c);
 
       const result = await dispatcher.dispatch(method, subPath, body, queryParams, { request: c.req.raw }, prefix);
       return toResponse(c, result);

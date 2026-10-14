@@ -4930,11 +4930,24 @@ const PAGE_HEADER_COMPONENT_TYPES = new Set(['page:header', 'page-header']);
  * without those pages silently losing their second line, the exact failure
  * shape this entry exists to prevent. The fixture pins all three positions.
  *
- * **Live window**; retires at 18.
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23421). The authoring funnel no longer rewrites the old key, so an
+ * author meets `PageHeaderProps`' own refusal, which names the rename
+ * (`aliases: { description: 'subtitle' }`), at every door that judges page
+ * props: `os validate` / `os build` / `os lint` and the metadata save door
+ * alike, where before the first two converted silently and the save door
+ * refused. Stored rows keep healing: stored-row rehydration replays the full
+ * chain, this entry included (`applyConversionsToStoredItem`), and so do the
+ * artifact-ingestion door (inside its window) and `os migrate meta`. The kebab
+ * `page-header` type stays in its walk for those replays only — objectui no
+ * longer registers that type, so a source node of it renders the unknown
+ * component panel whatever its props say.
  */
 const pageHeaderSubtitleAlias: MetadataConversion = {
   id: 'page-header-subtitle-alias',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'page.component.page-header.description',
   summary:
     "page-header component prop 'description' → 'subtitle' (the off-spec spelling a renderer tolerated through a bare `subtitle ?? description` fallback; `subtitle` is the declared key, and the fallback retires)",
@@ -5575,11 +5588,21 @@ const pageCardBodyToChildren: MetadataConversion = {
  * anything the rewrite declines to touch: it refuses the object form with a
  * message naming `bodyExtra`, at any position.
  *
- * **Live window**; retires at 18.
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23421). The authoring funnel no longer rewrites the object form,
+ * so an author meets that array-only field's refusal naming `bodyExtra` at
+ * every door that judges page props — `os validate` / `os build` / `os lint`
+ * and the metadata save door alike, where before the first two converted
+ * silently and the save door refused. Stored rows keep healing: stored-row
+ * rehydration replays the full chain, this entry included
+ * (`applyConversionsToStoredItem`), and so do the artifact-ingestion door
+ * (inside its window) and `os migrate meta`.
  */
 const inlineActionApiParamsToBodyExtra: MetadataConversion = {
   id: 'inline-action-api-params-to-body-extra',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'page.component.element:button.action.params',
   summary:
     "inline type:'api' action prop 'params' (object form) → 'bodyExtra' (a static payload and a parameter definition are two things, so the payload gets its own key; `params` stays the ActionParam[] definition array)",
@@ -9798,6 +9821,58 @@ function gridFilterHasContent(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   return isDict(value) && Object.keys(value).length > 0;
 }
+
+/**
+ * `object.externalSharingModel` leaves the authorable surface (protocol 18,
+ * #23268 — ADR-0049 enforce-or-remove; ruling of record 6159300530, letter A).
+ *
+ * ADR-0090 D11 declared a second org-wide default for EXTERNAL (portal /
+ * partner) principals. No request ever resolved one (the execution context
+ * assembles `audience: undefined`), and the authorization kernel's `EXTERNAL`
+ * rung (ADR-0095 / ADR-0099) is explicitly shared rows only, never
+ * OWD-derived, so the value changed no row answer for any principal. Its only
+ * readers were authoring checks of its own ordering against `sharingModel`.
+ *
+ * **Retired from the load path** — the object shape tombstones the key
+ * (`retiredKey`), so a live author is refused at parse with the prescription.
+ * The entry exists because stored `object` rows CAN carry it: Studio's object
+ * settings offered the select and `PUT /meta/object` persisted it until this
+ * release, and `applyConversionsToStoredItem` replays the chain over a stored
+ * row as `{ objects: [row] }`. It also lets `os migrate meta --from 17` list
+ * the mechanical edits for existing sources. Deletion is the whole
+ * conversion, and it is lossless: nothing read the value.
+ */
+const objectExternalSharingModelRemoved: MetadataConversion = {
+  id: 'object-external-sharing-model-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'object.externalSharingModel',
+  summary:
+    'object `externalSharingModel` removed (ADR-0049 — the external org-wide default no '
+    + 'principal ever read; external visibility is explicitly shared rows only, ADR-0095)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'objects', (obj, path) =>
+      stripKeys(obj, ['externalSharingModel'], emit, path));
+  },
+  fixture: {
+    before: {
+      objects: [
+        { name: 'portal_case', label: 'Case', sharingModel: 'public_read', externalSharingModel: 'private' },
+        // The internal default is the key that survives; an object without
+        // the external one passes through untouched.
+        { name: 'portal_note', label: 'Note', sharingModel: 'private' },
+      ],
+    },
+    after: {
+      objects: [
+        { name: 'portal_case', label: 'Case', sharingModel: 'public_read' },
+        { name: 'portal_note', label: 'Note', sharingModel: 'private' },
+      ],
+    },
+    expectedNotices: 1,
+  },
+};
 
 /**
  * `object-grid`'s legacy base-filter fallback leaves the contract (protocol 18,
@@ -16240,6 +16315,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: mappingLookupParamsRemoved, order: 11 },
   { conversion: memoryPersistenceAutoSaveIntervalToMs, order: 27 },
   { conversion: metricFiltersRemoved, order: 7 },
+  { conversion: objectExternalSharingModelRemoved, order: 64 },
   { conversion: objectGridDefaultFiltersRemoved, order: 35.5 },
   { conversion: objectGridDefaultSortRemoved, order: 14 },
   { conversion: objectGridResizableColumnsRemoved, order: 57 },

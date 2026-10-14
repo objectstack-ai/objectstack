@@ -1,5 +1,147 @@
 # @objectstack/core
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 66949b7: feat(plugin-security)!: the four security-catalog row objects are retired — `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` (ADR-0131 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered catalog-row-objects-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Positions, permission sets and capabilities live in the security catalog — the environment registry, fed by package declarations and by environment metadata saved through `/api/v1/meta` (ADR-0131 D3). The four row objects that mirrored them are no longer registered, so their data and REST routes and their Setup object pages are gone. No table is dropped and no row is deleted.
+  
+  FROM → TO:
+  
+  - `GET|POST|PATCH|DELETE /api/v1/data/sys_permission_set` → `GET|PUT|DELETE /api/v1/meta/permission/:name`; to copy a set, `POST /api/v1/security/permission-sets/:name/clone` with `{ name, label }`.
+  - `… /api/v1/data/sys_position` → `/api/v1/meta/position/:name`. A position's permission sets are its definition's `permissionSets`.
+  - `… /api/v1/data/sys_position_permission_set` → the position definition's `permissionSets` (`PUT /api/v1/meta/position/:name`).
+  - `… /api/v1/data/sys_capability` → read-only `GET /api/v1/meta/capability`; a package declares a capability with `defineCapability` (`stack.capabilities`).
+  - Setup → Access Control → Positions / Capabilities / Permission Sets now open Setup's catalog lists (`/apps/setup/metadata/<type>?scope=environment`) instead of the object pages; the `sys_position` record page (`SysPositionDetailPage`) is removed.
+  - An object permission on one of the four names in a permission set grants nothing and can be deleted.
+  
+  What else changes:
+  
+  - `sys_user_permission_set.permission_set_id` is a plain text column now, not a lookup: same column, same stored ids, same indexes. It is not written and grants nothing; a grant names its set by `permission_set`.
+  - A permission set saved through the metadata door is written to no row: the `permission` mutation projector, the `sys_permission_set` and `sys_position` data-door write-throughs and the row-only position backfill are no longer registered.
+  - On a fresh `single`-posture database the first human is promoted to platform administrator without reading any catalog row. An unscoped grant written before `sys_user_permission_set.permission_set` existed (it names no set) still withholds the promotion until the organization-ownership migration names it.
+  - Uninstalling a package still revokes every grant naming a permission set the package declared, by the names the uninstalling door captures before the withdrawal (`declared`, `captureUninstallDeclared`), and now by those names alone: the cleanup reads and removes no `sys_permission_set` or `sys_position_permission_set` row, so the `sets` and `positionBindings` counts on its outcome are always 0. A grant written before `sys_user_permission_set.permission_set` existed names no set and is not reached; the organization-ownership migration names it.
+  - On a `group` or `isolated` deployment the data-door half of the walled catalog refusal goes with the objects: a data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability` answers `404 OBJECT_NOT_FOUND` for every caller instead of `403 PERMISSION_DENIED` below the platform operator. The refusal at the `/meta` write doors, the permission-set clone door and the `/packages` write doors is unchanged.
+  - `capability-reference-unknown` no longer counts a `sys_capability` seed row as a declared capability — no runtime reader consults one. Declare the capability with `defineCapability`.
+  - On an existing database `os migrate plan`'s unmanaged-table sweep now lists the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` tables: they keep their rows and no object declares them any more. The sweep only reports; nothing is dropped, and the tables stay for the organization-ownership migration.
+  
+  Removed exports, no replacement:
+  
+  - `@objectstack/plugin-security`: the object definitions `SysPosition`, `SysPermissionSet`, `SysPositionPermissionSet`, `SysCapability` (from `./objects`); `securityObjects` lists the remaining three.
+  - `@objectstack/platform-objects/pages`: `SysPositionDetailPage`.
+  - `@objectstack/spec`: `SystemObjectName.POSITION`, `SystemObjectName.PERMISSION_SET`; the four names leave `PLATFORM_OBJECTS_BY_PACKAGE['plugin-security']` and `PLATFORM_PROVIDED_OBJECT_NAMES`.
+  - `@objectstack/core`: `isRowActive` and `ActivatableRow` — a catalog row's `active` column decides nothing; deactivation is the activation ledger's (`sys_metadata_activation`).
+  - `@objectstack/objectql`: the published `PLATFORM_OBJECT_TENANCY` record loses its `sys_permission_set` key (the other three names were never in it). A removed key of an exported constant is a narrowing, so `@objectstack/objectql` takes `minor` under the launch-window convention for breaking changes.
+- ed03834: feat(core): `emailTemplateDefinitionFromRow` — a `sys_email_template` row as the `email_template` definition it carries (ADR-0131 D10, ruling C on §6 Q1)
+  
+  Clause-②: yes (widening)
+  
+  A new pure export beside `permissionSetDefinitionFromRow` and `positionDefinitionFromRow`: one row in, one body out, with no engine and no I/O. Its one import is the spec's floor-locale constant. The upgrade ceremony (`os migrate organization-ownership --apply`) uses it to promote a customized or admin-authored template row to an environment `email_template` item through the metadata door before the row is deleted. It runs only in that ceremony, never at boot.
+  
+  The mapping: `body_html` → `bodyHtml`, `body_text` → `bodyText`, `from_address` / `from_name` → `fromOverride`, `reply_to` → `replyTo`, `variables_json` → `variables`, and `active` keeps its stored meaning. `label` falls back to the name and `locale` to `EMAIL_TEMPLATE_FLOOR_LOCALE` (`en-US`). The retired `category` / `is_system` columns and every provenance or state column are left out. It does not validate; the door does.
+  
+  Nothing existing changes.
+- 37510aa: feat(security): the guest's grants channel — an anonymous request at a guest-entry door holds the sets bound to the `guest` anchor, in the one organization the deployment resolves for it (ADR-0138 E1, D3/D4)
+  
+  ADR-0087 disposition: none. No authorable key, accept set or stored shape moves: no spec schema, metadata type, stored row or published response field is added, removed, renamed or re-shaped. A declared binding that was not enforced becomes enforced (ADR-0090 D9, as ADR-0138 D3 amends it).
+  
+  **The bindings that start granting.** On the reference apps, none: `app-showcase`, `app-crm`, `app-multi-package` and `app-todo` declare no definition of the `guest` anchor that names a set. `app-showcase` ships `showcase_guest_portal` as a capability an administrator may bind and binds it to no anchor (its `client_portal_user` position is an ordinary position), and `app-crm`'s `guest_portal` is the public form doors' set, which keeps its own posture. No reference app declares a permission set named `guest`, so no grant stops either. A set starts granting only where a deployment holds an environment definition of the `guest` position that names it.
+  
+  What changes:
+  
+  - **`@objectstack/core`** — the anonymous branch of `resolveAuthzContext` resolves the guest's grants on a face that takes the explicit guest entry (the new `guestEntry` input). It reads the sets the `guest` position's definition names, through the same position-bound read every position uses, and the activation ledger as for any held set. It resolves them only in the organization the guest entry's organization step derives (`resolveGuestOrganization`), which asks ADR-0131 D9's predicate and no second spelling of it. With nothing bound, the guest holds no set and no read is issued. The predicate itself, `resolveSystemWriteOrganization`, moves to `@objectstack/core` so both of its askers share it. New exports: `resolveGuestOrganization`, `resolveSystemWriteOrganization` (with `SystemWriteOrganizationDecision` and `SystemWriteRefusalReason`), and `GuestOrganizationUnresolvedError` with `isGuestOrganizationUnresolvedError` and its constants.
+  - **`@objectstack/objectql`** — `resolveSystemWriteOrganization` and its two types are re-exported from `@objectstack/core` as the same bindings. Nothing a caller imports changes.
+  - **`@objectstack/plugin-security`** — the set resolution treats the guest's sets as any requested set, and no longer folds the guest's position into the request. A permission set that merely shares the anchor's name no longer reaches an anonymous caller, and the baseline and `everyone` never did. At the CRUD gate, a guest that reaches a data operation acting in no organization, on a deployment where the organization step refuses, is refused before the operation runs.
+  - **`@objectstack/plugin-sharing`** — the read filter answers deny-all for the guest on every object that record sharing scopes, before the sharing-model branch: the guest reaches rows only through share links, never through the object's sharing model (ADR-0138 D3 item 6, as the maintainer's ruling C amends it). `externalSharingModel` is still not read for any caller. Share links are redeemed at their own door and are unchanged.
+  - **`@objectstack/runtime`** — the runtime face, which serves the guest, asks for the guest's grants.
+  
+  What an anonymous caller sees at an `authRequired: false` endpoint of `type: 'object_operation'`:
+  
+  - **One organization, a set bound to `guest`:** the operation runs as the guest, under that set, in that organization. A read the set grants is admitted and returns no row, whatever the object's sharing model (`private`, `public_read`, `public_read_write` or `controlled_by_parent`): the guest reaches a record only through a share link. A create the set grants lands in that organization with no owner.
+  - **Nothing bound:** `403 PERMISSION_DENIED`, as before.
+  - **A walled deployment, several organizations, or none:** `501 NOT_IMPLEMENTED`, naming the missing site binding (ADR-0138 D5), where it used to be `403 PERMISSION_DENIED` with nothing granted. Nothing that was served stops being served. The operator's log names the reason once.
+  
+  Unchanged: share links, which still serve an anonymous caller the one record they name, with `publicSharing.eligibility` checked at the mint and at every redemption; the public form doors, which keep their own posture and organization; the flow door, which runs under the flow's own declared posture; every surface that answers an anonymous request `401`; and every signed-in caller.
+  
+  Level: `minor` for `@objectstack/core`, because new exported symbols widen its published index; `patch` for the other four, whose exports do not move.
+
+### Patch Changes
+
+- 87e902d: feat(objectql): the engine composes a `ReadableIds` leaf at its executor boundary, on the final query immediately before the driver call, and refuses it by name wherever it cannot (ADR-0139 D2, D5)
+  
+  Clause-②: no
+  
+  - **Composed.** On `find`, `findOne`, `count` and `aggregate`, after the middleware chain and the `beforeFind` hooks, every `{ FIELD: { $in: ReadableIds.of(P) } }` in `where` is replaced by `ReadableIds.compose(leaf, scope)`, where `scope` is the registered security service's `getReadFilter(P, caller)`, marked `'policy'` (`undefined` composes with no row restriction). The comparand becomes `$in: []`, which matches no row, when:
+    - `canReadObject(P, caller)` is false or throws (a service without `canReadObject` is asked `explain`, and only `allowed: true` admits);
+    - `getReadFilter` answers `RLS_DENY_FILTER` (by identity) or throws;
+    - no security service is registered, or the registered one cannot answer both halves (the engine reads the kernel's `security` service through `ObjectQLPlugin` when a leaf is composed, so an engine used without that plugin has none);
+    - the registry holds no object `P`.
+  
+    Each parent object is asked once per read, and nothing is kept across reads. A leaf that a middleware or a `beforeFind` hook writes is composed the same way.
+  - **Refused, `INTERNAL_ERROR` / 500, before any driver is asked:**
+    - on `update` and `delete`: the caller's leaf at the comparand door, a middleware's at the executor's entry, before the prior-row reads;
+    - in `having` and in an aggregation's own `filter`;
+    - anywhere but a `$in` comparand, including a leaf the array form of `where` lowers into another position;
+    - a composed leaf the engine did not compose, written by a middleware or a hook (the caller's own, as a `$in` comparand, stays the comparand door's `INVALID_FILTER` / 400);
+    - ADR-0139 D5's three classes: a delegated (on-behalf-of) caller, a parent with an object-scoped read middleware, and a parent bound to another datasource than the object read.
+  - **Before:** the comparand door refused every `ReadableIds` leaf `INTERNAL_ERROR` / 500 ("this engine does not compose that leaf yet"), and a leaf that a middleware or a hook wrote reached the driver unrefused.
+  - **`@objectstack/core`:** `resolveFilterTokens` returns a `ReadableIds` leaf by reference. When the filter also held a placeholder, it used to rebuild the leaf as a plain `{ object }` and drop its brand.
+  - **Not yet:** no driver evaluates the composed leaf (ADR-0139 E3 and E4), and no code in the platform writes a `ReadableIds` leaf today.
+- b4d573a: fix(spec,core): the rolling `last_7_days`, `last_30_days` and `last_90_days` presets close on today, at the spec's prescription table, the save door's refusal and the analytics preset arm
+  
+  Clause-②: no (no accept set widens: the three rolling windows gain the inclusive `{today}` end every calendar preset already has)
+  
+  The three rolling windows were the open arm of `DATE_RANGE_PRESET_MACRO_WINDOWS`: `['{30_days_ago}', null]`, prescribed as `{ $gte: '{30_days_ago}' }`. A `$gte`-only window has no upper bound, so on a column that carries future dates (a close date, a due date) "last 30 days" also counted every later day. Measured on a `date` field with one row dated today−5 and one dated today+5: that window counted 2, while the console's preset lowering and the analytics preset arm counted 1.
+  
+  - `DATE_RANGE_PRESET_MACRO_WINDOWS` now closes every rolling window on `{today}`: `last_7_days` is `['{7_days_ago}', '{today}']`, and `last_30_days` and `last_90_days` follow the same shape. That is the inclusive last-day end every calendar preset already uses, and the extent the console's lowering already selects. The table's declared type narrows to match, `readonly [start: string, end: string]` (it was `end: string | null`). A reader that compared `end` with `null` still compiles; that branch can no longer be taken.
+  - The save door's refusal of a bare preset comparand (`bareDateRangePresetComparandMessage`, and the `filter-preset-comparand` lint verdict that quotes it) now prescribes the closed window. For `last_30_days` it says: write `{ $between: ['{30_days_ago}', '{today}'] }`, where it used to say `{ $gte: '{30_days_ago}' }`.
+  - `@objectstack/core`'s `resolveAnalyticsDateRangePreset`, the preset arm behind `timeDimensions[].dateRange`, selects the same extent. A rolling window now stops before tomorrow begins in the reference timezone, exactly as `today` does, with `endExclusive: true`. It used to end at the reference instant, so it dropped rows stamped later today. Its ends keep this module's own "the day the window stops before" spelling (`tomorrow`). Every preset this resolver returns is now `endExclusive: true`, and a caller's explicit `[a, b]` window keeps its inclusive reading, as before.
+  - The semantic migration entry `filter-preset-ordering-comparand-refused`, which `spec-changes.json` and `os migrate meta` carry, now names `{ $between: ["{30_days_ago}", "{today}"] }` as the window for `last_30_days` in its replacement, where it named `{ $gte: "{30_days_ago}" }`.
+  
+  If you followed the old refusal and authored `{ $gte: '{N_days_ago}' }` for a rolling preset, add `$lte: '{today}'`, or write the `$between` pair above, to stop counting future-dated rows.
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [777eed2]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes

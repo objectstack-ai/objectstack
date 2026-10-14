@@ -84,7 +84,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_user_position: {
     label: "User Position",
     pluralLabel: "User Positions",
-    description: "Assigns a position (sys_position.name) to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).",
+    description: "Assigns a position, by name, to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).",
     fields: {
       id: {
         label: "Assignment ID",
@@ -100,7 +100,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       position: {
         label: "Position",
-        help: "Position machine name (references sys_position.name)."
+        help: "Position machine name, resolved in the security catalog."
       },
       business_unit_id: {
         label: "Business Unit",

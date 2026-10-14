@@ -19,7 +19,6 @@ import {
   validateSecurityRoleWord,
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,
-  SECURITY_EXTERNAL_WIDER,
   SECURITY_WILDCARD_VAMA,
   SECURITY_ANCHOR_HIGH_PRIVILEGE,
   SECURITY_ROLE_WORD,
@@ -180,25 +179,9 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(findings[0].message).toContain("fails CLOSED to 'private'");
   });
 
-  // ── Rule: security-external-wider-than-internal (ADR-0090 D11) ──────
-  it('errors when the external dial is wider than the internal one', () => {
-    const findings = validateSecurityPosture({
-      objects: [{ name: 'portal_case', sharingModel: 'private', externalSharingModel: 'public_read' }],
-    });
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(SECURITY_EXTERNAL_WIDER);
-  });
-
-  it('accepts external ≤ internal', () => {
-    expect(
-      rulesOf({
-        objects: [
-          { name: 'a', sharingModel: 'public_read_write', externalSharingModel: 'public_read' },
-          { name: 'b', sharingModel: 'public_read', externalSharingModel: 'public_read' },
-        ],
-      }),
-    ).toEqual([]);
-  });
+  // `security-external-wider-than-internal` left with its key (#23268): the
+  // `obj` receiver's key list in the reads-are-declared table below pins that
+  // this linter reads no `externalSharingModel`.
 
   // ── Rule: security-wildcard-vama (ADR-0066) ─────────────────────────
   it("errors on a '*' wildcard carrying viewAll/modifyAll in an authored set", () => {
@@ -1480,6 +1463,12 @@ const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
   // scanned where they happen (in `object-graph.ts`, guarded by its own tests),
   // not here; this rule never touches an authored field record directly.
   surface: "a `GraphObject` — `object-graph.ts`'s resolved per-object surface, not an authored one.",
+  // [#23210] The merged-shape pass folds each `objectExtensions` entry into a
+  // `VisibleExtension` ({ carrier, path, priority, fields }) BEFORE it reads
+  // one; the authored reads behind it are scanned on `ext` and `f`.
+  visible: "a `VisibleExtension` — this file's own fold of one extension entry, not an authored surface.",
+  left: 'a `VisibleExtension`, the left operand of the fold-order comparator.',
+  right: 'a `VisibleExtension`, the right operand of the fold-order comparator.',
 };
 
 const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
@@ -1489,7 +1478,11 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // started passing the stack's own capability declarations to the predicate
     // as `AnchorBindingContext.declaredCapabilities` — a declared token is the
     // app's own gate, not a platform system permission.
-    expected: ['apps', 'books', 'capabilities', 'data', 'objects', 'permissions', 'positions'],
+    // [#23210] `objectExtensions` and `packages` joined when the
+    // controlled-by-parent rules started judging an object on its MERGED
+    // field set: the extensions a stack (or each package body of an artifact)
+    // declares are folded onto the objects it declares.
+    expected: ['apps', 'books', 'capabilities', 'data', 'objectExtensions', 'objects', 'packages', 'permissions', 'positions'],
     declaredBy: 'ObjectStackSchema',
     keys: () => Object.keys(ObjectStackSchema.shape),
   },
@@ -1500,7 +1493,7 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // [#18306] `fieldGroups` joined when the ADR-0090 D3 vocabulary freeze
     // started visiting the group headings that sit above the fields it already
     // judged.
-    expected: ['actions', 'externalSharingModel', 'fieldGroups', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
+    expected: ['actions', 'fieldGroups', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -1575,6 +1568,28 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'ObjectStackSchema.data[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.data),
   },
+  // [#23210] The merged-shape pass of the controlled-by-parent rules: an
+  // artifact entry (`packages[]`), its assembled body, and one
+  // `objectExtensions` entry — each read for the keys the registry's merge
+  // reads, and no other.
+  {
+    receiver: 'entry',
+    expected: ['manifest'],
+    declaredBy: 'ObjectStackSchema.packages[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.packages),
+  },
+  {
+    receiver: 'body',
+    expected: ['objectExtensions', 'objects'],
+    declaredBy: 'ObjectStackSchema.packages[].manifest',
+    keys: () => shapeKeysOf(shapeOf(ObjectStackSchema.shape.packages).manifest),
+  },
+  {
+    receiver: 'ext',
+    expected: ['extend', 'fields', 'priority'],
+    declaredBy: 'ObjectStackSchema.objectExtensions[]',
+    keys: () => shapeKeysOf(ObjectStackSchema.shape.objectExtensions),
+  },
   // [#18535] The ADR-0066 D1 capability declarations the anchor rule reads: it
   // wants their NAMES and hands the declarations themselves to the predicate,
   // which reads `name` and ignores every other field — so nothing is
@@ -1629,6 +1644,9 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'candidates', // #23100: `resolveCbpRelation`'s candidate list — `.length`, a JS property.
       'cbpCandidates', // #23100: one object's required master_detail list — `.length` / `.map`, JS methods.
       'declaredCapabilities', // #18535: the stack's own capability list — `.length`, a JS property.
+      // #23210: the merged-shape pass's own collections — JS Map / Set / Array methods.
+      'bodies', 'entries', 'targets', 'owners', 'extensions', 'byCarrier', 'writers', 'tiedWriters',
+      'merged', 'baseFields', 'blamed',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -1656,7 +1674,7 @@ describe('validateSecurityPosture — undeclared keys are the schema’s job, no
   it('there is no `objects[].security` envelope: the OWD dials are declared FLAT', () => {
     const objectKeys = Object.keys(ObjectSchema.shape);
     expect(objectKeys).not.toContain('security');
-    expect(objectKeys).toEqual(expect.arrayContaining(['sharingModel', 'externalSharingModel', 'publicSharing']));
+    expect(objectKeys).toEqual(expect.arrayContaining(['sharingModel', 'publicSharing']));
 
     // And `ObjectSchema` is strict, so this is not a silent strip: a stack
     // nesting the OWD under `security` is REFUSED, by name.
@@ -1730,7 +1748,6 @@ function pushedRuleIds(): string[] {
 const RULE_IDS: Record<string, string> = {
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,
-  SECURITY_EXTERNAL_WIDER,
   SECURITY_WILDCARD_VAMA,
   SECURITY_ANCHOR_HIGH_PRIVILEGE,
   SECURITY_ROLE_WORD,
@@ -1757,11 +1774,6 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
   { label: 'owd-unset', stack: { objects: [objectFixture({ name: 'leave_request' })] } },
   { label: 'owd-alias (retired value)', stack: { objects: [objectFixture({ name: 'leave_request', sharingModel: 'read' })] } },
   { label: 'owd-alias (non-canonical value)', stack: { objects: [objectFixture({ name: 'leave_request', sharingModel: 'nonsense' })] } },
-  { label: 'owd-alias (external retired value)', stack: { objects: [objectFixture({ name: 'o', sharingModel: 'private', externalSharingModel: 'full' })] } },
-  {
-    label: 'external-wider',
-    stack: { objects: [objectFixture({ name: 'o', sharingModel: 'private', externalSharingModel: 'public_read_write' })] },
-  },
   { label: 'fls-unqualified-key', stack: { permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { budget: { readable: true } } }] } },
   {
     label: 'fls-unknown-field',
@@ -1855,7 +1867,8 @@ describe('validateSecurityPosture — every branch is reachable without an undec
   });
 
   it('maps every `findings.push` site in the source', () => {
-    expect(pushedRuleIds()).toHaveLength(18);
+    // 16 since #23268: the external dial's alias and wider-than-internal sites left with the key.
+    expect(pushedRuleIds()).toHaveLength(16);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

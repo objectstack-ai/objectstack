@@ -76,6 +76,99 @@ export function forwardAsAttachment(options: {
   );
 }
 
+/**
+ * The original message an inline forward quotes: header values exactly as the
+ * client writes them into its block (display names, angle brackets and list
+ * separators included).
+ */
+export interface InlineOriginal {
+  from?: string;
+  to?: string;
+  cc?: string | null;
+  replyTo?: string;
+  subject?: string;
+  body?: string;
+}
+
+/**
+ * The "Forwarded message" block of a Gmail forward, as Gmail writes it into
+ * the text/plain body: the shape of `test/fixtures/gmail_en_body.txt` in
+ * `email-forward-parser` (MIT, Crisp IM SAS) — separator, then From, Date,
+ * Subject, To and Cc, an empty line, the original's text.
+ */
+export function gmailForwardBlock(original: InlineOriginal = {}): string {
+  return [
+    '---------- Forwarded message ---------',
+    `From: ${original.from ?? 'Customer <customer@acme.test>'}`,
+    'Date: Wed, Oct 27, 2021 at 9:31 AM',
+    `Subject: ${original.subject ?? 'A question'}`,
+    `To: ${original.to ?? '<rep@corp.test>'}`,
+    ...(original.cc === null ? [] : [`Cc: ${original.cc ?? 'Buyer <buyer@acme.test>, Partner <partner@globex.test>'}`]),
+    '',
+    original.body ?? 'What does it cost?',
+  ].join('\r\n');
+}
+
+/**
+ * The block of an Outlook forward (Outlook on the web / Microsoft 365), as it
+ * writes the text/plain body: the shape of `test/fixtures/outlook_live_body.txt`
+ * in `email-forward-parser` — 32 underscores, then From, Sent, To, Cc (a `;`
+ * list) and Subject, an empty line, the original's text.
+ */
+export function outlookForwardBlock(original: InlineOriginal = {}): string {
+  return [
+    '________________________________',
+    `From: ${original.from ?? 'Customer <customer@acme.test>'}`,
+    'Sent: Wednesday, October 27, 2021 15:14',
+    `To: ${original.to ?? 'rep@corp.test <rep@corp.test>'}`,
+    ...(original.cc === null ? [] : [`Cc: ${original.cc ?? 'Buyer <buyer@acme.test>; Partner <partner@globex.test>'}`]),
+    `Subject: ${original.subject ?? 'A question'}`,
+    '',
+    original.body ?? 'What does it cost?',
+  ].join('\r\n');
+}
+
+/**
+ * The block of an Apple Mail forward, as its text/plain rendering writes it:
+ * the shape of `test/fixtures/apple_mail_en_body.txt` in
+ * `email-forward-parser` — every line quoted with `>`, the separator, an empty
+ * line, then From, Subject, Date, To and Cc (and Reply-To when the original
+ * carried one), an empty line, the original's text.
+ */
+export function appleMailForwardBlock(original: InlineOriginal = {}): string {
+  return [
+    'Begin forwarded message:',
+    '',
+    `From: ${original.from ?? 'Customer <customer@acme.test>'}`,
+    `Subject: ${original.subject ?? 'A question'}`,
+    'Date: 25 October 2021 at 11:17:21 EEST',
+    `To: ${original.to ?? 'rep@corp.test'}`,
+    ...(original.cc === null ? [] : [`Cc: ${original.cc ?? 'Buyer <buyer@acme.test>, Partner <partner@globex.test>'}`]),
+    ...(original.replyTo === undefined ? [] : [`Reply-To: ${original.replyTo}`]),
+    '',
+    original.body ?? 'What does it cost?',
+  ]
+    .map((line) => (line === '' ? '>' : `> ${line}`))
+    .join('\r\n');
+}
+
+/**
+ * A message forwarded INLINE: a plain-text message from the forwarder whose
+ * body is a note followed by the client's forward `block` — or, with `block`
+ * `null`, the same message carrying the note only (the control).
+ */
+export function forwardInline(options: { forwarder?: string; messageId: string; block: string | null }): string {
+  const note = "See the customer's question below.";
+  return plainMessage(
+    {
+      From: options.forwarder ?? 'Rep <rep@corp.test>',
+      Subject: 'Fwd: A question',
+      'Message-ID': options.messageId,
+    },
+    options.block === null ? note : `${note}\r\n\r\n${options.block}`,
+  );
+}
+
 /** A delivery-status report (RFC 3464 inside RFC 6522 `multipart/report`): a bounce. */
 export function bounce(): string {
   return rfc822(
@@ -104,4 +197,65 @@ export function bounce(): string {
       '',
     ].join('\r\n'),
   );
+}
+
+/** One part of a {@link messageWithParts} message besides its text body. */
+export interface FixturePart {
+  /** The Content-Type value, parameters included (`application/pdf; name="q.pdf"`). */
+  contentType: string;
+  /** The Content-Disposition value (`attachment; filename="q.pdf"`), or none. */
+  disposition?: string;
+  /** The Content-ID, angle brackets included. */
+  contentId?: string;
+  /** The part's bytes, sent base64. */
+  bytes?: Uint8Array;
+  /** A forwarded message, sent as it is (an RFC 822 text), in place of `bytes`. */
+  message?: string;
+}
+
+/**
+ * A `multipart/mixed` message: a text/plain note, then each part in order —
+ * a file sent base64, or a forwarded message sent as it is.
+ */
+export function messageWithParts(options: {
+  messageId: string;
+  from?: string;
+  subject?: string;
+  headers?: HeaderList;
+  parts: ReadonlyArray<FixturePart>;
+}): string {
+  const boundary = `parts-${++boundarySeq}-boundary`;
+  const lines: string[] = [`--${boundary}`, 'Content-Type: text/plain; charset=utf-8', '', 'See attached.'];
+  for (const part of options.parts) {
+    lines.push(`--${boundary}`, `Content-Type: ${part.contentType}`);
+    if (part.disposition) lines.push(`Content-Disposition: ${part.disposition}`);
+    if (part.contentId) lines.push(`Content-ID: ${part.contentId}`);
+    if (part.message !== undefined) {
+      lines.push('', part.message);
+    } else {
+      const base64 = Buffer.from(part.bytes ?? new Uint8Array()).toString('base64');
+      lines.push('Content-Transfer-Encoding: base64', '', ...(base64.match(/.{1,76}/g) ?? ['']));
+    }
+  }
+  lines.push(`--${boundary}--`, '');
+  return rfc822(
+    [
+      ['From', options.from ?? 'Rep <rep@corp.test>'],
+      ['To', 'inbox@corp.test'],
+      ['Subject', options.subject ?? 'Fwd: A question'],
+      ['Message-ID', options.messageId],
+      ['Date', 'Mon, 12 Oct 2026 10:00:00 +0000'],
+      ...(options.headers ?? []),
+      ['MIME-Version', '1.0'],
+      ['Content-Type', `multipart/mixed; boundary="${boundary}"`],
+    ],
+    lines.join('\r\n'),
+  );
+}
+
+/** Bytes that are not text: every byte value once, then `filler` more. */
+export function binaryBytes(filler = 0): Uint8Array {
+  const out = new Uint8Array(256 + filler);
+  for (let i = 0; i < out.length; i++) out[i] = i % 256;
+  return out;
 }

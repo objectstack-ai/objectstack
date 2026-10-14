@@ -13,8 +13,8 @@
  * Why a data hook (and not a write gate or the REST layer):
  *  - admins edit rules through several doors (Setup UI generic data door,
  *    scripts, console) — an engine hook covers them all;
- *  - unlike sys_position/sys_capability there is deliberately NO
- *    SYSTEM_ROW_PROVENANCE write gate here: sharing rules are a first-class
+ *  - there is deliberately NO provenance write gate here (the retired
+ *    security catalog rows had one): sharing rules are a first-class
  *    admin authoring surface, so edits are allowed — they just have to be
  *    remembered;
  *  - both provenance columns are `readonly`, and the engine's readonly strip

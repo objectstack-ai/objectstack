@@ -289,7 +289,8 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
   it('[#8310] the R2-retirement boundary: a SYSTEM object with unset OWD is not refused at this door', () => {
     // The one active-path shape the retired plugin-gate R2 refused that this
     // door does not: a system object (`isSystem` / `sys_*`) with no authored
-    // `sharingModel` and an explicit external side. Deliberate, not a gap:
+    // `sharingModel` (R2 refused it beside an explicit external side; that key
+    // is itself retired since #23268). Deliberate, not a gap:
     // `security-owd-unset` exempts system objects because their runtime
     // default is PUBLIC (`effectiveSharingModel`, plugin-sharing) — R2's
     // hardcoded private baseline misread that default, so its refusal here
@@ -298,7 +299,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // change that boundary.
     const real = runRuntimeAuthoringRules({
       type: 'object',
-      item: { name: 'sys_probe', label: 'Probe', externalSharingModel: 'public_read', fields: {} },
+      item: { name: 'sys_probe', label: 'Probe', fields: {} },
     });
     expect(real.errors).toEqual([]);
     expect(real.rulesRun).toContain('validateSecurityPosture');

@@ -19,7 +19,7 @@ import {
     // The registry's "never registered" brand, asked directly by the public
     // form doors' tenancy read (see `registerFormEndpoints`).
     isServiceNotRegisteredError,
-    assembleExecutionContext, normalizeAuthGate, type AuthGate,
+    assembleExecutionContext, normalizeAuthGate, userAuthGateSourceOf, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
     // owner, shared with the runtime dispatcher's `/security` domain.
@@ -134,6 +134,9 @@ import {
     HistoryMetaItemRequestSchema,
     AuditMetaItemRequestSchema,
 } from '@objectstack/spec/api';
+// [#23183] The app item read's package-id key, spelled once in the spec — see
+// `fetchCurrentMetaDocument`, whose doors stay by-name.
+import { isAppPackageIdKey } from '@objectstack/spec/api';
 // [commit 2a29caa53] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
 // being smuggled past it with `as any` (see `TransportScopedMetaRequest`).
@@ -3178,7 +3181,17 @@ export class RestServer {
                     () => this.tenancyServiceProvider!(environmentId) as any,
                 );
             }
-            const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
+            // [#23287, ruling C′ item 3] The auth service's per-user posture
+            // computation rides into the shared resolver, where the API-key
+            // admission seam asks it for a key's owner: ONE judgment for every
+            // face, this one included.
+            const authz = await resolveAuthzContext({
+                ql,
+                headers,
+                getSession,
+                tenancyPosture,
+                userAuthGates: userAuthGateSourceOf(authService),
+            });
             // [commit f586f1a89] The anonymous contract IS the shared assembler's default
             // entry: no resolved principal → no context → 401. Taken early here
             // only so an anonymous request does not pay for the localization and
@@ -3229,13 +3242,28 @@ export class RestServer {
             // narrowness the ruling asked for: a host whose probe faults never
             // answered `true`, so it never declared a gate, and refusing on it
             // would block deployments that never asked for one.
+            //
+            // [#23287 — ruling C′ item 3] The cookie re-read below is the
+            // SESSION's gate, and it runs only for a principal a session
+            // admitted. A principal an API KEY admitted is judged by the key's
+            // own answer, decided once at the shared key-admission seam
+            // (`authz.authGate`: the key owner's account-scope posture). It
+            // used to re-read the cookie here whatever had admitted the
+            // caller, so a key sent beside a held cookie was refused with the
+            // COOKIE's posture — another credential's, possibly another user's
+            // — while the same key sent alone was admitted with no question
+            // asked of its owner at all.
             let authGate: AuthGate | undefined;
             let gateActive = false;
-            try {
-                gateActive = typeof authService.isAuthGateActive === 'function'
-                    && authService.isAuthGateActive() === true;
-            } catch {
-                gateActive = false;
+            if (authz.credential === 'api_key') {
+                authGate = authz.authGate;
+            } else {
+                try {
+                    gateActive = typeof authService.isAuthGateActive === 'function'
+                        && authService.isAuthGateActive() === true;
+                } catch {
+                    gateActive = false;
+                }
             }
             if (gateActive) {
                 let gatedSession: any;
@@ -3487,11 +3515,21 @@ export class RestServer {
      * serves no document of its own (`/history` and `/audit` serve events,
      * `/diff` a comparison) and so judges the item the plain read would judge.
      * `undefined` when nothing is behind the name.
+     *
+     * [#23183] …by NAME. These doors read their own data (events, the diff)
+     * under the literal `:name`, so the document they judge is that name's.
+     * The app item read's package-id key (ADR-0048 §3.1,
+     * `GetMetaItemRequestSchema.name`) is the plain read's arm, not theirs: the
+     * protocol would answer it with the package's app under the APP's name,
+     * which is not the item these doors read. Such a key is answered as no
+     * current document, exactly as it was before the arm existed: no app name
+     * is in the package-id grammar, so nothing is stored under it.
      */
     private async fetchCurrentMetaDocument(
         req: any,
         p: RestProtocol,
     ): Promise<any | undefined> {
+        if (isAppPackageIdKey(RestServer.metaTypeSingular(req.params.type), req.params.name)) return undefined;
         const currentRequest: GetMetaItemRequest = {
             type: req.params.type,
             name: req.params.name,

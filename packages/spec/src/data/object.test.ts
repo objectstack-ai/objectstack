@@ -1632,13 +1632,17 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
   });
 
   it('REFUSES no relation at all, and two required master_details, at the two lint-shared paths', () => {
-    expect(issuesOf(cbp({ title: { type: 'text' } })).map((i) => i.path)).toEqual(['sharingModel']);
+    const none = issuesOf(cbp({ title: { type: 'text' } }));
+    expect(none.map((i) => i.path)).toEqual(['sharingModel']);
     const two = issuesOf(cbp({
       a: { type: 'master_detail', reference: 'master_a', required: true },
       b: { type: 'master_detail', reference: 'master_b', required: true },
     }));
     expect(two.map((i) => i.path)).toEqual(['fields']);
     expect(two[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)\. ADR-0055 §1:/);
+    // Both refusals date themselves: 17.7.0 accepts either shape, so each names the release that refuses it.
+    expect(two[0].message).toContain('since @objectstack/spec 18, a controlled-by-parent object derives');
+    expect(none[0].message).toContain('since @objectstack/spec 18, a controlled-by-parent object derives');
   });
 
   it('judges controlled_by_parent only — every other sharing model keeps its relations as authored', () => {
@@ -2085,7 +2089,9 @@ describe('TenancyConfigSchema — strategy/crossTenantAccess removal', () => {
     const message = result.error!.issues.map((i) => i.message).join('\n');
     expect(message).toContain('crossTenantAccess');
     expect(message).toContain('ADR-0056');
-    expect(message).toContain('externalSharingModel');
+    // The retired external OWD is no longer named as a live channel (#23268).
+    expect(message).toContain('explicit shares');
+    expect(message).not.toContain('externalSharingModel');
   });
 
   it('rejects arbitrary unknown tenancy keys instead of silently stripping them', () => {

@@ -70,7 +70,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "パスワード変更必須",
-        help: "true の場合、パスワードを変更するまでユーザーはブロックされます（403 PASSWORD_EXPIRED）。管理者のユーザー管理ルートが設定します。システム管理。"
+        help: "true の場合、パスワードを変更するまでユーザーはブロックされます（403 PASSWORD_RESET_REQUIRED）。管理者のユーザー管理ルートが設定します。システム管理。"
       },
       mfa_required_at: {
         label: "MFA 強制適用日時",
@@ -197,6 +197,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           mustChangePassword: {
             label: "次回サインイン時にパスワード変更を必須にする"
+          },
+          revokeSessionsAndKeys: {
+            label: "すべてのセッションからサインアウトし API キーを失効させる",
+            helpText: "このユーザーのすべてのセッションを終了し、所有するすべての API キーを失効させます。アカウント侵害の疑いがある場合はオンのままにし、通常のリセットではオフにしてください。失効したキーはパスワード変更後も失効したままです。"
           }
         },
         resultDialog: {
@@ -710,7 +714,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       positions: {
         label: "配属先ポジション",
-        help: "承認時に割り当てられる sys_position 名（ADR-0105 D8）。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
+        help: "承認時に割り当てられるポジション名（ADR-0105 D8）。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
       }
     },
     _views: {

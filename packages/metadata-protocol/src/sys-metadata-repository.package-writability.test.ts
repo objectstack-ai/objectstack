@@ -574,11 +574,12 @@ describe('#7682 — the refusal discriminates on package writability', () => {
         `Cannot overlay 'permission' in package '${READ_ONLY_PKG}': that package is read-only, and its packaged base `
         + 'is locked against in-place edits. ',
       )).toBe(true);
-      // The clone route's spelling moved with C3 stage 8 (the data route of the
-      // retired `sys_permission_set` object → the catalog's clone door); the
-      // sentence around it did not.
-      expect(message).toContain('Clone it under a new name to customize it (the "Clone" action on the permission set, or POST /api/v1/');
-      expect(message).toContain(' with a new name).');
+      // The clone route is the catalog's clone door: the data route of the
+      // `sys_permission_set` object retired with it (C3 stage 8).
+      expect(message).toContain(
+        'Clone it under a new name to customize it (the "Clone" action on the permission set, '
+        + 'or POST /api/v1/security/permission-sets/:name/clone with a new name).',
+      );
       expect(message).not.toContain('OS_METADATA_WRITABLE');
       expect(message).not.toContain('redeploy');
       expect(message.endsWith('See docs/adr/0126-packaged-metadata-customization-model.md.')).toBe(true);
@@ -1254,17 +1255,10 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
   const ADR_0126 = 'See docs/adr/0126-packaged-metadata-customization-model.md.';
   const ACTION_SWITCH = 'Switch it off (POST /api/v1/actions/_activation/:object/:action, body {enabled: false}, '
     + ':object = global for an object-less action; operator-only where one install serves several organizations).';
-  // `{ROUTE}`: the clone route, whose spelling moved with C3 stage 8 (the
-  // retired object's data route → the catalog's clone door); see `sentenceMatches`.
+  // The clone route is the catalog's clone door: the data route of the
+  // `sys_permission_set` object retired with it (C3 stage 8).
   const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "Clone" action on the permission set, '
-    + 'or POST {ROUTE} with a new name).';
-  /** Exact equality, with a `{ROUTE}` placeholder standing for one `/api/v1/…` path. */
-  const sentenceMatches = (actual: string, expected: string): boolean => {
-    const [head, tail] = expected.split('{ROUTE}');
-    if (tail === undefined) return actual === expected;
-    return actual.startsWith(head) && actual.endsWith(tail)
-      && /^\/api\/v1\/\S+$/.test(actual.slice(head.length, actual.length - tail.length));
-  };
+    + 'or POST /api/v1/security/permission-sets/:name/clone with a new name).';
   const FLOW_PATHS = 'Clone it under a new name to customize it (POST /api/v1/automation/:name/clone, body {name, label}), '
     + 'or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; '
     + 'operator-only where one install serves several organizations).';
@@ -1296,9 +1290,10 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     it(`type door, save: a packaged ${type} is refused NOT_OVERRIDABLE with its row's path, no hatch`, async () => {
       const err = await putWith(repo, { type, name: `pkg_${type}`, intent: 'override-artifact' }) as any;
       expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-      const expected = `Metadata item '${type}/pkg_${type}' is provided by a managed package and is sealed `
-        + `against in-place edits. ${paths} ${ADR_0126}`;
-      expect(sentenceMatches(String(err.message), expected), `${String(err.message)}\n≠ ${expected}`).toBe(true);
+      expect(String(err.message)).toBe(
+        `Metadata item '${type}/pkg_${type}' is provided by a managed package and is sealed `
+        + `against in-place edits. ${paths} ${ADR_0126}`,
+      );
       expect(Array.from(engine.rows.values())).toEqual([]);
     });
   }
@@ -1368,9 +1363,10 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
         code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG,
         docs: 'docs/adr/0010-metadata-protection-model.md',
       });
-      const expected = `Cannot overlay '${type}' in package '${READ_ONLY_PKG}': that package is read-only, and its packaged base `
-        + `is locked against in-place edits. ${paths} ${ADR_0126}`;
-      expect(sentenceMatches(String(err.message), expected), `${String(err.message)}\n≠ ${expected}`).toBe(true);
+      expect(String(err.message)).toBe(
+        `Cannot overlay '${type}' in package '${READ_ONLY_PKG}': that package is read-only, and its packaged base `
+        + `is locked against in-place edits. ${paths} ${ADR_0126}`,
+      );
     });
   }
 
