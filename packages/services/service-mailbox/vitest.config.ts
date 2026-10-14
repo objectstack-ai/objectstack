@@ -28,9 +28,12 @@ export default defineConfig({
       { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
       { find: /^@objectstack\/platform-objects\/apps$/, replacement: path.resolve(__dirname, '../../platform-objects/src/apps/index.ts') },
+      { find: /^@objectstack\/platform-objects\/identity$/, replacement: path.resolve(__dirname, '../../platform-objects/src/identity/index.ts') },
       { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },
       { find: /^@objectstack\/spec\/data$/, replacement: path.resolve(__dirname, '../../spec/src/data/index.ts') },
       { find: /^@objectstack\/spec\/security$/, replacement: path.resolve(__dirname, '../../spec/src/security/index.ts') },
+      { find: /^@objectstack\/spec\/shared$/, replacement: path.resolve(__dirname, '../../spec/src/shared/index.ts') },
+      { find: /^@objectstack\/spec\/identity$/, replacement: path.resolve(__dirname, '../../spec/src/identity/index.ts') },
     ],
   },
 });

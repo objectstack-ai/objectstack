@@ -5,6 +5,7 @@ import { declaredHttpStatus } from '@objectstack/types';
 import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
+import type { AnchorBindingContext } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
 // merge boundaries that stamp it (see the RLS injection below).
@@ -1571,6 +1572,13 @@ export class SecurityPlugin implements Plugin {
       ],
     });
 
+    // [ADR-0131 D2, ADR-0090 D5] The six built-in positions and the `everyone`
+    // anchor's deployment baseline are declarations, so they are made here, in
+    // the kernel contract's declaration phase — where a boot that composes this
+    // plugin for its declarations only reaches them too. See
+    // {@link declareBuiltinPositions}.
+    this.declareBuiltinPositions(ctx);
+
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
     // service on kernel:ready (the i18n plugin may register after this one).
     if (typeof (ctx as any).hook === 'function') {
@@ -1731,34 +1739,15 @@ export class SecurityPlugin implements Plugin {
     this.metadata = metadata;
     this.ql = ql;
 
-    // [ADR-0131 D2, C3's built-ins slice pulled into C2] The six built-in
-    // positions — the identity names and the `everyone` / `guest` anchors — are
-    // declared metadata of THIS plugin, as its permission sets are. Not through
-    // the manifest registration in `init()`: measured, a manifest `positions`
-    // key reaches no registry (see `builtin-positions.ts`), so they go to the
-    // engine registry by the registry's own seam, under this plugin's package
-    // id — the provenance the manifest stamps on `permissions`. Here, on the
-    // engine handle `start()` already holds, before `kernel:ready` runs the
-    // bootstrap and before any request reaches the metadata door. The
-    // declaration is their one home: the boot writes no `sys_position` row for
-    // them (ADR-0131 D2).
-    const builtinRegistry = (ql as { registry?: unknown }).registry;
-    if (registerBuiltinPositions(builtinRegistry, SECURITY_PLUGIN_ID) === 0) {
-      ctx.logger.warn(
-        '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
-          + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
-          + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
-          + '`everyone` baseline sets are granted through no position.',
-      );
-    }
-    // [ADR-0090 D5, ADR-0131 D3/D4] `everyone` declares the deployment's
-    // baseline in its `permissionSets` — the binding the authorization resolver
-    // reads, in place of the junction rows the boot used to write — plus every
-    // package default a `manage_metadata` holder accepted (#22801 → A). At
-    // `kernel:ready`, because the high-privilege check reads the stack's
-    // declared capabilities (#18535) and they are all in by then; derived again
-    // on every accept, revoke, uninstall and package publish
-    // (`declareEveryone`).
+    // [ADR-0131 D2] The six built-in positions, and `everyone`'s deployment
+    // baseline as the fail-closed reading gives it, were declared in `init()`
+    // ({@link declareBuiltinPositions}).
+    // [ADR-0090 D5, ADR-0131 D3/D4] Here `everyone` is derived again with what
+    // only a started kernel has: the high-privilege check against the stack's
+    // declared capabilities (#18535), which are all in by `kernel:ready`, plus
+    // every package default a `manage_metadata` holder accepted (#22801 → A),
+    // which is a database read. Derived again on every accept, revoke,
+    // uninstall and package publish (`declareEveryone`).
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', () => this.declareEveryone(ctx.logger));
     }
@@ -4768,13 +4757,8 @@ export class SecurityPlugin implements Plugin {
     const ql = this.ql;
     try {
       const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
-      const sets = this.baselinePermissionSets.filter((name) => {
-        const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
-        const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
-        if (offending) {
-          logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set: name, offending });
-        }
-        return !offending;
+      const sets = this.everyoneBaseline(anchorContext, (set, offending) => {
+        logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set, offending });
       });
       try {
         const derived = await readAcceptedEveryoneSets(ql, this.metadata);
@@ -4800,6 +4784,73 @@ export class SecurityPlugin implements Plugin {
     } catch (e) {
       logger.warn('[security] everyone-anchor declaration failed (non-fatal)', { error: (e as Error).message });
     }
+  }
+
+  /**
+   * [ADR-0090 D5] The deployment's baseline as `everyone` names it: the
+   * declared baseline minus every shipped set carrying a high-privilege bit,
+   * judged against `context` — the stack's declared capabilities. Pure: the
+   * one derivation {@link declareBuiltinPositions} and {@link declareEveryone}
+   * share. `onWithheld` hears each set it leaves out.
+   */
+  private everyoneBaseline(
+    context: AnchorBindingContext | undefined,
+    onWithheld?: (set: string, offending: string) => void,
+  ): string[] {
+    return this.baselinePermissionSets.filter((name) => {
+      const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
+      const offending = boot ? describeHighPrivilegeBits(boot, context) : null;
+      if (offending) onWithheld?.(name, offending);
+      return !offending;
+    });
+  }
+
+  /**
+   * [ADR-0131 D2, ADR-0090 D5] Declare the six built-in positions, with
+   * `everyone` naming the deployment's baseline, to the engine registry — from
+   * `init()`, the kernel contract's declaration phase.
+   *
+   * They are metadata of THIS plugin, as its permission sets are, and their one
+   * home: no boot step writes a `sys_position` row for them. Not through the
+   * manifest registration: a manifest `positions` key reaches no registry (see
+   * `builtin-positions.ts`), so they go to the engine registry by its own seam,
+   * under this plugin's package id. Registry writes only — nothing here reads or
+   * writes the database.
+   *
+   * Why `init()`: a boot that composes this plugin for its declarations only
+   * runs `init()` and no `start()` and no hook — `os migrate
+   * organization-ownership --apply` resolves position bindings against this
+   * catalog, and declared from `start()` and `kernel:ready` neither the
+   * built-ins nor the baseline reached it.
+   *
+   * The baseline here is the fail-closed reading: no declared-capability
+   * context, because the stack's declarations are still arriving while plugins
+   * initialize, and a verdict read off a still-filling registry is one the boot
+   * can contradict. With no context a token is never excused, so this list is
+   * never wider than the one {@link declareEveryone} derives at `kernel:ready`,
+   * which replaces it on a started kernel and adds the accepted package
+   * defaults (a database read, which stays there). Nothing is reported here:
+   * {@link declareEveryone} reports what it withholds.
+   */
+  private declareBuiltinPositions(ctx: PluginContext): void {
+    let ql: { registry?: unknown } | undefined;
+    try {
+      ql = ctx.getService<{ registry?: unknown }>('objectql');
+    } catch {
+      return; // No engine: `start()` reports it, and nothing can be declared.
+    }
+    if (!ql) return;
+    if (registerBuiltinPositions(ql.registry, SECURITY_PLUGIN_ID) === 0) {
+      ctx.logger.warn(
+        '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
+          + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
+          + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
+          + '`everyone` baseline sets are granted through no position.',
+      );
+      return;
+    }
+    const baseline = this.everyoneBaseline(undefined);
+    if (baseline.length > 0) declareEveryoneBaseline(ql.registry, SECURITY_PLUGIN_ID, baseline);
   }
 
   async destroy(): Promise<void> {

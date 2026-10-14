@@ -302,6 +302,11 @@ describe('[ADR-0131 D4] grant readers by name — every principal answers the re
  * administrator's set (the walled `organization_admin` against the wall-less
  * `organization_admin_no_bypass`, ADR-0105 D4) and platform standing (a grant row
  * under `single`; the declared owner, which no grant row carries, under a wall).
+ * One recorded move since, the same in every principal: `member_default` through
+ * `everyone`. `init()` declares the deployment's baseline on that anchor
+ * (`builtin-positions.declaration-phase.test.ts`), and this harness runs
+ * `init()` and `start()` but fires no `kernel:ready`, where a started kernel
+ * has always derived it (`builtin-positions.boot.test.ts`'s grant golden).
  */
 const SINGLE: unknown = {
   backfill: { granted: 0, revoked: 0, scanned: 3, skipped: 0 },
@@ -310,7 +315,7 @@ const SINGLE: unknown = {
       delegatedPositions: [],
       droppedGrants: [],
       hasPlatformAdminGrant: false,
-      permissions: [],
+      permissions: ['member_default'],
       positions: ['everyone', 'org_member'],
       posture: 'MEMBER',
       systemPermissions: [],
@@ -331,7 +336,7 @@ const SINGLE: unknown = {
           },
         ],
         hasPlatformAdminGrant: false,
-        permissions: ['mcp_agent_data_read'],
+        permissions: ['mcp_agent_data_read', 'member_default'],
         positions: ['everyone', 'org_member'],
         posture: 'MEMBER',
         systemPermissions: [],
@@ -344,7 +349,7 @@ const SINGLE: unknown = {
         delegatedPositions: [],
         droppedGrants: [{ kind: 'permission_set', name: 'legacy_reports', state: 'deactivated' }],
         hasPlatformAdminGrant: false,
-        permissions: ['viewer_readonly'],
+        permissions: ['member_default', 'viewer_readonly'],
         positions: ['everyone', 'org_member'],
         posture: 'MEMBER',
         systemPermissions: [],
@@ -357,7 +362,7 @@ const SINGLE: unknown = {
         delegatedPositions: [],
         droppedGrants: [],
         hasPlatformAdminGrant: false,
-        permissions: ['organization_admin_no_bypass'],
+        permissions: ['member_default', 'organization_admin_no_bypass'],
         positions: ['everyone', 'org_owner'],
         posture: 'TENANT_ADMIN',
         systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
@@ -370,7 +375,7 @@ const SINGLE: unknown = {
         delegatedPositions: [],
         droppedGrants: [],
         hasPlatformAdminGrant: true,
-        permissions: ['admin_full_access'],
+        permissions: ['admin_full_access', 'member_default'],
         positions: ['everyone', 'platform_admin'],
         posture: 'PLATFORM_ADMIN',
         systemPermissions: [
@@ -402,7 +407,7 @@ const WALLED: unknown = {
       delegatedPositions: [],
       droppedGrants: [],
       hasPlatformAdminGrant: false,
-      permissions: [],
+      permissions: ['member_default'],
       positions: ['everyone', 'org_member'],
       posture: 'MEMBER',
       systemPermissions: [],
@@ -423,7 +428,7 @@ const WALLED: unknown = {
           },
         ],
         hasPlatformAdminGrant: false,
-        permissions: ['mcp_agent_data_read'],
+        permissions: ['mcp_agent_data_read', 'member_default'],
         positions: ['everyone', 'org_member'],
         posture: 'MEMBER',
         systemPermissions: [],
@@ -436,7 +441,7 @@ const WALLED: unknown = {
         delegatedPositions: [],
         droppedGrants: [{ kind: 'permission_set', name: 'legacy_reports', state: 'deactivated' }],
         hasPlatformAdminGrant: false,
-        permissions: ['viewer_readonly'],
+        permissions: ['member_default', 'viewer_readonly'],
         positions: ['everyone', 'org_member'],
         posture: 'MEMBER',
         systemPermissions: [],
@@ -449,7 +454,7 @@ const WALLED: unknown = {
         delegatedPositions: [],
         droppedGrants: [],
         hasPlatformAdminGrant: false,
-        permissions: ['organization_admin'],
+        permissions: ['member_default', 'organization_admin'],
         positions: ['everyone', 'org_owner'],
         posture: 'TENANT_ADMIN',
         systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
@@ -462,7 +467,7 @@ const WALLED: unknown = {
         delegatedPositions: [],
         droppedGrants: [],
         hasPlatformAdminGrant: true,
-        permissions: ['admin_full_access'],
+        permissions: ['admin_full_access', 'member_default'],
         positions: ['everyone', 'platform_admin'],
         posture: 'PLATFORM_ADMIN',
         systemPermissions: [

@@ -160,11 +160,12 @@ describe('the participant set (`match_addresses`)', () => {
     }
   });
 
-  it('lists outer addresses first, drops the mailbox own address, and keeps each (address, source) pair once', () => {
+  it('lists outer addresses first, then attachment, then inline, drops the mailbox own address, and keeps each (address, source) pair once', () => {
     const set = collectMatchAddresses(
       [
         { source: 'outer', addresses: ['Rep@Corp.test', 'INBOX@corp.test', 'rep@corp.test', 'nonsense'] },
         { source: 'attachment', addresses: ['customer@acme.test', 'rep@corp.test', 'Inbox@Corp.Test'] },
+        { source: 'inline', addresses: ['Quoted@Acme.test', 'customer@acme.test', 'inbox@corp.test'] },
       ],
       ['inbox@corp.test'],
     );
@@ -172,10 +173,12 @@ describe('the participant set (`match_addresses`)', () => {
       { address: 'rep@corp.test', source: 'outer' },
       { address: 'customer@acme.test', source: 'attachment' },
       { address: 'rep@corp.test', source: 'attachment' },
+      { address: 'quoted@acme.test', source: 'inline' },
+      { address: 'customer@acme.test', source: 'inline' },
     ]);
   });
 
-  it('round-trips through its stored spelling, and accepts the declared `inline` source a later parser writes', () => {
+  it('round-trips through its stored spelling, the `inline` source included', () => {
     const set = [
       { address: 'a@acme.test', source: 'outer' as const },
       { address: 'b@acme.test', source: 'inline' as const },

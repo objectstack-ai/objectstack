@@ -122,28 +122,19 @@ only narrows, so it cannot make a `private` row visible. On `public_read` and
 > a matching read grant — the rows they admit stay unwritable until the caller
 > can also read them. See [RLS — write targets](/docs/permissions/rls#anatomy-of-a-policy).
 
-## The external dial — `externalSharingModel` (ADR-0090 D11)
+## External principals — no external org-wide default
 
-Portal/partner scenarios get a second, independent dial with the same enum:
+There is one org-wide default, `sharingModel`. An external (portal or
+partner) principal reaches **explicitly shared rows only** — the authorization
+kernel's `EXTERNAL` rung (ADR-0095), never derived from an org-wide default.
+Grant it a row with a manual share or a sharing rule, or publish a record
+through a share link (`publicSharing`).
 
-```typescript
-sharingModel: 'public_read',            // internal baseline
-externalSharingModel: 'private',        // external principals: own + shares only
-```
-
-- Defaults to `private`; **external must never be wider than internal**
-  (`private < public_read < public_read_write`) — the linter errors on a
-  wider external dial (`security-external-wider-than-internal`).
-- "External" is a property of the **principal** (`audience: 'external'`),
-  never of the object. The BU depth axis does not apply to externals; their
-  visibility = own records + explicit shares + the external OWD.
-- **Status: declared, not yet evaluated at runtime.** Today the dial is
-  authoring-validated (the linter above) and surfaced in Studio (the `Ext`
-  badge per object row); the evaluator branch that substitutes it for
-  external principals lands with the principal-taxonomy semantics phase
-  (tracked on #2696, liveness: `planned`). Until then no request is
-  evaluated as external — authoring the dial prepares your model without
-  changing behavior.
+`externalSharingModel`, the external dial ADR-0090 D11 declared, was removed
+in `@objectstack/spec` 18 (ADR-0049 enforce-or-remove): no request ever
+resolved an external principal, so the value changed no answer. The schema
+refuses it with the prescription "delete the key";
+`os migrate meta --from 17` lists the mechanical edits for existing sources.
 
 ## Criteria-Based Sharing Rules
 

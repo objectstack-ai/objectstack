@@ -16,11 +16,11 @@
  *
  * ## The control
  *
- * A `planned` row with `authorWarn` is the legal shape, and it still warns at
- * the same door: the second fixture also authors `object.externalSharingModel`
- * (`planned` + `authorWarn` in tree), and `os lint` reports it under
- * `liveness-planned-property` — still exit 0, because a liveness finding is
- * advisory.
+ * A warned row still warns at the same door: the second fixture also authors
+ * `tool.outputSchema` (`experimental` in tree), and `os lint` reports it under
+ * `liveness-experimental-property` — still exit 0, because a liveness finding
+ * is advisory. (The control was `object.externalSharingModel`, `planned` +
+ * `authorWarn`, until #23268 retired that key; the parse now refuses it.)
  *
  * The CLI runs through `bin/run-dev.js` (source, via tsx); `@objectstack/lint`
  * resolves through `exports` to `dist/`, and both read the ledger JSON the spec
@@ -77,7 +77,7 @@ function payloadOf(run: Run, label: string): Record<string, any> {
 }
 
 /** The card's fixture: one object, one mapping that authors the pull binding. */
-function stack(objectExtra: Record<string, unknown> = {}): Record<string, unknown> {
+function stack(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     manifest: { id: 'com.example.fx-connector-source', name: 'fx', version: '0.1.0', type: 'app', namespace: 'fx' },
     objects: [
@@ -86,7 +86,6 @@ function stack(objectExtra: Record<string, unknown> = {}): Record<string, unknow
         label: 'Account',
         sharingModel: 'private',
         fields: { name: { type: 'text', label: 'Name' }, external_id: { type: 'text', label: 'External ID' } },
-        ...objectExtra,
       },
     ],
     mappings: [
@@ -103,6 +102,7 @@ function stack(objectExtra: Record<string, unknown> = {}): Record<string, unknow
         connectorSource: { connector: 'crm_api', action: 'request' },
       },
     ],
+    ...extra,
   };
 }
 
@@ -119,7 +119,16 @@ beforeAll(() => {
     dirs[label] = dir;
   };
   make('card', stack());
-  make('control', stack({ externalSharingModel: 'private' }));
+  // `tool.outputSchema` is `experimental` in tree, so it warns by verdict.
+  make('control', stack({
+    tools: [{
+      name: 'fx_lookup',
+      label: 'Lookup',
+      description: 'Look up an account',
+      parameters: { type: 'object', properties: {} },
+      outputSchema: { type: 'object' },
+    }],
+  }));
 });
 
 afterAll(() => {
@@ -145,14 +154,14 @@ describe('#21127 — a stack authoring `mapping.connectorSource` validates and l
     expect(issues.filter((i) => i.message.includes('connectorSource'))).toEqual([]);
   }, SPAWN_TIMEOUT_MS);
 
-  it('CONTROL: a `planned` row with `authorWarn` still warns at the same door', async () => {
+  it('CONTROL: a warned (`experimental`) row still warns at the same door', async () => {
     const run = await runCli(['lint', '--json'], dirs.control);
     const payload = payloadOf(run, 'lint (control)');
     expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
     const issues = (payload.issues ?? []) as Array<{ rule: string; message: string; severity: string }>;
-    const planned = issues.filter((i) => i.rule === 'liveness-planned-property');
-    expect(planned.map((i) => i.message).join(' | '), JSON.stringify(issues)).toContain('externalSharingModel');
-    expect(planned.every((i) => i.severity === 'warning')).toBe(true);
+    const warned = issues.filter((i) => i.rule === 'liveness-experimental-property');
+    expect(warned.map((i) => i.message).join(' | '), JSON.stringify(issues)).toContain('`outputSchema`');
+    expect(warned.every((i) => i.severity === 'warning')).toBe(true);
     expect(issues.filter((i) => i.message.includes('connectorSource'))).toEqual([]);
   }, SPAWN_TIMEOUT_MS);
 });

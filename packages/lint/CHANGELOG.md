@@ -1,5 +1,227 @@
 # @objectstack/lint
 
+## 18.0.0-next.1
+
+### Major Changes
+
+- 7958bdf: No flow position reads the single-brace `{…}` template dialect any more, and its resolver is deleted (ADR-0032 Sequencing 6: "delete the single-brace resolver"). `AutomationEngine.evaluateCondition` evaluates every condition as CEL: a condition carrying a `{var}` hole is refused as the CEL brace trap, naming its source, and a `template` or `flow` envelope is refused before evaluation, where the deleted path substituted the variables and compared the text. A literal in a value slot is handed on as written: a `Date` in a code-defined flow reaches the write as the `Date`, where the deleted interpolator wrote `{}`.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered flow-value-slot-template-dialect-refused, flow-text-slot-single-brace-refused) The two step-18 D3 entries, registered on this line before this change, record the retirement of the single-brace dialect from every value and text position; this change deletes the resolver behind those positions and the condition path no registered flow reached. No authorable flow surface changes: registerFlow and objectstack validate already refused a braced condition and a template or flow envelope at every condition slot (ADR-0032 §1a), and the residual calls the resolver kept saw literals only. No new D3 entry and no D2 conversion. -->
+  
+  **BREAKING**: a narrowing of a published runtime method and of published lint exports, shipped as `major` on the v18 line (`.changeset/pre.json` is open on `main` in `next` pre mode, so the release is `18.0.0-next.*`).
+  
+  **Why.** ADR-0032 Decision 3 keeps one template delimiter, `{{ }}`, and its Sequencing 6 deletes the single-brace resolver. The earlier changes on this line retired the dialect position by position — every value slot, the text slots, each CRUD filter operand — so the resolver's last readers were two calls that saw literals only and a condition path that only a direct call reached.
+  
+  **What changes.**
+  
+  - **Conditions.** `AutomationEngine.evaluateCondition(condition, variables, context?)` reads every condition as CEL — bare text, an envelope with `dialect: 'cel'`, or one naming no dialect. The template path it kept for a string carrying a `{var}` hole is deleted: such a string is refused as a CEL fault that names its source and says not to wrap field references in `{…}`, and an envelope with `dialect: 'template'` or `dialect: 'flow'` is refused before evaluation. `registerFlow` already refused both at every condition slot (a start node's `condition`, an edge `condition`, a `decision` branch's `expression`, a screen field's `visibleWhen`), so no registered flow changes. What changes is a direct caller: a plugin calling the method, or `@objectstack/verify`'s `stack.automation.evaluateCondition`, which hands the condition over as given.
+  - **Value-slot literals.** A literal in a value slot — a `fields`, `input` or `templateData` value, an `assignment` value in any of its three shapes, a `notify` recipient, an `http` `body`, a screen's `defaults`, `defaultValue` or `recordId` — is handed on as a copy of what was written (arrays and plain objects copied, every other value as it is). The deleted interpolator walked every object's own entries, so a `Date` written in a code-defined flow reached the write as `{}`; it reaches it as the `Date`.
+  - **`@objectstack/lint`.** `validateFlowTemplatePaths` reads the `{{ }}` holes of a node's strings and no single-brace token; a CRUD node's `filter` is not scanned, since each operand is a value slot that renders no template. So `flow-template-unknown-field` and `flow-template-lookup-traversal` report only `warning` now: their `error` at a filter operand, and every finding on a single-brace token, are gone, and the value-slot and text-slot judges refuse those tokens at the same doors as `expression-invalid`. Messages and hints spell a hole `{{ record.x }}`. `flow-double-brace-interpolation` and `flow-bare-dollar-reference`, at a string outside every value slot, text slot and declared literal (a plugin node's own config, a `connector_action` input), say the value is read as written, where they prescribed a `{var}` token nothing reads. The lint's mirror of the retired grammar is removed with its exports.
+  - **`@objectstack/spec`.** The `FlowSchema` example's `connector_action` input holds a literal, since nothing reads a token there. The upgrade guide's step-18 text-slot entry says no other flow string reads the single-brace dialect, where it said every other one kept it, and its value-slot entry names every value slot the retirement reached on this line, where it named only the `assignment` values and the CRUD `fields` map.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead | what changes |
+  |:--|:--|:--|
+  | `engine.evaluateCondition('{amount} > 100', vars)` | `engine.evaluateCondition('amount > 100', vars)` | the template substituted text and compared it; CEL compares the values and fails the run on an absent variable |
+  | `"{status} == 'open'"`, `'{status} == open'` | `"status == 'open'"` | a string literal is quoted |
+  | `{ dialect: 'template', source: "{flag} == true" }`, `dialect: 'flow'` | `{ dialect: 'cel', source: 'flag == true' }` | — |
+  | `classifyFlowTemplateToken(inner)` (`@objectstack/lint`) | `valueSlotTemplateRefusals(value)` / `textSlotTemplateRefusal(text)` (`@objectstack/spec/automation`), which refuse a token with the spelling that replaces it | the grammar it classified is read by nothing |
+  | `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` | the CEL stdlib: `isoDate(today())`, `isoDatetime(now())`, `round`, `floor`, `ceil`, `abs`, `min`, `max` | — |
+  | `FlowTemplateTokenVerdict` | nothing: the judges' reading of the retired grammar is internal to `@objectstack/spec` | — |
+  
+  **The one-line fix: write a condition as CEL, without `{…}` around a reference.**
+  
+  **Who is affected, measured.** In this repository at the base: no braced condition and no `template` or `flow` condition envelope in `examples/`, the docs or any package source; the deleted path's own pins in `@objectstack/service-automation` (`engine.test.ts`, `nested-region-parity.test.ts`) and `@objectstack/verify`'s door test are re-pinned to the refusal here. No authored `Date` literal in a flow was found; a compiled artifact serialises one to text, so only a flow handed to `registerFlow` in code carried one. Neither repository imports the removed lint exports. hotcrm at `0f84c9c` carries no braced condition and no `connector_action` input; its flows still author the single-brace dialect at value and text positions earlier changes on this line refuse, which its own upgrade migrates.
+  
+  ### The kit
+  
+  - **The engine.** `AutomationEngine.evaluateCondition` (`@objectstack/service-automation`): the template path, its hole discriminator and its text comparison are deleted. The value-slot resolvers' literal arm and the `assignment` executor copy a literal (`copyLiteral`, `builtin/value-slot-map.ts`). The single-brace interpolator (`interpolate`, `interpolateString`, `resolveToken`, its function table and `FlowExpressionFunctionError`), which the package did not export, is deleted with its tests.
+  - **The lint.** `validateFlowTemplatePaths` and the two wrong-syntax hints (`lint-flow-patterns.ts`); `classifyFlowTemplateToken`, `FLOW_TEMPLATE_DATE_FUNCTIONS`, `FLOW_TEMPLATE_VALUE_FUNCTIONS` and `FlowTemplateTokenVerdict` are removed.
+  - **The verify handle.** `stack.automation.evaluateCondition`'s documentation states the engine's reading: CEL, a `{var}` hole refused.
+  - **ADR-0087.** No new entry: the step-18 D3 entries `flow-value-slot-template-dialect-refused` and `flow-text-slot-single-brace-refused` record the retirement.
+- 4f68ba1: Every finding of the component-props gate is now an error at `objectstack validate`, `objectstack build` and `objectstack lint`. A page component whose `properties` carry a key its `ComponentPropsMap` row does not declare, a value that row rejects, or no `dataSource.object` binding where the element reads only that binding drew a warning: the command printed "✓ Validation passed" and built the artifact, and the renderer ignored the key or drew nothing. Each is now a `component-props-unknown-key` or `component-props-invalid` error, and the stack does not pass until it is fixed. A retired prop was already refused, and still is.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered element-data-source-and-object-block-filter-rule-array, element-flat-data-binding-retired, element-text-variant-heading-subheading-retired, ui-action-group-menu-member-params-array-only, ui-action-group-menu-members-typed, ui-object-block-grouping-config-typed, ui-object-form-custom-fields-typed, ui-object-form-fields-names-typed, ui-object-form-members-typed, ui-object-form-sections-typed, ui-object-gantt-markers-typed, ui-object-grid-columns-typed, ui-object-grid-export-options-closed, ui-object-grid-kanban-calendar-list-members-typed, ui-object-grid-page-size-positive-integer-refused, ui-object-grid-row-members-typed, ui-object-kanban-conditional-formatting-typed, ui-object-map-gantt-tree-navigation-typed, ui-object-master-detail-form-details-closed, ui-object-metric-aggregate-trend-typed, ui-object-metric-compare-to-typed, ui-object-metric-drill-down-report-typed, ui-object-metric-drill-down-typed, ui-object-timeline-items-typed, ui-object-timeline-mapping-typed, ui-record-line-items-props-closed) Every props shape this refuses on was declared, and each narrowing of one recorded in its own D3 entry, before this change; the entries named here are the step's narrowings whose refusal the gate carries, and this diff amends the reason text of each one that called that refusal advisory, to say it is now an error. It moves only the severity of the lint findings, so it adds no entry, and no conversion: nothing on the load path refuses a page's `properties`. -->
+  
+  **BREAKING**: an accept-set narrowing on a published authoring surface (the `component-props-invalid` and `component-props-unknown-key` rules of `objectstack validate`, `objectstack build` and `objectstack lint`).
+  
+  **What is refused now.** Every verdict of the gate:
+  
+  - `component-props-unknown-key`: a key the component's props row does not declare, at the bag's own level, on a strict object or union arm below it, or on a strip-mode object below it.
+  - `component-props-invalid`: a value the props row rejects (a wrong type, a missing required prop, a closed-set refusal such as a url action's `target` scheme or a `record:details` section's `count`, a retired enum value), and a missing `dataSource.object` on `element:record_picker`, `element:number` and `element:repeater`.
+  
+  **Not judged here.** The runtime publish door (the Studio, REST `/meta`, MCP) does not run this rule, so a page saved there is not refused for any of these. `defineStack` and the stack schema keep the open `properties` bag as written. A component `type` that `ComponentPropsMap` carries no row for (a `custom.*` or plugin type) is not judged.
+  
+  `ComponentPropsSeverity`, the type `@objectstack/lint` exports for these findings, narrows from `'error' | 'warning'` to `'error'`.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `page:header` `properties: { titel: 'Deals' }` | `properties: { title: 'Deals' }`, the declared spelling the error names |
+  | `record:related_list` `properties: { limit: 'five' }` | `properties: { limit: 5 }`, the type the error names |
+  | `element:number` with no `dataSource` | `dataSource: { object: 'deal' }` on the component node, beside `type` |
+  | a key the component does not read | nothing: delete the key |
+  
+  **The one-line fix: apply what the error names.** An unknown-key error names the declared spelling when one is close, a value error names what the row expects, and the binding error names where the object goes. If the component really does read the key or value, the props row is what is wrong: correct the declaration in `@objectstack/spec`, not the page.
+  
+  The `@objectstack/spec` change is text only: the reason of each D3 migration entry named above said the gate reported its refusal as an advisory finding, and now says it is an error.
+  
+  **Who is affected, measured.** At objectstack `8323cad97`, this rule ran at its own input tier over `examples/app-crm`, `app-todo`, `app-multi-package` and `app-showcase`, and over the eight shipped pages outside them (`@objectstack/platform-objects` ×3, `@objectstack/plugin-approvals`, `packages/qa/downstream-contract`, `@objectstack/cloud-connection` ×2, `@objectstack/mcp`): 37 pages, 177 components judged. It also ran over `objectstack-ai/hotcrm` at `0f84c9c72`: 8 pages, 50 components judged. Result: 0 findings of every class in both. A planted undeclared key and a planted wrong-typed prop each drew one finding on every population. The `create-objectstack` template authors no page. Deployed metadata and other repositories were not measured.
+
+### Minor Changes
+
+- 76815b9: feat(spec)!: a `controlled_by_parent` object derives its master from exactly one required `master_detail` — the parse refuses anything else, and the runtime's two fallback tiers retire (#23100)
+  
+  Clause-②: no (narrowing)
+  
+  ADR-0055 §1 says a `controlled_by_parent` object "must declare exactly one required `master_detail` field … Validation error otherwise (fail closed)". Until now neither the parse nor the runtime kept it. `ObjectSchema` accepted such an object with no master at all. The security runtime derived a master through a three-tier fallback the record never stated: a required `master_detail`, then any `master_detail`, then a required `lookup`, taking the first match by field order within a tier. The maintainer ruling (letter B) enforces the record, under ADR-0049 (enforce-or-remove).
+  
+  **BREAKING — what moves for consumers.**
+  
+  - **`@objectstack/spec`.** `ObjectSchema` (raw `.parse()` / `.safeParse()`, `ObjectSchema.create()`, `defineStack`, `os validate` and the metadata save door) refuses an object declaring `sharingModel: 'controlled_by_parent'` unless exactly one of its fields is a `master_detail` declared `required: true`. With none, the issue sits at `sharingModel` and names each field that relied on a retired tier. With two or more, it sits at `fields` and names them. A plain object literal is judged like a raw parse: an omitted `required` on its `master_detail` is refused, while `ObjectSchema.create()` keeps forcing an omitted `required` to `true`. The step-18 semantic migration entry `cbp-master-relation-tiers-retired` carries the prescription for `os migrate meta`. The step-18 conversion `cbp-master-detail-required-defaulted` covers the one lossless shape: a `controlled_by_parent` object whose one `master_detail` omits `required`, which Studio's field designer writes. It gets `required: true`, exactly what `ObjectSchema.create()` does. It runs on stored rows, built artifacts and `os migrate meta --from 17`. A live authoring parse still refuses the shape and names the fix.
+  - **`@objectstack/plugin-security`.** The relation resolver derives a master from that one field and nothing else. An object that declares a non-required `master_detail` only, a required `lookup` only, or two required `master_detail` fields resolves no master. Every read of it is denied, and every write and insert is refused with `422 INVALID_METADATA`. The plugin reports such an object once per object (`[security/controlled-by-parent] … resolves no master relation`), naming the shape it relied on. The `422` message now says "not exactly one required master_detail field".
+  - **`@objectstack/lint`.** `security-controlled-by-parent-no-relation` now refuses the non-required `master_detail` and required `lookup` shapes as well. `security-controlled-by-parent-ambiguous-relation` reports two or more required `master_detail` fields as "no master is derived", since the runtime no longer picks one by field order. Two required `lookup` fields are now a no-relation object, not a tie. `security-master-detail-ungranted` no longer treats a lookup-bound `controlled_by_parent` object as a detail.
+  
+  **FROM → TO — HotCRM's three objects.** These are the only producers measured on the retired third tier: the read-only HotCRM clone at `0f84c9c`, 8 `controlled_by_parent` objects, 5 of them already on one required `master_detail`. HotCRM's pinned engine is unaffected until it bumps past the release that carries this change.
+  
+  | object | FROM | TO |
+  |---|---|---|
+  | `crm_campaign_member` | `crm_campaign: Field.lookup('crm_campaign', { required: true })` | `crm_campaign: Field.masterDetail('crm_campaign', { required: true, deleteBehavior: 'restrict' })` |
+  | `crm_event_attendee` | `crm_event: Field.lookup('crm_event', { required: true })` | `crm_event: Field.masterDetail('crm_event', { required: true, deleteBehavior: 'restrict' })` |
+  | `crm_article_feedback` | `crm_knowledge_article: Field.lookup('crm_knowledge_article', { required: true, deleteBehavior: 'cascade' })` | `crm_knowledge_article: Field.masterDetail('crm_knowledge_article', { required: true, deleteBehavior: 'cascade' })` |
+  
+  `deleteBehavior: 'restrict'` keeps what the two lookups do today: a campaign or an event with members or attendees cannot be deleted. Without it a `master_detail` cascades, and a detail's rows are deleted with their master. An object whose rows must outlive their parent is not a detail. It leaves `controlled_by_parent` for `private`, `public_read` or `public_read_write`.
+  
+  **Remedy, in one line.** On every object with `sharingModel: 'controlled_by_parent'`, declare exactly one `master_detail` field with `required: true`, pointing at the master. Every other parent is a `lookup`.
+  
+  **Unchanged.**
+  
+  - An object with one required `master_detail` resolves and derives exactly as before, chain walk included. So does a required `master_detail` beside other `lookup` fields, or beside a `master_detail` that is not required. Every in-tree `controlled_by_parent` object is in that set: `examples/app-crm` (1), `examples/app-showcase` (2), the CLI's eval corpus (4) and the dogfood fixtures.
+  - Stored metadata whose one `master_detail` merely omits `required` keeps serving, converted as above. A stored row in any other retired shape is not rewritten: it still registers, under its `[metadata_spec_invalid]` diagnostic, and is denied until it is corrected and saved. Those shapes are an explicit `required: false`, two masters, or a required `lookup`. None of them is converted: turning a `lookup` into a `master_detail` changes what deleting the master does to every row, choosing between two masters is the pick ADR-0055 §1 refuses, and leaving `controlled_by_parent` is the author's decision.
+  - No export, signature or error code is added or removed.
+  
+  <!-- adr-0087: registered cbp-master-detail-required-defaulted, cbp-master-relation-tiers-retired -->
+
+### Patch Changes
+
+- 66949b7: feat(plugin-security)!: the four security-catalog row objects are retired — `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` (ADR-0131 D3)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered catalog-row-objects-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Positions, permission sets and capabilities live in the security catalog — the environment registry, fed by package declarations and by environment metadata saved through `/api/v1/meta` (ADR-0131 D3). The four row objects that mirrored them are no longer registered, so their data and REST routes and their Setup object pages are gone. No table is dropped and no row is deleted.
+  
+  FROM → TO:
+  
+  - `GET|POST|PATCH|DELETE /api/v1/data/sys_permission_set` → `GET|PUT|DELETE /api/v1/meta/permission/:name`; to copy a set, `POST /api/v1/security/permission-sets/:name/clone` with `{ name, label }`.
+  - `… /api/v1/data/sys_position` → `/api/v1/meta/position/:name`. A position's permission sets are its definition's `permissionSets`.
+  - `… /api/v1/data/sys_position_permission_set` → the position definition's `permissionSets` (`PUT /api/v1/meta/position/:name`).
+  - `… /api/v1/data/sys_capability` → read-only `GET /api/v1/meta/capability`; a package declares a capability with `defineCapability` (`stack.capabilities`).
+  - Setup → Access Control → Positions / Capabilities / Permission Sets now open Setup's catalog lists (`/apps/setup/metadata/<type>?scope=environment`) instead of the object pages; the `sys_position` record page (`SysPositionDetailPage`) is removed.
+  - An object permission on one of the four names in a permission set grants nothing and can be deleted.
+  
+  What else changes:
+  
+  - `sys_user_permission_set.permission_set_id` is a plain text column now, not a lookup: same column, same stored ids, same indexes. It is not written and grants nothing; a grant names its set by `permission_set`.
+  - A permission set saved through the metadata door is written to no row: the `permission` mutation projector, the `sys_permission_set` and `sys_position` data-door write-throughs and the row-only position backfill are no longer registered.
+  - On a fresh `single`-posture database the first human is promoted to platform administrator without reading any catalog row. An unscoped grant written before `sys_user_permission_set.permission_set` existed (it names no set) still withholds the promotion until the organization-ownership migration names it.
+  - Uninstalling a package still revokes every grant naming a permission set the package declared, by the names the uninstalling door captures before the withdrawal (`declared`, `captureUninstallDeclared`), and now by those names alone: the cleanup reads and removes no `sys_permission_set` or `sys_position_permission_set` row, so the `sets` and `positionBindings` counts on its outcome are always 0. A grant written before `sys_user_permission_set.permission_set` existed names no set and is not reached; the organization-ownership migration names it.
+  - On a `group` or `isolated` deployment the data-door half of the walled catalog refusal goes with the objects: a data-door insert, update or delete on `sys_position`, `sys_permission_set` or `sys_capability` answers `404 OBJECT_NOT_FOUND` for every caller instead of `403 PERMISSION_DENIED` below the platform operator. The refusal at the `/meta` write doors, the permission-set clone door and the `/packages` write doors is unchanged.
+  - `capability-reference-unknown` no longer counts a `sys_capability` seed row as a declared capability — no runtime reader consults one. Declare the capability with `defineCapability`.
+  - On an existing database `os migrate plan`'s unmanaged-table sweep now lists the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` tables: they keep their rows and no object declares them any more. The sweep only reports; nothing is dropped, and the tables stay for the organization-ownership migration.
+  
+  Removed exports, no replacement:
+  
+  - `@objectstack/plugin-security`: the object definitions `SysPosition`, `SysPermissionSet`, `SysPositionPermissionSet`, `SysCapability` (from `./objects`); `securityObjects` lists the remaining three.
+  - `@objectstack/platform-objects/pages`: `SysPositionDetailPage`.
+  - `@objectstack/spec`: `SystemObjectName.POSITION`, `SystemObjectName.PERMISSION_SET`; the four names leave `PLATFORM_OBJECTS_BY_PACKAGE['plugin-security']` and `PLATFORM_PROVIDED_OBJECT_NAMES`.
+  - `@objectstack/core`: `isRowActive` and `ActivatableRow` — a catalog row's `active` column decides nothing; deactivation is the activation ledger's (`sys_metadata_activation`).
+  - `@objectstack/objectql`: the published `PLATFORM_OBJECT_TENANCY` record loses its `sys_permission_set` key (the other three names were never in it). A removed key of an exported constant is a narrowing, so `@objectstack/objectql` takes `minor` under the launch-window convention for breaking changes.
+- 9fbabd7: fix(lint): 17 more author-time rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 17 rule ids now carries a `hint` (the CLI's `fix:` line, the runtime issue's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (the lengths here are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
+    - approval nodes: `approval-approver-not-membership-tier` (313 → 168), `approval-expression-no-empty-policy` (294 → 121) and `approval-expression-invalid` (292 → 144);
+    - datasets: `dataset-include-unknown` (336 → 97) and `dataset-field-unknown` (206 → 139);
+    - record titles: `title-format-retired` (267 → 148) and `title-unresolvable` (237 → 122);
+    - list views: `list-view-field-unknown` (258 → 62) and `list-view-field-dotted` (233 → 158);
+    - translations: `translation-target-unknown` (317 → 164);
+    - seeds: `seed-insert-mode-duplicates-on-replay` (309 → 131) and `seed-value-outside-state-machine` (251 → 139);
+    - charts: `chart-measure-unknown` (285 → 115);
+    - object field-name lists: `object-field-ref-unknown` (284 → 186);
+    - stack views: `view-container-shape` (256 → 187);
+    - agents: `ai-skill-surface-mismatch` (235 → 171);
+    - source-tier pages: `page-source-className-tailwind` (231 → 167).
+  - **Lists are no longer echoed.** `dataset-include-unknown`, `dataset-field-unknown`, `list-view-field-unknown` and `object-field-ref-unknown` no longer append the object's whole field list, `chart-measure-unknown` no longer lists the dataset's measures, and `translation-target-unknown` no longer lists the declared fields, views, sections, tabs, rules, actions, apps, navigation ids, dashboards, widgets, header actions, flows, screens, screen fields, refusing end nodes, params, outcomes or result paths: the verdict's "Did you mean" (on `chart-measure-unknown`, the fix line's own) names the nearest one. Two facts a list used to carry stay on the line as one bounded clause: a stale `_views` key is told that a nameless default `list` is keyed `default`, and a `_tabs` key over an object with no preset bar is told to declare the tab in a page's `interfaceConfig.userFilters.tabs`, because a list view's own `tabs` has no renderer. `dataset-filter-field-unknown`, outside this change, keeps its field list.
+  - **One line, one remedy.** Where a fix line explained its remedy, the explanation moved: what an expression approver's three roots hold, why `record` and `previous` are unbound at an approval node, and what `resolveAs` does; what each `onEmptyApprovers` policy does; that a business role is always a position; that a dataset join is derived from the object graph, up to three hops, with `a.b` including `a`; why `titleFormat` is retired and how a record title resolves, with its fallback; what a denormalised field is; which presentation positions a chart measure lands on, and that none carries a `suppressWarnings` key; the composite `externalId` of a junction table; that the seed exemption never licenses an undeclared state; when a skill may declare `surface: 'both'`; and why a Tailwind class in page source produces no CSS, with the theme-token and overlay advice.
+  - **`os explain RULE_ID` carries the rest.** What the fix lines stopped saying is each id's `RULE_EXPLANATIONS` entry in `@objectstack/lint`, which `os explain RULE_ID` prints. Five ids gain an entry, so their `rule:` line now carries the `os explain` pointer: `approval-expression-invalid`, `approval-expression-no-empty-policy`, `title-format-retired`, `title-unresolvable` and `page-source-className-tailwind`. Ten existing entries gain text. The enumerations an entry spells out are held to their sources by the rules' tests: the empty-slate policies to the spec's `onEmptyApprovers` enum, the expression roots to `APPROVER_EXPRESSION_ROOTS`, and the title-eligible types to `TITLE_ELIGIBLE_TYPES`.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), 9 of the 17 fire; the `hint` FROM → TO, measured at the door:
+    - a `flow` write with an approval node: `approval-approver-not-membership-tier` (2xx `advisories[].hint`, 313 → 138), `approval-expression-invalid` (422 `issues[].hint`: an empty expression 216 → 90, a `record` root 292 → 144; a parse failure 129, a bare root 110 and the `resolveAs` advisory 102 unchanged) and `approval-expression-no-empty-policy` (2xx advisory, 294 → 121);
+    - a `dataset` write: `dataset-include-unknown` (422, an entry naming nothing / an ordinary field 239 / 187 → 93 / 93) and `dataset-field-unknown` (422, a dimension / a measure 184 / 182 → 132 / 130);
+    - an `object` write: `object-field-ref-unknown` (422, 180 → 128; the same text is the `fix` of the publish receipt's `object_field_ref_unknown` runtime probe issue), and on its `listViews`, `list-view-field-unknown` (422, 110 → 57) and `list-view-field-dotted` (422, 231 → 157);
+    - a `view` write: `list-view-field-unknown` (422, 110 → 57) and `list-view-field-dotted` (422, a projection / a filter 231 / 143 → 157 / 95);
+    - a `report` write: `chart-measure-unknown` (422 at the query position, 117 → 106; 2xx advisory at a presentation position, 301 → 113).
+  
+    Studio's save-advisory toast prints an advisory's `hint` after its message, so the three approval advisories and the chart presentation advisory shorten there; Studio renders no 422 issue's `hint`. No Studio, REST or MCP reader in this repository or in objectui matches on `hint` text; a tool that did should match on `rule` and `path` instead.
+  - **Never at the runtime gate:** `title-format-retired`, `title-unresolvable`, `translation-target-unknown`, both seed ids, `view-container-shape`, `ai-skill-surface-mismatch` and `page-source-className-tailwind` run on the CLI only.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- b4d573a: fix(spec,core): the rolling `last_7_days`, `last_30_days` and `last_90_days` presets close on today, at the spec's prescription table, the save door's refusal and the analytics preset arm
+  
+  Clause-②: no (no accept set widens: the three rolling windows gain the inclusive `{today}` end every calendar preset already has)
+  
+  The three rolling windows were the open arm of `DATE_RANGE_PRESET_MACRO_WINDOWS`: `['{30_days_ago}', null]`, prescribed as `{ $gte: '{30_days_ago}' }`. A `$gte`-only window has no upper bound, so on a column that carries future dates (a close date, a due date) "last 30 days" also counted every later day. Measured on a `date` field with one row dated today−5 and one dated today+5: that window counted 2, while the console's preset lowering and the analytics preset arm counted 1.
+  
+  - `DATE_RANGE_PRESET_MACRO_WINDOWS` now closes every rolling window on `{today}`: `last_7_days` is `['{7_days_ago}', '{today}']`, and `last_30_days` and `last_90_days` follow the same shape. That is the inclusive last-day end every calendar preset already uses, and the extent the console's lowering already selects. The table's declared type narrows to match, `readonly [start: string, end: string]` (it was `end: string | null`). A reader that compared `end` with `null` still compiles; that branch can no longer be taken.
+  - The save door's refusal of a bare preset comparand (`bareDateRangePresetComparandMessage`, and the `filter-preset-comparand` lint verdict that quotes it) now prescribes the closed window. For `last_30_days` it says: write `{ $between: ['{30_days_ago}', '{today}'] }`, where it used to say `{ $gte: '{30_days_ago}' }`.
+  - `@objectstack/core`'s `resolveAnalyticsDateRangePreset`, the preset arm behind `timeDimensions[].dateRange`, selects the same extent. A rolling window now stops before tomorrow begins in the reference timezone, exactly as `today` does, with `endExclusive: true`. It used to end at the reference instant, so it dropped rows stamped later today. Its ends keep this module's own "the day the window stops before" spelling (`tomorrow`). Every preset this resolver returns is now `endExclusive: true`, and a caller's explicit `[a, b]` window keeps its inclusive reading, as before.
+  - The semantic migration entry `filter-preset-ordering-comparand-refused`, which `spec-changes.json` and `os migrate meta` carry, now names `{ $between: ["{30_days_ago}", "{today}"] }` as the window for `last_30_days` in its replacement, where it named `{ $gte: "{30_days_ago}" }`.
+  
+  If you followed the old refusal and authored `{ $gte: '{N_days_ago}' }` for a rolling preset, add `$lte: '{today}'`, or write the `$between` pair above, to stop counting future-dated rows.
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [777eed2]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/formula@18.0.0-next.1
+  - @objectstack/sdui-parser@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Major Changes

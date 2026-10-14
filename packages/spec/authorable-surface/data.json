@@ -665,7 +665,7 @@
     "data/Object:editMode",
     "data/Object:enable",
     "data/Object:external",
-    "data/Object:externalSharingModel",
+    "data/Object:externalSharingModel [RETIRED]",
     "data/Object:fieldGroups",
     "data/Object:fields",
     "data/Object:fileAccessDelegate",

@@ -23,6 +23,14 @@
  *  - **Forward as attachment is read** (Q3 C, phase 1): the headers of a
  *    `message/rfc822` or `message/global` part are participants too, under
  *    source `attachment`.
+ *  - **Forward quoted inline is read, for an organization user's forward
+ *    only** (Q3 C, the staged half): the "Forwarded message" block Gmail,
+ *    Outlook or Apple Mail writes into the text/plain body
+ *    (`inline-forward.ts`) names participants under source `inline` — when
+ *    the message's From is a user who is a member of the mailbox's
+ *    organization (D5: forwarding is consent). A block the parser does not
+ *    recognise is not guessed at, and a forward from anyone else is not read:
+ *    the message is matched on its other participants, which may pool it.
  *
  * ## Writes, in order
  *
@@ -35,7 +43,8 @@
  * completes it. The failure itself reaches the caller.
  *
  * Every write is a system write that carries the mailbox's organization
- * (ADR-0131 D9), and every match is read inside it.
+ * (ADR-0131 D9), and every match is read inside it — the organization-user
+ * door too: a membership in another organization does not open it.
  *
  * ## Who may call
  *
@@ -55,8 +64,10 @@ import {
   MAIL_MESSAGE_OBJECT,
 } from '../mail-read-visibility.js';
 import { dedupeKeyOf } from './dedupe-key.js';
+import { parseInlineForward } from './inline-forward.js';
 import {
   collectMatchAddresses,
+  normalizeMailAddress,
   parseMatchAddresses,
   serializeMatchAddresses,
   type MailMatchAddress,
@@ -67,7 +78,13 @@ import {
   type MailAssociationMatch,
   type MailMatchEngine,
 } from './match-records.js';
-import { parseInboundMessage, participantAddresses, type RawMailMessage } from './parse-message.js';
+import {
+  parseInboundMessage,
+  participantAddresses,
+  type MailParticipantHeaders,
+  type ParsedInboundMessage,
+  type RawMailMessage,
+} from './parse-message.js';
 import { suppressionReasonOf, type MailSuppressionReason } from './suppression.js';
 
 /** The kernel service name the mailbox plugin registers {@link MailIngestService} under. */
@@ -175,6 +192,16 @@ export class MailboxServiceError extends Error {
 export const REMATCH_PAGE_SIZE = 200;
 /** Existing links read per re-match page. */
 export const REMATCH_LINK_SCAN_LIMIT = 5_000;
+/**
+ * `sys_user` rows read to recognise one inline forward's sender: those whose
+ * email contains the sender's address. Beyond it the read may miss the user,
+ * and is said so.
+ */
+export const SENDER_USER_SCAN_LIMIT = 100;
+
+/** The identity objects the organization-user door reads (registered by the auth plugin). */
+const USER_OBJECT = 'sys_user';
+const MEMBER_OBJECT = 'sys_member';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 const DUPLICATE_RECORD = 'DUPLICATE_RECORD';
@@ -248,6 +275,8 @@ function distinctAddresses(addresses: ReadonlyArray<MailMatchAddress>): string[]
  */
 export class MailIngestService {
   private readonly matcher: MailRecordMatcher;
+  /** Whether the absence of the identity objects the door reads has been said. */
+  private reportedNoIdentityObjects = false;
 
   constructor(
     private readonly options: {
@@ -308,10 +337,12 @@ export class MailIngestService {
     const existing = await this.storedId(engine, mailbox.id, dedupeKey);
     if (existing !== null) return { outcome: 'duplicate', messageId: existing };
 
+    const inline = await this.inlineForwardOf(engine, organizationId, mailbox.id, parsed);
     const matchAddresses = collectMatchAddresses(
       [
         { source: 'outer', addresses: participantAddresses(parsed.outer) },
         ...parsed.forwarded.map((part) => ({ source: 'attachment' as const, addresses: participantAddresses(part) })),
+        ...(inline === null ? [] : [{ source: 'inline' as const, addresses: participantAddresses(inline) }]),
       ],
       mailbox.address ? [mailbox.address] : [],
     );
@@ -492,6 +523,97 @@ export class MailIngestService {
       if (isDuplicateRecord(err)) return false;
       throw err;
     }
+  }
+
+  /**
+   * The participants of the forward the body quotes inline, or `null`: when
+   * the body carries no block the parser recognises, or when the message was
+   * not sent by a user of the mailbox's organization. The parser is pure, so
+   * the door is read only for a message that carries a recognised block.
+   */
+  private async inlineForwardOf(
+    engine: MailIngestEngine,
+    organizationId: string,
+    mailboxId: string,
+    parsed: ParsedInboundMessage,
+  ): Promise<MailParticipantHeaders | null> {
+    const forward = parseInlineForward(parsed.text);
+    if (forward === null) return null;
+    const door = await this.sentByOrganizationUser(engine, organizationId, mailboxId, parsed.outer.from);
+    return door ? forward.participants : null;
+  }
+
+  /**
+   * The organization-user door of the `inline` source (ruling 6116489638 on
+   * #22870, Q3 C; D5: forwarding is consent). Open when the message's From
+   * names exactly one address, a `sys_user` holds that address as its email
+   * (ASCII case-insensitive, decided here on the value read back, as the
+   * record matcher decides it), and that user is a member (`sys_member`) of
+   * the mailbox's organization. Both reads are the system's, and the
+   * membership read is scoped to that one organization: a member of another
+   * organization is not a user of this one.
+   *
+   * Closed when the identity objects are not registered (no auth plugin is
+   * composed, so no sender can be recognised) — said once per instance.
+   */
+  private async sentByOrganizationUser(
+    engine: MailIngestEngine,
+    organizationId: string,
+    mailboxId: string,
+    from: ReadonlyArray<string>,
+  ): Promise<boolean> {
+    if (from.length !== 1) return false;
+    const address = normalizeMailAddress(from[0]);
+    if (address === null) return false;
+    if (!this.identityObjectsRegistered(engine, mailboxId)) return false;
+
+    const users = await engine.find(USER_OBJECT, {
+      where: { email: { $icontains: address } },
+      fields: ['id', 'email'],
+      limit: SENDER_USER_SCAN_LIMIT,
+      context: { ...SYSTEM_CTX },
+    });
+    const userIds = [
+      ...new Set(
+        users.filter((user) => normalizeMailAddress(user.email) === address).flatMap((user) => idOf(user.id) ?? []),
+      ),
+    ];
+    if (userIds.length === 0) {
+      if (users.length >= SENDER_USER_SCAN_LIMIT) {
+        this.options.logger.warn(
+          `[mailbox] recognising the sender of an inline forward in mailbox '${mailboxId}' read the ` +
+            `${SENDER_USER_SCAN_LIMIT}-row bound of users whose email contains the sender's address without finding ` +
+            'it, so the forward is not read and the message is matched on its other participants.',
+        );
+      }
+      return false;
+    }
+    const members = await engine.find(MEMBER_OBJECT, {
+      where: { $and: [{ organization_id: organizationId }, { user_id: { $in: userIds } }] },
+      fields: ['id'],
+      limit: 1,
+      context: { ...SYSTEM_CTX },
+    });
+    return members.length > 0;
+  }
+
+  private identityObjectsRegistered(engine: MailIngestEngine, mailboxId: string): boolean {
+    const names = new Set<string>();
+    for (const schema of engine.registry?.getAllObjects?.() ?? []) {
+      const name = (schema as { name?: unknown } | null)?.name;
+      if (typeof name === 'string') names.add(name);
+    }
+    if (names.has(USER_OBJECT) && names.has(MEMBER_OBJECT)) return true;
+    if (!this.reportedNoIdentityObjects) {
+      this.reportedNoIdentityObjects = true;
+      this.options.logger.warn(
+        `[mailbox] a message for mailbox '${mailboxId}' quotes a forward inline, but the identity objects ` +
+          `'${USER_OBJECT}' and '${MEMBER_OBJECT}' are not registered, so no sender can be recognised as a user of ` +
+          "the mailbox's organization and no inline forward is read; such messages are matched on their other " +
+          'participants. Compose the auth plugin (`@objectstack/plugin-auth`), which registers both, to read inline forwards.',
+      );
+    }
+    return false;
   }
 
   private async markAssociated(engine: MailIngestEngine, messageId: string): Promise<void> {

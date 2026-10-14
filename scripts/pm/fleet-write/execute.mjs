@@ -50,7 +50,10 @@
  * then sends `transferIssue` with both node ids and accepts only an answer
  * that places the card on the target. A transfer that fails prints the
  * installation remedy `transferRemedy` spells, in the log and the summary.
- * A `workflow_dispatch` is one POST the platform answers 204 to with no body
+ * A `workflow_dispatch` is one POST the platform answers 204 to with no body,
+ * carrying the inputs the op table closes for that file and nothing else
+ * (`WORKFLOW_DISPATCH_INPUTS`: none for the shard-timings refresh,
+ * `refresh_version_pr: "true"` alone for `release.yml`, its bookkeeping lane)
  * — its row reads `accepted`; the run it started is read back by the SEAT
  * (`dispatch.mjs`), never here, because the answer carries no run id, and the
  * token that request spends `actions: write` on reaches that one path and no
@@ -629,8 +632,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the annotations: ONE notice per landed op that creates or moves a card — op, number and url read from the platform's answer, never the request; none for any other op, a failed request or an answer that cannot be reported; the reader's own parser reads back exactly what was emitted": 12,
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
   'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
+  'the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2': 9,
 });
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -967,6 +971,30 @@ export async function selfTest() {
       t('a 403 (the token was minted without actions write) is a FAILED action, exit 5, naming the platform\'s sentence', [noGrant.exit, noGrant.rows[0]?.result.includes('Resource not accessible by integration')], [EXIT_ACTION_FAILED, true]);
       const offList = await run(base([{ op: 'workflow_dispatch', workflow: 'release.yml', ref: 'main' }]), allowed);
       t('the validator is the executor\'s gate too: an off-list workflow is refused here with ZERO writes, exit 2', [offList.exit, writes(offList.seen).length], [EXIT_REFUSED, 0]);
+    }
+
+    // ── the release.yml refresh ─────────────────────────────────────────────
+    battery('the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2');
+    {
+      const FILE = 'release.yml';
+      const DISPATCHES = `POST /repos/${REPO}/actions/workflows/${FILE}/dispatches`;
+      const refresh = (inputs) => base([{ op: 'workflow_dispatch', workflow: FILE, ref: 'main', ...(inputs === undefined ? {} : { inputs }) }]);
+      const ok = await run(refresh({ refresh_version_pr: true }), { ...allowed, [DISPATCHES]: { status: 204, json: null } }, { file: paceFile });
+      t('the one write is the dispatch call on release.yml with { ref: main, inputs: { refresh_version_pr: "true" } } — the string the platform was measured to take — exit 0', [ok.exit, writes(ok.seen).map((s) => [s.call, s.body])], [EXIT_OK, [[DISPATCHES, { ref: 'main', inputs: { refresh_version_pr: 'true' } }]]]);
+      t('…under the App token, after the sender gate on the ONE repository the stroke names', [ok.seen.map((s) => s.call), ok.seen.every((s) => s.auth === `Bearer ${TOKEN}`)], [[PERM, DISPATCHES], true]);
+      t('…a bodiless 204 lands as accepted, its summary row naming release.yml\'s dispatch endpoint', [ok.rows[0]?.status, ok.rows[0]?.result, ok.summary.includes(`| 1 | \`workflow_dispatch\` | \`${DISPATCHES}\` | 204 | accepted (HTTP 204, no body) |`)], [204, 'accepted (HTTP 204, no body)', true], ok.summary);
+      t('⛔ no other actions/* request leaves and no annotation is emitted', [ok.seen.filter((s) => s.call.includes('/actions/') && s.call !== DISPATCHES), ok.annotations], [[], []]);
+      // Every refusal: exit 2 before the sender gate, so ZERO requests of any kind — and the log names the input.
+      const refused = async (inputs, needle) => {
+        const r = await run(refresh(inputs), { ...allowed, [DISPATCHES]: { status: 204, json: null } });
+        return [r.exit, r.seen.length, r.logs.some((l) => l.includes('REFUSED') && l.includes(needle))];
+      };
+      t('⛔ absent inputs — the publish-repair lane — are refused with zero requests, exit 2, the log naming the one object the relay sends', await refused(undefined, 'actions[0].inputs is required when workflow is "release.yml"'), [EXIT_REFUSED, 0, true]);
+      t('⛔ refresh_version_pr false is refused with zero requests, exit 2', await refused({ refresh_version_pr: false }, 'actions[0].inputs.refresh_version_pr must be true'), [EXIT_REFUSED, 0, true]);
+      t('⛔ force beside the refresh — true or false — is refused with zero requests, exit 2', [await refused({ refresh_version_pr: true, force: true }, 'actions[0].inputs.force is not an input'), await refused({ refresh_version_pr: true, force: false }, 'actions[0].inputs.force is not an input')], [[EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true]]);
+      t('⛔ force alone, any other input, and the string "true" are each refused with zero requests, exit 2', [await refused({ force: true }, 'actions[0].inputs.force is not an input'), await refused({ refresh_version_pr: true, dry_run: true }, 'actions[0].inputs.dry_run is not an input'), await refused({ refresh_version_pr: 'true' }, 'must be a JSON boolean')], [[EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true]]);
+      const shard = await run(base([{ op: 'workflow_dispatch', workflow: 'shard-timings-refresh.yml', ref: 'main', inputs: { refresh_version_pr: true } }]), allowed);
+      t('⛔ the release entry\'s inputs on the shard-timings refresh — a file whose entry is null — are refused with zero requests, exit 2', [shard.exit, shard.seen.length], [EXIT_REFUSED, 0]);
     }
 
     // ── the summary ─────────────────────────────────────────────────────────

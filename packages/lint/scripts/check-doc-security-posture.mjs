@@ -36,7 +36,7 @@
  * The rule's own docblock states it "accepts the NORMALIZED stack input
  * (works both pre- and post-zod-parse)", so feeding it the raw authored
  * literal is a supported entry point, not a trick. None of the keys it reads
- * on this path (`sharingModel`, `externalSharingModel`, `isSystem`, `name`,
+ * on this path (`sharingModel`, `isSystem`, `name`,
  * `fields[].type/required/reference`) carries a zod default, so the pre-parse
  * judgment equals the post-parse one.
  *
@@ -59,7 +59,7 @@
  * - `SECURITY_OWD_UNSET` fires only when `sharingModel` is textually ABSENT
  *   from the literal — a present-but-unevaluable value is the sentinel, which
  *   is non-null, so "unset" can never be a guess.
- * - `SECURITY_OWD_ALIAS` / `SECURITY_EXTERNAL_WIDER` fire only on values that
+ * - `SECURITY_OWD_ALIAS` fires only on values that
  *   are static strings (the rule itself requires `typeof === 'string'`; the
  *   sentinel is not a string).
  * - `SECURITY_CBP_NO_RELATION` and `SECURITY_CBP_AMBIGUOUS_RELATION` read the

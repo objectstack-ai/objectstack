@@ -211,6 +211,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'element-flat-data-binding-to-data-source': ELEMENTS.flatMap(([schema, surface, keys]) =>
     keys.map((key) => tombstone(schema, surface, key)),
   ),
+  'object-external-sharing-model-removed': [tombstone(ObjectSchema, 'object', 'externalSharingModel')],
   'object-grid-default-filters-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultFilters')],
   'email-template-category-is-system-removed': [
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'category'),
