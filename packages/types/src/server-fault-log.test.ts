@@ -23,7 +23,8 @@ import {
     describeFaultRequest,
     SERVER_FAULT_LOG_PREFIX,
 } from './server-fault-log.js';
-import { sendError } from './response-envelope.js';
+import { sendError, sendServerFault } from './response-envelope.js';
+import { BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 
 const spyLogger = () => ({
     debug: vi.fn(),
@@ -184,6 +185,102 @@ describe('sendError — the funnel every nested-envelope 5xx exits through', () 
                 success: false,
                 error: { code: 'INTERNAL_ERROR', message: 'boom', details: { a: 1 } },
             });
+        } finally {
+            spy.mockRestore();
+        }
+    });
+});
+
+describe('[#23174] sendServerFault — a caught fault answers the generic text and logs the throw once', () => {
+    /**
+     * The caught-fault sibling of `sendError`, observed through the same sink
+     * and for the same reason as the block above: it takes no logger either.
+     *
+     * The string below is shaped like what an adapter or driver error carries
+     * — a server path and a table name — so "the body carries none of it" is
+     * a claim about the text a catch-all arm used to ship.
+     */
+    const FAULT = 'ENOENT: open /srv/objectstack/storage-root/tenant-a/sys_file.db';
+    const makeRes = () => {
+        const res: any = {
+            statusCode: undefined as number | undefined,
+            body: undefined as any,
+            status(c: number) { res.statusCode = c; return res; },
+            json(b: any) { res.body = b; return res; },
+        };
+        return res;
+    };
+    const faultLines = (spy: { mock: { calls: unknown[][] } }) =>
+        spy.mock.calls.filter((c) => String(c[0]).startsWith(SERVER_FAULT_LOG_PREFIX));
+
+    it('writes the declared envelope with the generic text, and nothing of the throw', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+        try {
+            const res = makeRes();
+            sendServerFault(res, 500, 'INTERNAL', 'Internal error', new Error(FAULT));
+
+            expect(res.statusCode).toBe(500);
+            expect(res.body).toEqual({ success: false, error: { code: 'INTERNAL', message: 'Internal error' } });
+            expect(BaseResponseSchema.safeParse(res.body).success).toBe(true);
+            expect(envelopeViolations(res.body)).toEqual([]);
+            expect(JSON.stringify(res.body)).not.toContain('/srv/objectstack');
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('logs ONE line, carrying the caught text and its stack', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+        try {
+            sendServerFault(makeRes(), 500, 'INTERNAL', 'Internal error', new Error(FAULT));
+
+            const lines = faultLines(spy);
+            expect(lines).toHaveLength(1);
+            expect(String(lines[0][0])).toContain(FAULT);
+            const meta = lines[0][1] as Record<string, unknown>;
+            expect(meta).toMatchObject({ status: 500, code: 'INTERNAL' });
+            expect(String(meta.stack)).toContain(FAULT);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('CONTROL — the composition it replaces, logServerFault then sendError, logs TWO lines', () => {
+        // The instrument above can count past one: the shape a catch-all arm
+        // had to compose before this writer existed costs a second, stackless
+        // line carrying the generic text.
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+        try {
+            logServerFault({ status: 500, code: 'INTERNAL', error: new Error(FAULT) });
+            sendError(makeRes(), 500, 'INTERNAL', 'Internal error');
+            expect(faultLines(spy)).toHaveLength(2);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('keys the line by the route pattern a door passes, and reads no request object', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+        try {
+            sendServerFault(makeRes(), 500, 'INTERNAL', 'Upload failed', new Error(FAULT), {
+                method: 'PUT',
+                path: '/api/v1/storage/_local/raw/:token',
+            });
+            const [message, meta] = faultLines(spy)[0];
+            expect(String(message)).toContain('PUT /api/v1/storage/_local/raw/:token');
+            expect(meta).toMatchObject({ method: 'PUT', path: '/api/v1/storage/_local/raw/:token' });
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('a throw with no text of its own prints the generic text, and the body is unchanged', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+        try {
+            const res = makeRes();
+            sendServerFault(res, 500, 'INTERNAL_ERROR', 'Failed to read namespace', new Error(''));
+            expect(String(faultLines(spy)[0][0])).toContain('Failed to read namespace');
+            expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: 'Failed to read namespace' });
         } finally {
             spy.mockRestore();
         }

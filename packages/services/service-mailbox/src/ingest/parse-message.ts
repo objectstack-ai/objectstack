@@ -12,12 +12,14 @@
  *
  *  - the participant addresses, per part: the received message's own From,
  *    Sender, Reply-To, To and Cc (`outer`), and the same five headers of each
- *    `message/rfc822` part of the received message (`attachment` — a message
- *    forwarded as an attachment, RFC 2046 §5.2.1). Such a part is read for its
- *    headers only, and a part nested inside it is not read at all: the seam
- *    reads the forward the user made, not the forwards inside it. A forwarded
- *    message quoted inline in the body is not read (that is the `inline`
- *    source, and its parser is separate work);
+ *    forwarded-message part of the received message (`attachment` — a message
+ *    forwarded as an attachment): a `message/rfc822` part (RFC 2046 §5.2.1) or
+ *    its internationalized twin `message/global` (RFC 6532 §3.7), whose
+ *    headers may carry UTF-8. Such a part is read for its headers only, and a
+ *    part nested inside it is not read at all: the seam reads the forward the
+ *    user made, not the forwards inside it. A forwarded message quoted inline
+ *    in the body is not read (that is the `inline` source, and its parser is
+ *    separate work);
  *  - the threading ids (Message-ID, In-Reply-To, References, RFC 5322 §3.6.4),
  *    angle brackets stripped;
  *  - the header values automatic-mail suppression reads, and the top-level
@@ -55,10 +57,10 @@ export interface ParsedInboundMessage {
   html: string | null;
   /** The received message's own participants (the `outer` source). */
   outer: MailParticipantHeaders;
-  /** One entry per `message/rfc822` part of the received message (the `attachment` source). */
+  /** One entry per forwarded-message part of the received message (the `attachment` source). */
   forwarded: MailParticipantHeaders[];
   /**
-   * How many `message/rfc822` parts could not be read (the parser refused
+   * How many forwarded-message parts could not be read (the parser refused
    * them) or were past {@link MAX_FORWARDED_PARTS}. Their addresses are not in
    * {@link forwarded}; the message itself is still stored.
    */
@@ -79,6 +81,14 @@ export interface ParsedInboundMessage {
  * a single message may hand the matcher.
  */
 export const MAX_FORWARDED_PARTS = 20;
+
+/**
+ * The media types of a forwarded message carried as a part: `message/rfc822`
+ * (RFC 2046 §5.2.1) and `message/global` (RFC 6532 §3.7 — the same, with UTF-8
+ * allowed in its headers, and any transfer encoding, which the MIME walk
+ * decodes before the part is read).
+ */
+export const FORWARDED_MESSAGE_TYPES: ReadonlySet<string> = new Set(['message/rfc822', 'message/global']);
 
 const PARSE_OPTIONS = {
   // Every `message/rfc822` part is an attachment, never folded into the outer
@@ -165,7 +175,7 @@ export async function parseInboundMessage(raw: RawMailMessage): Promise<ParsedIn
   const forwarded: MailParticipantHeaders[] = [];
   let unreadForwardedParts = 0;
   for (const attachment of email.attachments) {
-    if (attachment.mimeType.toLowerCase() !== 'message/rfc822') continue;
+    if (!FORWARDED_MESSAGE_TYPES.has(attachment.mimeType.toLowerCase())) continue;
     if (forwarded.length >= MAX_FORWARDED_PARTS) {
       unreadForwardedParts++;
       continue;

@@ -33,6 +33,13 @@
  * (`the withheld third carrier`) so a later "completeness" patch has to argue
  * with a test rather than with a comment.
  *
+ * [#23293] A fourth carrier joined later: `?package=`, which the door reads
+ * since #23165, as `packageId` in the same bag. A delete naming no package of
+ * an item two packages hold is refused `409 RESOURCE_CONFLICT` with
+ * `?package=` as the remedy; the `[#23293]` cases pin that the SDK can now
+ * send it, on both declarations, and that the real door then removes that
+ * package's row and no other.
+ *
  * ## ⚠️ The instrument trap this file is shaped around
  *
  * The two declarations are TEXTUALLY IDENTICAL — `deleteItem: async (type:
@@ -254,6 +261,95 @@ describe('[#12181] meta.deleteItem carriers — ENVIRONMENT-SCOPED twin', () => 
         expect(headerNamesOf(fetchMock, 1)).toEqual(BASELINE_HEADERS);
         expect(new URL(String(fetchMock.mock.calls[0][0])).search).toBe('');
         expect(new URL(String(fetchMock.mock.calls[1][0])).search).toBe('');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#23293] The fourth carrier, `?package=` — on the wire, both declarations
+// ---------------------------------------------------------------------------
+//
+// Since #23165 the reset door reads `?package=` (the package whose row the
+// delete removes) and refuses a delete that names no package of an item two
+// packages hold, `409 RESOURCE_CONFLICT`, prescribing `?package=`. The bag had
+// no member for it, so an SDK caller could not follow that remedy. Every claim
+// is made on BOTH declarations, each beside its negative control, for the
+// textual-identity reason in this file's header.
+
+const PKG = 'com.qa.alpha';
+
+describe('[#23293] meta.deleteItem `packageId` — UNSCOPED ObjectStackClient.meta', () => {
+    it('a delete naming a package sends it as `?package=`', async () => {
+        const { client, fetchMock } = createMockClient(RESET_OK);
+        await client.meta.deleteItem('view', 'shared_grid', { packageId: PKG });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            `http://localhost:3000/api/v1/meta/view/shared_grid?package=${PKG}`,
+        );
+        expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+        // A query parameter, never a header: the header set is the unpinned one.
+        expect(headerNamesOf(fetchMock)).toEqual(BASELINE_HEADERS);
+    });
+
+    it('NEGATIVE CONTROL: a delete naming none sends no query string, and `\'\'` names none', async () => {
+        const { client, fetchMock } = createMockClient(RESET_OK);
+        await client.meta.deleteItem('view', 'shared_grid');
+        await client.meta.deleteItem('view', 'shared_grid', {});
+        await client.meta.deleteItem('view', 'shared_grid', { packageId: '' });
+        await client.meta.deleteItem('view', 'shared_grid', { packageId: undefined });
+        for (let i = 0; i < 4; i++) {
+            expect(String(fetchMock.mock.calls[i][0])).toBe('http://localhost:3000/api/v1/meta/view/shared_grid');
+        }
+    });
+
+    it('rides beside `state` and `ifMatch` without disturbing either, the key sent once', async () => {
+        const { client, fetchMock } = createMockClient(RESET_OK);
+        await client.meta.deleteItem('view', 'shared_grid', { ifMatch: OCC_TOKEN, state: 'draft', packageId: PKG });
+        const url = new URL(String(fetchMock.mock.calls[0][0]));
+        expect(url.search).toBe(`?state=draft&package=${PKG}`);
+        // The door refuses a repeated `?package=` with a 400.
+        expect(url.searchParams.getAll('package')).toEqual([PKG]);
+        expect(headersOfCall(fetchMock)['If-Match']).toBe(OCC_TOKEN);
+    });
+
+    it('url-encodes a package id that needs it, as `saveItem` does', async () => {
+        const { client, fetchMock } = createMockClient(RESET_OK);
+        await client.meta.deleteItem('view', 'shared_grid', { packageId: 'acme/crm suite' });
+        await client.meta.saveItem('view', 'shared_grid', {}, { packageId: 'acme/crm suite' });
+        const queryOf = (i: number) => new URL(String(fetchMock.mock.calls[i][0])).search;
+        expect(queryOf(0)).toBe('?package=acme%2Fcrm+suite');
+        // IN STEP with the save door's address: the same id, the same bytes.
+        expect(queryOf(0)).toBe(queryOf(1));
+    });
+});
+
+describe('[#23293] meta.deleteItem `packageId` — ENVIRONMENT-SCOPED twin', () => {
+    it('a delete naming a package sends it as `?package=` on the scoped client too', async () => {
+        const { client, fetchMock } = createMockClient(RESET_OK);
+        await client.environment('env-123').meta.deleteItem('view', 'shared_grid', { packageId: PKG });
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            `http://localhost:3000/api/v1/environments/env-123/meta/view/shared_grid?package=${PKG}`,
+        );
+    });
+
+    it('NEGATIVE CONTROL: on the scoped client a delete naming none sends no query string', async () => {
+        const { client, fetchMock } = createMockClient(RESET_OK);
+        const scoped = client.environment('env-123').meta;
+        await scoped.deleteItem('view', 'shared_grid');
+        await scoped.deleteItem('view', 'shared_grid', { packageId: '' });
+        for (let i = 0; i < 2; i++) {
+            expect(String(fetchMock.mock.calls[i][0])).toBe(
+                'http://localhost:3000/api/v1/environments/env-123/meta/view/shared_grid',
+            );
+        }
+    });
+
+    it('IN STEP with the unscoped twin: the same options put the same query on the wire', async () => {
+        const { client, fetchMock } = createMockClient(RESET_OK);
+        const opts = { state: 'draft', packageId: PKG } as const;
+        await client.meta.deleteItem('view', 'shared_grid', opts);
+        await client.environment('env-123').meta.deleteItem('view', 'shared_grid', opts);
+        const queryOf = (i: number) => new URL(String(fetchMock.mock.calls[i][0])).search;
+        expect(queryOf(1)).toBe(queryOf(0));
+        expect(queryOf(0)).toBe(`?state=draft&package=${PKG}`);
     });
 });
 
@@ -629,5 +725,73 @@ describe('[#12181] the real reset door: `?state=draft` discards ONLY the pending
         const after = await overlayRows(engine, 'scoped_draft');
         expect(after).toHaveLength(1);
         expect(after[0].state).toBe('active');
+    }, 60_000);
+});
+
+describe('[#23293] the real reset door: an item two packages hold is deleted by naming its package', () => {
+    const OTHER_PKG = 'com.qa.beta';
+
+    /** One item saved into two packages THROUGH THE SDK: one row per package (ADR-0048). */
+    async function twoPackageItem(meta: ObjectStackClient['meta'] | ReturnType<ObjectStackClient['environment']>['meta'], name: string) {
+        await meta.saveItem('view', name, VIEW(name, 'A'), { packageId: PKG });
+        await meta.saveItem('view', name, VIEW(name, 'B'), { packageId: OTHER_PKG });
+    }
+
+    /** The package each stored row of `name` is bound to, sorted. */
+    async function packagesOf(engine: any, name: string): Promise<string[]> {
+        return (await overlayRows(engine, name)).map((r: any) => String(r.package_id)).sort();
+    }
+
+    it('NAMING NONE (the only delete the SDK could express before): refused 409 RESOURCE_CONFLICT, and nothing is deleted', async () => {
+        const { engine, client, deleteRequests } = await bootDoor();
+        await twoPackageItem(client.meta, 'two_pkg_probe');
+        expect(await packagesOf(engine, 'two_pkg_probe')).toEqual([PKG, OTHER_PKG].sort());
+
+        const err: any = await client.meta.deleteItem('view', 'two_pkg_probe').then(
+            () => { throw new Error('expected the package-less delete to be refused'); },
+            (e: any) => e,
+        );
+        // The envelope the caller branches on, not merely that something threw.
+        expect(err.code).toBe('RESOURCE_CONFLICT');
+        expect(err.httpStatus).toBe(409);
+        expect(await packagesOf(engine, 'two_pkg_probe')).toEqual([PKG, OTHER_PKG].sort());
+        // The probe: no package reached the protocol.
+        expect(deleteRequests).toHaveLength(1);
+        expect(deleteRequests[0]).not.toHaveProperty('packageId');
+    }, 60_000);
+
+    it('NAMING ONE: `{ packageId }` removes that package\'s row and no other', async () => {
+        const { engine, client, deleteRequests } = await bootDoor();
+        await twoPackageItem(client.meta, 'two_pkg_probe');
+
+        const reset: DeleteMetaItemResponse = await client.meta.deleteItem('view', 'two_pkg_probe', { packageId: PKG });
+
+        expect(reset.success).toBe(true);
+        expect(reset.reset).toBe(true);
+        expect(await packagesOf(engine, 'two_pkg_probe')).toEqual([OTHER_PKG]);
+        // POSITIVE CONTROL for the previous case's absence: the same probe sees
+        // the package arrive, read off `?package=` by the door.
+        expect(deleteRequests).toHaveLength(1);
+        expect(deleteRequests[0].packageId).toBe(PKG);
+    }, 60_000);
+
+    it('the ENVIRONMENT-SCOPED twin: refused naming none, and naming one removes only that row', async () => {
+        const { engine, client, deleteRequests } = await bootDoor();
+        const scoped = client.environment('env-123').meta;
+        await twoPackageItem(scoped, 'scoped_two_pkg');
+
+        const err: any = await scoped.deleteItem('view', 'scoped_two_pkg').then(
+            () => { throw new Error('expected the scoped package-less delete to be refused'); },
+            (e: any) => e,
+        );
+        expect(err.code).toBe('RESOURCE_CONFLICT');
+        expect(err.httpStatus).toBe(409);
+        expect(await packagesOf(engine, 'scoped_two_pkg')).toEqual([PKG, OTHER_PKG].sort());
+        expect(deleteRequests[0]).not.toHaveProperty('packageId');
+
+        const reset: DeleteMetaItemResponse = await scoped.deleteItem('view', 'scoped_two_pkg', { packageId: OTHER_PKG });
+        expect(reset.reset).toBe(true);
+        expect(await packagesOf(engine, 'scoped_two_pkg')).toEqual([PKG]);
+        expect(deleteRequests[1].packageId).toBe(OTHER_PKG);
     }, 60_000);
 });

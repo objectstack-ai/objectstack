@@ -24,4 +24,5 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_mail_message.fields.reference_ids.label": "5102fd1664d35c0b",
   "objects.sys_mail_message.fields.reply_to.label": "90ad8f2ca791a95a",
   "objects.sys_mail_message.fields.sender_address.label": "89db06253eee9632",
+  "objects.sys_mailbox.fields.imap_uid_validity.label": "5a2ec2b384b73bb0",
 };
