@@ -2,10 +2,14 @@
 
 /**
  * [ADR-0131 D4] A grant names its permission set BY NAME
- * (`sys_user_permission_set.permission_set`), and nothing derives that name
- * from `permission_set_id` any more (D10's first step): a non-system write
- * naming a set the security catalog does not hold is refused, and a grant that
- * carries no name is refused as `required`.
+ * (`sys_user_permission_set.permission_set`), its one reference: the legacy
+ * `permission_set_id` is retired (D10, C7b), so a write naming it is refused
+ * as an undeclared field; a non-system write naming a set the security
+ * catalog does not hold is refused, and a grant that carries no name is
+ * refused as `required`. One grant per user, set and organization: the
+ * declared unique index refuses a second, and the write door refuses the one
+ * duplicate the index cannot see (a platform-wide grant, organization NULL),
+ * so a revoke leaves no grant of that set in force.
  *
  * Measured on a REAL `ObjectQL` engine over a real SQL driver with the REAL
  * `SecurityPlugin` started on it the way a kernel composition does, because
@@ -169,7 +173,7 @@ describe('the data door (a non-system writer)', () => {
     await h.engine.insert('sys_user_permission_set', { user_id: 'u_1', permission_set: 'qa_alpha' }, { context: ADMIN } as any);
     const [row] = await grantsOf(h, 'u_1');
     expect(row).toMatchObject({ permission_set: 'qa_alpha' });
-    expect(row.permission_set_id ?? null).toBeNull();
+    expect(row).not.toHaveProperty('permission_set_id');
     expect(await h.engine.find('sys_permission_set', { context: SYS })).toEqual([]);
   });
 
@@ -183,15 +187,25 @@ describe('the data door (a non-system writer)', () => {
     expect(await grantsOf(h, 'u_2')).toHaveLength(0);
   });
 
-  it('NEGATIVE — a grant written with the id alone is refused 400 VALIDATION_FAILED, required at permission_set: nothing derives a name from the id', async () => {
+  it('NEGATIVE — a grant written with the retired id is refused 400 INVALID_FIELD: the column is no longer declared (C7b)', async () => {
     const h = await boot();
     const err = await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_3', permission_set_id: 'ps_alpha' }, { context: ADMIN } as any,
+      'sys_user_permission_set', { user_id: 'u_3', permission_set_id: 'ps_alpha', permission_set: 'qa_alpha' }, { context: ADMIN } as any,
+    ));
+    const env = envelopeOf(err);
+    expect([env.code, env.status]).toEqual(['INVALID_FIELD', 400]);
+    expect(await grantsOf(h, 'u_3')).toHaveLength(0);
+  });
+
+  it('NEGATIVE — a grant naming no set is refused 400 VALIDATION_FAILED, required at permission_set', async () => {
+    const h = await boot();
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { user_id: 'u_3b' }, { context: ADMIN } as any,
     ));
     const env = envelopeOf(err);
     expect([env.code, env.status]).toEqual(['VALIDATION_FAILED', 400]);
     expect(env.fields.map((f: any) => [f.field, f.code])).toContainEqual(['permission_set', 'required']);
-    expect(await grantsOf(h, 'u_3')).toHaveLength(0);
+    expect(await grantsOf(h, 'u_3b')).toHaveLength(0);
   });
 
   it('a batch insert with one row naming no catalog set is refused whole; nothing is stored', async () => {
@@ -253,11 +267,74 @@ describe('a system writer', () => {
   it('NEGATIVE — a system grant naming nothing is still refused as required (the engine judges every writer)', async () => {
     const h = await boot();
     const err = await refusalOf(() => h.engine.insert(
-      'sys_user_permission_set', { user_id: 'u_s2', permission_set_id: 'ps_beta' }, { context: SYS } as any,
+      'sys_user_permission_set', { user_id: 'u_s2' }, { context: SYS } as any,
     ));
     const env = envelopeOf(err);
     expect([env.code, env.status]).toEqual(['VALIDATION_FAILED', 400]);
     expect(await grantsOf(h, 'u_s2')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One grant per user, set and organization (seat answers 6162538253, Q5 A)
+// ---------------------------------------------------------------------------
+
+describe('one grant per user, set and organization', () => {
+  const ORG = 'org_dup';
+  const grantsOfSet = async (h: Harness, userId: string, set: string) =>
+    (await grantsOf(h, userId)).filter((g) => g.permission_set === set);
+
+  it('NEGATIVE — a second organization-scoped grant is refused 409 DUPLICATE_RECORD by the declared index (UNIQUE_VIOLATION on the wire); the revoke of the one leaves none in force', async () => {
+    const h = await boot();
+    await h.engine.insert('sys_member', { id: 'mem_d1', user_id: 'u_d1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_d1', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: ADMIN } as any);
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { id: 'ups_d1b', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: SYS } as any,
+    ));
+    expect([envelopeOf(err).code, envelopeOf(err).status]).toEqual(['DUPLICATE_RECORD', 409]);
+    expect((await grantsOfSet(h, 'u_d1', 'qa_alpha')).map((g) => g.id)).toEqual(['ups_d1']);
+
+    await h.engine.delete('sys_user_permission_set', { where: { id: 'ups_d1' }, context: ADMIN } as any);
+    expect(await grantsOfSet(h, 'u_d1', 'qa_alpha')).toEqual([]);
+  });
+
+  it('NEGATIVE — a second platform-wide grant (organization NULL), which the index cannot see, is refused with the same 409 DUPLICATE_RECORD at the write door, for a system writer too; the revoke leaves none in force', async () => {
+    const h = await boot();
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_p1', user_id: 'u_p1', permission_set: 'qa_alpha', organization_id: null }, { context: ADMIN } as any);
+    for (const context of [ADMIN, SYS]) {
+      const err = await refusalOf(() => h.engine.insert(
+        'sys_user_permission_set', { user_id: 'u_p1', permission_set: 'qa_alpha' }, { context } as any,
+      ));
+      expect([envelopeOf(err).code, envelopeOf(err).status]).toEqual(['DUPLICATE_RECORD', 409]);
+    }
+    expect((await grantsOfSet(h, 'u_p1', 'qa_alpha')).map((g) => g.id)).toEqual(['ups_p1']);
+
+    await h.engine.delete('sys_user_permission_set', { where: { id: 'ups_p1' }, context: ADMIN } as any);
+    expect(await grantsOfSet(h, 'u_p1', 'qa_alpha')).toEqual([]);
+  });
+
+  it('NEGATIVE — an update that makes a platform-wide duplicate (re-naming the set) is refused 409 and the row is untouched', async () => {
+    const h = await boot();
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_u1', user_id: 'u_u1', permission_set: 'qa_alpha' }, { context: ADMIN } as any);
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_u2', user_id: 'u_u1', permission_set: 'qa_beta' }, { context: ADMIN } as any);
+    const err = await refusalOf(() => h.engine.update(
+      'sys_user_permission_set', { id: 'ups_u2', permission_set: 'qa_alpha' }, { context: ADMIN } as any,
+    ));
+    expect([envelopeOf(err).code, envelopeOf(err).status]).toEqual(['DUPLICATE_RECORD', 409]);
+    expect((await grantsOf(h, 'u_u1')).find((g) => g.id === 'ups_u2')).toMatchObject({ permission_set: 'qa_beta' });
+  });
+
+  it('CONTROL — one set to one user in two organizations and platform-wide, two users of one set, and an edit of a held grant all land', async () => {
+    const h = await boot();
+    for (const org of ['org_c1', 'org_c2']) {
+      await h.engine.insert('sys_member', { id: `mem_${org}`, user_id: 'u_c1', organization_id: org, role: 'member' }, { context: SYS } as any);
+      await h.engine.insert('sys_user_permission_set', { user_id: 'u_c1', permission_set: 'qa_alpha', organization_id: org }, { context: ADMIN } as any);
+    }
+    await h.engine.insert('sys_user_permission_set', { id: 'ups_c1', user_id: 'u_c1', permission_set: 'qa_alpha' }, { context: ADMIN } as any);
+    await h.engine.insert('sys_user_permission_set', { user_id: 'u_c2', permission_set: 'qa_alpha' }, { context: ADMIN } as any);
+    await h.engine.update('sys_user_permission_set', { id: 'ups_c1', permission_set: 'qa_alpha', reason: 'edited' }, { context: ADMIN } as any);
+    expect(await grantsOfSet(h, 'u_c1', 'qa_alpha')).toHaveLength(3);
+    expect(await grantsOfSet(h, 'u_c2', 'qa_alpha')).toHaveLength(1);
   });
 });
 

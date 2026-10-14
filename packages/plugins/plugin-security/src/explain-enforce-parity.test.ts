@@ -431,7 +431,7 @@ async function bootPrincipal(source: PostureSource) {
   // Each grant carries the set's name beside its id, as every platform writer stores it.
   const grant = (user: string, set: string, name: string) =>
     e.insert('sys_user_permission_set', {
-      id: `ups_${user}_${set}_${n}`, user_id: user, permission_set_id: set, permission_set: name, organization_id: ALPHA,
+      id: `ups_${user}_${set}_${n}`, user_id: user, permission_set: name, organization_id: ALPHA,
     }, SYS);
   await grant(USER_ADMIN, `ps_user_admin_${n}`, 'qa_user_admin');
   await grant(USER_ADMIN, `ps_reader_${n}`, READER_SET);
