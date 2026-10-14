@@ -167,8 +167,10 @@ re-checked at the same head, shape the decisions:
   enforcing reader keys on the string `'guest'`: the envelope
   (`packages/core/src/security/assemble-execution-context.ts#entryFields`), explain's `EXTERNAL` floor
   (`packages/plugins/plugin-security/src/explain-engine.ts#derivePosture`), the anchor binding tier
-  (`packages/spec/src/security/high-privilege.ts#describeAnchorForbiddenBits`, called from
-  `packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin.assertAudienceAnchorBindingGate`),
+  (`packages/spec/src/security/high-privilege.ts#describeAnchorForbiddenBits`; at `7b926f7600` an
+  engine write gate on `sys_position_permission_set` called it, and that table was retired by #15204
+  stage 8 and the gate deleted by #23403, so on `main` its `guest` tier has no caller until item 5's
+  bind door),
   and delegated administration (`packages/plugins/plugin-security/src/delegated-admin-gate.ts#ANCHOR_POSITIONS`).
 - **Two guest values are declared with nothing behind them.** A package may suggest a `guest`
   binding (`packages/plugins/plugin-security/src/objects/sys-audience-binding-suggestion.object.ts#anchor`),
@@ -367,8 +369,12 @@ unchanged. **Card**: E2.
    three.
 4. **The binding tier stands.** A set bound to `guest` must pass the strictest anchor tier:
    explicit objects only, no wildcard, read-mostly with create case by case, no view-all or
-   modify-all, no system permissions (ADR-0090 D9; `describeAnchorForbiddenBits`, enforced by
-   `SecurityPlugin.assertAudienceAnchorBindingGate`). A delegated administrator never binds an anchor
+   modify-all, no system permissions (ADR-0090 D9; `describeAnchorForbiddenBits`). The predicate
+   runs where a binding is made: for `everyone`, when a suggestion is confirmed
+   (`confirmAudienceBindingSuggestion`) and on every derivation of the anchor
+   (`readAcceptedEveryoneSets`); for `guest`, no door binds a set today (item 5), and the bind door
+   runs it when built. The engine gate that once applied it to `sys_position_permission_set` rows
+   retired with that table (#15204 stage 8; the gate was deleted by #23403). A delegated administrator never binds an anchor
    (ADR-0090 D12; `ANCHOR_POSITIONS`). Unchanged.
 5. **How a deployment grants: implementation-first.** The bind door is built when a named
    deployment needs to grant the guest on a public surface (a site or portal) and the class-1 form
@@ -391,9 +397,9 @@ unchanged. **Card**: E2.
    so ⛔ opening that door (`PUT /meta/position/guest`) is refused: it reverses the seal and misses
    environment kernels. The row half stays item 6: share links and, when built, an explicit guest
    sharing rule (read-only, criteria-based, the strictest lint tier), the only shape in which D8's
-   retired `guest` recipient returns. **Re-read when the door is built:** item 4's guest tier of
-   `assertAudienceAnchorBindingGate`, which guards `sys_position_permission_set` rows that no
-   binding reader reads, and objectui's pin that a guest row offers no Accept
+   retired `guest` recipient returns. **Re-read when the door is built:** item 4's guest tier, which
+   no door runs today (the engine gate that carried it guarded `sys_position_permission_set` rows,
+   retired by #15204 stage 8, and was deleted by #23403), and objectui's pin that a guest row offers no Accept
    (`objectui:packages/app-shell/src/components/SuggestedBindingsPanel.tsx`). Amended by ruling C
    on [#23267](https://github.com/objectstack-ai/objectstack/issues/23267)
    ([`6159279205`](https://github.com/objectstack-ai/objectstack/issues/23267#issuecomment-6159279205)).
@@ -575,7 +581,7 @@ that card lands; no row is declared without an enforcer.
 | no `system` flow behind an anonymous flow door | D2b | the publish path, in both directions | card E2 |
 | the guest's grants, and deny-all when none | D3 | the anonymous branch of `resolveAuthzContext` | card E1 |
 | no door binds a set to `guest` until the bind door is built | D3 item 5 (amended) | the anchors' seal (`NOT_OVERRIDABLE`; the package door's built-in names) and `confirmAudienceBindingSuggestion`'s refusal of a `guest` row | enforced; the door is follow-up F4 |
-| the anchor binding tier | ADR-0090 D9; D3 | `describeAnchorForbiddenBits`, through `assertAudienceAnchorBindingGate` | enforced |
+| the anchor binding tier | ADR-0090 D9; D3 | `describeAnchorForbiddenBits`: for `everyone` through `confirmAudienceBindingSuggestion` and `readAcceptedEveryoneSets`; for `guest`, through the bind door when it is built (no door binds a set to `guest`, the row above) | enforced for `everyone`; `guest`: follow-up F4 |
 | no delegated binding of an anchor | ADR-0090 D12 | `ANCHOR_POSITIONS` | enforced |
 | the guest's organization | D4 | the guest entry's organization step, with `resolveSystemWriteOrganization`'s predicate | card E1 |
 | the form doors' organization | D4, clarification (1) | `anonymousFormIntakeUnavailability`; the engine's write derivation | enforced |

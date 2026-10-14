@@ -496,6 +496,7 @@
     "checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization (function)",
     "checkListViewChartBinding (function)",
+    "checkPageComponentViewData (function)",
     "checkPagePrintComposition (function)",
     "checkPageRequiresKind (function)",
     "checkPageSlotPair (function)",
