@@ -43,7 +43,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
-| **operation** | `any` | optional | Declarative single-record write, forwarded to the runner together with `patch` |
+| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own |
 | **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
 | **confirmText** | `string` | optional | Confirmation question asked before the action runs |
 | **successMessage** | `string` | optional | Toast shown when the action succeeds |
@@ -54,7 +54,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one |
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
-| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, and on a row that names no executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: 'update'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
 | **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
 
 ### Nested Shape: `ActionButtonProps.onSuccess`
@@ -101,7 +101,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
-| **operation** | `any` | optional | Declarative single-record write, forwarded to the runner together with `patch` |
+| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own |
 | **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
 | **confirmText** | `string` | optional | Confirmation question asked before the action runs |
 | **successMessage** | `string` | optional | Toast shown when the action succeeds |
@@ -110,7 +110,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| …>[]` | optional | Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one |
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
-| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, and on a row that names no executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: 'update'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
 | **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
 | **size** | `Enum<'default' \| 'sm' \| 'lg' \| 'icon' \| 'md'>` | optional | Inline button size — the Button primitive's vocabulary, plus `md` (drawn as `default`), falling back to the group's `size`. A dropdown item reads no size |
 
@@ -137,7 +137,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
-| **operation** | `any` | optional | Declarative single-record write, forwarded to the runner together with `patch` |
+| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own |
 | **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
 | **confirmText** | `string` | optional | Confirmation question asked before the action runs |
 | **successMessage** | `string` | optional | Toast shown when the action succeeds |
@@ -146,7 +146,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>[]` | optional | Action locations, forwarded to the runner — the console uses them to tell a record-scoped action from an object-level one |
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
-| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, and on a row that names no executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: 'update'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
 | **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
 
 ### Nested Shape: `ActionIconProps.onSuccess`
@@ -191,7 +191,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **method** | `string` | optional | HTTP method for an `api` action, forwarded to the runner |
 | **bodyExtra** | `any` | optional | Static request-body fields for an `api` action, forwarded to the runner |
 | **bodyShape** | `any` | optional | How an `api` action shapes its request body, forwarded to the runner |
-| **operation** | `any` | optional | Declarative single-record write, forwarded to the runner together with `patch` |
+| **operation** | `Enum<'update'>` | optional | Declarative single-record write, forwarded to the runner together with `patch`: `ActionSchema`'s own `operation`, whose one member is `update`. The runner reads it before any executor, performs the write through the platform action route and runs no executor of its own |
 | **patch** | `any` | optional | Field values the declarative `operation` writes, forwarded to the runner |
 | **confirmText** | `string` | optional | Confirmation question asked before the action runs |
 | **successMessage** | `string` | optional | Toast shown when the action succeeds |
@@ -200,7 +200,7 @@ const result = ActionButtonPropsSchema.parse(data);
 | **locations** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| …>[]` | optional | Action locations, forwarded to the runner — an `action:group` with a `location` draws only the members that list it, and the console uses them to tell a record-scoped action from an object-level one |
 | **toast** | `any` | optional | Toast behaviour, forwarded to the runner |
 | **resultDialog** | `any` | optional | One-shot result dialog for a value the response shows exactly once, forwarded to the runner |
-| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, and on a row that names no executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
+| **onSuccess** | `{ navigate: string; openIn?: Enum<'self' \| 'newTab'> }` | optional | Post-success navigation, forwarded to the runner: `ActionSchema`'s own `{ navigate, openIn }` block. Taken beside an `api` or `script` executor, or a handler a host registers under another name; refused beside the built-ins `url`, `navigation`, `modal`, `flow` and `form`, on a row that names no executor, and beside `operation: 'update'`, whose write the runner performs before any executor. `navigate` is an http:// or https:// URL, a mailto: address, an in-app path starting with / or ./, or a template that opens with $&#123;, judged after interpolation — every other scheme and a protocol-relative //host are refused; `openIn` is `self` (default) or `newTab` |
 | **objectName** | `string` | optional | Object the action acts on, forwarded to the runner — the console dispatches to it instead of the page's object. Omit to act on the page's object |
 
 
