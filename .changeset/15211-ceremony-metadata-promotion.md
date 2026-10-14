@@ -16,19 +16,22 @@ The plan of `os migrate organization-ownership` gains a key, `metadataConflicts`
 - **Under `single`, an organization customization whose key no other row holds becomes the environment's, in place.** This covers the `sys_metadata` rows of `view`, `dashboard`, `report`, `translation` and `email_template`; the key is type, name, package and bundle member. The row takes its history with it.
 - **A key held by more than one row is a conflict, listed in the plan.** Under `single` it blocks the step until the operator chooses one row with `--metadata-choice ROW_ID`, once per conflict.
   - The key ends with exactly one environment row. Where the key has an environment row, that row takes the chosen body in place, and its version names the chosen row's snapshot. Where it has none, the chosen organization row is promoted in place. A withdrawal the body keeps is also saved through the metadata door.
+  - The in-place write does to the row what the door does. It asks the door's lock verdict first, so a locked item stays locked and the conflict blocks. It keeps the row's stored `_lock` keys. It restamps `checksum`.
   - Any public-form withdrawal another row of the key holds is kept on that body.
   - The environment row is read back. Only then are the key's organization rows deleted, in one statement, by id.
   - A rerun after an interruption accepts the same `--metadata-choice` and finishes.
-- **Under a wall (`isolated`, `group`), nothing is promoted unless the operator names the row, and nothing is ever deleted.** A named row becomes the environment's as above. The other organization rows stay where they are, reported, and they keep the column from being dropped.
+- **Under a wall (`isolated`, `group`), nothing is promoted unless the operator names the row, and nothing is ever deleted.** A named row's body becomes the environment's as above. Every organization row left, the chosen one included where the key has an environment row, is named in the report as remaining and blocking `column-drops`, with the remedy.
 
 **A choice deletes only rows the reviewed plan listed.** `--metadata-choice` and `--template-choice` delete the other rows of their conflict. So the apply reads the conflict groups the plan file records (`metadataConflicts` and `templateConflicts`). It refuses, before anything is written, a choice whose conflict now holds other rows than the reviewed plan listed, with a new reason, `plan-conflict-mismatch`. The refusal names the conflict, the rows added and the rows gone. Plan again, review, and pass the new file.
 
 `event_seq` and every `(type, name, version)` of `sys_metadata_history` become unique environment-wide. The metadata door numbers a save from history in its own scope, so each lineage is placed where no environment save can land on it:
 
-- **A promoted row takes its history with it.** Before the row leaves its organization, that organization's lineage of the item is moved above the environment's numbers and becomes environment history. Every later environment save of the item numbers above it, and the row's version still names its own snapshot.
+- **A promoted row takes its history with it.** Before the row leaves its organization, that organization's lineage of the item is moved above the environment's numbers, and above every other number that organization holds, then becomes environment history. Every later environment save of the item numbers above it, and the row's version still names its own snapshot.
 - **A new step, `history-renumber`, runs just before `column-drops`, on every apply, even after a checkpoint.** It lays out every lineage still tagged to an organization above the environment's: each organization's event range by one offset, its commit ranges with it, and each item's version lineage, the organization's rows with it.
   - Under `single`, that history then becomes the environment's too.
   - Under a wall it stays its organization's.
+
+`column-drops` runs only after that same apply's `history-renumber` has verified `event_seq` and every `(type, name, version)` unique environment-wide. A duplicate it cannot lay out is named, and blocks.
 
 Order within an organization, and the version a rollback resolves, are unchanged. Nothing in history is deleted.
 
