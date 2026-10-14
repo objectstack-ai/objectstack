@@ -603,10 +603,13 @@ often before the account-level lock engages.
 > directly on the host server and that resolves its own caller, at the family's
 > own door. A gated session gets `403` with the gate's own code
 > (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) at whichever of them serves the
-> request. The auth endpoints and a short allow-list kept with that decision
-> (health and discovery among them) still pass, so the user can remediate. This
-> is why a non-compliant user can sign in but can't read or change data until
-> they fix the issue.
+> request. The auth endpoints (sign-in, change-password, two-factor enrollment
+> and sign-out among them) and a short allow-list kept with that decision
+> (health and discovery among them) still pass, so the user can remediate. Platform administration is not part of that exemption: the
+> platform-admin actions refuse a gated session with the same `403`, a platform
+> administrator's included. This is why a non-compliant user can sign in but
+> can't read or change data, or administer the platform, until they fix the
+> issue.
 
 ---
 
