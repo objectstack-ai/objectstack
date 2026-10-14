@@ -43,9 +43,10 @@
  * declare before this rule landed — `PageSchema` is closed, so no stored page
  * row and no authored config file could carry it. The population of print
  * pages is therefore EMPTY at landing, in the repo and in every tenant's
- * stored rows alike: the false-refusal budget the sibling
- * `validateComponentTypes` is still waiting on (measured over stored tenant
- * rows) is zero by construction here, not by sampling. And the judgment is
+ * stored rows alike: a false-refusal budget over stored tenant rows (the
+ * one the sibling `validateComponentTypes` was held on until the ruling of
+ * record on #23388 crossed it) is zero by construction here, not by
+ * sampling. And the judgment is
  * page-local, so a `page` write's per-write snapshot — exactly one page, its
  * own — is all it reads. Hence `surfaces: CLI_AND_RUNTIME` with
  * `runtimeTypes: ['page']` in the registry: Studio, REST `/meta` and MCP

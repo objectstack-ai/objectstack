@@ -85,8 +85,9 @@
  * types as the lit control in the same query. Every in-tree occurrence of a
  * retired name is the map itself, a tombstone prescription, conversion or
  * migration registry data, a test, or prose. ⚠️ That reading covers authored
- * config-file metadata only — the same scope limit the rule's `surfaceReason`
- * records for stored tenant rows.
+ * config-file metadata only, not stored tenant rows. The rule runs on the
+ * runtime save door too (the ruling of record on #23388): a stored row is
+ * judged on its next save, never on load.
  */
 
 import {
