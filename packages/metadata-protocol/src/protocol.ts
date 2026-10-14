@@ -9,7 +9,7 @@ import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } fr
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
 // the posture, is what the runtime authoring gate is told.
-import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { judgePermissionSetOwnerBinding, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 // [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
@@ -956,34 +956,22 @@ function runtimeHookWithoutBodyRefusal(
  * {@link ObjectStackProtocolImplementation.publishPackageDrafts} share — the
  * three doors `savedItemNameRefusal` judges a body's `name` at.
  *
- * What disagrees, judged on the body as authored:
- *
- * | body `packageId` | the row's binding | verdict |
- * |:--|:--|:--|
- * | absent | anything | accepted: an absent key declares nothing |
- * | `'P'` | `'P'` | accepted, as before |
- * | `'Q'` | `'P'` | refused |
- * | any string, `''` included | none | refused: a present key declares a package-shipped set, and the set is environment-authored |
- *
- * A value that is not a string is the schema's to refuse (`z.string()`), with
- * its own located `422`. `binding` is the RESOLVED binding of the row the
- * write lands in, never the request's spelling: a draft save that names no
- * package lands in the package of the item's active row (#11087), a direct
- * save that names none lands in the row its address resolves, and a restore
- * writes into the item's active row, whose binding `put` keeps. An empty-string
- * binding is no package, the normalisation both hydration seams apply.
+ * What disagrees, and the words, are the one judge every door of this rule
+ * calls: `judgePermissionSetOwnerBinding` (`@objectstack/spec/security`, whose
+ * header holds the verdict table), which the stack schema (the build door) and
+ * `ObjectQL.registerApp` (the registration door) call too. This function is the
+ * write doors' envelope around it, and its words for these three doors are byte
+ * for byte the words this function built before the judge moved. `binding` is
+ * the RESOLVED binding of the row the write lands in, never the request's
+ * spelling: a draft save that names no package lands in the package of the
+ * item's active row (#11087), a direct save that names none lands in the row
+ * its address resolves, and a restore writes into the item's active row, whose
+ * binding `put` keeps.
  *
  * `VALIDATION_ERROR` / 400, the envelope of the door's other body-against-
  * address refusal: `savedItemNameRefusal`, which judges the body's `name`
  * against the name the row is written under, at the same doors. No code is
- * minted. The message prescribes first, because a 4xx message crosses the REST
- * boundary bounded at 500 characters with its TAIL truncated, names both
- * values, and offers the two remedies the ruling names: drop the key, or write
- * the set into the package it declares. A restore writes a stored version its
- * caller cannot edit in place, so its remedy is the save that fixes it: the
- * item saved again with the key dropped or set to the binding, instead of
- * restoring the version (the name judge's restore wording). `issues[]` locates
- * the key, the shape the Studio designer keys on.
+ * minted. `issues[]` locates the key, the shape the Studio designer keys on.
  *
  * Every writer through the save door is judged, the two server-stated
  * re-savers included (`migrateStoredMetadata`, which records the refusal as
@@ -999,40 +987,12 @@ function permissionSetOwnerBindingRefusal(
     door: 'save' | 'restore' | 'publish',
 ): (Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] }) | undefined {
     if (singularType !== 'permission') return undefined;
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-    const declared = (item as { packageId?: unknown }).packageId;
-    if (typeof declared !== 'string') return undefined;
-    const bound = typeof binding === 'string' && binding !== '' ? binding : null;
-    if (declared === bound) return undefined;
-    const into = (pkg: string | null) => (pkg === null ? 'into no package' : `into package '${pkg}'`);
-    const intoDeclared = declared === ''
-        ? ''
-        : `, or ${door === 'save' ? 'save the set' : 'save it'} into package '${declared}' `
-            + `(?package=${declared} on the REST door, packageId in process)`;
-    const owner = bound === null
-        ? 'a set written into no package is authored in this environment, which an absent `packageId` states'
-        : 'the package a set is written into is its owner';
-    const tail = `and ${owner} (ADR-0086 D3): a \`packageId\` that disagrees is refused, never silently overridden.`;
-    const message = door === 'save'
-        ? `Drop \`packageId\` from permission set '${name}'${intoDeclared}, then send it again. Nothing was written. `
-            + `Its body declares \`packageId\` '${declared}', but this save writes it ${into(bound)}, ${tail}`
-        : door === 'restore'
-        ? `Save permission set '${name}' again with \`packageId\` ${bound === null ? 'dropped' : `dropped or set to '${bound}'`}, `
-            + 'instead of restoring this version. Nothing was restored. '
-            + `The version's body declares \`packageId\` '${declared}', but it is restored ${into(bound)}, ${tail}`
-        : `Save the draft of permission set '${name}' again with \`packageId\` dropped${intoDeclared}, then publish it. `
-            + `Nothing was published. Its body declares \`packageId\` '${declared}', but it is published ${into(bound)}, ${tail}`;
-    const err = new Error(message) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    const refusal = judgePermissionSetOwnerBinding(item, name, binding, door);
+    if (!refusal) return undefined;
+    const err = new Error(refusal.message) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
     err.code = 'VALIDATION_ERROR';
     err.status = 400;
-    err.issues = [{
-        path: 'packageId',
-        message: `Disagrees with the package the set is written into (${bound === null ? 'none' : `'${bound}'`}): `
-            + (door === 'restore'
-                ? `drop it${bound === null ? '' : `, or set it to '${bound}'`}.`
-                : `drop it${declared === '' ? '' : `, or write the set into package '${declared}'`}.`),
-        code: 'custom',
-    }];
+    err.issues = [{ path: 'packageId', message: refusal.issueMessage, code: 'custom' }];
     return err;
 }
 
