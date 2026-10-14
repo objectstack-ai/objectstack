@@ -33,6 +33,8 @@ import '@objectstack/objectql';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { AutomationServicePlugin } from '@objectstack/service-automation';
 import { JobServicePlugin } from '@objectstack/service-job';
+import { RealtimeServicePlugin } from '@objectstack/service-realtime';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..');
@@ -48,13 +50,18 @@ const PROBE_OBJECT = { name: 'probe_note', label: 'Probe Note', fields: { body: 
 const MANIFEST = { id: 'com.example.probe', name: 'Probe', version: '0.0.0', type: 'app' };
 
 /** The compositions measured. `null` config = a bare directory (no config, no artifact). */
-const COMPOSITIONS: Array<{ id: string; config: Record<string, unknown> | null }> = [
+const COMPOSITIONS: Array<{ id: string; config: Record<string, unknown> | null; authSecret?: boolean }> = [
   { id: 'bare (no config, no artifact)', config: null },
   { id: '(i) config, no connector, no requires', config: { manifest: MANIFEST, objects: [PROBE_OBJECT] } },
   { id: '(ii) config, requires: [automation]', config: { manifest: MANIFEST, objects: [PROBE_OBJECT], requires: ['automation'] } },
+  {
+    id: '(iii) config, requires: [automation, realtime], OS_AUTH_SECRET set',
+    config: { manifest: MANIFEST, objects: [PROBE_OBJECT], requires: ['automation', 'realtime'] },
+    authSecret: true,
+  },
 ];
 
-const TABLES = ['sys_flow_dispatch', 'sys_job'] as const;
+const TABLES = ['sys_flow_dispatch', 'sys_job', 'sys_presence', 'sys_audit_log'] as const;
 
 let dir: string;
 let templateDb: string;
@@ -95,6 +102,8 @@ async function bootServed(projectDir: string, dbFile: string): Promise<void> {
   await kernel.use(new PlatformObjectsPlugin() as any);
   await kernel.use(new JobServicePlugin() as any);
   await kernel.use(new AutomationServicePlugin({ armRuntime: false }) as any);
+  await kernel.use(new RealtimeServicePlugin() as any);
+  await kernel.use(new AuditPlugin() as any);
   await runtime.start();
   await kernel.shutdown();
 }
@@ -200,6 +209,8 @@ afterAll(() => {
 describe('#23399 probe: the ceremony boot per composition, against a v17-shaped database', () => {
   for (const composition of COMPOSITIONS) {
     it(`${composition.id}: the ceremony boot's declared set and managed drift`, async () => {
+      if (composition.authSecret) process.env.OS_AUTH_SECRET = randomBytes(32).toString('hex');
+      else delete process.env.OS_AUTH_SECRET;
       const projectDir = projectFor(composition.id, composition.config);
       const dbFile = freshCopy();
       const stack = await bootSchemaStack({
@@ -236,6 +247,8 @@ describe('#23399 probe: the ceremony boot per composition, against a v17-shaped 
     }, CASE_TIMEOUT_MS);
 
     it(`${composition.id}: the real command, --apply, end to end`, async () => {
+      if (composition.authSecret) process.env.OS_AUTH_SECRET = randomBytes(32).toString('hex');
+      else delete process.env.OS_AUTH_SECRET;
       const projectDir = projectFor(composition.id, composition.config);
       const dbFile = freshCopy();
       process.chdir(projectDir);
