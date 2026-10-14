@@ -101,6 +101,7 @@ import {
   type LayeredProbe,
 } from './packaged-permission-set-lock.js';
 import { PermissionSetNameConflictError } from './errors.js';
+import { isProjectionEcho, readServedPackageBinding, stripDecorations } from './security-catalog-echo.js';
 
 export const SYSTEM_CTX = { isSystem: true };
 
@@ -463,16 +464,9 @@ function touchesDefinition(payload: Record<string, any>): boolean {
  * is, and only one of them guards a write door.
  */
 
-/** Strip layered-read / registry decorations so a re-authored body is clean. */
-function stripDecorations(body: any): any {
-  if (!body || typeof body !== 'object') return body;
-  const { _packageId, _provenance, _diagnostics, _lock, _lockReason, _lockSource, [ENV_PROJECTION_MARKER]: _mark, ...clean } = body;
-  return clean;
-}
-
-/** True when a layered-read layer is just our own registry echo, not a real artifact. */
-const isProjectionEcho = (v: any): boolean =>
-  !!(v && typeof v === 'object' && (v as any)[ENV_PROJECTION_MARKER]);
+// `stripDecorations` and `isProjectionEcho` live in `security-catalog-echo.ts`
+// (imported above), the module that owns the echo since C3 stage 8 unwired
+// this projector.
 
 /**
  * Read the DECLARED (artifact) body for a permission set from the engine's
@@ -788,26 +782,9 @@ async function syncEvaluatorRegistry(
   } catch { /* best-effort */ }
 }
 
-/**
- * [#23233] The package the stored row a by-name read SERVES for `name` is
- * bound to: the `_packageId` the protocol's single-item read states on the
- * item from that row's `package_id` column. `undefined` when the row is bound
- * to no package, or the protocol has no single-item read (minimal embeddings,
- * unit-test stubs), which keys no row by package either.
- *
- * ⛔ The one read of that binding in this module — the data door's update leg
- * ({@link createPermissionSetWriteThrough}, #21861) and the registry echo
- * ({@link syncEvaluatorRegistry}) both ask it. Never from a patch, the
- * projected record or a registry item: those are copies, and the row is the
- * fact. A read that fails is not caught here; each caller decides what a
- * binding it could not read means for its own write.
- */
-async function readServedPackageBinding(protocol: any, name: string): Promise<string | undefined> {
-  if (typeof protocol?.getMetaItem !== 'function') return undefined;
-  const served = await protocol.getMetaItem({ type: 'permission', name });
-  const packageId = served?.item?._packageId;
-  return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
-}
+// [#23233] `readServedPackageBinding`, the one read of a stored row's package
+// binding — asked by the data door's update leg and the registry echo here —
+// lives in `security-catalog-echo.ts` (imported above).
 
 /** Drop the in-memory `permission` entry for a retired definition. */
 function dropEvaluatorRegistryEntry(metadata: any, name: string): void {
