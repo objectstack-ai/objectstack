@@ -356,7 +356,9 @@ export const MemberDefaultPermissionSet = definePermissionSet({
  * may read announcements and file an inquiry (public form intake) — nothing
  * else. Guest bindings face the STRICTEST lint tier: named objects only (no
  * wildcard), read-only by default (create case-by-case), never `allowEdit`,
- * never VAMA/system permissions.
+ * never VAMA/system permissions. The runtime anchor gate
+ * (`assertAudienceAnchorBindingGate`) enforces the same rules on the binding
+ * write itself.
  *
  * Binding is an ADMIN action (Setup → Access Control → bind `guest` →
  * `showcase_guest_portal`); the app only ships the capability.
