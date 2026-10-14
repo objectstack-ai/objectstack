@@ -26552,8 +26552,8 @@ export class ObjectStackProtocolImplementation implements
         // the field `x_iojn_task` came out `x_iojn2_task` — its `name` and every
         // value naming it — while its `fields` key stayed, so the copy's key
         // and `name` disagreed. `x_iojn_task` is another identifier, never the
-        // object; the copy renames no item whose name does not START with the
-        // source prefix (`renameName`), and neither does this rewrite.
+        // object: `renameName` swaps the source prefix only at the START of a
+        // name, and this rewrite now matches only a whole identifier too.
         const olds = prefixed.filter((name) => renameMap.has(name)).sort((a, b) => b.length - a.length);
         const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const re = olds.length
