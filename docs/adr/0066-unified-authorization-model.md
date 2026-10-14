@@ -1,6 +1,6 @@
 # ADR-0066: Unified authorization model — capability registry, secure-by-default posture, resource→capability contracts, dual-surface gates
 
-**Status**: Accepted (2026-06-23) — D1–D5 + refinements ⑤/⑨ implemented (capability registry + `defineCapability` seeding, `access.default` posture with posture-gated superuser bypass, `requiredPermissions` AND-gates on object/field/action, `crudBucketForOperation`, `validateCapabilityReferences` lint); D4's UI half enforced in objectui ActionRunner.
+**Status**: Accepted (2026-06-23) — D1–D5 + refinements ⑤/⑨ implemented (capability registry + `defineCapability` seeding, `access.default` posture with posture-gated superuser bypass, `requiredPermissions` AND-gates on object/field/action, `crudBucketForOperation`, `validateCapabilityReferences` lint); D4's UI half enforced in objectui ActionRunner. · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D2/D3/D13): the stored records this record names — `sys_permission_set` and `sys_capability` — are retired as row objects by #15204 stage 8 (`66949b7729`, 2026-10-13), and the seeders that filled them are retired under ADR-0131 D2; permission sets and capabilities are metadata-registry definitions, and the `sys_user_permission_set` assignment stays. The three-way separation stands; see the notes under the principle, D1, D5 and ⑨.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (`readScope`/`writeScope` depth: own/unit/unit_and_below/org), [ADR-0058](./0058-expression-and-predicate-surface.md) (CEL predicate surface used by RLS); relates to cloud ADR-0016 (authz open/paid boundary)
 **Consumers**: `@objectstack/spec` (object/app/permission schemas), `@objectstack/plugin-security` (RLS/FLS compiler + enforcement), `../objectui` (ActionRunner + app/nav gating), `../cloud` (control-plane objects, e.g. `sys_license`)
@@ -18,6 +18,13 @@ Authorization splits into three concerns that must stay decoupled:
 3. **Requirement** — *what a resource needs* — an object / field / action / app **references** a capability (a contract). It does **not** encode the assignment.
 
 The design rule that resolves the recurring confusion: **a resource declares the capability it requires (a stable contract); the capability and its assignment are dynamic, admin-maintained records.** A resource never bakes "who" — only "what is required".
+
+> **Note (2026-10-14) — of item 2's records, only the assignments remain.** `sys_permission_set`,
+> and `sys_role` / `sys_role_permission_set` under their ADR-0090 D3 names `sys_position` /
+> `sys_position_permission_set`, are retired by #15204 stage 8 (`66949b7729`, 2026-10-13), by
+> execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13: a permission set, and
+> the sets a position carries, are definitions in the metadata registry; the user assignments
+> `sys_user_permission_set` and `sys_user_position` stay runtime records.
 
 ## Authorization needs (taxonomy: need × status)
 
@@ -44,6 +51,13 @@ Promote capabilities from bare strings to **first-class records** (`sys_permissi
 
 **Landed (2026-07):** the curated platform set is `@objectstack/spec` `PLATFORM_CAPABILITIES` (`security/capabilities.ts`), seeded `managed_by:'platform'` by `bootstrap-system-capabilities.ts`. "**Packages declare their capabilities**" is now an EXPLICIT API — `defineCapability` + a stack's `capabilities` array (`{ name, label?, description?, scope, packageId? }`) — materialized into `sys_capability` with `managed_by:'package'` + `package_id` provenance by `bootstrap-declared-capabilities.ts` (idempotent, upgrade-aware; refuses to hijack curated/foreign capabilities, never clobbers admin rows, and *claims* a pre-existing derived placeholder). This retires the implicit back-door where a capability existed only as an untitled placeholder derived from a permission set's `systemPermissions[]`; that derivation still runs for back-compat but skips any explicitly-declared name. A capability is **not** a contract and carries no `inputs`: DEFINE (`defineCapability`) / GRANT (`systemPermissions`) / REQUIRE (`requiredPermissions`) stay decoupled. Aligns with ADR-0066 D1 (retire implicit `managed_by`-guessing).
 
+> **Note (2026-10-14) — `sys_capability` is retired.** The row object this paragraph materializes
+> declared capabilities into is no longer registered since #15204 stage 8 (`66949b7729`, 2026-10-13), by execution of
+> [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13, and no seeder writes a
+> declared capability into any table (ADR-0131 D2): `PLATFORM_CAPABILITIES` and a stack's
+> `defineCapability` declarations are served by the metadata registry. DEFINE / GRANT / REQUIRE stay
+> decoupled.
+
 ### D2 — Secure-by-default object/field posture [new] (data-model posture, NOT a permission)
 Add an object (and field) flag that opts it **out of blanket wildcard grants** — e.g. `access: { default: 'private' }` (vs the implicit `'public'`). A `private` object is **not** covered by `'*': {allowRead:true}`; access requires an **explicit** permission-set grant. Mirrors Salesforce "new object = no access until granted." This is a posture like `tenancy`, declared on the object — it is **not** an assignment and names no principal. `admin_full_access` (the superuser `'*'` grant) still covers private objects unless it too is excluded (rare).
 
@@ -61,6 +75,11 @@ An action declaring `requiredPermissions` is enforced in **one place, two surfac
 
 ### D5 — Package-seeded, admin-maintainable policies [existing mechanism, fill the gap]
 A package may seed permission-set policies (incl. per-object grants for **its own** objects) via `stack.permissions` **[existing]**; these land as `sys_permission_set` records **admins can edit in Setup** **[existing]**. The gap to close: make a package's per-object secure default (D2 + an admin-only grant) expressible + seedable so a sensitive package object is locked on install and tunable thereafter.
+
+> **Note (2026-10-14) — a package's sets no longer land as `sys_permission_set` records.** That row
+> object is retired by #15204 stage 8 (`66949b7729`, 2026-10-13), by execution of
+> [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13: a package's sets are served from
+> the metadata registry. Of the runtime records the next section keeps, only the assignments remain.
 
 ## What stays unchanged (existing strengths)
 Permission sets / roles / bindings as runtime records (assignment layer); the full RLS spectrum (ownership, hierarchy depth ADR-0057, tenant isolation, sharing, CEL); `tenancy`; `App.requiredPermissions`; anti-escalation; union grant semantics.
@@ -112,3 +131,8 @@ Captured for the record; **out of scope for Phases 1–4 above**. Each is anchor
 - **⑦ Permission-set groups + subtractive *muting*.** Pure union does not scale governance ("permission-set explosion"); Salesforce added permission-set-group *muting* precisely to allow taking access away. Roles→permission-sets already bundle; a subtractive/deny layer (precedence step 4) is the missing piece for large-org administration. Pairs with delegated admin (#9).
 - **⑧ FLS posture: unlisted fields are visible, and field grants union without deny** *(recorded 2026-07 pre-launch architecture assessment)*. Runtime FLS is block-list-shaped: `field-masker.ts` hides a field only when an explicit rule marks it `readable:false`, so an **undeclared** sensitive field is exposed by default, and `getFieldPermissions` merges most-permissively, so one set's `readable:true` permanently out-votes another's `false`. Consequences: protecting a salary/ID-number field relies on discipline (grant it only where needed), not mechanism. The object-level `private` posture (D2/④) mitigates the unlisted-default-visible half for objects that adopt it; the union half is the field-level face of ⑦ — a muting/deny layer must cover **field** grants, not just object grants, when it lands. Until then, treat "sensitive field on a `public` object" as a smell in review.
 - **⑨ Authoring-time validation for capability references** *(recorded 2026-07 pre-launch architecture assessment)*. `systemPermissions` / `requiredPermissions` are free strings today; a typo (`mange_users`) fails closed at runtime — the safe direction — but is undiscoverable: nothing reports that the referenced capability exists nowhere. When D1 lands the `sys_permission` registry, add the authoring/publish-gate lint alongside it: referencing an unregistered capability warns at author time (consistent with ADR-0049 honesty and the contract-first Prime Directive — reject at the producer, don't tolerate at the consumer). **Landed (2026-07):** `validateCapabilityReferences` in `@objectstack/lint` warns (never errors — cross-package capabilities and the fail-closed runtime make a hard gate wrong) when a `requiredPermissions` reference resolves against neither the built-in set (`@objectstack/spec` `PLATFORM_CAPABILITY_NAMES`), nor a capability the stack grants via a permission set's `systemPermissions`, nor a `sys_capability` seed row. Wired into `os validate` and `os lint`. `systemPermissions` (the declaration side) is deliberately not flagged.
+
+> **Note (2026-10-14) — ⑨'s seed-row source is gone.** With `sys_capability` retired by #15204
+> stage 8 (`66949b7729`, 2026-10-13; [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
+> D3/D13), `validateCapabilityReferences` no longer counts a `sys_capability` seed row as a known
+> capability, because no runtime reader consults one.

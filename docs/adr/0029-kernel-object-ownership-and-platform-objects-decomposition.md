@@ -1,6 +1,6 @@
 # ADR-0029: Kernel Object Ownership — First-Party Capabilities as Plugins That Own Their Data, and Decomposing the `platform-objects` Monolith
 
-**Status**: Accepted — K0/K1/K2/D7 implemented; K3 (pending ADR-0030/storage) + K4 cleanup remaining (proposed 2026-06-01 · calibrated 2026-06-12) · **Amended** (2026-08-09, [#6853](https://github.com/objectstack-ai/objectstack/issues/6853) — **D9**: a tenant `sys_metadata` overlay of an `object` registers as its own `overlay` contributor layer instead of taking the packaged `own` slot and splicing the packaged definition out. D3's single-owner invariant is unchanged. **Design only — nothing is implemented yet**; see **"Amendment (2026-08-09, #6853)"** at the end for the measurement, the semantics, the blast radius, and what is deliberately left open.)
+**Status**: Accepted — K0/K1/K2/D7 implemented; K3 (pending ADR-0030/storage) + K4 cleanup remaining (proposed 2026-06-01 · calibrated 2026-06-12) · **Amended** (2026-08-09, [#6853](https://github.com/objectstack-ai/objectstack/issues/6853) — **D9**: a tenant `sys_metadata` overlay of an `object` registers as its own `overlay` contributor layer instead of taking the packaged `own` slot and splicing the packaged definition out. D3's single-owner invariant is unchanged. **Design only — nothing is implemented yet**; see **"Amendment (2026-08-09, #6853)"** at the end for the measurement, the semantics, the blast radius, and what is deliberately left open.) · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13 — two security objects in D1's `plugin-sharing` row, `sys_permission_set` and `sys_position_permission_set` (one of the `sys_*_permission_set` tables), are retired as row objects by #15204 stage 8 (`66949b7729`, 2026-10-13); see the note under D1.)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0019](./0019-app-as-consumer-unit.md) (app as the consumer-facing unit), [ADR-0025](./0025-plugin-package-distribution.md) (plugin package distribution + dependencies)
 **Related**: [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) (metadata naming & namespace isolation) **depends on** this ADR — its D5/D6 (reserved `sys` namespace, single-owner-per-object, apps-cannot-define-kernel) assume the kernel is properly owned. This ADR is sequenced **first** and is independently valuable; ADR-0028 owns the naming model, this ADR owns kernel object *ownership*.
@@ -99,6 +99,12 @@ data monolith. Ownership *declaration* (`manifest`) and object *definition*
 
 (Exact assignment of security objects — under `plugin-sharing` vs a dedicated
 `plugin-rbac` — to settle in implementation.)
+
+> **Note (2026-10-14) — two security objects in the `plugin-sharing` row are retired.**
+> `sys_permission_set` and `sys_position_permission_set` are no longer registered since #15204
+> stage 8 (`66949b7729`, 2026-10-13), by execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md)
+> D3/D13: a permission set is a definition in the metadata registry, and a position names its sets
+> in its own definition. `sys_user_permission_set` stays; D1's ownership rule is unchanged.
 
 ### D2 — Small core; everything else is a capability plugin
 

@@ -2,6 +2,7 @@
 
 **Status**: Accepted (2026-07-09)
 · **Amended** (2026-10-13, ADR-0138 D3/D4) — D9's `guest` anchor bindings resolve for anonymous requests, in the organization ADR-0138 D4 resolves; an empty set denies all.
+· **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13) — two of the row objects D3 renames into, `sys_position` and `sys_position_permission_set`, and the `sys_capability` D5 names, are retired by #15204 stage 8 (`66949b7729`, 2026-10-13): a position is a metadata-registry definition that names its sets in `PositionSchema.permissionSets`; `sys_user_position` stays. See the notes under D3, D5 and D8.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing verification),
@@ -209,6 +210,12 @@ collaboration = `team`. The word "role" does not exist here.**
 
 `permission_set` is deliberately **not** renamed — see *Alternatives considered*.
 
+> **Note (2026-10-14) — two of the renamed tables are retired.** `sys_position` and
+> `sys_position_permission_set` are no longer registered since #15204 stage 8 (`66949b7729`,
+> 2026-10-13), by execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13: a
+> position is a metadata-registry definition that names its sets in `PositionSchema.permissionSets`,
+> and `sys_user_position` stays as the assignment. The renames and the word ban stand.
+
 ### D4 — OWD vocabulary: canonical four, aliases removed
 
 The `sharingModel` enum shrinks to `private | public_read | public_read_write |
@@ -286,6 +293,13 @@ Replaces both the `member_default` builtin-set fallback and ADR-0056 D7's defaul
 > supply the declared list they keep the pre-revision behaviour — the predicate's default — so the
 > narrowing reaches a binding only where a caller can name what this stack declared.
 
+> **Note (2026-10-14) — `everyone`'s bindings are no longer rows.** With
+> `sys_position_permission_set` and `sys_capability` retired by #15204 stage 8 (`66949b7729`,
+> 2026-10-13; [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13), a set reaches
+> `everyone` through the position's definition — ADR-0131 D3 keeps the baseline derived from
+> `isDefault`, and an accepted suggestion edits that definition instead of inserting a row — and a
+> package-declared capability lives in the registry. D5's rules stand.
+
 ### D6 — Explain engine is P0; access-matrix snapshots gate publishes
 
 A contract `explain(principal, operation, object, record?) → decision + granting path` (which
@@ -333,6 +347,11 @@ to permission sets. Positions distribute capability **vertically** (stable, org-
 receive shared records **horizontally** (fluid, deal/project-shaped). This is a standing constraint,
 lint-checked at the spec level (no `team_id` on `sys_position_permission_set`-like tables), so the
 Dataverse owner-team auditability failure mode is unrepresentable rather than discouraged.
+
+> **Note (2026-10-14).** `sys_position_permission_set` is retired by #15204 stage 8 (`66949b7729`,
+> 2026-10-13; [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13); a position's sets
+> are its definition's `PositionSchema.permissionSets`, a list of permission-set names with no team
+> key. The constraint stands.
 
 ### D9 — Audience anchors: `everyone` + `guest` positions; packages suggest, never own
 
