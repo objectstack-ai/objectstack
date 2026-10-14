@@ -32,7 +32,7 @@ export const entry: SemanticMigration = {
     'the same name without the dollar sign, read as a hole over that name: iteratorVariable: \'row\' read as '
     + '{{ row.name }}, idVariable: \'account_id\' read as {{ account_id }}, a declared variable or an assignment '
     + 'target named total read as {{ total }}. Rename every read of the old name with it — a text-slot hole, a '
-    + 'CEL expression, a single-brace token in a value position',
+    + 'CEL expression',
   reason:
     'The dollar-named variables are the flow engine\'s own: it binds $record, $runId, $flowName, $flowLabel and '
     + '$error, a flat-graph loop binds $loopItems and $loopIndex, and a resume signal may not write any dollar '

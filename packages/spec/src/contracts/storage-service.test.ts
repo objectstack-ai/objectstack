@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import type {
+  AttachFileInput,
+  IFileAttachmentService,
   IStorageService,
   StorageFileInfo,
   StorageListPage,
 } from './storage-service';
 import {
   DEFAULT_STORAGE_LIST_LIMIT,
+  FILE_ATTACHMENT_SERVICE,
   decodeStorageListCursor,
   encodeStorageListCursor,
   resolveStorageListLimit,
@@ -368,5 +371,31 @@ describe('Storage Service Contract', () => {
 
     await storage.abortChunkedUpload!('upload_to_abort');
     expect(aborted).toBe(true);
+  });
+});
+
+describe('File Attachment Service Contract (#23306)', () => {
+  it('names its own registry slot, beside the blob store rather than on it', () => {
+    expect(FILE_ATTACHMENT_SERVICE).toBe('file-attachments');
+  });
+
+  it('is one verb from an input naming the parent, the organization and the bytes to the ids it wrote', async () => {
+    const seen: AttachFileInput[] = [];
+    const service: IFileAttachmentService = {
+      attachFile: async (input) => {
+        seen.push(input);
+        return { fileId: 'f1', attachmentId: 'a1', size: input.data.byteLength };
+      },
+    };
+    const out = await service.attachFile({
+      parentObject: 'sys_mail_message',
+      parentId: 'm1',
+      organizationId: null,
+      filename: 'forwarded.eml',
+      mimeType: 'message/rfc822',
+      data: Buffer.from('hello'),
+    });
+    expect(out).toEqual({ fileId: 'f1', attachmentId: 'a1', size: 5 });
+    expect(seen[0].organizationId).toBeNull();
   });
 });

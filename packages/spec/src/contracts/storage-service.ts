@@ -434,3 +434,95 @@ export interface IFileAccessDelegate {
      */
     authorizeFileRead(recordId: string, context: unknown): Promise<boolean>;
 }
+
+// ==========================================
+// Server-side attach: store bytes, attach them to a record (#23306)
+// ==========================================
+
+/**
+ * Service-registry slot for {@link IFileAttachmentService}.
+ *
+ * `@objectstack/service-storage` registers it: that package owns `sys_file`
+ * and `sys_attachment` and runs every gate on them. A slot of its own, not a
+ * member of {@link IStorageService}: that contract is the blob store a
+ * storage ADAPTER implements (the local and S3 adapters, a third party's), and
+ * none of them holds the data engine this verb writes rows through.
+ */
+export const FILE_ATTACHMENT_SERVICE = 'file-attachments' as const;
+
+/** What {@link IFileAttachmentService.attachFile} stores, and where it attaches it. */
+export interface AttachFileInput {
+    /**
+     * The parent record's object, by its short name. The object must declare
+     * `enable: { files: true }`, the opt-in every attachment of it needs.
+     */
+    parentObject: string;
+    /** The parent record's id. */
+    parentId: string;
+    /**
+     * The organization the caller acts in, or `null` for a caller that acts in
+     * none (a single-tenant deployment, a platform-wide job). Required, so that
+     * acting in no organization is stated, never a field left out.
+     *
+     * With an organization, the parent must belong to it or to none (a global
+     * record); a parent walled into another organization is refused as not
+     * found. Both rows are written in the parent's own organization when it has
+     * one, and otherwise in this one.
+     */
+    organizationId: string | null;
+    /** The file name an attachment list shows. Its extension is kept on the storage key. */
+    filename: string;
+    /** The file's media type. */
+    mimeType: string;
+    /**
+     * The bytes. Their length is judged against the deployment's upload size
+     * limit (the `max_upload_mb` storage setting) before anything is stored.
+     */
+    data: Buffer;
+}
+
+/** What {@link IFileAttachmentService.attachFile} wrote. */
+export interface AttachedFile {
+    /** The new `sys_file` row's id: the opaque file id the download doors take. */
+    fileId: string;
+    /** The new `sys_attachment` row's id. */
+    attachmentId: string;
+    /** The number of bytes stored. */
+    size: number;
+}
+
+/**
+ * The server-side door that stores bytes and attaches them to a record: one
+ * `sys_file` row and one `sys_attachment` row linking it to the parent.
+ *
+ * For a producer with no browser upload in front of it (inbound mail, an
+ * import, generated output), so it acts as the SYSTEM, not as a user: there is
+ * no caller whose edit access to the parent could be asked. What it does run is
+ * what every attachment of the parent runs, through the same code: the upload
+ * size limit the REST upload doors apply, the parent's organization, and every
+ * gate that judges a `sys_attachment` insert, the `enable.files` opt-in among
+ * them.
+ *
+ * Refusals carry `code` and `status` (ADR-0112):
+ *  - `VALIDATION_ERROR` / 400: a malformed input;
+ *  - `PAYLOAD_TOO_LARGE` / 413: the bytes are over the upload size limit,
+ *    refused before anything is stored, with the REST upload doors' own answer;
+ *  - `RECORD_NOT_FOUND` / 404: no such parent record, or one walled into
+ *    another organization than `organizationId`;
+ *  - `FILES_DISABLED` / 403: the parent object does not declare
+ *    `enable: { files: true }`;
+ *  - any other refusal a gate on the `sys_attachment` insert raises, unchanged;
+ *  - `SERVICE_UNAVAILABLE` / 503: no data engine is wired, or the kernel has
+ *    not finished booting. It serves once `kernel:bootstrapped` has fired —
+ *    after every plugin's `kernel:ready` handler has installed its gates.
+ *
+ * ⛔ No refusal leaves a committed `sys_file`. The row is written `pending`
+ * before the bytes, so the platform's pending-upload retention can reclaim
+ * both if the process dies mid-call, and turns `committed` only in the same
+ * transaction as the `sys_attachment` insert. A refused call removes the
+ * bytes and the row before it throws.
+ */
+export interface IFileAttachmentService {
+    /** Store `input.data` and attach it to the parent record, as one file and one attachment. */
+    attachFile(input: AttachFileInput): Promise<AttachedFile>;
+}
