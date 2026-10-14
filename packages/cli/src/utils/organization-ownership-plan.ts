@@ -14,6 +14,7 @@ import {
   type RowPredicate,
 } from './organization-ownership-inventory.js';
 import { physicalTableListSql, rotationBaseOf } from './unmanaged-tables.js';
+import { planGrantRewrite, type GrantCollision, type LegacySetRow } from './organization-ownership-grants.js';
 
 /**
  * The ADR-0131 D10 ceremony's preflight — ceremony item 1, read-only.
@@ -161,6 +162,8 @@ export interface TablePlan {
    * keeps one row per key; nothing is guessed.
    */
   metadataConflicts?: MetadataConflict[];
+  /** `sys_user_permission_set` only: what the grant's unique key holds ({@link GrantKeyPlan}). */
+  grants?: GrantKeyPlan;
 }
 
 /**
@@ -175,6 +178,22 @@ export interface MetadataConflict {
   candidates: Array<{ id: string; organizationId: string | null; state: string | null }>;
 }
 
+/**
+ * `sys_user_permission_set` (C7b): the populations the unique index on
+ * (`user_id`, `permission_set`, `organization_id`) refuses, which the ceremony
+ * reports and never deletes. A NULL organization is keyed with NULL, as the
+ * write door keys it.
+ */
+export interface GrantKeyPlan {
+  /** `absent` on a 17.x database this release has not booted against yet: nothing can be counted. */
+  nameColumn: 'present' | 'absent';
+  /** Named grants holding one set for one user in one organization: they block the legacy id column's drop. */
+  duplicates: { groups: number; rows: number };
+  /** Legacy grants the rewrite may not name, each with the grant that already holds its key: they block the rewrite. */
+  rewriteCollisions: GrantCollision[];
+  note?: string;
+}
+
 /** One `(name, locale)` the promotion cannot carry without the operator's choice. */
 export interface TemplateConflict {
   name: string;
@@ -184,6 +203,9 @@ export interface TemplateConflict {
 
 /** The table whose customized and authored rows the ceremony promotes (ruling C on ADR-0131 §6 Q1). */
 export const TEMPLATE_OBJECT = 'sys_email_template';
+/** The permission-set grant table whose unique key the plan reads ({@link GrantKeyPlan}). */
+export const GRANT_OBJECT = 'sys_user_permission_set';
+const LEGACY_SET_OBJECT = 'sys_permission_set';
 
 /** Provenance the seeders stamped: only such a row can be a copy of code. */
 export const SEEDED_BY: readonly string[] = ['package', 'platform', 'system'];
@@ -771,6 +793,53 @@ async function planCategory(sql: Sql, table: string, columns: ReadonlySet<string
   return { rows: count, groups };
 }
 
+/** {@link GrantKeyPlan}: read-only, keyed like the index. */
+async function planGrantKeys(ctx: PlanContext, table: string, columns: ReadonlySet<string>): Promise<GrantKeyPlan> {
+  const { sql } = ctx;
+  if (!columns.has('permission_set') || !columns.has('user_id')) {
+    return {
+      nameColumn: 'absent',
+      duplicates: { groups: 0, rows: 0 },
+      rewriteCollisions: [],
+      note:
+        `${table} has no permission_set column yet, so no grant names its set and nothing here can be counted. ` +
+        'Boot this release once against the database (its schema sync adds the column), then re-run the plan.',
+    };
+  }
+  const keyColumns = ['user_id', 'permission_set', ...(columns.has(ORG) ? [ORG] : [])];
+  const duplicates = await planCategory(sql, table, columns, {
+    id: 'duplicate-grants',
+    label: 'grants holding one permission set for one user in one organization',
+    citation: 'seat answers 6162538253, Q5 A',
+    where: [{ column: 'permission_set', isNull: false }],
+    conflictBy: { groupBy: keyColumns },
+  });
+  const rewriteCollisions: GrantCollision[] = [];
+  if (columns.has('permission_set_id')) {
+    const t = sql.q(table, table);
+    const nameCol = sql.q('permission_set', table);
+    const select = ['id', 'user_id', 'permission_set', 'permission_set_id', ...(columns.has(ORG) ? [ORG] : [])]
+      .map((c) => sql.q(c, table)).join(', ');
+    const rows = await sql.read(table, `SELECT ${select} FROM ${t}`, []);
+    const named = rows.filter((r) => nonEmptyId(r.permission_set) !== null);
+    const legacy = rows.filter((r) => nonEmptyId(r.permission_set) === null);
+    const sets = new Map<string, LegacySetRow>();
+    const setColumns = ctx.catalog.columns.get(LEGACY_SET_OBJECT);
+    if (legacy.length && setColumns?.has('name')) {
+      const setSelect = ['id', 'name', ...(setColumns.has(ORG) ? [ORG] : [])].map((c) => sql.q(c, LEGACY_SET_OBJECT)).join(', ');
+      for (const r of await sql.read(LEGACY_SET_OBJECT, `SELECT ${setSelect} FROM ${sql.q(LEGACY_SET_OBJECT, LEGACY_SET_OBJECT)}`, [])) {
+        sets.set(String(r.id), { name: nonEmptyId(r.name), organizationId: nonEmptyId(r[ORG]) });
+      }
+    }
+    rewriteCollisions.push(...planGrantRewrite(
+      legacy.map((r) => ({ id: String(r.id), userId: nonEmptyId(r.user_id), organizationId: nonEmptyId(r[ORG]), setId: nonEmptyId(r.permission_set_id) })),
+      named.map((r) => ({ id: String(r.id), userId: nonEmptyId(r.user_id), organizationId: nonEmptyId(r[ORG]), name: String(r.permission_set) })),
+      sets,
+    ).collisions);
+  }
+  return { nameColumn: 'present', duplicates: { groups: duplicates.groups ?? 0, rows: duplicates.rows }, rewriteCollisions };
+}
+
 async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source: TablePlan['source'], tables: string[]): Promise<TablePlan> {
   const { sql } = ctx;
   const columns = ctx.catalog.columns.get(tables[0]!)!;
@@ -856,6 +925,7 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
     for (const table of tables) conflicts.push(...(await readTemplateConflicts(sql, table, ctx.catalog.columns.get(table)!)));
     plan.templateConflicts = conflicts;
   }
+  if (entry.object === GRANT_OBJECT) plan.grants = await planGrantKeys(ctx, tables[0]!, columns);
 
   const rows = plan.rows!;
   const departing = plan.departures.reduce((n, d) => n + d.rows, 0);

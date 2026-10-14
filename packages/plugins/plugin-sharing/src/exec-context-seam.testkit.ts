@@ -124,6 +124,9 @@ export async function bootRequestContext(
   });
 
   const authz = await resolveAuthzContext({
+    // [#23455] This kit composes no auth service and presents no API key, so
+    // no owner posture can be asked: `undefined`, passed on purpose.
+    userAuthGates: undefined,
     ql,
     headers: new Headers(),
     // [#15349] The posture a transport supplies. Threaded rather than omitted

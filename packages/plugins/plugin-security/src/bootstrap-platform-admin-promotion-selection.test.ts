@@ -749,13 +749,11 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
       await seedLegacyPlatformBucket(engine as any, defaultPermissionSets);
       const first = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {});
       expect(first.reason).toBe('no_authenticable_user');
-      const sets = await findRows(engine, 'sys_permission_set', { name: 'admin_full_access' });
       await (engine as any).insert(
         'sys_user_permission_set',
         {
           id: 'ups_legacy',
           user_id: 'usr_person0',
-          permission_set_id: sets[0].id,
           permission_set: 'admin_full_access',
           organization_id: null,
         },

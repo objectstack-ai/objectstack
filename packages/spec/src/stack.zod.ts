@@ -3481,11 +3481,11 @@ function collectPermissionGrantObjectErrors(
  * column type carries a type-conditional refusal in
  * {@link InlineGridColumnSchema}, and for no other.
  *
- * Read from the renderer, not decided here: objectui's `hydrateColumns`
- * (`packages/plugin-form/src/deriveMasterDetail.ts`, read at the
- * `.objectui-sha` pin `db11afd4967c`) leaves a column that declares a `type`
- * alone and otherwise sets `type: fieldTypeToColumnType(childField.type)`,
- * whose only `currency` arm is the `currency` field type. Today the column
+ * Read from the renderer, not decided here: its column hydration leaves a
+ * column that declares a `type` alone and otherwise derives the column type
+ * from the child field's type, whose only `currency` arm is the `currency`
+ * field type (the read point is recorded in `packages/spec/liveness/field.json`,
+ * row `inlineColumns`). Today the column
  * schema's one type-conditional rule is the `currency` refusal of `scale`, so
  * `currency` is the one row; a new type-conditional rule on the column adds its
  * row here, and `inline-grid-column-carriers.test.ts` reds until it does.

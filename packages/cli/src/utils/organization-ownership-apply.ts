@@ -35,6 +35,12 @@ import {
   type TablePlan,
   type UnattributableRow,
 } from './organization-ownership-plan.js';
+import {
+  grantCollisionBlocker,
+  planGrantRewrite,
+  type LegacySetRow,
+  type UnnamedReason,
+} from './organization-ownership-grants.js';
 
 /**
  * The ADR-0131 D10 ceremony's apply step — ceremony items 2 to 4: the backup
@@ -91,7 +97,8 @@ import {
  *  3. `rewrite` — the verified id→name rewrite (D4):
  *     `sys_user_permission_set.permission_set` is named from the set row its
  *     `permission_set_id` points at, then EVERY grant is verified to name a set
- *     the security catalog resolves. The id column stays (C7b drops it).
+ *     the security catalog resolves. The id column is read here, by raw SQL,
+ *     and dropped by column-drops.
  *  4. `mirror-deletion` (fate 2) — gated on the rewrite's verification, which
  *     is read again immediately before the first delete. Only rows of a
  *     `mirror-deletion` object that match its mirror selector and none of its
@@ -108,7 +115,10 @@ import {
  *     environment save made since is covered. Numbers only, no delete.
  *  5. `column-drops` (fate 1) — `organization_id` leaves the D7 objects
  *     through the schema-drift ceremony ({@link ColumnDropPort}), never a hand
- *     `ALTER`.
+ *     `ALTER`; so does the retired `sys_user_permission_set.permission_set_id`
+ *     (C7b), once the rewrite has read it and no two grants hold one set for
+ *     one user in one organization (the unique index that replaces the old
+ *     one would refuse them; they are reported, never deleted).
  *
  * Then the post-check re-runs the plan and reports, per table, what remains.
  *
@@ -204,23 +214,36 @@ export interface TemplatePort {
   find(name: string, locale: string): Promise<{ definition: Readonly<Record<string, unknown>>; environment: boolean } | undefined>;
 }
 
+/** An index a retired column keyed, named by its declaration (the driver derives the physical name). */
+export interface RetiredIndex {
+  columns: readonly string[];
+  unique: boolean;
+}
+
+/** One column drop: `organization_id` of a fate-1 table, or a retired column the ceremony owns. */
+export interface ColumnDrop {
+  table: string;
+  column: string;
+  /** Indexes the column keyed, dropped before it: the port drops them in an earlier, separate apply. */
+  retiredIndexes?: readonly RetiredIndex[];
+}
+
 /**
- * One table's column drop, as the schema-drift ceremony answered it.
+ * One column drop, as the schema-drift ceremony answered it.
  *
  * `not-declared`: the composition this run booted declares no object for the
  * table, so the ceremony has no declaration to drop the column against. That
  * is a fact about the composition the ceremony was run in, never about the
  * release. `not-proposed` is only for a table it DOES declare.
  */
-export interface ColumnDropOutcome {
-  table: string;
+export interface ColumnDropOutcome extends ColumnDrop {
   outcome: 'dropped' | 'not-proposed' | 'not-declared' | 'failed';
   detail?: string;
 }
 
-/** Drops `organization_id` on the named tables through the schema-drift ceremony (ADR-0120 D4). */
+/** Drops the named columns through the schema-drift ceremony (ADR-0120 D4). */
 export interface ColumnDropPort {
-  drop(tables: readonly string[]): Promise<ColumnDropOutcome[]>;
+  drop(columns: readonly ColumnDrop[]): Promise<ColumnDropOutcome[]>;
 }
 
 /** What the ceremony records after each finished step. */
@@ -1928,61 +1951,72 @@ async function verifyReferences(run: Run): Promise<Verification> {
 }
 
 async function runRewrite(run: Run): Promise<StepReport> {
-  const summary: Record<string, number> = { named: 0, grants: 0, verified: 0 };
+  const summary: Record<string, number> = { named: 0, grants: 0, verified: 0, collisions: 0 };
   const notes: string[] = [];
+  const blockers: string[] = [];
   const cols = await columnsOf(run, GRANTS);
   if (cols?.has('permission_set') && cols.has('permission_set_id')) {
-    const sets = new Map<string, { name: string | null; organization: string | null }>();
+    const sets = new Map<string, LegacySetRow>();
     if (await columnsOf(run, SETS)) {
       const setCols = (await columnsOf(run, SETS))!;
       for (const row of await readAll(run, SETS, ['name', ...(setCols.has(ORG) ? [ORG] : [])])) {
-        sets.set(String(row.id), { name: text(row.name), organization: text(row[ORG]) });
+        sets.set(String(row.id), { name: text(row.name), organizationId: text(row[ORG]) });
       }
     }
     const t = run.sql.q(GRANTS, GRANTS);
     const nameCol = run.sql.q('permission_set', GRANTS);
-    const unnamed = await readAll(run, GRANTS, ['permission_set_id', ...(cols.has(ORG) ? [ORG] : [])], {
-      text: `${nameCol} IS NULL OR ${nameCol} = ''`,
+    const keyCols = ['user_id', ...(cols.has(ORG) ? [ORG] : [])];
+    const unnamedWhere = { text: `${nameCol} IS NULL OR ${nameCol} = ''`, params: [] };
+    const legacy = (await readAll(run, GRANTS, ['permission_set_id', ...keyCols], unnamedWhere)).map((g) => ({
+      id: String(g.id),
+      userId: text(g.user_id),
+      organizationId: text(g[ORG]),
+      setId: text(g.permission_set_id),
+    }));
+    const named = (await readAll(run, GRANTS, ['permission_set', ...keyCols], {
+      text: `${nameCol} IS NOT NULL AND ${nameCol} <> ''`,
       params: [],
-    });
-    const reasons = { noId: [] as string[], dangling: [] as string[], crossOrganization: [] as string[], unresolved: [] as string[] };
-    for (const grant of unnamed) {
-      const gid = String(grant.id);
-      const setId = text(grant.permission_set_id);
-      if (!setId) { reasons.noId.push(gid); continue; }
-      const set = sets.get(setId);
-      if (!set?.name) { reasons.dangling.push(gid); continue; }
-      // A name carries no organization: an organization's set row may be named
-      // only by that organization's grants (the grant rule the resolver applies).
-      if (set.organization !== null && set.organization !== text(grant[ORG])) { reasons.crossOrganization.push(gid); continue; }
-      if (!(await resolveName(run, 'permission', set.name))) { reasons.unresolved.push(gid); continue; }
+    })).map((g) => ({ id: String(g.id), userId: text(g.user_id), organizationId: text(g[ORG]), name: String(g.permission_set) }));
+    const resolvable = new Map<string, boolean>();
+    for (const legacyGrant of legacy) {
+      const name = legacyGrant.setId ? sets.get(legacyGrant.setId)?.name : null;
+      if (name && !resolvable.has(name)) resolvable.set(name, (await resolveName(run, 'permission', name)) !== undefined);
+    }
+    // A legacy grant whose name the user already holds in its organization is
+    // never named: the unique index would refuse it (organization-ownership-grants.ts).
+    const decided = planGrantRewrite(legacy, named, sets, (name) => resolvable.get(name) === true);
+    for (const { id, name } of decided.name) {
       await execute(
         run,
         GRANTS,
         `UPDATE ${t} SET ${nameCol} = ? WHERE ${run.sql.q('id', GRANTS)} = ? AND (${nameCol} IS NULL OR ${nameCol} = '')`,
-        [set.name, gid],
+        [name, id],
       );
       summary.named++;
     }
-    const describe: Record<keyof typeof reasons, string> = {
+    summary.collisions = decided.collisions.length;
+    if (decided.collisions.length) blockers.push(grantCollisionBlocker(GRANTS, decided.collisions));
+    const describe: Record<UnnamedReason, string> = {
       noId: 'carry neither a name nor a permission_set_id',
       dangling: 'point at a set row that does not exist',
       crossOrganization: 'point at another organization\'s set row — a name carries no organization, so it is never written',
       unresolved: 'point at a set row whose name the security catalog does not resolve',
     };
-    for (const key of Object.keys(reasons) as (keyof typeof reasons)[]) {
-      if (reasons[key].length) notes.push(`${reasons[key].length} unnamed grant(s) ${describe[key]}: ${reasons[key].slice(0, 20).join(', ')}.`);
+    for (const key of Object.keys(decided.reasons) as UnnamedReason[]) {
+      const ids = decided.reasons[key];
+      if (ids.length) notes.push(`${ids.length} unnamed grant(s) ${describe[key]}: ${ids.slice(0, 20).join(', ')}.`);
     }
     if (summary.named) run.opts.onProgress?.(`rewrite: ${summary.named} grant(s) now name their permission set`);
   }
   const verification = await verifyReferences(run);
   summary.grants = verification.grants;
   summary.verified = verification.verified;
+  blockers.push(...verification.blockers);
   return {
     step: 'rewrite',
-    status: verification.blockers.length ? 'blocked' : 'done',
+    status: blockers.length ? 'blocked' : 'done',
     summary,
-    blockers: verification.blockers,
+    blockers,
     notes: [...notes, ...verification.notes],
   };
 }
@@ -2119,6 +2153,19 @@ async function deletePromotedTemplates(run: Run, tables: readonly string[]): Pro
 
 // ── Step 5: column drops (fate 1) ────────────────────────────────────────────
 
+/** The retired id column of a grant (ADR-0131 D4, C7b), which the rewrite reads before column-drops drops it. */
+const GRANT_SET_ID_COLUMN = 'permission_set_id';
+/**
+ * The two indexes the retired column keyed (C7b). Schema sync is additive, so
+ * they outlive their declaration, and they go BEFORE the column: MySQL refuses
+ * to drop a column a key still uses, or keeps the key minus that column — a
+ * unique (user_id, organization_id) that would refuse any second grant.
+ */
+const GRANT_SET_ID_INDEXES: readonly RetiredIndex[] = [
+  { columns: ['user_id', 'permission_set_id', 'organization_id'], unique: true },
+  { columns: ['permission_set_id'], unique: false },
+];
+
 async function runColumnDrops(run: Run): Promise<StepReport> {
   if (!run.historyVerified) {
     return {
@@ -2134,7 +2181,7 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
   }
   const plan = await planFor(run);
   const blockers: string[] = [];
-  const due: string[] = [];
+  const due: ColumnDrop[] = [];
   for (const table of plan.tables) {
     if (table.fate !== 'column-drop' || table.physical !== 'present' || table.organizationColumn !== 'present') continue;
     const held = table.categories.filter((c) => c.rows > 0);
@@ -2145,7 +2192,24 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
       );
       continue;
     }
-    due.push(...table.tables);
+    due.push(...table.tables.map((t) => ({ table: t, column: ORG })));
+  }
+  // [C7b] The grant's retired id column: the rewrite (step 3) has read it and
+  // verified every grant by name. It goes once no two grants hold one set for
+  // one user in one organization — the unique index that replaces the old one
+  // refuses them, and which to keep is the operator's call, never the ceremony's.
+  if ((await columnsOf(run, GRANTS))?.has(GRANT_SET_ID_COLUMN)) {
+    const duplicates = plan.tables.find((t) => t.object === GRANTS)?.grants?.duplicates;
+    if (duplicates && duplicates.rows > 0) {
+      blockers.push(
+        `${GRANTS}.${GRANT_SET_ID_COLUMN} is not dropped: ${duplicates.rows} grant(s) in ${duplicates.groups} group(s) ` +
+          'hold one permission set for one user in one organization, which the unique index on (user_id, ' +
+          'permission_set, organization_id) refuses, and a revoke of one of them would leave the other in force. ' +
+          'Which grant stays is never guessed and none is deleted here: remove all but one grant per group, then re-run.',
+      );
+    } else {
+      due.push({ table: GRANTS, column: GRANT_SET_ID_COLUMN, retiredIndexes: GRANT_SET_ID_INDEXES });
+    }
   }
   let dropped = 0;
   let notDeclared = 0;
@@ -2158,7 +2222,7 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
       if (outcome.outcome === 'not-declared') {
         notDeclared++;
         blockers.push(
-          `${outcome.table}.${ORG} was not dropped: the composition this run booted declares no object for ` +
+          `${outcome.table}.${outcome.column} was not dropped: the composition this run booted declares no object for ` +
             `${outcome.table}, so the schema-drift ceremony has no declaration to drop it against, and no release ` +
             'changes that. Re-run the ceremony where the deployment\'s composition is declared: its project directory ' +
             'and environment (the requires capability whose provider declares this object; OS_AUTH_SECRET for the ' +
@@ -2168,10 +2232,10 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
       }
       blockers.push(
         outcome.outcome === 'not-proposed'
-          ? `${outcome.table}.${ORG} was not proposed for dropping by the schema-drift ceremony: the object this ` +
-            `runtime declares still carries the column${outcome.detail ? ` (${outcome.detail})` : ''}. Run the ceremony ` +
-            'with the release whose declaration drops it.'
-          : `Dropping ${outcome.table}.${ORG} failed: ${outcome.detail ?? 'no detail'}. Re-run once the cause is fixed.`,
+          ? `${outcome.table}.${outcome.column} was not proposed for dropping by the schema-drift ceremony: the object ` +
+            `this runtime declares still carries the column${outcome.detail ? ` (${outcome.detail})` : ''}. Run the ` +
+            'ceremony with the release whose declaration drops it.'
+          : `Dropping ${outcome.table}.${outcome.column} failed: ${outcome.detail ?? 'no detail'}. Re-run once the cause is fixed.`,
       );
     }
   }

@@ -87,12 +87,25 @@ const FIELD: Record<ClassName, string> = { masked: 'role', gated: 'must_change_p
 const SUBJECT = { email: 'ald.subject.kq@example.com', name: 'Ald Subject', role: 'aldrolekq' };
 const VALUE: Record<ClassName, string | null> = { masked: SUBJECT.role, gated: null, withheld: SUBJECT.email };
 
-/** The explicit rows' events, and the decision keys each may carry. */
+/**
+ * The explicit rows' events, and the decision keys each may carry: `required` is
+ * written on every row of the event, `optional` only on some (the producer's
+ * `AdminAuditDecisions` type, `plugin-auth/src/admin-user-endpoints.ts`).
+ *
+ * The password set (#23287, ruling C′ item 2, with the revocation ON by default):
+ * `revokeSessionsAndKeys` is the administrator's switch, written on every forced
+ * reset. `revokedSessions`, `revokedApiKeys` and `revocationComplete` are what the
+ * revocation landed, counts only, written only when the switch was on. This
+ * fixture's reset leaves the switch at its default, so its row carries all three.
+ */
 const CREATE_EVENT = 'user.admin_created';
 const PASSWORD_SET_EVENT = 'user.admin_password_set';
 const DECISIONS: Record<string, { required: string[]; optional: string[] }> = {
   [CREATE_EVENT]: { required: ['event', 'membershipCreated', 'passwordGenerated', 'placeholderEmail'], optional: ['organizationId'] },
-  [PASSWORD_SET_EVENT]: { required: ['event', 'passwordGenerated'], optional: [] },
+  [PASSWORD_SET_EVENT]: {
+    required: ['event', 'passwordGenerated', 'revokeSessionsAndKeys'],
+    optional: ['revokedSessions', 'revokedApiKeys', 'revocationComplete'],
+  },
 };
 
 const Anchor = ObjectSchema.create({

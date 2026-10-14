@@ -40,7 +40,6 @@ import {
   TemplateChoiceRefusal,
   type ApplyExecutor,
   type CeremonyLedgerPort,
-  type ColumnDropOutcome,
   type OrganizationOwnershipApplyReport,
   type ReviewedPlan,
 } from '../../utils/organization-ownership-apply.js';
@@ -597,43 +596,29 @@ export default class MigrateOrganizationOwnership extends Command {
           },
         },
         columnDrops: {
-          drop: async (tables) => {
-            const drift = await liveStack.detectManagedDrift();
-            const wanted = new Set(tables);
-            const entries = drift.filter((d) => {
-              const op = (d as { op?: { type?: string; column?: string } }).op;
-              return op?.type === 'drop_column' && op.column === 'organization_id' && wanted.has(String(d.table));
-            });
-            const outcomes: ColumnDropOutcome[] = [];
-            const proposed = new Set(entries.map((d) => String(d.table)));
+          drop: async (columns) => {
             // The tables this booted composition declares, keyed as the driver
             // keys its managed set. A table outside it can never be proposed,
             // whatever a release declares: `not-declared`, and `not-proposed`
             // only for a declared one. A rotation shard is judged by its base.
             const { StorageNameMapping } = await import('@objectstack/spec/system');
             const { rotationBaseOf } = await import('../../utils/unmanaged-tables.js');
+            const { buildIndexName } = await import('@objectstack/driver-sql');
+            const { dropColumnsThroughDrift } = await import('../../utils/organization-ownership-column-drops.js');
             const declared = new Set(
               (liveStack.allObjects() as Array<{ name?: unknown } | null>)
                 .map((o) => o?.name)
                 .filter((name): name is string => typeof name === 'string' && name.length > 0)
                 .map((name) => StorageNameMapping.resolveTableName({ name })),
             );
-            for (const table of tables) {
-              if (!proposed.has(table)) {
-                outcomes.push(
-                  declared.has(rotationBaseOf(table) ?? table)
-                    ? { table, outcome: 'not-proposed', detail: 'the drift differ proposed no drop for it' }
-                    : { table, outcome: 'not-declared' },
-                );
-              }
-            }
-            if (entries.length === 0) return outcomes;
-            const { applied, skipped } = await liveStack.applyMigrationEntries(entries, { allowDestructive: true });
-            for (const d of applied) outcomes.push({ table: String(d.table), outcome: 'dropped' });
-            for (const d of skipped) {
-              outcomes.push({ table: String(d.table), outcome: 'failed', detail: String((d as { message?: unknown }).message ?? 'skipped by the schema-drift ceremony') });
-            }
-            return outcomes;
+            return dropColumnsThroughDrift(
+              {
+                drift: liveStack,
+                isDeclared: (table) => declared.has(rotationBaseOf(table) ?? table),
+                indexName: (table, indexColumns, unique) => buildIndexName(table, [...indexColumns], unique),
+              },
+              columns,
+            );
           },
         },
         ledger,

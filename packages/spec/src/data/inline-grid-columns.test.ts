@@ -174,10 +174,9 @@ describe('deriveInlineGridColumns', () => {
 
 /**
  * [#21091] The fields of an inline grid's per-row expand form. The first two
- * fixtures are the renderer's own `deriveFormFields` cases (objectui
- * `packages/plugin-form/src/deriveMasterDetail.test.ts` at the `.objectui-sha`
- * pin `31971ff1e28f`), asserted here as whole lists rather than as the
- * `toContain` probes they are there.
+ * fixtures are the renderer's own per-row expand form cases (recorded in
+ * `packages/spec/liveness/field.json`, row `inlineColumns`), asserted here as
+ * whole lists rather than as the `toContain` probes they are there.
  */
 describe('deriveInlineRowFormFields', () => {
   const taskSchema = {
@@ -269,8 +268,8 @@ describe('deriveInlineRowFormFields', () => {
 
 /**
  * [#21091] When an inline grid offers its per-row expand form — the condition
- * objectui's `MasterDetailForm` applies at the `.objectui-sha` pin
- * `31971ff1e28f` before it hands a row an expand control.
+ * the renderer applies before it hands a row an expand control (recorded in
+ * `packages/spec/liveness/field.json`, row `inlineColumns`).
  */
 describe('isInlineRowFormOffered', () => {
   it('always in the `form` factor: the row form IS the editor', () => {

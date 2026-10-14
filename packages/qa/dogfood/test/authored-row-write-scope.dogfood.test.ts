@@ -192,6 +192,7 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
     const headers = new Headers({ authorization: `Bearer ${token}` });
     return resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers,
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

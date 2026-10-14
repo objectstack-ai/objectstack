@@ -1324,31 +1324,29 @@ const TRIAGE = new Map([
  * method against the one stated figure available, without reproducing its
  * bookkeeping term for term.
  *
- * ⭐ All FOURTEEN members are recorded below (follow-up to this table's first
+ * ⭐ Thirteen members are recorded below (a fourteenth, a spec pin-citation
+ * gate, retired with its script and its row in #23434) (follow-up to this table's first
  * sitting, which shipped twelve — #14695's dev report at the time named the
  * remaining two as an open question, since the issue text's claim that they
  * were "named in PR #14692's body with their measured shares" did not hold
  * up against that body's actual text, which states only the aggregate row
  * above). The filing session (which ran the original census) supplied its
- * artifacts directly: `check:error-code-provenance` and
- * `check:objectui-pin-citations`, both `packages/spec`-scoped gates run via
- * `pnpm --filter @objectstack/spec run check:X`, sitting in that census's own
- * "root-wide, same class, no ledger row" bucket as members 13 and 14. Their
- * shares below are RE-MEASURED here by this table's own method (traced fresh
+ * artifacts directly: `check:error-code-provenance`, a `packages/spec`-scoped
+ * gate run via `pnpm --filter @objectstack/spec run check:X`, sitting in that
+ * census's own "root-wide, same class, no ledger row" bucket as member 13
+ * (member 14 was the retired gate above). Its share below is RE-MEASURED here by this table's own method (traced fresh
  * against the `2aa8456cf` worktree), not copied from the filing session's
  * numbers — the same "carry the base, never mix, measure rather than trust a
  * secondhand digit" discipline the twelve above already follow. The filing
  * session's own sitting-1 counts are cited in each row's `why` as a
- * cross-check, and both land within 1 file of this table's independent
- * measurement (2070 vs 2069, and an exact 1192 vs 1192) — corroborating the
- * method a second time, on a `tsx`-run gate rather than a plain `node` one.
+ * cross-check, and it lands within 1 file of this table's independent
+ * measurement (2070 vs 2069) — corroborating the method a second time, on a
+ * `tsx`-run gate rather than a plain `node` one.
  *
- * ⚠️ Six of the fourteen below measure OUTSIDE the issue's summarised
- * "32–52%" range for this bucket: FOUR above it (`check:driver-memory-census`
+ * ⚠️ Five of the thirteen below measure OUTSIDE the issue's summarised
+ * "32–52%" range for this bucket, all above it (`check:driver-memory-census`
  * 91.7%, `check:parse-guard` 90.6%, `check:live-db-isolation` 90.3%,
- * `check:type-check-coverage`/`check:type-check-debt` 55.8%) and ONE below it
- * (`check:objectui-pin-citations`, 20.4% — recorded as measured, not forced
- * into the quoted band). Each is measured on this tree by the SAME method as
+ * `check:type-check-coverage`/`check:type-check-debt` 55.8%). Each is measured on this tree by the SAME method as
  * every other row here, and the ratio does not change the verdict either
  * direction — existing `TRIAGE` rows already span 39% (`check:authz-resolver`)
  * to 99% (`scripts/check-position-name-fold-loaders.mjs`) under the identical
@@ -1489,21 +1487,6 @@ export const CENSUS_REFUSE_WIDE = new Map([
       + 'declares 3 hints already (a comment-mask helper and its own ledger file, twice), none of them '
       + 'a subtree — a true packages/** declaration would name this gate for every card touching any '
       + 'package, the same width trade as every other row here',
-  }],
-  ['check:objectui-pin-citations packages', {
-    verdict: 'REFUSE-WIDE',
-    reads: 1192,
-    of: 5837,
-    base: '2aa8456cf',
-    why: 'packages/spec/scripts/check-objectui-pin-citations.ts scans spec source for citations '
-      + 'pinned against .objectui-sha, run via `pnpm --filter @objectstack/spec run '
-      + 'check:objectui-pin-citations` — traced at 1192 of 5837 tracked packages/ files (20.4%), an '
-      + 'EXACT match to the filing session\'s own sitting-1 census (tracked_reads 1200, undeclared '
-      + '1200, byRoot.packages 1192). The narrowest of the fourteen, and BELOW the issue\'s summarised '
-      + '32–52% band — recorded as measured rather than forced into the quoted range; the gate '
-      + 'declares no hint at all today, and the population is still the whole non-test packages/ '
-      + 'source tree it walks, so the width trade is unchanged by sitting below the band. The gap '
-      + 'between the earlier report\'s "12 of 14, two unrecorded" and this row is closed here',
   }],
 ]);
 

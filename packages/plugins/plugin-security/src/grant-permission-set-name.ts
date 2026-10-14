@@ -13,12 +13,12 @@
  * security catalog's definition of that name. Every grant writer in this
  * repository writes the name and nothing else (the organization-admin
  * reconcile, the platform-admin promotion, self-registration, the verify RLS
- * persona, Setup's grant picker). D10 orders the id column's removal after
- * every grant names its set; this is that first step, so `permission_set_id`
- * is optional, no writer fills it, and no write derives the name from it. The
- * column and its data go with D10's later stage. Rows written before the name
- * column existed are named by the one-time backfill
- * (`grant-permission-set-name-backfill.ts`), never here.
+ * persona, Setup's grant picker). D10 ordered the id column's removal after
+ * every grant names its set: the declaration of `permission_set_id` is
+ * retired (C7b), and rows written before the name column existed are named by
+ * the v18 ceremony's verified rewrite (`os migrate organization-ownership
+ * --apply`), which reads the physical column before its column-drops step
+ * drops it — never here.
  *
  * ## What is refused — exactly "the catalog holds no set by this name"
  *
@@ -58,6 +58,15 @@
  * dialect for "this reference names nothing". No new error code (ADR-0112,
  * ADR-0114).
  *
+ * ## One grant per user, set and organization
+ *
+ * Not judged here. The declared unique index (`user_id`, `permission_set`,
+ * `organization_id`) is `unique: 'organization'`, whose organization key part
+ * is NULL-safe (ADR-0120 D3), so it refuses a second grant of one set to one
+ * user in one organization AND a second platform-wide grant (organization
+ * NULL), for every writer and every write path: a duplicate confers nothing
+ * more, but a revoke that deletes one row would leave the other granting.
+ *
  * ## Hooks, not a middleware
  *
  * Registered as engine `beforeInsert` / `beforeUpdate` hooks at priority 30:
@@ -77,12 +86,8 @@ import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.j
 
 /** The grant object this module judges. */
 export const GRANT_OBJECT = 'sys_user_permission_set';
-/** The grant's legacy id reference to a catalog row (dropped by ADR-0131 D10; read only by the backfill and the D10 report). */
-export const GRANT_SET_ID_FIELD = 'permission_set_id';
 /** The grant's NAME reference to the permission set (ADR-0131 D4). */
 export const GRANT_SET_NAME_FIELD = 'permission_set';
-/** The legacy row table the backfill reads an id's name from. */
-export const PERMISSION_SET_CATALOG_OBJECT = 'sys_permission_set';
 /** The security catalog type a `permission_set` value must name an item of. */
 const PERMISSION_SET_CATALOG_TYPE = 'permission';
 /** The `packageId` both hooks register under, so they bind and unbind as one. */
@@ -156,16 +161,12 @@ function judgedName(value: unknown): string | undefined {
 /**
  * [ADR-0131 D4] The permission set a STORED grant names, as every by-name
  * grant reader asks it: the grant's `permission_set`, or `undefined` for a
- * grant that names none — `NULL` or blank, which is a grant written before the
- * column existed that the backfill has not named yet, or one it could not name
- * (an id with no set row, or a set row of another organization).
+ * grant that names none — `NULL` or blank, a grant written before the column
+ * existed that the v18 ceremony's rewrite has not named (its verification
+ * blocks the ceremony on every such grant before the id column is dropped).
  *
  * A grant that names nothing grants nothing through a by-name reader: it is
- * never matched to a set, never shown as held, never counted. A reader whose
- * job is to RESTRICT — a revocation, a refused promotion, a duplicate it must
- * not insert — may still reach such a legacy grant through its id until
- * ADR-0131 D10 counts the unnamed grants and drops that column; no reader
- * reaches it through the id to confer anything.
+ * never matched to a set, never shown as held, never counted.
  */
 export function grantSetNameOf(row: unknown): string | undefined {
   if (!row || typeof row !== 'object') return undefined;

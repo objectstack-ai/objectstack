@@ -4,12 +4,11 @@
  * [ADR-0131 D4] The grant that names nothing, as each `plugin-auth` grant
  * reader treats it once the readers key on `sys_user_permission_set.permission_set`.
  *
- * A grant written before the name column existed carries `NULL` until the
- * one-time backfill (`plugin-security`, `kernel:bootstrapped`) names it; on an
- * upgraded deployment's first boot every grant is unnamed when the
- * `kernel:ready` passes run, and the backfill leaves some unnamed for good (an
- * id with no set row, or a set row of another organization). Each reader takes
- * its fail-closed direction:
+ * A grant written before the name column existed carries `NULL` until the v18
+ * ceremony's verified rewrite (`os migrate organization-ownership --apply`,
+ * ADR-0131 D10) names it from the legacy `permission_set_id`, a column no
+ * runtime declares any more (C7b). Each reader takes its fail-closed
+ * direction:
  *
  * - **the last-administrator guard** counts no administrator through it, and
  *   reads it as evidence that the environment is NOT fresh — so the bootstrap
@@ -18,13 +17,12 @@
  *   administrator: it confers an owner membership, and an unnamed grant
  *   confers nothing.
  *
- * And the guard's simulation of a write that re-points a grant's id without
- * its name: the platform derives that name after the guard runs, so the guard
- * reads it as taking the standing away — while an id echoed unchanged keeps it.
+ * And a write naming the retired id is refused as an undeclared field before
+ * it moves anything.
  *
  * Real ObjectQL over the SQL driver with the real `SecurityPlugin` (its objects
  * and its name hooks); a grant is unnamed by writing `NULL` with the name hooks
- * unbound, the state the backfill leaves.
+ * unbound, the state the ceremony's rewrite finds.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -137,7 +135,7 @@ const adminGrant = async (engine: ObjectQL): Promise<any> =>
   ((await engine.find('sys_user_permission_set', { where: { user_id: 'usr_admin' }, ...SYS })) as any[])[0];
 
 /**
- * The state the backfill leaves on a grant it has not named. Written past both
+ * The state of a legacy grant the ceremony's rewrite has not named. Written past both
  * hooks that would refuse it: the name hooks, and the guard itself — clearing
  * the sole administrator's grant name takes the standing away, which the guard
  * refuses like any other revocation. The guard is bound again afterwards.
@@ -175,12 +173,18 @@ describe('[ADR-0131 D4] a grant that names nothing — the last-administrator gu
     expect((await adminGrant(engine)).permission_set).toBe('admin_full_access');
   });
 
-  it('writing the legacy id moves no standing: nothing derives a name from it, so the write is permitted', async () => {
+  it('writing the retired id is refused 400 INVALID_FIELD (C7b) and moves no standing', async () => {
     const { engine } = await soleGrantAnchoredAdmin();
     const grant = await adminGrant(engine);
-    const [viewer] = (await engine.find('sys_permission_set', { where: { name: 'viewer_readonly' }, ...SYS })) as any[];
-    await engine.update('sys_user_permission_set', { id: grant.id, permission_set_id: viewer.id, reason: 'renewed' }, SYS);
-    expect(await adminGrant(engine)).toMatchObject({ permission_set: 'admin_full_access', reason: 'renewed' });
+    let refused: any;
+    try {
+      await engine.update('sys_user_permission_set', { id: grant.id, permission_set_id: 'ps_viewer', reason: 'renewed' }, SYS);
+    } catch (e) {
+      refused = e;
+    }
+    expect([refused?.code, refused?.status]).toEqual(['INVALID_FIELD', 400]);
+    expect(await adminGrant(engine)).toMatchObject({ permission_set: 'admin_full_access' });
+    expect((await adminGrant(engine)).reason ?? null).not.toBe('renewed');
   });
 });
 

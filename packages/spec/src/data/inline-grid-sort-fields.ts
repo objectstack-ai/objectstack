@@ -6,9 +6,9 @@
  *
  * The renderer derives the field it stamps with each line's position on
  * drag-reorder from the child object: the first of these names the child
- * declares (objectui `packages/plugin-form/src/deriveMasterDetail.ts`,
- * `SORT_FIELD_NAMES`, the same six names in the same order at the
- * `.objectui-sha` pin `89cad75d5570`). Two readers here:
+ * declares — the same six names in the same order as the renderer's own list
+ * (its read point is recorded in `packages/spec/liveness/field.json`, row
+ * `inlineColumns`). Two readers here:
  *
  * - `inline-grid-columns.ts`, whose derived grid columns and per-row form
  *   fields skip these names, as the renderer's do;

@@ -7,25 +7,21 @@
  * driver's tenant scope and the write hooks included, which the core suite's
  * recording double answers for neither of.
  *
- * - **Another organization's set.** A grant whose id names another
- *   organization's set row confers nothing, whether it is left unnamed (what
- *   the write hook and the backfill leave it) or carries that set's name (what
- *   the hook could write before it judged the set row's organization).
- * - **An unnamed grant** confers nothing through the resolver, and its id
- *   still restricts where it restricted: the organization-administrator
- *   reconcile still revokes it through its id.
- * - **The upgrade boot.** Grants stored before the name column existed are
- *   unnamed until the one-time backfill at `kernel:bootstrapped` names them.
- *   No request reaches the resolver before then: the HTTP socket opens at
- *   `kernel:listening`, strictly after every `kernel:bootstrapped` handler,
- *   and by then the grant confers again. A `kernel:ready` handler — boot code,
- *   never a request — still sees it unnamed.
+ * - **Another organization's set.** A grant of a set only another
+ *   organization's row carries confers nothing, whether it is left unnamed or
+ *   carries that set's name.
+ * - **An unnamed grant** confers nothing through the resolver, and nothing
+ *   reaches it through the retired `permission_set_id` any more (ADR-0131
+ *   D10, C7b): the v18 ceremony's verified rewrite names such a grant, or
+ *   blocks on it, before the column is dropped — the boot-time backfill that
+ *   named it is retired, and so is its pin here (its duplicate is the
+ *   ceremony's acceptance fixture, `organization-ownership-apply.test.ts`).
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { LiteKernel, resetPlatformAdminEmailMemo, resolveUserAuthzGrants } from '@objectstack/core';
+import { resetPlatformAdminEmailMemo, resolveUserAuthzGrants } from '@objectstack/core';
 import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
 import { SysMigration } from '@objectstack/platform-objects/system';
 
@@ -137,7 +133,7 @@ async function grant(engine: Engine, id: string): Promise<Record<string, any> | 
   return (await engine.findOne('sys_user_permission_set', { where: { id }, context: SYS })) as any;
 }
 
-describe('[ADR-0131 D4] a grant whose id names another organization’s set confers nothing through the resolver', () => {
+describe('[ADR-0131 D4] a grant of a set only another organization’s row carries confers nothing through the resolver', () => {
   async function world(): Promise<Engine> {
     const engine = await boot({ walled: true });
     await insertUser(engine, 'usr_x');
@@ -147,9 +143,9 @@ describe('[ADR-0131 D4] a grant whose id names another organization’s set conf
     return engine;
   }
 
-  it('left unnamed (what the write hook and the backfill leave it): nothing, in either organization or none', async () => {
+  it('left unnamed: nothing, in either organization or none', async () => {
     const engine = await world();
-    await insertGrantUnhooked(engine, { id: 'g_x', user_id: 'usr_x', permission_set_id: 'ps_b_tools', organization_id: null });
+    await insertGrantUnhooked(engine, { id: 'g_x', user_id: 'usr_x', organization_id: null });
     for (const tenantId of [undefined, ORG_A, ORG_B]) {
       const out = await resolveUserAuthzGrants(engine, 'usr_x', tenantId ? { tenantId } : {});
       expect(out.permissions, String(tenantId)).not.toContain('b_tools');
@@ -160,10 +156,10 @@ describe('[ADR-0131 D4] a grant whose id names another organization’s set conf
   it('carrying that set’s name: nothing either — no row the grant may name bears it', async () => {
     const engine = await world();
     await insertGrantUnhooked(engine, {
-      id: 'g_y', user_id: 'usr_x', permission_set_id: 'ps_b_tools', permission_set: 'b_tools', organization_id: null,
+      id: 'g_y', user_id: 'usr_x', permission_set: 'b_tools', organization_id: null,
     });
     await insertGrantUnhooked(engine, {
-      id: 'g_z', user_id: 'usr_x', permission_set_id: 'ps_b_tools', permission_set: 'b_tools', organization_id: ORG_A,
+      id: 'g_z', user_id: 'usr_x', permission_set: 'b_tools', organization_id: ORG_A,
     });
     for (const tenantId of [undefined, ORG_A, ORG_B]) {
       const out = await resolveUserAuthzGrants(engine, 'usr_x', tenantId ? { tenantId } : {});
@@ -195,8 +191,8 @@ describe('[ADR-0131 D4] a grant whose id names another organization’s set conf
   });
 });
 
-describe('[ADR-0131 D4] an unnamed grant confers nothing through the resolver; its id still restricts', () => {
-  it('an unnamed organization-administrator grant confers nothing, and the reconcile still revokes it through its id', async () => {
+describe('[ADR-0131 D4/D10] an unnamed grant confers nothing through the resolver; no id reaches it', () => {
+  it('an unnamed grant beside an organization-administrator membership confers nothing, and the reconcile neither grants through it nor reaches it', async () => {
     const engine = await boot();
     await insertUser(engine, 'usr_admin');
     await insertUser(engine, 'usr_owner');
@@ -204,86 +200,21 @@ describe('[ADR-0131 D4] an unnamed grant confers nothing through the resolver; i
     await seedLegacyPlatformBucket(engine, defaultPermissionSets);
     await bootstrapPlatformAdmin(engine, defaultPermissionSets);
     await engine.insert('sys_organization', { id: ORG_A, name: 'A', slug: 'a' }, { context: SYS } as any);
-    // A plain member holding an organization-administrator grant the backfill
-    // has not named — what a demoted owner's left-behind grant looks like.
+    // A plain member holding a grant that names nothing — a legacy row the v18
+    // ceremony's rewrite has not named yet.
     await engine.insert('sys_member',
       { id: 'm_owner', user_id: 'usr_owner', organization_id: ORG_A, role: 'member' },
       { context: { isSystem: true, tenantId: ORG_A } } as any);
-    const [set] = (await engine.find('sys_permission_set', {
-      where: { name: 'organization_admin_no_bypass', organization_id: null }, context: SYS,
-    })) as any[];
-    await insertGrantUnhooked(engine, { id: 'g_oa', user_id: 'usr_owner', permission_set_id: set.id, organization_id: ORG_A });
+    await insertGrantUnhooked(engine, { id: 'g_oa', user_id: 'usr_owner', organization_id: ORG_A });
 
     const out = await resolveUserAuthzGrants(engine, 'usr_owner', { tenantId: ORG_A });
     expect(out.permissions).not.toContain('organization_admin_no_bypass');
     expect(out.posture).toBe('MEMBER');
 
+    // The reconcile reads grants by name alone: for a plain member there is
+    // nothing to revoke, and the unnamed row is the ceremony's, untouched.
     const demotion = await reconcileOrgAdminGrant(engine, 'usr_owner', ORG_A, { posture: 'single' });
-    expect(demotion.action).toBe('revoked');
-    expect(await grant(engine, 'g_oa')).toBeNull();
-  });
-});
-
-describe('[ADR-0131 D4] the upgrade boot — no request reaches the resolver before the backfill names the grants', () => {
-  it('a grant stored before the name column: unnamed at kernel:ready, named and conferring at kernel:listening', async () => {
-    const engine = await newEngine();
-    for (const ps of defaultPermissionSets) {
-      engine.registry.registerItem('permission', structuredClone(ps) as any, 'name' as any, CATALOG_PACKAGE);
-    }
-    engine.registry.registerItem(
-      'permission',
-      { name: 'upgrade_reviewer', label: 'Reviewer', objects: {}, systemPermissions: ['cap_review'] } as any,
-      'name' as any,
-      CATALOG_PACKAGE,
-    );
-    // Stored before this boot: the set row, and a grant with no name.
-    await engine.insert('sys_permission_set',
-      { id: 'ps_up', name: 'upgrade_reviewer', label: 'Reviewer', system_permissions: '["cap_review"]', active: true },
-      { context: SYS } as any);
-    await insertUser(engine, 'usr_member');
-    await insertGrantUnhooked(engine, { id: 'g_up', user_id: 'usr_member', permission_set_id: 'ps_up' });
-    expect((await grant(engine, 'g_up'))?.permission_set).toBeNull();
-
-    const seen: Record<string, string[]> = {};
-    const metadata = {
-      get: async (type: string, name: string) =>
-        type === 'permission'
-          ? ([...defaultPermissionSets] as Array<{ name?: string }>).find((s) => s?.name === name) ?? null
-          : engine.getSchema(name) ?? null,
-      list: async () => [...defaultPermissionSets],
-    };
-    const kernel = new LiteKernel({ logger: { level: 'silent' } });
-    kernel.use({
-      name: 'com.objectstack.engine.objectql',
-      init: async (ctx: any) => {
-        ctx.registerService('objectql', engine);
-        ctx.registerService('metadata', metadata);
-        ctx.registerService('manifest', { register: () => undefined });
-      },
-      start: async () => undefined,
-    } as any);
-    kernel.use(new SecurityPlugin({ fallbackPermissionSet: 'member_default' }));
-    // Registered after SecurityPlugin, so each of its handlers runs after
-    // SecurityPlugin's own handler for the same hook.
-    kernel.use({
-      name: 'com.objectstack.qa.resolver-probe',
-      dependencies: ['com.objectstack.security'],
-      init: async () => undefined,
-      start: async (ctx: any) => {
-        const probe = (phase: string) => async () => {
-          seen[phase] = (await resolveUserAuthzGrants(engine, 'usr_member', { bypassGrantsCache: true })).systemPermissions;
-        };
-        ctx.hook('kernel:ready', probe('ready'));
-        ctx.hook('kernel:listening', probe('listening'));
-      },
-    } as any);
-    try {
-      await kernel.bootstrap();
-      expect(seen.ready).not.toContain('cap_review');
-      expect(seen.listening).toContain('cap_review');
-      expect((await grant(engine, 'g_up'))?.permission_set).toBe('upgrade_reviewer');
-    } finally {
-      await kernel.shutdown();
-    }
+    expect(demotion.action).not.toBe('revoked');
+    expect(await grant(engine, 'g_oa')).toMatchObject({ id: 'g_oa', permission_set: null });
   });
 });
