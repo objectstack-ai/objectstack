@@ -117,7 +117,8 @@ is one diagram a reviewer (or AI) can read end-to-end.
       },
     },
     { id: 'mark_won', type: 'update_record', label: 'Mark Won',
-      config: { objectName: 'opportunity', filter: { id: '{record.id}' }, fields: { stage: 'closed_won' } } },
+      config: { objectName: 'opportunity', filter: { id: { dialect: 'cel', source: 'record.id' } },
+                fields: { stage: 'closed_won' } } },
     { id: 'approved', type: 'end', label: 'Approved' },
     { id: 'rejected', type: 'end', label: 'Rejected' },
   ],
@@ -128,7 +129,6 @@ is one diagram a reviewer (or AI) can read end-to-end.
     { id: 'e2', source: 'manager_review',  target: 'needs_director',   label: 'approve' },
     { id: 'e3', source: 'manager_review',  target: 'rejected',         label: 'reject'  },
     // Decision branches: mutually-exclusive edge `condition` predicates.
-    // Without them BOTH branches would execute (unguarded edges run in parallel).
     { id: 'e4', source: 'needs_director',  target: 'director_signoff', label: 'true',
       condition: cel`record.amount > 500000` },
     { id: 'e5', source: 'needs_director',  target: 'mark_won',         label: 'false',
@@ -331,7 +331,7 @@ Time-word cheat sheet across surfaces (do not mix them up):
 
 | Surface | Event-time record | Pre-event record | Live record |
 |:--------|:------------------|:-----------------|:------------|
-| Flow condition / `{…}` template | `record` (trigger snapshot) | `previous` | — (use a `get_record` node) |
+| Flow condition / CEL envelope / `{{ }}` hole | `record` (trigger snapshot) | `previous` | — (use a `get_record` node) |
 | Approval `expression` approver | `trigger.*` | `vars.previous` | `current.*` |
 
 Object-hook `ctx` is a different vocabulary — see **objectstack-data**

@@ -235,6 +235,11 @@ describe('[ADR-0131 D4] grant equivalence — the name column changes no princip
  * and unchanged after it. `single` and walled differ in exactly one place: the
  * organization administrator's set — the walled `organization_admin` against
  * the wall-less `organization_admin_no_bypass` (ADR-0105 D4).
+ * One recorded move since, the same in every principal: `member_default` through
+ * `everyone`. `init()` declares the deployment's baseline on that anchor
+ * (`builtin-positions.declaration-phase.test.ts`), and this harness runs
+ * `init()` and `start()` but fires no `kernel:ready`, where a started kernel
+ * has always derived it (`builtin-positions.boot.test.ts`'s grant golden).
  */
 const GOLDEN: Record<'single' | 'isolated', unknown> = {
   single: {
@@ -249,7 +254,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'member@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['viewer_readonly'],
+      permissions: ['member_default', 'viewer_readonly'],
       positions: ['everyone', 'org_member'],
       posture: 'MEMBER',
       systemPermissions: [],
@@ -258,7 +263,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'orgadmin@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['organization_admin_no_bypass'],
+      permissions: ['member_default', 'organization_admin_no_bypass'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
       systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
@@ -267,7 +272,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: [],
       email: 'admin@eq.example',
       org_user_ids: ['usr_admin', 'usr_member', 'usr_orgadmin'],
-      permissions: ['admin_full_access'],
+      permissions: ['admin_full_access', 'member_default'],
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
@@ -288,7 +293,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'member@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['viewer_readonly'],
+      permissions: ['member_default', 'viewer_readonly'],
       positions: ['everyone', 'org_member'],
       posture: 'MEMBER',
       systemPermissions: [],
@@ -297,7 +302,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'orgadmin@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['organization_admin'],
+      permissions: ['member_default', 'organization_admin'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
       systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
@@ -306,7 +311,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       accessible_org_ids: [],
       email: 'admin@eq.example',
       org_user_ids: ['usr_admin', 'usr_member', 'usr_orgadmin'],
-      permissions: ['admin_full_access'],
+      permissions: ['admin_full_access', 'member_default'],
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [

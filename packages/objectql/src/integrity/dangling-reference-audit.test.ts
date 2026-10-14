@@ -122,8 +122,7 @@ describe('[#4551] dangling stored references are reported, never rewritten', () 
   it('finds a dangling reference and reports its FULL location', async () => {
     // The residual #4441 left: a system write put a permission-set id here that
     // names no row. On an RBAC link table that is a security-surface record
-    // resolving to nothing — the audience-anchor gate has to resolve exactly
-    // that set to evaluate the grant.
+    // resolving to nothing: a grant naming a permission set nothing serves.
     const port = makePort({
       objects: [binding],
       rows: {

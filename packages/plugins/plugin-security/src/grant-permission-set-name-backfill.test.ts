@@ -380,10 +380,11 @@ describe('[ADR-0131 D4] grant name backfill — every principal’s grants are b
       await clearAllNames(world.engine);
 
       // The resolver reads a grant's set by its name (ADR-0131 C2 stage S5a),
-      // so a grant the backfill has not named yet confers nothing.
+      // so a grant the backfill has not named yet confers nothing: what is
+      // left is what `everyone` names, the deployment's baseline.
       const unnamed = (await grantsByPrincipal(world.engine)) as Record<string, any>;
       expect(unnamed.member.permissions).not.toContain('viewer_readonly');
-      expect(unnamed.organizationAdmin.permissions).toEqual([]);
+      expect(unnamed.organizationAdmin.permissions).toEqual(['member_default']);
       expect(unnamed.organizationAdmin.posture).toBe('MEMBER');
       if (posture === 'single') {
         // The promoted first user's grant row is the anchor; walled, the
@@ -694,6 +695,11 @@ describe('[ADR-0131 D4] grant name backfill — boot wiring', () => {
  * The resolver's envelope per principal — recorded from the tree BEFORE the
  * name column existed (the S4a grant-equivalence golden). The backfill brings
  * every principal back to it once the resolver reads the name (stage S5a).
+ * One recorded move since, the same in every principal: `member_default` through
+ * `everyone`. `init()` declares the deployment's baseline on that anchor
+ * (`builtin-positions.declaration-phase.test.ts`), and this harness runs
+ * `init()` and `start()` but fires no `kernel:ready`, where a started kernel
+ * has always derived it (`builtin-positions.boot.test.ts`'s grant golden).
  */
 const GOLDEN: Record<Posture, unknown> = {
   single: {
@@ -708,7 +714,7 @@ const GOLDEN: Record<Posture, unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'member@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['viewer_readonly'],
+      permissions: ['member_default', 'viewer_readonly'],
       positions: ['everyone', 'org_member'],
       posture: 'MEMBER',
       systemPermissions: [],
@@ -717,7 +723,7 @@ const GOLDEN: Record<Posture, unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'orgadmin@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['organization_admin_no_bypass'],
+      permissions: ['member_default', 'organization_admin_no_bypass'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
       systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
@@ -726,7 +732,7 @@ const GOLDEN: Record<Posture, unknown> = {
       accessible_org_ids: [],
       email: 'admin@eq.example',
       org_user_ids: ['usr_admin', 'usr_member', 'usr_orgadmin'],
-      permissions: ['admin_full_access'],
+      permissions: ['admin_full_access', 'member_default'],
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
@@ -747,7 +753,7 @@ const GOLDEN: Record<Posture, unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'member@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['viewer_readonly'],
+      permissions: ['member_default', 'viewer_readonly'],
       positions: ['everyone', 'org_member'],
       posture: 'MEMBER',
       systemPermissions: [],
@@ -756,7 +762,7 @@ const GOLDEN: Record<Posture, unknown> = {
       accessible_org_ids: ['org_eq'],
       email: 'orgadmin@eq.example',
       org_user_ids: ['usr_member', 'usr_orgadmin'],
-      permissions: ['organization_admin'],
+      permissions: ['member_default', 'organization_admin'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
       systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
@@ -765,7 +771,7 @@ const GOLDEN: Record<Posture, unknown> = {
       accessible_org_ids: [],
       email: 'admin@eq.example',
       org_user_ids: ['usr_admin', 'usr_member', 'usr_orgadmin'],
-      permissions: ['admin_full_access'],
+      permissions: ['admin_full_access', 'member_default'],
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [

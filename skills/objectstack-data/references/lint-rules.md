@@ -20,7 +20,6 @@ Data-model rules (in addition to naming/label/i18n):
 | `object/missing-name-field` | suggestion | an object with no `nameField` (ADR-0079's canonical title pointer) and no name-like field (`name`/`title`/`subject`/`label`/`full_name`/`display_name`/`code`) |
 | `security-owd-unset` | error | an object published with no authored `sharingModel` (422 lint envelope; absence is not a decision) |
 | `security-owd-alias` | error | a legacy OWD spelling instead of the canonical four (ADR-0090 D4) |
-| `security-external-wider-than-internal` | error | `externalSharingModel` wider than `sharingModel` (ADR-0090 D11) |
 | `security-master-detail-ungranted` | warning | a `master_detail` child whose master carries no matching grant |
 
 > **`code` counts for R9, but is NOT a title-derivation key.** R9's name-like

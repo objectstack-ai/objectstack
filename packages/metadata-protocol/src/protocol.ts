@@ -3,6 +3,14 @@
 import type {
     DataProtocol, FlowRegistration, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
+// [ADR-0138 D2b] The one cross-item judge of the anonymous flow endpoint ×
+// `runAs: 'system'` flow pair, and the flow-direction refusal it words — see
+// `anonymousElevatedFlowRefusal`.
+import {
+    anonymousElevatedFlowPairs,
+    elevatedFlowAnonymousEndpointsMessage,
+    type AnonymousFlowDoorCandidate,
+} from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
 import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
@@ -55,6 +63,7 @@ import {
     envWritableMetadataTypes,
     historyRowsOfMember,
     packageScopedRowWhere,
+    packagelessAddressAmbiguityRefusal,
     resetEnvWritableMetadataTypes,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
@@ -1178,51 +1187,6 @@ function authoredLockFamilyRefusal(
             + 'Sent back exactly as a read of this item serves it, the key is accepted and ignored.',
         code: 'custom',
     }));
-    return err;
-}
-
-/**
- * [#23165, ADR-0048] The refusal of a direct save, or a delete, that names no
- * package, of an item whose rows at the address are bound to two or more
- * packages ({@link ObjectStackProtocolImplementation.packagelessAddress}).
- *
- * A `sys_metadata` row is keyed `(org, type, name, package_id)`, so such a
- * write has no one row to write or remove. Before this refusal the save wrote
- * a package-less row beside the packages' rows and answered `200`, for a row
- * the item read does not serve, and the delete removed whichever row the
- * package-agnostic `findOne` met first and answered "it no longer exists"
- * while another package's row stayed served. Choosing one of the packages is
- * that driver-order coin toss (#8907). The remedy is the request's: name the
- * package, which is the address every door of the item takes (`?package=`,
- * ADR-0048).
- *
- * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member for
- * a refusal that comes from environment state rather than the body (the same
- * request is accepted once it names its package), and the code this
- * package already answers when a name is held by more than one owner
- * (`importUnmanagedPackage`). The prescription first, because a 4xx message
- * crosses the REST boundary bounded at 500 characters with its tail
- * truncated; the candidates follow, sorted, so the message is the same on
- * every driver.
- */
-function packagelessAddressAmbiguityRefusal(
-    verb: 'save' | 'delete',
-    type: string,
-    name: string,
-    packageIds: readonly string[],
-): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
-    const shown = packageIds.slice(0, 5).map((id) => `'${id}'`).join(', ');
-    const more = packageIds.length > 5 ? ` and ${packageIds.length - 5} more` : '';
-    const [nothing, single] = verb === 'save'
-        ? ['Nothing was written.', 'no single row to write']
-        : ['Nothing was deleted.', 'no single row to remove'];
-    const err = new Error(
-        `Name the package this ${verb} is for, then send it again: on the REST door add ?package= with the package id, `
-        + `in process pass packageId. ${nothing} ${type} '${name}' belongs to ${packageIds.length} packages `
-        + `(${shown}${more}), and a ${verb} that names none has ${single}.`,
-    ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
-    err.code = 'RESOURCE_CONFLICT';
-    err.status = 409;
     return err;
 }
 
@@ -6017,8 +5981,7 @@ export interface MutationProjectionOutcome {
  * write by throwing — it is the seam for domain invariants that must hold on
  * every runtime-authored body regardless of which HTTP surface produced it
  * (e.g. plugin-security's OWD posture gate: an environment may only TIGHTEN
- * a packaged object's `sharingModel`, and `externalSharingModel ≤
- * sharingModel` per ADR-0090 D11).
+ * a packaged object's `sharingModel`).
  *
  * Invoked inside `saveMetaItem` for BOTH draft and publish-mode saves, after
  * the ADR-0005 overlay/runtime-create authorization and the per-type spec
@@ -18615,11 +18578,20 @@ export class ObjectStackProtocolImplementation implements
     private async assertLockAllowsDelete(args: {
         type: string;
         name: string;
+        /**
+         * [#23297] The package the delete names (ADR-0048 `?package=`), handed
+         * to the gate as the save's is ({@link lockWriteRefusal}): part of the
+         * item's address. It never narrows the rows or the shipping packages
+         * the lock is resolved over (#21761, #21803: the strictest of them
+         * binds, so a delete naming a package is refused whenever the save
+         * naming it is); it picks whose prose the refusal carries.
+         */
+        packageId?: string;
         actor?: string;
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const state = await this.getEffectiveLock(args.type, args.name);
+        const state = await this.getEffectiveLock(args.type, args.name, args.packageId);
         const refusal = evaluateLockForDelete(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -18829,8 +18801,9 @@ export class ObjectStackProtocolImplementation implements
      * one package's row of an item two packages hold, or the package-less row
      * beside a package's, and claimed the item gone. The draft save has
      * resolved its address from the item's active row since #11087
-     * (`SysMetadataRepository.resolveWriteHead`, unchanged); the direct save
-     * and the delete did not, and this is that half.
+     * (`SysMetadataRepository.resolveWriteHead`, which [#23297] reads every
+     * active row and refuses two packages' with the same refusal); the direct
+     * save and the delete did not, and this is that half.
      *
      * The rows are the ones the item read chooses among
      * ({@link findServedOverlayRow}): the environment's (ADR-0131 D6), the
@@ -20428,6 +20401,87 @@ export class ObjectStackProtocolImplementation implements
                     healed = registry.removeRuntimeShadow(type, name, memberKey) || healed;
                 }
             }
+
+            // ── [#23297, ADR-0048] A ROW OF THE ITEM IS STILL STORED ──
+            //
+            // The tiers below conclude what is served next from the layers
+            // UNDER the deleted row (a packaged artifact, a MetadataService
+            // baseline, or nothing) and on "nothing" retire the entry. That
+            // presumed the deleted row was the item's only row. A delete names
+            // its package (#23165), so an item two packages hold keeps the
+            // other package's row stored and served by the item read and the
+            // list, while tier 3 retired the registry entry: the
+            // registry-backed doors (`getObject`, which data CRUD dispatches
+            // on, and the registry lookups) answered "not registered" until
+            // the next boot or save. Measured on a booted showcase: after
+            // `DELETE /api/v1/meta/object/x?package=P` with Q's row remaining,
+            // `GET /api/v1/meta/object/x` served Q's row and
+            // `GET /api/v1/data/x` answered 404 `OBJECT_NOT_FOUND`.
+            //
+            // So the store is asked first. A row still stored at the address
+            // (the environment's active rows, the canonical type, this member,
+            // every package) is what is served next: it is registered again
+            // the way a write makes a row live ({@link applyRegistryWriteThrough}),
+            // in the order the boot hydration ({@link loadMetaFromDb}) reads
+            // and with its sealed-object skip, and nothing is retired. Tier 1
+            // above has already lifted the deleted row's shadow off a packaged
+            // artifact, so a remaining row the hydration declines (#22057)
+            // leaves the artifact served, as a boot does.
+            //
+            // An `object` has ONE owner per name in the registry (ADR-0029
+            // D3): a second package's runtime-authored row never registered
+            // (its write-through was refused at save), so the owner can be the
+            // deleted row's package. That owner is unregistered first, only
+            // for a name no code package ships (the tier-3 limb's own guard),
+            // so the remaining row can take the name. An extender keeps it
+            // registered, said as tier 3 says it.
+            //
+            // An outage is not an absence: a failed read stops the walk with
+            // nothing retired, as a degraded baseline read does below. An
+            // unprovisioned store holds no row.
+            // The canonical key the repository stores rows under, and the one
+            // the write-through registers under (#8862, #9111).
+            const canonical = canonicalMetaType(type);
+            let storedRows: Array<Record<string, unknown>> | null | undefined;
+            try {
+                // [#21911] The explicit system opt-in — see findServedOverlayRow.
+                storedRows = await this.engine.find('sys_metadata', {
+                    where: { type: canonical, name, state: 'active', organization_id: null, ...overlayMemberWhere(canonical, member) },
+                    context: { isSystem: true },
+                });
+            } catch (error) {
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            }
+            const remainingRows = canonical === 'object' && this.isUnservedSealedOverlay(canonical, name)
+                ? []
+                : storedRows ?? [];
+            if (remainingRows.length > 0) {
+                if (canonical === 'object' && !this.isArtifactBacked(canonical, name)) {
+                    const bindings = new Set(remainingRows.map((row) => boundPackageOf(row.package_id) ?? 'sys_metadata'));
+                    const owner = typeof registry.getObjectOwner === 'function' ? registry.getObjectOwner(name) : undefined;
+                    if (owner && !bindings.has(owner.packageId) && typeof registry.unregisterObject === 'function') {
+                        try {
+                            registry.unregisterObject(name);
+                        } catch (err: any) {
+                            console.warn(
+                                `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                                + `${err?.message ?? err}`,
+                            );
+                            return;
+                        }
+                    }
+                }
+                for (const row of remainingRows) {
+                    await this.applyRegistryWriteThrough({
+                        type: canonical,
+                        name,
+                        item: this.convertStoredItem(String(row.type ?? canonical), storedRowDocument(row)),
+                        packageId: boundPackageOf(row.package_id) ?? null,
+                        organizationId: null,
+                    });
+                }
+                return;
+            }
             if (healed) return;
 
             const baseline = await this.readItemFromMetadataService(type, name);
@@ -20978,6 +21032,93 @@ export class ObjectStackProtocolImplementation implements
         err.status = 422;
         err.object = object;
         err.holders = unique;
+        return err;
+    }
+
+    /**
+     * [ADR-0138 D2b] The flow half of the anonymous door × elevated flow
+     * refusal: a flow published with `runAs: 'system'` while an
+     * `authRequired: false` endpoint of `type: 'flow'` names it.
+     *
+     * The record refuses the pair "in both directions, because either item can
+     * be the last one edited". An endpoint is code-only (`api` is
+     * `allowRuntimeCreate: false`; the code-only inlet refuses its write), so its
+     * own publish is the stack parse and the metadata layer's package publish,
+     * where the judge runs over both items. A flow is authorable here, so this
+     * door is where the OTHER direction is read: the flow is the item being
+     * published, and the endpoints that name it are read from what declares
+     * them on this host. Both judges are the one in
+     * `@objectstack/spec/api` (`anonymousElevatedFlowPairs`), so the stack and
+     * this door cannot grow two opinions of the pair.
+     *
+     * Asked at every door a flow body reaches `active` through: the save in
+     * publish mode ({@link saveMetaItem}) and the draft promotion
+     * ({@link promoteDraftForPublish}) the per-item publish and
+     * `publishPackageDrafts` share. A draft save is let through: a draft does
+     * not execute, and its publish is judged here. `migrate-stored` re-saves
+     * (the credential move, `os migrate meta --stored`) are not judged: they
+     * rewrite a row that already exists, and refusing one would leave a
+     * credential the move exists to take out of the row in cleartext. Such a
+     * row keeps executing as published until its next publish, which this
+     * refuses (the semantic entry `api-endpoint-anonymous-elevated-flow-refused`
+     * says so to an upgrading author).
+     *
+     * Where the endpoints are read, both, because each is a home a code
+     * stack's `apis` has on a real boot: the engine registry's `api` items
+     * (`registerApp` files every stack's `apis` there) and the `metadata`
+     * service's `list('api')`, the manager whose index the endpoint matcher
+     * serves from. Their items are read as bodies, as {@link getMetaItems}
+     * reads the same two sources. ⛔ `sys_metadata` is not read: an `api` row
+     * there is never served (the matcher does not read the store) and none can
+     * be written any more. A read that fails propagates: answering "no
+     * endpoint names it" from a read that never happened would publish the
+     * very pair this refuses.
+     *
+     * `INVALID_METADATA` / 422 with `issues[]` at `runAs` — the envelope this
+     * door's other publish-time contract refusals carry (the schema gate and
+     * the runtime authoring gate), so Studio highlights the key the refusal is
+     * about. ⛔ No new code. The message prescribes before it explains (a 4xx
+     * message crosses the REST boundary with its tail truncated) and carries no
+     * tracker number.
+     */
+    private async anonymousElevatedFlowRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        if (singularType !== 'flow') return undefined;
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+        if ((item as { runAs?: unknown }).runAs !== 'system') return undefined;
+
+        const endpoints: unknown[] = [];
+        const registry = this.engine.registry;
+        if (typeof registry?.listItems === 'function') {
+            endpoints.push(...registry.listItems('api'));
+        }
+        const metadataService = this.getServicesRegistry?.()?.get('metadata');
+        if (metadataService && typeof metadataService.list === 'function') {
+            const listed = await metadataService.list('api');
+            if (Array.isArray(listed)) endpoints.push(...listed);
+        }
+
+        const pairs = anonymousElevatedFlowPairs(
+            endpoints as AnonymousFlowDoorCandidate[],
+            [{ name, runAs: 'system' }],
+        );
+        if (pairs.length === 0) return undefined;
+
+        const names = [...new Set(pairs.map((pair) => pair.endpoint))];
+        const err = new Error(elevatedFlowAnonymousEndpointsMessage(name, names)) as Error & {
+            code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[];
+        };
+        err.code = 'INVALID_METADATA';
+        err.status = 422;
+        err.issues = [{
+            path: 'runAs',
+            message: `An anonymous endpoint (\`authRequired: false\`) triggers this flow: ${names.map((n) => `'${n}'`).join(', ')}. `
+                + "No anonymous door may start a `runAs: 'system'` flow (ADR-0138 D2b).",
+            code: 'custom',
+        }];
         return err;
     }
 
@@ -22230,6 +22371,17 @@ export class ObjectStackProtocolImplementation implements
         {
             const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, request.item, request.name);
             if (defaultPageRefusal) throw defaultPageRefusal;
+        }
+
+        // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
+        // anonymous endpoint of `type: 'flow'` names it is refused, in publish
+        // mode only (a draft does not execute; its publish is judged at the
+        // promotion), before the authoring gate and every write. A
+        // `migrate-stored` re-save rewrites an existing row and is not judged.
+        // See {@link anonymousElevatedFlowRefusal}.
+        if (mode !== 'draft' && writeSource !== 'migrate-stored') {
+            const elevatedRefusal = await this.anonymousElevatedFlowRefusal(singularType, request.item, request.name);
+            if (elevatedRefusal) throw elevatedRefusal;
         }
 
         // The #4463 runtime authoring gate — the shared author-time rule
@@ -23852,6 +24004,17 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, draftForGate.body, request.name, 'published');
             if (defaultPageRefusal) throw defaultPageRefusal;
+        }
+        // [ADR-0138 D2b] …and a flow draft that would go `active` with
+        // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
+        // it: the draft save let it through (a draft does not execute), so its
+        // publish is where the pair is judged — on the draft body, with the
+        // save door's predicate and envelope, before `repo.promoteDraft` writes,
+        // so a batch publish aborts on it too. See
+        // {@link anonymousElevatedFlowRefusal}.
+        if (draftForGate) {
+            const elevatedRefusal = await this.anonymousElevatedFlowRefusal(singularType, draftForGate.body, request.name);
+            if (elevatedRefusal) throw elevatedRefusal;
         }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
@@ -28336,6 +28499,8 @@ export class ObjectStackProtocolImplementation implements
             const lockErr = await this.assertLockAllowsDelete({
                 type: request.type,
                 name: request.name,
+                // [#23297] The delete's address carries its package, as the save's does.
+                ...(request.packageId ? { packageId: request.packageId } : {}),
                 ...(request.actor ? { actor: request.actor } : {}),
                 source: 'protocol.deleteMetaItem',
             });

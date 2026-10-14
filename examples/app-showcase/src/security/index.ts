@@ -11,7 +11,7 @@
  *   • sharing-rules.ts    — record widening (criteria + BU-subtree recipients)
  *
  * The other two concepts live elsewhere by design: the OWD baseline
- * (`sharingModel` / `externalSharingModel`) is declared per-object in
+ * (`sharingModel`) is declared per-object in
  * src/data/objects/, and the business-unit tree is DATA (environment-owned,
  * seeded in src/data/seed/ as `sys_business_unit` rows), not metadata.
  *

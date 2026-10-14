@@ -30,6 +30,7 @@ import { describe, it, expect } from 'vitest';
 // The engine-double contract gate: a fake looser than ObjectQL's own verb
 // dispatch is how #4434 shipped a dead route with its suite green.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, ConflictError } from '@objectstack/metadata-core';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
@@ -255,4 +256,69 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
     const repo = makeRepo(makeFakeEngine());
     expect(await repo.headAt(REF, { state: 'draft' })).toEqual({ head: null, packageId: null });
   });
+});
+
+/**
+ * [#23297, ADR-0048] The inheritance reads EVERY active row of the address,
+ * never the first one the store returns.
+ *
+ * Bound to two packages, a package-less draft has no single package to go
+ * into: `put` refuses it `409 RESOURCE_CONFLICT` with the `?package=` remedy
+ * (the refusal the direct save and the delete answer since #23165) and writes
+ * nothing, and `headAt` names the package-unbound draft key, never a package
+ * picked by storage order. Bound to one package, with a package-less active
+ * row beside it, the draft inherits the package in either storage order.
+ */
+describe('[#23297] SysMetadataRepository draft inheritance reads every active row', () => {
+  const activeRow = (pkg: string | null, checksum: string) => ({
+    type: REF.type, name: REF.name, organization_id: null, state: 'active',
+    package_id: pkg, metadata: '{"label":"Member"}', checksum, version: 1,
+  });
+
+  for (const order of [['app.k9qk', 'app.other'], ['app.other', 'app.k9qk']] as const) {
+    it(`two packages (${order.join(' stored before ')}): put refuses 409 RESOURCE_CONFLICT and writes nothing`, async () => {
+      const engine = makeFakeEngine(order.map((pkg, i) => activeRow(pkg, `sha-${i}`)));
+      const repo = makeRepo(engine);
+      const rowsBefore = engine.rows.length;
+
+      const err = await repo
+        .put(REF, { label: 'Member', description: 'pending' }, { parentVersion: null, actor: 't', state: 'draft' as const })
+        .then(() => null, (e: unknown) => e as Error & { code?: string; status?: number });
+
+      expect(err).not.toBeNull();
+      const envelope = resolveThrownHttpError(err);
+      expect(envelope.status).toBe(409);
+      expect(envelope.code).toBe('RESOURCE_CONFLICT');
+      expect(err!.message).toContain("'app.k9qk', 'app.other'");
+      expect(err!.message).toContain('?package=');
+      expect(engine.rows).toHaveLength(rowsBefore);
+      expect(engine.history).toHaveLength(0);
+    });
+
+    it(`two packages (${order.join(' stored before ')}): headAt names the package-unbound draft key, no package`, async () => {
+      const engine = makeFakeEngine(order.map((pkg, i) => activeRow(pkg, `sha-${i}`)));
+      const repo = makeRepo(engine);
+      expect(await repo.headAt(REF, { state: 'draft', packageId: null })).toEqual({ head: null, packageId: null });
+    });
+  }
+
+  it('two packages: a draft naming one of them is its own address and saves', async () => {
+    const engine = makeFakeEngine([activeRow('app.k9qk', 'sha-0'), activeRow('app.other', 'sha-1')]);
+    const repo = makeRepo(engine);
+    await repo.put(REF, { label: 'pending' }, { parentVersion: null, actor: 't', state: 'draft' as const, packageId: 'app.other' });
+    expect(engine.rows.filter((r) => r.state === 'draft').map((r) => r.package_id)).toEqual(['app.other']);
+  });
+
+  for (const residueFirst of [true, false]) {
+    it(`one package and a package-less active row (${residueFirst ? 'package-less stored first' : 'package stored first'}): the draft inherits the package`, async () => {
+      const rows = residueFirst
+        ? [activeRow(null, 'sha-residue'), activeRow('app.k9qk', 'sha-active')]
+        : [activeRow('app.k9qk', 'sha-active'), activeRow(null, 'sha-residue')];
+      const engine = makeFakeEngine(rows);
+      const repo = makeRepo(engine);
+      await repo.put(REF, { label: 'pending' }, { parentVersion: null, actor: 't', state: 'draft' as const });
+      expect(engine.rows.filter((r) => r.state === 'draft').map((r) => r.package_id)).toEqual(['app.k9qk']);
+      expect((await repo.headAt(REF, { state: 'draft', packageId: null })).packageId).toBe('app.k9qk');
+    });
+  }
 });

@@ -12,8 +12,8 @@
  *  - **R1 — env-tighten-only (ADR-0086 D1, ADR-0049).** An environment write
  *    over a PACKAGED object (artifact-backed — reachable only via the
  *    `OS_METADATA_WRITABLE=object` escape hatch, since `object` ships
- *    `allowEnvironmentOverlay:false`) may not set `sharingModel` /
- *    `externalSharingModel` WIDER than the packaged declaration. Widening
+ *    `allowEnvironmentOverlay:false`) may not set `sharingModel` WIDER than
+ *    the packaged declaration. Widening
  *    legitimately = author it in the package source and publish (ADR-0090
  *    D7), never an env overlay. No lint rule covers this comparison — it
  *    needs the packaged DECLARATION, a deployment fact only this seam holds.
@@ -32,7 +32,12 @@
  * effectively PUBLIC at runtime (`effectiveSharingModel`, plugin-sharing),
  * so R2's hardcoded private baseline refused pairs that are not actually
  * external-wider; and draft-state saves, which the lint discipline
- * deliberately defers to the draft→active promotion gate (#4463 D1).
+ * deliberately defers to the draft→active promotion gate (#4463 D1). (That
+ * lint rule left with the key it judged, below.)
+ *
+ * **R1's external half is RETIRED with the key** (#23268, ADR-0049): the
+ * object shape tombstones `externalSharingModel`, so no body this gate sees
+ * can carry it, and R1 compares the internal `sharingModel` alone.
  *
  * Deliberately write-path only — no zod refine, so grandfathered stored
  * metadata keeps loading (the ADR-0090 D1 lesson: never change behavior of
@@ -42,10 +47,8 @@
  */
 
 /**
- * D11 openness ordering — mirrors `OWD_WIDTH` in
- * `packages/lint/src/validate-security-posture.ts` (`controlled_by_parent`
- * deliberately absent: it inherits the detail-master's pair and cannot be
- * ordered locally).
+ * OWD openness ordering (`controlled_by_parent` deliberately absent: it
+ * inherits the detail-master's posture and cannot be ordered locally).
  */
 const OWD_WIDTH: Record<string, number> = {
   private: 0,
@@ -76,17 +79,15 @@ export interface ObjectPostureGateContext {
 /**
  * The gate. Throws 403 `owd_widening_forbidden` to reject the write; returns
  * silently when the body passes. (R2 `owd_external_wider` retired — #8310
- * ruling; the external ≤ internal ordering is refused upstream by the 422
- * runtime lint door, see the header.)
+ * ruling; the external key it ordered is itself retired since #23268, see
+ * the header.)
  */
 export function objectPostureGate(ctx: ObjectPostureGateContext): void {
   const body = ctx.body as Record<string, unknown> | null;
   if (!body || typeof body !== 'object') return;
 
   const internal = body['sharingModel'];
-  const external = body['externalSharingModel'];
   const wInternal = widthOf(internal);
-  const wExternal = widthOf(external);
 
   // R1 — ADR-0086 D1: an environment may only TIGHTEN a packaged object's
   // posture. Applies only to overlay writes over an artifact-backed object
@@ -109,23 +110,17 @@ export function objectPostureGate(ctx: ObjectPostureGateContext): void {
   const declared = ctx.declaredBody as Record<string, unknown> | null;
   if (!declared || typeof declared !== 'object') return;
 
-  // Baseline widths. An undeclared internal baselines to `private` (the
+  // Baseline width. An undeclared internal baselines to `private` (the
   // ADR-0090 D1 default for custom objects — fail-closed: an env overlay of
-  // an OWD-less packaged object may not introduce a wider posture); an
-  // undeclared external baselines to `private` (the D11 default).
-  // `controlled_by_parent` on either side of a comparison skips that
-  // comparison (not orderable locally).
+  // an OWD-less packaged object may not introduce a wider posture).
+  // `controlled_by_parent` on either side skips the comparison (not
+  // orderable locally).
   const declaredInternal = declared['sharingModel'];
-  const declaredExternal = declared['externalSharingModel'];
   const wDeclaredInternal = widthOf(declaredInternal) ?? (declaredInternal == null ? OWD_WIDTH['private'] : undefined);
-  const wDeclaredExternal = widthOf(declaredExternal) ?? (declaredExternal == null ? OWD_WIDTH['private'] : undefined);
 
   const violations: string[] = [];
   if (wInternal !== undefined && wDeclaredInternal !== undefined && wInternal > wDeclaredInternal) {
     violations.push(`sharingModel '${String(internal)}' > declared '${String(declaredInternal ?? 'private (default)')}'`);
-  }
-  if (wExternal !== undefined && wDeclaredExternal !== undefined && wExternal > wDeclaredExternal) {
-    violations.push(`externalSharingModel '${String(external)}' > declared '${String(declaredExternal ?? 'private (default)')}'`);
   }
   if (violations.length > 0) {
     throw postureError(

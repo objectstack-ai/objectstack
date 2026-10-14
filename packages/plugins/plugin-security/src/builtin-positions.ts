@@ -8,7 +8,7 @@
  * ## One list, one home
  *
  * {@link securityBuiltinPositions} is the only place the six are listed.
- * `SecurityPlugin.start` declares them to the engine registry
+ * `SecurityPlugin.init` declares them to the engine registry
  * ({@link registerBuiltinPositions}), under this plugin's package id, so the
  * security catalog read (`createSecurityCatalogReader`, `@objectstack/core`)
  * and the metadata door (`GET /api/v1/meta/position`) list them beside every
@@ -51,9 +51,12 @@
  * [ADR-0090 D5, ADR-0131 D3/D4] The `everyone` anchor distributes the
  * deployment's baseline sets — the app's `isDefault` set composed with the
  * platform's `member_default` — in its definition's `permissionSets`, which
- * the authorization resolver reads. The plugin declares it at `kernel:ready`
- * ({@link declareEveryoneBaseline}), once the stack's declared capabilities
- * the high-privilege check reads are in; no other built-in names a set.
+ * the authorization resolver reads. The plugin declares it
+ * ({@link declareEveryoneBaseline}) in `init()` with the fail-closed reading of
+ * the high-privilege check, so a boot that composes the plugin for its
+ * declarations only holds it too, and again at `kernel:ready`, once the stack's
+ * declared capabilities that check reads are in, with the accepted package
+ * defaults; no other built-in names a set.
  */
 
 import {

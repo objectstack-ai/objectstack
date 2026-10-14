@@ -16,7 +16,7 @@ ADR-0005 rollback landed by #6483 / PR #6608)
 > **RETIRED 2026-10-13 (#15204 stage 8, `66949b7729`, by execution of [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D2/D3/D13).**
 > The `sys_permission_set` row object is no longer registered, and the machinery that kept it a
 > projection — the write-through (D3), the `permission` projector (D2) and the boot reconcile and
-> backfill (D4) — is unwired; its module stays in the tree until #15204 stage 7a deletes it. D1
+> backfill (D4) — is unwired, and #15204 stage 7a (#23368) deleted its module (`permission-set-projection.ts`, with the seed-name lookup and the refusal sink). D1
 > stands. Read the rest of this summary, D2–D4 and the Consequences in the past tense.
 
 A permission-set **definition** (label, description, the six facet groups, `adminScope`,
@@ -184,9 +184,10 @@ is `managed_by:'admin'` while its definition ships as a platform artifact, and i
 data-door edit is **refused** — the record's provenance column was never what the gate
 read. The mirror case is `twodoors_pkgset`, whose row is `managed_by:'package'` while its
 definition lives in `sys_metadata` (that materialization is pinned in the same file);
-that an edit of such a row still **lands** is pinned as a unit case in
+that an edit of such a row still **lands** was pinned as a unit case in
 `packages/plugins/plugin-security/src/permission-set-projection.test.ts`, whose protocol
-stub models this gate.
+stub modelled this gate, until #15204 stage 7a (#23368) deleted that suite with the
+projection it pinned.
 
 The refusal is left to the producer deliberately: `plugin-security` does not re-derive
 artifact-backing to pre-empt it. That rule belongs to the metadata protocol
@@ -395,9 +396,11 @@ other write.
   `packages/metadata-protocol/src/protocol.ts` (`saveMetaItem` /
   `deleteMetaItem` tier gates) and
   `packages/metadata-protocol/src/sys-metadata-repository.ts` (`assertAllowed`).
-- Implementation: `packages/plugins/plugin-security/src/permission-set-projection.ts`,
-  `packages/metadata-protocol/src/protocol.ts` (`registerMutationProjector`),
-  `packages/plugins/plugin-security/src/security-plugin.ts` (wiring).
+- Implementation: `packages/plugins/plugin-security/src/permission-set-projection.ts`
+  (deleted by #15204 stage 7a, #23368, after stage 8 unwired it),
+  `packages/metadata-protocol/src/protocol.ts` (`registerMutationProjector`, the seam that
+  stays), `packages/plugins/plugin-security/src/security-plugin.ts` (the wiring, removed by
+  stage 8).
 
 ---
 

@@ -59,7 +59,6 @@ const FORM_SLUG = 'e1guest-intake';
 const OBJ = {
   private: 'e1guest_private',
   publicRead: 'e1guest_public_read',
-  publicReadExternal: 'e1guest_public_read_ext',
   publicReadWrite: 'e1guest_public_rw',
   parent: 'e1guest_parent',
   child: 'e1guest_child',
@@ -79,7 +78,6 @@ const objects = [
   object(OBJ.publicRead, 'public_read', {
     publicSharing: { enabled: true, eligibility: `record.name == '${OBJ.publicRead}-seed-1'` },
   }),
-  object(OBJ.publicReadExternal, 'public_read', { externalSharingModel: 'public_read' }),
   object(OBJ.publicReadWrite, 'public_read_write'),
   object(OBJ.parent, 'public_read'),
   ObjectSchema.create({
@@ -102,7 +100,6 @@ const GuestReader = definePermissionSet({
   objects: {
     [OBJ.private]: { allowRead: true },
     [OBJ.publicRead]: { allowRead: true },
-    [OBJ.publicReadExternal]: { allowRead: true },
     [OBJ.publicReadWrite]: { allowRead: true, allowCreate: true },
     [OBJ.parent]: { allowRead: true },
     [OBJ.child]: { allowRead: true },
@@ -139,7 +136,6 @@ const find = (key: keyof typeof OBJ): ApiEndpoint => ({
 const endpoints: ApiEndpoint[] = [
   find('private'),
   find('publicRead'),
-  find('publicReadExternal'),
   find('publicReadWrite'),
   find('parent'),
   find('child'),
@@ -222,7 +218,7 @@ beforeAll(async () => {
   organizationId = String(orgs[0].id);
 
   // Two rows per object, written by the admin through the data door.
-  for (const name of [OBJ.private, OBJ.publicRead, OBJ.publicReadExternal, OBJ.publicReadWrite, OBJ.parent, OBJ.unbound, OBJ.fold]) {
+  for (const name of [OBJ.private, OBJ.publicRead, OBJ.publicReadWrite, OBJ.parent, OBJ.unbound, OBJ.fold]) {
     for (const n of [1, 2]) {
       const res = await stack.apiAs(adminToken, 'POST', `/data/${name}`, { name: `${name}-seed-${n}` });
       expect(res.status, await res.clone().text()).toBe(201);
@@ -373,14 +369,13 @@ describe('ADR-0138 E1 — the guest\'s row scope is share links only, under ever
 
   // [ADR-0138 D3 item 6, as the maintainer's ruling C amends it — comment
   // 6148183570 on #23266] The guest never takes the OWD branch of the
-  // row-level pipeline: not `sharingModel`, and not `externalSharingModel`
-  // (which no runtime reads for anyone, #23268). It owns nothing (D1), so it
-  // reaches rows only through share links. A guest with a bound read set and
-  // no link is ADMITTED to each object (200: the set grants read) and reads
-  // ZERO rows of it, whatever the object's sharing model — the `public_read`
-  // object that also declares `externalSharingModel: 'public_read'` included.
-  // The link control is the next block.
-  const cases: Array<keyof typeof OBJ> = ['private', 'publicRead', 'publicReadExternal', 'publicReadWrite', 'parent', 'child'];
+  // row-level pipeline (`sharingModel`; the external dial it might once have
+  // taken, `externalSharingModel`, is retired — #23268, and this file's object
+  // declaring it went with it). It owns nothing (D1), so it reaches rows only
+  // through share links. A guest with a bound read set and no link is ADMITTED
+  // to each object (200: the set grants read) and reads ZERO rows of it,
+  // whatever the object's sharing model. The link control is the next block.
+  const cases: Array<keyof typeof OBJ> = ['private', 'publicRead', 'publicReadWrite', 'parent', 'child'];
   for (const key of cases) {
     it(`${OBJ[key]}: the guest is admitted and reads 0 rows`, async () => {
       const res = await anonymous(key);
