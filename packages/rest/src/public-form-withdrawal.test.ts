@@ -1,33 +1,30 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#21331] Withdrawing a public form from anonymous intake takes effect on
-// every intake door. Both doors (`GET /forms/:slug` and
-// `POST /forms/:slug/submit`) read the form in the organization the request
-// belongs to: the tenancy service's `defaultOrgId()`. That is the same
-// organization whose overlay the administrator's editor shows. A withdrawal
-// saved in that organization therefore closes both doors, and nothing is
-// written.
+// [#21331, ADR-0131 C7] Withdrawing a public form from anonymous intake takes
+// effect on every intake door. Both doors (`GET /forms/:slug` and
+// `POST /forms/:slug/submit`) read the form in the environment, like every
+// other metadata read: environment → code. Until v18 they also read the
+// Default Organization's legacy layer; the v18 ceremony carries every
+// organization-layer withdrawal onto the environment, fail-closed (rulings A
+// on #22008 and #22011; pinned end to end in the cli's
+// `organization-ownership-apply.test.ts`), and that read is deleted.
 //
 // Pinned both sides:
-//   - withdrawn in the organization: both doors answer 404 FORM_NOT_FOUND and
-//     `createData` is never called;
-//   - published in the organization (the control): both doors accept, and
-//     every metadata read the doors make names that organization;
-//   - withdrawn env-wide with no organization to resolve: both doors refuse;
-//   - tenancy never registered: the env-wide read, unchanged;
+//   - no view read names an organization, whatever the tenancy answers;
+//   - withdrawn in the environment: both doors answer 404 FORM_NOT_FOUND and
+//     `createData` is never called; published (the control): both accept;
+//   - tenancy never registered: the same read;
 //   - tenancy registered but unreachable: both doors refuse (fail closed).
 //
-// A withdrawal is a kill switch: an explicit withdrawal of the same form (the
-// same view and slot, the link kept with a switch cleared) at any layer the
-// doors read closes it, and layering may only narrow intake, never re-open it.
-// The doors therefore read the env-wide layer beneath the organization's too:
-//   - withdrawn env-wide, re-opened in the organization: both doors refuse;
-//   - withdrawn in the organization, open env-wide: both doors refuse;
-//   - open in both: both doors accept;
-//   - a form only the organization has (no env-wide body): it is served;
-//   - not a withdrawal (the link cleared env-wide, a switch merely absent, or
-//     another view sharing the slug withdrawn): it is served;
-//   - the same view re-pointed at a new slug in the organization: still closed.
+// A withdrawal is a kill switch: the list holds one item per package of a
+// view name, and an explicit withdrawal of the same form (matched by slot or
+// by slug, the link kept with a switch cleared) in any of them closes it:
+//   - another package's withdrawal of the same view name closes the form;
+//   - every package's body open (control): served;
+//   - not a withdrawal (the link cleared, a switch merely absent, or another
+//     view sharing the slug withdrawn): served;
+//   - the form moved to a new slug in one package's body while another's
+//     withdraws the old one: still closed.
 
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
@@ -86,34 +83,24 @@ function notRegistered(): Error {
 }
 
 interface Setup {
-  /** What the env-wide (organization-less) read answers. */
+  /** What the environment's read answers. */
   envWide: boolean;
-  /** What the organization read answers; `undefined` = no overlay there. */
-  inOrg?: boolean;
   /** The tenancy provider's behaviour. */
   tenancy: 'org' | 'no-org' | 'not-registered' | 'unreachable';
-  /** Replaces the form's whole `sharing` on every read (the `envWide`/`inOrg` switch is then ignored). */
+  /** Replaces the form's whole `sharing` (the `envWide` switch is then ignored). */
   sharing?: Record<string, unknown>;
-  /** Replaces the env-wide read's whole view list (the organization read is unchanged). */
+  /** Replaces the environment's whole view list. */
   envWideViews?: unknown[];
-  /** Extra views every read answers alongside the form view. */
+  /** Extra views the read answers alongside the form view. */
   extraViews?: unknown[];
-  /** Replaces the organization read's whole view list (the env-wide read is unchanged). */
-  orgViews?: unknown[];
 }
 
 function build(setup: Setup) {
   const createData = vi.fn().mockResolvedValue({ object: 'inquiry', id: 'rec_1', record: {} });
-  // [ADR-0131 D6, triage ruling Q3 A] The doors' `view` read reaches the
-  // Default Organization's legacy layer through `legacyFormOrganizationId`, the
-  // one read key left that names an organization.
-  const getMetaItems = vi.fn(async (req: { type: string; organizationId?: string; legacyFormOrganizationId?: string }) => {
+  const getMetaItems = vi.fn(async (req: Record<string, unknown> & { type: string }) => {
     if (req.type === 'view') {
-      const org = req.legacyFormOrganizationId;
-      if (org !== ORG && setup.envWideViews) return setup.envWideViews;
-      if (org === ORG && setup.orgViews) return setup.orgViews;
-      const effective = org === ORG && setup.inOrg !== undefined ? setup.inOrg : setup.envWide;
-      return [formView(effective, setup.sharing), ...(setup.extraViews ?? [])];
+      if (setup.envWideViews) return setup.envWideViews;
+      return [formView(setup.envWide, setup.sharing), ...(setup.extraViews ?? [])];
     }
     if (req.type === 'object') return [inquiryObject];
     return [];
@@ -163,8 +150,19 @@ function build(setup: Setup) {
 }
 
 describe('[#21331] public form withdrawal reaches every intake door', () => {
-  it('withdrawn in the organization: both doors answer FORM_NOT_FOUND and nothing is written', async () => {
-    const s = build({ envWide: true, inOrg: false, tenancy: 'org' });
+  it('[ADR-0131 C7] no view read names an organization, whatever the tenancy answers: one environment read per door', async () => {
+    const s = build({ envWide: true, tenancy: 'org' });
+    expect((await s.get()).statusCode).toBe(200);
+    expect((await s.post()).statusCode).toBe(201);
+    const views = s.getMetaItems.mock.calls.map(([r]) => r).filter((r) => r.type === 'view');
+    expect(views).toHaveLength(2);
+    for (const r of s.getMetaItems.mock.calls.map(([req]) => req)) {
+      expect(Object.keys(r).filter((k) => /organization/i.test(k))).toEqual([]);
+    }
+  });
+
+  it('withdrawn in the environment: both doors answer FORM_NOT_FOUND and nothing is written', async () => {
+    const s = build({ envWide: false, tenancy: 'org' });
     const get = await s.get();
     expect(get.statusCode).toBe(404);
     expect(get.body.code).toBe('FORM_NOT_FOUND');
@@ -174,8 +172,8 @@ describe('[#21331] public form withdrawal reaches every intake door', () => {
     expect(s.createData).not.toHaveBeenCalled();
   });
 
-  it('published in the organization (control): both doors accept, every read names the organization', async () => {
-    const s = build({ envWide: true, inOrg: true, tenancy: 'org' });
+  it('published in the environment (control): both doors accept', async () => {
+    const s = build({ envWide: true, tenancy: 'org' });
     const get = await s.get();
     expect(get.statusCode).toBe(200);
     expect(get.body.object).toBe('inquiry');
@@ -183,32 +181,19 @@ describe('[#21331] public form withdrawal reaches every intake door', () => {
     const post = await s.post();
     expect(post.statusCode).toBe(201);
     expect(s.createData).toHaveBeenCalledTimes(1);
-    // [ADR-0131 D6] No read names an organization by the retired key; the
-    // `view` read alone reaches the legacy layer, and the object read is the
-    // environment's.
-    const reads = s.getMetaItems.mock.calls.map(([r]) => [r.type, r.legacyFormOrganizationId]);
-    expect(reads.length).toBeGreaterThan(0);
-    for (const [r] of s.getMetaItems.mock.calls) expect(r.organizationId).toBeUndefined();
-    for (const [type, legacy] of reads) {
-      if (type !== 'view') expect(legacy).toBeUndefined();
-    }
-    // One resolution per door: the legacy organization's view read, then the env-wide one.
-    expect(reads.filter(([type]) => type === 'view').map(([, o]) => o)).toEqual([ORG, undefined, ORG, undefined]);
   });
 
-  it('withdrawn env-wide with no organization to resolve: both doors refuse', async () => {
+  it('withdrawn with no organization to resolve: both doors refuse', async () => {
     const s = build({ envWide: false, tenancy: 'no-org' });
     expect((await s.get()).body.code).toBe('FORM_NOT_FOUND');
     expect((await s.post()).body.code).toBe('FORM_NOT_FOUND');
     expect(s.createData).not.toHaveBeenCalled();
-    for (const [r] of s.getMetaItems.mock.calls) expect(r.legacyFormOrganizationId).toBeUndefined();
   });
 
-  it('tenancy never registered: the env-wide read, unchanged', async () => {
-    const s = build({ envWide: true, inOrg: false, tenancy: 'not-registered' });
+  it('tenancy never registered: the same environment read', async () => {
+    const s = build({ envWide: true, tenancy: 'not-registered' });
     expect((await s.get()).statusCode).toBe(200);
     expect((await s.post()).statusCode).toBe(201);
-    for (const [r] of s.getMetaItems.mock.calls) expect(r.legacyFormOrganizationId).toBeUndefined();
   });
 
   it('tenancy registered but unreachable: both doors refuse instead of reading env-wide (fail closed)', async () => {
@@ -254,7 +239,7 @@ describe('either declared switch withdraws a public form from every anonymous do
   }
 });
 
-describe('a public form withdrawal is a kill switch: layering only narrows intake', () => {
+describe('a public form withdrawal is a kill switch: one package\'s withdrawal of a view name closes its form', () => {
   const expectClosed = async (s: ReturnType<typeof build>) => {
     const get = await s.get();
     expect([get.statusCode, get.body.code]).toEqual([404, 'FORM_NOT_FOUND']);
@@ -263,92 +248,58 @@ describe('a public form withdrawal is a kill switch: layering only narrows intak
     expect(s.createData).not.toHaveBeenCalled();
   };
 
-  it('withdrawn env-wide (allowAnonymous false), re-opened in the organization: both doors refuse', async () => {
-    await expectClosed(build({ envWide: false, inOrg: true, tenancy: 'org' }));
-  });
-
-  it('withdrawn env-wide through `enabled: false`, re-opened in the organization: both doors refuse', async () => {
-    const withdrawn = formView(true, { enabled: false, allowAnonymous: true, publicLink: '/forms/contact-us' });
-    await expectClosed(build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [withdrawn] }));
-  });
-
-  it('not a withdrawal: the public link cleared env-wide leaves the organization\'s open form served', async () => {
-    const cleared = formView(true, { enabled: true, allowAnonymous: false });
-    const s = build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [cleared] });
-    expect((await s.get()).statusCode).toBe(200);
-    expect((await s.post()).statusCode).toBe(201);
-  });
-
-  // The list reads serve one item per package for a name, each carrying its
+  // The list read serves one item per package for a name, each carrying its
   // `_packageId`. Known limit (fails closed): the package is not compared, so
   // a withdrawal of a view name closes that name in every package.
-  it('another package\'s withdrawal of the same view name closes this package\'s form too', async () => {
-    const openA = { ...formView(true), _packageId: 'pkg_a' };
-    await expectClosed(build({
-      envWide: true, inOrg: true, tenancy: 'org',
-      orgViews: [openA],
-      envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, { ...formView(false), _packageId: 'pkg_b' }],
-    }));
+  for (const tenancy of ['org', 'no-org'] as const) {
+    it(`another package's withdrawal of the same view name closes this package's form (tenancy ${tenancy})`, async () => {
+      await expectClosed(build({
+        envWide: true, tenancy,
+        envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, { ...formView(false), _packageId: 'pkg_b' }],
+      }));
+    });
+  }
+
+  it('withdrawn through `enabled: false` in another package: closed', async () => {
+    const withdrawn = { ...formView(true, { enabled: false, allowAnonymous: true, publicLink: '/forms/contact-us' }), _packageId: 'pkg_b' };
+    await expectClosed(build({ envWide: true, tenancy: 'org', envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, withdrawn] }));
   });
 
   it('control: every package\'s body of the view name open serves the form', async () => {
-    const openA = { ...formView(true), _packageId: 'pkg_a' };
     const s = build({
-      envWide: true, inOrg: true, tenancy: 'org',
-      orgViews: [openA],
+      envWide: true, tenancy: 'org',
       envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, { ...formView(true), _packageId: 'pkg_b' }],
     });
     expect((await s.get()).statusCode).toBe(200);
     expect((await s.post()).statusCode).toBe(201);
   });
 
-  it('the same package\'s withdrawal of the view name closes its form, beside another package\'s open one', async () => {
-    const openA = { ...formView(true), _packageId: 'pkg_a' };
-    await expectClosed(build({
-      envWide: true, inOrg: true, tenancy: 'org',
-      orgViews: [openA],
-      envWideViews: [{ ...formView(false), _packageId: 'pkg_a' }, { ...formView(true), _packageId: 'pkg_b' }],
-    }));
+  it('not a withdrawal: another package\'s body with the public link cleared leaves the form served', async () => {
+    const cleared = { ...formView(true, { enabled: true, allowAnonymous: false }), _packageId: 'pkg_b' };
+    const s = build({ envWide: true, tenancy: 'org', envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, cleared] });
+    expect((await s.get()).statusCode).toBe(200);
+    expect((await s.post()).statusCode).toBe(201);
   });
 
-  it('another view withdrawing the same slug env-wide does not close this view\'s form', async () => {
+  it('only an explicit false withdraws: a body with the link, enabled true and allowAnonymous absent closes nothing', async () => {
+    const absent = { ...formView(true, { enabled: true, publicLink: '/forms/contact-us' }), _packageId: 'pkg_b' };
+    const s = build({ envWide: true, tenancy: 'org', envWideViews: [{ ...formView(true), _packageId: 'pkg_a' }, absent] });
+    expect((await s.get()).statusCode).toBe(200);
+    expect((await s.post()).statusCode).toBe(201);
+  });
+
+  it('another view withdrawing the same slug does not close this view\'s form', async () => {
     const other = { ...formView(false), name: 'legacy_contact' };
-    const s = build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [formView(true), other] });
-    expect((await s.get()).statusCode).toBe(200);
-    expect((await s.post()).statusCode).toBe(201);
-  });
-
-  it('withdrawn in the organization, open env-wide: both doors refuse', async () => {
-    await expectClosed(build({ envWide: true, inOrg: false, tenancy: 'org' }));
-  });
-
-  it('open in both layers (control): both doors accept', async () => {
-    const s = build({ envWide: true, inOrg: true, tenancy: 'org' });
-    expect((await s.get()).statusCode).toBe(200);
-    expect((await s.post()).statusCode).toBe(201);
-    expect(s.createData).toHaveBeenCalledTimes(1);
-  });
-
-  it('a form only the organization carries (no env-wide body, control): both doors accept', async () => {
-    const s = build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [] });
-    expect((await s.get()).statusCode).toBe(200);
-    expect((await s.post()).statusCode).toBe(201);
-  });
-
-  it('only an explicit false withdraws: env-wide link + enabled true with allowAnonymous absent does not close the org\'s open form', async () => {
-    const absent = formView(true, { enabled: true, publicLink: '/forms/contact-us' });
-    const s = build({ envWide: true, inOrg: true, tenancy: 'org', envWideViews: [absent] });
+    const s = build({ envWide: true, tenancy: 'org', envWideViews: [formView(true), other] });
     expect((await s.get()).statusCode).toBe(200);
     expect((await s.post()).statusCode).toBe(201);
   });
 
   for (const link of ['/forms/contact-us-2', '/forms/Contact-Us']) {
-    it(`the same view re-pointed at a new slug (${link}) in the organization stays closed`, async () => {
+    it(`the form moved to a new slug (${link}) in one package, withdrawn at the old one in another: still closed (same slot)`, async () => {
       const slug = link.replace('/forms/', '');
-      const s = build({
-        envWide: true, inOrg: true, tenancy: 'org', envWideViews: [formView(false)],
-        sharing: { enabled: true, allowAnonymous: true, publicLink: link },
-      });
+      const moved = { ...formView(true, { enabled: true, allowAnonymous: true, publicLink: link }), _packageId: 'pkg_a' };
+      const s = build({ envWide: true, tenancy: 'org', envWideViews: [moved, { ...formView(false), _packageId: 'pkg_b' }] });
       const get = await s.get(slug);
       expect([get.statusCode, get.body.code]).toEqual([404, 'FORM_NOT_FOUND']);
       const post = await s.post(slug);
@@ -360,9 +311,9 @@ describe('a public form withdrawal is a kill switch: layering only narrows intak
   for (const tenancy of ['org', 'no-org'] as const) {
     it(`two different views sharing a slug in one read do not close each other (tenancy ${tenancy})`, async () => {
       // Another view (another app's form) names the same slug and withdraws
-      // it, in every read: this view's open form is still served.
+      // it: this view's open form is still served.
       const other = { ...formView(false), name: 'legacy_contact' };
-      const s = build({ envWide: true, tenancy, extraViews: [other], ...(tenancy === 'org' ? { inOrg: true } : {}) });
+      const s = build({ envWide: true, tenancy, extraViews: [other] });
       expect((await s.get()).statusCode).toBe(200);
       expect((await s.post()).statusCode).toBe(201);
       expect(s.createData).toHaveBeenCalledTimes(1);

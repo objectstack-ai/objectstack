@@ -115,6 +115,13 @@ async function plantOrgRow(engine: any, organizationId: string, name: string, it
     return { success: true };
 }
 
+/** A stored environment row, written through the overlay repository the way a Studio save writes it. */
+async function plantEnvRow(engine: any, name: string, item: unknown): Promise<{ success: true }> {
+    await new SysMetadataRepository({ engine })
+        .put({ type: 'view', name } as any, item, { parentVersion: null, actor: null });
+    return { success: true };
+}
+
 /** The card's repro body: a `defineView` container, as `defineView` emits it. */
 const leadContainer = {
     list: {
@@ -293,7 +300,7 @@ describe('#7736 a runtime-authored view container is served', () => {
  *     isolation because it operates only on rows already scoped to THIS
  *     request's own org/environment (the pre-existing `queryByOrg` merge).
  */
-describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6] a legacy organization container only by the anonymous form doors\' legacy read', () => {
+describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6, C7] a legacy organization container by no read', () => {
     it('derives the object binding from the containers own top-level `object` field, not just `list.data.object`', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
@@ -312,13 +319,13 @@ describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6]
         expect(switcherMatches(list.items, 'crm_lead').map((v: any) => v.name)).toEqual(['crm_lead.default']);
     });
 
-    it('the cards own repro, at the one read left that reaches a legacy organization row: the anonymous form doors\' legacy layer expands it', async () => {
+    it('the cards own repro, on a stored environment row: the list read expands it', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
+        await plantEnvRow(engine, 'crm_lead', leadContainer);
 
-        const list: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_acme' });
+        const list: any = await protocol.getMetaItems({ type: 'view' });
         const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
         expect(served).toEqual(['crm_lead.default', 'crm_lead.pipeline']);
     });
@@ -328,7 +335,12 @@ describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6]
         const protocol = new ObjectStackProtocolImplementation(engine);
         await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
 
-        for (const request of [{ type: 'view' }, { type: 'view', organizationId: 'org_acme' }]) {
+        for (const request of [
+            { type: 'view' },
+            { type: 'view', organizationId: 'org_acme' },
+            // The anonymous form doors' legacy key, deleted with ADR-0131 C7.
+            { type: 'view', legacyFormOrganizationId: 'org_acme' },
+        ]) {
             const list: any = await protocol.getMetaItems(request as any);
             expect(switcherMatches(list.items, 'crm_lead')).toEqual([]);
         }
@@ -339,13 +351,13 @@ describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6]
     it('POSITIVE CONTROL: a pre-existing independent ViewItem for the same object is still served alongside the newly-expanded container', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
-        await plantOrgRow(engine, 'org_acme', 'crm_lead.mine', {
+        await plantEnvRow(engine, 'crm_lead', leadContainer);
+        await plantEnvRow(engine, 'crm_lead.mine', {
             name: 'crm_lead.mine', object: 'crm_lead', viewKind: 'list', label: 'My Leads',
             config: { type: 'grid', data: { provider: 'object', object: 'crm_lead' }, columns: [{ field: 'name' }] },
         });
 
-        const list: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_acme' });
+        const list: any = await protocol.getMetaItems({ type: 'view' });
         const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
         // A fix that merely "returned everything" could not distinguish these:
         // the pre-existing independent item and the two newly-expanded
@@ -353,23 +365,11 @@ describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6]
         expect(served).toEqual(['crm_lead.default', 'crm_lead.mine', 'crm_lead.pipeline']);
     });
 
-    it('ORG ISOLATION HELD: a container authored in org_acme is invisible reading as org_globex, and visible reading as org_acme', async () => {
-        const { engine } = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(engine);
-        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
-
-        const globex: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_globex' });
-        expect(switcherMatches(globex.items, 'crm_lead')).toEqual([]);
-
-        const acme: any = await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_acme' });
-        expect(switcherMatches(acme.items, 'crm_lead')).toHaveLength(2);
-    });
-
-    it('the isolation-safe path never registers an org-scoped expansion into the shared SchemaRegistry', async () => {
+    it('the isolation-safe path never registers a read\'s expansion into the shared SchemaRegistry', async () => {
         const { engine, registered } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
-        await protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_acme' });
+        await plantEnvRow(engine, 'crm_lead', leadContainer);
+        await protocol.getMetaItems({ type: 'view' });
 
         // The RESPONSE carries the expansion (re-confirmed above); the SHARED
         // registry — read by every org/environment this kernel serves — must

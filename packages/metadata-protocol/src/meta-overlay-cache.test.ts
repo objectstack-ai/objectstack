@@ -578,13 +578,11 @@ describe('[#11967] §7 distinct reads never share an entry', () => {
         expect((scoped.items as any[]).map((i) => i.name)).toEqual(['beta']);
     });
 
-    // [ADR-0131 D6] The cache holds the environment's rows only. The one read
-    // that still reaches a legacy organization's rows — the anonymous form
-    // doors' `view` read, `legacyFormOrganizationId` — reads them uncached,
-    // on top of the environment's cached set, so it never answers from the
-    // environment-wide entry alone; and any other read naming an organization
-    // is the environment read.
-    it('the form doors\' legacy organization read does not answer from the env-wide entry', async () => {
+    // [ADR-0131 D6, C7] The cache holds the environment's rows only, and every
+    // read is the environment read: one naming an organization, by any key —
+    // the anonymous form doors' deleted `legacyFormOrganizationId` included —
+    // answers from the environment's entry.
+    it('a read naming an organization, by any key, answers from the env-wide entry', async () => {
         const h = makeHarness([
             storedRow('view', 'alpha'),
             storedRow('view', 'org_only', { organization_id: 'org_1', id: 'r_view_org' }),
@@ -592,15 +590,13 @@ describe('[#11967] §7 distinct reads never share an entry', () => {
 
         const envWide = await h.protocol.getMetaItems({ type: 'view' });
         const findsAfterEnvWide = h.finds.length;
-
-        const legacy = await h.protocol.getMetaItems({ type: 'view', legacyFormOrganizationId: 'org_1' });
-        expect(h.finds.length).toBeGreaterThan(findsAfterEnvWide);
-
         expect((envWide.items as any[]).map((i) => i.name)).toEqual(['alpha']);
-        expect((legacy.items as any[]).map((i) => i.name).sort()).toEqual(['alpha', 'org_only']);
 
-        const named = await h.protocol.getMetaItems({ type: 'view', organizationId: 'org_1' } as { type: string });
-        expect((named.items as any[]).map((i) => i.name)).toEqual(['alpha']);
+        for (const named of [{ legacyFormOrganizationId: 'org_1' }, { organizationId: 'org_1' }]) {
+            const read = await h.protocol.getMetaItems({ type: 'view', ...named } as { type: string });
+            expect((read.items as any[]).map((i) => i.name)).toEqual(['alpha']);
+        }
+        expect(h.finds.length).toBe(findsAfterEnvWide);
     });
 
 

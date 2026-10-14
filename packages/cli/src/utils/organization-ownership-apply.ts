@@ -5,6 +5,7 @@ import {
   permissionSetDefinitionFromRow,
   positionDefinitionFromRow,
 } from '@objectstack/core';
+import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn } from '@objectstack/metadata-core';
 import {
   inventoryEntryFor,
   type InventoryEntry,
@@ -15,6 +16,9 @@ import {
   columnListSql,
   definitionKey,
   groupTemplateRows,
+  groupMetadataKeyRows,
+  readMetadataKeyRows,
+  METADATA_OBJECT,
   templatePromotionSql,
   SEEDED_BY,
   TEMPLATE_OBJECT,
@@ -23,6 +27,7 @@ import {
   predicateSql,
   Sql,
   type AttributionSink,
+  type MetadataKeyRow,
   type TemplateConflict,
   type OrganizationOwnershipPlan,
   type PlanReader,
@@ -48,6 +53,20 @@ import {
  *     (`convertPositionBindingRows`). Only under `single` (ADR-0131 D3: a
  *     Setup catalog write is an environment metadata write under `single` and
  *     refused under a wall); under a wall the rows are reported.
+ *  2a. `metadata-promotion` — rulings A on #22011 and #22008 (records
+ *     6020163868, 6020151485): first every public-form withdrawal an
+ *     organization saved is carried onto the environment, fail-closed (any
+ *     organization's withdrawal wins), by writing it onto each active
+ *     environment `view` of that name that still serves the form open,
+ *     through the metadata door; the same predicate the anonymous doors
+ *     judge by (`anonymousFormIntakeWithdrawnIn`) decides. Then, under
+ *     `single`, each organization-scoped `sys_metadata` row of the five
+ *     presentational types whose overlay key no other row holds becomes an
+ *     environment row in place (its `organization_id` cleared). A key held by
+ *     more than one row is a conflict: listed, kept, and blocking until the
+ *     operator keeps one row (the ceremony deletes none of them: `sys_metadata`
+ *     is not a fate-2 table). Under a wall the rows are reported, never
+ *     promoted: one organization's view is not every organization's.
  *  2b. `template-promotion` — ruling C on ADR-0131 §6 Q1: every
  *     `sys_email_template` row an organization customized or authored becomes
  *     an environment `email_template` item through the metadata door (core's
@@ -101,6 +120,7 @@ export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-owners
 export const CEREMONY_STEPS = [
   'attribution',
   'authored-conversion',
+  'metadata-promotion',
   'template-promotion',
   'settings-move',
   'rewrite',
@@ -121,7 +141,17 @@ export interface CatalogPort {
 
 /** The metadata door: an environment metadata save. Throws when the door refuses. */
 export interface MetadataDoorPort {
-  save(type: 'position' | 'permission' | 'email_template', name: string, body: Record<string, unknown>): Promise<void>;
+  save(
+    type: 'position' | 'permission' | 'email_template' | 'view',
+    name: string,
+    body: Record<string, unknown>,
+    target?: { packageId: string | null },
+  ): Promise<void>;
+}
+
+/** The env-wide `view` list the anonymous form doors read (every package's item of a name). */
+export interface ServedViewsPort {
+  list(): Promise<ReadonlyArray<Readonly<Record<string, unknown>>>>;
 }
 
 /** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
@@ -219,6 +249,8 @@ export interface ApplyOptions {
   catalog: CatalogPort;
   door: MetadataDoorPort;
   templates: TemplatePort;
+  /** The served views, for carrying form withdrawals. */
+  views: ServedViewsPort;
   columnDrops: ColumnDropPort;
   ledger: CeremonyLedgerPort;
   inventory?: readonly InventoryEntry[];
@@ -613,6 +645,153 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
     );
   }
   return { step: 'authored-conversion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+}
+
+// ── Step 2a: organization customizations and form withdrawals (rulings A) ──
+
+const parseBody = (row: Record<string, unknown>): Record<string, unknown> | null => {
+  const raw = row.metadata;
+  try {
+    const body = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+    // A stored body names its item; the doors judge withdrawals by that name.
+    return { ...(body as Record<string, unknown>), name: (body as Record<string, unknown>).name ?? row.name };
+  } catch {
+    return null;
+  }
+};
+
+/** The served item's own package (`_packageId`), or `null` for a package-less item. */
+const servedPackageOf = (item: Readonly<Record<string, unknown>>): string | null => {
+  const pkg = item._packageId;
+  return typeof pkg === 'string' && pkg !== '' && pkg !== METADATA_OBJECT ? pkg : null;
+};
+
+/** A served item as a body the door accepts: its runtime annotations (`_`-prefixed keys) dropped. */
+const authoredBodyOf = (item: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+  JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(item).filter(([k]) => !k.startsWith('_'))))) as Record<string, unknown>;
+
+/**
+ * Carry every organization-layer withdrawal onto the environment, fail-closed:
+ * each view the environment serves (stored or from code, in every package)
+ * whose name a withdrawing organization row shares, and which still serves the
+ * withdrawn form open, takes the withdrawal (`sharing.enabled: false` on that
+ * form), saved through the metadata door into its own package. The judgement
+ * is the anonymous doors' own (`anonymousFormIntakeWithdrawnIn`), with the
+ * organization rows as the layer: a 17.x organization row replaced the served
+ * body whole, so its stored body is exactly what the doors judged.
+ *
+ * Under `single` a view whose own key an organization row holds is skipped:
+ * that row is promoted in place (its withdrawal travels with it) or is a
+ * conflict the operator resolves, and a door save there would make a conflict
+ * of a promotion.
+ */
+async function carryFormWithdrawals(run: Run, rows: readonly MetadataKeyRow[], summary: Record<string, number>, blockers: string[]): Promise<void> {
+  const t = METADATA_OBJECT;
+  const sql = run.sql;
+  const orgViews = rows.filter((r) => r.type === 'view' && r.organizationId !== null && (r.state ?? 'active') === 'active');
+  if (orgViews.length === 0) return;
+  const layerOf = new Map<string, Record<string, unknown>[]>();
+  const ids = orgViews.map((r) => r.id);
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    const found = await sql.read(
+      t,
+      `SELECT ${['id', 'name', 'metadata'].map((c) => `${sql.q(c, t)} AS ${sql.q(c, t)}`).join(', ')} ` +
+        `FROM ${sql.q(t, t)} WHERE ${sql.q('id', t)} IN (${chunk.map(() => '?').join(', ')})`,
+      chunk,
+    );
+    for (const row of found) {
+      const body = parseBody(row);
+      if (body) layerOf.set(String(row.name), [...(layerOf.get(String(row.name)) ?? []), body]);
+    }
+  }
+  if (layerOf.size === 0) return;
+  const heldByOrganization = new Set(orgViews.map((r) => `${r.name}\u0000${r.packageId ?? ''}`));
+  for (const served of await run.opts.views.list()) {
+    const name = typeof served.name === 'string' ? served.name : undefined;
+    const layer = name === undefined ? undefined : layerOf.get(name);
+    if (!name || !layer) continue;
+    const packageId = servedPackageOf(served);
+    if (run.opts.posture === 'single' && heldByOrganization.has(`${name}\u0000${packageId ?? ''}`)) continue;
+    const body = authoredBodyOf(served);
+    const closing = anonymousFormIntakeCandidates(body).filter((c) => anonymousFormIntakeWithdrawnIn(layer, body, c));
+    if (closing.length === 0) continue;
+    for (const candidate of closing) {
+      candidate.form.sharing = { ...(candidate.form.sharing as Record<string, unknown>), enabled: false };
+    }
+    try {
+      await run.opts.door.save('view', name, body, { packageId });
+      summary.withdrawalsCarried += closing.length;
+      run.opts.onProgress?.(`carried ${closing.length} public-form withdrawal(s) onto the environment view ${name}`);
+    } catch (error) {
+      blockers.push(
+        `An organization withdrew the public form(s) ${closing.map((c) => c.slug).join(', ')} of the view ${name}` +
+          `${packageId ? ` (package ${packageId})` : ''}, and the metadata door refused to carry that withdrawal onto ` +
+          `the environment: ${error instanceof Error ? error.message : String(error)}. Withdraw the form there ` +
+          '(sharing.enabled false), then re-run. An upgrade never reopens a withdrawn form (ruling record 6020151485).',
+      );
+    }
+  }
+}
+
+async function runMetadataPromotion(run: Run): Promise<StepReport> {
+  const summary: Record<string, number> = { withdrawalsCarried: 0, promoted: 0, conflicts: 0, reported: 0 };
+  const blockers: string[] = [];
+  const notes: string[] = [];
+  const cols = await columnsOf(run, METADATA_OBJECT);
+  if (!cols?.has(ORG)) return { step: 'metadata-promotion', status: 'done', summary, blockers, notes };
+  const rows = await readMetadataKeyRows(run.sql, METADATA_OBJECT, cols);
+  const orgRows = rows.filter((r) => r.organizationId !== null);
+  if (orgRows.length === 0) return { step: 'metadata-promotion', status: 'done', summary, blockers, notes };
+
+  // Withdrawals first, under every posture: closing a form is never a leak.
+  await carryFormWithdrawals(run, rows, summary, blockers);
+
+  if (run.opts.posture !== 'single') {
+    summary.reported = orgRows.length;
+    notes.push(
+      `${orgRows.length} organization-scoped presentational ${METADATA_OBJECT} row(s) are reported, not promoted: under the ` +
+        `${run.opts.posture} posture one organization's customization is not the environment's. They keep the ` +
+        `${METADATA_OBJECT} column from being dropped.`,
+    );
+    return { step: 'metadata-promotion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+  }
+
+  const { promotable, conflicts } = groupMetadataKeyRows(rows);
+  summary.conflicts = conflicts.length;
+  for (const conflict of conflicts) {
+    blockers.push(
+      `The ${conflict.type} ${conflict.name}` +
+        `${conflict.packageId ? ` (package ${conflict.packageId})` : ''}${conflict.bundleMember ? ` [${conflict.bundleMember}]` : ''} ` +
+        `is held by ${conflict.candidates.length} rows once the organization leaves its key: ` +
+        conflict.candidates.map((c) => `${c.id} (${c.organizationId ? `organization ${c.organizationId}` : 'environment'}, ${c.state ?? 'no state'})`).join(', ') +
+        '. Which one the environment keeps is never guessed, and the ceremony deletes none of them: keep one row and ' +
+        `remove the others from ${METADATA_OBJECT}, then re-run.` +
+        (conflict.type === 'view'
+          ? ' If any of them withdraws a public form, keep one that withdraws it too: an upgrade never reopens a withdrawn form.'
+          : ''),
+    );
+  }
+  const t = run.sql.q(METADATA_OBJECT, METADATA_OBJECT);
+  const org = run.sql.q(ORG, METADATA_OBJECT);
+  const id = run.sql.q('id', METADATA_OBJECT);
+  const byOrganization = new Map<string, string[]>();
+  for (const row of promotable) byOrganization.set(row.organizationId!, [...(byOrganization.get(row.organizationId!) ?? []), row.id]);
+  for (const [organizationId, ids] of byOrganization) {
+    for (let i = 0; i < ids.length; i += IN_CHUNK) {
+      const chunk = ids.slice(i, i + IN_CHUNK);
+      await execute(
+        run,
+        METADATA_OBJECT,
+        `UPDATE ${t} SET ${org} = NULL WHERE ${org} = ? AND ${id} IN (${chunk.map(() => '?').join(', ')})`,
+        [organizationId, ...chunk],
+      );
+    }
+    summary.promoted += ids.length;
+  }
+  if (summary.promoted) run.opts.onProgress?.(`promotion: ${summary.promoted} organization customization(s) are environment rows now`);
+  return { step: 'metadata-promotion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
 }
 
 // ── Step 2b: template promotion (ruling C) ──────────────────────────────────
@@ -1125,6 +1304,7 @@ async function runColumnDrops(run: Run): Promise<StepReport> {
 const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   attribution: runAttribution,
   'authored-conversion': runAuthoredConversion,
+  'metadata-promotion': runMetadataPromotion,
   'template-promotion': runTemplatePromotion,
   'settings-move': runSettingsMove,
   rewrite: runRewrite,

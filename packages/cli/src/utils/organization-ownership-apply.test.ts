@@ -22,6 +22,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { permissionSetDefinitionFromRow } from '@objectstack/core';
+import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn } from '@objectstack/metadata-core';
 import {
   applyOrganizationOwnership,
   TemplateChoiceRefusal,
@@ -32,6 +33,7 @@ import {
   type ColumnDropPort,
   type MetadataDoorPort,
   type OrganizationOwnershipApplyReport,
+  type ServedViewsPort,
   type TemplatePort,
 } from './organization-ownership-apply.js';
 
@@ -67,6 +69,8 @@ function executor(opts: { failOnceOn?: RegExp } = {}): ApplyExecutor {
 function catalog(): CatalogPort & MetadataDoorPort & TemplatePort & {
   saved: Map<string, Record<string, unknown>>;
   templates: Map<string, Record<string, unknown>>;
+  /** Environment `view` saves, in order, with the package each was saved into. */
+  viewSaves: Array<{ name: string; body: Record<string, unknown>; packageId: string | null }>;
   boot(): void;
 } {
   const declared = new Map<string, Record<string, unknown>>([
@@ -80,9 +84,11 @@ function catalog(): CatalogPort & MetadataDoorPort & TemplatePort & {
     ['auth.reset_password|en-US', { name: 'auth.reset_password', label: 'Reset', locale: 'en-US', subject: 'Reset', bodyHtml: '<p>code</p>' }],
   ]);
   let hydrated = new Map<string, Record<string, unknown>>();
+  const viewSaves: Array<{ name: string; body: Record<string, unknown>; packageId: string | null }> = [];
   return {
     saved,
     templates,
+    viewSaves,
     async find(name, locale) {
       const own = templates.get(`${name}|${locale}`);
       if (own) return { definition: own, environment: true };
@@ -96,7 +102,11 @@ function catalog(): CatalogPort & MetadataDoorPort & TemplatePort & {
       const definition = hydrated.get(`${type}|${name}`) ?? declared.get(`${type}|${name}`);
       return definition ? { definition } : undefined;
     },
-    async save(type, name, body) {
+    async save(type, name, body, target) {
+      if (type === 'view') {
+        viewSaves.push({ name, body, packageId: target?.packageId ?? null });
+        return;
+      }
       if (type === 'email_template') {
         if (!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/.test(name)) throw new Error(`VALIDATION_ERROR: ${name} is not dotted snake_case`);
         templates.set(`${name}|${String(body.locale)}`, body);
@@ -106,6 +116,49 @@ function catalog(): CatalogPort & MetadataDoorPort & TemplatePort & {
       saved.set(`${type}|${name}`, body);
     },
   };
+}
+
+/** A form view the code package `pkg_a` ships, open to anonymous intake at `/forms/lead-intake`. */
+const formView = (open: boolean, label = 'Lead intake'): Record<string, unknown> => ({
+  name: 'crm_lead.intake',
+  label,
+  object: 'crm_lead',
+  viewKind: 'form',
+  config: { sharing: { enabled: open, allowAnonymous: true, publicLink: '/forms/lead-intake' } },
+});
+
+/**
+ * The env-wide view list as the anonymous doors read it: the code package's
+ * items, replaced per (name, package) by the active environment rows of
+ * `sys_metadata` and then by the door's saves this run.
+ */
+function servedViews(c: ReturnType<typeof catalog>, code: Array<Record<string, unknown>> = [{ ...formView(true), _packageId: 'pkg_a' }]): ServedViewsPort {
+  return {
+    async list() {
+      const slots = new Map<string, Record<string, unknown>>();
+      const put = (item: Record<string, unknown>, pkg: string | null): void => {
+        slots.set(`${String(item.name)}|${pkg ?? ''}`, { ...item, ...(pkg ? { _packageId: pkg } : {}) });
+      };
+      for (const item of code) put(item, (item._packageId as string | undefined) ?? null);
+      const hasTable = rows(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sys_metadata'`).length > 0;
+      if (hasTable) {
+        for (const row of rows(`SELECT * FROM sys_metadata WHERE type = 'view' AND organization_id IS NULL AND state = 'active'`)) {
+          put(JSON.parse(String(row.metadata)) as Record<string, unknown>, (row.package_id as string | null) ?? null);
+        }
+      }
+      for (const save of c.viewSaves) put(save.body, save.packageId);
+      return [...slots.values()];
+    },
+  };
+}
+
+/** What the anonymous doors serve for a slug, by their own judgement over the env-wide list. */
+async function doorsServe(views: ServedViewsPort, slug: string): Promise<string[]> {
+  const list = await views.list();
+  return list
+    .filter((v) => anonymousFormIntakeCandidates(v).some((cand) => cand.slug === slug && !anonymousFormIntakeWithdrawnIn(list, v, cand)))
+    .map((v) => `${String(v.name)}|${String(v._packageId ?? '')}`)
+    .sort();
 }
 
 function ledger(): CeremonyLedgerPort & { checkpoint: CeremonyCheckpoint | null; verdicts: Array<{ complete: boolean; blocking: number; advisory: number }> } {
@@ -285,10 +338,11 @@ async function accessAfter(c: ReturnType<typeof catalog>): Promise<string[]> {
 const apply = (
   c: ReturnType<typeof catalog>,
   l: ReturnType<typeof ledger>,
-  opts: { posture?: string; executor?: ApplyExecutor; templateChoices?: string[] } = {},
+  opts: { posture?: string; executor?: ApplyExecutor; templateChoices?: string[]; views?: ServedViewsPort } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
   return applyOrganizationOwnership({
+    views: opts.views ?? servedViews(c),
     executor: opts.executor ?? executor(),
     ...(opts.templateChoices ? { templateChoices: opts.templateChoices } : {}),
     posture: opts.posture ?? 'single',
@@ -455,7 +509,7 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const again = await apply(c, l);
 
     expect(again.resumedFrom).toEqual([
-      'attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion', 'column-drops',
+      'attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion', 'column-drops',
     ]);
     expect(again.steps.every((s) => s.status === 'checkpointed')).toBe(true);
     expect(again.complete).toBe(true);
@@ -467,14 +521,14 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const c = catalog();
     const l = ledger();
     await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE FROM "sys_capability"/ }) })).rejects.toThrow(/killed mid-step/);
-    expect(Object.keys(l.checkpoint!.completed)).toEqual(['attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite']);
+    expect(Object.keys(l.checkpoint!.completed)).toEqual(['attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite']);
     expect(rows('SELECT COUNT(*) AS n FROM sys_position_permission_set')).toEqual([{ n: 3 }]);
     writes = [];
 
     const resumed = await apply(c, l);
 
-    expect(resumed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite']);
-    expect(resumed.steps.map((s) => s.status)).toEqual(['checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'done', 'done']);
+    expect(resumed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'metadata-promotion', 'template-promotion', 'settings-move', 'rewrite']);
+    expect(resumed.steps.map((s) => s.status)).toEqual(['checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'checkpointed', 'done', 'done']);
     expect(writes.some((w) => /^UPDATE/.test(w))).toBe(false);
     expect(resumed.complete).toBe(true);
     expect(rows('SELECT COUNT(*) AS n FROM sys_position_permission_set')).toEqual([{ n: 0 }]);
@@ -695,7 +749,7 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
   it('holds a column whose rows another stage owns, and reports it', async () => {
     db.exec(`
       CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT, package_id TEXT);
-      INSERT INTO sys_metadata VALUES ('md_1', 'org_b', 'view', 'deal_list', 'active', NULL);
+      INSERT INTO sys_metadata VALUES ('md_1', 'org_b', 'object', 'deal', 'active', NULL);
     `);
     const report = await apply(catalog(), ledger());
 
@@ -704,5 +758,135 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(drops.blockers.join('\n')).toMatch(/sys_metadata\.organization_id is not dropped/);
     expect(rows(`SELECT name FROM pragma_table_info('sys_metadata') WHERE name = 'organization_id'`)).toHaveLength(1);
     expect(rows(`SELECT name FROM pragma_table_info('sys_job') WHERE name = 'organization_id'`)).toHaveLength(0);
+  });
+});
+
+describe('ADR-0131 D10 --apply — organization customizations and form withdrawals (rulings A on #22011 and #22008)', () => {
+  const metadataTable = (values: string): void => {
+    db.exec(`
+      CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT,
+        package_id TEXT, bundle_member TEXT, metadata TEXT);
+      ${values ? `INSERT INTO sys_metadata VALUES ${values};` : ''}
+    `);
+  };
+  const md = (id: string, org: string | null, type: string, name: string, body: Record<string, unknown>, pkg: string | null = null): string =>
+    `('${id}', ${org === null ? 'NULL' : `'${org}'`}, '${type}', '${name}', 'active', ${pkg === null ? 'NULL' : `'${pkg}'`}, NULL, '${JSON.stringify(body)}')`;
+  const step = (report: OrganizationOwnershipApplyReport) => report.steps.find((s) => s.step === 'metadata-promotion')!;
+  const owners = (): Array<[unknown, unknown]> =>
+    rows('SELECT id, organization_id FROM sys_metadata ORDER BY id').map((r) => [r.id, r.organization_id]);
+
+  it('under single, an organization customization no other row holds becomes an environment row in place', async () => {
+    metadataTable([
+      md('md_dash', 'org_default', 'dashboard', 'sales_board', { name: 'sales_board', label: 'Org board' }),
+      md('md_env', null, 'report', 'pipeline', { name: 'pipeline', label: 'Env report' }),
+      md('md_obj', 'org_default', 'object', 'deal', { name: 'deal' }),
+    ].join(', '));
+
+    const report = await apply(catalog(), ledger());
+
+    expect(step(report)).toMatchObject({ status: 'done', summary: { promoted: 1, conflicts: 0 } });
+    // The non-presentational row is reported, never promoted; nothing is deleted.
+    expect(owners()).toEqual([['md_dash', null], ['md_env', null], ['md_obj', 'org_default']]);
+  });
+
+  it('a key held by an organization row and the environment row is a conflict: kept, listed by id, blocking; nothing is written', async () => {
+    metadataTable([
+      md('md_org', 'org_default', 'view', 'deal_list', { name: 'deal_list', label: 'Org list' }),
+      md('md_env', null, 'view', 'deal_list', { name: 'deal_list', label: 'Env list' }),
+    ].join(', '));
+    const c = catalog();
+
+    const report = await apply(c, ledger());
+
+    expect(step(report).status).toBe('blocked');
+    expect(step(report).blockers.join('\n')).toMatch(/view deal_list is held by 2 rows .*md_org \(organization org_default, active\), md_env \(environment, active\)/);
+    expect(writes.filter((w) => /sys_metadata/.test(w))).toEqual([]);
+    expect(owners()).toEqual([['md_env', null], ['md_org', 'org_default']]);
+    expect(c.viewSaves).toEqual([]);
+
+    // The operator keeps one row; the re-run promotes nothing more and goes on.
+    db.exec(`DELETE FROM sys_metadata WHERE id = 'md_org'`);
+    const again = await apply(c, ledger());
+    expect(step(again)).toMatchObject({ status: 'done', summary: { promoted: 0, conflicts: 0 } });
+  });
+
+  it('two organizations holding one key is a conflict too', async () => {
+    metadataTable([
+      md('md_a', 'org_a', 'translation', 'fr', { name: 'fr' }),
+      md('md_b', 'org_b', 'translation', 'fr', { name: 'fr' }),
+    ].join(', '));
+    const report = await apply(catalog(), ledger());
+    expect(step(report).summary.conflicts).toBe(1);
+    expect(owners()).toEqual([['md_a', 'org_a'], ['md_b', 'org_b']]);
+  });
+
+  it('under a wall the rows are reported, never promoted, and they hold the column', async () => {
+    metadataTable(md('md_dash', 'org_a', 'dashboard', 'sales_board', { name: 'sales_board' }));
+    const report = await apply(catalog(), ledger(), { posture: 'isolated' });
+    expect(step(report)).toMatchObject({ status: 'done', summary: { promoted: 0, reported: 1 } });
+    expect(owners()).toEqual([['md_dash', 'org_a']]);
+  });
+
+  for (const posture of ['single', 'isolated'] as const) {
+    it(`⭐ a form an organization withdrew before the upgrade is refused at the anonymous doors after it, across packages (${posture})`, async () => {
+      // The organization withdrew the package-less copy; package pkg_a serves its own copy, open.
+      metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false, 'Org copy')));
+      const c = catalog();
+      const views = servedViews(c);
+      expect(await doorsServe(views, 'lead-intake')).toEqual(['crm_lead.intake|pkg_a']);
+
+      const report = await apply(c, ledger(), { posture, views });
+
+      expect(step(report).status).toBe('done');
+      expect(step(report).summary.withdrawalsCarried).toBe(1);
+      // Carried onto pkg_a's own copy, through the door, into its own package.
+      expect(c.viewSaves.map((v) => [v.name, v.packageId, (v.body.config as any).sharing.enabled])).toEqual([
+        ['crm_lead.intake', 'pkg_a', false],
+      ]);
+      expect(await doorsServe(views, 'lead-intake')).toEqual([]);
+
+      // Idempotent: a second run (no checkpoint) carries nothing more.
+      const again = await apply(c, ledger(), { posture, views });
+      expect(step(again).summary.withdrawalsCarried).toBe(0);
+      expect(c.viewSaves).toHaveLength(1);
+    });
+  }
+
+  it('⭐ under single, a withdrawal the organization holds on the key it alone holds travels with the promoted row', async () => {
+    metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false, 'Org copy'), 'pkg_a'));
+    const c = catalog();
+    const views = servedViews(c);
+
+    const report = await apply(c, ledger(), { views });
+
+    expect(step(report).summary).toMatchObject({ promoted: 1, withdrawalsCarried: 0 });
+    expect(c.viewSaves).toEqual([]);
+    expect(owners()).toEqual([['md_org', null]]);
+    expect(await doorsServe(views, 'lead-intake')).toEqual([]);
+  });
+
+  it('control: an organization row that withdraws nothing carries nothing, and the form stays served', async () => {
+    metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(true, 'Org copy')));
+    const c = catalog();
+    const views = servedViews(c);
+    const report = await apply(c, ledger(), { views });
+    expect(step(report).summary.withdrawalsCarried).toBe(0);
+    expect(c.viewSaves).toEqual([]);
+    expect(await doorsServe(views, 'lead-intake')).toEqual(['crm_lead.intake|', 'crm_lead.intake|pkg_a']);
+  });
+
+  it('a door that refuses the carry blocks the step, naming the form and the remedy', async () => {
+    metadataTable(md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false)));
+    const c = catalog();
+    const refusing: ReturnType<typeof catalog> = {
+      ...c,
+      async save(type, name, body, target) {
+        if (type === 'view') throw new Error('NOT_OVERRIDABLE: the view is sealed');
+        return c.save(type, name, body, target);
+      },
+    };
+    const report = await apply(refusing, ledger(), { views: servedViews(c) });
+    expect(step(report).status).toBe('blocked');
+    expect(step(report).blockers.join('\n')).toMatch(/lead-intake of the view crm_lead\.intake \(package pkg_a\).*NOT_OVERRIDABLE.*sharing\.enabled false/);
   });
 });
