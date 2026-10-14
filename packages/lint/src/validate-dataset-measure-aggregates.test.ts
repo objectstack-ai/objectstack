@@ -1102,19 +1102,24 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
 // ───────────────────────────────────────────────────────────────────────────
 
 /** The words a `dimension-json-stored-field-refused` message names each class with. */
-const CLASS_WORDS: Record<GroupKeyClass, string> = {
-  'structured-json': 'a structured-JSON value',
-  'multi-value': 'a multi-value field',
-};
+const GROUP_KEY_CLASSES: readonly GroupKeyClass[] = ['structured-json', 'multi-value'];
+const CLASS_WORDS: ReadonlyMap<GroupKeyClass, string> = new Map([
+  ['structured-json', 'a structured-JSON value'],
+  ['multi-value', 'a multi-value field'],
+]);
 
-/** The class the rule's one finding names, or `null` when the rule is silent. */
-const classTheRuleNamed = (found: ReadonlyArray<{ message: string }>): GroupKeyClass | null => {
-  expect(found.length).toBeLessThanOrEqual(1);
-  if (found.length === 0) return null;
-  const named = (Object.keys(CLASS_WORDS) as GroupKeyClass[]).filter((cls) => found[0].message.includes(CLASS_WORDS[cls]));
-  expect(named).toHaveLength(1);
-  return named[0];
-};
+/**
+ * The class the rule's one finding names, or `null` when the rule is silent.
+ * Anything else — several findings, or a message naming no class or both —
+ * is `'unreadable'`, which no classifier answer equals.
+ */
+function classTheRuleNamed(found: ReadonlyArray<{ message: string }>, column: string): GroupKeyClass | null | 'unreadable' {
+  const [only, ...more] = found;
+  if (!only) return null;
+  if (more.length > 0 || !only.message.includes(`"${column}"`)) return 'unreadable';
+  const named = GROUP_KEY_CLASSES.filter((cls) => only.message.includes(CLASS_WORDS.get(cls) ?? cls));
+  return named.length === 1 ? named[0] : 'unreadable';
+}
 
 describe('[#23235] groupKeyClassOf — the exported classifier and the rule agree on the rule\'s own fixtures', () => {
   it('is the function the rule calls, re-exported from the package barrel', () => {
@@ -1128,7 +1133,7 @@ describe('[#23235] groupKeyClassOf — the exported classifier and the rule agre
         const def = multiple ? { type: fieldType, multiple: true } : { type: fieldType };
         const label = `${fieldType}${multiple ? ', multiple' : ''}`;
         const exported = groupKeyClassOf(def);
-        expect(exported, label).toBe(classTheRuleNamed(dimensionFindings(dimensionStack(def))));
+        expect(exported, label).toBe(classTheRuleNamed(dimensionFindings(dimensionStack(def)), 'grouped'));
         tally[exported ?? 'served']++;
       }
     }
@@ -1152,7 +1157,7 @@ describe('[#23235] groupKeyClassOf — the exported classifier and the rule agre
     for (const [def, expected] of fixtures) {
       const label = JSON.stringify(def);
       expect(groupKeyClassOf(def as { type: string; multiple?: boolean }), label).toBe(expected);
-      expect(classTheRuleNamed(dimensionFindings(dimensionStack(def))), label).toBe(expected);
+      expect(classTheRuleNamed(dimensionFindings(dimensionStack(def)), 'grouped'), label).toBe(expected);
     }
   });
 
@@ -1165,7 +1170,9 @@ describe('[#23235] groupKeyClassOf — the exported classifier and the rule agre
     for (const [column, def] of columns) {
       const exported = groupKeyClassOf(def);
       classes.add(exported);
-      expect(exported, column).toBe(classTheRuleNamed(cubeDimensionFindings(cubeStack({ dimensions: { probe: dim(column) } }))));
+      expect(exported, column).toBe(
+        classTheRuleNamed(cubeDimensionFindings(cubeStack({ dimensions: { probe: dim(column) } })), column),
+      );
     }
     // The fixture exercises all three answers.
     expect([...classes].sort()).toEqual([null, 'multi-value', 'structured-json'].sort());
