@@ -32,7 +32,7 @@
  *
  * ## ⛔ It does not consult `customized`, and that is measured, not stylistic
  *
- * `upsertEnvPermissionSet` computes the flag as
+ * The retired projector (`upsertEnvPermissionSet`, C3 stage 7a) computed the flag as
  * `existing.managed_by === 'package' ? !!customized : false`. On the exact
  * field-reported shape — a genuinely package-declared set whose row's
  * `managed_by` predates provenance tracking (`permission-set-drift.ts`'s
@@ -49,10 +49,8 @@
  * ## Scope, stated rather than assumed
  *
  *  - ENV-WIDE overlays only (`sys_metadata.organization_id IS NULL`), the same
- *    boundary `reconcilePermissionSetProjection` and `permission-set-drift.ts`
- *    draw (#10103 residue, deliberately out of scope). A reading that answered
- *    a different question from the reconciler it reports on would send an
- *    operator to a row the reconciler never touches;
+ *    boundary the retired reconciler (`reconcilePermissionSetProjection`) and
+ *    drift diagnostic drew (#10103 residue, deliberately out of scope);
  *  - "package-declared" is decided by {@link classifyPackagedPermissionSet} —
  *    the engine SchemaRegistry, the same source the write-door lock uses, so
  *    the reading and the lock can never disagree about which sets are locked;
@@ -84,11 +82,9 @@ async function tryFind(ql: any, object: string, where: any, limit: number): Prom
 }
 
 /**
- * Page cap for the `sys_metadata` overlay sweep — the same value
- * `reconcilePermissionSetProjection` and `computePermissionSetDriftDiagnostics`
- * use for the identical read. Shared deliberately: three readings of the same
- * rows answering under three different caps would disagree about the same
- * environment.
+ * Page cap for the `sys_metadata` overlay sweep — the value the retired
+ * reconciler and drift diagnostic used for the identical read, kept so this
+ * reading answers under the cap it always has.
  */
 export const OVERLAY_PAGE_LIMIT = 1000;
 

@@ -283,41 +283,6 @@ describe('DelegatedAdminGate — assignments (sys_user_position)', () => {
   });
 });
 
-describe('DelegatedAdminGate — bindings (sys_position_permission_set)', () => {
-  it('delegate binds an allowlisted set to a position held only inside the subtree', async () => {
-    await expect(h.gate.assert({
-      object: 'sys_position_permission_set', operation: 'insert',
-      data: { position_id: 'pos_sales', permission_set_id: 'ps_sales' },
-      context: h.ctxOf('delegate'),
-    })).resolves.toBeUndefined();
-  });
-
-  it('denies binding a non-allowlisted set', async () => {
-    await expect(h.gate.assert({
-      object: 'sys_position_permission_set', operation: 'insert',
-      data: { position_id: 'pos_sales', permission_set_id: 'ps_fin' },
-      context: h.ctxOf('delegate'),
-    })).rejects.toThrow(/not in the scope's allowlist/);
-  });
-
-  it('denies re-composing a position held outside the subtree (blast radius)', async () => {
-    h.tables.sys_user_position.push({ id: 'a_w', user_id: 'u_west_1', position: 'sales_rep', business_unit_id: 'bu_west' });
-    await expect(h.gate.assert({
-      object: 'sys_position_permission_set', operation: 'insert',
-      data: { position_id: 'pos_sales', permission_set_id: 'ps_sales' },
-      context: h.ctxOf('delegate'),
-    })).rejects.toThrow(/outside the delegated subtree/);
-  });
-
-  it('audience-anchor bindings are tenant-level only for delegates', async () => {
-    await expect(h.gate.assert({
-      object: 'sys_position_permission_set', operation: 'insert',
-      data: { position_id: 'pos_everyone', permission_set_id: 'ps_sales' },
-      context: h.ctxOf('delegate'),
-    })).rejects.toThrow(/tenant-level only/);
-  });
-});
-
 describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () => {
   it('delegate grants an allowlisted set to a user inside the subtree; granted_by stamped', async () => {
     const row: any = { user_id: 'u_east_1', permission_set: 'sales_user' };
@@ -396,56 +361,6 @@ describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () =>
         data: { id: 'g1', permission_set: 'finance_admin' }, context: h.ctxOf('delegate'),
       })).rejects.toThrow(/'finance_admin' is not in the scope's allowlist/);
     });
-  });
-});
-
-describe('DelegatedAdminGate — env-set authoring (sys_permission_set)', () => {
-  it('delegate with authorEnvironmentSets may insert an inert env set', async () => {
-    await expect(h.gate.assert({
-      object: 'sys_permission_set', operation: 'insert',
-      data: { name: 'east_helper', object_permissions: '{}' },
-      context: h.ctxOf('delegate'),
-    })).resolves.toBeUndefined();
-  });
-
-  it('authoring a set that mints a NARROWER adminScope is allowed (strict containment)', async () => {
-    await expect(h.gate.assert({
-      object: 'sys_permission_set', operation: 'insert',
-      data: {
-        name: 'east_sales_admin',
-        admin_scope: JSON.stringify({
-          businessUnit: 'east_sales',
-          manageAssignments: true,
-          assignablePermissionSets: ['sales_user'],
-        }),
-      },
-      context: h.ctxOf('delegate'),
-    })).resolves.toBeUndefined();
-  });
-
-  it('authoring a scope equal to or broader than your own is denied', async () => {
-    await expect(h.gate.assert({
-      object: 'sys_permission_set', operation: 'insert',
-      data: { name: 'clone_of_mine', admin_scope: JSON.stringify(EAST_SCOPE) },
-      context: h.ctxOf('delegate'),
-    })).rejects.toThrow(/strictly contains it/);
-
-    await expect(h.gate.assert({
-      object: 'sys_permission_set', operation: 'insert',
-      data: {
-        name: 'hq_takeover',
-        admin_scope: JSON.stringify({ ...EAST_SCOPE, businessUnit: 'hq' }),
-      },
-      context: h.ctxOf('delegate'),
-    })).rejects.toThrow(/strictly contains it/);
-  });
-
-  it('delegates cannot set the tenant-wide isDefault suggestion', async () => {
-    await expect(h.gate.assert({
-      object: 'sys_permission_set', operation: 'insert',
-      data: { name: 'east_default', isDefault: true },
-      context: h.ctxOf('delegate'),
-    })).rejects.toThrow(/tenant-level/);
   });
 });
 
@@ -1104,9 +1019,6 @@ describe('DelegatedAdminGate — granted_by is the writer on every admitted inse
   it('a governed object with no granted_by column is never given one', async () => {
     const member: any = { user_id: 'u_x', organization_id: 'org_1', role: 'admin' };
     await expect(h.gate.assert({ object: 'sys_member', operation: 'insert', data: member, context: h.ctxOf('tenant_admin') })).resolves.toBeUndefined();
-    const binding: any = { position_id: 'pos_sales', permission_set_id: 'ps_sales' };
-    await expect(h.gate.assert({ object: 'sys_position_permission_set', operation: 'insert', data: binding, context: h.ctxOf('tenant_admin') })).resolves.toBeUndefined();
     expect('granted_by' in member).toBe(false);
-    expect('granted_by' in binding).toBe(false);
   });
 });

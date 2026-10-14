@@ -1260,7 +1260,7 @@ export const ERROR_CODE_LEDGER = {
     // its casing and every other package's rows are unchanged.
     // `PackagedPermissionSetLockedError` and
     // `PackagedPermissionSetProvenanceUnknownError`
-    // (`packaged-permission-set-lock.ts`), 403: a data-path write targets a
+    // (`packaged-permission-set-lock.ts`), 403: a metadata-door save targets a
     // package-declared permission set, or one whose provenance cannot be
     // determined (fail-closed). Deliberately the SAME envelope
     // `@objectstack/metadata-protocol`'s ADR-0005 tier gate answers for this
@@ -1270,32 +1270,6 @@ export const ERROR_CODE_LEDGER = {
     'NOT_OVERRIDABLE',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
-    // [commit 8f6d83147] The data door's duplicate-name refusal on `sys_permission_set`
-    // — `PermissionSetNameConflictError` (`errors.ts`), thrown by the
-    // ADR-0094 D3 write-through middleware's insert leg
-    // (`permission-set-projection.ts`) when a set with that machine name
-    // already exists. `code` / `status` via the package's exported
-    // `PERMISSION_SET_NAME_CONFLICT_CODE` / `PERMISSION_SET_NAME_CONFLICT_STATUS`.
-    //
-    // THIRD EMITTER of a code `@objectstack/rest` (SQL conflict) and
-    // `@objectstack/driver-memory` (in-memory uniqueness refusal) already
-    // register, and the wire identity is deliberately the SAME for the reason
-    // their rows give: this object declares `{ fields: ['name'], unique:
-    // 'organization' }`, so the very same collision answers `409
-    // UNIQUE_VIOLATION` when the index catches it instead of this pre-check
-    // (the reading recorded on that index, #8554). A second spelling here
-    // would make one condition answer two envelopes depending only on which
-    // layer got there first. Per this file's header, a code emitted by
-    // several packages is listed once per emitting package — provenance, not
-    // identity; the union, its casing and every other package's rows are
-    // unchanged.
-    //
-    // Wire-reachable by the test the "Retiring a code" section applies
-    // (#8035), measured live on `examples/app-showcase` over a cookie session:
-    // `POST /api/v1/data/sys_permission_set {"name":"<a name already taken>"}`
-    // answers `409` with this code on the flat `{ error, code }` responder
-    // (`mapDataError`'s declared-status 4xx arm, `thrownCodeFields`).
-    'UNIQUE_VIOLATION',
   ],
   '@objectstack/plugin-webhooks': [
     // [#13353] The redeliver endpoint's malformed-body refusal — the plugin

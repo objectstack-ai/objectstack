@@ -13,12 +13,13 @@
  * Every message is fed as a raw RFC 822 string; no IMAP is involved.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 // Engine options are DECLARED, never erased to `any` (`pnpm check:query-options-erasure`).
 import type { DataEngineInsertOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
+import type { AttachFileInput, IFileAttachmentService } from '@objectstack/spec/contracts';
 import { SysMember, SysUser } from '@objectstack/platform-objects/identity';
 import { SysMailAssociation, SysMailbox, SysMailMessage } from '../objects/index.js';
 import { MAILBOX_ADMIN_CAPABILITY } from '../mail-read-visibility.js';
@@ -26,10 +27,12 @@ import { MailIngestService, MailboxServiceError, type MailIngestEngine } from '.
 import { parseMatchAddresses } from './match-addresses.js';
 import {
   appleMailForwardBlock,
+  binaryBytes,
   bounce,
   forwardAsAttachment,
   forwardInline,
   gmailForwardBlock,
+  messageWithParts,
   outlookForwardBlock,
   plainMessage,
   rfc822,
@@ -74,6 +77,7 @@ describe('the ingest seam on a real engine', () => {
   let engine: ObjectQL;
   let service: MailIngestService;
   const warnings: string[] = [];
+  const errors: string[] = [];
   let mailboxSeq = 0;
 
   const find = (object: string, where: Row): Promise<Row[]> =>
@@ -106,7 +110,7 @@ describe('the ingest seam on a real engine', () => {
     await engine.syncSchemas();
     service = new MailIngestService({
       engine: () => engine as unknown as MailIngestEngine,
-      logger: { warn: (m: string) => warnings.push(m) },
+      logger: { warn: (m: string) => warnings.push(m), error: (m: string) => errors.push(m) },
     });
   });
 
@@ -218,7 +222,7 @@ describe('the ingest seam on a real engine', () => {
       });
       const racing = new MailIngestService({
         engine: () => racingEngine as unknown as MailIngestEngine,
-        logger: { warn: (m: string) => warnings.push(m) },
+        logger: { warn: (m: string) => warnings.push(m), error: (m: string) => errors.push(m) },
       });
 
       const second = await racing.ingest({ mailboxId: mailbox, raw }, SYSTEM);
@@ -437,7 +441,7 @@ describe('the ingest seam on a real engine', () => {
       const said: string[] = [];
       const noAuth = new MailIngestService({
         engine: () => withoutIdentity as unknown as MailIngestEngine,
-        logger: { warn: (m: string) => said.push(m) },
+        logger: { warn: (m: string) => said.push(m), error: (m: string) => said.push(m) },
       });
       for (const id of ['<noauth-1@corp.test>', '<noauth-2@corp.test>']) {
         const block = gmailForwardBlock({ from: 'customer-noauth@acme.test', cc: null });
@@ -581,6 +585,231 @@ describe('the ingest seam on a real engine', () => {
       });
       expect(new Date(row!.received_at).toISOString()).toBe('2026-10-12T11:00:00.000Z');
       expect(new Date(row!.sent_at).toISOString()).toBe('2026-10-12T09:00:00.000Z');
+    });
+  });
+
+  describe('attachments: each part is handed to the attach verb as a file of the row', () => {
+    /**
+     * The verb as the producer sees it: it records each call, with the state
+     * of the parent row AT the call (the row must exist first), and refuses
+     * the file names it is told to. The verb's own behaviour is pinned on the
+     * real one in `mailbox-attachments-kernel.test.ts`; here what is measured
+     * is what the seam hands it, and when.
+     */
+    type Call = AttachFileInput & { parentAtCall: Row | undefined };
+    let calls: Call[];
+    let refuse: Map<string, Error>;
+    let attaching: MailIngestService;
+    const said: { warn: string[]; error: string[] } = { warn: [], error: [] };
+    const verb: IFileAttachmentService = {
+      async attachFile(input) {
+        const [parent] = await find(input.parentObject, { id: input.parentId });
+        calls.push({ ...input, parentAtCall: parent });
+        const refusal = refuse.get(input.filename);
+        if (refusal) throw refusal;
+        return { fileId: `file_${calls.length}`, attachmentId: `att_${calls.length}`, size: input.data.byteLength };
+      },
+    };
+    const refusalOf = (code: string, status: number, message: string) =>
+      Object.assign(new Error(message), { code, status });
+
+    const ORIGINAL = rfc822(
+      [
+        ['From', 'Customer <customer@acme.test>'],
+        ['To', 'rep@corp.test'],
+        ['Subject', 'What does it cost?'],
+        ['Message-ID', '<attach-orig@acme.test>'],
+      ],
+      'What does it cost?',
+    );
+    const PDF = binaryBytes(40);
+    /** The card's message: one forwarded message and one file. */
+    const forwardWithFile = (messageId: string) =>
+      messageWithParts({
+        messageId,
+        parts: [
+          { contentType: 'application/pdf; name="quote.pdf"', disposition: 'attachment; filename="quote.pdf"', bytes: PDF },
+          { contentType: 'message/rfc822', disposition: 'attachment; filename="question.eml"', message: ORIGINAL },
+        ],
+      });
+
+    beforeAll(() => {
+      attaching = new MailIngestService({
+        engine: () => engine as unknown as MailIngestEngine,
+        logger: { warn: (m: string) => said.warn.push(m), error: (m: string) => said.error.push(m) },
+        attachments: () => verb,
+      });
+    });
+    beforeEach(() => {
+      calls = [];
+      refuse = new Map();
+      said.warn.length = 0;
+      said.error.length = 0;
+    });
+
+    it('stores the file and the forwarded message (.eml), in message order, on the row, in the mailbox’s organization', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      const result = await attaching.ingest({ mailboxId: mailbox, raw: forwardWithFile('<attach-1@corp.test>') }, SYSTEM);
+
+      expect(result.outcome).toBe('stored');
+      const messageId = (result as { messageId: string }).messageId;
+      const rows = await messagesIn(mailbox);
+      expect(rows.map((r) => r.id)).toEqual([messageId]);
+      expect(calls.map((c) => [c.parentObject, c.parentId, c.organizationId, c.filename, c.mimeType])).toEqual([
+        ['sys_mail_message', messageId, ORG_A, 'quote.pdf', 'application/pdf'],
+        ['sys_mail_message', messageId, ORG_A, 'question.eml', 'message/rfc822'],
+      ]);
+      // The bytes as the message carries them: the file's, and the forwarded
+      // message exactly as it travels in its part.
+      expect(Buffer.isBuffer(calls[0]!.data)).toBe(true);
+      expect(new Uint8Array(calls[0]!.data)).toEqual(PDF);
+      expect(calls[1]!.data.toString('utf8')).toBe(ORIGINAL);
+      // The parent exists, in the mailbox's organization, before each call.
+      for (const call of calls) expect(call.parentAtCall).toMatchObject({ id: messageId, organization_id: ORG_A });
+      expect([...said.warn, ...said.error]).toEqual([]);
+    });
+
+    it('control: a message without parts hands the verb nothing', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      const result = await attaching.ingest({ mailboxId: mailbox, raw: plainMessage({ 'Message-ID': '<attach-none@acme.test>' }) }, SYSTEM);
+      expect(result.outcome).toBe('stored');
+      expect(calls).toEqual([]);
+    });
+
+    it('acts in the mailbox’s organization, never null: a mailbox in ORG_B stores its parts in ORG_B', async () => {
+      const mailbox = await newMailbox(ORG_B);
+      const result = await attaching.ingest({ mailboxId: mailbox, raw: forwardWithFile('<attach-org-b@corp.test>') }, SYSTEM);
+      expect(calls.map((c) => [c.parentId, c.organizationId])).toEqual([
+        [(result as { messageId: string }).messageId, ORG_B],
+        [(result as { messageId: string }).messageId, ORG_B],
+      ]);
+    });
+
+    it('a re-delivered copy stops at the dedupe: no part is handed over again', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      const raw = forwardWithFile('<attach-again@corp.test>');
+      expect((await attaching.ingest({ mailboxId: mailbox, raw }, SYSTEM)).outcome).toBe('stored');
+      expect(calls).toHaveLength(2);
+
+      expect((await attaching.ingest({ mailboxId: mailbox, raw }, SYSTEM)).outcome).toBe('duplicate');
+      expect(calls).toHaveLength(2);
+      expect(await messagesIn(mailbox)).toHaveLength(1);
+    });
+
+    it('control: the same parts under another Message-ID are another message, and are handed over again', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      await attaching.ingest({ mailboxId: mailbox, raw: forwardWithFile('<attach-twin-1@corp.test>') }, SYSTEM);
+      await attaching.ingest({ mailboxId: mailbox, raw: forwardWithFile('<attach-twin-2@corp.test>') }, SYSTEM);
+      expect(calls).toHaveLength(4);
+      expect(new Set(calls.map((c) => c.parentId)).size).toBe(2);
+    });
+
+    it('a re-match never re-attaches, and a suppressed message attaches nothing', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      await attaching.ingest({ mailboxId: mailbox, raw: forwardWithFile('<attach-rematch@corp.test>') }, SYSTEM);
+      await insert('mailtest_contact', { organization_id: ORG_A, name: 'C', email: 'rep@corp.test' });
+      expect(await attaching.rematch({ mailboxId: mailbox }, SYSTEM)).toMatchObject({ scanned: 1 });
+      expect(calls).toHaveLength(2);
+
+      const suppressed = messageWithParts({
+        messageId: '<attach-ooo@corp.test>',
+        headers: [['Auto-Submitted', 'auto-replied']],
+        parts: [{ contentType: 'application/pdf', disposition: 'attachment; filename="ooo.pdf"', bytes: PDF }],
+      });
+      expect(await attaching.ingest({ mailboxId: mailbox, raw: suppressed }, SYSTEM)).toEqual({
+        outcome: 'suppressed',
+        reason: 'auto_submitted',
+      });
+      expect(calls).toHaveLength(2);
+    });
+
+    it('counts every part the parser lists — an inline image, an inline file, a nameless part — and names each', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      const long = `${'q'.repeat(300)}.pdf`;
+      const raw = messageWithParts({
+        messageId: '<attach-kinds@corp.test>',
+        parts: [
+          // An image the HTML body shows by `cid:` reference.
+          { contentType: 'image/png', disposition: 'inline; filename="logo.png"', contentId: '<logo@corp.test>', bytes: binaryBytes() },
+          // Apple Mail marks the files it attaches `inline`.
+          { contentType: 'application/pdf; name="apple.pdf"', disposition: 'inline; filename="apple.pdf"', bytes: PDF },
+          { contentType: 'application/octet-stream', bytes: binaryBytes(1) },
+          { contentType: 'application/pdf', disposition: `attachment; filename="${long}"`, bytes: PDF },
+          { contentType: 'application/pdf', disposition: 'attachment; filename="../evil/path.pdf"', bytes: PDF },
+          // Forwarded with no file name: named by its own Subject.
+          { contentType: 'message/rfc822', message: ORIGINAL },
+          // A forwarded message whose Subject cannot name it.
+          { contentType: 'message/global', message: ORIGINAL.replace('Subject: What does it cost?\r\n', '') },
+        ],
+      });
+      expect((await attaching.ingest({ mailboxId: mailbox, raw }, SYSTEM)).outcome).toBe('stored');
+      const names = calls.map((c) => c.filename);
+      expect(names).toEqual([
+        'logo.png',
+        'apple.pdf',
+        'attachment-3',
+        `${'q'.repeat(251)}.pdf`,
+        '.._evil_path.pdf',
+        'What does it cost?.eml',
+        'forwarded.eml',
+      ]);
+      expect(calls.map((c) => c.mimeType)).toEqual([
+        'image/png', 'application/pdf', 'application/octet-stream', 'application/pdf', 'application/pdf',
+        'message/rfc822', 'message/global',
+      ]);
+      expect(names[3]).toHaveLength(255);
+    });
+
+    it('a refused part loses neither the message nor the other parts, and is said at error, by name', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      refuse.set('quote.pdf', refusalOf('FILES_DISABLED', 403, 'Attachments are not enabled on sys_mail_message.'));
+
+      const result = await attaching.ingest({ mailboxId: mailbox, raw: forwardWithFile('<attach-refused@corp.test>') }, SYSTEM);
+
+      expect(result.outcome).toBe('stored');
+      expect(await messagesIn(mailbox)).toHaveLength(1);
+      expect(calls.map((c) => c.filename)).toEqual(['quote.pdf', 'question.eml']);
+      expect(said.error).toHaveLength(1);
+      expect(said.error[0]).toContain("'quote.pdf'");
+      expect(said.error[0]).toContain('FILES_DISABLED (403)');
+      expect(said.error[0]).toContain('is NOT stored');
+      expect(said.warn).toEqual([]);
+    });
+
+    it('control: the same message with no refusal says nothing', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      await attaching.ingest({ mailboxId: mailbox, raw: forwardWithFile('<attach-not-refused@corp.test>') }, SYSTEM);
+      expect(said.error).toEqual([]);
+    });
+
+    it('a part the verb throws on without an envelope is said too, and the message is still stored', async () => {
+      const mailbox = await newMailbox(ORG_A);
+      refuse.set('question.eml', new Error('storage backend unreachable'));
+      const result = await attaching.ingest({ mailboxId: mailbox, raw: forwardWithFile('<attach-thrown@corp.test>') }, SYSTEM);
+      expect(result.outcome).toBe('stored');
+      expect(said.error).toHaveLength(1);
+      expect(said.error[0]).toContain("'question.eml'");
+      expect(said.error[0]).toContain('storage backend unreachable');
+    });
+
+    it('with no attach verb composed, the message is stored without its parts, and that is said once', async () => {
+      for (const attachments of [() => undefined, undefined]) {
+        const quiet: string[] = [];
+        const loud: string[] = [];
+        const withoutStorage = new MailIngestService({
+          engine: () => engine as unknown as MailIngestEngine,
+          logger: { warn: (m: string) => quiet.push(m), error: (m: string) => loud.push(m) },
+          ...(attachments ? { attachments } : {}),
+        });
+        const mailbox = await newMailbox(ORG_A);
+        for (const id of ['<nostore-1@corp.test>', '<nostore-2@corp.test>']) {
+          expect((await withoutStorage.ingest({ mailboxId: mailbox, raw: forwardWithFile(id) }, SYSTEM)).outcome).toBe('stored');
+        }
+        expect(await messagesIn(mailbox)).toHaveLength(2);
+        expect(quiet.filter((m) => m.includes("'file-attachments' service is composed"))).toHaveLength(1);
+        expect(loud).toEqual([]);
+      }
+      expect(calls).toEqual([]);
     });
   });
 
