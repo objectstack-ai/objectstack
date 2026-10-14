@@ -294,7 +294,8 @@ for (const [doorName, boot] of DOORS) {
  * row. What either door does with them is `RestServer`'s reading, not this
  * file's: a token is the body key when it is not nullish (else `If-Match`),
  * the key is stripped from the patch whatever its value, and a token is
- * forwarded as its string only when it is truthy.
+ * forwarded as its string unless it can never carry a version, which is
+ * refused (#23492, pinned in its own block below).
  */
 const EDGE_SHAPES: ReadonlyArray<readonly [string, (version: string) => PatchOptions]> = [
     ['a stale token', () => ({ body: { name: AFTER, expectedVersion: STALE } })],
@@ -332,6 +333,82 @@ describe('[#23462] the two doors answer each token shape with the same status, c
         conflict(answer);
         expect(await name()).toBe(BEFORE);
     }, 60_000);
+});
+
+// ── A token that can never carry a version ────────────────────────────────────
+
+/**
+ * [#23492] Both doors read `bodyVersion ?? If-Match` and used to forward a
+ * token only when it was truthy. `''` and `false` are not nullish, so the
+ * stale `If-Match` beside them was never read, and not truthy, so no token was
+ * forwarded: the update was APPLIED, `200`, on both doors (measured on this
+ * rig before the fix, the row read back as written). Now a token in a token
+ * position that can never carry a version is refused with the protocol's own
+ * answer to the quoted-empty tag `""`, `400 VALIDATION_FAILED`, before
+ * `updateData` is asked; maintainer decision #20 ① rules that shape refused,
+ * neither read as "no token" nor answered `409`.
+ */
+const UNUSABLE: ReadonlyArray<readonly [string, PatchOptions]> = [
+    ["a body expectedVersion of '' beside a stale If-Match", { body: { name: AFTER, expectedVersion: '' }, headers: { 'If-Match': STALE } }],
+    ["a body expectedVersion of '' and no If-Match", { body: { name: AFTER, expectedVersion: '' } }],
+    ['a body expectedVersion of false beside a stale If-Match', { body: { name: AFTER, expectedVersion: false }, headers: { 'If-Match': STALE } }],
+    ['a body expectedVersion of false and no If-Match', { body: { name: AFTER, expectedVersion: false } }],
+    ['a blank body expectedVersion beside a stale If-Match', { body: { name: AFTER, expectedVersion: '   ' }, headers: { 'If-Match': STALE } }],
+    ['a body expectedVersion of true', { body: { name: AFTER, expectedVersion: true } }],
+    ['a body expectedVersion that is an array, beside a stale If-Match', { body: { name: AFTER, expectedVersion: [] }, headers: { 'If-Match': STALE } }],
+    ['an empty If-Match and no body token', { body: { name: AFTER }, headers: { 'If-Match': '' } }],
+];
+
+const refused = (a: Answer) =>
+    expect({ status: a.status, code: a.code }, JSON.stringify(a)).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+
+for (const [doorName, boot] of DOORS) {
+    describe(`[#23492] ${doorName}: PATCH /data/:object/:id refuses a token that can never carry a version`, () => {
+        for (const [shape, opts] of UNUSABLE) {
+            it(`${shape}: 400 VALIDATION_FAILED, updateData never asked, the row unchanged`, async () => {
+                const door = await boot();
+                refused(await door.patch(opts));
+                expect(door.forwarded()).toEqual([]);
+                expect(await door.name()).toBe(BEFORE);
+            }, 60_000);
+        }
+
+        it('the refusal is the protocol\'s own answer to the quoted-empty tag: the same status and code', async () => {
+            const quoted = await boot();
+            const protocolAnswer = await quoted.patch({ body: { name: AFTER, expectedVersion: '""' } });
+            // The protocol, not the door, refused this one: the token reached it.
+            expect(quoted.forwarded().map((f) => f.expectedVersion)).toEqual(['""']);
+            const empty = await boot();
+            const doorAnswer = await empty.patch({ body: { name: AFTER, expectedVersion: '' } });
+            expect({ status: doorAnswer.status, code: doorAnswer.code })
+                .toEqual({ status: protocolAnswer.status, code: protocolAnswer.code });
+        }, 60_000);
+
+        it('control: a null body token is no token, so a stale If-Match beside it is judged and refused 409', async () => {
+            const door = await boot();
+            conflict(await door.patch({ body: { name: AFTER, expectedVersion: null }, headers: { 'If-Match': STALE } }));
+            expect(door.forwarded().map((f) => f.expectedVersion)).toEqual([STALE]);
+            expect(await door.name()).toBe(BEFORE);
+        }, 60_000);
+
+        it('control: a body token of 0 is a number, judged as "0" (refused 409), never dropped', async () => {
+            const door = await boot();
+            conflict(await door.patch({ body: { name: AFTER, expectedVersion: 0 }, headers: { 'If-Match': door.version } }));
+            expect(door.forwarded()).toEqual([{ expectedVersion: '0', data: { name: AFTER } }]);
+            expect(await door.name()).toBe(BEFORE);
+        }, 60_000);
+    });
+}
+
+describe('[#23492] the two doors refuse each token that can never carry a version alike', () => {
+    for (const [shape, opts] of UNUSABLE) {
+        it(`${shape}: the same status, code and sentence`, async () => {
+            const answers: Answer[] = [];
+            for (const [, boot] of DOORS) answers.push(await (await boot()).patch(opts));
+            const [rest, catchAllAnswer] = answers;
+            expect(catchAllAnswer).toEqual(rest);
+        }, 60_000);
+    }
 });
 
 // ── The dispatcher's fallback updater ─────────────────────────────────────────
