@@ -11322,16 +11322,17 @@ export class ObjectStackProtocolImplementation implements
         // strictest lock among the item's stored rows in scope, never only the
         // row this layer reports.
         let overlayLockLayer: unknown;
+        // [#23291] Naming no package, the overlay comes from the address
+        // {@link getMetaItem} serves its content from
+        // ({@link packagelessReadAddress}), so `effective` is what that read
+        // returns and `/published` serves the same document. Content only: the
+        // lock stays at the request's address, as the `_lock` gate judges it.
+        // Asked outside the `try` below: its own failed read already answers
+        // the #5532 envelope, with the driver's error as `cause`.
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name);
         try {
             // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
             // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
-            //
-            // [#23291] Naming no package, at the address {@link getMetaItem}
-            // serves its content from ({@link packagelessReadAddress}), so
-            // `effective` is what that read returns and `/published` serves
-            // the same document. Content only: the lock stays at the
-            // request's address, as the `_lock` gate judges it.
-            const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name);
             const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
