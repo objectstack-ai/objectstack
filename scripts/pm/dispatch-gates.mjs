@@ -1161,11 +1161,10 @@ export function extractTriggerPaths(workflowText) {
  *
  * It closes the INDIRECTION: a declared path population the tool could not
  * follow. It does not close, and cannot, the gate that declares no population
- * ON PURPOSE. `check:objectui-pin-citations` is unfiltered because `lint.yml`
- * says a `packages/spec/**` filter "would go dormant on exactly the PR that
- * moves `.objectui-sha`, which is the PR this exists to catch" — the
- * correctness requirement and the derivability requirement are in direct
- * opposition there, and the gate is right. Nothing here gives it a filter.
+ * ON PURPOSE: a gate whose correctness requires it to run unfiltered on the
+ * very change set a filter would skip puts the correctness requirement and the
+ * derivability requirement in direct opposition, and such a gate is right.
+ * Nothing here gives it a filter.
  *
  * ## Why a strict whitelist rather than an expression evaluator
  *

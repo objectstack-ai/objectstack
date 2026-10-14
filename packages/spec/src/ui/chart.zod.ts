@@ -718,8 +718,8 @@ export const ChartConfigSchema = lazySchema(() => strictObject(
   // item 2 — the protocol is wrong for this one key). The same false-compliance
   // shape the `aria` family has already been retired for twice one level up:
   // `dashboard.aria` at the #3896 close-out and `dashboard.widgets[].aria` at
-  // #5010. Measured at this checkout's own `.objectui-sha` pin `53ded82bf7a4` and
-  // recorded per key in `liveness/dashboard.json`: `AdvancedChartImpl` declares
+  // #5010. Measured on the renderer and recorded per key in
+  // `liveness/dashboard.json` (row `widgets.chartConfig.aria`): `AdvancedChartImpl` declares
   // no `aria` prop, `chartConfigPresentation` names it nowhere (its docblock
   // calls it "the one declared key with no reader at all"), `SchemaRenderer`'s
   // ARIA injection reads flat node props and never a nested `aria` object, and

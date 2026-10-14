@@ -282,8 +282,7 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * moved: until objectui#8352 a DATETIME value ignored `format` altogether,
    * and this docblock and the `describe` beneath it both said so.
    *
-   * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `b9814b334`, re-read there 2026-10-14:
+   * Measured at objectui `b9814b334` (re-read there 2026-10-14:
    * every objectui file this record cites is byte-identical across the hop from
    * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
    * `1fb1ced36`, re-read there 2026-10-12:

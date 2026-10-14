@@ -133,8 +133,7 @@
  * Asked and declined at triage (#11344, verbatim: "a full generator only if it
  * falls out of existing `gen:*` vocabulary cheaply. Do not invent a new
  * generation pipeline for this card"). The classification is also the safety
- * property, exactly as with `check:objectui-pin-citations`: the automation a
- * reader reaches for — rewrite each stale number and drop each dead symbol —
+ * property: the automation a reader reaches for — rewrite each stale number and drop each dead symbol —
  * is the operation that must NOT be offered. The numbers are not the claim; the
  * PROSE BESIDE THEM is. A row reading `| integration | 7 | Connector (Database,
  * File Storage, GitHub, MQ, SaaS, Vercel) |` is wrong in both cells when the

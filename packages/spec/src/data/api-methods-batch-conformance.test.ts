@@ -60,8 +60,8 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // one column: the `revoke_api_key` / `restore_api_key` row actions PATCH
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
-  // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `b9814b334`, re-read there 2026-10-14:
+  // `bulk` either — both read off objectui `b9814b334`
+  // (re-read there 2026-10-14:
   // in `packages/plugin-grid`, on the hop off `1fb1ced36`, `ObjectGrid.tsx`
   // changed again (327 insertions, 80 deletions: objectui#12292's per-row
   // If-Match saves, objectui#12303's save feedback, objectui#12030's spec 18

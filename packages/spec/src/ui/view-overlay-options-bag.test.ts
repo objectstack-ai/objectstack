@@ -159,9 +159,9 @@ describe('the bag itself is closed', () => {
 
 describe('a legal `options.KIND` still parses and round-trips', () => {
   it('CONTROL: the legacy `options.map` bag objectui pins is accepted and kept in the parse output', () => {
-    // objectui `packages/app-shell/src/views/InterfaceListPage.mapConfig.test.tsx`
-    // — "CONTROL: the legacy `options.map` bag is still forwarded on its own
-    // path" — at the `.objectui-sha` pin `f8a9d0fb0`.
+    // objectui's own control — "the legacy `options.map` bag is still
+    // forwarded on its own path" (recorded in `packages/spec/liveness/view.json`,
+    // row `list.map`).
     const options = { map: { locationField: 'location', titleField: 'legacy_title' } };
     const body = overlay({ name: 'showcase_task.work_map', object: 'showcase_task', type: 'map', columns: ['title', 'location'], options });
     const parsed = ViewMetadataSchema.safeParse(body);
