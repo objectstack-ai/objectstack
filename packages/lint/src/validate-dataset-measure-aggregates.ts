@@ -326,14 +326,33 @@ function declarerOf(verdict: Extract<FieldPathVerdict, { kind: 'ok' }>, baseObje
 }
 
 /**
+ * The JSON-stored class of a column the analytics door refuses to group by:
+ * `'structured-json'` (the {@link STRUCTURED_JSON_TYPES} class) or
+ * `'multi-value'` (a list stored as JSON, {@link isMultiValueField}).
+ */
+export type GroupKeyClass = 'structured-json' | 'multi-value';
+
+/**
  * [#20890] The class of a column a dimension GROUPS by, or `null` when it
  * stores one scalar value — the analytics door's two predicates, in its
  * order: {@link STRUCTURED_JSON_TYPES}, then {@link isMultiValueField} (the
  * declaration, `multiple` included). ⛔ Never the type alone: a type-only
  * reading would refuse `tags` and pass a `select` with `multiple: true`, which
  * is the same JSON column.
+ *
+ * [#23235] Exported from the package barrel as the one place the door's two
+ * predicates are applied in the door's order, so a consumer that derives
+ * group keys outside a config file (cloud's AI build deriving dataset
+ * dimensions) asks this verdict instead of composing the two predicates
+ * itself — `null` is a group key the door serves. Both legs of
+ * `dimension-json-stored-field-refused` (dataset and cube) keep calling it,
+ * and this file's test holds the export equal to the rule's verdict on the
+ * rule's own fixtures. The input is the spec's own value-contract slice of a
+ * field definition (`ValueShapeFieldDef`: `type` and `multiple`, the two keys
+ * the predicates read), so a declared `Field` passes verbatim; it reads no
+ * object graph, so resolving a dotted path to its leaf stays the caller's.
  */
-function groupKeyClassOf(shape: ValueShapeFieldDef): 'structured-json' | 'multi-value' | null {
+export function groupKeyClassOf(shape: ValueShapeFieldDef): GroupKeyClass | null {
   if (STRUCTURED_JSON_TYPES.has(shape.type)) return 'structured-json';
   return isMultiValueField(shape) ? 'multi-value' : null;
 }
@@ -362,7 +381,7 @@ function jsonStoredDimensionFinding(
   site: MemberSite,
   leaf: Extract<FieldPathVerdict, { kind: 'ok' }>,
   shape: ValueShapeFieldDef,
-  cls: 'structured-json' | 'multi-value',
+  cls: GroupKeyClass,
 ): DatasetMeasureAggregateFinding {
   return {
     severity: 'error',

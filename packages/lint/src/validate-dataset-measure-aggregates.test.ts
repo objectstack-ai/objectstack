@@ -24,6 +24,7 @@ import {
   STRUCTURED_JSON_TYPES,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
+  type Field,
 } from '@objectstack/spec/data';
 
 import { runAuthoringRules } from './authoring-rules.js';
@@ -31,8 +32,11 @@ import { explainRule } from './rule-explanations.js';
 import {
   DIMENSION_JSON_STORED_FIELD_REFUSED,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
+  groupKeyClassOf as moduleGroupKeyClassOf,
   validateDatasetMeasureAggregates as validateDatasetMeasureAggregatesUnrecorded,
 } from './validate-dataset-measure-aggregates.js';
+// [#23235] The classifier as a consumer reaches it: the package barrel.
+import { groupKeyClassOf, type GroupKeyClass } from './index.js';
 
 // [#22161] Each finding of the two ids is one verdict sentence; the reasoning
 // it used to carry is the id's `os explain` entry. Every call below records
@@ -1086,6 +1090,94 @@ describe('the cube leg — every cube measure is judged by the aggregate × fiel
     expect(
       runAuthoringRules('lint', { normalized: control, parsed: control }).filter((f) => f.rule === RULE),
     ).toEqual([]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#23235] `groupKeyClassOf` — the dimension leg's verdict, exported. A
+// consumer deriving dataset dimensions asks it instead of composing the
+// analytics door's two predicates; these cases hold the export equal to what
+// the rule itself decides, on the rule's own fixtures (the dataset leg's
+// `dimensionStack` and the cube leg's `cubeStack`).
+// ───────────────────────────────────────────────────────────────────────────
+
+/** The words a `dimension-json-stored-field-refused` message names each class with. */
+const CLASS_WORDS: Record<GroupKeyClass, string> = {
+  'structured-json': 'a structured-JSON value',
+  'multi-value': 'a multi-value field',
+};
+
+/** The class the rule's one finding names, or `null` when the rule is silent. */
+const classTheRuleNamed = (found: ReadonlyArray<{ message: string }>): GroupKeyClass | null => {
+  expect(found.length).toBeLessThanOrEqual(1);
+  if (found.length === 0) return null;
+  const named = (Object.keys(CLASS_WORDS) as GroupKeyClass[]).filter((cls) => found[0].message.includes(CLASS_WORDS[cls]));
+  expect(named).toHaveLength(1);
+  return named[0];
+};
+
+describe('[#23235] groupKeyClassOf — the exported classifier and the rule agree on the rule\'s own fixtures', () => {
+  it('is the function the rule calls, re-exported from the package barrel', () => {
+    expect(groupKeyClassOf).toBe(moduleGroupKeyClassOf);
+  });
+
+  it('agrees with the dataset leg on every declared FieldType, flagged and not — class included', () => {
+    const tally: Record<GroupKeyClass | 'served', number> = { 'structured-json': 0, 'multi-value': 0, served: 0 };
+    for (const fieldType of FieldType.options) {
+      for (const multiple of [false, true]) {
+        const def = multiple ? { type: fieldType, multiple: true } : { type: fieldType };
+        const label = `${fieldType}${multiple ? ', multiple' : ''}`;
+        const exported = groupKeyClassOf(def);
+        expect(exported, label).toBe(classTheRuleNamed(dimensionFindings(dimensionStack(def))));
+        tally[exported ?? 'served']++;
+      }
+    }
+    // Floors on every side, so neither an always-null nor an always-refusing
+    // classifier can make the agreement vacuous.
+    expect(tally['structured-json']).toBe(2 * STRUCTURED_JSON_TYPES.size);
+    expect(tally['multi-value']).toBe(2 * MULTI_OPTION_TYPES.size + MULTI_CAPABLE_TYPES.size);
+    expect(tally.served).toBeGreaterThan(50);
+  });
+
+  it('agrees with the dimension leg on its named fixtures', () => {
+    const fixtures: Array<[Record<string, unknown>, GroupKeyClass | null]> = [
+      [{ type: 'json' }, 'structured-json'],
+      [{ type: 'text' }, null],
+      [{ type: 'multiselect' }, 'multi-value'],
+      [{ type: 'checkboxes' }, 'multi-value'],
+      [{ type: 'tags' }, 'multi-value'],
+      [{ type: 'select', multiple: true }, 'multi-value'],
+      [{ type: 'select' }, null],
+    ];
+    for (const [def, expected] of fixtures) {
+      const label = JSON.stringify(def);
+      expect(groupKeyClassOf(def as { type: string; multiple?: boolean }), label).toBe(expected);
+      expect(classTheRuleNamed(dimensionFindings(dimensionStack(def))), label).toBe(expected);
+    }
+  });
+
+  it('agrees with the cube leg on every column of the cube fixture', () => {
+    const stack = cubeStack({});
+    const ledger = (stack.objects as Array<{ name: string; fields: Record<string, { type: string; multiple?: boolean }> }>)[0];
+    const columns = Object.entries(ledger.fields).filter(([, def]) => typeof def.type === 'string');
+    expect(columns.length).toBeGreaterThanOrEqual(6);
+    const classes = new Set<GroupKeyClass | null>();
+    for (const [column, def] of columns) {
+      const exported = groupKeyClassOf(def);
+      classes.add(exported);
+      expect(exported, column).toBe(classTheRuleNamed(cubeDimensionFindings(cubeStack({ dimensions: { probe: dim(column) } }))));
+    }
+    // The fixture exercises all three answers.
+    expect([...classes].sort()).toEqual([null, 'multi-value', 'structured-json'].sort());
+  });
+
+  it('takes a declared Field verbatim — the shape a consumer holds', () => {
+    const tags: Field = { name: 'labels', type: 'tags' };
+    const stages: Field = { name: 'stages', type: 'select', multiple: true, options: [{ label: 'Open', value: 'open' }] };
+    const stage: Field = { name: 'stage', type: 'select', options: [{ label: 'Open', value: 'open' }] };
+    expect(groupKeyClassOf(tags)).toBe('multi-value');
+    expect(groupKeyClassOf(stages)).toBe('multi-value');
+    expect(groupKeyClassOf(stage)).toBeNull();
   });
 });
 
