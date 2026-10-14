@@ -373,8 +373,9 @@ describe('lintLivenessProperties', () => {
   // shipped ledgers off `@objectstack/spec/package.json` and returns [] when it
   // cannot find them — so "no findings" is also what a BROKEN lint returns, and
   // the silence pin alone would pass on a lint that had stopped reading ledgers
-  // entirely. This asserts it still warns on a property that is still marked
-  // `authorWarn` (`object.externalSharingModel`, the last one in tree), in the
+  // entirely. This asserts it still warns on a property that still warns
+  // (`object.externalSharingModel`, a `dead` tombstone row since #23268 — a
+  // `dead` verdict warns on an unparsed intake without an opt-in), in the
   // same call that authors the retired area gates: same process, same ledger
   // load, one warning and not three.
   it('the area-gate silence is a real verdict, not a lint that stopped loading ledgers', () => {
@@ -603,8 +604,8 @@ describe('lintLivenessProperties', () => {
     // `dashboard` is a registered type with an EMPTY warn map, so nothing inside
     // the dashboard walk can tell a working walk from one that was dropped from
     // TYPE_COLLECTIONS. This authors all five once-warned widget keys and a
-    // property that IS still `authorWarn` (`object.externalSharingModel`, the
-    // last one in tree) in the SAME call: same process, same ledger load, one
+    // property that still warns (`object.externalSharingModel`, a `dead`
+    // tombstone row since #23268) in the SAME call: same process, same ledger load, one
     // warning and not six.
     // Since #16094 the retired keys warn, so this one call also proves the
     // dashboard walk is registered and running: the `colorVariant` silence sits
@@ -665,7 +666,7 @@ describe('lintLivenessProperties', () => {
   // re-subjecting to `navigation.runAction`, and that row has now flipped too.
   // Measured across all 30 shipped ledgers at this commit, EVERY remaining
   // warned entry is top-level (`agent.{lifecycle,memory,guardrails,
-  // structuredOutput}`, `field.relatedListFilter`, `object.externalSharingModel`,
+  // structuredOutput}`, `field.relatedListFilter`, `object.externalSharingModel` (`dead` since #23268),
   // `tool.outputSchema`, `translation.flows`) — and a top-level path never
   // reaches `getNested` at all, because `checkItem` takes the
   // `path.includes('.') ? getNested(…) : [item[path]]` branch. So there is no
@@ -731,8 +732,8 @@ describe('lintLivenessProperties', () => {
     // reading ledgers returns; and with `runAction` live, `app` has no warned
     // nav key left, so nothing inside the app walk can tell a working walk from
     // one that was dropped from TYPE_COLLECTIONS. This authors the flipped key
-    // and a property that IS still `authorWarn` (`object.externalSharingModel`,
-    // the last one in tree) in the SAME call: same process, same ledger load,
+    // and a property that still warns (`object.externalSharingModel`, a `dead`
+    // tombstone row since #23268) in the SAME call: same process, same ledger load,
     // one warning and not two.
     it('the navigation silence is a real verdict, not a lint that stopped loading ledgers', () => {
       const findings = lintLivenessProperties({
@@ -825,7 +826,7 @@ describe('lintLivenessProperties', () => {
     // what a lint holding no ledgers at all returns; and with `relatedListFilter`
     // live the FIELD ledger has no warned row left, so nothing inside the field
     // walk can tell those two apart on its own. This authors the flipped key and
-    // a property that IS still `authorWarn` — `object.externalSharingModel`, on
+    // a property that still warns — `object.externalSharingModel` (`dead`, #23268), on
     // the very object carrying the fields — in the SAME call: one warning and
     // not two, out of a directory that demonstrably resolved.
     //
@@ -867,8 +868,8 @@ describe('lintLivenessProperties', () => {
   // and `authorHint` dropped. REAL LEDGER: contract tests on the two shipped
   // rows. The two warn pins below turned red at that flip ON PURPOSE and are
   // re-subjected to the silence — a `live` row never warns. Each authors the
-  // flipped key beside a property that IS still `authorWarn`
-  // (`object.externalSharingModel`) in the SAME call: one ledger load, one
+  // flipped key beside a property that still warns
+  // (`object.externalSharingModel`, `dead` since #23268) in the SAME call: one ledger load, one
   // warning, so the silence is a reading and not a lint that stopped loading
   // ledgers (which also answers []).
   describe('list-view and dashboard audience gate (#22611 → #22639 — live, enforced by the /meta read gate)', () => {
@@ -883,7 +884,7 @@ describe('lintLivenessProperties', () => {
       return type === 'view' ? ledger.props.list.children.requiredPermissions : ledger.props.requiredPermissions;
     };
     const lit = (findings: { message: string; rule: string }[]) =>
-      expect(ruleOf(findings, 'externalSharingModel')).toBe('liveness-planned-property');
+      expect(ruleOf(findings, 'externalSharingModel')).toBe(LIVENESS_DEAD_PROPERTY);
 
     for (const [type, path, stack] of [
       ['view', 'list.requiredPermissions', { views: [viewWith({ requiredPermissions: GATE })] }],
@@ -988,8 +989,8 @@ describe('lintLivenessProperties', () => {
     // navigation blocks use. `lintLivenessProperties` returns [] both when a walk
     // is broken and when it cannot resolve the shipped ledgers at all, so the
     // silence needs a witness that the ledgers ARE loaded in the same call. Pairs
-    // the clean bundle with `object.externalSharingModel`, still `authorWarn` in
-    // tree: same process, same ledger load, one warning and not two.
+    // the clean bundle with `object.externalSharingModel`, which still warns (a
+    // `dead` tombstone row since #23268): same process, same ledger load, one warning and not two.
     it('the translation silence is a real verdict, not a lint that stopped loading ledgers', () => {
       const findings = lintLivenessProperties({
         objects: [{ name: 'widget', externalSharingModel: 'read' }],
@@ -1225,10 +1226,11 @@ describe('the array fan-out, against a synthetic warn map (#10262)', () => {
 // the `dead` branch, so the finding's MESSAGE told the author to remove
 // something the ledger's own `authorHint`/`note` on the SAME finding said to
 // keep. `field.relatedListFilter`, `object.externalSharingModel` and
-// `translation.flows` are the three shipped rows this hit. Only
-// `object.externalSharingModel` still does: `field.relatedListFilter` and
-// `translation.flows` have both gone `live`, each once its reader reached the
-// `.objectui-sha` pin.
+// `translation.flows` are the three shipped rows this hit. None still does:
+// `field.relatedListFilter` and `translation.flows` have both gone `live`, each
+// once its reader reached the `.objectui-sha` pin, and
+// `object.externalSharingModel` was retired (#23268) — its row is now a `dead`
+// tombstone, so it pins the `dead` branch against the real ledger below.
 //
 // The real ledgers currently have PLANNED rows and EXPERIMENTAL rows, but — as
 // this file's other comments document at length (#2377, #3896, #4509) — no
@@ -1258,8 +1260,8 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
         'zh-CN': { flows: { lead_conversion: { label: '线索转化', screens: { screen_1: { title: '转化详情' } } } } },
       }],
     });
-    // Anti-vacuity: the same call, the same ledger load, still raises the one
-    // planned row in tree, so the silence is a reading and not an unloaded lint.
+    // Anti-vacuity: the same call, the same ledger load, still raises the
+    // object's `dead` tombstone row, so the silence is a reading and not an unloaded lint.
     expect(findings.map((f) => f.message).filter((m) => m.includes('externalSharingModel'))).toHaveLength(1);
     expect(findings.filter((f) => f.where.startsWith('translation bundle'))).toEqual([]);
   });
@@ -1282,25 +1284,29 @@ describe('dead / experimental / planned / live-elsewhere verdicts are distinct, 
   // REAL LEDGER case here: #19187 flipped it `live` once objectui#4664 reached
   // the `.objectui-sha` pin, so it warns about nothing and can pin no verdict.
   // Its silence is pinned in the `field related-list filter (#19187)` block
-  // above, where a half-reverted flip surfaces. The PLANNED branch stays a
-  // contract test on the one row that is still planned,
-  // `object.externalSharingModel` just below.
+  // above, where a half-reverted flip surfaces. The PLANNED branch's default
+  // wording is pinned on the synthetic no-hint entry below; the real-ledger
+  // case below now pins the DEAD branch on `object.externalSharingModel`, the
+  // row #23268 retired.
 
-  it('REAL LEDGER: object.externalSharingModel (planned, no authorHint) — planned rule id, the planned DEFAULT hint, never its ledger note', () => {
+  it('REAL LEDGER: object.externalSharingModel (dead tombstone, no authorHint) — dead rule id, the dead DEFAULT hint, never its ledger note', () => {
     const findings = lintLivenessProperties({ objects: [{ name: 'widget', externalSharingModel: 'read' }] });
     const f = findings.find((x) => x.message.includes('externalSharingModel'));
     expect(f).toBeDefined();
-    expect(f!.rule).toBe('liveness-planned-property');
-    expect(f!.message).not.toContain('dead');
+    expect(f!.rule).toBe(LIVENESS_DEAD_PROPERTY);
+    expect(f!.message).toContain('has no runtime effect (liveness: dead)');
     const ledger = JSON.parse(readFileSync(join(shippedLedgerDir(), 'object.json'), 'utf8'));
     const row = ledger.props.externalSharingModel;
-    // Anti-vacuity: the row is still the leaking shape this pin exists for.
-    expect(row.authorWarn).toBe(true);
+    // Anti-vacuity: the row is the retired shape this pin reads — `dead`, no
+    // opt-in needed, no authorHint, maintainer prose in its note.
+    expect(row.status).toBe('dead');
+    expect(row.authorWarn).toBeUndefined();
     expect(row.authorHint).toBeUndefined();
     expect(row.note).toMatch(/#\d+/);
     expect(f!.hint).toBe(
-      checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", oneEntry({ status: 'planned', authorWarn: true }))[0].hint,
+      checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", oneEntry({ status: 'dead' }))[0].hint,
     );
+    expect(f!.hint).toContain('Remove it');
     expect(f!.hint).not.toMatch(/#\d+/);
     expect(f!.hint).not.toContain(row.note);
   });
@@ -1497,7 +1503,7 @@ describe('authorWarnedProperties', () => {
     // warn this goes red and the CLI's coverage gate is looked at with it.
     expect([...authorWarnedProperties('translation')]).toEqual([]);
     // The positive the empty answer needs, from the same reader in the same
-    // process: the one planned + authorWarn row still in tree.
+    // process: the object's `dead` tombstone row (#23268) — a dead verdict warns.
     expect(authorWarnedProperties('object').has('externalSharingModel')).toBe(true);
   });
 
@@ -2062,14 +2068,16 @@ describe('#21127 — a stack authoring `mapping.connectorSource` lints clean, an
   });
 
   it('REAL LEDGER (the control): a `planned` row with `authorWarn` still warns, in the same call', () => {
-    // `object.externalSharingModel` is `planned` + `authorWarn` in tree — the
-    // legal shape: a consumer is being built, keep the key, it does nothing yet.
+    // `page.print` is `planned` + `authorWarn` in tree — the legal shape: a
+    // consumer is being built, keep the key, it does nothing yet. (The control
+    // was `object.externalSharingModel` until #23268 retired it.)
     const findings = lintLivenessProperties({
-      objects: [{ ...FX_ACCOUNT, externalSharingModel: 'private' }],
+      objects: [FX_ACCOUNT],
+      pages: [{ name: 'invoice_print', print: {} }],
       mappings: [FX_PULL],
     });
     const planned = findings.filter((f) => f.rule === 'liveness-planned-property');
-    expect(planned.map((f) => f.message).join(' | ')).toContain('externalSharingModel');
+    expect(planned.map((f) => f.message).join(' | ')).toContain('`print`');
     expect(findings.filter((f) => f.message.includes('connectorSource'))).toEqual([]);
   });
 });
