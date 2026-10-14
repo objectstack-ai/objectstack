@@ -988,6 +988,76 @@ describe('AuthPlugin', () => {
       expect((manager as any).config.mfaGracePeriodDays).toBe(90);
     });
 
+    // [#23367, ruling A] The API-key lifecycle policy is auth configuration:
+    // the settings keys reach the one policy both readers ask.
+    describe('[#23367] API-key lifecycle policy', () => {
+      it('answers the ruling\'s defaults when nothing is set, with no landing yet', async () => {
+        const { manager } = await bootWithAuthSettings({});
+        expect(manager.resolveApiKeyLifecyclePolicy()).toEqual({
+          defaultExpiryDays: 90,
+          maxExpiryDays: 365,
+          inactivityDays: 90,
+        });
+      });
+
+      it('binds each api_key_* setting, so a changed setting changes the policy', async () => {
+        const { manager } = await bootWithAuthSettings({
+          api_key_default_expiry_days: { value: 30, source: 'global' },
+          api_key_max_expiry_days: { value: 180, source: 'global' },
+          api_key_inactivity_days: { value: 0, source: 'global' },
+          api_key_policy_started_at: { value: '2026-10-14T00:00:00Z', source: 'global' },
+        });
+        expect(manager.resolveApiKeyLifecyclePolicy()).toEqual({
+          defaultExpiryDays: 30,
+          maxExpiryDays: 180,
+          inactivityDays: 0,
+          startedAt: '2026-10-14T00:00:00.000Z',
+        });
+      });
+
+      it('never lets the default outlive the ceiling', async () => {
+        const { manager } = await bootWithAuthSettings({
+          api_key_default_expiry_days: { value: 400, source: 'global' },
+          api_key_max_expiry_days: { value: 365, source: 'global' },
+        });
+        expect(manager.resolveApiKeyLifecyclePolicy().defaultExpiryDays).toBe(365);
+      });
+
+      it('records the landing once, on kernel:bootstrapped, and never over a stored one', async () => {
+        const writes: Array<[string, string, unknown]> = [];
+        const boot = async (stored: { value?: unknown; source: string }) => {
+          hookCapture = createHookCapture();
+          const settings = {
+            getNamespace: vi.fn(async () => ({ values: { api_key_policy_started_at: stored } })),
+            get: vi.fn(async () => stored),
+            set: vi.fn(async (ns: string, key: string, value: unknown) => { writes.push([ns, key, value]); }),
+            subscribe: vi.fn(),
+          };
+          mockContext.hook = hookCapture.hookFn;
+          mockContext.getService = vi.fn((name: string) => {
+            if (name === 'manifest') return { register: vi.fn() };
+            if (name === 'settings') return settings;
+            return undefined;
+          });
+          authPlugin = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' });
+          await authPlugin.init(mockContext);
+          await authPlugin.start(mockContext);
+          await hookCapture.trigger('kernel:ready');
+          await hookCapture.trigger('kernel:bootstrapped');
+        };
+
+        await boot({ source: 'default' });
+        expect(writes).toHaveLength(1);
+        expect(writes[0]![0]).toBe('auth');
+        expect(writes[0]![1]).toBe('api_key_policy_started_at');
+        expect(Number.isNaN(Date.parse(String(writes[0]![2])))).toBe(false);
+
+        writes.length = 0;
+        await boot({ value: '2026-10-14T00:00:00.000Z', source: 'global' });
+        expect(writes).toEqual([]);
+      });
+    });
+
     it('binds account-lockout settings (ADR-0069 D2)', async () => {
       const { manager } = await bootWithAuthSettings({
         lockout_threshold: { value: 5, source: 'global' },

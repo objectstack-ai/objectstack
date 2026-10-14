@@ -129,7 +129,21 @@ interface SettingsReadSurface {
     namespace: string | undefined,
     handler: SettingsChangeHandler,
   ): SettingsUnsubscribe;
+  /**
+   * [#23367] Persist one key — used ONCE, to record when this deployment
+   * started enforcing the API-key lifecycle policy
+   * ({@link AuthPlugin.recordApiKeyPolicyStart}). Optional, like `subscribe`.
+   */
+  set?(
+    namespace: string,
+    key: string,
+    value: unknown,
+    ctx?: Record<string, unknown>,
+  ): Promise<unknown>;
 }
+
+/** [#23367] The auth setting that records when the API-key lifecycle policy took effect. */
+const API_KEY_POLICY_STARTED_AT_KEY = 'api_key_policy_started_at';
 
 /**
  * The `protocol` slot's metadata reader, as the user-import route uses it.
@@ -829,6 +843,18 @@ export class AuthPlugin implements Plugin {
       }
       if (!ql) return;
       scheduleLegacySsoSecretMigration(ql, ctx.logger);
+    });
+
+    // [#23367, ruling A] Record when this deployment started enforcing the
+    // API-key lifecycle policy — ONCE, in the `auth` settings, so the anchor
+    // survives restarts and every node reads the same instant (⛔ never the
+    // process start). On `kernel:bootstrapped`, strictly after every
+    // `kernel:ready` handler, because the settings engine binds from one of
+    // them and a write inside that window is refused
+    // (`SETTINGS_ENGINE_NOT_BOUND`). Registered independently of
+    // `registerRoutes`: the policy is judged wherever keys are admitted.
+    ctx.hook('kernel:bootstrapped', async () => {
+      await this.recordApiKeyPolicyStart(ctx);
     });
 
     // Setup App translations are now loaded by `PlatformObjectsPlugin`
@@ -1634,6 +1660,57 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * [#23367, ruling A] Record the API-key lifecycle policy's landing — the
+   * anchor of the inactivity clock for keys with no recorded use, and of the
+   * one-year grace for keys signed with no expiry — when no value is stored
+   * yet. One place: the `auth` setting `api_key_policy_started_at`, which
+   * `bindAuthSettings` binds into the manager (the write's change event
+   * re-runs that pass, so the anchor is live as soon as it lands).
+   *
+   * ⛔ Never overwrites a stored value: the anchor is written once, by the
+   * first boot that runs the policy, and only an operator moves it.
+   *
+   * A deployment with no settings service has nowhere to keep the anchor, so
+   * the policy runs without one: keys signed with no expiry get no grace date
+   * and keys with no recorded use are not judged idle until they record one.
+   * Functional, and said once at `warn`. A write that FAILS is the durability
+   * half — the deployment believes the policy is armed while the anchor never
+   * landed — so it is said at `error`, with the remedy.
+   */
+  private async recordApiKeyPolicyStart(ctx: PluginContext): Promise<void> {
+    if (!this.authManager) return;
+    let settings: SettingsReadSurface | undefined;
+    try {
+      settings = ctx.getService<SettingsReadSurface>('settings');
+    } catch {
+      settings = undefined;
+    }
+    if (!settings || typeof settings.get !== 'function' || typeof settings.set !== 'function') {
+      ctx.logger.warn(
+        '[auth] API-key lifecycle policy: no settings service, so the date the policy took effect cannot be '
+          + 'recorded. Keys created with no expiry get no one-year grace date, and keys with no recorded use are '
+          + 'not judged inactive until they record one. Register the settings service to record it.',
+      );
+      return;
+    }
+    try {
+      await this.ensureAuthSettingsBound(ctx);
+      const stored = await settings.get('auth', API_KEY_POLICY_STARTED_AT_KEY, {});
+      const explicit = stored && (stored.source ?? 'default') !== 'default';
+      if (explicit && typeof stored?.value === 'string' && stored.value.trim()) return;
+      await settings.set('auth', API_KEY_POLICY_STARTED_AT_KEY, new Date().toISOString(), {});
+    } catch (err: any) {
+      ctx.logger.error(
+        '[auth] API-key lifecycle policy: the date the policy took effect was NOT recorded '
+          + `(auth.${API_KEY_POLICY_STARTED_AT_KEY}: ${String(err?.message ?? err)}). Keys created with no expiry `
+          + 'stay without their one-year grace date, and keys with no recorded use are not judged inactive, while '
+          + 'the rest of the policy runs as configured. Fix: restore the settings store and restart, or set '
+          + `auth.${API_KEY_POLICY_STARTED_AT_KEY} (UTC, ISO 8601) in the settings console.`,
+      );
+    }
+  }
+
+  /**
    * Bind the small open-source auth settings namespace to better-auth config.
    *
    * Only explicit settings values (stored or OS_AUTH_* env overrides) affect
@@ -1832,6 +1909,32 @@ export class AuthPlugin implements Plugin {
         if (isExplicit('mfa_grace_period_days')) {
           const n = Math.floor(Number(values.mfa_grace_period_days));
           if (Number.isFinite(n) && n >= 0) patch.mfaGracePeriodDays = Math.min(90, n);
+        }
+
+        // [#23367, ruling A] The API-key lifecycle policy. Only explicit values
+        // apply, as for every key here: an unset key leaves the manager's own
+        // default, which is the same number the manifest shows (90 / 365 / 90).
+        // The inactivity window takes 0 (off), so it uses a non-negative reader.
+        if (isExplicit('api_key_default_expiry_days')) {
+          const n = asPositiveInt(values.api_key_default_expiry_days);
+          if (n !== undefined) patch.apiKeyDefaultExpiryDays = Math.min(3650, n);
+        }
+        if (isExplicit('api_key_max_expiry_days')) {
+          const n = asPositiveInt(values.api_key_max_expiry_days);
+          if (n !== undefined) patch.apiKeyMaxExpiryDays = Math.min(3650, n);
+        }
+        if (isExplicit('api_key_inactivity_days')) {
+          const n = Math.floor(Number(values.api_key_inactivity_days));
+          if (Number.isFinite(n) && n >= 0) patch.apiKeyInactivityDays = Math.min(3650, n);
+        }
+        // The landing anchor, once recorded (`recordApiKeyPolicyStart` writes it
+        // on the first boot that runs the policy). A value that does not parse
+        // as an instant is ignored: the anchor keeps its standing value rather
+        // than moving every legacy key's grace to a date nobody wrote.
+        if (isExplicit(API_KEY_POLICY_STARTED_AT_KEY)) {
+          const raw = asTrimmedString(values[API_KEY_POLICY_STARTED_AT_KEY]);
+          const ms = raw ? Date.parse(raw) : Number.NaN;
+          if (!Number.isNaN(ms)) patch.apiKeyPolicyStartedAt = new Date(ms).toISOString();
         }
 
         // Session lifetime — days → seconds for better-auth's `session`

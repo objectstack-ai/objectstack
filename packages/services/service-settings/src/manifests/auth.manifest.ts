@@ -361,6 +361,63 @@ const manifest = {
       description:
         'CIDR ranges or exact IPs (one per line, or comma-separated), e.g. 203.0.113.0/24. When set, sign-in from outside these ranges is rejected. Empty = no restriction. Requires a trusted proxy to set X-Forwarded-For.',
     },
+    // [#23367, ruling A] The API-key lifecycle policy. Two readers, one
+    // source: `bindAuthSettings` binds these into the auth service
+    // (`resolveApiKeyLifecyclePolicy`), which the signing door (`POST /keys`)
+    // and the key-admission seam (`resolveApiKeyAdmission`) both ask. Never
+    // gated on `email_password_enabled`: API keys exist under every sign-in
+    // method.
+    {
+      type: 'group',
+      id: 'api_keys',
+      label: 'API keys',
+      required: false,
+      description:
+        'How long personal API keys live. A key that expires, sits unused past the inactivity window, or is revoked is refused with its own error code, and the remedy is always a new key.',
+    },
+    {
+      type: 'number',
+      key: 'api_key_default_expiry_days',
+      label: 'Default key lifetime (days)',
+      required: false,
+      default: 90,
+      min: 1,
+      max: 3650,
+      description:
+        'A key created without an expiry date expires this many days after it is created. Never longer than the maximum lifetime below.',
+    },
+    {
+      type: 'number',
+      key: 'api_key_max_expiry_days',
+      label: 'Maximum key lifetime (days)',
+      required: false,
+      default: 365,
+      min: 1,
+      max: 3650,
+      description:
+        'The furthest expiry date a new key may ask for, counted from its creation. A longer one is refused (API_KEY_EXPIRY_TOO_LONG); exactly this many days is accepted.',
+    },
+    {
+      type: 'number',
+      key: 'api_key_inactivity_days',
+      label: 'Inactivity expiry (days)',
+      required: false,
+      default: 90,
+      min: 0,
+      max: 3650,
+      description:
+        'A key with no recorded use for this many days is refused (API_KEY_INACTIVE). It is not revoked; create a new key. A key never used counts from its creation, or from the policy start below when it is older. 0 turns inactivity expiry off.',
+    },
+    {
+      type: 'text',
+      key: 'api_key_policy_started_at',
+      label: 'Key policy started at',
+      required: false,
+      pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,3})?)?Z$',
+      description:
+        'Recorded automatically (UTC, ISO 8601) the first time the server runs with this policy. Keys created before it with no expiry date expire one year after it; keys with no recorded use count their inactivity from it. Changing it moves both dates for keys not yet given one.',
+    },
+
     {
       type: 'group',
       id: 'social',
