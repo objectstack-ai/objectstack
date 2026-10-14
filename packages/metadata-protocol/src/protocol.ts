@@ -25934,13 +25934,10 @@ export class ObjectStackProtocolImplementation implements
             if (shared.length > 0) {
                 const more = shared.length > 5 ? `; and ${shared.length - 5} more` : '';
                 const err = new Error(
-                    `Uninstall package '${request.packageId}' with keepData (?keepData=true on the REST door, `
-                    + 'keepData: true in process), '
-                    + 'which keeps every object table of the package, or first delete without dropStorage either '
-                    + "this package's row of each object below (its table stays for the other rows) or the "
-                    + "object's other rows (this uninstall then drops the table): "
-                    + 'DELETE /api/v1/meta/object/NAME?package=ID. Nothing was removed. '
-                    + "An uninstall drops an object's table only with the object's last row, and "
+                    `Uninstall package '${request.packageId}' with keepData (?keepData=true; keepData: true in `
+                    + 'process), which keeps all its object tables, or first delete, without dropStorage, its row '
+                    + 'or the other rows of each object below (DELETE /api/v1/meta/object/NAME?package=ID). '
+                    + "Nothing was removed: an uninstall drops an object's table only with the object's last row, and "
                     + (shared.length === 1
                         ? 'an object of this package is'
                         : `${shared.length} objects of this package are`)
