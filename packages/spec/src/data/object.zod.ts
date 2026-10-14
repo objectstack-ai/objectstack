@@ -24,7 +24,8 @@ import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
 import { isMaskedOnReadFieldType } from './masked-field-types';
 // The one-required-master predicate, shared with the v18 stored-row listing
 // (`conversions/refused-shapes.ts`) so the parse and the upgrade's preview
-// refuse one set. Internal: not re-exported by `data/index.ts`.
+// refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
+// field predicate `isControlledByParentMasterField` it counts.
 import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
