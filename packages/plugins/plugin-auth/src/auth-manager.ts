@@ -2115,8 +2115,10 @@ export class AuthManager {
           // order the session gate applies. No resolvable session falls through
           // to the vendor's own 401. `VENDOR_ROLE_SCALAR_ADMIN_PATHS`
           // (`admin-impersonate-endpoint.ts`) classifies every other path the
-          // plugin registers.
-          if (VENDOR_ROLE_SCALAR_ADMIN_PATHS.has(ctx?.path)) {
+          // plugin registers. With no gate feature active the posture holds no
+          // one, so the session read is skipped, as the transport seams skip it
+          // (`isAuthGateActive`, the same caches the computation reads).
+          if (VENDOR_ROLE_SCALAR_ADMIN_PATHS.has(ctx?.path) && this.isAuthGateActive()) {
             const actor = await this.resolveActor(ctx);
             if (actor?.userId) await this.assertActorNotHeld(actor);
             // fall through — the vendor still authorizes everything it owns
