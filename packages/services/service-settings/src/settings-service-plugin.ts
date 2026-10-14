@@ -17,7 +17,7 @@ import {
   type TenancyPostureSource,
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import type { IHttpServer, IDataEngine, IHttpRequest } from '@objectstack/spec/contracts';
+import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
@@ -315,9 +315,9 @@ export class SettingsServicePlugin implements Plugin {
           const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
           // [#23287, ruling C′ item 3] The auth service's per-user posture
           // computation, for the shared key-admission seam.
-          let authService: any;
+          let authService: IAuthService | undefined;
           try {
-            authService = ctx.getService('auth');
+            authService = ctx.getService<IAuthService>('auth');
           } catch {
             authService = undefined;
           }

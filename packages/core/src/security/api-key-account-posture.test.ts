@@ -53,25 +53,28 @@ const PASSWORD_RESET_REQUIRED: AuthGate = {
   message: 'You must change your password before continuing.',
 };
 
+/**
+ * A read-only engine: `find` alone, so nothing on this path CAN write — the
+ * "not a revocation" case below also compares the key row before and after.
+ * The caller's `limit` is held by presence, after the filter.
+ */
 function makeQl(keyRow: Record<string, unknown> = {}) {
   const tables: Record<string, any[]> = {
     sys_api_key: [{ id: 'key_1', key: hashApiKey(KEY), user_id: OWNER, revoked: false, scopes: '[]', ...keyRow }],
     sys_member: [],
     sys_user: [{ id: OWNER }, { id: COOKIE_USER }],
   };
-  const writes: string[] = [];
   return {
-    writes,
+    tables,
     ql: {
       async find(object: string, opts: any) {
         const where = opts?.where ?? {};
-        return (tables[object] ?? []).filter((r) =>
+        const rows = (tables[object] ?? []).filter((r) =>
           Object.entries(where).every(([k, v]) =>
             v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v),
         );
+        return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
       },
-      async update(object: string) { writes.push(object); },
-      async insert(object: string) { writes.push(object); },
     },
   };
 }
@@ -193,7 +196,8 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
   });
 
   it('the refusal is not a revocation: the same key is admitted again once the posture clears', async () => {
-    const { ql, writes } = makeQl();
+    const { ql, tables } = makeQl();
+    const keyRowBefore = JSON.stringify(tables.sys_api_key);
     const { table, source } = postureSource({ [OWNER]: [MFA_REQUIRED] });
     const held = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source });
     expect(held.authGate).toEqual(MFA_REQUIRED);
@@ -202,7 +206,7 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
     const again = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source });
     expect(again.userId).toBe(OWNER);
     expect(again.authGate).toBeUndefined();
-    expect(writes).toEqual([]);
+    expect(JSON.stringify(tables.sys_api_key)).toBe(keyRowBefore);
   });
 
   it('a held cookie beside an admitted key never answers for the key', async () => {

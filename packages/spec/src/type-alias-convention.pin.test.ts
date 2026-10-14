@@ -273,6 +273,7 @@ import type * as M187 from './shared/duration.zod.js';
 import type * as M188 from './ai/build-progress.zod.js';
 // The host fate supplement (ADR-0131 D10's C10 stage) -- new module, next free index.
 import type * as M189 from './system/fate-supplement.zod.js';
+import type * as M190 from './kernel/execution-context.zod.js';
 
 // ---------------------------------------------------------------------------
 // 785 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
@@ -964,6 +965,12 @@ export type Iso_kernel_events_core__EventPriority = Assert<Eq< z.input< typeof M
 
 // kernel/events/handlers.zod.ts
 export type Iso_kernel_events_handlers__EventRouteSchema = Assert<Eq< z.input< typeof M84.EventRouteSchema >, z.infer< typeof M84.EventRouteSchema > >>;
+
+// kernel/execution-context.zod.ts
+// [#23287] The closed posture vocabulary and its scope: string enums, so the
+// author and parsed states coincide.
+export type Iso_kernel_executionContext__AuthGateCodeSchema = Assert<Eq< z.input< typeof M190.AuthGateCodeSchema >, z.infer< typeof M190.AuthGateCodeSchema > >>;
+export type Iso_kernel_executionContext__AuthGateScopeSchema = Assert<Eq< z.input< typeof M190.AuthGateScopeSchema >, z.infer< typeof M190.AuthGateScopeSchema > >>;
 
 // kernel/manifest.zod.ts
 export type Iso_kernel_manifest__InstallModeSchema = Assert<Eq< z.input< typeof M85.InstallModeSchema >, z.infer< typeof M85.InstallModeSchema > >>;

@@ -38,7 +38,7 @@ import { AuthzPostureSchema } from '../security/explain.zod';
  * without a declared scope does not compile.
  */
 export const AuthGateCodeSchema = z.enum(['PASSWORD_EXPIRED', 'PASSWORD_RESET_REQUIRED', 'MFA_REQUIRED']);
-export type AuthGateCode = z.infer<typeof AuthGateCodeSchema>;
+export type AuthGateCode = z.input<typeof AuthGateCodeSchema>;
 
 /**
  * [ADR-0069 · #23287, ruling C′ item 1] What a posture HOLDS.
@@ -50,7 +50,7 @@ export type AuthGateCode = z.infer<typeof AuthGateCodeSchema>;
  *   API keys keep working.
  */
 export const AuthGateScopeSchema = z.enum(['account', 'credential']);
-export type AuthGateScope = z.infer<typeof AuthGateScopeSchema>;
+export type AuthGateScope = z.input<typeof AuthGateScopeSchema>;
 
 /**
  * [ADR-0069 · #23287, ruling C′ items 1 and 2] Each posture code's scope,
