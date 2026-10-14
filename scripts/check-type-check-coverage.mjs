@@ -523,7 +523,7 @@
 // a green check. `spec` alone hid 902 across 272 test files. To onboard: drop
 // the exclusion from tsconfig.json and delete the entry here in the same PR.
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, totalmem } from 'node:os';
 import { join, posix, resolve } from 'node:path';
@@ -3293,6 +3293,18 @@ const SURPLUS_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/6376
 // replay rewrites the outputs it restores, so a refreshed closure reads as
 // current afterwards. The mtime read survives only as the backstop over what
 // those filters do not reach.
+//
+// LOCKED (#23470). That rebuild rewrites `dist/` across the workspace, and a
+// dev's locked test battery in the same tree reads it: measured once, this gate
+// rewrote `packages/spec/dist` and `packages/platform-objects/dist` under a
+// locked vitest run, which answered MODULE_NOT_FOUND on correct sources and
+// cost three re-runs. So the build goes through the shared verify lock's entry
+// point (`scripts/pm/os-verify-lock.sh`) and waits its turn like any other
+// build; the gate's tsc reads after it stay unlocked. Run from inside a hold --
+// `os-verify-lock.sh -c 'pnpm check:type-check-debt'` -- the entry point sees
+// its own ancestor holding the lock and runs the build NESTED, rather than
+// queueing behind itself until its budget runs out. In CI no one else holds the
+// lock, so it is taken at once.
 // ---------------------------------------------------------------------------
 
 /**
@@ -3488,6 +3500,70 @@ function workspaceBuildGraph(packages) {
 }
 
 /**
+ * The shared verify lock's one entry point. The closure build goes through it
+ * (#23470) -- see the LOCKED paragraph of BUILT CLOSURE above.
+ */
+const VERIFY_LOCK_ENTRY = 'scripts/pm/os-verify-lock.sh';
+
+/**
+ * The argv that runs `argv` under the shared verify lock. One composition, so
+ * the self-test can run the very shape the gate runs from inside a hold.
+ *
+ * @param {string[]} argv
+ * @param {string} [lockScript]
+ * @returns {string[]}
+ */
+function verifyLockArgv(argv, lockScript = join(ROOT, VERIFY_LOCK_ENTRY)) {
+  return ['bash', lockScript, '--', ...argv];
+}
+
+/**
+ * The entry point's VERDICT, read the way its own header says to read it: the
+ * LAST line that STARTS `os-verify-lock: VERDICT`, never the bare exit code --
+ * 99 is both "never got a turn" and a command's own 99, and only the line can
+ * tell them apart.
+ *
+ *   ran      the command ran and `exit` is ITS code. `mode` says how: `locked`
+ *            (this call acquired), `nested` (inside a hold its own ancestor
+ *            already has) or `unlocked` (a host with no usable `flock`, the
+ *            lock's declared degradation).
+ *   refused  the command never ran -- a queue timeout, an unusable lock, a
+ *            usage or filter refusal -- or the line carries a word that cannot
+ *            certify it (`batch-last-exit`), or one this reader does not know.
+ *   missing  no VERDICT line at all, which the entry point calls a bug in itself.
+ *
+ * Pure over the text, so the self-test pins every shape without a process.
+ *
+ * @param {string} stderr
+ * @returns {{kind: 'ran', exit: number, mode: 'locked'|'nested'|'unlocked', line: string}
+ *   | {kind: 'refused', line: string} | {kind: 'missing'}}
+ */
+function readLockVerdict(stderr) {
+  const lines = String(stderr ?? '').split(/\r?\n/).filter((l) => l.startsWith('os-verify-lock: VERDICT '));
+  if (lines.length === 0) return { kind: 'missing' };
+  const line = lines[lines.length - 1];
+  const ran = /^os-verify-lock: VERDICT command-exit (\d+)(?: |$)/.exec(line);
+  if (!ran) return { kind: 'refused', line };
+  const mode = line.includes(' · NESTED ')
+    ? 'nested'
+    : line.includes(' · UNLOCKED (declared)') ? 'unlocked' : 'locked';
+  return { kind: 'ran', exit: Number(ran[1]), mode, line };
+}
+
+/**
+ * Run `argv` under the shared verify lock and read its verdict. `env` is the
+ * self-test's door to a private lock file; a real run passes nothing.
+ *
+ * @param {string[]} argv
+ * @param {{lockScript?: string, env?: NodeJS.ProcessEnv}} [options]
+ */
+function runUnderVerifyLock(argv, { lockScript = join(ROOT, VERIFY_LOCK_ENTRY), env = process.env } = {}) {
+  const [cmd, ...args] = verifyLockArgv(argv, lockScript);
+  const run = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', env, maxBuffer: 256 * 1024 * 1024 });
+  return { run, verdict: readLockVerdict(run.stderr) };
+}
+
+/**
  * Rebuild the ledgered packages' dependency closure, with the same command and
  * the same filters `lint.yml` runs immediately before this gate. Parity is the
  * whole point: two different build commands are two different worlds, and the
@@ -3496,17 +3572,57 @@ function workspaceBuildGraph(packages) {
  * turbo decides what is actually out of date by hashing inputs, which is
  * strictly better than the mtime read below and is why this runs FIRST and the
  * freshness check is only a backstop over what it leaves behind.
+ *
+ * It runs UNDER THE SHARED VERIFY LOCK (#23470), and the outcome is read from
+ * the lock's VERDICT line, not from its exit code: the build's own failure, a
+ * turn the lock never gave, and a wrapper that printed no verdict are three
+ * different refusals with three different remedies.
  */
 function refreshBuiltClosure() {
   const bin = join(ROOT, 'node_modules', '.bin', 'turbo');
   if (!existsSync(bin)) {
     refusePrerequisite(`--re-measure needs the workspace's own turbo at ${bin}; run \`pnpm install\` first.`);
   }
+  const lockScript = join(ROOT, VERIFY_LOCK_ENTRY);
+  if (!existsSync(lockScript)) {
+    refusePrerequisite(
+      `--re-measure builds the closure under the shared verify lock, and its entry point ${lockScript} is missing.`,
+    );
+  }
   const args = ['run', 'build', '--filter=./packages/*', '--filter=./packages/*/*'];
-  const run = spawnSync(bin, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  console.log(
+    `  closure build: under the shared verify lock (${VERIFY_LOCK_ENTRY}), because it rewrites \`dist/\` that `
+      + `a locked test run in this tree may be reading. A wait here is a sibling's locked run, not a hang.`,
+  );
+  const { run, verdict } = runUnderVerifyLock([bin, ...args], { lockScript });
   if (run.error) refusePrerequisite(`the closure build could not be run: ${run.error.message}`);
-  if (run.status !== 0) {
-    const output = `${run.stdout ?? ''}${run.stderr ?? ''}`.trim();
+  // The entry point's own lines -- the wait, the hold, the verdict and, on a
+  // host with no usable flock, the disclosure a PR body must carry -- are the
+  // caller's to read, on every outcome.
+  if (run.stderr) process.stderr.write(run.stderr.endsWith('\n') ? run.stderr : `${run.stderr}\n`);
+  if (verdict.kind === 'missing') {
+    refusePrerequisite(
+      `--re-measure cannot run: the closure build's outcome is unknown -- ${VERIFY_LOCK_ENTRY} exited `
+        + `${run.status} and printed no VERDICT line, so nothing here can say whether the closure was built.`,
+    );
+  }
+  if (verdict.kind === 'refused') {
+    refusePrerequisite(
+      `--re-measure cannot run: the closure build never ran, because it did not get a turn on the shared `
+        + `verify lock -- nothing was built and nothing was measured. The lock's verdict:\n  ${verdict.line}\n`
+        + `Set OS_VERIFY_LOCK_SLOT=<name> BEFORE you re-run, so a call that gives up keeps its place in the `
+        + `queue. Or run the whole gate under the lock yourself -- \`bash ${VERIFY_LOCK_ENTRY} -c `
+        + `'pnpm check:type-check-debt'\` -- and the build runs inside that hold without queueing again.`,
+    );
+  }
+  if (verdict.exit !== run.status) {
+    refusePrerequisite(
+      `--re-measure cannot run: the closure build's outcome is unknown -- the lock's VERDICT line says `
+        + `exit ${verdict.exit} and ${VERIFY_LOCK_ENTRY} itself exited ${run.status}:\n  ${verdict.line}`,
+    );
+  }
+  if (verdict.exit !== 0) {
+    const output = `${run.stdout ?? ''}`.trim();
     refusePrerequisite(
       `--re-measure cannot run: the ledgered packages' dependency closure does not build, so there is no `
         + `world to measure against. Fix the build first -- every number in DEBT and TEST_DEBT is measured `
@@ -4932,6 +5048,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'graduation remedy (#11491)': 8,
   'TS6059 wiring (#10779)': 2,
   'population-floor cases': 23,
+  // The closure build's shared-verify-lock contract: 11 verdict-reader rows, 2
+  // wiring pins, 6 real-lock cases on a private lock file.
+  'verify-lock cases (#23470)': 19,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -4940,7 +5059,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the table
 // cross-check in `batteryFloorFailures()` is the other half, and names WHICH
 // label collided.
-const SELF_TEST_BATTERY_FLOOR = 62;
+const SELF_TEST_BATTERY_FLOOR = 65;
 
 // The ledger `batteryFloorFailures()` reads.
 //
@@ -6759,6 +6878,180 @@ function selfTest() {
     }
   }
 
+  // ── THE CLOSURE BUILD TAKES THE SHARED VERIFY LOCK (#23470) ───────────────
+  //
+  // The pin the card asks for: a locked test battery is never handed a
+  // half-rebuilt `dist/` by this gate. Three halves, and only the last two run
+  // processes -- against a PRIVATE lock file in a temp dir, never the fleet's:
+  //
+  //   1. the VERDICT reader, pure, over every line shape the entry point prints;
+  //   2. the WIRING -- `refreshBuiltClosure` spawns nothing itself, so its build
+  //      can only run through `runUnderVerifyLock`;
+  //   3. REAL locks. A stand-in build that writes a marker file must NOT run
+  //      while another locked run holds the lock (the defect: the old build
+  //      spawned turbo directly and ran at once), must pass its own exit code
+  //      out through the verdict, and -- run in the gate's own argv shape from
+  //      INSIDE a hold -- must run NESTED rather than queue behind its holder.
+  const lockVerdictCases = [
+    {
+      label: 'an acquired run reads as ran, with the command\'s own exit code',
+      stderr: 'os-verify-lock: ACQUIRED after 0s — running: turbo run build\nos-verify-lock: VERDICT command-exit 0 · held the lock 9s · waited 0s · ⚠ SHARED-BOX SECONDS',
+      expect: { kind: 'ran', exit: 0, mode: 'locked' },
+    },
+    {
+      label: 'a failed build is a ran with its non-zero code, not a refusal',
+      stderr: 'os-verify-lock: VERDICT command-exit 2 · held the lock 41s · waited 3s',
+      expect: { kind: 'ran', exit: 2, mode: 'locked' },
+    },
+    {
+      label: 'a command that exits 99 itself is a ran 99 -- the LINE, not the code, says "never acquired"',
+      stderr: 'os-verify-lock: VERDICT command-exit 99 · held the lock 2s · waited 0s',
+      expect: { kind: 'ran', exit: 99, mode: 'locked' },
+    },
+    {
+      label: 'a queue timeout never ran',
+      stderr: 'os-verify-lock: VERDICT queue-timeout (exit 99) · never acquired · waited 540s (9m00s) · holder pid 7, held 600s',
+      expect: { kind: 'refused' },
+    },
+    {
+      label: 'an unusable lock never ran',
+      stderr: 'os-verify-lock: VERDICT lock-unusable (exit 99) · never acquired · refused before waiting',
+      expect: { kind: 'refused' },
+    },
+    {
+      label: 'a word that cannot certify the command is refused, not read as a pass',
+      stderr: 'os-verify-lock: VERDICT batch-last-exit 0 · ⚠ NOT A VERDICT ON THE WHOLE COMMAND',
+      expect: { kind: 'refused' },
+    },
+    {
+      label: 'a run inside an ancestor\'s hold reads as nested',
+      stderr: 'os-verify-lock: NESTED — this call runs inside a hold\nos-verify-lock: VERDICT command-exit 0 · NESTED inside the hold of pid 42 · no second acquisition',
+      expect: { kind: 'ran', exit: 0, mode: 'nested' },
+    },
+    {
+      label: 'a host with no usable flock reads as the declared unlocked run',
+      stderr: 'os-verify-lock: VERDICT command-exit 0 · UNLOCKED (declared) · no usable `flock` on this host',
+      expect: { kind: 'ran', exit: 0, mode: 'unlocked' },
+    },
+    {
+      label: 'the LAST verdict line decides -- an inner call\'s line above it is not this run\'s',
+      stderr: 'os-verify-lock: VERDICT command-exit 1 · NESTED inside the hold of pid 42\nos-verify-lock: VERDICT command-exit 0 · held the lock 1s · waited 0s',
+      expect: { kind: 'ran', exit: 0, mode: 'locked' },
+    },
+    {
+      label: 'a verdict quoted mid-line in a build log is not a verdict',
+      stderr: '@objectstack/x:build: os-verify-lock: VERDICT command-exit 0 · held the lock 1s',
+      expect: { kind: 'missing' },
+    },
+    { label: 'no verdict line at all is missing, never a pass', stderr: '', expect: { kind: 'missing' } },
+  ];
+  for (const c of lockVerdictCases) {
+    registerCase('verify-lock cases (#23470)');
+    const got = readLockVerdict(c.stderr);
+    const picked = Object.fromEntries(Object.keys(c.expect).map((k) => [k, got[k]]));
+    if (JSON.stringify(picked) !== JSON.stringify(c.expect)) {
+      failures.push(`readLockVerdict — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  registerCase('verify-lock cases (#23470)');
+  if (/\bspawnSync\(|\bspawn\(|\bexecFileSync\(|\bexecSync\(/.test(refreshBuiltClosure.toString())) {
+    failures.push(
+      'refreshBuiltClosure spawns a process itself — its closure build must go through runUnderVerifyLock, '
+        + 'or it rewrites `dist/` under a locked test run in the same tree (#23470).',
+    );
+  }
+  registerCase('verify-lock cases (#23470)');
+  if (!/runUnderVerifyLock\(\[bin, \.\.\.args\]/.test(refreshBuiltClosure.toString())) {
+    failures.push('refreshBuiltClosure no longer runs the turbo build through runUnderVerifyLock (#23470).');
+  }
+
+  {
+    // ⚠ THE CASES MUST TEST THE LOCK, NOT THE SHELL THEY RUN FROM -- the same
+    // rule the entry point's own --self-test keeps: every knob it reads is
+    // dropped, and the lock file and ledger are this test's own.
+    const lockDir = mkdtempSync(join(tmpdir(), 'objectstack-type-check-lock-'));
+    const lockFile = join(lockDir, 'lock');
+    const lockEnv = { ...process.env, OS_VERIFY_LOCK_FILE: lockFile, OS_VERIFY_LOCK_LEDGER: `${lockFile}.ledger` };
+    for (const knob of ['OS_VERIFY_LOCK_SLOT', 'OS_VERIFY_LOCK_WAIT', 'OS_VERIFY_LOCK_NO_FILTER_CHECK',
+      'OS_VERIFY_LOCK_BOOTS', 'OS_VERIFY_LOCK_SIM_LIVENESS', 'OS_VERIFY_LOCK_HELD_BY', 'OS_VERIFY_LOCK_FLOCK']) {
+      delete lockEnv[knob];
+    }
+    const marker = (name) => join(lockDir, `${name}.ran`);
+    // The stand-in build: proves it ran by writing a marker, then exits `code`.
+    const standIn = (name, code = 0) => [
+      process.execPath, '-e',
+      `require('node:fs').writeFileSync(${JSON.stringify(marker(name))}, ''); process.exit(${code})`,
+    ];
+    const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    let holder = null;
+    try {
+      const free = runUnderVerifyLock(standIn('free'), { env: lockEnv });
+      registerCase('verify-lock cases (#23470)');
+      if (!(free.verdict.kind === 'ran' && free.verdict.exit === 0 && free.run.status === 0 && existsSync(marker('free')))) {
+        failures.push(`verify lock — a free lock must run the build and pass 0 out: got ${JSON.stringify(free.verdict)}, status ${free.run.status}`);
+      }
+      // Whether this host can lock at all is the entry point's own judgement,
+      // read off the run above -- a host with no usable flock runs every command
+      // in its declared unlocked mode, where there is no contention to observe.
+      const hostLocks = free.verdict.kind === 'ran' && free.verdict.mode === 'locked';
+
+      const failed = runUnderVerifyLock(standIn('failed', 7), { env: lockEnv });
+      registerCase('verify-lock cases (#23470)');
+      if (!(failed.verdict.kind === 'ran' && failed.verdict.exit === 7 && failed.run.status === 7)) {
+        failures.push(`verify lock — a failing build's own code must come out through the verdict: got ${JSON.stringify(failed.verdict)}, status ${failed.run.status}`);
+      }
+
+      if (hostLocks) {
+        // A sibling's LOCKED run, holding until this test kills its process
+        // group. The build must not run while it holds -- the card's pin.
+        holder = spawn('bash', [join(ROOT, VERIFY_LOCK_ENTRY), '--', 'sleep', '60'], {
+          env: lockEnv, detached: true, stdio: 'ignore',
+        });
+        for (let waited = 0; !existsSync(`${lockFile}.holder`) && waited < 10000; waited += 50) pause(50);
+        const held = runUnderVerifyLock(standIn('held'), { env: { ...lockEnv, OS_VERIFY_LOCK_WAIT: '1' } });
+        registerCase('verify-lock cases (#23470)');
+        if (existsSync(marker('held'))) {
+          failures.push('verify lock — the build RAN while another locked run held the lock: a locked battery in this tree would read a half-rebuilt `dist/` (#23470)');
+        }
+        registerCase('verify-lock cases (#23470)');
+        if (held.verdict.kind !== 'refused' || !held.verdict.line.includes('queue-timeout')) {
+          failures.push(`verify lock — a build that never got its turn must read as refused (queue-timeout): got ${JSON.stringify(held.verdict)}`);
+        }
+        process.kill(-holder.pid, 'SIGTERM');
+        holder = null;
+      } else {
+        registerCase('verify-lock cases (#23470)');
+        registerCase('verify-lock cases (#23470)');
+        if (free.verdict.mode !== 'unlocked') {
+          failures.push(`verify lock — neither locked nor the declared unlocked mode: ${JSON.stringify(free.verdict)}`);
+        }
+        console.log('  ℹ verify lock: no usable flock on this host — contention is not observable here (declared unlocked mode).');
+      }
+
+      // NESTED: the gate's own argv shape, run from inside a hold on the same
+      // lock, with a 1s budget. Queueing behind its own holder would exit 99.
+      for (let waited = 0; existsSync(`${lockFile}.holder`) && waited < 10000; waited += 50) pause(50);
+      const nested = runUnderVerifyLock(
+        ['env', 'OS_VERIFY_LOCK_WAIT=1', ...verifyLockArgv(standIn('nested'))],
+        { env: { ...lockEnv, OS_VERIFY_LOCK_WAIT: '10' } },
+      );
+      registerCase('verify-lock cases (#23470)');
+      if (!(nested.verdict.kind === 'ran' && nested.verdict.exit === 0 && existsSync(marker('nested')))) {
+        failures.push(`verify lock — the build, run from inside a hold, must run at once: got ${JSON.stringify(nested.verdict)}`);
+      }
+      registerCase('verify-lock cases (#23470)');
+      if (hostLocks && !/VERDICT command-exit 0 · NESTED inside the hold of pid \d+/.test(nested.run.stderr ?? '')) {
+        failures.push('verify lock — the inner call did not say NESTED: it took a second turn instead of running inside its ancestor\'s hold');
+      }
+    } finally {
+      if (holder) {
+        try { process.kill(-holder.pid, 'SIGTERM'); } catch { /* already gone */ }
+      }
+      rmSync(lockDir, { recursive: true, force: true });
+    }
+  }
+
   // THE GENERATED RE-MEASURE PROJECT (#8218). The invariant is one sentence --
   // no path in this object may be relative -- and it is worth a case table
   // because the file is written into `os.tmpdir()`, where a relative path does
@@ -7538,7 +7831,8 @@ function selfTest() {
       `${typeEntryCases.length + closureCases.length + staleCases.length + sourceFileCases.length} ` +
       `built-closure case(s) + ` +
       `${planCases.length + rewriteCases.length + roundTripCases.length} auto-lowering case(s) + ` +
-      `${REFUSING.length * 2 + 1 + exitCodeCases.length + textCases.length} exit-code case(s) hold.`,
+      `${REFUSING.length * 2 + 1 + exitCodeCases.length + textCases.length} exit-code case(s) + ` +
+      `${batterySeen.get('verify-lock cases (#23470)') ?? 0} verify-lock case(s) hold.`,
   );
 
   return SELF_TEST_VERDICT;
