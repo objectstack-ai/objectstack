@@ -407,11 +407,11 @@ function grantsObjectAccess(p: AnyRec): boolean {
 
 /**
  * `security-controlled-by-parent-no-relation` for one object, at `path`. One
- * builder for the declared object and the merged one ({@link
- * extensionMergedCbpFindings}), so the two read in one wording.
+ * site for the declared object and the merged one
+ * ({@link pushExtensionMergedCbpFindings}), so the two read in one wording.
  */
-function cbpNoRelationFinding(objName: string, path: string): SecurityFinding {
-  return {
+function pushCbpNoRelation(findings: SecurityFinding[], objName: string, path: string): void {
+  findings.push({
     severity: 'error',
     rule: SECURITY_CBP_NO_RELATION,
     where: `object "${objName}"`,
@@ -428,16 +428,21 @@ function cbpNoRelationFinding(objName: string, path: string): SecurityFinding {
     hint:
       `Add the master relation, e.g. fields.parent: { type: 'master_detail', reference: '<master_object>', ` +
       `required: true }, or set its own sharingModel: 'private', 'public_read' or 'public_read_write'`,
-  };
+  });
 }
 
 /**
  * `security-controlled-by-parent-ambiguous-relation` for one object, at
- * `path`, naming its candidates. Shared like {@link cbpNoRelationFinding}.
+ * `path`, naming its candidates. Shared like {@link pushCbpNoRelation}.
  */
-function cbpAmbiguousRelationFinding(objName: string, path: string, candidates: CbpRelation[]): SecurityFinding {
+function pushCbpAmbiguousRelation(
+  findings: SecurityFinding[],
+  objName: string,
+  path: string,
+  candidates: CbpRelation[],
+): void {
   const roster = candidates.map((cand) => `"${cand.field}" → ${cand.master}`).join(', ');
-  return {
+  findings.push({
     severity: 'error',
     rule: SECURITY_CBP_AMBIGUOUS_RELATION,
     where: `object "${objName}"`,
@@ -451,10 +456,10 @@ function cbpAmbiguousRelationFinding(objName: string, path: string, candidates: 
     hint:
       `Keep master_detail on the ONE master this object's rows belong to, and declare every other parent ` +
       `as a lookup field`,
-  };
+  });
 }
 
-/** One `objectExtensions` entry as the registry registers it — see {@link extensionMergedCbpFindings}. */
+/** One `objectExtensions` entry as the registry registers it — see {@link pushExtensionMergedCbpFindings}. */
 interface VisibleExtension {
   /** The position of the package that ships it: registration order across packages. */
   carrier: number;
@@ -503,14 +508,13 @@ interface VisibleExtension {
  * a `master_detail` in the declaration or in the merged set — the line that
  * added the second master, or demoted the one.
  */
-function extensionMergedCbpFindings(stack: AnyRec): SecurityFinding[] {
-  const findings: SecurityFinding[] = [];
-  const bodies = packagesOf(stack).map((entry) =>
+function pushExtensionMergedCbpFindings(findings: SecurityFinding[], stack: AnyRec): void {
+  const multi = Array.isArray(stack.packages);
+  const bodies: AnyRec[] = packagesOf(stack).map((entry) =>
     entry.manifest && typeof entry.manifest === 'object' && !Array.isArray(entry.manifest)
       ? (entry.manifest as AnyRec)
       : {},
   );
-  const multi = Array.isArray(stack.packages);
 
   // Target name → its declaration, or `null` when two packages claim it.
   const targets = new Map<string, AnyRec | null>();
@@ -542,58 +546,56 @@ function extensionMergedCbpFindings(stack: AnyRec): SecurityFinding[] {
     entries.forEach((entry: unknown, i: number) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
       const ext = entry as AnyRec;
-      const target = ext.extend;
-      if (typeof target !== 'string' || !targets.get(target)) return;
-      const byCarrier = extensions.get(target) ?? new Map<number, VisibleExtension>();
+      if (typeof ext.extend !== 'string' || !targets.get(ext.extend)) return;
+      const byCarrier = extensions.get(ext.extend) ?? new Map<number, VisibleExtension>();
       byCarrier.set(carrier, {
         carrier,
         path: `${at}objectExtensions[${i}]`,
         priority: typeof ext.priority === 'number' ? ext.priority : 200,
         fields: recordsOf(ext.fields),
       });
-      extensions.set(target, byCarrier);
+      extensions.set(ext.extend, byCarrier);
     });
   };
   if (!multi) collect(stack.objectExtensions, 0, '');
   else bodies.forEach((body, j) => collect(body.objectExtensions, j, `packages[${j}].manifest.`));
 
   for (const [target, byCarrier] of extensions) {
-    const base = targets.get(target);
-    if (!base || owdOf(base) !== 'controlled_by_parent') continue;
-    if (cbpMasterCandidates(base).length !== 1) continue;
+    const obj = targets.get(target);
+    if (!obj || owdOf(obj) !== 'controlled_by_parent') continue;
+    if (cbpMasterCandidates(obj).length !== 1) continue;
 
-    const baseFields = new Map(recordsOf(base.fields).map((f) => [String(f.name ?? '?'), f] as const));
+    const baseFields = new Map(recordsOf(obj.fields).map((f) => [String(f.name ?? '?'), f] as const));
     const merged = new Map(baseFields);
-    const ordered = [...byCarrier.values()].sort((a, b) => a.priority - b.priority || a.carrier - b.carrier);
+    const ordered = [...byCarrier.values()].sort(
+      (left, right) => left.priority - right.priority || left.carrier - right.carrier,
+    );
     const writers = new Map<string, VisibleExtension>();
+    // Per key, how many packages wrote it at the priority of its last writer.
     const tiedWriters = new Map<string, number>();
-    for (const ext of ordered) {
-      for (const field of ext.fields) {
-        const key = String(field.name ?? '?');
-        const previous = writers.get(key);
-        tiedWriters.set(key, previous?.priority === ext.priority ? (tiedWriters.get(key) ?? 1) + 1 : 1);
-        writers.set(key, ext);
-        merged.set(key, field);
+    for (const visible of ordered) {
+      for (const f of visible.fields) {
+        const key = String(f.name ?? '?');
+        const tied = writers.get(key)?.priority === visible.priority;
+        tiedWriters.set(key, tied ? (tiedWriters.get(key) ?? 1) + 1 : 1);
+        writers.set(key, visible);
+        merged.set(key, f);
       }
     }
     if ([...tiedWriters.values()].some((count) => count > 1)) continue;
 
-    const candidates = cbpMasterCandidates({ ...base, fields: [...merged.values()] });
+    const candidates = cbpMasterCandidates({ ...obj, fields: [...merged.values()] });
     if (candidates.length === 1) continue;
     const blamed = new Set<VisibleExtension>();
-    for (const [key, ext] of writers) {
-      if (merged.get(key)?.type === 'master_detail' || baseFields.get(key)?.type === 'master_detail') blamed.add(ext);
+    for (const [key, visible] of writers) {
+      if (merged.get(key)?.type === 'master_detail' || baseFields.get(key)?.type === 'master_detail') blamed.add(visible);
     }
-    for (const ext of ordered) {
-      if (!blamed.has(ext)) continue;
-      findings.push(
-        candidates.length === 0
-          ? cbpNoRelationFinding(target, `${ext.path}.fields`)
-          : cbpAmbiguousRelationFinding(target, `${ext.path}.fields`, candidates),
-      );
+    for (const visible of ordered) {
+      if (!blamed.has(visible)) continue;
+      if (candidates.length === 0) pushCbpNoRelation(findings, target, `${visible.path}.fields`);
+      else pushCbpAmbiguousRelation(findings, target, `${visible.path}.fields`, candidates);
     }
   }
-  return findings;
 }
 
 /**
@@ -702,7 +704,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // who may author it.
     const cbpCandidates = owd === 'controlled_by_parent' ? cbpMasterCandidates(obj) : undefined;
     if (cbpCandidates && cbpCandidates.length === 0) {
-      findings.push(cbpNoRelationFinding(objName, `${objPath}.sharingModel`));
+      pushCbpNoRelation(findings, objName, `${objPath}.sharingModel`);
     }
 
     // ── [#14747 · #23100] controlled_by_parent with TWO OR MORE masters ───
@@ -721,7 +723,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // not: the ambiguity is a property of the document, independent of who may
     // author it.
     if (cbpCandidates && cbpCandidates.length > 1) {
-      findings.push(cbpAmbiguousRelationFinding(objName, `${objPath}.fields`, cbpCandidates));
+      pushCbpAmbiguousRelation(findings, objName, `${objPath}.fields`, cbpCandidates);
     }
 
     // D11: external dial present on any object (system included) must obey
@@ -761,8 +763,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // ── [#23210] the same two rules, on an object's MERGED field set ─────
   // An `objectExtensions` entry of this stack merges into its target at boot,
   // so an object that passes above as declared can run with two required
-  // master_detail fields, or none. See {@link extensionMergedCbpFindings}.
-  findings.push(...extensionMergedCbpFindings(stack));
+  // master_detail fields, or none. See {@link pushExtensionMergedCbpFindings}.
+  pushExtensionMergedCbpFindings(findings, stack);
 
   // [#16108] The object graph, for the FLS field-existence rule below. Built
   // ONCE here rather than per permission set: `indexObjectGraph` walks every
