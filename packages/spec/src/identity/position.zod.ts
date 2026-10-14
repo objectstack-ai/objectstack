@@ -73,14 +73,14 @@ export const PositionSchema = lazySchema(() => strictObject(
   },
   {
   /** Identity */
-  // [#8468] "unique per organization", not bare "unique". This `describe()` is
-  // the source of the generated reference page's `name` row
-  // (`content/docs/references/identity/position.mdx`), so the bare wording
-  // published the installation-wide reading that `sys_position`'s declared
-  // index accidentally materialized — as if it had been intended. The ruling of
-  // 2026-08-13 scopes the name per organization; the text now says so.
+  // [ADR-0131 D3] The catalog is environment-level: there is no
+  // organization-level catalog, so a name is one item in the security catalog
+  // the environment serves. This `describe()` is the source of the generated
+  // reference page's `name` row (`content/docs/references/identity/position.mdx`);
+  // its earlier "unique per organization" (#8468) read the retired
+  // `sys_position` row's index.
   name: SnakeCaseIdentifierSchema.describe(
-    'Position name, unique per organization (lowercase snake_case)',
+    'Position name, unique within the security catalog the environment serves (lowercase snake_case)',
   ),
   label: z.string().describe('Display label (e.g. VP of Sales)'),
 

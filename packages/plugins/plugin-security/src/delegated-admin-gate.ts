@@ -862,9 +862,8 @@ export class DelegatedAdminGate {
       parseMaybeJson(setRowOrDef.admin_scope ?? setRowOrDef.adminScope) ?? undefined;
     if (!carried) return null;
     // NOTE: containment needs resolved subtrees — checked synchronously against
-    // the pre-resolved held scopes; the carried scope's subtree is resolved in
-    // checkStrictContainment for the authoring path. For grant paths we compare
-    // conservatively by definition (name + flags + allowlist).
+    // the pre-resolved held scopes. Grant paths compare conservatively by
+    // definition (name + flags + allowlist).
     for (const s of held) {
       if (this.definitionContainsStrictly(s.scope, carried)) return null;
     }

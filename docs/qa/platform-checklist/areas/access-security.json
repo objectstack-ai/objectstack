@@ -2558,7 +2558,7 @@
     },
     {
       "id": "access-security.packaged-permission-set-lifecycle",
-      "title": "Packaged permission-set lifecycle (#11513) survives ADR-0126 unchanged: locked base at the data door, clone-to-customize with every facet carried, `active` row-state flip — and NONE of it writes a sys_metadata_activation row",
+      "title": "Packaged permission-set lifecycle (#11513) at the retired sys_permission_set data door: locked base, clone-to-customize with every facet carried, `active` row-state flip — and NONE of it wrote a sys_metadata_activation row",
       "since": "v16",
       "status": "retired",
       "retiredReason": "C3 stage 8 (ADR-0131 D3) retired the sys_permission_set row object: its data door, its Activate / Deactivate / Clone row actions and its `active` column are gone. A packaged set's base stays locked at the metadata door, a copy is made with POST /api/v1/security/permission-sets/:name/clone, and a set is switched off in the activation ledger (sys_metadata_activation).",
@@ -2642,7 +2642,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts (provenance classifier, fail-closed verdicts, the clone action's payload pinned facet-by-facet against the params list — pin 6) + packaged-permission-set-restore-leg.test.ts; the live enforcement flip and the no-ledger-row wall stay manual"
+        "ref": "packages/plugins/plugin-security/src/packaged-permission-set-lock.test.ts and packaged-permission-set-lock-gate.test.ts (provenance classifier, fail-closed verdicts, the metadata-door lock that survives the data door's retirement); the data-door legs this item described, the clone action's pin 6 and the restore-leg suite, retired with C3 stages 7a and 8"
       },
       "source": [
         "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (classifier + both refusals; the SchemaRegistry-not-managed_by decision)",

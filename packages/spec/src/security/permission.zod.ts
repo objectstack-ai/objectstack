@@ -807,21 +807,20 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
       'believed a capability boundary was declared that the runtime never saw.',
   },
   {
-  // [#8554] "unique per organization", not bare "unique". This `describe()` is
-  // the SOURCE of the generated reference page
-  // (`content/docs/references/security/permission.mdx`), so the bare wording had
-  // already reached authors as published contract — the same route the
-  // `sys_position` accident took (#8468). `sys_permission_set` is tenant-scoped
-  // and the declared index is now `unique: 'organization'`.
-  /** Permission set name, unique per organization */
-  name: SnakeCaseIdentifierSchema.describe('Permission set name, unique per organization (lowercase snake_case)'),
+  // [ADR-0131 D3] The catalog is environment-level: there is no
+  // organization-level catalog, so a name is one item in the security catalog
+  // the environment serves. This `describe()` is the SOURCE of the generated
+  // reference page (`content/docs/references/security/permission.mdx`); its
+  // earlier "unique per organization" (#8554) read the retired
+  // `sys_permission_set` row's index.
+  /** Permission set name, unique within the security catalog the environment serves */
+  name: SnakeCaseIdentifierSchema.describe('Permission set name, unique within the security catalog the environment serves (lowercase snake_case)'),
   
   /** Display label */
   label: z.string().optional().describe('Display label'),
 
   /**
-   * Human-readable description, shown in Setup and read from the authored set
-   * through the security catalog. The built-in default sets have always authored it —
+   * Human-readable description of the set. The built-in default sets have always authored it —
    * but until #4001 the schema could not represent it, so it was silently
    * stripped at parse (the ADR-0078 §3 inverse-drift class); the `.strict()`
    * gate surfaced the gap and it is now declared.

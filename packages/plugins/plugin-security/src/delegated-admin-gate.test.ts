@@ -283,6 +283,87 @@ describe('DelegatedAdminGate — assignments (sys_user_position)', () => {
   });
 });
 
+describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () => {
+  it('delegate grants an allowlisted set to a user inside the subtree; granted_by stamped', async () => {
+    const row: any = { user_id: 'u_east_1', permission_set: 'sales_user' };
+    await expect(h.gate.assert({
+      object: 'sys_user_permission_set', operation: 'insert', data: row, context: h.ctxOf('delegate'),
+    })).resolves.toBeUndefined();
+    expect(row.granted_by).toBe('u_delegate');
+  });
+
+  it('denies grants to users outside the subtree', async () => {
+    await expect(h.gate.assert({
+      object: 'sys_user_permission_set', operation: 'insert',
+      data: { user_id: 'u_west_1', permission_set: 'sales_user' },
+      context: h.ctxOf('delegate'),
+    })).rejects.toThrow(/outside the delegated subtree/);
+  });
+
+  it('denies non-allowlisted sets — including to the delegate themselves', async () => {
+    await expect(h.gate.assert({
+      object: 'sys_user_permission_set', operation: 'insert',
+      data: { user_id: 'u_delegate', permission_set: 'finance_admin' },
+      context: h.ctxOf('delegate'),
+    })).rejects.toThrow(/not in the scope's allowlist/);
+  });
+
+  it('granting a set that carries an adminScope requires STRICT containment (equal scope refused)', async () => {
+    // sub_admin carries the delegate's own EXACT scope — lateral propagation banned.
+    await expect(h.gate.assert({
+      object: 'sys_user_permission_set', operation: 'insert',
+      data: { user_id: 'u_east_1', permission_set: 'sub_admin' },
+      context: h.ctxOf('delegate'),
+    })).rejects.toThrow(/not strictly contained/);
+  });
+
+  // [ADR-0131 D4] A stored grant's pre-image is judged by the set it NAMES
+  // (`permission_set`), read from the catalog by that name; an insert, or an
+  // update that re-points the id, is judged by the id it writes, as before.
+  describe('[ADR-0131 D4] the pre-image is judged by the name the grant holds', () => {
+    const storedGrant = (row: Record<string, unknown>) => {
+      for (const set of h.tables.sys_permission_set) set.organization_id ??= null;
+      h.tables.sys_user_permission_set = [{ id: 'g1', user_id: 'u_east_1', ...row }];
+    };
+    const remove = () => h.gate.assert({
+      object: 'sys_user_permission_set', operation: 'delete',
+      options: { where: { id: 'g1' } }, context: h.ctxOf('delegate'),
+    });
+
+    it('a grant naming an allowlisted set may be revoked by the delegate — whatever its id says', async () => {
+      storedGrant({ permission_set_id: 'ps_fin', permission_set: 'sales_user' });
+      await expect(remove()).resolves.toBeUndefined();
+    });
+
+    it('a grant naming a set outside the allowlist is refused — whatever its id says', async () => {
+      storedGrant({ permission_set_id: 'ps_sales', permission_set: 'finance_admin' });
+      await expect(remove()).rejects.toThrow(/'finance_admin' is not in the scope's allowlist/);
+    });
+
+    it('a grant that names NO set is refused: the delegate cannot be shown to hold authority over it', async () => {
+      storedGrant({ permission_set_id: 'ps_sales', permission_set: null });
+      await expect(remove()).rejects.toThrow(/names no permission set/);
+    });
+
+    it('a grant naming a set the security catalog does not hold is refused', async () => {
+      storedGrant({ permission_set_id: 'ps_sales', permission_set: 'sales_user_retired' });
+      await expect(remove()).rejects.toThrow(/is not in the security catalog/);
+    });
+
+    it('an update keeping the set is judged by the stored name; one re-pointing the id by the new id', async () => {
+      storedGrant({ permission_set_id: 'ps_sales', permission_set: 'sales_user' });
+      await expect(h.gate.assert({
+        object: 'sys_user_permission_set', operation: 'update',
+        data: { id: 'g1', reason: 'renewed' }, context: h.ctxOf('delegate'),
+      })).resolves.toBeUndefined();
+      await expect(h.gate.assert({
+        object: 'sys_user_permission_set', operation: 'update',
+        data: { id: 'g1', permission_set: 'finance_admin' }, context: h.ctxOf('delegate'),
+      })).rejects.toThrow(/'finance_admin' is not in the scope's allowlist/);
+    });
+  });
+});
+
 // ── [ADR-0091 D3] Self-service delegation of duty ──────────────────────────
 
 const T0 = Date.parse('2026-07-01T00:00:00Z');
@@ -938,9 +1019,6 @@ describe('DelegatedAdminGate — granted_by is the writer on every admitted inse
   it('a governed object with no granted_by column is never given one', async () => {
     const member: any = { user_id: 'u_x', organization_id: 'org_1', role: 'admin' };
     await expect(h.gate.assert({ object: 'sys_member', operation: 'insert', data: member, context: h.ctxOf('tenant_admin') })).resolves.toBeUndefined();
-    const binding: any = { position_id: 'pos_sales', permission_set_id: 'ps_sales' };
-    await expect(h.gate.assert({ object: 'sys_position_permission_set', operation: 'insert', data: binding, context: h.ctxOf('tenant_admin') })).resolves.toBeUndefined();
     expect('granted_by' in member).toBe(false);
-    expect('granted_by' in binding).toBe(false);
   });
 });

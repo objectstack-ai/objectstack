@@ -1254,7 +1254,7 @@ export const ERROR_CODE_LEDGER = {
     // its casing and every other package's rows are unchanged.
     // `PackagedPermissionSetLockedError` and
     // `PackagedPermissionSetProvenanceUnknownError`
-    // (`packaged-permission-set-lock.ts`), 403: a data-path write targets a
+    // (`packaged-permission-set-lock.ts`), 403: a metadata-door save targets a
     // package-declared permission set, or one whose provenance cannot be
     // determined (fail-closed). Deliberately the SAME envelope
     // `@objectstack/metadata-protocol`'s ADR-0005 tier gate answers for this
