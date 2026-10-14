@@ -20,11 +20,13 @@
  *
  *   locateReviewOfRecord     the record on this head, on the PR thread or its card
  *   deliveredCardNumber      which card thread a pull request's record may sit on
- *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it
+ *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it — at the tier its face maps to
+ *   reviewFace / REVIEW_FACES which face made the review owed, and the ONE tier NAME it stands at
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
- *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs
+ *   unexplainedPathsBetween  the pure-regeneration test a carried record re-runs, prose arm included
+ *   isOutsideReviewSurface   the prose faces a head may move on and keep its record
  *   contractReviewTemplateLines / contractReviewRecordLines   what `--template` prints
  *   contractReviewBriefLines what `--brief-template` prints — the brief a seat hands its reviewer
  *
