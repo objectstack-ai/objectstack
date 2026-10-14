@@ -59,6 +59,7 @@ import { applyManagedWriteDenies } from './managed-object-write-denies.js';
 import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
+import { registerSecurityCatalogEcho, echoStoredSecurityCatalogOverlays } from './security-catalog-echo.js';
 import {
   reconcileAudienceBindingSuggestions,
   listAudienceBindingSuggestions,
@@ -4411,8 +4412,9 @@ export class SecurityPlugin implements Plugin {
     // retired, so no `sys_position`, `sys_permission_set` or `sys_capability`
     // write reaches the engine at all. A position, permission set or
     // capability is written through the metadata door alone, which registers
-    // it in the security catalog itself and, under a wall, refuses a tenant
-    // with the same verdict (`walledCatalogWriteVerdict`).
+    // it in the security catalog (on an environment kernel through the echo
+    // `runBootstrap` wires, `security-catalog-echo.ts`) and, under a wall,
+    // refuses a tenant with the same verdict (`walledCatalogWriteVerdict`).
 
     // Defer platform admin bootstrap until all plugins finish starting —
     // sys_user / sys_user_permission_set objects must be registered (by
@@ -4424,6 +4426,11 @@ export class SecurityPlugin implements Plugin {
     // [#22801 → A] Same once-guard for the `permission` mutation listener
     // that re-derives `everyone` (registered in `runBootstrap`).
     let everyoneMutationWired = false;
+    // The security catalog's echo is wired once and its boot pass runs once,
+    // though runBootstrap re-runs (e.g. after the first user insert): the
+    // projector replaces idempotently, and the pass would only repeat work.
+    let catalogEchoWired = false;
+    let catalogEchoBooted = false;
     // [#3325 / ADR-0092] Union the better-auth managed-object write denies into
     // the default sets from the LIVE registry, replacing the hand-maintained
     // baseline as the source of truth (a newly-declared identity table is then
@@ -4508,9 +4515,30 @@ export class SecurityPlugin implements Plugin {
               },
             );
           }
-          // [ADR-0131 D3, C3 stage 8] No `permission` mutation projector: the
-          // metadata door's own registry write-through puts a saved set in the
-          // security catalog, and no row mirrors it.
+          // [ADR-0131 D3] The security catalog's echo: the awaited mutation
+          // projector for `permission` and `position`, then one pass over the
+          // stored env-wide overlays. On an ENVIRONMENT kernel the metadata
+          // door registers no stored row in the engine registry, so the
+          // catalog finds a metadata-door set or position only in the
+          // metadata service, and this is what puts it there. It writes no
+          // row (C3 stage 8 retired them) and decides nothing. Before the
+          // suggestion reconcile below, which reads the catalog. See
+          // `security-catalog-echo.ts`.
+          if (!catalogEchoWired) {
+            catalogEchoWired = registerSecurityCatalogEcho(protocol, {
+              ql, metadata: this.metadata, logger: ctx.logger,
+            });
+          }
+          if (catalogEchoWired && !catalogEchoBooted) {
+            catalogEchoBooted = true;
+            try {
+              await echoStoredSecurityCatalogOverlays(protocol, {
+                ql, metadata: this.metadata, logger: ctx.logger,
+              });
+            } catch (e) {
+              ctx.logger.warn('[security] the security-catalog echo of stored overlays failed at boot', { error: (e as Error).message });
+            }
+          }
           // [#3050] OWD posture authoring gate — pre-persistence veto on
           // runtime-authored `object` bodies: env-tighten-only over packaged
           // declarations (ADR-0086 D1) + external ≤ internal (ADR-0090 D11).
