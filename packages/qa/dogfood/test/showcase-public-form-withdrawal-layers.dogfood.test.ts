@@ -16,16 +16,13 @@
 // ceremony (`os migrate organization-ownership --apply`) carries every
 // organization-layer withdrawal onto the environment, fail-closed (rulings A
 // on #22008 and #22011; the carry is pinned in the cli's
-// `organization-ownership-apply.test.ts`). No door can write an organization
-// row any more, so this file PLANTS legacy organization rows at rest in
-// `sys_metadata`, as a door left them before the retirement, and pins:
+// `organization-ownership-apply.test.ts`). Since ADR-0131 D7 `sys_metadata`
+// declares no organization column, so no organization row can exist to be
+// read, and this file pins:
 //
-//   - a legacy organization overlay that keeps the form open does not survive
-//     an environment withdrawal: both anonymous doors answer
-//     `404 FORM_NOT_FOUND` and nothing lands;
-//   - ⭐ a legacy organization row is read by no door: its withdrawal no longer
-//     closes a form open environment-wide — it is the ceremony's to carry;
-//   - the admin's save with an active organization is environment-wide;
+//   - the shipped form is served to both anonymous doors;
+//   - the admin's save with an active organization is environment-wide, and its
+//     withdrawal closes both doors (`404 FORM_NOT_FOUND`) with nothing landing;
 //   - open environment-wide (control): both doors accept, and the row lands in
 //     the organization the doors resolve.
 
@@ -78,23 +75,6 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
     return { status: res.status, json: (await res.json()) as Record<string, any> };
   };
 
-  /** Plant a LEGACY organization-scoped overlay, as a door wrote one before ADR-0131 D6. */
-  const plantLegacyOrgOverlay = async (allowAnonymous: boolean) => {
-    const item = structuredClone(published);
-    item.config.sharing.allowAnonymous = allowAnonymous;
-    const at = { type: 'view', name: 'showcase_inquiry.contact', organization_id: organizationId };
-    const now = new Date().toISOString();
-    const [existing] = await ql.find('sys_metadata', { where: { ...at, state: 'active' }, context: SYS });
-    if (existing) {
-      await ql.update('sys_metadata', { metadata: JSON.stringify(item), updated_at: now }, { where: { id: existing.id }, context: SYS });
-    } else {
-      await ql.insert('sys_metadata', {
-        ...at, package_id: null, state: 'active', version: 1, checksum: null,
-        created_at: now, updated_at: now, metadata: JSON.stringify(item),
-      }, { context: SYS });
-    }
-  };
-
   const saved = async (allowAnonymous: boolean) => {
     const r = await save(allowAnonymous);
     expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -123,28 +103,19 @@ describe('showcase: a public form withdrawal at any metadata layer holds', () =>
     await stack?.stop();
   });
 
-  it('PRECONDITION: with a legacy organization overlay that keeps the form open, the form is served', async () => {
-    await plantLegacyOrgOverlay(true);
+  it('PRECONDITION: the shipped form is served', async () => {
     expect(await probe()).toEqual(OPEN);
   });
 
-  it('withdrawn by an admin WITH an active organization: the save is environment-wide, and it closes the form beneath the open legacy overlay', async () => {
+  it('withdrawn by an admin WITH an active organization: the save is environment-wide, and it closes the form', async () => {
     await scope(organizationId);
     expect(await saved(false), 'an org-active admin\'s save is environment-wide (ADR-0131 D6)').toMatch(/env-wide/);
     expect(await probe()).toEqual(CLOSED);
   });
 
-  it('⭐ a legacy organization WITHDRAWAL is read by no door: the form open environment-wide is served until the ceremony carries it (ADR-0131 C7)', async () => {
-    await scope(null);
-    expect(await saved(true)).toMatch(/env-wide/);
-    await plantLegacyOrgOverlay(false);
-    expect(await probe()).toEqual(OPEN);
-  });
-
   it('open environment-wide (control): both doors accept and the row lands in the organization', async () => {
     await scope(organizationId);
     expect(await saved(true)).toMatch(/env-wide/);
-    await plantLegacyOrgOverlay(true);
     const marker = `layer_probe_${probeSeq + 1}`;
     expect(await probe()).toEqual(OPEN);
     const [row] = await ql.find('showcase_inquiry', { where: { name: marker }, context: SYS });
