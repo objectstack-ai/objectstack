@@ -137,9 +137,10 @@ describe('[#23245] HttpDispatcher.enforceAuthGate — an active gate that cannot
     });
 
     it('CASE 1 — OUTAGE: an active gate whose session read fails rejects with the branded 503, and the member never runs', async () => {
-        // SUPERSEDED, quoted — what origin/main answered on this fixture: the
-        // read's rejection became "no session", the gate admitted, and
-        //     expect(member.handleRedeliver).toHaveBeenCalledTimes(1);   // served
+        // What origin/main answered on this fixture: the read's rejection
+        // became "no session", the gate admitted, and `dispatch()` RESOLVED —
+        // the request went on to the route exactly as the gate-off control
+        // (CASE 2, same backend) still does.
         const { dispatcher, member } = harness({ gateActive: true, backend: 'outage' });
         const err: any = await rejectionOf(dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(request())));
         expect(err, '`dispatch()` RESOLVED — the active gate failed open on the outage').toBeDefined();
