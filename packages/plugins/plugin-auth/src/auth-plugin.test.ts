@@ -1038,7 +1038,7 @@ describe('AuthPlugin', () => {
             if (name === 'manifest') return { register: vi.fn() };
             if (name === 'settings') return settings;
             return undefined;
-          });
+          }) as unknown as typeof mockContext.getService;
           authPlugin = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' });
           await authPlugin.init(mockContext);
           await authPlugin.start(mockContext);

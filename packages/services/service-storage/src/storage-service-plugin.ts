@@ -31,6 +31,7 @@ import type {
   ISecurityService,
   IStorageService,
   IFileAccessDelegate,
+  ApiKeyLifecyclePolicy,
 } from '@objectstack/spec/contracts';
 import {
   OBSERVABILITY_METRICS_SERVICE,
@@ -1165,6 +1166,8 @@ function buildAuthSessionResolver(
 type GateAuthService = {
   isAuthGateActive?(): boolean;
   resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
+  /** [#23367] The API-key lifecycle policy (`IAuthService.resolveApiKeyLifecyclePolicy`). */
+  resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy;
 };
 
 /**
