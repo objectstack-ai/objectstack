@@ -38,6 +38,7 @@ import {
   REACTIONS_COLUMN,
   readCommentReactionsConversion,
 } from '../../utils/comment-reactions-conversion.js';
+import { ceremonyOrganizationColumnDrops, readOrganizationOwnershipMarker } from '../../utils/organization-ownership-drop-gate.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -476,6 +477,54 @@ export default class MigrateApply extends Command {
           printSuccess(
             `sys_comment.reactions: its reactions were converted and verified (${conversion.flag?.verified_at}) — `
             + 'the drop may proceed.',
+          );
+        }
+      }
+
+      // ── [#23429 E1, ADR-0131 D10 item 5] REFUSE AN organization_id DROP AHEAD OF THE CEREMONY ──
+      //
+      // The third sibling, placed by the same rule: below the report, above the
+      // confirmation prompt, above both writes. A v18 runtime declares no
+      // organization column on the ceremony's column-drop tables, so the drift
+      // report offers each physical one for `--allow-destructive`. Dropped here
+      // first, the ceremony never promotes or reports the legacy organization
+      // rows, they become environment rows, and the v18 boot refusal finds no
+      // column left to refuse over — the escape hatch D10 item 5 forbids. So
+      // the drop waits for the ceremony's verified marker; no flag stands it
+      // down (`utils/organization-ownership-drop-gate.ts`).
+      const organizationDrops = ceremonyOrganizationColumnDrops(intended);
+      if (organizationDrops.length > 0) {
+        const engine = (stack.kernel as { getService?: (n: string) => unknown }).getService?.call(
+          stack.kernel,
+          'objectql',
+        );
+        const marker = await readOrganizationOwnershipMarker(engine as never);
+        if (!marker.verified) {
+          const detail = marker.flag
+            ? `The last run of "os migrate organization-ownership --apply" (${marker.flag.last_run_at}) is not verified `
+              + `(${marker.flag.blocking} blocking item(s)).`
+            : 'No run of "os migrate organization-ownership --apply" is recorded on this database.';
+          if (flags.json) {
+            await emitJson({
+              ...target, created: [], applied: [], skipped: drift, pending,
+              message: 'refused_organization_ownership_unmigrated', tables: organizationDrops, detail, marker: marker.flag,
+            }, 1, { compact: true });
+            return;
+          }
+          printError(
+            `Refusing to drop organization_id from ${organizationDrops.join(', ')}: the organization-ownership ceremony `
+            + `owns that drop, and it has not verified on this database. ${detail} Dropping the column first would turn `
+            + 'every legacy organization row into an environment row without the ceremony\'s promotion or report. Run '
+            + '"os migrate organization-ownership" to review its plan, then "os migrate organization-ownership --apply"; '
+            + 'it drops these columns itself once it verifies.',
+          );
+          this.exit(1);
+          return;
+        }
+        if (!flags.json) {
+          printSuccess(
+            `organization_id on ${organizationDrops.join(', ')}: the organization-ownership ceremony verified `
+            + `(${marker.flag?.verified_at}) — the drop may proceed.`,
           );
         }
       }
