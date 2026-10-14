@@ -171,7 +171,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { gitFreeEnv } from './git-env.mjs';
 import { globToRegExp } from './glob-match.mjs';
@@ -1260,10 +1260,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'proxy-rearm': 10,
   qualifier: 40,
   spellings: 56,
+  retry: 42,
 });
 
 /** Deleting a roster entry silences its floor, so the roster's size is pinned too. */
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 /**
  * ⭐ THE ONE ENUMERATION OF CITATION SPELLINGS (#20636). Every spelling this
@@ -1354,16 +1355,33 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  */
 const SELF_TEST_VERDICT = 'check-issue-citations self-test reached its verdict';
 
-/** A `fetch` stand-in over a declared routing table. No network, ever. */
+/**
+ * A connection failure in the shape node 22's fetch throws it: a `TypeError`
+ * whose `cause.code` names the failure (measured -- see `BOARD_READ_RETRY`).
+ */
+function connectionFailure(code, message = 'fetch failed') {
+  const detail = code === 'UND_ERR_SOCKET' ? 'other side closed' : `read ${code}`;
+  return new TypeError(message, { cause: Object.assign(new Error(detail), { code }) });
+}
+
+/**
+ * A `fetch` stand-in over a declared routing table. No network, ever. A reply
+ * may `throws` (a code, spelled as `connectionFailure` builds it, or an error
+ * to throw as-is) or `bodyThrows` (the same, raised while the body is read).
+ */
 function stubFetch(routes) {
   return async (url) => {
     for (const [pattern, reply] of routes) {
       if (!pattern.test(url)) continue;
       const r = typeof reply === 'function' ? reply(url) : reply;
+      if (r.throws) throw typeof r.throws === 'string' ? connectionFailure(r.throws) : r.throws;
       return {
         ok: (r.status ?? 200) < 400,
         status: r.status ?? 200,
-        json: async () => r.body,
+        json: async () => {
+          if (r.bodyThrows) throw typeof r.bodyThrows === 'string' ? connectionFailure(r.bodyThrows, 'terminated') : r.bodyThrows;
+          return r.body;
+        },
         headers: { get: (k) => (r.headers ?? {})[k.toLowerCase()] ?? null },
       };
     }
@@ -1691,6 +1709,219 @@ export async function selfTest() {
       'every "not a citation" row must say why');
   }
 
+  /* 10. THE RETRY (#23361). A transient board read is retried inside a bounded
+   *     budget, and everything else keeps its exact old meaning. ⛔ The card's
+   *     hardest line closes the battery: no scripted failure lets an unread
+   *     board pass. No case sleeps -- the backoff is observed through `sleep`. */
+  battery('retry');
+  {
+    const OWN = 'o/r';
+    const P = BOARD_READ_RETRY;
+    const recorder = () => {
+      const slept = [];
+      return { slept, sleep: async (ms) => { slept.push(ms); }, budget: boardReadBudget({ sleep: async (ms) => { slept.push(ms); } }) };
+    };
+    /* A reply sequence for one route: each call takes the next reply, the last one sticks. */
+    const seq = (...replies) => {
+      let calls = 0;
+      const next = () => replies[Math.min(calls++, replies.length - 1)];
+      next.calls = () => calls;
+      return next;
+    };
+    const rejection = async (promise) => { try { await promise; return null; } catch (err) { return err; } };
+    const HEAD = { body: [{ number: 500 }] };
+    const LIVE_100 = { body: { number: 100 } };
+    const probe = (wanted, budget, routes) => probeBoard(wanted, { ownerRepo: OWN, token: '', budget, fetchImpl: stubFetch(routes) });
+
+    /* The predicate, against the shapes measured on node 22.22.0. */
+    check(retryableNetworkCode(connectionFailure('ECONNRESET')) === 'ECONNRESET', 'a reset (`fetch failed`, cause ECONNRESET) is a named connection failure');
+    check(retryableNetworkCode(connectionFailure('UND_ERR_SOCKET', 'terminated')) === 'UND_ERR_SOCKET', 'a socket the peer closed mid-body (`terminated`, cause UND_ERR_SOCKET) is one too');
+    check(retryableNetworkCode(new TypeError('fetch failed', { cause: new Error('x', { cause: Object.assign(new Error('y'), { code: 'ECONNRESET' }) }) })) === 'ECONNRESET',
+      'the code is found down the cause chain, not only one level deep');
+    check(retryableNetworkCode(connectionFailure('ECONNREFUSED')) === null && retryableNetworkCode(connectionFailure('ENOTFOUND')) === null,
+      '⛔ a refused connection and a failed lookup are route answers, not blips: not named, not retried');
+    check(retryableNetworkCode(new Error('plain')) === null && retryableNetworkCode(null) === null, 'an error with no code, and no error at all, name nothing');
+
+    /* The card's case: one transient 500, then a 200, resolves -- on both reads the measured failures hit. */
+    {
+      const { slept, budget } = recorder();
+      const head = seq({ status: 500 }, HEAD);
+      const board = await probe([100], budget, [[/per_page=1/, head], [/issues\/100$/, LIVE_100]]);
+      check(board.frontier === 500 && board.has(100) && head.calls() === 2 && slept.join() === '500',
+        '⭐ one transient 500 on the HEAD probe, then a 200, RESOLVES: one retry after one 500 ms backoff');
+    }
+    {
+      const { slept, budget } = recorder();
+      const one = seq({ status: 500 }, LIVE_100);
+      const board = await probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, one]]);
+      check(classifyCitation({ number: 100, qualifier: null }, board, { ownerRepo: OWN }).cause === CAUSE.RESOLVES && one.calls() === 2 && slept.join() === '500',
+        '⭐ one transient 500 on a PER-NUMBER probe, then a 200, RESOLVES the citation: the read the queue ejection died on');
+    }
+    {
+      const { budget } = recorder();
+      const reset = seq({ throws: 'ECONNRESET' }, LIVE_100);
+      const board = await probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, reset]]);
+      check(board.has(100) && reset.calls() === 2, 'a connection reset, then a 200, resolves');
+    }
+    {
+      const { budget } = recorder();
+      const cut = seq({ ...LIVE_100, bodyThrows: 'UND_ERR_SOCKET' }, LIVE_100);
+      const board = await probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, cut]]);
+      check(board.has(100) && cut.calls() === 2, 'a socket closed while the BODY streams is retried too: the unit retried is the request and its body');
+    }
+    {
+      const { budget } = recorder();
+      const page1 = { body: [{ number: 1 }], headers: { link: '<https://api.github.com/repositories/9/issues?page=2>; rel="next"' } };
+      const page2 = seq({ status: 502 }, { body: [{ number: 4, pull_request: {} }] });
+      const board = await enumerateBoard({ ownerRepo: OWN, token: '', budget, fetchImpl: stubFetch([[/page=2/, page2], [/issues\?state=all/, page1]]) });
+      check(board.frontier === 4 && board.isPull(4) && page2.calls() === 2, 'the ENUMERATING strategy shares the retry: a transient 502 on page 2 still yields the whole board');
+    }
+
+    /* Persistent failure: refused after exactly the ladder, with a refusal that names it. */
+    {
+      const { slept, budget } = recorder();
+      const head = seq({ status: 500 });
+      const err = await rejection(probe([100], budget, [[/per_page=1/, head]]));
+      check(err !== null && head.calls() === P.attemptsPerRead && slept.join() === P.backoffMs.join(),
+        `⭐ persistent 500s are NOT a board: refused after exactly ${P.attemptsPerRead} attempts and ${P.backoffMs.join(' + ')} ms of backoff`);
+      check((err?.message ?? '').startsWith('GET issues?per_page=1 -> HTTP 500 after 3 attempts'),
+        `the refusal names the attempt count, so a red says it was not one blip; got ${JSON.stringify(err?.message)}`);
+      check(!/#\d/.test(err?.message ?? ''), 'the refusal text is runtime prose and carries no tracker number');
+    }
+    {
+      const { slept, budget } = recorder();
+      const reset = seq({ throws: 'ECONNRESET' });
+      const err = await rejection(probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, reset]]));
+      check(err !== null && reset.calls() === 3 && slept.length === 2, 'persistent resets are refused after the same ladder');
+      check((err?.message ?? '').startsWith('GET issues/100 -> ECONNRESET after 3 attempts') && retryableNetworkCode(err?.cause) === 'ECONNRESET',
+        '…naming the read and the code, with the original failure kept as its cause');
+    }
+
+    /* A 4xx is an answer. ⛔ A 404 keeps its meaning: absent, a FINDING, asked once. */
+    {
+      const { slept, budget } = recorder();
+      const gone = seq({ status: 404, body: {} });
+      const board = await probe([150], budget, [[/per_page=1/, HEAD], [/issues\/150$/, gone]]);
+      check(gone.calls() === 1 && slept.length === 0 && !board.has(150)
+        && classifyCitation({ number: 150, qualifier: null }, board, { ownerRepo: OWN }).cause === CAUSE.ALLOCATED_BUT_ABSENT,
+      '⭐ a 404 keeps its meaning: asked ONCE, never retried, and the citation is still a FINDING');
+    }
+    for (const status of [401, 403, 429]) {
+      const { slept, budget } = recorder();
+      const denied = seq({ status });
+      const err = await rejection(probe([100], budget, [[/per_page=1/, HEAD], [/issues\/100$/, denied]]));
+      check(err !== null && denied.calls() === 1 && slept.length === 0 && err.message.includes(`HTTP ${status} after 1 attempt (not retried`),
+        `a ${status} is an answer, not a blip: refused on the first attempt, with no backoff`);
+    }
+
+    /* Every other thrown error reaches the caller UNCHANGED, on its old exit path. */
+    const unnamed = [
+      ['a refused connection (ECONNREFUSED)', connectionFailure('ECONNREFUSED')],
+      ['a failed lookup (ENOTFOUND)', connectionFailure('ENOTFOUND')],
+      ['a proxy refusing the tunnel (UND_ERR_ABORTED, two causes deep)', new TypeError('fetch failed', {
+        cause: new Error('Request was cancelled.', { cause: Object.assign(new Error('Proxy response (502) !== 200 when HTTP Tunneling'), { code: 'UND_ERR_ABORTED' }) }),
+      })],
+    ];
+    for (const [label, thrown] of unnamed) {
+      const { slept, budget } = recorder();
+      const refused = seq({ throws: thrown });
+      const err = await rejection(probe([100], budget, [[/per_page=1/, refused]]));
+      check(err === thrown && refused.calls() === 1 && slept.length === 0, `${label} is not retried, and is rethrown as the very error it was`);
+    }
+    {
+      const { budget } = recorder();
+      const garbled = new SyntaxError('Unexpected token < in JSON');
+      const err = await rejection(probe([100], budget, [[/per_page=1/, { ...HEAD, bodyThrows: garbled }]]));
+      check(err === garbled, 'a body that is not JSON is not a blip either: rethrown unchanged');
+    }
+
+    /* The budget, per READ and per RUN -- the bound the lint lane relies on. */
+    check(P.backoffMs.length === P.attemptsPerRead - 1, 'one backoff per retry a read may take, no more and no fewer');
+    const ladder = P.backoffMs.reduce((a, b) => a + b, 0);
+    check(ladder === 1500 && (P.retriesPerRun / (P.attemptsPerRead - 1)) * ladder === 3000,
+      `the policy matches the documented worst cases: 1500 ms for a board that stays down, 3000 ms for one that flaps (ladder ${ladder} ms)`);
+    for (const [strategy, count] of [['auto', 400], ['enumerate', 3]]) {
+      const { slept, sleep } = recorder();
+      let reads = 0;
+      const down = async () => { reads += 1; return { ok: false, status: 503, json: async () => ({}), headers: { get: () => null } }; };
+      const rows = Array.from({ length: count }, (_, i) => ({ number: 100 + i, qualifier: null }));
+      const err = await rejection(buildBoard({ rows, ownerRepo: OWN, token: '', strategy, fetchImpl: down, sleep }));
+      check(err !== null && reads === P.attemptsPerRead && slept.reduce((a, b) => a + b, 0) === ladder,
+        `⭐ a board that STAYS DOWN costs one ladder (${ladder} ms, ${P.attemptsPerRead} reads) and then refuses — ${strategy === 'auto' ? `${count} cited numbers` : 'the enumerating strategy'} included; got ${reads} reads`);
+    }
+    {
+      /* A board that FLAPS: every read fails twice, then answers. Each read
+       * would spend its whole ladder, so the run budget is what stops it. */
+      const { slept, sleep } = recorder();
+      const perUrl = new Map();
+      const flap = (url) => {
+        if (!perUrl.has(url)) perUrl.set(url, seq({ status: 500 }, { status: 500 }, /per_page=1/.test(url) ? HEAD : { body: { number: Number(url.split('/').pop()) } }));
+        return perUrl.get(url)();
+      };
+      const rows = [100, 101, 102, 103, 104].map((number) => ({ number, qualifier: null }));
+      const err = await rejection(buildBoard({ rows, ownerRepo: OWN, token: '', strategy: 'auto', fetchImpl: stubFetch([[/./, flap]]), sleep }));
+      check(err !== null && slept.length === P.retriesPerRun && slept.reduce((a, b) => a + b, 0) === 3000,
+        `⭐ a board that FLAPS spends at most the run's ${P.retriesPerRun} retries (3000 ms) and then refuses; slept ${slept.join(', ')}`);
+      check((err?.message ?? '').includes(`after 1 attempt (this run's budget of ${P.retriesPerRun} retries is spent)`),
+        `…and the refusal says the run budget, not the read, is what ran out; got ${JSON.stringify(err?.message)}`);
+    }
+
+    /* ⛔ NOT A WEAKER GATE: no scripted failure, at any read, yields a board. */
+    const persistent = [
+      ['HTTP 500', { status: 500 }], ['HTTP 502', { status: 502 }], ['HTTP 503', { status: 503 }], ['HTTP 504', { status: 504 }],
+      ['ECONNRESET', { throws: 'ECONNRESET' }], ['UND_ERR_SOCKET', { throws: 'UND_ERR_SOCKET' }],
+      ['UND_ERR_SOCKET mid-body', { body: [], bodyThrows: 'UND_ERR_SOCKET' }],
+      ['HTTP 401', { status: 401 }], ['HTTP 403', { status: 403 }], ['HTTP 429', { status: 429 }],
+      ['ECONNREFUSED', { throws: 'ECONNREFUSED' }],
+    ];
+    for (const [label, reply] of persistent) {
+      const rows = [{ number: 100, qualifier: null }];
+      const placements = [
+        ['the head probe', 'auto', [[/./, reply]]],
+        ['a per-number probe', 'auto', [[/per_page=1/, HEAD], [/./, reply]]],
+        ['an enumerated page', 'enumerate', [[/./, reply]]],
+      ];
+      const passed = [];
+      for (const [where, strategy, routes] of placements) {
+        const { sleep } = recorder();
+        if (await rejection(buildBoard({ rows, ownerRepo: OWN, token: '', strategy, fetchImpl: stubFetch(routes), sleep })) === null) passed.push(where);
+      }
+      check(passed.length === 0, `⛔ a persistent ${label} never yields a board — it passed at: ${passed.join(', ') || 'nowhere'}`);
+    }
+
+    /* …and end to end: a persistent 500 EXITS 3, read off a real process. The
+     * child is offline -- its `fetchImpl` is a stub -- and judges a real diff. */
+    const tmp = mkdtempSync(join(tmpdir(), 'check-issue-citations-retry-'));
+    try {
+      const git = (...args) => execFileSync('git', args, { cwd: tmp, env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+      mkdirSync(join(tmp, 'packages/p/src'), { recursive: true });
+      writeFileSync(join(tmp, 'packages/p/src/thing.ts'), 'export const x = 1;\n');
+      git('init', '-q');
+      git('config', 'user.email', 'selftest@example.invalid');
+      git('config', 'user.name', 'selftest');
+      git('add', '-A');
+      git('commit', '-qm', 'base');
+      const base = git('rev-parse', 'HEAD').toString().trim();
+      writeFileSync(join(tmp, 'packages/p/src/thing.ts'), '// blocked on #100 landing\nexport const x = 1;\n');
+      const childSource = [
+        `const { run } = await import(${JSON.stringify(pathToFileURL(SELF_PATH).href)});`,
+        "const fetchImpl = async () => { process.stderr.write('stub-read\\n'); return { ok: false, status: 500, json: async () => ({}), headers: { get: () => null } }; };",
+        `process.exit(await run({ root: ${JSON.stringify(tmp)}, base: ${JSON.stringify(base)}, fetchImpl, sleep: async () => {} }));`,
+      ].join('\n');
+      const env = gitFreeEnv();
+      delete env.GITHUB_TOKEN;
+      delete env.GH_TOKEN;
+      const child = spawnSync(process.execPath, ['--input-type=module', '-e', childSource], { cwd: tmp, env, encoding: 'utf8' });
+      const reads = ((child.stderr ?? '').match(/^stub-read$/gm) ?? []).length;
+      check(child.status === EXIT_PREREQUISITE_NOT_MET && EXIT_PREREQUISITE_NOT_MET === 3,
+        `⭐ persistent 500s EXIT 3 end to end, never 0 — got exit ${child.status}${child.status === EXIT_PREREQUISITE_NOT_MET ? '' : `: ${(child.stderr ?? '').slice(-400)}`}`);
+      check(reads === P.attemptsPerRead && (child.stderr ?? '').includes('PREREQUISITE NOT MET') && (child.stderr ?? '').includes('HTTP 500 after 3 attempts'),
+        `…after exactly ${P.attemptsPerRead} reads, and the refusal it prints names them (read ${reads})`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
   /* ── The floor: every declared battery RAN, and ran its cases ───────────── */
   const floorMessages = [];
   const floorFailure = (m) => { floorMessages.push(m); };
@@ -1719,7 +1950,7 @@ export async function selfTest() {
   assert(!breached, floorMessages.join('\n     '));
 
   const total = [...batterySeen.values()].reduce((a, b) => a + b, 0);
-  console.log(`✅ check-issue-citations --self-test: grammar narrowed, every spelling enumerated, qualifier a closed set of repositories, four 404 causes kept apart, both board strategies agree, diff scope red AND green, scope contract pinned (${total} cases, ${declared.length} batteries)`);
+  console.log(`✅ check-issue-citations --self-test: grammar narrowed, every spelling enumerated, qualifier a closed set of repositories, four 404 causes kept apart, both board strategies agree, a transient board read retried inside a bounded budget and never passed unread, diff scope red AND green, scope contract pinned (${total} cases, ${declared.length} batteries)`);
   return SELF_TEST_VERDICT;
 }
 
