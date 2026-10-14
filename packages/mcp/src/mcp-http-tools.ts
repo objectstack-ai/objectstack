@@ -304,27 +304,51 @@ function errorResult(message: string) {
  *
  * Uncoded throws fall through to `errorResult` unchanged, so this widens what a
  * caller can read and narrows nothing.
+ *
+ * [#23509] Every catch in this file renders through here: the data tools and
+ * `list_actions` used to call `errorResult(messageOf(err))` directly, so a coded
+ * refusal reached their callers as its message alone. A key whose owner is held
+ * (`MFA_REQUIRED`, ruling C′ item 1: refused "with the same code" at every
+ * seam), `RECORD_NOT_FOUND`, the exposure and permission refusals: the client
+ * read the sentence and never the code it is meant to branch on.
  */
 function errorResultFromThrown(err: unknown) {
+  const envelope = thrownRefusalEnvelope(err);
+  if (!envelope) return errorResult(messageOf(err));
+  return {
+    content: [{ type: 'text' as const, text: jsonText({ error: envelope }) }],
+    isError: true as const,
+  };
+}
+
+/** The ADR-0112 envelope a thrown refusal carries, as {@link thrownRefusalEnvelope} reads it. */
+export interface ThrownRefusalEnvelope {
+  code: string;
+  message: string;
+  status?: number;
+  details?: unknown;
+}
+
+/**
+ * Read the ADR-0112 envelope off a thrown value, or `undefined` when it carries
+ * no non-empty string `code`.
+ *
+ * The one reader both MCP surfaces use, so the tools ({@link errorResultFromThrown})
+ * and the record resource (`MCPServerRuntime.bridgeResources`) agree on what
+ * counts as a coded refusal and on the members it carries. `undefined` is the
+ * caller's cue to keep its own message-only rendering: nothing is invented for
+ * a throw that never had a code.
+ */
+export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
   const code = (err as { code?: unknown } | null | undefined)?.code;
-  if (typeof code !== 'string' || code.length === 0) return errorResult(messageOf(err));
+  if (typeof code !== 'string' || code.length === 0) return undefined;
   const details = (err as { details?: unknown }).details;
   const status = (err as { status?: unknown }).status;
   return {
-    content: [
-      {
-        type: 'text' as const,
-        text: jsonText({
-          error: {
-            code,
-            message: messageOf(err),
-            ...(typeof status === 'number' ? { status } : {}),
-            ...(details !== undefined ? { details } : {}),
-          },
-        }),
-      },
-    ],
-    isError: true as const,
+    code,
+    message: messageOf(err),
+    ...(typeof status === 'number' ? { status } : {}),
+    ...(details !== undefined ? { details } : {}),
   };
 }
 
@@ -602,7 +626,7 @@ export function registerObjectTools(
             status: 503,
           });
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultFromThrown(err);
         }
       },
     );
@@ -626,7 +650,7 @@ export function registerObjectTools(
           if (!def) return errorResult(`Object "${objectName}" not found`);
           return textResult(def);
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultFromThrown(err);
         }
       },
     );
@@ -701,7 +725,7 @@ export function registerObjectTools(
             },
           });
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultFromThrown(err);
         }
       },
     );
@@ -781,7 +805,7 @@ export function registerObjectTools(
           if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
           return textResult(withDelegationNotice(result, diagnosed.statement));
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultFromThrown(err);
         }
       },
     );
@@ -873,7 +897,7 @@ export function registerObjectTools(
               ...(truncated ? { truncated: true } : {}),
             });
           } catch (err) {
-            return errorResult(messageOf(err));
+            return errorResultFromThrown(err);
           }
         },
       );
@@ -900,7 +924,7 @@ export function registerObjectTools(
           if (record == null) return errorResult(`Record "${recordId}" not found in "${objectName}"`);
           return textResult(record);
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultFromThrown(err);
         }
       },
     );
@@ -929,7 +953,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultFromThrown(err);
         }
       },
     );
@@ -963,7 +987,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultFromThrown(err);
         }
       },
     );
@@ -987,7 +1011,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultFromThrown(err);
         }
       },
     );
@@ -1054,7 +1078,7 @@ export function registerActionTools(
           : actions.filter((a) => !a.objectName || !isSystemObject(a.objectName));
         return textResult({ actions: visible, totalCount: visible.length });
       } catch (err) {
-        return errorResult(messageOf(err));
+        return errorResultFromThrown(err);
       }
     },
   );

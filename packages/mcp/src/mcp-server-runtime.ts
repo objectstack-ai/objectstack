@@ -7,7 +7,7 @@ import type { Logger, IMetadataService, AIToolDefinition } from '@objectstack/sp
 import type { Agent } from '@objectstack/spec/ai';
 import { PLATFORM_PROVIDED_TOOL_NAMES } from '@objectstack/spec/system';
 import type { ToolRegistry, ToolExecutionResult } from './types.js';
-import { wireBridgeTools } from './mcp-http-tools.js';
+import { wireBridgeTools, thrownRefusalEnvelope } from './mcp-http-tools.js';
 import type {
   McpDataBridge,
   McpActionBridge,
@@ -1258,11 +1258,30 @@ export class MCPServerRuntime {
             };
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
+            // [#23509] A coded refusal carries its ADR-0112 `code` (and the
+            // `status` / `details` the thrown value has) beside the sentence,
+            // so a client reads the code it branches on: a held owner's key is
+            // refused here "with the same code" (ruling C′ item 1) as on REST.
+            // The members are ADDED to the body, in the `{ error, code, status }`
+            // vocabulary the two sibling resources above already answer with
+            // (#6055, #6504): `error` stays the same string, and a client that
+            // tells a refusal from a row by `typeof body.error === 'string'`
+            // still does. A throw with no code answers `{ error }` as before.
+            const envelope = thrownRefusalEnvelope(err);
             return {
               contents: [{
                 uri: `objectstack://objects/${objectName}/records/${recordId}`,
                 mimeType: 'application/json',
-                text: JSON.stringify({ error: message }),
+                text: JSON.stringify(
+                  envelope
+                    ? {
+                        error: message,
+                        code: envelope.code,
+                        ...(envelope.status !== undefined ? { status: envelope.status } : {}),
+                        ...(envelope.details !== undefined ? { details: envelope.details } : {}),
+                      }
+                    : { error: message },
+                ),
               }],
             };
           }
