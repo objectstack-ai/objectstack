@@ -299,7 +299,7 @@ localStorage / auth gotchas.
     approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
-    triggers a release workflow, and none merges the Version Packages PR.** A rule that binds every seat lives here,
+    triggers a release, and none merges the Version Packages PR.** A rule that binds every seat lives here,
     not only in a lane-specific skill file. **Release-adjacent work stays open to every seat**: the release board,
     `.objectui-sha` pin bumps, version reconciliation, writing changesets, compiling release notes when asked, and
     *verifying* release state (`npm view`, `git ls-remote --tags`) are ordinary tasks. What is reserved is the
