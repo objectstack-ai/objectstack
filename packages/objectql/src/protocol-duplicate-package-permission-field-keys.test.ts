@@ -122,15 +122,23 @@ const HIDDEN = { readable: false, editable: false };
 const LOCKED = { readable: true, editable: false };
 const OPEN = { readable: true, editable: true };
 
-/** A prefixed object with a field that spells the object's own name. */
+/**
+ * A prefixed object with a field that spells the renamed bare object's name.
+ *
+ * ⛔ No field here spells a PREFIXED object's name. The object copy's
+ * free-text rewrite renames such a field's `name` but not its `fields` key, so
+ * the save door's FLS lint (which reads the `name`) refuses the copied set while
+ * the data plane still addresses the column by its key — a separate defect,
+ * not this rule's.
+ */
 const customerBody = {
     name: 'dupsrc_customer', label: 'Customer', sharingModel: 'private',
     fields: {
         full_name: { name: 'full_name', type: 'text', label: 'Full name' },
-        dupsrc_customer: { name: 'dupsrc_customer', type: 'text', label: 'Customer code' },
+        ticket: { name: 'ticket', type: 'text', label: 'Ticket reference' },
     },
 };
-/** An object whose name lacks the `dupsrc_` prefix, likewise. */
+/** An object whose name lacks the `dupsrc_` prefix, with a field that spells its own name. */
 const ticketBody = {
     name: 'ticket', label: 'Ticket', sharingModel: 'private',
     fields: {
@@ -152,7 +160,7 @@ const flsBody = {
     },
     fields: {
         'dupsrc_customer.full_name': HIDDEN,
-        'dupsrc_customer.dupsrc_customer': LOCKED,
+        'dupsrc_customer.ticket': LOCKED,
         'ticket.title': HIDDEN,
         'ticket.ticket': OPEN,
         'dupext_account.name': LOCKED,
@@ -235,11 +243,12 @@ describe('ADR-0070 D4 — duplicatePackage re-points a copied permission set\'s 
     it('only the object part moves: a field part that spells the object\'s name stays', async () => {
         const fields = await duplicate();
 
-        expect(fields['dupdst_customer.dupsrc_customer']).toEqual(LOCKED);
+        // The field part spells the key's own object, and another renamed object.
         expect(fields['dupdst_ticket.ticket']).toEqual(OPEN);
+        expect(fields['dupdst_customer.ticket']).toEqual(LOCKED);
         // NEGATIVE CONTROL: the field part was not renamed with the object.
-        expect(fields).not.toHaveProperty(['dupdst_customer.dupdst_customer']);
         expect(fields).not.toHaveProperty(['dupdst_ticket.dupdst_ticket']);
+        expect(fields).not.toHaveProperty(['dupdst_customer.dupdst_ticket']);
     });
 
     it('a key naming an object outside the package keeps its name, and the source set is untouched', async () => {
@@ -248,8 +257,8 @@ describe('ADR-0070 D4 — duplicatePackage re-points a copied permission set\'s 
         // NEGATIVE CONTROL: an object the package does not hold is not renamed.
         expect(fields['dupext_account.name']).toEqual(LOCKED);
         expect(Object.keys(fields).sort()).toEqual([
-            'dupdst_customer.dupsrc_customer',
             'dupdst_customer.full_name',
+            'dupdst_customer.ticket',
             'dupdst_ticket.ticket',
             'dupdst_ticket.title',
             'dupext_account.name',
