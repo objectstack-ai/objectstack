@@ -20483,9 +20483,9 @@ export class ObjectStackProtocolImplementation implements
             } catch (error) {
                 this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
             }
-            const remainingRows = (storedRows ?? []).filter(
-                (row) => !(singular === 'object' && this.isUnservedSealedOverlay(singular, name)),
-            );
+            const remainingRows = singular === 'object' && this.isUnservedSealedOverlay(singular, name)
+                ? []
+                : storedRows ?? [];
             if (remainingRows.length > 0) {
                 if (singular === 'object' && !this.isArtifactBacked(singular, name)) {
                     const bindings = new Set(remainingRows.map((row) => boundPackageOf(row.package_id) ?? 'sys_metadata'));
