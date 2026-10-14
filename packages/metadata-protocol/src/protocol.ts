@@ -10710,9 +10710,7 @@ export class ObjectStackProtocolImplementation implements
         //
         // Content only: the lock is selected from the item's rows at the
         // address the `_lock` gate judges a package-less save at, below.
-        const contentPackageId = request.packageId
-            || (await this.packagelessAddress(PLURAL_TO_SINGULAR[request.type] ?? request.type, request.name, member)).packageId
-            || undefined;
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name, member);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -11327,11 +11325,18 @@ export class ObjectStackProtocolImplementation implements
         try {
             // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
             // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
+            //
+            // [#23291] Naming no package, at the address {@link getMetaItem}
+            // serves its content from ({@link packagelessReadAddress}), so
+            // `effective` is what that read returns and `/published` serves
+            // the same document. Content only: the lock stays at the
+            // request's address, as the `_lock` gate judges it.
+            const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name);
             const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: 'active',
-                ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...(contentPackageId ? { packageId: contentPackageId } : {}),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
@@ -18799,6 +18804,19 @@ export class ObjectStackProtocolImplementation implements
             : request.packageId ?? null;
         const stored = await this.storedHeadAt(repo, ref, state, packageId, request.member);
         return stored === null ? null : this.receiptVersion(stored);
+    }
+
+    /**
+     * [#23291, ADR-0048 §3.3] The package a by-name read that names no package
+     * takes its stored CONTENT from: the item's own package when its active
+     * rows are bound to exactly one ({@link packagelessAddress}, the address
+     * the save, the delete and the read's `version` resolve), else
+     * `undefined`, any row (the best-effort first match). {@link getMetaItem}
+     * and {@link getMetaItemLayered} both ask it, so the plain read, the
+     * layered read's `effective` and `/published` serve one row.
+     */
+    private async packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+        return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member)).packageId ?? undefined;
     }
 
     /**

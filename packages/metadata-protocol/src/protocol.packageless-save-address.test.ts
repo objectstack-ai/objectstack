@@ -43,8 +43,9 @@
  *    holds the rest).
  *  - [#23291] the read naming no package serves the row that save writes,
  *    with a package-unbound row stored beside the package's: the card's five
- *    steps, both storage orders, the draft reads, the stand-in for another
- *    package, and an item another package holds too.
+ *    steps, both storage orders (the plain and the layered read), the draft
+ *    reads and their corner, the stand-in for another package, and an item
+ *    another package holds too.
  *
  * Refusals are asserted as the envelope an HTTP boundary answers with
  * (`resolveThrownHttpError`): `code` and `status`, never a bare throw.
@@ -736,6 +737,9 @@ describe('[#23291] the read naming no package serves the row the save naming non
         expect(namedRead.item).toMatchObject({ label: 'pkg' });
         expect(unnamedRead.version).toEqual(expect.any(String));
         expect(unnamedRead.version).toBe(namedRead.version);
+        const layered = await protocol.getMetaItemLayered({ type: 'app', name });
+        expect(layered.overlay).toMatchObject({ label: 'pkg' });
+        expect(layered.effective).toMatchObject({ label: 'pkg' });
 
         // 4. A package-less save, pinned to that token, writes the package's
         //    row (#23165), and the reads and the list serve what it wrote.
@@ -780,8 +784,48 @@ describe('[#23291] the read naming no package serves the row the save naming non
 
             expect(read.item).toMatchObject({ label: 'pkg', _packageId: WRITABLE });
             expect(read.version).toBe((await protocol.getMetaItem({ type: 'app', name, packageId: WRITABLE })).version);
+
+            // The layered read (`/layers`, `?layers=`, `/published`): its
+            // overlay is the package's row, and `effective` is what the plain
+            // read returns.
+            const layered = await protocol.getMetaItemLayered({ type: 'app', name });
+            expect(layered.overlay).toMatchObject({ label: 'pkg' });
+            expect(layered.effective).toMatchObject({ name, label: 'pkg' });
+            expect((layered.effective as any).label).toBe(read.item.label);
+            expect(layered.overlay).toEqual((await protocol.getMetaItemLayered({ type: 'app', name, packageId: WRITABLE })).overlay);
         });
     }
+
+    it('the layered read naming a package with no row of its own still reports the package-unbound row (the stand-in)', async () => {
+        const { protocol } = makeProtocol();
+        const name = 's6_layered_standin_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound' }) });
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg' }), packageId: WRITABLE });
+
+        const layered = await protocol.getMetaItemLayered({ type: 'app', name, packageId: OTHER_WRITABLE });
+
+        expect(layered.overlay).toMatchObject({ label: 'unbound' });
+        expect(layered.effective).toMatchObject({ label: 'unbound' });
+    });
+
+    it('the corner: active rows bound to the package, the only draft bound to ANOTHER package — the strict draft read naming none answers 404 NO_DRAFT, the preview serves the active row', async () => {
+        const { protocol, rows } = makeProtocol();
+        const name = 's6_draft_corner_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg' }), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other draft' }), packageId: OTHER_WRITABLE, mode: 'draft' });
+        expect(rows('app', name, 'draft').map((r) => r.package_id ?? null)).toEqual([OTHER_WRITABLE]);
+
+        // The address a package-less draft save writes is the package's draft,
+        // and there is none: the absence answer, as its version token was.
+        const envelope = resolveThrownHttpError(await refusalOf(() => protocol.getMetaItem({ type: 'app', name, state: 'draft' })));
+        expect(envelope).toMatchObject({ status: 404, code: 'NO_DRAFT' });
+        // That draft is read by naming its package.
+        expect((await protocol.getMetaItem({ type: 'app', name, state: 'draft', packageId: OTHER_WRITABLE })).item.label).toBe('other draft');
+        // The preview naming none falls back to the active row.
+        const preview = await protocol.getMetaItem({ type: 'app', name, previewDrafts: true });
+        expect(preview.item.label).toBe('pkg');
+        expect(preview.item._draft).toBeUndefined();
+    });
 
     it('the package-unbound row still stands in for a package with no row of its own (ADR-0048 prefer-local)', async () => {
         const { protocol } = makeProtocol();
