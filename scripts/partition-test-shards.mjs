@@ -97,7 +97,9 @@
 // <turbo-ls.json> is the output of `turbo ls [--affected] --output=json`
 // (shape: {packages:{count,items:[{name,path}]}}; `turbo ls` is marked
 // experimental, so the payload is asserted loudly in readPackageItems() below
-// rather than defaulted around).
+// rather than defaulted around). A document from another writer may also
+// state its own slicing in a `sliceAcrossShards` key that `turbo ls` never
+// writes -- the nightly tiers' does; see readSliceAcrossShards() below.
 // Prints the selected shard's package names, one per line -- possibly zero
 // lines, which the caller must treat as "nothing to run", NOT as "no filter":
 // a `turbo run test` with no --filter args runs the entire workspace.
@@ -1308,11 +1310,11 @@ export function readPackageItems(parsed, listPath) {
 // no step red either time. 9ff74285 retired the CLI's entry, and from the next
 // night the second shard ran nothing while the first carried the whole e2e
 // tier (one slice each ran 1196s / 1168s on 2026-10-01; from 2026-10-04 the
-// one shard's test step ran 2361-2615s on seven of eight green nights);
-// 59194834 brought the entry back at 3, which
-// cannot spread over two shards, so the CLI stayed whole until the first shard
-// was killed at its 45-minute limit. A count derived from the run's own N
-// cannot drift from the matrix that runs it.
+// one shard's test step ran 2361-2615s on seven of eight green nights).
+// 59194834 brought the entry back at 3, which cannot spread over two shards,
+// so the CLI stayed whole until the first shard was killed at its 45-minute
+// limit. A count derived from the run's own N cannot drift from the matrix
+// that runs it.
 //
 // `turbo ls` never writes this key, so a Test Core document reads `null` here
 // and its run slices by FILE_SHARDED_PACKAGES byte for byte as before. Present,
@@ -2663,7 +2665,7 @@ function selfTest() {
   // Slices that cannot spread do not run in parallel, so they are not taken:
   // three slices across two shards stay whole. That is the shape that left the
   // nightly tiers' second shard empty while they read Test Core's map; they now
-  // state their own slicing, pinned in the battery after this one.
+  // state their own slicing, pinned in the nightly battery below.
   check(() => {
     const [d] = planShards([{ name: 'big', weight: 1700, sliceCount: 3 }, mk('other', 100)], 2).decisions;
     if (!d.needed || d.spreads || d.count !== 1 || !renderSliceDecision(d).includes('cannot spread')) {
