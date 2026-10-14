@@ -15,6 +15,12 @@
  *  - Body is whitelisted to `name` (+ optional `expires_at`); any
  *    `key` / `id` / `user_id` / `revoked` in the body is ignored, so a
  *    caller cannot forge a known-secret or escalate.
+ *  - [#23367, ruling A] The API-key lifecycle policy (the auth service's
+ *    `resolveApiKeyLifecyclePolicy`, the same source the key-admission seam
+ *    reads): a signing that names no `expires_at` gets the default life (90
+ *    days unless configured), and one that asks for a later date than the
+ *    ceiling (one year unless configured) is refused `400
+ *    API_KEY_EXPIRY_TOO_LONG`. Exactly the ceiling is accepted.
  *  - `scopes` are intentionally NOT accepted from the body in v1: the
  *    verify path ADDS scopes to the principal's permissions, so honouring
  *    arbitrary body scopes would be an escalation vector. A generated key
@@ -36,12 +42,27 @@
 import {
     isGrantActive, effectiveTenancyPosture, AuthzStoreUnavailableError,
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+    apiKeyLifecyclePolicySourceOf,
 } from '@objectstack/core';
+import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
 import { generateApiKey } from '../security/api-key.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+const DAY_MS = 86_400_000;
+
+/**
+ * [#23367] The clock skew the ceiling forgives. A client that computes "one
+ * year from now" on its own clock and sends it is asking for exactly the
+ * ceiling; a client clock a few seconds ahead of the server's must not turn
+ * that into a refusal.
+ */
+const EXPIRY_CEILING_SKEW_MS = 60_000;
+
+/** [#23367] The ceiling refusal's code (ADR-0112 ledger, `@objectstack/runtime`). */
+export const API_KEY_EXPIRY_TOO_LONG_CODE = 'API_KEY_EXPIRY_TOO_LONG' as const;
 
 /**
  * The legacy branch matched `=== '/keys' || startsWith('/keys/') ||
@@ -95,6 +116,26 @@ export async function handleKeysRequest(
     const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
     const name = rawName || 'API Key';
 
+    // ── [#23367, ruling A] The lifecycle policy, from the auth service. ──
+    //
+    // The same source the key-admission seam judges with, so the life a key
+    // is signed with and the life it is admitted under cannot disagree. A
+    // kernel with no `auth` service has no auth configuration: the signing
+    // then keeps its pre-policy behaviour (no default, no ceiling). An `auth`
+    // service that is registered and FAILED to build is the outage it is
+    // (#15900's reasoning for `tenancy` below): the policy is an input to the
+    // credential being minted, and an input never read decides nothing.
+    let policy: ApiKeyLifecyclePolicy | undefined;
+    try {
+        const source = apiKeyLifecyclePolicySourceOf(
+            await deps.resolveServiceOrLoud(context, 'auth', context.environmentId),
+        );
+        policy = source ? await source() : undefined;
+    } catch (err) {
+        throw new AuthzStoreUnavailableError('api_key_policy', err);
+    }
+
+    const nowMs = Date.now();
     let expiresAt: string | undefined;
     if (body?.expires_at != null && body.expires_at !== '') {
         const ms = typeof body.expires_at === 'number'
@@ -103,10 +144,26 @@ export async function handleKeysRequest(
         if (Number.isNaN(ms)) {
             return { handled: true, response: deps.error('Invalid expires_at: must be a parseable date', 400) };
         }
-        if (ms <= Date.now()) {
+        if (ms <= nowMs) {
             return { handled: true, response: deps.error('Invalid expires_at: must be in the future', 400) };
         }
+        if (policy && ms > nowMs + policy.maxExpiryDays * DAY_MS + EXPIRY_CEILING_SKEW_MS) {
+            const latest = new Date(nowMs + policy.maxExpiryDays * DAY_MS).toISOString();
+            return {
+                handled: true,
+                response: deps.error(
+                    `expires_at ${new Date(ms).toISOString()} is further away than this deployment allows: an API key `
+                    + `lives at most ${policy.maxExpiryDays} days, so the latest expiry a key signed now may have is `
+                    + `${latest}. Ask for that date or an earlier one, and rotate the key before it expires.`,
+                    400,
+                    { code: API_KEY_EXPIRY_TOO_LONG_CODE },
+                ),
+            };
+        }
         expiresAt = new Date(ms).toISOString();
+    } else if (policy) {
+        // No expiry asked for: the policy's default life, never a permanent key.
+        expiresAt = new Date(nowMs + policy.defaultExpiryDays * DAY_MS).toISOString();
     }
 
     const ql = (await deps.getObjectQL(context, context.environmentId))
