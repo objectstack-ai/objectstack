@@ -34,6 +34,9 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 // [#23265] …and the repo's one sentence for a repeated single-valued
 // parameter, which the delete's `?expectedVersion` answers.
 import { assertFilterParamSuppliedOnce, repeatedQueryParamMessage } from '@objectstack/rest';
+// [#23492] The dispatcher's one constructor for a `400 VALIDATION_FAILED`
+// answer, which a refused version token returns in this transport's envelope.
+import { validationFailure, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 
 /**
  * [#23265] The request's `If-Match`, from either header shape a host hands
@@ -48,6 +51,37 @@ function requestIfMatch(headers: unknown): unknown {
     const h = headers as { get?: unknown } & Record<string, unknown>;
     if (typeof h.get === 'function') return (h.get as (name: string) => unknown).call(headers, 'if-match') ?? undefined;
     return h['if-match'] ?? h['If-Match'];
+}
+
+/**
+ * [#23492] What this domain's `PATCH` and `DELETE` do with the
+ * optimistic-concurrency token they read, before `callData` is asked: absent
+ * (`undefined` or `null`, which falls through to `If-Match`), judged (a string
+ * with something in it, or a finite number, forwarded as its string), or
+ * refused `400 VALIDATION_FAILED` (an empty or blank string, a boolean, an
+ * array, an object: a token shape that can never carry a version, maintainer
+ * decision #20 ①). It replaces a truthiness test that let `expectedVersion: ''`
+ * or `false`, and `?expectedVersion=`, hide a stale `If-Match` and run the
+ * write unguarded.
+ *
+ * `RestServer`'s twin routes ask the same function, statement for statement
+ * (`versionTokenRefusal` in `packages/rest/src/rest-server.ts`, whose docblock
+ * carries the full argument), so the two doors answer every token alike;
+ * `data-update-expected-version.test.ts` and
+ * `data-delete-expected-version.test.ts` hold them to it. Returns the refusal's
+ * sentence, or `undefined` when the token is absent or judged.
+ */
+function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
+    if (token === undefined || token === null) return undefined;
+    if (typeof token === 'string' && token.trim() !== '') return undefined;
+    if (typeof token === 'number' && Number.isFinite(token)) return undefined;
+    const shape = typeof token === 'string' ? 'empty'
+        : Array.isArray(token) ? 'an array'
+        : typeof token === 'object' ? 'an object'
+        : `the ${typeof token} \`${String(token)}\``;
+    return `${spelling} is ${shape}, which can never carry a version, so it is refused rather than read as `
+        + 'no token. Send the version you read (the record\'s `updated_at`), or omit both expectedVersion and '
+        + 'If-Match to perform an unguarded write.';
 }
 
 export function createDataDomain(deps: DomainHandlerDeps): DomainRoute {
@@ -170,9 +204,16 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // whole body over as the patch, so through the `@objectstack/hono`
             // catch-all a stale `If-Match` update was APPLIED, and a body
             // `expectedVersion` reached the engine as a field it refused as
-            // unknown. The key is stripped from the patch whatever its value,
-            // and a token is forwarded only when truthy: the twin's own
-            // statements, so both doors send `updateData` the same thing.
+            // unknown. The key is stripped from the patch whatever its value:
+            // the twin's own statements, so both doors send `updateData` the
+            // same thing.
+            //
+            // [#23492] …and every token the caller sent is judged or refused:
+            // one that can never carry a version is refused `400` before
+            // `callData` is asked (`versionTokenRefusal`), and every other
+            // present token is forwarded. A truthiness test used to decide
+            // the forward, so `expectedVersion: ''` or `false` hid a stale
+            // `If-Match` and the update ran unguarded, on both doors.
             const bodyVersion = (body && typeof body === 'object') ? body.expectedVersion : undefined;
             const expectedVersion = bodyVersion ?? requestIfMatch(_context.request?.headers);
             let data = body;
@@ -180,12 +221,22 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
                 const { expectedVersion: _token, ...patch } = body;
                 data = patch;
             }
+            const versionRefusal = versionTokenRefusal(
+                expectedVersion,
+                bodyVersion != null ? 'The body\'s `expectedVersion`' : 'The `If-Match` header',
+            );
+            if (versionRefusal) {
+                return {
+                    handled: true,
+                    response: deps.errorFromThrown(validationFailure(versionRefusal, []), VALIDATION_FAILED_STATUS),
+                };
+            }
             // Spec: returns UpdateDataResponse = { object, id, record }
             const result = await actionExec.callData(deps, _context, 'update', {
                 object: objectName,
                 id,
                 data,
-                ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
             }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
@@ -210,8 +261,13 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // request that sent no token. A repeated `?expectedVersion` is
             // refused first, as the twin's arity gate refuses it, before the
             // service is asked; a one-element array is one occurrence and an
-            // empty one is none. A token is forwarded only when non-empty, the
-            // twin's own test, so both doors send `deleteData` the same thing.
+            // empty one is none.
+            //
+            // [#23492] The `PATCH` above's rule, the twin's own: a token that
+            // can never carry a version is refused `400` before `callData` is
+            // asked, and every other present token is forwarded. A truthiness
+            // test used to decide the forward, so `?expectedVersion=` hid a
+            // stale `If-Match` and the delete ran unguarded, on both doors.
             const rawVersion = query?.expectedVersion;
             if (Array.isArray(rawVersion) && rawVersion.length > 1) {
                 return {
@@ -221,10 +277,20 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             }
             const queryVersion = Array.isArray(rawVersion) ? rawVersion[0] : rawVersion;
             const expectedVersion = queryVersion ?? requestIfMatch(_context.request?.headers);
+            const versionRefusal = versionTokenRefusal(
+                expectedVersion,
+                queryVersion != null ? 'The `expectedVersion` query parameter' : 'The `If-Match` header',
+            );
+            if (versionRefusal) {
+                return {
+                    handled: true,
+                    response: deps.errorFromThrown(validationFailure(versionRefusal, []), VALIDATION_FAILED_STATUS),
+                };
+            }
             const result = await actionExec.callData(deps, _context, 'delete', {
                 object: objectName,
                 id,
-                ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
             }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }

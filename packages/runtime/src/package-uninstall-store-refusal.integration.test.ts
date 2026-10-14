@@ -24,10 +24,14 @@
  *  4. The registry's own uninstall refusal — another package extends an object
  *     this one owns (ADR-0029) — is decided BEFORE the store delete
  *     (`SchemaRegistry.assertPackageUninstallable`, asked by `deletePackage`):
- *     the door answers `500` and nothing changes — the stored rows, the
- *     registry entry and the disable record are all intact, in the same
- *     process and after a restart. That is the envelope the door gave when it
- *     withdrew the package itself first.
+ *     nothing changes — the stored rows, the registry entry and the disable
+ *     record are all intact, in the same process and after a restart.
+ *     [#23505] The door answers it as the client refusal it is: `409
+ *     RESOURCE_CONFLICT`, its message opening with the way out (uninstall the
+ *     extending package first) and naming the object and its extender. It
+ *     answered `500 INTERNAL_ERROR` while the registry threw a bare `Error`.
+ *  5. CONTROL for 4: the extending package uninstalled through the same door,
+ *     the same uninstall succeeds — the prescription is a real way out.
  *
  * ## The composition — the shipped pieces, booted twice over one database file
  *
@@ -249,20 +253,36 @@ describe('#21276 CONTROL — an ordinary delete removes the package, and a resta
   });
 });
 
+/**
+ * An object `PKG` owns, extended by `OTHER_PKG` — registered exactly as
+ * `ObjectQL.registerApp` registers a manifest's `objects` and its
+ * `objectExtensions`. In memory only: nothing about it is stored.
+ */
+function extendAnObjectOfPkg(p: Process): string {
+  p.engine.registry.registerObject({ name: 'leave_request', fields: { title: { type: 'text' } } } as any, PKG, 'leave', 'own');
+  const fqn = p.engine.registry.getAllObjects(PKG).map((o: any) => o.name).find((n: string) => n.endsWith('leave_request'));
+  p.engine.registry.registerObject({ name: fqn, fields: { note: { type: 'text' } } } as any, OTHER_PKG, undefined, 'extend');
+  return fqn;
+}
+
 describe('#21276 the registry\'s uninstall refusal (an ADR-0029 extender) is decided before the store delete', () => {
-  it('500, and nothing changes: stored rows, registry entry and disable record intact, in the same process and after a restart', async () => {
+  it('[#23505] 409 RESOURCE_CONFLICT naming the way out, and nothing changes: stored rows, registry entry and disable record intact, in the same process and after a restart', async () => {
     const dir = newDir();
     const first = await boot(dir);
     await seed(first);
     // Another package extends an object this one owns, so the registry refuses
-    // the uninstall. Registered in memory only: nothing about it is stored.
-    first.engine.registry.registerObject({ name: 'leave_request', fields: { title: { type: 'text' } } } as any, PKG, 'leave', 'own');
-    const fqn = first.engine.registry.getAllObjects(PKG).map((o: any) => o.name).find((n: string) => n.endsWith('leave_request'));
-    first.engine.registry.registerObject({ name: fqn, fields: { note: { type: 'text' } } } as any, OTHER_PKG, undefined, 'extend');
+    // the uninstall.
+    const fqn = extendAnObjectOfPkg(first);
 
     const answer = await first.call('DELETE', `/${PKG}`);
 
-    expect({ status: answer.status, code: answer.code }).toEqual({ status: 500, code: 'INTERNAL_ERROR' });
+    expect({ status: answer.status, code: answer.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+    // The way out comes first (a 4xx message can be truncated), then what it is about.
+    const message: string = answer.body?.error?.message;
+    expect(message.startsWith(
+      `Uninstall the package that extends an object of "${PKG}" first (${OTHER_PKG}), then uninstall "${PKG}" again`,
+    ), message).toBe(true);
+    expect(message).toContain(`"${fqn}"`);
     const detail = await first.call('GET', `/${PKG}`);
     expect(detail.status).toBe(200);
     expect(detail.body?.data).toMatchObject({ enabled: false, status: 'disabled' });
@@ -277,5 +297,33 @@ describe('#21276 the registry\'s uninstall refusal (an ADR-0029 extender) is dec
     expect(after.status).toBe(200);
     expect(after.body?.data).toMatchObject({ enabled: false, status: 'disabled' });
     expect(await restarted.metadataRows()).toEqual(['view/leave_list']);
+  });
+
+  it('[#23505] CONTROL — the extending package uninstalled through the same door, the same uninstall succeeds', async () => {
+    const dir = newDir();
+    const first = await boot(dir);
+    await seed(first);
+    // The extender is an installed package this time, so the way out the
+    // refusal names can be taken through the door.
+    await first.protocol.installPackage({ manifest: { id: OTHER_PKG, name: 'Addon', version: '1.0.0', type: 'app' } } as any);
+    const fqn = extendAnObjectOfPkg(first);
+    expect((await first.call('DELETE', `/${PKG}`)).status, 'precondition: refused while extended').toBe(409);
+
+    const extenderGone = await first.call('DELETE', `/${OTHER_PKG}`);
+    expect(extenderGone.status).toBe(200);
+
+    const answer = await first.call('DELETE', `/${PKG}`);
+
+    expect(answer.status).toBe(200);
+    expect(answer.body?.data).toMatchObject({ packageId: PKG, success: true, registryRemoved: true });
+    expect((await first.call('GET', `/${PKG}`)).status).toBe(404);
+    expect(first.engine.registry.getObject(fqn)).toBeUndefined();
+    expect(await first.metadataRows()).toEqual([]);
+    expect(loadDisabledPackageIds(ENV).has(PKG)).toBe(false);
+    await first.destroy();
+
+    const restarted = await boot(dir);
+
+    expect((await restarted.call('GET', `/${PKG}`)).status).toBe(404);
   });
 });

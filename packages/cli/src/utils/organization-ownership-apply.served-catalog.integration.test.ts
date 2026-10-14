@@ -130,6 +130,9 @@ async function ceremony(posture: string, db: Database.Database): Promise<Organiz
     // The plan the operator reviewed: the one this run computes.
     reviewedPlan: { file: 'plan.json', generatedAt: '2026-10-14T00:00:00Z', database: 'v17', inventoryDigest: inventoryDigest(), posture },
     catalog,
+    // No view is served here: the form-withdrawal carry has nothing to judge.
+    views: { list: async () => [] },
+    lock: { verdict: async () => ({ editable: true }) },
     door: { save: async (type, name) => { throw new Error(`the door was asked to save ${type} ${name}`); } },
     templates: { find: async () => undefined },
     columnDrops: { drop: async (columns) => columns.map((c) => ({ table: c.table, column: c.column, outcome: 'not-proposed' as const })) },

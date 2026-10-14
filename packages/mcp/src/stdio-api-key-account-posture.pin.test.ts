@@ -28,7 +28,9 @@
  *    principal-bound call (the data tools' bridge and the record resource)
  *    rejects with `code` `MFA_REQUIRED`, `status` 403 and the session's
  *    message, before any read or write; over the real stdio wire a
- *    `tools/call` answers a tool error carrying that remediation message;
+ *    `tools/call` answers a tool error carrying that code, status and
+ *    remediation message, and `resources/read` on the record answers the code
+ *    and status beside the message (#23509);
  *  - a key whose owner holds only `PASSWORD_RESET_REQUIRED` (scope
  *    `credential`) → served;
  *  - the same session: a posture that APPEARS refuses the next call, and a
@@ -190,9 +192,11 @@ async function refusalOf(call: Promise<unknown>): Promise<{ code?: unknown; stat
 }
 
 const HELD_ENVELOPE = { code: 'MFA_REQUIRED', status: 403, message: MFA_REQUIRED.message };
+/** The same envelope as a tool error renders it: `errorResultFromThrown`'s `{ code, message, status }`. */
+const HELD_ENVELOPE_WIRE = { code: 'MFA_REQUIRED', message: MFA_REQUIRED.message, status: 403 };
 
-/** One `tools/call` over a real `StdioServerTransport` attached to the long-lived server. */
-async function callToolOverStdio(runtime: MCPServerRuntime, name: string, args: Record<string, unknown>) {
+/** One request (`tools/call`, `resources/read`) over a real `StdioServerTransport` attached to the long-lived server. */
+async function rpcOverStdio(runtime: MCPServerRuntime, method: string, params: Record<string, unknown>) {
   const serverStdin = new PassThrough();
   const serverStdout = new PassThrough();
   const transport = new StdioServerTransport(serverStdin, serverStdout);
@@ -225,7 +229,7 @@ async function callToolOverStdio(runtime: MCPServerRuntime, name: string, args: 
     send({ id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'pin', version: '0.0.0' } } });
     await answer(1);
     send({ method: 'notifications/initialized' });
-    send({ id: 2, method: 'tools/call', params: { name, arguments: args } });
+    send({ id: 2, method, params });
     return await answer(2);
   } finally {
     await transport.close().catch(() => {});
@@ -251,11 +255,23 @@ describe('MCP stdio — a key answers as its owner\'s session does, on every cal
     expect(await refusalOf(getRecord(OBJECT, 'n1'))).toEqual(HELD_ENVELOPE);
     expect(host.fixture.notes.filter((n) => n.title === 'held write'), 'a held owner\'s write landed').toHaveLength(0);
 
-    // What a stdio client sees: a tool error carrying the remediation message.
-    const answered = await callToolOverStdio(runtime, 'query_records', { objectName: OBJECT });
+    // What a stdio client sees: a tool error carrying the code, the status and
+    // the remediation message — "the same code" REST answers (#23509; the
+    // message alone reached it before).
+    const answered = await rpcOverStdio(runtime, 'tools/call', { name: 'query_records', arguments: { objectName: OBJECT } });
     expect(answered.error).toBeUndefined();
     expect(answered.result?.isError).toBe(true);
-    expect(answered.result?.content?.[0]?.text).toBe(MFA_REQUIRED.message);
+    expect(answered.result?.content).toHaveLength(1);
+    expect(JSON.parse(answered.result?.content?.[0]?.text)).toEqual({ error: HELD_ENVELOPE_WIRE });
+
+    // …and the record resource on the same wire: the code beside the sentence.
+    const read = await rpcOverStdio(runtime, 'resources/read', { uri: `objectstack://objects/${OBJECT}/records/n1` });
+    expect(read.error).toBeUndefined();
+    expect(JSON.parse(read.result?.contents?.[0]?.text)).toEqual({
+      error: MFA_REQUIRED.message,
+      code: 'MFA_REQUIRED',
+      status: 403,
+    });
   });
 
   it('SERVES a key whose owner holds only a credential-scope posture', async () => {
