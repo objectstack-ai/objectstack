@@ -151,6 +151,9 @@ import { planUnmanagedImport, unmanagedInstallPostureRefusal } from './package-u
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+// [#23183] The app item read's package-id key — the one spelling of the arm
+// `GetMetaItemRequestSchema.name` declares ({@link resolveAppPackageIdKey}).
+import { isAppPackageIdKey } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -10625,6 +10628,97 @@ export class ObjectStackProtocolImplementation implements
         }, options);
     }
 
+    /**
+     * [#23183] The packages {@link resolveAppPackageIdKey} has reported as
+     * holding more than one app, keyed by package and app set, so the operator
+     * is told once per state rather than once per read.
+     */
+    private readonly reportedMultiAppPackages = new Set<string>();
+
+    /**
+     * [#23183] ADR-0048 §3.1: "The route/container coordinate for an installed
+     * package's UI is its package id … With the current one-app-per-package
+     * invariant, the app *is* the package container." So the app item read
+     * answers for a package id as it answers for the app's own name, as
+     * `GetMetaItemRequestSchema.name` declares. This is the one place the key is
+     * resolved: both transports' item reads hand {@link getMetaItem} the key
+     * they were asked for, and neither resolves it itself.
+     *
+     * Recognised by `isAppPackageIdKey` (`@objectstack/spec/api`): `type: 'app'`
+     * and a key in the package-id grammar, which no app name is in. Every other
+     * request is returned untouched, so every by-name read of every type is
+     * unchanged.
+     *
+     * "The package's app" is what the package-scoped list serves
+     * ({@link getMetaItems} with `packageId`, the read behind
+     * `GET /meta/app?package=`): the apps the package ships, its stored rows
+     * included, none for a disabled package. Its drafts are in view exactly
+     * when this read reads drafts (`state: 'draft'` or `previewDrafts`), so the
+     * key resolves to the app the read itself would serve.
+     *
+     *  - ONE app: the request becomes that app's by-name read, scoped to the
+     *    package (`packageId`, ADR-0048 prefer-local). The envelope names the
+     *    app by its own `name`, the address a save of it uses and the item its
+     *    `version` token belongs to.
+     *  - NONE, or MORE THAN ONE (a package breaking ADR-0019 D3's at-most-one
+     *    rule, which the save door does not enforce): the request is returned
+     *    as asked, and its by-name read answers absence, because no legal app
+     *    name is in the package-id grammar. Absence, and no answer of its own:
+     *    the doors' read gate answers an unpublished app as absent (ADR-0045
+     *    §3), and a separate "two apps" answer would let a caller see an app
+     *    being built in the package before it is published. The operator is
+     *    told instead, in the log.
+     *
+     * A `packageId` naming a different package is refused `400 INVALID_REQUEST`:
+     * the key already names the package, and a prefer-local scope from a
+     * second package would read that package's same-name app, not this one's.
+     *
+     * A failed list read propagates: a store outage is never answered as "no
+     * such package" (#5532).
+     */
+    private async resolveAppPackageIdKey<R extends {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
+    }>(request: R): Promise<R> {
+        if (!isAppPackageIdKey(request.type, request.name)) return request;
+        const packageId = request.name;
+        if (request.packageId !== undefined && request.packageId !== packageId) {
+            const err: any = new Error(
+                `The app read's key '${packageId}' is a package id, and it names a different package `
+                + `than packageId '${request.packageId}'. Name the package once: read the app by its `
+                + `package id alone, or by its own app name with packageId as its scope.`,
+            );
+            err.code = 'INVALID_REQUEST';
+            err.status = 400;
+            throw err;
+        }
+        const readsDrafts = request.state === 'draft' || request.previewDrafts === true;
+        const listed = await this.getMetaItems({
+            type: 'app',
+            packageId,
+            ...(readsDrafts ? { previewDrafts: true } : {}),
+        });
+        const names = [...new Set(
+            ((listed as { items?: unknown[] } | undefined)?.items ?? [])
+                .map((app) => (app as { name?: unknown } | null)?.name)
+                .filter((name): name is string => typeof name === 'string' && name.length > 0),
+        )];
+        if (names.length === 1) return { ...request, name: names[0], packageId };
+        if (names.length > 1) {
+            const key = `${packageId}|${[...names].sort().join(',')}`;
+            if (!this.reportedMultiAppPackages.has(key)) {
+                this.reportedMultiAppPackages.add(key);
+                console.warn(
+                    `[metadata-protocol] Package '${packageId}' holds ${names.length} apps `
+                    + `(${[...names].sort().join(', ')}), so reading the app by its package id answers `
+                    + `"not found": with one app per package the app is the package container `
+                    + `(ADR-0048 §3.1), and a package may define at most one app (ADR-0019 D3). `
+                    + `Fold them into one app, or move all but one into packages of their own.`,
+                );
+            }
+        }
+        return request;
+    }
+
     async getMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
@@ -10632,6 +10726,12 @@ export class ObjectStackProtocolImplementation implements
     }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
+        // [#23183] ADR-0048 §3.1: the app read keyed by PACKAGE ID, resolved
+        // ONCE, here, to the package's one app read by its own name in that
+        // package, so every step below (the stored row, the lock, the version
+        // token) reads the app exactly as its by-name read does. See
+        // {@link resolveAppPackageIdKey}.
+        request = await this.resolveAppPackageIdKey(request);
         // [#22877] Ruling 6116165299 (Q2 i): ONE member of a bundled type is
         // addressed by name, the selector's or else the canonical one. Every
         // layer below answers that member or nothing — the stored row, the
