@@ -250,11 +250,83 @@ export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * What the automation engine threw when it refused to register a stored flow:
+ * the engine's own `code` and `message`, verbatim. ⛔ Never paraphrased, never
+ * re-coded: a consumer renders `message`, and branches on `code` only where
+ * the engine set one (many registration refusals are plain errors, which carry
+ * none — so `code` is absent there rather than invented).
+ */
+export const FlowRegistrationRefusalSchema = lazySchema(() => z.object({
+  code: z.string().optional().describe(
+    'The machine code the engine\'s refusal carried, verbatim. Absent when the thrown error carried none.',
+  ),
+  message: z.string().describe(
+    'The engine\'s refusal message, verbatim. Render it as sent; do not parse it.',
+  ),
+}));
+
+/**
+ * The automation engine's verdict on ONE stored flow, as the metadata read
+ * serves it — beside the item, never inside it.
+ *
+ * Two facts, deliberately apart: the stored `status` is what the author
+ * declared and stays as authored, while this is what the engine made of the
+ * definition. Before this member existed, a flow the engine refused at boot
+ * (withdrawn, with a warn line) was served as `status: 'active'` and nothing
+ * on the read said it never runs.
+ *
+ * A closed set, total over the engine's state for a name:
+ *
+ * - `registered` — the engine holds a registration under the name.
+ *   Registration is not arming: whether a trigger is bound is
+ *   `GET /automation/_status`'s answer, not this one.
+ * - `refused` — the engine's last attempt to register the stored flow threw,
+ *   and it holds nothing under the name; `reason` is what it threw. A later
+ *   successful registration of the name (a save, a publish, a reload) ends
+ *   the state.
+ * - `unregistered` — the engine holds nothing under the name and recorded no
+ *   refusal: the flow has not reached it (a read during boot, or between a
+ *   save and the engine following it), or it was unregistered on purpose.
+ *
+ * It is the verdict of the engine in the process that answered the read: on a
+ * deployment of several processes each answers for its own engine, and no
+ * cross-process store is consulted.
+ */
+export const FlowRegistrationSchema = lazySchema(() => z.discriminatedUnion('state', [
+  z.object({
+    state: z.literal('registered').describe('The engine holds a registration under the flow\'s name.'),
+  }),
+  z.object({
+    state: z.literal('refused').describe(
+      'The engine refused to register the stored flow and holds nothing under its name: it never runs.',
+    ),
+    reason: FlowRegistrationRefusalSchema.describe('What the engine threw, verbatim.'),
+  }),
+  z.object({
+    state: z.literal('unregistered').describe(
+      'The engine holds nothing under the flow\'s name and recorded no refusal for it.',
+    ),
+  }),
+]));
+
+/**
  * Get Metadata Items Response
+ *
+ * `registrations` is the list's position for the automation engine's verdict
+ * ({@link FlowRegistrationSchema}): the items stay bare documents, so the
+ * verdict sits beside them, keyed by each item's `name` — readable without a
+ * per-item read, and never inside an item.
  */
 export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   items: z.array(z.unknown()).describe('Array of metadata items'),
+  registrations: z.record(z.string(), FlowRegistrationSchema).optional().describe(
+    'The automation engine\'s verdict on each listed flow, keyed by the item\'s `name`: one entry per '
+    + 'listed item that is not a pending draft. Present only on a `flow` list answered by a process that '
+    + 'runs an automation service; absent otherwise, and absence means no engine judged them, never '
+    + '`registered`. The verdict is the answering process\'s engine. Beside the items, never inside one: '
+    + 'an item\'s `status` stays what its author declared.',
+  ),
 }));
 
 /**
@@ -430,6 +502,17 @@ const MetadataProtectionEnvelopeFields = {
  * Like the protection keys it is published by the uncached branch only (the
  * cached branch never consults the store's rows), and it is the one key whose
  * `null` is a statement: no stored row is there, so the next save is a create.
+ *
+ * [#23316] `registration` is the automation engine's verdict on a `flow`
+ * ({@link FlowRegistrationSchema}), an envelope sibling of `lock` for the same
+ * reason `lock` is one: it is a fact about the item that the document cannot
+ * carry. The stored `status` is the author's declared state, and a flow the
+ * engine refused at boot used to be served as `status: 'active'` with nothing
+ * beside it. Unlike the protection keys it is published by BOTH branches:
+ * the cached branch is the default door, so it carries the verdict too, read
+ * live and kept out of the ETag ({@link GetMetaItemCachedResponseSchema}). It
+ * is absent wherever no automation engine answered, so absence is never read
+ * as `registered`.
  */
 export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -459,6 +542,16 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     + '`?preview=draft` read, which publish no version: absence means "not '
     + 'published here", never "no row". Opaque — echo it verbatim, never parse '
     + 'it.',
+  ),
+  registration: FlowRegistrationSchema.optional().describe(
+    'The automation engine\'s verdict on this flow (see `FlowRegistrationSchema`): `registered`, or '
+    + '`refused` with the engine\'s `reason` verbatim, or `unregistered`. Present only on a `flow` read '
+    + 'answered by a process that runs an automation service; absent otherwise, and absence means no '
+    + 'engine judged it, never `registered`. Unlike the protection keys it is published by the cached '
+    + 'branch too, read live and never part of the ETag, so a cached read that carries it is never '
+    + 'answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is '
+    + 'the answering process\'s engine. Beside `item`, never inside it: the item\'s `status` stays what '
+    + 'its author declared.',
   ),
 }));
 
@@ -1929,8 +2022,22 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
 /**
  * Get Metadata Item with Cache Response
  * Uses MetadataCacheResponse from http-cache.zod.ts
+ *
+ * [#23316] …plus `registration`: the cached read is the DEFAULT door of
+ * `GET /meta/flow/:name`, so the automation engine's verdict on a stored flow
+ * rides it too, read live from the delegate read on every call. It is never
+ * folded into `etag`, so a read that carries it is never answered
+ * `notModified`: a 304 would pin the caller to the verdict it was served
+ * before, which the validator cannot see change.
  */
-export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheResponseSchema);
+export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheResponseSchema.extend({
+  registration: FlowRegistrationSchema.optional().describe(
+    'The automation engine\'s verdict on the flow in `data`, read live on every call and never part of '
+    + '`etag` (see `FlowRegistrationSchema`). Present only for a `flow` read answered by a process that '
+    + 'runs an automation service; a read that carries it is never answered `notModified`. Absent '
+    + 'otherwise, and absence means no engine judged it, never `registered`.',
+  ),
+}));
 
 /**
  * Get UI View Request
@@ -3402,6 +3509,8 @@ export type GetDiscoveryResponse = z.input<typeof GetDiscoveryResponseSchema>;
 export type GetMetaTypesRequest = z.input<typeof GetMetaTypesRequestSchema>;
 export type GetMetaTypesResponse = z.input<typeof GetMetaTypesResponseSchema>;
 export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
+export type FlowRegistrationRefusal = z.input<typeof FlowRegistrationRefusalSchema>;
+export type FlowRegistration = z.input<typeof FlowRegistrationSchema>;
 export type GetMetaItemsResponse = z.input<typeof GetMetaItemsResponseSchema>;
 export type GetMetaItemRequest = z.input<typeof GetMetaItemRequestSchema>;
 export type GetMetaItemResponse = z.input<typeof GetMetaItemResponseSchema>;

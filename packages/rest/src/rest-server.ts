@@ -6682,6 +6682,20 @@ export class RestServer {
                                 // [#9454] The cached door is the `view` arm, and
                             };
                             const result = await p.getMetaItemCached(cachedRequest);
+                            // [#23316] The automation engine's verdict on a
+                            // FLOW, beside the document and never inside it:
+                            // this branch is the default door of
+                            // `GET /meta/flow/:name`, so without it a flow the
+                            // engine refused was served here as its stored
+                            // `status` alone. The protocol reads it live from
+                            // its delegate read on every call; it is in no
+                            // validator, so a read carrying it is never
+                            // answered 304 (`getMetaItemCached` says why).
+                            // Flow only — every other type's cached envelope
+                            // is unchanged.
+                            const cachedRegistration = metaType === 'flow' && result.registration !== undefined
+                                ? { registration: result.registration }
+                                : {};
 
                             if (result.notModified) {
                                 res.status(304).send();
@@ -6752,7 +6766,7 @@ export class RestServer {
                                 res.header('Vary', 'Accept-Language');
                                 res.json(await this.translateMetaEnvelope(
                                     req, req.params.type, environmentId,
-                                    { type: metaType, name: req.params.name },
+                                    { type: metaType, name: req.params.name, ...cachedRegistration },
                                     cachedDocument, cacheI18n, runtimeView.document,
                                 ));
                                 return;
@@ -6838,6 +6852,7 @@ export class RestServer {
                             const cachedEnvelope = {
                                 type: metaType,
                                 name: req.params.name,
+                                ...cachedRegistration,
                             };
                             res.json(await this.translateMetaEnvelope(
                                 req, req.params.type, environmentId, cachedEnvelope, cachedDocument, cacheI18n,
