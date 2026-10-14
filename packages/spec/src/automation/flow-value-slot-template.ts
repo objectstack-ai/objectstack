@@ -57,10 +57,11 @@
  *    --stored` runs on each flow row, and a parse refusal reports the row
  *    `failed`, which flips `storedMigrationClean`: a non-zero exit that no run
  *    of the command can clear, because no conversion rewrites the token (the
- *    next section). A refusal after the parse is listed instead, as a TODO
- *    under the step-18 D3 entry `flow-value-slot-template-dialect-refused`
- *    (`conversions/refused-shapes.ts`), and the verdict does not move. The
- *    pin that a braced filter operand parses and is listed went red.
+ *    next section). A refusal after the parse is listed instead, as a TODO —
+ *    a value-slot site under the step-18 D3 entry
+ *    `flow-value-slot-template-dialect-refused` (`conversions/refused-shapes.ts`),
+ *    a text-slot site under `registerFlow` — and the verdict does not move.
+ *    The pins that a braced slot parses and is listed went red.
  *
  * What this leaves: a stack built by `defineStack` and handed to none of those
  * doors — `os dev` and `os serve` load it and boot — reaches `registerFlow` at

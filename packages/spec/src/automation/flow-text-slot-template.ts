@@ -48,8 +48,9 @@
  * `flow-value-slot-template.ts` ("The doors that run it"): a refusal at the
  * parse would replace `registerFlow`'s located line and `objectstack
  * validate`'s `expression-invalid` finding with the parse's issue list, and
- * would fail the row in the stored pass (`os migrate meta --stored`), whose
- * verdict a refusal after the parse leaves unmoved.
+ * would fail the row in the stored pass (`os migrate meta --stored`), which
+ * lists a text-slot refusal made after the parse as a TODO under
+ * `registerFlow` and leaves its verdict unmoved.
  *
  * ## Refused, not converted (ADR-0087 D2)
  *
