@@ -36,7 +36,7 @@ import { ObjectStackProtocolImplementation } from './index.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
-    id: string; type: string; name: string; organization_id: string | null;
+    id: string; type: string; name: string;
     package_id: string | null; state: string; metadata: string; checksum?: string; version?: number;
 }
 
@@ -49,7 +49,7 @@ function matches(r: Row, where: Record<string, unknown>): boolean {
 }
 
 function keyOf(w: Record<string, unknown>) {
-    return `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
+    return `${w.type}|${w.name}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
 }
 
 /**
@@ -102,17 +102,6 @@ function makeStubEngine() {
         },
     };
     return { engine, rows, registered };
-}
-
-/**
- * [ADR-0131 D6] The save door refuses every organization-scoped write, so an
- * organization-scoped view row — one stored before that release, which the
- * reads still serve — is planted at rest through the repository.
- */
-async function plantOrgRow(engine: any, organizationId: string, name: string, item: unknown): Promise<{ success: true }> {
-    await new SysMetadataRepository({ engine, organizationId, orgLabel: organizationId })
-        .put({ type: 'view', name } as any, item, { parentVersion: null, actor: null });
-    return { success: true };
 }
 
 /** A stored environment row, written through the overlay repository the way a Studio save writes it. */
@@ -300,7 +289,7 @@ describe('#7736 a runtime-authored view container is served', () => {
  *     isolation because it operates only on rows already scoped to THIS
  *     request's own org/environment (the pre-existing `queryByOrg` merge).
  */
-describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6, C7] a legacy organization container by no read', () => {
+describe('#13407 environment-scoped runtime containers are served', () => {
     it('derives the object binding from the containers own top-level `object` field, not just `list.data.object`', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
@@ -328,24 +317,6 @@ describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6,
         const list: any = await protocol.getMetaItems({ type: 'view' });
         const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
         expect(served).toEqual(['crm_lead.default', 'crm_lead.pipeline']);
-    });
-
-    it('[ADR-0131 D6] every other read serves no legacy organization container, whatever organization it names', async () => {
-        const { engine } = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(engine);
-        await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
-
-        for (const request of [
-            { type: 'view' },
-            { type: 'view', organizationId: 'org_acme' },
-            // The anonymous form doors' legacy key, deleted with ADR-0131 C7.
-            { type: 'view', legacyFormOrganizationId: 'org_acme' },
-        ]) {
-            const list: any = await protocol.getMetaItems(request as any);
-            expect(switcherMatches(list.items, 'crm_lead')).toEqual([]);
-        }
-        expect((await protocol.getMetaItem({ type: 'view', name: 'crm_lead.default', organizationId: 'org_acme' } as any)).item)
-            .toBeUndefined();
     });
 
     it('POSITIVE CONTROL: a pre-existing independent ViewItem for the same object is still served alongside the newly-expanded container', async () => {
@@ -392,10 +363,10 @@ describe('#13407 environment-scoped runtime containers are served; [ADR-0131 D6,
     });
 
     describe('anti-vacuity — the closure does not become "expand anything"', () => {
-        it('a DIFFERENT object in the SAME org still serves nothing for it', async () => {
+        it('a DIFFERENT object still serves nothing for it, whatever organization the caller names', async () => {
             const { engine } = makeStubEngine();
             const protocol = new ObjectStackProtocolImplementation(engine);
-            await plantOrgRow(engine, 'org_acme', 'crm_lead', leadContainer);
+            await plantEnvRow(engine, 'crm_lead', leadContainer);
             const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
             expect(switcherMatches(list.items, 'crm_account')).toEqual([]);
         });
@@ -645,12 +616,11 @@ describe('#21334 a container on another package\'s object never takes that packa
     const CONTAINERS = [
         { arm: 'package-scoped (saved into another writable package)', packageId: REPAIR, organizationId: undefined, ownPackage: REPAIR },
         { arm: 'package-less, environment-wide', packageId: undefined, organizationId: undefined, ownPackage: undefined },
-        // [ADR-0131 D6] No organization-scoped arm: a legacy organization
-        // container is served by no read (pinned in the ISOLATION case below).
+        // [ADR-0131 D6/D7] No organization-scoped arm: no stored row carries
+        // an organization.
     ] as { arm: string; packageId: string | undefined; organizationId: string | undefined; ownPackage: string | undefined }[];
-    const save = (protocol: Protocol, name: string, item: unknown, c: (typeof CONTAINERS)[number]) => c.organizationId
-        ? plantOrgRow((protocol as any).engine, c.organizationId, name, item)
-        : protocol.saveMetaItem({
+    const save = (protocol: Protocol, name: string, item: unknown, c: (typeof CONTAINERS)[number]) =>
+        protocol.saveMetaItem({
             type: 'view', name, item,
             ...(c.packageId ? { packageId: c.packageId } : {}),
         } as any);
@@ -705,7 +675,7 @@ describe('#21334 a container on another package\'s object never takes that packa
                 // A row bound to the package that owns the object (an installed
                 // package's own stored view), written straight to the store.
                 rows.set('own-pkg-row', {
-                    id: 'r_own', type: 'view', name: 'os_qa_same_pkg', organization_id: null,
+                    id: 'r_own', type: 'view', name: 'os_qa_same_pkg',
                     package_id: SHOWCASE, state: 'active', metadata: JSON.stringify(probe('os_qa_same_pkg')),
                 });
 
@@ -777,7 +747,7 @@ describe('#21334 a container on another package\'s object never takes that packa
         const { protocol, rows } = showcaseHarness('env_local');
         const nameless = { object: TASK, list: { type: 'grid', columns: ['title'] }, listViews: { in_progress: { label: 'Mine', type: 'grid', columns: ['title'] } } };
         rows.set('nameless-row', {
-            id: 'r_nameless', type: 'view', name: 'os_qa_nameless', organization_id: null,
+            id: 'r_nameless', type: 'view', name: 'os_qa_nameless',
             package_id: REPAIR, state: 'active', metadata: JSON.stringify(nameless),
         });
 
@@ -895,18 +865,6 @@ describe('#21334 a container on another package\'s object never takes that packa
                     });
                 }
 
-                it('[ADR-0131 D6] ISOLATION — a legacy organization-scoped container\'s names answer nothing, for any caller', async () => {
-                    const { protocol } = showcaseHarness(environmentId);
-                    await plantOrgRow((protocol as any).engine, ORG, OWN, { name: OWN, object: TASK, ...MEMBER_CASES['listViews.*'].member });
-                    const expanded = MEMBER_CASES['listViews.*'].servedAs;
-
-                    expect(await byNameDoor(protocol, expanded, ORG)).toBeUndefined();
-                    expect(ownNames(await objectDoor(protocol, ORG))).toEqual([]);
-                    expect(ownNames(await objectDoor(protocol, 'org_globex'))).toEqual([]);
-                    expect(await byNameDoor(protocol, expanded, 'org_globex')).toBeUndefined();
-                    expect(await byNameDoor(protocol, expanded)).toBeUndefined();
-                });
-
                 for (const organizationId of [undefined] as Array<string | undefined>) {
                     it(`a tenant overlay of the package's own container (${organizationId ? 'organization-scoped' : 'environment-wide'}): each name it expands answers the overlay's view by name, not the packaged one`, async () => {
                         const { protocol } = showcaseHarness(environmentId);
@@ -915,9 +873,7 @@ describe('#21334 a container on another package\'s object never takes that packa
                             list: { label: 'Customized', type: 'grid', data, columns: [{ field: 'title' }] },
                             listViews: { in_progress: { label: 'Customized In Progress', type: 'grid', data, columns: [{ field: 'title' }] } },
                         };
-                        await (organizationId
-                            ? plantOrgRow((protocol as any).engine, organizationId, TASK, overlay)
-                            : protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay } as any));
+                        await protocol.saveMetaItem({ type: 'view', name: TASK, item: overlay } as any);
 
                         const served = await objectDoor(protocol, organizationId);
                         for (const name of [DEFAULT, `${TASK}.in_progress`]) {
@@ -994,9 +950,8 @@ describe('#21334 a container on another package\'s object never takes that packa
         };
         /** The control: a name the container expands that has no row of its own. */
         const ROWLESS = `${TASK}.in_progress`;
-        const saveView = (protocol: Protocol, name: string, item: unknown, organizationId?: string) => (organizationId
-            ? plantOrgRow((protocol as any).engine, organizationId, name, item)
-            : protocol.saveMetaItem({ type: 'view', name, item } as any));
+        const saveView = (protocol: Protocol, name: string, item: unknown, _organizationId?: string) =>
+            protocol.saveMetaItem({ type: 'view', name, item } as any);
         /** The two doors answer `name` with one item, and that item is the one `expectItem` names. */
         const expectBothDoors = async (
             protocol: Protocol, name: string, organizationId: string | undefined, expectItem: (v: any) => void,
@@ -1032,7 +987,7 @@ describe('#21334 a container on another package\'s object never takes that packa
                             ];
                             for (const write of order === 'the container first' ? writes : [...writes].reverse()) await write();
                             expect(
-                                [...rows.values()].filter((r) => r.name === DEFAULT && r.organization_id === (organizationId ?? null)),
+                                [...rows.values()].filter((r) => r.name === DEFAULT),
                                 'the save door stored the row under the expanded name',
                             ).toHaveLength(1);
 
@@ -1056,20 +1011,6 @@ describe('#21334 a container on another package\'s object never takes that packa
                         });
                     }
                 }
-
-                it('[ADR-0131 D6] a legacy organization row of the name is no caller\'s row: every caller is served the container\'s expansion', async () => {
-                    const { protocol } = showcaseHarness(environmentId);
-                    await saveView(protocol, TASK, container);
-                    await saveView(protocol, DEFAULT, row, ORG);
-
-                    const expectTheDefaultExpansion = (v: any) => {
-                        expect(v?.label).toBe('FromContainer');
-                        expect(v?.config?.columns).toEqual([{ field: 'title' }]);
-                    };
-                    await expectBothDoors(protocol, DEFAULT, ORG, expectTheDefaultExpansion);
-                    await expectBothDoors(protocol, DEFAULT, undefined, expectTheDefaultExpansion);
-                    await expectBothDoors(protocol, DEFAULT, 'org_globex', expectTheDefaultExpansion);
-                });
             });
         }
     });
@@ -1149,9 +1090,9 @@ describe('#21334 a container on another package\'s object never takes that packa
                     const saved = (await save(protocol, m.servedAs, byName, c)) as any;
                     const stored = [...rows.values()]
                         .filter((r) => r.name === m.servedAs)
-                        .map((r) => ({ package_id: r.package_id, organization_id: r.organization_id, state: r.state }));
+                        .map((r) => ({ package_id: r.package_id, state: r.state, organization: 'organization_id' in r }));
                     expect(stored, `${kernelName(environmentId)}: stored once, in the container's scope`)
-                        .toEqual([{ package_id: c.packageId ?? null, organization_id: null, state: 'active' }]);
+                        .toEqual([{ package_id: c.packageId ?? null, state: 'active', organization: false }]);
                     expect((await byNameDoor(protocol, m.servedAs))?.label).toBe('ByName');
                     expect(named(await objectDoor(protocol), m.servedAs).map((v) => v.label)).toEqual(['ByName']);
                     outcomes.push({ success: saved?.success, stored, ...(await answer(protocol, m.servedAs)) });
@@ -1761,16 +1702,6 @@ describe('#21334 a container on another package\'s object never takes that packa
                     serves: [{ object: TASK, name: `${TASK}.${OWN}`, label: 'Probe' }, { object: TASK, name: DEFAULT, label: 'All Tasks' }],
                 },
             },
-            {
-                shape: 'an environment-wide container saved under the expanded name of an organization\'s container',
-                scopes: ['environment-wide'],
-                given: [{ name: LEAD, item: storedLead, organizationId: ORG }],
-                save: { name: `${LEAD}.pipeline`, item: { object: LEAD, list: leadList('Everyone') } },
-                allowed: {
-                    because: 'the caller\'s selection decides: an organization\'s rows are not an environment-wide caller\'s, and reading every organization\'s rows at an environment-wide save would be a cross-tenant read at a write door',
-                    serves: [{ object: LEAD, name: `${LEAD}.default`, label: 'Everyone' }],
-                },
-            },
         ];
 
         /** The ruling's acceptance list, verbatim in substance: each must be a row. */
@@ -1827,7 +1758,6 @@ describe('#21334 a container on another package\'s object never takes that packa
 
         const writeIn = (protocol: Protocol, write: Write, callerOrganizationId: string | undefined, mode?: 'draft' | 'publish') => {
             const organizationId = write.organizationId === undefined ? callerOrganizationId : (write.organizationId ?? undefined);
-            if (organizationId) return plantOrgRow((protocol as any).engine, organizationId, write.name, write.item);
             return protocol.saveMetaItem({
                 type: 'view', name: write.name, item: write.item,
                 ...(write.packageId ? { packageId: write.packageId } : {}),
@@ -1837,7 +1767,7 @@ describe('#21334 a container on another package\'s object never takes that packa
         };
         const refusalOf = (write: Promise<unknown>) => write.then(() => null, (e: any) => e);
         const viewRowsOf = (rows: Map<string, Row>) =>
-            [...rows.values()].filter((r) => r.type === 'view').map((r) => [r.name, r.organization_id, r.state, r.metadata]).sort();
+            [...rows.values()].filter((r) => r.type === 'view').map((r) => [r.name, r.state, r.metadata]).sort();
         /** `name` answers one view item carrying `label` on BOTH doors. */
         const expectServed = async (protocol: Protocol, served: Served, organizationId: string | undefined) => {
             const listed = named(
@@ -1942,7 +1872,7 @@ describe('#21334 a container on another package\'s object never takes that packa
         ] as const;
         const storeAtRest = (rows: Map<string, Row>, name: string, body: Record<string, unknown>, organizationId?: string) =>
             rows.set(`at-rest:${name}:${organizationId ?? 'env'}`, {
-                id: `r_${name}`, type: 'view', name, organization_id: organizationId ?? null,
+                id: `r_${name}`, type: 'view', name,
                 package_id: null, state: 'active', metadata: JSON.stringify({ name, ...body }),
             });
 
