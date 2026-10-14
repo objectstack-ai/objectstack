@@ -130,6 +130,8 @@ async function ceremony(posture: string, db: Database.Database): Promise<Organiz
     // The plan the operator reviewed: the one this run computes.
     reviewedPlan: { file: 'plan.json', generatedAt: '2026-10-14T00:00:00Z', database: 'v17', inventoryDigest: inventoryDigest(), posture },
     catalog,
+    // What the command hands it: the boot's own answer for the security plugin.
+    securityPlugin: stack.composition.securityPlugin,
     // No view is served here: the form-withdrawal carry has nothing to judge.
     views: { list: async () => [] },
     lock: { verdict: async () => ({ editable: true }) },
@@ -158,6 +160,22 @@ describe('the ownership ceremony resolves bindings against what a started kernel
     expect(conversion.blockers).toHaveLength(1);
     expect(conversion.blockers[0]).toContain('position zz_undeclared');
     expect(conversion.blockers.join('\n')).not.toContain('everyone');
+  }, CASE_TIMEOUT_MS);
+
+  it('control: the boot composed the plugin, and the rewrite verifies grants of two shipped sets, 2 of 2', async () => {
+    expect(stack.composition.securityPlugin).toEqual({ composed: true });
+    const db = new Database(join(dir, 'shipped.db'));
+    db.exec(`
+      CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT);
+      INSERT INTO sys_organization VALUES ('org_default', 'default');
+      CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT, permission_set TEXT);
+      INSERT INTO sys_user_permission_set VALUES
+        ('grant_admin', 'org_default', 'usr_admin', 'admin_full_access'),
+        ('grant_nobypass', 'org_default', 'usr_admin', 'organization_admin_no_bypass');
+    `);
+    const rewrite = step(await ceremony('single', db), 'rewrite');
+    expect(rewrite.blockers).toEqual([]);
+    expect(rewrite).toMatchObject({ status: 'done', summary: { grants: 2, verified: 2 } });
   }, CASE_TIMEOUT_MS);
 
   it('walled: the rewrite gate blocks on the undeclared position, and not on everyone', async () => {

@@ -46,6 +46,7 @@ import {
 } from './organization-ownership-apply.js';
 import { backfillOrgAdminGrants } from '@objectstack/plugin-security';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import { describeSecurityPluginComposition, type SchemaMigrationComposition } from './schema-migration-plugins.js';
 
 let dir: string;
 let file: string;
@@ -422,6 +423,7 @@ const apply = (
     columnDrops?: ColumnDropPort;
     reviewed?: Partial<ReviewedPlan>;
     lock?: MetadataLockPort;
+    securityPlugin?: SchemaMigrationComposition['securityPlugin'];
   } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
@@ -442,6 +444,7 @@ const apply = (
     executor: opts.executor ?? executor(),
     ...(opts.templateChoices ? { templateChoices: opts.templateChoices } : {}),
     ...(opts.metadataChoices ? { metadataChoices: opts.metadataChoices } : {}),
+    ...(opts.securityPlugin ? { securityPlugin: opts.securityPlugin } : {}),
     posture: opts.posture ?? 'single',
     database: file,
     catalog: c,
@@ -2006,5 +2009,133 @@ describe('ADR-0131 D10 --apply — the grant\'s retired id column (C7b, seat ans
       expect(rewrite.status).toBe('blocked');
       expect(rewrite.blockers.join('\n')).toMatch(/has no permission_set column.*Boot this release once against the database/);
     });
+  });
+});
+
+describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin declares (triage 6159130107)', () => {
+  /** What the boot's auth gate answers with no auth secret and no development boot: the card's setup. */
+  const NO_SECRET = { composed: false, reason: 'no-secret' } as const;
+  const COMPOSITION = describeSecurityPluginComposition(NO_SECRET);
+  type Step = OrganizationOwnershipApplyReport['steps'][number];
+  const step = (report: OrganizationOwnershipApplyReport, name: Step['step']): Step => report.steps.find((s) => s.step === name)!;
+  /** The one blocker of `s` that names `subject`. */
+  const blockerOf = (s: Step, subject: string): string => {
+    const found = s.blockers.filter((b) => b.includes(subject));
+    expect(found, subject).toHaveLength(1);
+    return found[0]!;
+  };
+  /** Every DELETE the run issued, beside the settings rung that moves before the rewrite. */
+  const deletes = (): string[] => writes.filter((w) => /^DELETE/.test(w) && !/^DELETE FROM "sys_setting"/.test(w));
+  const v17Bindings = `
+    INSERT INTO sys_position VALUES
+      ('pos_everyone', NULL, 'everyone', 'Everyone', 'platform', 0, 1),
+      ('pos_gone', NULL, 'zz_undeclared', 'Undeclared', 'platform', 0, 1);
+    INSERT INTO sys_position_permission_set VALUES
+      ('bind_everyone', NULL, 'pos_everyone', 'ps_null'),
+      ('bind_gone', NULL, 'pos_gone', 'ps_null');
+  `;
+
+  it('rewrite: a grant naming a shipped set gets the composition, never removal; an unknown set keeps its remedy', async () => {
+    db.exec(`
+      INSERT INTO sys_user_permission_set VALUES
+        ('grant_admin', 'org_default', 'usr_admin', NULL, 'admin_full_access'),
+        ('grant_nobypass', 'org_default', 'usr_admin', NULL, 'organization_admin_no_bypass'),
+        ('grant_unknown', 'org_default', 'usr_9', NULL, 'zz_unknown_set');
+    `);
+    const report = await apply(catalog(), ledger(), { securityPlugin: NO_SECRET });
+
+    const rewrite = step(report, 'rewrite');
+    expect(rewrite.status).toBe('blocked');
+    const unknown = blockerOf(rewrite, 'the permission set zz_unknown_set,');
+    expect(unknown).not.toContain(COMPOSITION);
+    expect(unknown).toMatch(/or remove the grants/);
+    for (const name of ['admin_full_access', 'organization_admin_no_bypass']) {
+      const blocker = blockerOf(rewrite, `the permission set ${name},`);
+      expect(blocker).toContain(COMPOSITION);
+      expect(blocker).not.toMatch(/\bremove\b/);
+    }
+    // Still refused: the gate holds and nothing is deleted.
+    expect(step(report, 'mirror-deletion').status).toBe('not-reached');
+    expect(deletes()).toEqual([]);
+  });
+
+  it('rewrite: a legacy grant whose set row is a shipped set gets the composition, never removal; an unknown set row keeps its remedy', async () => {
+    db.exec(`
+      INSERT INTO sys_permission_set VALUES
+        ('ps_admin', NULL, 'admin_full_access', 'Admin', 'platform', 1, '{}', '[]'),
+        ('ps_gone', NULL, 'zz_unknown_set', 'Gone', 'platform', 1, '{}', '[]');
+      INSERT INTO sys_user_permission_set VALUES
+        ('grant_admin_legacy', 'org_default', 'usr_admin', 'ps_admin', NULL),
+        ('grant_gone_legacy', 'org_default', 'usr_9', 'ps_gone', NULL);
+    `);
+    const report = await apply(catalog(), ledger(), { securityPlugin: NO_SECRET });
+
+    const rewrite = step(report, 'rewrite');
+    expect(rewrite.status).toBe('blocked');
+    const unknown = blockerOf(rewrite, 'grant_gone_legacy');
+    expect(unknown).not.toContain(COMPOSITION);
+    expect(unknown).toMatch(/name or remove each/);
+    const shipped = blockerOf(rewrite, 'grant_admin_legacy');
+    expect(shipped).toContain('admin_full_access');
+    expect(shipped).toContain(COMPOSITION);
+    expect(shipped).not.toMatch(/\bremove\b/);
+    expect(step(report, 'mirror-deletion').status).toBe('not-reached');
+    expect(deletes()).toEqual([]);
+  });
+
+  it('authored-conversion: the seeded everyone binding gets the composition, never removal; an undeclared position keeps its remedy', async () => {
+    db.exec(v17Bindings);
+    const report = await apply(catalog(), ledger(), { securityPlugin: NO_SECRET });
+
+    const conversion = step(report, 'authored-conversion');
+    expect(conversion.status).toBe('blocked');
+    const undeclared = blockerOf(conversion, 'position zz_undeclared ');
+    expect(undeclared).not.toContain(COMPOSITION);
+    expect(undeclared).toMatch(/or remove the bindings/);
+    const everyone = blockerOf(conversion, 'position everyone ');
+    expect(everyone).toContain(COMPOSITION);
+    expect(everyone).not.toMatch(/\bremove\b/);
+    expect(step(report, 'rewrite').status).toBe('not-reached');
+    expect(deletes()).toEqual([]);
+  });
+
+  it('under a wall, the rewrite gate: the everyone binding gets the composition; an undeclared position keeps its remedy', async () => {
+    db.exec(v17Bindings);
+    const report = await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin: NO_SECRET });
+
+    expect(step(report, 'authored-conversion').status).toBe('done');
+    const rewrite = step(report, 'rewrite');
+    expect(rewrite.status).toBe('blocked');
+    const undeclared = blockerOf(rewrite, 'position zz_undeclared ');
+    expect(undeclared).not.toContain(COMPOSITION);
+    expect(undeclared).toMatch(/resolve its blocker/);
+    const everyone = blockerOf(rewrite, 'position everyone ');
+    expect(everyone).toContain(COMPOSITION);
+    expect(everyone).not.toMatch(/\bremove\b/);
+    expect(deletes()).toEqual([]);
+  });
+
+  it.each([
+    ['composed', { composed: true } as const],
+    ['not said', undefined],
+  ])('control (%s): authored-conversion keeps the remedy — the composition is the boot\'s answer, never inferred', async (_label, securityPlugin) => {
+    db.exec(v17Bindings);
+    const conversion = step(await apply(catalog(), ledger(), { securityPlugin }), 'authored-conversion');
+    expect(blockerOf(conversion, 'position everyone ')).toMatch(/or remove the bindings/);
+    expect(conversion.blockers.join('\n')).not.toContain(COMPOSITION);
+  });
+
+  it.each([
+    ['composed', { composed: true } as const],
+    ['not said', undefined],
+  ])('control (%s), under a wall: the rewrite keeps every remedy', async (_label, securityPlugin) => {
+    db.exec(`
+      INSERT INTO sys_user_permission_set VALUES ('grant_admin', 'org_default', 'usr_admin', NULL, 'admin_full_access');
+      ${v17Bindings}
+    `);
+    const rewrite = step(await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin }), 'rewrite');
+    expect(blockerOf(rewrite, 'the permission set admin_full_access,')).toMatch(/or remove the grants/);
+    expect(blockerOf(rewrite, 'position everyone ')).toMatch(/resolve its blocker/);
+    expect(rewrite.blockers.join('\n')).not.toContain(COMPOSITION);
   });
 });
