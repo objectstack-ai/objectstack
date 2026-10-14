@@ -26323,6 +26323,10 @@ export class ObjectStackProtocolImplementation implements
      * when its target name is already claimed (the source also holds
      * `iojn_ticket`) the object is refused in `failed[]`, before anything is
      * written for it, with the source rename that clears it.
+     *
+     * A copied permission set's field rules follow too: in `fields`, keyed
+     * `<object>.<field>`, a key's object part takes the renamed object's name
+     * and its field part is left as stored.
      */
     async duplicatePackage(request: {
         sourcePackageId: string;
@@ -26566,6 +26570,59 @@ export class ObjectStackProtocolImplementation implements
             }
             return v;
         };
+        // ⭐ A COPIED PERMISSION SET'S FIELD RULES FOLLOW THE RENAMED OBJECTS.
+        // `PermissionSetSchema.fields` is a record keyed `<entity_name>.<field_name>`
+        // (`packages/spec/src/security/permission.zod.ts`), and the security
+        // plugin reads a set's rules for an object by the key prefix
+        // `<object>.` (`PermissionEvaluator.getFieldPermissions`). Left as
+        // stored, the copy's rules govern the SOURCE's object and the
+        // duplicate's object gets none: a field the source set hides is
+        // readable on the copy for whoever holds the copied set.
+        //
+        // `deepRewrite` cannot carry it: the derived site index reads
+        // `permission.fields` as a site naming `field` items (its property
+        // spells that type), never an object, and has no arm for a composite
+        // key — and widening the index would also change the "Used by" answer
+        // it feeds (`findReferencesToMeta`). So this step is keyed on the
+        // declared shape — the `fields` record of a copied `permission` item —
+        // never on a property name, which would also catch an object's own
+        // `fields` (keyed by field name).
+        //
+        // The split: object and field names are both `^[a-z_][a-z0-9_]*$`, so
+        // a key's object part is everything before its FIRST `.`. It is
+        // rewritten only when it equals a renamed object name exactly, and the
+        // field part is never read — `dupsrc_customer.dupsrc_customer` becomes
+        // `dupdst_customer.dupsrc_customer`. A key naming an object outside the
+        // package keeps its name.
+        //
+        // ⛔ REFUSED, NEVER MERGED: when a renamed key equals a key the set
+        // already holds (the source also governs an object, outside the
+        // package, named like the copy), keeping either rule would silently
+        // drop the other, so the set is reported in `failed[]` with both keys.
+        // `Object.fromEntries` defines own properties, so no key can land on
+        // the prototype.
+        const rewriteFieldRuleKeys = (fields: Record<string, unknown>): { fields: Record<string, unknown> } | { collision: string } => {
+            const out = new Map<string, unknown>();
+            const from = new Map<string, string>();
+            for (const [key, rule] of Object.entries(fields)) {
+                const dot = key.indexOf('.');
+                const renamed = dot > 0 ? renameMap.get(key.slice(0, dot)) : undefined;
+                const next = renamed === undefined ? key : `${renamed}${key.slice(dot)}`;
+                const other = from.get(next);
+                if (other !== undefined) {
+                    const moved = next === key ? other : key;
+                    return {
+                        collision: `its field rule '${moved}' follows object '${moved.slice(0, moved.indexOf('.'))}' `
+                            + `to '${next}', a key the set already holds for object `
+                            + `'${next.slice(0, next.indexOf('.'))}', which this copy does not rename. `
+                            + `Remove '${moved}' or '${next}' on the source, then duplicate again.`,
+                    };
+                }
+                out.set(next, rule);
+                from.set(next, key);
+            }
+            return { fields: Object.fromEntries(out) };
+        };
 
         if (srcPkg?.manifest && typeof registry?.installPackage === 'function') {
             try {
@@ -26694,6 +26751,19 @@ export class ObjectStackProtocolImplementation implements
                 // binding is reported in `failed[]` with the door's remedy.
                 if (singular === 'permission' && rewritten.packageId === request.sourcePackageId) {
                     rewritten.packageId = request.targetPackageId;
+                }
+                if (singular === 'permission' && rewritten.fields
+                    && typeof rewritten.fields === 'object' && !Array.isArray(rewritten.fields)) {
+                    const result = rewriteFieldRuleKeys(rewritten.fields);
+                    if ('collision' in result) {
+                        failed.push({
+                            type: row.type,
+                            name: row.name,
+                            error: `Permission set '${row.name}' is not copied: ${result.collision}`,
+                        });
+                        continue;
+                    }
+                    rewritten.fields = result.fields;
                 }
             }
             try {
