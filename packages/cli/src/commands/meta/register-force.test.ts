@@ -120,10 +120,15 @@ async function runCli(argv: string[]): Promise<CliRun> {
 const TEST_PACKAGE_ID = 'objectstack-test';
 const PKG = 'com.qa.alpha';
 
-/** An environment-authored object with the two fields the card's probe used. */
+/**
+ * An environment-authored object with the two fields the card's probe used.
+ * `sharingModel` is declared because the save door's author-time rule
+ * `security-owd-unset` refuses an object without one.
+ */
 const PROBE = (name: string, fields: Record<string, { type: string; label: string }>) => ({
   name,
   label: 'Probe',
+  sharingModel: 'private',
   fields: Object.fromEntries(
     Object.entries(fields).map(([fname, f]) => [fname, { name: fname, ...f }]),
   ),
