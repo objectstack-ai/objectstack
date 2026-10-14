@@ -2,7 +2,7 @@
 '@objectstack/metadata-protocol': minor
 ---
 
-fix(metadata-protocol)!: an uninstall without `keepData` of a package holding an object another stored row also holds is refused `409 RESOURCE_CONFLICT` before anything is removed, instead of half-uninstalling the package (ADR-0048)
+fix(metadata-protocol)!: an uninstall without `keepData` of a package holding an object another stored row also holds is refused `409 RESOURCE_CONFLICT` before anything is removed, instead of dropping the object's table while the other row still serves it (ADR-0048)
 
 Clause-②: no (narrowing)
 
@@ -12,7 +12,7 @@ Clause-②: no (narrowing)
 
 A `sys_metadata` row is keyed by its package (ADR-0048), so one object can hold one row per package, and a package-less row beside them, all served over the one table its name maps to. An uninstall drops each of its objects' tables unless `keepData` is set, and a table is dropped only with the object's last stored row.
 
-**FROM.** `DELETE /api/v1/packages/com.acme.a` (`deletePackage({ packageId: 'com.acme.a' })` in process), for a package whose object a second package `com.acme.b` (or the package-less row) also holds, deleted the package's `sys_packages` row and its other rows, then met the per-object table-drop refusal and answered `400 PACKAGE_DELETE_PARTIAL` with that object in `failed[]`. The package was no longer installed, while its row of the shared object stayed stored and served: a half-uninstalled package.
+**FROM.** `DELETE /api/v1/packages/com.acme.a` (`deletePackage({ packageId: 'com.acme.a' })` in process), for a package whose object a second package `com.acme.b` (or the package-less row) also holds, removed the package and its rows and dropped the shared object's table along with the package's row of it. The object stayed defined and served by `com.acme.b`'s row while its records were gone: its next data read answered `500`.
 
 **TO.** Such an uninstall is refused `409 RESOURCE_CONFLICT` before its first durable step: the `sys_packages` row, the registry entry, every row, the tables and their records all stay. The message names each shared object and the rows that keep it, and the ways out.
 
