@@ -123,8 +123,15 @@ describe('[#22777] the stdio bridge refuses a condition on a target the decision
         }>;
       const refused = await call({ hidden: { name: 'x' } });
       expect(refused.isError).toBe(true);
-      expect(refused.content[0]!.text).toContain("Object 'rcx_hidden' is not exposed via the API");
-      expect(refused.content[0]!.text).toContain("'where.hidden'");
+      // [#23509] The tool renders the refusal's envelope: the code and status
+      // the bridge threw, beside the unchanged sentence.
+      const { error } = JSON.parse(refused.content[0]!.text) as {
+        error: { code: unknown; status: unknown; message: string };
+      };
+      expect(error.code).toBe('OBJECT_API_DISABLED');
+      expect(error.status).toBe(404);
+      expect(error.message).toContain("Object 'rcx_hidden' is not exposed via the API");
+      expect(error.message).toContain("'where.hidden'");
       expect(engine.find).not.toHaveBeenCalled();
       const served = await call({ listonly: { name: 'x' } });
       expect(served.isError).toBeFalsy();

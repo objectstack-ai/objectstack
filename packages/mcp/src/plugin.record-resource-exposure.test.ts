@@ -210,17 +210,36 @@ function mockContext(services: Record<string, unknown>) {
 /**
  * One read path's answer, normalized to the same shape for both surfaces.
  *
- * The two surfaces serialize a refusal differently and neither is this card's
- * to change: the resource wraps it as a JSON `{ error }` body (its `catch` in
- * `bridgeResources`), the tool answers `isError: true` with the bare message as
- * text (`errorResult(messageOf(err))`). Normalizing here is what lets the cases
- * below compare VERDICTS rather than two serialization accidents.
+ * The two surfaces serialize a refusal differently. The resource answers a JSON
+ * body with the sentence as `error` and the code and status beside it
+ * (`{ error, code, status }`, its `catch` in `bridgeResources`). The tool
+ * answers `isError: true` with the envelope as JSON text
+ * (`{ error: { code, message, status } }`, `errorResultFromThrown`). Both have
+ * carried the code since #23509; before it, each carried the sentence alone.
+ * Normalizing here is what lets the cases below compare VERDICTS rather than
+ * two serialization accidents.
  */
 interface PathAnswer {
   /** The refusal message, or `undefined` when the path served a row. */
   error?: string;
+  /** The refusal's ADR-0112 code, as the wire carried it. */
+  code?: unknown;
+  /** The refusal's status, as the wire carried it. */
+  status?: unknown;
   /** The row, or `undefined` when the path refused. */
   record?: any;
+}
+
+/** A tool error's text: the coded envelope when it is one, else the bare message (a code-less throw). */
+function toolRefusal(text: string): PathAnswer {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: text };
+  }
+  if (typeof parsed?.error?.message !== 'string') return { error: text };
+  return { error: parsed.error.message, code: parsed.error.code, status: parsed.error.status };
 }
 
 interface BothPaths {
@@ -273,7 +292,7 @@ async function readBothPaths(def: unknown): Promise<BothPaths> {
     const resourceBody = JSON.parse(resourceFrame.result.contents[0].text);
     const resource: PathAnswer =
       typeof resourceBody?.error === 'string'
-        ? { error: resourceBody.error }
+        ? { error: resourceBody.error, code: resourceBody.code, status: resourceBody.status }
         : { record: resourceBody };
 
     const toolFrame = await session.rpc('tools/call', {
@@ -283,7 +302,7 @@ async function readBothPaths(def: unknown): Promise<BothPaths> {
     expect(toolFrame.error, 'tools/call failed at the protocol level').toBeUndefined();
     const toolText = toolFrame.result.content[0].text as string;
     const tool: PathAnswer = toolFrame.result.isError
-      ? { error: toolText }
+      ? toolRefusal(toolText)
       : { record: JSON.parse(toolText) };
 
     return {
@@ -338,6 +357,12 @@ describe('#8266 one declaration, both read paths, same verdict', () => {
     // sentence because they take the same decision from the same helper.
     expect(both.resource.error).toBe(both.tool.error);
 
+    // [#23509] …and the same CODE, which both wires now carry beside it.
+    expect(both.resource.code).toBe('OBJECT_API_DISABLED');
+    expect(both.resource.status).toBe(404);
+    expect(both.tool.code).toBe(both.resource.code);
+    expect(both.tool.status).toBe(both.resource.status);
+
     // Refused BEFORE dispatch — the engine was never asked for the row, by
     // either path. A gate that refused after reading would still have read.
     expect(both.rowReads).toHaveLength(0);
@@ -387,6 +412,10 @@ describe('#8266 one declaration, both read paths, same verdict', () => {
 
     expect(both.tool.record).toBeUndefined();
     expect(both.resource.error).toBe(both.tool.error);
+    expect(both.resource.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+    expect(both.resource.status).toBe(405);
+    expect(both.tool.code).toBe(both.resource.code);
+    expect(both.tool.status).toBe(both.resource.status);
     expect(both.rowReads).toHaveLength(0);
   });
 
@@ -419,12 +448,11 @@ describe('#8266 one declaration, both read paths, same verdict', () => {
 
 describe('#8266 the refusal carries the ADR-0112 envelope', () => {
   /**
-   * The wire assertions above can only read `.message`: BOTH the resource
-   * serializer (`bridgeResources`' `catch`) and the `get_record` tool
-   * (`errorResult(messageOf(err))`) forward the message alone. That is
-   * pre-existing on both surfaces and is not this card's to change — so the
-   * envelope is asserted here, at the seam that actually carries it, rather
-   * than left unasserted or faked into a wire test that cannot see it.
+   * The wire assertions above read the code and the status since #23509; both
+   * surfaces forwarded the message alone before it. The member they still do
+   * not render is the 405's effective operation set (`allowedOperations`), so
+   * the envelope is asserted here, at the seam that actually carries it,
+   * rather than left unasserted or faked into a wire test that cannot see it.
    */
   async function refusalFor(def: unknown, action: string): Promise<McpExposureError> {
     const metadataService = fakeMetadata(def) as unknown as IMetadataService;
