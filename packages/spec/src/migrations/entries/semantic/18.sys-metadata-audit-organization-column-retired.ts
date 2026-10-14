@@ -24,7 +24,7 @@ export const entry: SemanticMigration = {
   reason:
     'ADR-0131 D6 retired the per-organization overlay axis: every metadata write now lands '
     + 'environment-wide with a NULL organization, every read is environment then code, and a legacy '
-    + 'organization row is reported at boot and served by no read. The column therefore only holds '
+    + 'organization row is served by no read, and the v18 runtime refuses to start on a database still holding the column until the ceremony has run. The column therefore only holds '
     + 'the legacy rows the 17.x organization layer wrote, and the v18 ceremony owns those: under '
     + 'single it promotes the presentational customizations to environment rows and carries every '
     + 'public-form withdrawal onto the environment, fail-closed (the maintainer rulings on organization customizations and form withdrawals), and '
