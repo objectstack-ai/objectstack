@@ -1700,6 +1700,7 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'records', 'reason', 'until', 'setName', 'flsKey', 'opts', 'path', 'i', 'e', 'fields', 'crm_opportunity',
       'flsGraph', // #16108: the shared object index — `.has` / `.get`, JS Map methods.
       'flsField', // #16108: the key's remainder, a string — `.length`, a JS property.
+      'remainder', // #23549: an unqualified key's text after its '.', a string — `.length` / `.includes`.
       'declared', // #16108: one object's sorted field-name list — `.length` / `.slice` / `.join`.
       'candidates', // #23100: `resolveCbpRelation`'s candidate list — `.length`, a JS property.
       'cbpCandidates', // #23100: one object's required master_detail list — `.length` / `.map`, JS methods.
