@@ -950,10 +950,12 @@ describe('[#23291] an object\'s destructive-change check judges the row the save
         expect(fieldsOf(rows('object', name).find((r) => r.package_id === OTHER_WRITABLE)!)).toEqual(['a', 'd']);
 
         // Drops `d`, which the stand-in it overlays has: refused.
-        const { protocol: second } = pairFixture(`${name}_2`);
+        const { protocol: second, rows: secondRows } = pairFixture(`${name}_2`);
+        const secondBefore = secondRows('object', `${name}_2`).map((r) => [r.package_id ?? null, fieldsOf(r)]);
         const envelope = resolveThrownHttpError(await refusalOf(() => second.saveMetaItem({
             type: 'object', name: `${name}_2`, item: objectBody(`${name}_2`, ['a', 'c']), packageId: OTHER_WRITABLE,
         })));
         expect(envelope).toMatchObject({ status: 409, code: 'DESTRUCTIVE_CHANGE' });
+        expect(secondRows('object', `${name}_2`).map((r) => [r.package_id ?? null, fieldsOf(r)])).toEqual(secondBefore);
     });
 });
