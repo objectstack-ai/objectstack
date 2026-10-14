@@ -1051,6 +1051,7 @@
     "getAuthEndpointUrl": "src/api/auth-endpoints.zod.ts#getAuthEndpointUrl (function)",
     "getDefaultRouteRegistrations": "src/api/plugin-rest-api.zod.ts#getDefaultRouteRegistrations (function)",
     "identityFreeEndpointGateFailure": "src/api/endpoint-publish-gate.ts#identityFreeEndpointGateFailure (function)",
+    "isAppPackageIdKey": "src/api/protocol.zod.ts#isAppPackageIdKey (function)",
     "isSubscribableChannel": "src/api/discovery.zod.ts#isSubscribableChannel (function)",
     "makeApiErrorSchema": "src/api/contract.zod.ts#makeApiErrorSchema (function)",
     "normalizeEndpointPath": "src/api/endpoint.zod.ts#normalizeEndpointPath (function)",

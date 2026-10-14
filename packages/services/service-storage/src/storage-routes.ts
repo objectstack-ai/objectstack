@@ -626,10 +626,9 @@ export function registerStorageFamily(
   // registration itself.
   //
   // The answer is REST's `enforceAuth`: `403` with the gate's own `code` and
-  // `message`, in this family's declared envelope. `code` is declared as a
-  // bare string on the session's `authGate`; its one producer (plugin-auth's
-  // `customSession` enrichment) writes only `PASSWORD_EXPIRED` /
-  // `MFA_REQUIRED`, both members of the vocabulary.
+  // `message`, in this family's declared envelope. `code` is a
+  // member of the closed posture vocabulary (`AuthGateCodeSchema`), every
+  // member of which is registered in the error-code vocabulary.
   //
   // No request path is passed. The allow-list exempts remediation and
   // bootstrap routes, and none of this family is one; its base path is the

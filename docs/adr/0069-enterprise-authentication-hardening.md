@@ -1,6 +1,6 @@
 # ADR-0069: Enterprise authentication hardening — password policy, enforced MFA, SSO, session controls, network gating, and anti-brute-force, all enforcement-wired
 
-**Status**: Accepted — **P1 + P2 implemented** (2026-07-04); P3 partially landed (see Addendum). Original proposal 2026-06-24. Session-of-record question settled 2026-08-04 (#4785): sessions live in `sys_session`; the kernel `cache` service backs D2's rate-limit counters only.
+**Status**: Accepted — **P1 + P2 implemented** (2026-07-04); P3 partially landed (see Addendum). Original proposal 2026-06-24. Session-of-record question settled 2026-08-04 (#4785): sessions live in `sys_session`; the kernel `cache` service backs D2's rate-limit counters only. · **Amended** (2026-10-14, ruling C′ on [#23287](https://github.com/objectstack-ai/objectstack/issues/23287), [`6159450584`](https://github.com/objectstack-ai/objectstack/issues/23287#issuecomment-6159450584), maintainer 「同意」) — D3 states what the gate holds for an API key, for password expiry and for a forced reset; see the note under D3.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (**the governing constraint** — a security property that isn't enforced at runtime is forbidden; no toggle may be a "false surface"), [ADR-0007](./0007-settings-manifest-and-kv-store.md) (settings manifest + cascade KV store), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (`sys_role` is platform-native, decoupled from better-auth; org scoping), [ADR-0066](./0066-unified-authorization-model.md) (capability/assignment split), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (`current_user` contract, built-in roles)
 **Consumers**: `@objectstack/plugin-auth` (better-auth wiring, `bindAuthSettings`/`applyConfigPatch`, auth route middleware), `@objectstack/service-settings` (`auth.manifest.ts`), `@objectstack/platform-objects` (identity objects `sys_user`/`sys_session`/`sys_account`), `@objectstack/rest` (auth request middleware seam), `../objectui` (settings UI rendering)
@@ -85,6 +85,17 @@ Legend: **[native]** = a better-auth config/plugin does the enforcing; **[custom
 | `sys_organization.require_mfa` (per-org) | — | `customSession` org resolution | **[custom]** an org may *require* MFA above the global floor |
 
 > better-auth makes MFA *available*; making it *required* is the missing enforcement. Gate at the session-validation seam so a half-authenticated (password-only) session cannot read data.
+>
+> **What the gate holds (amended 2026-10-14: ruling C′ on [#23287](https://github.com/objectstack-ai/objectstack/issues/23287),
+> [`6159450584`](https://github.com/objectstack-ai/objectstack/issues/23287#issuecomment-6159450584), maintainer 「同意」;
+> the revocation's default is the maintainer's letter A,
+> [`6165848580`](https://github.com/objectstack-ai/objectstack/issues/23287#issuecomment-6165848580)).**
+> The gate holds the account's standing and an API key answers as the session does (a held
+> user's key is refused with the session's code and remediation, and admitted again once the
+> standing clears: a refusal, not a revocation); password expiry (D1) holds password sign-in
+> alone, so the user's keys keep working; and an administrator's forced password reset (D7)
+> carries an explicit revocation of the user's sessions and API keys, on by default and off only
+> as the administrator's explicit act.
 
 ### D4 — Session controls (P2)
 

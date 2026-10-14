@@ -116,7 +116,7 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
       // `sys_permission_set.name` is ever widened, the pin beside this file is
       // where this bound is re-derived rather than rediscovered on MySQL.
       maxLength: 100,
-      description: 'Name of the suggested permission set (resolved against sys_permission_set at confirm time).',
+      description: 'Name of the suggested permission set (resolved in the security catalog at confirm time).',
     }),
 
     anchor: Field.select({

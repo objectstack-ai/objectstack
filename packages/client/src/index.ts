@@ -825,8 +825,11 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
  * reads, made reachable from the SDK (commit cf71d73f8).
  *
  * `DELETE /meta/:type/:name` ("reset metadata item to artifact default")
- * reads FOUR carriers. This bag declares THREE of them, and the fourth's
- * absence is a ruling rather than an oversight:
+ * reads these carriers: the `If-Match` header and the `state`, `package`,
+ * `dropStorage` and `member` query parameters (`META_ITEM_RESET_PARAMS` in
+ * `@objectstack/rest` is the query half). This bag declares `ifMatch`,
+ * `state` and `packageId`; `dropStorage` and `member` are not members, and
+ * the reason for each is stated below:
  *
  * - {@link DeleteMetaItemOptions.ifMatch} — the ADR-0008 OCC pin. The door
  *   already reads `If-Match` and threads it as `parentVersion`, and
@@ -845,13 +848,18 @@ function metaSaveHeaders(options?: SaveMetaItemOptions): Record<string, string> 
  *   parameter their client could not send.
  *
  * ⛔ `?dropStorage=true` is deliberately NOT a member, and adding it "for
- * completeness" reverses a decision. It is the one carrier of the four that
+ * completeness" reverses a decision. It is the one carrier the door reads that
  * ADDS destructive reach — it drops the object's physical table after the
  * metadata row goes — no caller was measured needing it from this client,
  * and the door's repeated-parameter refusal exists because of that
  * destructiveness. Maintainer-seat ruling, landed by commit cf71d73f8: a destructive surface
  * with no measured pull is not published. A caller that needs it is a
  * separate, separately reviewable widening.
+ *
+ * `?member=<name>` — reset ONE member of a bundled type (#22877) — is not a
+ * member either, and no `meta` method on this client declares it. That
+ * absence records the bag as it stands, not a ruling against it: declaring
+ * it is a separate widening, with its own review.
  *
  * Same bag on BOTH `deleteItem` declarations — the unscoped client and the
  * environment-scoped twin — for the reason #7019 states: the scoped mount is

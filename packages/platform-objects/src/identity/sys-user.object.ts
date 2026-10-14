@@ -297,6 +297,21 @@ export const SysUser = ObjectSchema.create({
           required: false,
           defaultValue: true,
         },
+        {
+          // [#23287 — ruling C′ item 2] The forced reset's explicit revocation
+          // switch. ON by default: the act records no reason, and the default
+          // is the one for a suspected compromise, where a surviving session
+          // or API key is exactly what the reset must not leave behind. Turn it
+          // off for a routine reset.
+          name: 'revokeSessionsAndKeys',
+          label: 'Sign Out Everywhere and Revoke API Keys',
+          type: 'boolean',
+          required: false,
+          defaultValue: true,
+          helpText:
+            'Ends every session of this user and revokes every API key they own. Leave on when the account may be '
+            + 'compromised; turn off for a routine reset. Revoked keys stay revoked after the password change.',
+        },
       ],
       resultDialog: {
         title: 'Password Updated',
@@ -835,7 +850,8 @@ export const SysUser = ObjectSchema.create({
     // #2766 V1 — admin-issued "must change password on next sign-in" flag.
     // Set by the /admin/create-user and /admin/set-user-password routes when
     // a temporary password is issued; enforced through the ADR-0069 authGate
-    // (surfaces as PASSWORD_EXPIRED); cleared by stampPasswordChangedAt once
+    // (surfaces as PASSWORD_RESET_REQUIRED, its own code since #23287 ruling
+    // C′ item 2, scope `credential`); cleared by stampPasswordChangedAt once
     // the user completes a password change.
     must_change_password: Field.boolean({
       label: 'Must Change Password',
@@ -843,7 +859,7 @@ export const SysUser = ObjectSchema.create({
       readonly: true,
       group: 'Admin',
       description:
-        'When true, the user is blocked (403 PASSWORD_EXPIRED) until they change ' +
+        'When true, the user is blocked (403 PASSWORD_RESET_REQUIRED) until they change ' +
         'their password. Stamped by the admin user-management routes; system-managed.',
     }),
 

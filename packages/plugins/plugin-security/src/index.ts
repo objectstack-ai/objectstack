@@ -122,7 +122,8 @@ export type {
 } from './packaged-permission-set-lock.js';
 // [commit 5619aace3 — maintainer ruling 2026-08-25, option B] The lock's METADATA-door
 // registration: the pre-persistence authoring-gate seam consults the SAME
-// classifier and throws the SAME error classes as the data door above.
+// classifier and throws the SAME error classes exported above. Since C3 stage 8
+// retired the `sys_permission_set` data door, it is the lock's one door.
 export { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
 export type { PermissionSetLockGateContext } from './packaged-permission-set-lock-gate.js';
 export {

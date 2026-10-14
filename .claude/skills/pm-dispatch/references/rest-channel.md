@@ -46,10 +46,10 @@
 - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:中继 op `pr_update_branch`(`pull` + 40 位 `expected_head_sha`),真合并提交。
-- ⛔ 裸 `PUT .../pulls/{n}/update-branch` 落个人账号;短 SHA 派发前即拒;base 未动 422 = op 报 no-op。
 - ✓ 落地经中继 `node scripts/pm/fleet-write/dispatch.mjs --repo O/N --actions-file F`;`--via dispatch` 同载。
 - ✓ 启动 run 走 op `workflow_dispatch`:解锁物是白名单 run 才启;入表只经 workflow 自己的 PR。
-- ⛔ 裸 `PATCH /pulls/{n}` 带 `{"draft": false}` 回 200 零改;状态码不作数,`GET /pulls/{n}` 才作数。
+- F = `[{"op":"workflow_dispatch","workflow":"release.yml","ref":"main","inputs":{"refresh_version_pr":true}}]`。
+- 该 F 刷版本 PR:单 op 成文件,发版路径修复入 `main` 即发;他 input、值、ref 或缺键按名拒。
 - 线程自己建:`POST .../pulls/{n}/comments` 带 `commit_id`·`path`·`line`,回读看 `review_threads`。
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
 - ✓ F = `[{"op":"pr_ready","pull":N},{"op":"automerge_enable","pull":N}]`;反向 `pr_draft`/`automerge_disable`。
