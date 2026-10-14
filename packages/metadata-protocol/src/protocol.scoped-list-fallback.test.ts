@@ -22,17 +22,15 @@
  * stand-in serves a slot the package seats and never seats one, so the
  * scoped list still lists only the items the package ships.
  *
- *  1. The generated pin: every subset of five stored rows (env-wide and
- *     org-scoped, package-less and package A's, plus package B's env-wide
- *     row), every row order, with and without an organization, with and
+ *  1. The generated pin: every subset of three stored rows (package-less,
+ *     package A's and package B's, all env-wide: ADR-0131 D6/D7, the family
+ *     declares no organization column), every row order, with and without an organization, with and
  *     without A's artifact. For packages A and B: when the package ships the
  *     name (its artifact, or a row of its own in scope), the scoped list's
  *     one slot serves the row an oracle written from the rule names, and
  *     `getMetaItem` naming the package serves the same; when it ships
  *     nothing, the scoped list has no slot for the name.
- *  2. Named, both row orders: A's artifact beside the package-less row; with
- *     an organization, the organization's package-less row beside an env-wide
- *     row of A.
+ *  2. Named, both row orders: A's artifact beside the package-less row.
  *  3. Membership: a package-less row of a name the package does not ship
  *     adds no slot to the scoped list, which lists the same names with and
  *     without it, while the unscoped list still serves that row.
@@ -58,7 +56,7 @@ const PKG_A = 'com.example.a';
 const PKG_B = 'com.example.b';
 const NAME = 'd_slot';
 
-type Scope = 'env-wide' | 'org-scoped';
+type Scope = 'env-wide';
 interface RowSpec { scope: Scope; packageId: string | null; label: string }
 
 /** The stored rows the tables draw from. */
@@ -66,8 +64,6 @@ const ROWS = {
     envPackageless: { scope: 'env-wide', packageId: null, label: 'env-wide package-less row' },
     envA: { scope: 'env-wide', packageId: PKG_A, label: 'env-wide row of A' },
     envB: { scope: 'env-wide', packageId: PKG_B, label: 'env-wide row of B' },
-    orgPackageless: { scope: 'org-scoped', packageId: null, label: 'org-scoped package-less row' },
-    orgA: { scope: 'org-scoped', packageId: PKG_A, label: 'org-scoped row of A' },
 } as const satisfies Record<string, RowSpec>;
 type RowKey = keyof typeof ROWS;
 const ROW_KEYS = Object.keys(ROWS) as RowKey[];
@@ -76,7 +72,6 @@ interface StoredRow {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
@@ -93,7 +88,6 @@ function stored(
         id: `r_${key}_${state}_${name}`,
         type,
         name,
-        organization_id: spec.scope === 'org-scoped' ? ORG : null,
         package_id: spec.packageId,
         state,
         metadata: JSON.stringify({ name, label, _provenance: 'org', ...body }),
@@ -239,7 +233,7 @@ describe('pin 1 (generated) — the scoped list\'s slot serves the row getMetaIt
         ([undefined, ORG] as const).flatMap((organizationId) =>
             [false, true].map((artifact) => ({ rows, organizationId, artifact }))));
 
-    it('completeness: every subset of the five rows, with and without an organization and A\'s artifact; the fallback arrangements are in it', () => {
+    it('completeness: every subset of the three rows, with and without an organization and A\'s artifact; the fallback arrangements are in it', () => {
         expect(TABLE).toHaveLength(2 ** ROW_KEYS.length * 2 * 2);
         expect(new Set(ROW_KEYS.map((key) => ROWS[key].packageId))).toEqual(new Set([null, PKG_A, PKG_B]));
         // The arrangements this card is about: a package that ships the name
@@ -298,22 +292,6 @@ describe('pin 2 — named arrangements, both row orders: the scoped slot is getM
             });
         }
     }
-    for (const order of orders<RowKey>(['orgPackageless', 'envA'])) {
-        it(`[ADR-0131 D6] organization ${ORG} · the organization's legacy package-less row is not served over an env-wide row of A · row order ${order.join(', ')}`, async () => {
-            const protocol = harness(order.map((key) => stored(key)));
-            const slots = await scopedSlots(protocol, PKG_A, { organizationId: ORG });
-            expect(slots.map((s) => s.label)).toEqual([ROWS.envA.label]);
-            expect((await byName(protocol, PKG_A, { organizationId: ORG })).item?.label).toBe(ROWS.envA.label);
-        });
-    }
-    for (const order of orders<RowKey>(['orgA', 'envPackageless'])) {
-        it(`[ADR-0131 D6] organization ${ORG} · the organization's legacy row of A is not served over the env-wide package-less row · row order ${order.join(', ')}`, async () => {
-            const protocol = harness(order.map((key) => stored(key)));
-            const slots = await scopedSlots(protocol, PKG_A, { organizationId: ORG });
-            expect(slots).toEqual([]);
-            expect((await byName(protocol, PKG_A, { organizationId: ORG })).item?.label).toBe(ROWS.envPackageless.label);
-        });
-    }
 });
 
 // ── 3. Membership ────────────────────────────────────────────────────────────
@@ -321,8 +299,7 @@ describe('pin 2 — named arrangements, both row orders: the scoped slot is getM
 describe('pin 3 — membership: a package-less row of a name the package does not ship adds no slot', () => {
     const OTHER = 'd_other';
     for (const organizationId of [undefined, ORG]) {
-        for (const scopeKey of ['envPackageless', 'orgPackageless'] as const) {
-            if (scopeKey === 'orgPackageless' && organizationId === undefined) continue;
+        for (const scopeKey of ['envPackageless'] as const) {
             it(`${organizationId ? `organization ${organizationId}` : 'no organization'} · a ${ROWS[scopeKey].label} of a name A does not ship`, async () => {
                 const shipped = [stored('envA', { name: 'd_rowed' })];
                 const items = [ARTIFACT_A];
@@ -334,11 +311,10 @@ describe('pin 3 — membership: a package-less row of a name the package does no
                 expect(listedWithout).toEqual([`d_rowed@${PKG_A}`, `${NAME}@${PKG_A}`]);
                 expect(names(await scopedList(withRow, PKG_A, scope))).toEqual(listedWithout);
                 // The env-wide row is still served where it belongs: the
-                // unscoped list. [ADR-0131 D6] A legacy organization row is
-                // served by no list.
+                // unscoped list.
                 const unscoped: any = await withRow.getMetaItems({ type: TYPE, ...scope });
                 expect((unscoped.items as any[]).filter((i) => i.name === OTHER).map((i) => i.label))
-                    .toEqual(scopeKey === 'orgPackageless' ? [] : [ROWS[scopeKey].label]);
+                    .toEqual([ROWS[scopeKey].label]);
             });
         }
     }
@@ -348,10 +324,8 @@ describe('pin 3 — membership: a package-less row of a name the package does no
 
 describe('pin 4 — the MetadataService layer: a package-less row stands in for the package\'s runtime item', () => {
     const RUNTIME_A = { name: NAME, label: 'runtime item of A', _packageId: PKG_A };
-    for (const scopeKey of ['envPackageless', 'orgPackageless'] as const) {
-        // [ADR-0131 D6] A legacy organization row stands in for nothing: the
-        // runtime item is served.
-        const served = scopeKey === 'orgPackageless' ? RUNTIME_A.label : ROWS[scopeKey].label;
+    for (const scopeKey of ['envPackageless'] as const) {
+        const served = ROWS[scopeKey].label;
         it(`a ${ROWS[scopeKey].label} of the name: the scoped slot serves ${served}, as getMetaItem naming A does`, async () => {
             const protocol = harness([stored(scopeKey)], { runtime: [RUNTIME_A] });
             const scope = { organizationId: ORG };
@@ -436,9 +410,9 @@ describe('pin 6 — a stored view container of A: a package-less row of a name i
 
 describe('pin 7 — the lock: the scoped slot\'s lock family equals getMetaItem\'s envelope where the served row moved', () => {
     for (const lock of ['no-overlay', 'no-delete', 'full'] as const) {
-        for (const declaredOn of ['orgPackageless', 'envA'] as const) {
-            it(`[ADR-0131 D6] organization ${ORG} · env A served, the organization's legacy package-less row not · ${ROWS[declaredOn].label} declares ${lock}`, async () => {
-                const rows = (['orgPackageless', 'envA'] as const).map((key) =>
+        for (const declaredOn of ['envPackageless', 'envA'] as const) {
+            it(`organization ${ORG} · env A served over the env-wide package-less row · ${ROWS[declaredOn].label} declares ${lock}`, async () => {
+                const rows = (['envPackageless', 'envA'] as const).map((key) =>
                     stored(key, { body: key === declaredOn ? { _lock: lock, _lockReason: `declared on ${key}` } : {} }));
                 const protocol = harness(rows, { items: [ARTIFACT_A] });
                 const scope = { organizationId: ORG };
