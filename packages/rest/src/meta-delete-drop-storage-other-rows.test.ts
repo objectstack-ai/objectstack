@@ -143,7 +143,7 @@ async function boot(environmentId?: string) {
         const body = ticket('Ticket unbound');
         const now = new Date().toISOString();
         await engine.insert('sys_metadata', {
-            id: 'seed_active_unbound', type: 'object', name: NAME, organization_id: null,
+            id: 'seed_active_unbound', type: 'object', name: NAME,
             package_id: null, state: 'active', metadata: JSON.stringify(body), checksum: hashSpec(body, 'object'),
             version: 1, created_at: now, updated_at: now,
         }, { context: { isSystem: true } } as any);

@@ -59,7 +59,6 @@ interface StoredRow {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
@@ -69,7 +68,6 @@ const STORED: StoredRow[] = [{
     id: 'r_drafted_draft',
     type: 'app',
     name: DRAFT_APP_NAME,
-    organization_id: null,
     package_id: DRAFT_PKG,
     state: 'draft',
     metadata: JSON.stringify({ name: DRAFT_APP_NAME, label: 'Drafted', navigation: [] }),
