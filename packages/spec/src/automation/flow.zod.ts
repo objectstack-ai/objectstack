@@ -1112,6 +1112,15 @@ export const FlowSchema = lazySchema(() => strictObject(
   // record-change flow fired by a write that carried none (any `isSystem`
   // plugin/service write; `isSystem` does not suppress trigger dispatch, only
   // `skipTriggers` does). Declare `system` to make the elevation explicit.
+  //
+  // [ADR-0138 D2b] …except behind an anonymous door. The prescription above
+  // used to cover "api triggers" without a word about WHICH api door, so an
+  // author (an AI most of all) who followed it behind an `authRequired: false`
+  // endpoint of `type: 'flow'` opened an anonymous, system-level entry point.
+  // Publish now refuses that pair in both directions
+  // (`api/endpoint-publish-gate.ts`, section (f)), and the text names the
+  // exception and what serves that caller, so the describe and the refusal say
+  // one thing.
   runAs: z
     .enum(['system', 'user'])
     .default('user')
@@ -1119,7 +1128,9 @@ export const FlowSchema = lazySchema(() => strictObject(
       'Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting). ' +
         'A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — ' +
         'declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any ' +
-        'record-change flow fired by a write that carried no user.',
+        'record-change flow fired by a write that carried no user. Except behind an anonymous door: publish refuses ' +
+        'system on a flow that an authRequired: false endpoint of type flow triggers (ADR-0138 D2b); serve that caller ' +
+        "through an authenticated endpoint, the flow's signed inbound hook, or a public form.",
     ),
 
   /**
