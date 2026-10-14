@@ -10788,6 +10788,29 @@ export class ObjectStackProtocolImplementation implements
         // is answered as a draft, as above.
         const storedRowDeclined = readState === 'active' && this.declinesStoredRow(request.type, request.name);
 
+        // [#23291, ADR-0048 §3.3, ADR-0070 TL;DR 1] The package whose stored
+        // content a read that names no package serves: the address a save or
+        // a delete naming none writes ({@link packagelessAddress}), read from
+        // the item's ACTIVE rows at both states, as the draft save inherits
+        // its package from them (#11087). For an item bound to exactly one
+        // package, the read then serves what the read naming that package
+        // serves (its own row, else the package-less one); otherwise any row,
+        // the best-effort first match ADR-0048 §3.3 states.
+        //
+        // Before, it took the first row of any package. A save naming the
+        // package beside the item's package-unbound row mints the package's
+        // row and leaves the unbound one stored first, so this read kept
+        // serving the unbound body while the package-less save wrote the
+        // package's row, the package-less delete removed it, the list served
+        // it, and this read's own `version` named it (#23165). The package-less
+        // row is not converted or removed: ADR-0070 keeps it as a read-side
+        // detail and a migration source, and it still stands in for every
+        // package with no row of its own (ADR-0048 prefer-local).
+        //
+        // Content only: the lock is selected from the item's rows at the
+        // address the `_lock` gate judges a package-less save at, below.
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name, member);
+
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
         // fall back to the active read below. This differs from the strict
@@ -10803,7 +10826,7 @@ export class ObjectStackProtocolImplementation implements
                     type: request.type,
                     name: request.name,
                     state: 'draft',
-                    ...(request.packageId ? { packageId: request.packageId } : {}),
+                    ...(contentPackageId ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
                 }))?.row;
                 if (draftRec) {
@@ -10849,7 +10872,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: readState,
-                ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...(contentPackageId ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             }))?.row;
             storedRowServed = record !== undefined && record !== null;
@@ -11398,6 +11421,14 @@ export class ObjectStackProtocolImplementation implements
         // strictest lock among the item's stored rows in scope, never only the
         // row this layer reports.
         let overlayLockLayer: unknown;
+        // [#23291] Naming no package, the overlay comes from the address
+        // {@link getMetaItem} serves its content from
+        // ({@link packagelessReadAddress}), so `effective` is what that read
+        // returns and `/published` serves the same document. Content only: the
+        // lock stays at the request's address, as the `_lock` gate judges it.
+        // Asked outside the `try` below: its own failed read already answers
+        // the #5532 envelope, with the driver's error as `cause`.
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name);
         try {
             // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
             // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
@@ -11405,7 +11436,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: 'active',
-                ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...(contentPackageId ? { packageId: contentPackageId } : {}),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
@@ -18879,6 +18910,19 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23291, ADR-0048 §3.3] The package a by-name read that names no package
+     * takes its stored CONTENT from: the item's own package when its active
+     * rows are bound to exactly one ({@link packagelessAddress}, the address
+     * the save, the delete and the read's `version` resolve), else
+     * `undefined`, any row (the best-effort first match). {@link getMetaItem}
+     * and {@link getMetaItemLayered} both ask it, so the plain read, the
+     * layered read's `effective` and `/published` serve one row.
+     */
+    private async packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+        return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member)).packageId ?? undefined;
+    }
+
+    /**
      * [#23165, ADR-0048] THE package-less write address: which row of an item a
      * write that names no package addresses, read from the item's stored rows
      * at `state`. The item's own package when those rows are bound to exactly
@@ -22165,9 +22209,20 @@ export class ObjectStackProtocolImplementation implements
         // reachable type set and carries the measurements above.
         if (!request.force && singularType === 'object') {
             try {
+                // [#23291, ADR-0048] Judged against the row this save
+                // overwrites: the read at the save's own address. A
+                // package-less publish save has resolved `packageId` to the
+                // item's one package above (#23165); a save naming a package
+                // with no row of its own reads that package's address, the
+                // package-unbound stand-in it overlays. Before, the read named
+                // no package, so with a package-unbound row stored beside the
+                // package's it judged a row no package-less save writes, and a
+                // save naming a third package was judged against another
+                // package's row.
                 const existing = await this.getMetaItem({
                     type: request.type,
                     name: request.name,
+                    ...(request.packageId ? { packageId: request.packageId } : {}),
                 } as any);
                 const prev = (existing as any)?.item;
                 if (prev) {

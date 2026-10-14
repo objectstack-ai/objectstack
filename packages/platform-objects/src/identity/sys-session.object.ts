@@ -196,9 +196,12 @@ export const SysSession = ObjectSchema.create({
       // backing a session's active organization ends and the user holds no
       // other. ⛔ It is a COURTESY, never the enforcement: the wall is the
       // per-request membership check in `resolve-authz-context.ts`.
+      // `admin_password_reset` is the second authorization-event cause: an
+      // administrator's forced password reset revoked the session
+      // (`plugin-auth/forced-reset-revocation.ts`, `FORCED_RESET_REVOKE_REASON`).
       description:
         'Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, '
-        + 'admin, organization_membership_ended, …).',
+        + 'admin, organization_membership_ended, admin_password_reset, …).',
     }),
 
     // ── Active context (multi-org/team) ──────────────────────────

@@ -1736,6 +1736,60 @@ function sendMetaItemAbsent(res: any): void {
 }
 
 /**
+ * [#23492] What a `/data` write door does with the optimistic-concurrency
+ * token it read — the body's `expectedVersion` (`PATCH`) or `?expectedVersion`
+ * (`DELETE`), else `If-Match` — before the protocol is asked. One of three:
+ *
+ *  - ABSENT: the spelling consulted is `undefined` or `null`. The body key or
+ *    the query name falls through to `If-Match`, and no `If-Match` either is
+ *    the legal unguarded write.
+ *  - JUDGED: a string with something in it, or a finite number. The door
+ *    forwards its string, and the protocol compares it (`409
+ *    CONCURRENT_UPDATE` on a mismatch; the quoted-empty tag `""` is the
+ *    protocol's own `400`, `MalformedVersionTokenError`).
+ *  - REFUSED `400 VALIDATION_FAILED`: anything else the caller put in a token
+ *    position — an empty or blank string, a boolean, an array, an object. It
+ *    can never carry a version, so it is the protocol's ruled answer to `""`
+ *    (maintainer decision #20 ①: a token shape that can never carry a version
+ *    is refused, neither read as "no token" nor answered `409`), given here
+ *    because the protocol never sees these: it reads a blank string as no
+ *    token.
+ *
+ * What it replaces is a truthiness test. The door forwarded a token only when
+ * it was truthy, and `bodyVersion ?? If-Match` reads `If-Match` only when the
+ * body key is nullish, so `expectedVersion: ''` or `false` — not nullish, not
+ * truthy — hid a stale `If-Match`, and the write ran unguarded with a `200`.
+ * `?expectedVersion=` did the same to a `DELETE`, and an empty `If-Match`
+ * alone, the caller asking for a guard and sending nothing to judge, ran
+ * unguarded too.
+ *
+ * Returns the refusal's sentence, or `undefined` when the token is absent or
+ * judged. Both doors build the refusal with the one constructor,
+ * `validationFailure(sentence, [])` (`@objectstack/types`), and render it with
+ * their own classifier: this file THROWS it into the route's catch
+ * (`mapDataError`, the envelope the protocol's `""` refusal gets here), and the
+ * dispatcher hands it to `deps.errorFromThrown` and RETURNS the answer (a throw
+ * out of `dispatch()` reaches a `createHonoApp` host's catch-all, which reads
+ * only `statusCode` and would answer `500`). The runtime dispatcher's `/data`
+ * domain carries this function statement for statement (`versionTokenRefusal`
+ * in `packages/runtime/src/domains/data.ts`), so the two doors answer every
+ * token alike; `data-update-expected-version.test.ts` and
+ * `data-delete-expected-version.test.ts` hold them to it.
+ */
+function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
+    if (token === undefined || token === null) return undefined;
+    if (typeof token === 'string' && token.trim() !== '') return undefined;
+    if (typeof token === 'number' && Number.isFinite(token)) return undefined;
+    const shape = typeof token === 'string' ? 'empty'
+        : Array.isArray(token) ? 'an array'
+        : typeof token === 'object' ? 'an object'
+        : `the ${typeof token} \`${String(token)}\``;
+    return `${spelling} is ${shape}, which can never carry a version, so it is refused rather than read as `
+        + 'no token. Send the version you read (the record\'s `updated_at`), or omit both expectedVersion and '
+        + 'If-Match to perform an unguarded write.';
+}
+
+/**
  * [#20338] May this caller read PENDING metadata — a `sys_metadata` row in
  * `state: 'draft'`, unpublished authoring work? THE question every door that
  * asks the protocol for draft content asks first.
@@ -9101,6 +9155,18 @@ export class RestServer {
                             const { expectedVersion: _drop, ...rest } = data as any;
                             data = rest;
                         }
+                        // [#23492] A token that can never carry a version is
+                        // refused here, before anything is asked, and every
+                        // other present token is forwarded below: no token the
+                        // caller sent is read as "no token". THROWN as
+                        // `validationFailure`, so this route's catch answers it
+                        // through `mapDataError`, in the envelope it already
+                        // gives the protocol's own refusal of `""`.
+                        const versionRefusal = versionTokenRefusal(
+                            expectedVersion,
+                            bodyVersion != null ? 'The body\'s `expectedVersion`' : 'The `If-Match` header',
+                        );
+                        if (versionRefusal) throw validationFailure(versionRefusal, []);
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'update')) return;
                         // [#3899] Same gate as create: the wire body is the bare
                         // field patch (`expectedVersion` already stripped above),
@@ -9112,7 +9178,7 @@ export class RestServer {
                             object: req.params.object,
                             id: req.params.id,
                             data: data ?? {},
-                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                            ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
                         };
                         const parsedUpdateOne = (UpdateDataRequestSchema as any).safeParse(updateInput);
                         if (!parsedUpdateOne.success) {
@@ -9128,7 +9194,7 @@ export class RestServer {
                             object: req.params.object,
                             id: req.params.id,
                             data: data ?? {},
-                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                            ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
@@ -9176,11 +9242,19 @@ export class RestServer {
                             ? (req.query as any).expectedVersion
                             : undefined;
                         const expectedVersion = queryVersion ?? ifMatchHeader;
+                        // [#23492] The `PATCH` above's rule, thrown the same
+                        // way: a token that can never carry a version is
+                        // refused, every other present token is forwarded.
+                        const versionRefusal = versionTokenRefusal(
+                            expectedVersion,
+                            queryVersion != null ? 'The `expectedVersion` query parameter' : 'The `If-Match` header',
+                        );
+                        if (versionRefusal) throw validationFailure(versionRefusal, []);
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'delete')) return;
                         const deleteRequest: ServerScopedDataRequest<DeleteDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
-                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                            ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };

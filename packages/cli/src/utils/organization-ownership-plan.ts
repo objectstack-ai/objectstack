@@ -155,8 +155,27 @@ export interface TablePlan {
    * until the operator chooses one row per group; nothing is guessed.
    */
   templateConflicts?: TemplateConflict[];
+  /**
+   * `sys_metadata` only: the keys of the promotion population that more than
+   * one row holds once the organization leaves the key — two organizations, or
+   * an organization and the environment. Kept and blocking until the operator
+   * keeps one row per key; nothing is guessed.
+   */
+  metadataConflicts?: MetadataConflict[];
   /** `sys_user_permission_set` only: what the grant's unique key holds ({@link GrantKeyPlan}). */
   grants?: GrantKeyPlan;
+}
+
+/**
+ * One overlay key of `sys_metadata` (`type`, `name`, package, bundle member)
+ * that the promotion cannot carry alone: every row that holds it, and whose.
+ */
+export interface MetadataConflict {
+  type: string;
+  name: string;
+  packageId: string | null;
+  bundleMember: string | null;
+  candidates: Array<{ id: string; organizationId: string | null; state: string | null }>;
 }
 
 /**
@@ -209,6 +228,98 @@ export function templatePromotionSql(sql: Sql, cols: ReadonlySet<string>): { tex
     text: `${customized} OR ${managed} IS NULL OR ${managed} NOT IN (${SEEDED_BY.map(() => '?').join(', ')})`,
     params: [...params, ...SEEDED_BY],
   };
+}
+
+/** The table whose organization-scoped customizations the ceremony promotes (ruling record 6020163868, A). */
+export const METADATA_OBJECT = 'sys_metadata';
+
+/**
+ * The five presentational types whose organization-scoped rows are promoted to
+ * environment rows (ruling records 6020163868 and 6020151485, both A). The
+ * inventory's `organization-presentational-promotion` category names the same
+ * list, and a pin holds the two equal.
+ */
+export const PRESENTATIONAL_TYPES: readonly string[] = ['view', 'dashboard', 'report', 'translation', 'email_template'];
+
+/** One `sys_metadata` row of a presentational type, by its overlay key. */
+export interface MetadataKeyRow {
+  id: string;
+  type: string;
+  name: string;
+  packageId: string | null;
+  bundleMember: string | null;
+  /** `null` = an environment row. */
+  organizationId: string | null;
+  state: string | null;
+}
+
+/**
+ * Every `sys_metadata` row of a presentational type, by key, keyset-paged:
+ * environment rows and organization rows alike, so a key the environment
+ * already holds is seen as held. No body is read.
+ */
+export async function readMetadataKeyRows(sql: Sql, table: string, columns: ReadonlySet<string>): Promise<MetadataKeyRow[]> {
+  for (const column of ['type', 'name', ORG]) requireColumn(table, columns, column);
+  const select = ['id', 'type', 'name', ORG, ...['package_id', 'bundle_member', 'state'].filter((c) => columns.has(c))];
+  const t = sql.q(table, table);
+  const id = sql.q(ID, table);
+  const types = PRESENTATIONAL_TYPES.map(() => '?').join(', ');
+  const out: MetadataKeyRow[] = [];
+  let after: unknown;
+  for (;;) {
+    const rows = await sql.read(
+      table,
+      `SELECT ${select.map((c) => `${sql.q(c, table)} AS ${sql.q(c, table)}`).join(', ')} FROM ${t} ` +
+        `WHERE ${sql.q('type', table)} IN (${types})${after === undefined ? '' : ` AND ${id} > ?`} ORDER BY ${id} LIMIT ${PAGE}`,
+      after === undefined ? [...PRESENTATIONAL_TYPES] : [...PRESENTATIONAL_TYPES, after],
+    );
+    for (const row of rows) {
+      out.push({
+        id: String(row.id),
+        type: String(row.type),
+        name: String(row.name),
+        packageId: nonEmptyId(row.package_id),
+        bundleMember: nonEmptyId(row.bundle_member),
+        organizationId: nonEmptyId(row[ORG]),
+        state: nonEmptyId(row.state),
+      });
+    }
+    if (rows.length < PAGE) return out;
+    after = rows[rows.length - 1]!.id;
+  }
+}
+
+/**
+ * Split the promotion population by overlay key: a key held by exactly one
+ * row, an organization's, is promotable in place; a key held by an
+ * organization's row and any other row (another organization's, or the
+ * environment's) is a conflict. Keys only the environment holds are not the
+ * ceremony's.
+ */
+export function groupMetadataKeyRows(rows: readonly MetadataKeyRow[]): { promotable: MetadataKeyRow[]; conflicts: MetadataConflict[] } {
+  const byKey = new Map<string, MetadataKeyRow[]>();
+  for (const row of rows) {
+    const key = [row.type, row.name, row.packageId ?? '', row.bundleMember ?? ''].join('\u0000');
+    byKey.set(key, [...(byKey.get(key) ?? []), row]);
+  }
+  const promotable: MetadataKeyRow[] = [];
+  const conflicts: MetadataConflict[] = [];
+  for (const group of byKey.values()) {
+    if (!group.some((r) => r.organizationId !== null)) continue;
+    if (group.length === 1) {
+      promotable.push(group[0]!);
+      continue;
+    }
+    const first = group[0]!;
+    conflicts.push({
+      type: first.type,
+      name: first.name,
+      packageId: first.packageId,
+      bundleMember: first.bundleMember,
+      candidates: group.map((r) => ({ id: r.id, organizationId: r.organizationId, state: r.state })),
+    });
+  }
+  return { promotable, conflicts };
 }
 
 /** The JSON of a definition's own keys, for comparing two bodies. */
@@ -637,16 +748,34 @@ async function applyAnchor(
   return left;
 }
 
+/**
+ * Overlay-key columns that arrived after 17.x: `sys_metadata.bundle_member`
+ * first shipped in 18.0.0-next.0. Both the plan and the apply boot with schema
+ * changes held, so on the 17.x databases this ceremony migrates the column is
+ * absent, which the overlay key reads as NULL (its NULL-folded part).
+ */
+const FOLDED_KEY_COLUMNS: ReadonlySet<string> = new Set(['bundle_member']);
+
 async function planCategory(sql: Sql, table: string, columns: ReadonlySet<string>, category: InventoryCategory): Promise<{ rows: number; groups?: number }> {
+  // A category that selects on the organization column has no rows left once
+  // the column is gone (the ceremony's post-check reads a dropped table too).
+  if (!columns.has(ORG) && conditionColumns(category.where).includes(ORG)) {
+    return category.conflictBy ? { rows: 0, groups: 0 } : { rows: 0 };
+  }
   const t = sql.q(table, table);
   const where = predicateSql(sql, table, columns, category.where ?? []);
   if (!category.conflictBy) {
     return { rows: await sql.count(table, `SELECT COUNT(*) AS n FROM ${t} WHERE ${where.text}`, where.params) };
   }
-  const groupBy = category.conflictBy.groupBy.map((c) => {
-    requireColumn(table, columns, c);
-    return sql.q(c, table);
-  });
+  // A key column a 17.x database never had (see FOLDED_KEY_COLUMNS) reads as
+  // NULL on every row there, and grouping by a constant is no grouping: it is
+  // grouped by only where it exists. Every other column is required.
+  const groupBy = category.conflictBy.groupBy
+    .filter((c) => columns.has(c) || !FOLDED_KEY_COLUMNS.has(c))
+    .map((c) => {
+      requireColumn(table, columns, c);
+      return sql.q(c, table);
+    });
   const distinct = category.conflictBy.distinct;
   if (distinct) requireColumn(table, columns, distinct);
   const having = distinct ? `COUNT(DISTINCT ${sql.q(distinct, table)}) > 1` : 'COUNT(*) > 1';
@@ -785,6 +914,11 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
       if (counted.groups !== undefined) groups = (groups ?? 0) + counted.groups;
     }
     plan.categories.push({ id: category.id, label: category.label, citation: category.citation, rows, ...(groups !== undefined ? { groups } : {}) });
+  }
+  if (entry.object === METADATA_OBJECT && hasOrg) {
+    const conflicts: MetadataConflict[] = [];
+    for (const table of tables) conflicts.push(...groupMetadataKeyRows(await readMetadataKeyRows(sql, table, ctx.catalog.columns.get(table)!)).conflicts);
+    plan.metadataConflicts = conflicts;
   }
   if (entry.object === TEMPLATE_OBJECT) {
     const conflicts: TemplateConflict[] = [];
