@@ -26235,6 +26235,15 @@ export class ObjectStackProtocolImplementation implements
      * with the source — and rewriting every intra-package reference (lookup
      * `reference`, view `object`, expressions, etc.) to the new names. Per-item
      * best-effort; one failure never aborts the whole clone.
+     *
+     * Every copied object is named in the target namespace: `iojn_customer`
+     * becomes `iojn2_customer`, and an object whose name lacks the source
+     * prefix (`ticket`) becomes `iojn2_ticket` — the prefix rule's own rename
+     * (ADR-0129 D2). Such a name is rewritten where it is REFERENCED (an
+     * object-reference property, exact value), never inside free text; and
+     * when its target name is already claimed (the source also holds
+     * `iojn_ticket`) the object is refused in `failed[]`, before anything is
+     * written for it, with the source rename that clears it.
      */
     async duplicatePackage(request: {
         sourcePackageId: string;
@@ -26364,30 +26373,115 @@ export class ObjectStackProtocolImplementation implements
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
 
-        // Map only OBJECT names that carry the source namespace prefix; views/etc.
-        // are renamed by the same prefix swap and reference-rewritten via the map.
+        // Views/etc. are renamed by the source-prefix swap alone; a name without
+        // the prefix keeps it (the docblock re-namespaces OBJECT names).
         const renameName = (name: string): string =>
             sourceNs && typeof name === 'string' && name.startsWith(`${sourceNs}_`)
                 ? `${targetNs}_${name.slice(sourceNs.length + 1)}`
                 : name;
+
+        // ⭐ EVERY OBJECT GETS A NAME IN THE TARGET NAMESPACE (ADR-0070 D4, read
+        // with ADR-0129 D2). An object name IS its table name and its registry
+        // key, so a copy that keeps the source's name is a second claim on the
+        // source's object: before PR #23510 it stored a target row the registry
+        // refused, over the source's table, and after it the copy failed with
+        // the ADR-0029 D9.9 ownership prescription, which names no way out for
+        // a duplicate. ADR-0129 D2 says what the name is: every object a
+        // package defines is `${namespace}_${shortName}`, and the prefix rule's
+        // own prescription for a name that lacks the prefix
+        // (`validateObjectNamespacePrefix`) is "rename it to
+        // `${namespace}_${name}`". The copy is a NEW object, so that rename
+        // costs nothing here — while renaming the SOURCE object would move its
+        // table. A prefixed name swaps the source prefix for the target's;
+        // a name WITHOUT the source prefix (a direct-publish save, which no
+        // prefix gate reads, or a package that had no namespace) takes the
+        // target prefix in front of its whole name.
+        //
+        // ⛔ REFUSED, NEVER RE-INVENTED: when that name is already claimed — by
+        // the copy of a prefixed sibling (`ticket` and `iojn_ticket` both name
+        // `iojn2_ticket`) or by an object the source package holds — the object
+        // is reported in `failed[]` before anything is written for it, at its
+        // own name, with the rename that clears it. A second invented name
+        // (a numeric suffix, a third prefix) would be a name nobody wrote.
+        const objectNames = new Set<string>(
+            rows.filter((row) => row?.type === 'object' && typeof row.name === 'string').map((row) => row.name as string),
+        );
         const renameMap = new Map<string, string>();
-        for (const row of rows) {
-            if (row?.type === 'object') {
-                const nn = renameName(row.name);
-                if (nn !== row.name) renameMap.set(row.name, nn);
-            }
+        const prefixed: string[] = [];
+        const unprefixed: string[] = [];
+        for (const name of objectNames) {
+            if (sourceNs && name.startsWith(`${sourceNs}_`)) prefixed.push(name);
+            else unprefixed.push(name);
         }
+        for (const name of prefixed) {
+            const nn = renameName(name);
+            if (nn !== name) renameMap.set(name, nn);
+        }
+        // Every name a prefixed object's copy takes (itself, when the target
+        // namespace IS the source's), and every name the source holds.
+        const claimedBy = new Map<string, string>(prefixed.map((name) => [renameName(name), name]));
+        const refusedObjects = new Map<string, string>();
+        for (const name of unprefixed) {
+            const nn = `${targetNs}_${name}`;
+            const holder = claimedBy.get(nn) ?? (objectNames.has(nn) ? nn : undefined);
+            if (holder !== undefined) {
+                const lacks = sourceNs
+                    ? `lacks the '${sourceNs}_' prefix of package '${request.sourcePackageId}' (ADR-0129 D2: `
+                        + 'every object a package defines carries its namespace as a name prefix)'
+                    : `carries no namespace prefix (package '${request.sourcePackageId}' declares no namespace)`;
+                const taken = holder === nn
+                    ? `'${nn}' is an object package '${request.sourcePackageId}' already holds`
+                    : `'${nn}' is already the copy name of object '${holder}'`;
+                refusedObjects.set(
+                    name,
+                    `Object '${name}' is not copied: its name ${lacks}, so its copy is named '${nn}' in `
+                        + `namespace '${targetNs}', and ${taken}. Rename '${name}' on the source to `
+                        + `${sourceNs ? `a '${sourceNs}_' name` : 'a name'} no other object in the package uses, `
+                        + 'then duplicate again.',
+                );
+                continue;
+            }
+            renameMap.set(name, nn);
+            claimedBy.set(nn, name);
+        }
+
         // Longest-first, identifier-boundary rewrite so `iojn_task` never corrupts
         // `iojn_task_log`, and `iojn_x` inside `record.iojn_x`/`iojn_x.view` matches.
-        const olds = [...renameMap.keys()].sort((a, b) => b.length - a.length);
+        // Prefixed names only: a prefixed name is distinctive enough to find in
+        // free text, a bare one is not (below).
+        const olds = prefixed.filter((name) => renameMap.has(name)).sort((a, b) => b.length - a.length);
         const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const re = olds.length ? new RegExp(`(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g') : null;
-        const deepRewrite = (v: any): any => {
-            if (typeof v === 'string') return re ? v.replace(re, (m) => renameMap.get(m) ?? m) : v;
-            if (Array.isArray(v)) return v.map(deepRewrite);
+        // ⭐ AT AN OBJECT-REFERENCE PROPERTY, A NAME IS REWRITTEN WHOLE — the
+        // only place a BARE name is rewritten. Measured: a free-text rewrite of
+        // `ticket` also renames a lookup FIELD called `ticket` (`fields.ticket.
+        // name`) and the word in "A support ticket raised by a customer". So a
+        // value is rewritten only where it sits under a property that names an
+        // object — the derived site index (`REFERENCE_SITES`, target `object`:
+        // `reference`, `object`, `objectName`, `objects`, …), read by property
+        // wherever it occurs in any item, because flow node configs (`config.
+        // objectName`) are declared by node descriptors the index does not
+        // walk — and only when it equals a renamed name exactly, in the four
+        // shapes a name arrives in there: a string, an array element, a record
+        // KEY (`permission.objects` is keyed by object name) or a `.name`. The
+        // record key holds for prefixed names too: a copied permission set
+        // otherwise kept `objects.<source object>`, a grant on the SOURCE.
+        const objectReferenceProperties = new Set(
+            (REFERENCE_SITES.byTarget.get('object') ?? []).map((site) => site.property),
+        );
+        const deepRewrite = (v: any, atReference = false): any => {
+            if (typeof v === 'string') {
+                const whole = atReference ? renameMap.get(v) : undefined;
+                if (whole !== undefined) return whole;
+                return re ? v.replace(re, (m) => renameMap.get(m) ?? m) : v;
+            }
+            if (Array.isArray(v)) return v.map((element) => deepRewrite(element, atReference));
             if (v && typeof v === 'object') {
                 const o: any = {};
-                for (const [k, val] of Object.entries(v)) o[k] = deepRewrite(val);
+                for (const [k, val] of Object.entries(v)) {
+                    const key = atReference ? (renameMap.get(k) ?? k) : k;
+                    o[key] = deepRewrite(val, objectReferenceProperties.has(k) || (atReference && k === 'name'));
+                }
                 return o;
             }
             return v;
@@ -26423,7 +26517,12 @@ export class ObjectStackProtocolImplementation implements
         const canonicalizeFlow = this.resolveFlowCanonicalizer();
 
         for (const row of rows) {
-            const newName = renameName(row.name);
+            const refusal = row?.type === 'object' ? refusedObjects.get(row.name) : undefined;
+            if (refusal !== undefined) {
+                failed.push({ type: row.type, name: row.name, error: refusal });
+                continue;
+            }
+            const newName = row?.type === 'object' ? (renameMap.get(row.name) ?? row.name) : renameName(row.name);
             const rawType = String(row.type);
             const singular = PLURAL_TO_SINGULAR[rawType] ?? rawType;
             let body: unknown;
