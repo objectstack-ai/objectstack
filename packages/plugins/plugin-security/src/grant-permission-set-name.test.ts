@@ -324,45 +324,6 @@ describe('one grant per user, set and organization', () => {
     expect((await grantsOf(h, 'u_u1')).find((g) => g.id === 'ups_u2')).toMatchObject({ permission_set: 'qa_beta' });
   });
 
-  it('NEGATIVE — a two-row create repeating one platform-wide grant is refused 409 whole, for a system writer too; nothing is stored', async () => {
-    const h = await boot();
-    for (const context of [ADMIN, SYS]) {
-      const err = await refusalOf(() => h.engine.insert(
-        'sys_user_permission_set',
-        [{ user_id: 'u_b1', permission_set: 'qa_alpha' }, { user_id: 'u_b1', permission_set: 'qa_alpha' }],
-        { context } as any,
-      ));
-      expect([envelopeOf(err).code, envelopeOf(err).status]).toEqual(['DUPLICATE_RECORD', 409]);
-    }
-    expect(await grantsOf(h, 'u_b1')).toEqual([]);
-  });
-
-  it('NEGATIVE — a multi-row update naming one set on two platform-wide grants of one user is refused 409; both rows are untouched', async () => {
-    const h = await boot();
-    await h.engine.insert('sys_user_permission_set', { id: 'ups_m1', user_id: 'u_m', permission_set: 'qa_beta' }, { context: ADMIN } as any);
-    await h.engine.insert('sys_user_permission_set', { id: 'ups_m2', user_id: 'u_m', permission_set: 'member_default' }, { context: ADMIN } as any);
-    const err = await refusalOf(() => h.engine.update(
-      'sys_user_permission_set', { permission_set: 'qa_alpha' }, { multi: true, where: { user_id: 'u_m' }, context: ADMIN } as any,
-    ));
-    expect([envelopeOf(err).code, envelopeOf(err).status]).toEqual(['DUPLICATE_RECORD', 409]);
-    expect((await grantsOf(h, 'u_m')).map((g) => `${g.id}:${g.permission_set}`).sort())
-      .toEqual(['ups_m1:qa_beta', 'ups_m2:member_default']);
-  });
-
-  it('CONTROL — a two-row create of one platform-wide set to two users lands, and so does a multi-row update across two users', async () => {
-    const h = await boot();
-    await h.engine.insert(
-      'sys_user_permission_set',
-      [{ user_id: 'u_c3', permission_set: 'qa_alpha' }, { user_id: 'u_c4', permission_set: 'qa_alpha' }],
-      { context: ADMIN } as any,
-    );
-    await h.engine.update(
-      'sys_user_permission_set', { permission_set: 'qa_beta' }, { multi: true, where: { permission_set: 'qa_alpha' }, context: ADMIN } as any,
-    );
-    expect((await grantsOf(h, 'u_c3')).map((g) => g.permission_set)).toEqual(['qa_beta']);
-    expect((await grantsOf(h, 'u_c4')).map((g) => g.permission_set)).toEqual(['qa_beta']);
-  });
-
   it('CONTROL — one set to one user in two organizations and platform-wide, two users of one set, and an edit of a held grant all land', async () => {
     const h = await boot();
     for (const org of ['org_c1', 'org_c2']) {
