@@ -26,6 +26,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { hashApiKey, isAuthzStoreUnavailableError } from '@objectstack/core';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 
 import { HttpDispatcher, type HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
@@ -153,7 +154,10 @@ function dispatcherWithKey(row: Record<string, unknown>) {
         : []
     )),
     insert: vi.fn(async (_object: string, data: any) => { inserted.push(data); return { id: 'key_new' }; }),
-    update: vi.fn(async () => ({})),
+    update: vi.fn(async (_object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return {};
+    }),
     getObjects: vi.fn().mockReturnValue({}),
     registry: { getObject: vi.fn().mockReturnValue(null), getRegisteredTypes: vi.fn().mockReturnValue([]) },
   };

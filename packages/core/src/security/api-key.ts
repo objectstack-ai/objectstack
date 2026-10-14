@@ -204,22 +204,28 @@ export function apiKeyLifecyclePolicySourceOf(
   return () => service.resolveApiKeyLifecyclePolicy!();
 }
 
-/** [#23367] The three lifecycle refusal codes (ADR-0112 ledger, `@objectstack/core`). */
-export const API_KEY_EXPIRED_CODE = 'API_KEY_EXPIRED' as const;
-export const API_KEY_INACTIVE_CODE = 'API_KEY_INACTIVE' as const;
-export const API_KEY_REVOKED_CODE = 'API_KEY_REVOKED' as const;
+/**
+ * [#23367] The three lifecycle refusals, each declared as its wire pair — the
+ * ADR-0112 code (registered under `@objectstack/core`) beside the status it
+ * answers. `403` for all three, as the ruling words it ("the key's own 403 body
+ * names the date") and as a held key's posture refusal answers: the credential
+ * was recognised, and its state is what refuses it. Unknown keys keep the
+ * generic 401.
+ */
+const API_KEY_EXPIRED_REFUSAL = { code: 'API_KEY_EXPIRED', status: 403 } as const;
+const API_KEY_INACTIVE_REFUSAL = { code: 'API_KEY_INACTIVE', status: 403 } as const;
+const API_KEY_REVOKED_REFUSAL = { code: 'API_KEY_REVOKED', status: 403 } as const;
+
+export const API_KEY_EXPIRED_CODE = API_KEY_EXPIRED_REFUSAL.code;
+export const API_KEY_INACTIVE_CODE = API_KEY_INACTIVE_REFUSAL.code;
+export const API_KEY_REVOKED_CODE = API_KEY_REVOKED_REFUSAL.code;
 export type ApiKeyLifecycleCode =
   | typeof API_KEY_EXPIRED_CODE
   | typeof API_KEY_INACTIVE_CODE
   | typeof API_KEY_REVOKED_CODE;
 
-/**
- * [#23367] The status a lifecycle refusal answers with. `403`, as the ruling
- * words it ("the key's own 403 body names the date") and as a held key's
- * posture refusal answers: the credential was recognised, and its state is
- * what refuses it. Unknown keys keep the generic 401.
- */
-export const API_KEY_LIFECYCLE_REFUSAL_STATUS = 403 as const;
+/** [#23367] The status every lifecycle refusal answers with (see the pairs above). */
+export const API_KEY_LIFECYCLE_REFUSAL_STATUS = API_KEY_REVOKED_REFUSAL.status;
 
 /** [#23367] One lifecycle refusal, as the seam decides it. */
 export interface ApiKeyLifecycleRefusal {

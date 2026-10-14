@@ -22,6 +22,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 
 import {
@@ -45,18 +46,25 @@ const iso = (ms: number): string => new Date(ms).toISOString();
 
 interface Recorded { object: string; data: Record<string, unknown> }
 
-/** One `sys_api_key` row, matched by hash; records every `update` it is asked for. */
+/**
+ * One `sys_api_key` row, matched by hash; records every `update` it is asked
+ * for. `find` holds the caller's bound (by presence), and `update` routes
+ * through the real engine's dispatch contract, so the seam's stamp is proven
+ * to use a call shape `ObjectQL.update` accepts (`{ id, ...fields }`).
+ */
 function makeQl(row: Record<string, unknown>, opts: { failUpdate?: boolean } = {}) {
   const updates: Recorded[] = [];
+  const rows: any[] = [{ id: KEY_ID, key: hashApiKey(RAW), prefix: 'osk_lifecycl', user_id: OWNER, revoked: false, ...row }];
   const ql = {
     updates,
     find: async (object: string, findOpts: any) => {
       if (object !== 'sys_api_key') return [];
       const where = findOpts?.where ?? {};
-      const stored = { id: KEY_ID, key: hashApiKey(RAW), prefix: 'osk_lifecycl', user_id: OWNER, revoked: false, ...row };
-      return Object.entries(where).every(([k, v]) => (stored as any)[k] === v) ? [stored] : [];
+      const matched = rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      return typeof findOpts?.limit === 'number' ? matched.slice(0, findOpts.limit) : matched;
     },
-    update: async (object: string, data: Record<string, unknown>) => {
+    update: async (object: string, data: Record<string, unknown>, options?: any) => {
+      assertEngineUpdateDispatch(data as any, options);
       if (opts.failUpdate) throw new Error('write refused');
       updates.push({ object, data });
       return data;

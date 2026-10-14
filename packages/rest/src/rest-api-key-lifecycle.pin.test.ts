@@ -18,7 +18,7 @@
  *    is served.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { hashApiKey } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 
@@ -93,9 +93,6 @@ async function drive(rest: RestServer, headers: Record<string, string>) {
 }
 
 describe('[#23367] REST relays the API-key lifecycle refusal through enforceAuth', () => {
-  let warn: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
-  afterEach(() => { warn.mockRestore(); });
 
   it('revoked, expired and inactive answer 403 with three distinct codes', async () => {
     const codes: string[] = [];

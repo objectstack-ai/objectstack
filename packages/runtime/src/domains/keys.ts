@@ -61,8 +61,8 @@ const DAY_MS = 86_400_000;
  */
 const EXPIRY_CEILING_SKEW_MS = 60_000;
 
-/** [#23367] The ceiling refusal's code (ADR-0112 ledger, `@objectstack/runtime`). */
-export const API_KEY_EXPIRY_TOO_LONG_CODE = 'API_KEY_EXPIRY_TOO_LONG' as const;
+/** [#23367] The ceiling refusal, as its wire pair (ADR-0112 ledger, `@objectstack/runtime`). */
+const API_KEY_EXPIRY_TOO_LONG = { code: 'API_KEY_EXPIRY_TOO_LONG', status: 400 } as const;
 
 /**
  * The legacy branch matched `=== '/keys' || startsWith('/keys/') ||
@@ -214,8 +214,8 @@ export async function handleKeysRequest(
                     `expires_at ${new Date(requestedMs).toISOString()} is further away than this deployment allows: an `
                     + `API key lives at most ${policy.maxExpiryDays} days, so the latest expiry a key signed now may `
                     + `have is ${latest}. Ask for that date or an earlier one, and rotate the key before it expires.`,
-                    400,
-                    { code: API_KEY_EXPIRY_TOO_LONG_CODE },
+                    API_KEY_EXPIRY_TOO_LONG.status,
+                    { code: API_KEY_EXPIRY_TOO_LONG.code },
                 ),
             };
         }
