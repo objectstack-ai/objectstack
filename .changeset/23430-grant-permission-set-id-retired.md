@@ -27,10 +27,10 @@ What else changes:
 - `os migrate organization-ownership --plan` reports a `grants` block on `sys_user_permission_set`, keyed like the new index (a NULL organization keyed with NULL):
   - `duplicates`: groups of named grants holding one set for one user in one organization. `--apply`'s `column-drops` step does not drop `permission_set_id` while one group remains.
   - `rewriteCollisions`: legacy grants whose derived name their user already holds in the same organization. `--apply`'s rewrite names none of them and blocks, naming both ids.
-- The organization-administrator reconcile and its boot sweep write no grant for a pair holding an unnamed grant in that organization: the ceremony's rewrite names that grant, and a named grant beside it would hold the key the rename needs.
   - On a database without the `permission_set` column it counts zero and names the remedy (boot this release once), instead of refusing the plan.
 
   The ceremony deletes no grant: remove the one you do not keep, then re-run.
+- The organization-administrator reconcile and its boot sweep write no grant for a pair holding an unnamed grant in that organization: the ceremony's rewrite names that grant, and a named grant beside it would hold the key the rename needs.
 - `--apply` drops the two retired indexes before the column, in a separate earlier schema-drift apply: MySQL refuses to drop a column a key still uses.
 - The organization-administrator reconcile and its boot sweep, the platform-admin bootstrap's unnamed-grant leg (Leg C) and the catalog reference report read grants by name only. A legacy grant that names nothing confers nothing, still withholds the platform-admin promotion while it is unscoped, and is reached by no revocation until the ceremony's rewrite names it; once named, the boot sweep revokes it where its pair no longer qualifies. The report's `UnnamedGrant` entries lose `permissionSetId`.
 - `GET /meta/object/sys_user_permission_set` no longer serves the hidden `permission_set_id` field.
