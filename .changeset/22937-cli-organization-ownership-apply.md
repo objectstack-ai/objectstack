@@ -21,5 +21,5 @@ The command that planned the ceremony now performs it. Without `--apply` nothing
 
 ```bash
 os migrate organization-ownership --out plan.json            # read the plan first
-os migrate organization-ownership --apply --backup-taken     # then perform it
+os migrate organization-ownership --apply --backup-taken --plan-file plan.json   # then perform the plan you reviewed
 ```
