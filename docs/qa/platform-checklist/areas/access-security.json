@@ -2646,7 +2646,7 @@
       },
       "source": [
         "packages/plugins/plugin-security/src/packaged-permission-set-lock.ts (classifier + both refusals; the SchemaRegistry-not-managed_by decision)",
-        "packages/plugins/plugin-security/src/permission-set-projection.ts (insert-path lock + duplicate 409; the #4669 row-state carve-out ordered BEFORE the update-path lock)",
+        "packages/plugins/plugin-security/src/packaged-permission-set-lock-gate.ts (the lock's one enforcement point since the sys_permission_set data door retired with C3 stages 7a and 8, taking its insert-path lock, duplicate 409 and #4669 row-state carve-out with it)",
         "packages/runtime/src/domains/permission-set-clone.ts (the clone door that replaced the retired object's clone_permission_set action)",
         "docs/adr/0126-packaged-metadata-customization-model.md §1.1 (the #11513 machinery, named as the regime's first instance), §8 item 3 (permission sets converge later; the landed shape stays valid meanwhile)",
         "#11513 (lock the base, clone to customize — the 2026-08-24 ruling), #11703 (the three dropped clone facets), #12159 (ruling 2026-08-26: no ledger rows for permission sets pending the convergence card), #12438 (the sweep)"

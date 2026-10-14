@@ -820,9 +820,8 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
   label: z.string().optional().describe('Display label'),
 
   /**
-   * Human-readable description, surfaced on `sys_permission_set` (list columns
-   * + form) and the Setup projection (`permission-set-projection.ts` reads it
-   * from the authored set). The built-in default sets have always authored it —
+   * Human-readable description, shown in Setup and read from the authored set
+   * through the security catalog. The built-in default sets have always authored it —
    * but until #4001 the schema could not represent it, so it was silently
    * stripped at parse (the ADR-0078 §3 inverse-drift class); the `.strict()`
    * gate surfaced the gap and it is now declared.

@@ -710,7 +710,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       positions: {
         label: "Puestos de asignación",
-        help: "Nombres de sys_position asignados al aceptar (ADR-0105 D8). Los conjuntos de permisos de cada puesto deben estar en la lista de permitidos del adminScope de quien emite la invitación."
+        help: "Nombres de puestos asignados al aceptar (ADR-0105 D8). Los conjuntos de permisos de cada puesto deben estar en la lista de permitidos del adminScope de quien emite la invitación."
       }
     },
     _views: {

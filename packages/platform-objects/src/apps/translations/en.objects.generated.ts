@@ -710,7 +710,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       positions: {
         label: "Placement Positions",
-        help: "sys_position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
+        help: "Position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
       }
     },
     _views: {

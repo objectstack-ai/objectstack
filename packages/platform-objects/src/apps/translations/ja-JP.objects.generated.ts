@@ -710,7 +710,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       positions: {
         label: "配属先ポジション",
-        help: "承認時に割り当てられる sys_position 名（ADR-0105 D8）。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
+        help: "承認時に割り当てられるポジション名（ADR-0105 D8）。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
       }
     },
     _views: {

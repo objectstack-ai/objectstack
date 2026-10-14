@@ -138,8 +138,7 @@ export function objectPostureGate(ctx: ObjectPostureGateContext): void {
 }
 
 /**
- * Wire the gate onto the protocol. Feature-detected like
- * `registerPermissionSetProjection` — a protocol that predates
+ * Wire the gate onto the protocol. Feature-detected — a protocol that predates
  * `registerAuthoringGate` (older embeddings, unit-test stubs) simply keeps
  * the legacy behavior (CLI lint remains the only guard there). Returns
  * `true` when wired.

@@ -32,8 +32,8 @@
  * by the code written to stop silent forks.
  *
  * ⛔ So the answer is NOT taken from a name-keyed page over
- * `sys_permission_set`. The batched existence oracle
- * (`seed-name-lookup.ts`'s `buildExistingByName`) capped its UNSCOPED page at
+ * `sys_permission_set`. The batched existence oracle the catalog seeders read
+ * (`buildExistingByName`, retired with them in C3 stage 7a) capped its UNSCOPED page at
  * `limit: names.length`, which truncates the moment one name can carry more
  * than one row — and a truncated page read as `absent`. Commit e1d773eb7 has since
  * repaired that: the page budget is measured (one row more than it will hold is
@@ -89,11 +89,10 @@ import { isTenantAuthored } from '@objectstack/metadata-core';
 
 /**
  * ⛔ This module imports NOTHING from the rest of the plugin, and that is
- * structural rather than stylistic: `permission-set-projection.ts` imports
- * THIS module (its write door is the lock's only enforcement point), so any
- * import back the other way — directly, or through
- * `bootstrap-declared-permissions.ts`, which itself imports the projection
- * module — would close a cycle around a write door.
+ * structural rather than stylistic: the write doors import THIS module (the
+ * metadata door's gate, `packaged-permission-set-lock-gate.ts`, and the
+ * catalog echo, `security-catalog-echo.ts`), so any import back the other way
+ * could close a cycle around a write door.
  *
  * ⚠️ In particular it does not reuse {@link readDeclared}, and that is a
  * deliberate strictness difference rather than a second spelling: `readDeclared`
@@ -105,11 +104,11 @@ import { isTenantAuthored } from '@objectstack/metadata-core';
  */
 
 /**
- * The marker `permission-set-projection.ts` stamps on bodies it syncs into the
- * metadata manager's in-memory registry, so its own copy of an overlay body can
- * never masquerade as a shipped artifact.
+ * The marker the catalog echo (`security-catalog-echo.ts`) stamps on bodies it
+ * syncs into the metadata manager's in-memory registry, so its own copy of an
+ * overlay body can never masquerade as a shipped artifact.
  *
- * It lives HERE, and the projection module imports it from here, so the
+ * It lives HERE, and the echo imports it from here, so the
  * constant has exactly one home — a lock that decides "packaged" partly by the
  * absence of this marker must not be reading a second, drifting spelling of it.
  */
@@ -118,8 +117,8 @@ export const ENV_PROJECTION_MARKER = '_envProjection';
 /**
  * The `_packageId` value the metadata layer stamps on a RUNTIME SHADOW — an
  * item hydrated into the registry from a `sys_metadata` overlay row rather
- * than shipped as an artifact. `readDeclaredBody` in the projection module
- * excludes it for the same reason this does: a shadow is the overlay, not the
+ * than shipped as an artifact. The retired projection module's
+ * `readDeclaredBody` excluded it for the same reason this does: a shadow is the overlay, not the
  * declaration it shadows, and reading it as "declared" would lock a set that
  * no package ships.
  */
@@ -191,8 +190,7 @@ function declaredPackageIdOf(item: any, name: string): string | null {
  *     one source this repo already calls "package-declared". In-memory, so it
  *     cannot truncate;
  *  2. the layered read's `code` layer, for kernels that expose no readable
- *     SchemaRegistry (minimal embeddings; the same fallback
- *     `projectPermissionMutation` already uses). One name, one envelope — no
+ *     SchemaRegistry (minimal embeddings). One name, one envelope — no
  *     page and no cap here either.
  */
 export function classifyPackagedPermissionSet(
@@ -284,14 +282,10 @@ export function classifyPackagedPermissionSet(
  * English, like every platform refusal: there is no localization path for a
  * thrown `userMessage`, and these texts do not invent one.
  */
-const LOCKED_UPDATE_USER_MESSAGE =
+const LOCKED_USER_MESSAGE =
   `This permission set is provided by an installed package and can't be edited here. Clone it instead `
   + `with the Clone action, then edit the clone. The clone is your organization's own permission set, `
   + `and package upgrades keep reaching the original.`;
-
-const LOCKED_INSERT_USER_MESSAGE =
-  `This name belongs to a permission set provided by an installed package. Choose a different name for `
-  + `your permission set, or clone the packaged one with the Clone action and edit the clone.`;
 
 const PROVENANCE_UNKNOWN_USER_MESSAGE =
   `This permission set can't be saved right now, because the system couldn't confirm whether an installed `
@@ -321,10 +315,16 @@ const PROVENANCE_UNKNOWN_USER_MESSAGE =
  * `status` AND `statusCode`: the two transports read different property names
  * (`mapDataError` passes a domain error through on `.status`; the runtime
  * dispatcher's `errorFromThrown` reads `.status` then falls back to
- * `.statusCode`), and this throws on the DATA path, which reaches both.
+ * `.statusCode`), and a door's refusal can reach either.
  *
- * `userMessage` carries the same guidance for the end user, per operation —
- * see the note on the texts above.
+ * `userMessage` carries the same guidance for the end user — see the note on
+ * the texts above.
+ *
+ * One remedy, the clone: the one door that throws it (the metadata door's
+ * authoring gate) judges an override of the shipped base. The "choose a
+ * different name" variant the retired data door's create raised is gone with
+ * that door (C3 stage 8). `operation` stays in the published signature and
+ * no longer selects the text.
  */
 export class PackagedPermissionSetLockedError extends Error {
   readonly code = 'NOT_OVERRIDABLE';
@@ -332,20 +332,17 @@ export class PackagedPermissionSetLockedError extends Error {
   readonly statusCode = 403;
   /** The guidance addressed to the end user; `message` stays the diagnostic. */
   readonly userMessage: string;
-  constructor(name: string, packageId: string, operation: 'insert' | 'update') {
+  constructor(name: string, packageId: string, _operation: 'insert' | 'update') {
     super(
       `[Security] Permission set '${name}' is declared by package '${packageId}' and is locked in this `
       + `environment — editing it here would silently fork it from the package, and the fork would win over `
       + `every future upgrade with no signal. `
-      + (operation === 'insert'
-        ? `Choose a different name for your set, or clone '${name}' (the "Clone" action on the permission `
-          + `set) and edit the clone.`
-        : `Clone it instead (the "Clone" action on the permission set, or POST `
-          + `/api/v1/security/permission-sets/${name}/clone with a new name) and edit the clone — the clone is your organization's own set, and upgrades keep `
-          + `flowing to '${name}' untouched.`),
+      + `Clone it instead (the "Clone" action on the permission set, or POST `
+      + `/api/v1/security/permission-sets/${name}/clone with a new name) and edit the clone — the clone is your organization's own set, and upgrades keep `
+      + `flowing to '${name}' untouched.`,
     );
     this.name = 'PackagedPermissionSetLockedError';
-    this.userMessage = operation === 'insert' ? LOCKED_INSERT_USER_MESSAGE : LOCKED_UPDATE_USER_MESSAGE;
+    this.userMessage = LOCKED_USER_MESSAGE;
   }
 }
 

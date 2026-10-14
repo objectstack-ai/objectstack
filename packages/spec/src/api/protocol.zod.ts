@@ -794,7 +794,7 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
   }).optional().describe(
     'Outcome of the awaited ADR-0094 mutation projector — the post-persist step '
     + 'that materializes this metadata into its derived data-plane read model '
-    + '(e.g. `permission` → `sys_permission_set`). Present ONLY when a projector '
+    + '(e.g. `datasource` → its live connection pool). Present ONLY when a projector '
     + 'is registered for this metadata type, which is why it is optional: its '
     + 'absence means "no projector ran", never "the projection failed". '
     + 'Best-effort by design — a projector failure is reported here and logged, '
@@ -951,7 +951,8 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
  * - `seedApplied` — only when the published type is `seed`. Publishing a seed
  *   is what makes its rows live, so the row materialization rides along.
  * - `materializeApplied` — only when an ADR-0086 P2 publish materializer is
- *   registered for the type (e.g. `permission` → `sys_permission_set`).
+ *   registered for the type (e.g. `flow`, whose draft credentials become the
+ *   live ones).
  * - `projectionApplied` — only when an ADR-0094 mutation projector is
  *   registered for the type. Same field, same meaning, as on
  *   {@link SaveMetaItemResponseSchema}: both write doors run the projector.
@@ -1023,8 +1024,8 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
     error: z.string().optional().describe('Materializer failure message, present only when `success` is false.'),
   }).optional().describe(
     'Outcome of the ADR-0086 P2 publish-time materializer — the step that '
-    + 'projects the published body into its data-plane row (e.g. `permission` '
-    + '→ `sys_permission_set`, under the owning package). Present ONLY when a '
+    + 'applies the published body to its data-plane state (e.g. `flow`, whose '
+    + 'draft credentials become the live ones). Present ONLY when a '
     + 'materializer is registered for this metadata type, which is why it is '
     + 'optional: its absence means "no materializer ran", never "it failed". '
     + 'Best-effort, same contract as `seedApplied`.',
@@ -1282,7 +1283,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     ),
   }).optional().describe(
     'ADR-0086 P2 — aggregate result of publish-time materializers across '
-    + 'the batch (e.g. `permission` → `sys_permission_set`), including '
+    + 'the batch (e.g. `flow`, whose draft credentials become the live ones), including '
     + 'side-effect failures surfaced by the per-item effects loop. Present '
     + 'ONLY when at least one published item had a registered materializer '
     + 'or a side-effect failure. Best-effort, same contract as '

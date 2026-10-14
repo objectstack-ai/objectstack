@@ -10,18 +10,14 @@
  * unique per organization only, so in a single-database multi-org posture
  * (ADR-0105 D1 `group` / `isolated`) two organizations' holdings of the same
  * name are the same string. Two gate reads selected holdings by that name under
- * a bare `{ isSystem: true }` context with no organization condition:
+ * a bare `{ isSystem: true }` context with no organization condition. The one
+ * that remains is `activeHoldings` — does the delegator CURRENTLY and
+ * DIRECTLY hold the position (ADR-0091 D3 rule 4)? A holding stamped for
+ * ANOTHER organization answered yes, so a user self-delegated a position in an
+ * organization where they held nothing. (The other, the binding blast radius,
+ * retired with the `sys_position_permission_set` binding rows, ADR-0131 D3.)
  *
- *   - `activeHoldings` — does the delegator CURRENTLY and DIRECTLY hold the
- *     position (ADR-0091 D3 rule 4)? A holding stamped for ANOTHER
- *     organization answered yes, so a user self-delegated a position in an
- *     organization where they held nothing.
- *   - `assignmentAnchorsOfPosition` — whose capability does re-binding the
- *     position re-compose (the ADR-0090 D12 blast radius)? Another
- *     organization's same-named assignments entered it, so a delegate was
- *     refused over holders their binding never reaches.
- *
- * ## The rule both reads now follow — the runtime's own
+ * ## The rule the read now follows — the runtime's own
  *
  * `resolveAuthzContext` (step 4, `@objectstack/core`) keeps a holding when its
  * `organization_id` is empty OR equals the active organization, and drops it
@@ -34,7 +30,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import type { PermissionSet } from '@objectstack/spec/security';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
@@ -57,31 +52,12 @@ const OBJECTS = [
   object('sys_business_unit', ['name', 'parent_business_unit_id']),
   object('sys_position', ['name', 'delegatable']),
   object('sys_permission_set', ['name', 'admin_scope']),
-  object('sys_position_permission_set', ['position_id', 'permission_set_id']),
   object('sys_user_position', [
     'user_id', 'position', 'business_unit_id', 'granted_by', 'delegated_from', 'valid_until', 'reason',
   ]),
   object('sys_business_unit_member', ['user_id', 'business_unit_id']),
   object('sys_user', ['primary_business_unit_id']),
 ];
-
-/** A binding delegate's scope: the unit NAMED `sales`, may bind `sales_user` only. */
-const BIND_SCOPE = {
-  businessUnit: 'sales',
-  includeSubtree: true,
-  manageAssignments: false,
-  manageBindings: true,
-  authorEnvironmentSets: false,
-  assignablePermissionSets: ['sales_user'],
-};
-
-const BINDER_SETS = [
-  {
-    name: 'sales_binder',
-    objects: { sys_position_permission_set: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
-    adminScope: BIND_SCOPE,
-  },
-] as unknown as PermissionSet[];
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
@@ -164,7 +140,7 @@ function gateOn(engine: ObjectQL) {
   });
   return new DelegatedAdminGate({
     ql: engine,
-    resolveSets: async (context: any) => (context?.principal === 'binder' ? BINDER_SETS : []),
+    resolveSets: async () => [],
   });
 }
 
@@ -188,15 +164,6 @@ const selfDelegate = (gate: DelegatedAdminGate, organizationId: string | undefin
     context: organizationId
       ? { principal: 'holder', userId: USER, tenantId: organizationId }
       : { principal: 'holder', userId: USER },
-  });
-
-/** A binding delegate in `organizationId` binds `sales_user` to the position row `positionId`. */
-const bind = (gate: DelegatedAdminGate, organizationId: string, positionId: string, permissionSetId: string) =>
-  gate.assert({
-    object: 'sys_position_permission_set',
-    operation: 'insert',
-    data: { position_id: positionId, permission_set_id: permissionSetId },
-    context: { principal: 'binder', userId: 'usr_binder', tenantId: organizationId },
   });
 
 /** A gate refusal: the ADR-0112 envelope, then the first sentence that names why. */
@@ -283,73 +250,5 @@ describe('DelegatedAdminGate — rule 4 counts only holdings the caller\'s organ
     await hold(engine, ORG_B, [{ id: 'up_b', user_id: USER }]);
 
     await expect(selfDelegate(gateOn(engine), undefined)).resolves.toBeUndefined();
-  });
-});
-
-// ── assignmentAnchorsOfPosition — the binding blast radius ────────────────
-
-describe('DelegatedAdminGate — a binding\'s blast radius is the holders the bound position reaches', () => {
-  it('org B\'s same-named assignments do not refuse org A\'s binding (outside-subtree anchor)', async () => {
-    const engine = await bootEngine();
-    const b = await seedOrganization(engine, ORG_B, '0');
-    const a = await seedOrganization(engine, ORG_A, 'a');
-    await hold(engine, ORG_A, [{ id: 'up_a', user_id: 'usr_a1', business_unit_id: a.salesEast }]);
-    await hold(engine, ORG_B, [{ id: 'up_b', user_id: 'usr_b1', business_unit_id: b.salesEast }]);
-
-    await expect(bind(gateOn(engine), ORG_A, a.fieldLead, a.salesUser)).resolves.toBeUndefined();
-  });
-
-  it('org B\'s same-named assignments do not push org A\'s binding over the blast-radius cap', async () => {
-    const engine = await bootEngine();
-    const b = await seedOrganization(engine, ORG_B, '0');
-    const a = await seedOrganization(engine, ORG_A, 'a');
-    await hold(engine, ORG_A, [{ id: 'up_a', user_id: 'usr_a1', business_unit_id: a.salesEast }]);
-    await hold(engine, ORG_B, Array.from({ length: 501 }, (_, i) => ({
-      id: `up_b_${String(i).padStart(3, '0')}`,
-      user_id: `usr_b_${i}`,
-      business_unit_id: b.salesEast,
-    })));
-
-    await expect(bind(gateOn(engine), ORG_A, a.fieldLead, a.salesUser)).resolves.toBeUndefined();
-  });
-
-  it('an organization-less holding IS in org A\'s blast radius — the runtime grants it org A\'s binding', async () => {
-    const engine = await bootEngine();
-    await seedOrganization(engine, ORG_B, '0');
-    const a = await seedOrganization(engine, ORG_A, 'a');
-    await hold(engine, ORG_A, [{ id: 'up_a', user_id: 'usr_a1', business_unit_id: a.salesEast }]);
-    await hold(engine, undefined, [{ id: 'up_none', user_id: 'usr_x' }]);
-
-    await expectRefused(
-      bind(gateOn(engine), ORG_A, a.fieldLead, a.salesUser),
-      /position 'field_lead' has 1 unanchored assignment\(s\)/,
-    );
-  });
-
-  it('the radius follows the BOUND row\'s organization — org B\'s holders still guard org B\'s row', async () => {
-    const engine = await bootEngine();
-    const b = await seedOrganization(engine, ORG_B, '0');
-    const a = await seedOrganization(engine, ORG_A, 'a');
-    await hold(engine, ORG_A, [{ id: 'up_a', user_id: 'usr_a1', business_unit_id: a.salesEast }]);
-    await hold(engine, ORG_B, [{ id: 'up_b', user_id: 'usr_b1', business_unit_id: b.salesEast }]);
-
-    await expectRefused(
-      bind(gateOn(engine), ORG_A, b.fieldLead, a.salesUser),
-      /position 'field_lead' is held in business unit 'bu_0_sales_east', outside the delegated subtree/,
-    );
-  });
-
-  it('control (dark) — org A\'s own holder outside the subtree still refuses', async () => {
-    const engine = await bootEngine();
-    const a = await seedOrganization(engine, ORG_A, 'a');
-    await engine.insert('sys_business_unit', [
-      { id: 'bu_a_ops', name: 'ops', parent_business_unit_id: null },
-    ], { context: sysCtx(ORG_A) } as any);
-    await hold(engine, ORG_A, [{ id: 'up_a', user_id: 'usr_a1', business_unit_id: 'bu_a_ops' }]);
-
-    await expectRefused(
-      bind(gateOn(engine), ORG_A, a.fieldLead, a.salesUser),
-      /position 'field_lead' is held in business unit 'bu_a_ops', outside the delegated subtree/,
-    );
   });
 });
