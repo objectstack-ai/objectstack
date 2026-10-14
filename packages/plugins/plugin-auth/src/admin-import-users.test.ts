@@ -28,6 +28,8 @@ function makeDeps(opts: {
   smsInviteAvailable?: boolean;
   resetFails?: boolean;
   smsFails?: boolean;
+  /** [#23152] When set, the deps carry `consoleResetPasswordUrl` answering it. */
+  setPasswordPageUrl?: string;
 } = {}) {
   const existing = opts.existingUsers ?? [];
   let nextId = 1;
@@ -59,6 +61,9 @@ function makeDeps(opts: {
     emailServiceAvailable: () => opts.emailAvailable ?? true,
     smsInviteAvailable: () => opts.smsInviteAvailable ?? false,
     sendInviteSms,
+    ...(opts.setPasswordPageUrl !== undefined
+      ? { consoleResetPasswordUrl: () => opts.setPasswordPageUrl! }
+      : {}),
     noteMustChangePasswordIssued,
     logger: { warn },
   };
@@ -324,6 +329,27 @@ describe('runAdminImportUsers — invite policy', () => {
     // No must-change stamp for invite (users set their own password).
     expect(m.update.mock.calls.filter((c) => c[1]?.must_change_password === true).length).toBe(0);
     expectNoPasswordLeak(m, m.createUser.mock.calls.map((c) => c[0].body.password));
+  });
+
+  it('[#23152] names the Console set-password page as the reset redirectTo when the deps carry it', async () => {
+    const page = 'https://acme.example.com/_console/reset-password';
+    const m = makeDeps({ setPasswordPageUrl: page });
+    await runAdminImportUsers(
+      m.deps,
+      makeRequest({ passwordPolicy: 'invite', format: 'json', rows: [{ email: 'a@x.co' }] }),
+      ACTOR,
+    );
+    expect(m.requestPasswordReset.mock.lastCall).toStrictEqual([{ body: { email: 'a@x.co', redirectTo: page } }]);
+  });
+
+  it('[#23152] without the member, the reset request is exactly { email } — no redirectTo key', async () => {
+    const m = makeDeps();
+    await runAdminImportUsers(
+      m.deps,
+      makeRequest({ passwordPolicy: 'invite', format: 'json', rows: [{ email: 'a@x.co' }] }),
+      ACTOR,
+    );
+    expect(m.requestPasswordReset.mock.lastCall).toStrictEqual([{ body: { email: 'a@x.co' } }]);
   });
 
   it('keeps the row created (with INVITE_EMAIL_FAILED) when the email fails — no rollback', async () => {

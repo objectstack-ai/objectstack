@@ -247,18 +247,33 @@ describe('[#20515] a removed member\'s organization-scoped manage_metadata no lo
     });
 });
 
+/**
+ * [ADR-0131 D12 items 7–8] Under this rig's `isolated` posture the walled
+ * refusal answers every package write by a caller below the platform operator
+ * rung, AFTER the capability gate. A caller the capability gate admitted is
+ * told so by which refusal it gets: the walled one names the posture, the
+ * capability gate's names the capability.
+ */
+async function refusedByTheWallNotTheCapabilityGate(answer: { status: number; code: unknown; body: any }): Promise<void> {
+    expect({ status: answer.status, code: answer.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+    const message = String(answer.body?.error?.message ?? '');
+    expect(message).toContain("'isolated' tenancy posture");
+    expect(message).not.toContain('requires the `manage_metadata` capability');
+}
+
 describe('[#20515] what the rule leaves unchanged', () => {
-    it('CONTROL · a current member with the same grant and org_alpha active passes: DELETE /packages/:id answers 200', async () => {
+    it('CONTROL · a current member with the same grant and org_alpha active passes the capability gate: DELETE /packages/:id reaches the walled refusal, and nothing is deleted', async () => {
         const r = rig();
         const answer = await r.call('DELETE', 'member', `/packages/${PKG}`);
-        expect(answer.status).toBe(200);
-        expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
+        await refusedByTheWallNotTheCapabilityGate(answer);
+        expect(r.deleteRequests).toEqual([]);
+        expect(r.registry.getPackage(PKG)).toBeDefined();
     });
 
-    it('CONTROL · the same current member passes PATCH /packages/:id/disable: 200, and the package is switched off', async () => {
+    it('CONTROL · the same current member passes the capability gate at PATCH /packages/:id/disable, and the walled refusal keeps the package enabled', async () => {
         const r = rig();
-        expect((await r.call('PATCH', 'member', `/packages/${PKG}/disable`)).status).toBe(200);
-        expect(switchedOff(r)).toBe(true);
+        await refusedByTheWallNotTheCapabilityGate(await r.call('PATCH', 'member', `/packages/${PKG}/disable`));
+        expect(switchedOff(r)).toBe(false);
     });
 
     // [ADR-0131 D3/D4] A position's sets are the ones its catalog definition
@@ -271,15 +286,20 @@ describe('[#20515] what the rule leaves unchanged', () => {
         expect(r.deleteRequests).toEqual([]);
     });
 
-    it('a GLOBAL grant still passes the gate for the removed member — the uninstall proceeds, naming no organization', async () => {
+    it('a GLOBAL grant still passes the capability gate for the removed member — the walled refusal answers next, below the operator rung', async () => {
         const r = rig();
-        const answer = await r.call('DELETE', 'global', `/packages/${PKG}`);
-        expect(answer.status).toBe(200);
+        await refusedByTheWallNotTheCapabilityGate(await r.call('DELETE', 'global', `/packages/${PKG}`));
+        expect(r.deleteRequests).toEqual([]);
+        await refusedByTheWallNotTheCapabilityGate(await r.call('PATCH', 'global', `/packages/${PKG}/disable`));
+        expect(switchedOff(r)).toBe(false);
+    });
+
+    it('the operator\'s uninstall proceeds naming no organization, and its disable lands — the positive control that makes `switchedOff` false above mean something', async () => {
+        const r = rig();
+        expect((await r.call('DELETE', 'admin', `/packages/${PKG}`)).status).toBe(200);
         expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
-        // …and the disable door, which asks no organization, lands — the
-        // positive control that makes `switchedOff` false above mean something.
         const d = rig();
-        expect((await d.call('PATCH', 'global', `/packages/${PKG}/disable`)).status).toBe(200);
+        expect((await d.call('PATCH', 'admin', `/packages/${PKG}/disable`)).status).toBe(200);
         expect(switchedOff(d)).toBe(true);
     });
 

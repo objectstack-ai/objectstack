@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { PluginContext } from '@objectstack/core';
-import type { AutomationContext } from '@objectstack/spec/contracts';
+import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
+import { createRecordWallOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
 import { defineActionDescriptor, isExpressionEnvelopeShaped, NotifyConfigSchema } from '@objectstack/spec/automation';
 import type { NotifyConfigParsed } from '@objectstack/spec/automation';
 import type { AutomationEngine } from '../engine.js';
@@ -77,6 +78,89 @@ function toStr(value: unknown): string | undefined {
     if (value == null) return undefined;
     const s = String(value).trim();
     return s.length > 0 ? s : undefined;
+}
+
+/** A record a notification can be about — an object name and a row id. */
+interface RecordRef {
+    readonly object: string;
+    readonly id: string;
+}
+
+/**
+ * [#23284] The elevated context of the one read below. The organization is read
+ * off the STORED row by id, never off a snapshot the run carries: a trigger
+ * door may hand a run a `record` its caller wrote, and a caller-written
+ * `organization_id` must not decide whose notification this is.
+ */
+const SUBJECT_ORGANIZATION_READ = { context: { isSystem: true } } as const;
+
+/**
+ * [#23284] The organization of the record a notification is ABOUT, for a run
+ * whose context carries none (a schedule tick, a record change written by a
+ * system context).
+ *
+ * The candidates are tried in order and the first one that answers wins:
+ *
+ *  1. the click-through record the node declares (`sourceObject` + `sourceId`)
+ *     — what `sys_notification.source_object` / `source_id` store, and the
+ *     anchor ADR-0131's ownership inventory attributes a stored notification
+ *     by, so the producer and the inventory answer the same question the same
+ *     way;
+ *  2. the run's trigger record (`AutomationContext.object` + `record.id`) — the
+ *     record the run itself is about, the anchor the run's own history row is
+ *     stamped from.
+ *
+ * The column is the object's WALL column (`createRecordWallOrganizationResolver`:
+ * an ADR-0066 opt-out has none, then a declared `tenancy.tenantField`, then the
+ * kernel's `organization_id`) — "which organization does this record belong
+ * to", never the stamp-only divergence the three sanctioned platform-row
+ * writers read. An object with no such column, an object the engine does not
+ * know, a row that no longer exists and a row whose column is empty each
+ * answer nothing, and the next candidate is asked.
+ *
+ * ⛔ No candidate is a guess: not the install's first organization, not the
+ * recipient's membership. When none answers, the emit carries no organization
+ * and the engine's system-write rule decides the owner (ADR-0131 D9) — the sole
+ * organization under `single`, a refusal where none is derivable. A read that
+ * fails propagates: it fails the step rather than quietly dropping to that rule.
+ */
+async function organizationOfRecordAbout(
+    data: IDataEngine,
+    resolver: RecordOrganizationResolver,
+    candidates: ReadonlyArray<RecordRef | undefined>,
+): Promise<string | undefined> {
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        const column = resolver.organizationFieldFor(candidate.object);
+        if (!column) continue;
+        const row = await data.findOne(
+            candidate.object,
+            { where: { id: candidate.id }, fields: ['id', column] },
+            SUBJECT_ORGANIZATION_READ,
+        );
+        const organization = resolver.organizationOf(candidate.object, row);
+        if (organization) return organization;
+    }
+    return undefined;
+}
+
+/** The run's trigger record as a {@link RecordRef}, when the run has one. */
+function triggerRecordOf(context: AutomationContext): RecordRef | undefined {
+    const object = toStr(context.object);
+    const id = toStr((context.record as { id?: unknown } | undefined)?.id);
+    return object && id ? { object, id } : undefined;
+}
+
+/**
+ * The code a thrown failure carries (`err.code`, the ADR-0112 envelope's
+ * machine-readable half), so a step that fails on the engine's refusal names
+ * it — `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` and the rest — beside the
+ * message. Read for the step's TEXT only: `NodeExecutionResult.code` stays
+ * reserved for the codes an executor classifies itself.
+ */
+function thrownCodeOf(err: unknown): string | undefined {
+    const code = err !== null && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
+    return typeof code === 'string' && code.length > 0 ? code : undefined;
 }
 
 /** How a returned failure names what a value expression evaluated to — `null`, a map, a number (`42`). */
@@ -205,6 +289,24 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
         } catch {
             return undefined;
         }
+    };
+    // [#23284] The data engine the record-anchor read goes through — resolved
+    // the way the CRUD nodes resolve theirs — and one wall-column resolver per
+    // engine (object schemas are static after registration, so its per-object
+    // memo stays true for the engine's life).
+    const getData = (): IDataEngine | undefined => {
+        try {
+            return ctx.getService<IDataEngine>('data') ?? ctx.getService<IDataEngine>('objectql');
+        } catch {
+            return undefined;
+        }
+    };
+    let wallResolver: { readonly data: IDataEngine; readonly resolver: RecordOrganizationResolver } | undefined;
+    const wallResolverFor = (data: IDataEngine): RecordOrganizationResolver => {
+        if (wallResolver?.data !== data) {
+            wallResolver = { data, resolver: createRecordWallOrganizationResolver(data) };
+        }
+        return wallResolver.resolver;
     };
 
     engine.registerNodeExecutor({
@@ -449,41 +551,45 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // Maintainer ruling, 2026-08-24, verbatim: 「11303
             // sys_inbox_message/sys_notification/sys_email 应该写
             // organization_id。」 — a gap, not a design choice, and the
-            // PRODUCERS are the fix site. Everything below `emit()` was already
-            // threaded; this node was the origin that never supplied a value.
+            // PRODUCERS are the fix site.
             //
             // `AutomationContext.tenantId` is the acting run's organization —
             // the same source `audit-writers.ts` hands its own `collab.mention`
             // emit, so the two notification producers agree about whose
-            // organization a notification carries.
+            // organization a notification carries. A run that carries one keeps
+            // it exactly as before: nothing below is read for it.
             //
-            // ⛔ There is deliberately NO fallback limb here — not "the current
+            // [#23284] A run that carries NONE — a schedule tick, a record change
+            // written by a system context — takes the organization of the record
+            // the notification is about (`organizationOfRecordAbout`): the
+            // declared click-through record, else the run's trigger record. That
+            // read happens inside the `try` below, so a failed read fails the
+            // step instead of being dropped.
+            //
+            // ⛔ There is deliberately NO guessed limb — not "the current
             // organization", not the first organization on the install, not the
             // recipient's first membership. A wrong `organization_id` is worse
             // than a null: a null is visibly missing, while a wrong value is
             // silently authoritative to every report, export and cleanup script
-            // that filters by organization. When the run carries no
-            // organization, the notification carries none and says so (below).
-            const organizationId = toStr(context.tenantId);
-            if (!organizationId) {
-                // Fail-LOUD, not fail-guess — and deliberately not fail-CLOSED.
-                // Refusing here would break the two deployments that legitimately
-                // have no organization to thread: a `single`-posture install, and
-                // every stack before its first organization exists. So the
-                // org-less write stays permitted and becomes a VISIBLE event
-                // instead of a silent one.
-                ctx.logger.warn(
-                    `[notify] no organization in scope for topic '${topic ?? 'notify'}' — the ` +
-                    `sys_notification / sys_inbox_message / sys_notification_receipt / ` +
-                    `sys_notification_delivery rows for this emit will carry organization_id = NULL ` +
-                    `and will be invisible to any report or cleanup that filters by organization. ` +
-                    `On a multi-organization install this means the triggering context lost its ` +
-                    `tenant: give the flow's trigger an acting organization (AutomationContext.tenantId). ` +
-                    `On a single-organization install this is expected and can be ignored.`,
-                );
-            }
+            // that filters by organization. A notification about no record, from
+            // a run with no organization, reaches `emit()` with no organization,
+            // and its owner is the engine's to decide by ADR-0131 D9 — the sole
+            // organization under `single`, a loud refusal
+            // (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`) wherever none is
+            // derivable, which fails this step below. The WARN that used to
+            // predict a NULL row here is gone with the NULL row.
+            let organizationId = toStr(context.tenantId);
 
             try {
+                if (!organizationId) {
+                    const data = getData();
+                    if (data) {
+                        organizationId = await organizationOfRecordAbout(data, wallResolverFor(data), [
+                            source,
+                            triggerRecordOf(context),
+                        ]);
+                    }
+                }
                 // ADR-0030 single ingress: hand the messaging service a topic +
                 // audience + payload; it writes the L2 event and materializes
                 // per channel. title/body/url ride in the payload (templates in
@@ -513,10 +619,10 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     severity,
                     source,
                     actorId,
-                    // [#11303] Absent (not null) when the run has no
-                    // organization: `EmitInput.organizationId` is optional, and
-                    // the chain below normalizes a missing value to NULL exactly
-                    // once, in `writeEvent`.
+                    // [#11303] Absent (not null) when neither the run nor the
+                    // record the notification is about names an organization:
+                    // `EmitInput.organizationId` is optional, and the engine
+                    // decides the owner of an emit that carries none (above).
                     ...(organizationId ? { organizationId } : {}),
                     channels: channels.length ? channels : undefined,
                 });
@@ -601,7 +707,14 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                         : { selected: recipients.length, acted: delivered },
                 };
             } catch (err) {
-                return { success: false, error: `notify failed: ${(err as Error).message}` };
+                // [#23284] A refusal fails the step and names the engine's code —
+                // the ADR-0131 D9 refusal of a notification no organization owns
+                // reads `notify failed: ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED: …`.
+                const code = thrownCodeOf(err);
+                return {
+                    success: false,
+                    error: `notify failed: ${code ? `${code}: ` : ''}${(err as Error).message}`,
+                };
             }
         },
     });

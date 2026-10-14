@@ -34,5 +34,7 @@ export const entry: SemanticMigration = {
     + "`sys_metadata` view row carries `data.provider: 'api'`; the parse refuses one with the prescription. "
     + "Every endpoint such a view read is either a page component's API binding on a same-origin path "
     + 'with no credential key, or dropped on purpose; and every converted view binds its object or static '
-    + 'rows and loads.',
+    + 'rows and loads. `os migrate meta --stored` lists each stored view still bound to the API source as a '
+    + 'TODO under this entry\'s id, before the upgrade and after it, by row and position, showing the '
+    + 'request URL and method and withholding every other request key, and rewrites none of them.',
 };

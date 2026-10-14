@@ -210,6 +210,20 @@ describe('execute-time config parse (#4277)', () => {
     expect(enqueued[0]?.timeoutMs).toBe(1500);
   });
 
+  it('[#23260] a token in a number slot is refused at registration, at config.limit, and at the run', async () => {
+    // Until #23260 the build doors never judged a value carrying a `{token}`
+    // for its type, so this node registered — and every builtin parses its
+    // config as authored, so every run that reached it was refused here.
+    const door = doorRefusal('get_record', { objectName: 'account', limit: '{x}' });
+    expect(door).toContain('refused at `limit` by the get_record contract');
+    expect(door).toContain('expected number, received string');
+    const result = await runPatched(engineWith(), 'get_record', { objectName: 'account', limit: 10 }, { limit: '{x}' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('config.limit');
+    // CONTROL: the literal of the right type registers.
+    expect(doorRefusal('get_record', { objectName: 'account', limit: 10 })).toBe('');
+  });
+
   it('http still refuses a statically wrong-typed slot', async () => {
     expect(doorRefusal('http', { url: 'https://example.test', timeoutMs: 'soon' })).toContain('refused at `timeoutMs`');
     const engine = engineWith();

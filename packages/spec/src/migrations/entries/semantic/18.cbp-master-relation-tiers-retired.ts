@@ -56,5 +56,8 @@ export const entry: SemanticMigration = {
     + 'line for the object, and a member who can read its master reads its rows. A stored row whose one '
     + '`master_detail` omitted `required` is served with `required: true` (`cbp-master-detail-required-defaulted`); '
     + 'a stored row in any other retired shape still registers (with its `[metadata_spec_invalid]` '
-    + 'diagnostic) and is denied until it is corrected and saved.',
+    + 'diagnostic) and is denied until it is corrected and saved. `os migrate meta --stored` lists each such '
+    + 'row as a TODO under this entry\'s id, before the upgrade and after it, naming the object, its shape (two '
+    + 'masters, none, a required `lookup` only, an explicit `required: false`) and the owner\'s choice, and '
+    + 'rewrites none of them.',
 };

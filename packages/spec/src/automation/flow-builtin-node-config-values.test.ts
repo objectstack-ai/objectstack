@@ -12,16 +12,16 @@
  * `outputVariable: 42`, a screen field's `min: '1'` — used to pass
  * `FlowSchema`, `objectstack validate` and `objectstack compile`, register, and
  * then fail every run that reached the node. The pins below hold the refusal at
- * every door that parses a flow, and the controls hold what stays accepted:
+ * every door that parses a flow — (#23260) a `{token}` value in a typed slot
+ * included, judged for its type like any literal now that every builtin parses
+ * its config as authored — and the controls hold what stays accepted:
  *
- *  - a valid node of every builtin type;
- *  - a `{token}` value in a typed slot, in each spelling an author writes —
- *    never refused for its pre-interpolation type (except at a key its
- *    executor reads as written, a notify or http literal — #19939);
+ *  - a valid node of every builtin type, and a literal of the right type where
+ *    a token is refused;
  *  - the places the build cannot know what the run parses, or another judge
  *    owns the finding (key membership, a region slot, a `predicate` / `value`
- *    ledger slot, `http`'s run-resolved `signingSecret`, a legacy `loop` with
- *    no `body`).
+ *    ledger slot, a value or text slot whose own judge refuses its token,
+ *    `http`'s run-resolved `signingSecret`, a legacy `loop` with no `body`).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -30,6 +30,8 @@ import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 import { ArtifactStagePackageBodySchema, ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
 import { flowNodeConfigRefusals, getBuiltinNodeConfigContracts } from './flow-node-config-refusals';
+import { flowNodeTextSlotSources, textSlotTemplateRefusal } from './flow-text-slot-template';
+import { flowNodeValueTemplateRefusals } from './flow-value-slot-template';
 import { FlowSchema } from './flow.zod';
 
 const ENTRY_ID = 'flow-builtin-node-config-values-refused';
@@ -207,6 +209,133 @@ describe('one refusal per judged builtin, at each typed key', () => {
   });
 });
 
+/**
+ * Every finding the three judges `registerFlow` and `objectstack validate` call
+ * on one node's config raise — this arm, the value-slot judge and the
+ * text-slot judge — each tagged with its judge and located at its path.
+ */
+function judgedAtTheDoors(type: string, config: Config): string[] {
+  return [
+    ...flowNodeConfigRefusals(type, config).map(({ path }) => `contract:${path}`),
+    ...flowNodeValueTemplateRefusals(type, config).map(({ path }) => `value-slot:${path}`),
+    ...flowNodeTextSlotSources(type, config)
+      .filter(({ source }) => textSlotTemplateRefusal(source) !== undefined)
+      .map(({ path }) => `text-slot:${path}`),
+  ];
+}
+
+describe('[#23260] a value carrying a `{token}` is judged for its type, like any literal', () => {
+  // Every builtin executor parses its config as authored since #19939 deleted
+  // the flow interpolator, so the run's contract sees the token the build's
+  // sees, and refuses it there at every run that reaches the node.
+
+  it('the probe: get_record limit {x} is refused at nodes.1.config.limit, in the contract\'s words', () => {
+    const config = { ...VALID.get_record, limit: '{x}' };
+    const issues = issuesOf(flowWith('get_record', config));
+    expect(issues.map(({ code, path }) => ({ code, path }))).toEqual([{ code: 'custom', path: 'nodes.1.config.limit' }]);
+    expect(issues[0]!.message).toBe(flowNodeConfigRefusals('get_record', config)[0]!.message);
+    expect(issues[0]!.message).toContain(contractSentence('get_record', config, 'limit'));
+    expect(contractSentence('get_record', config, 'limit')).toMatch(/expected number, received string/);
+    expect(flowNodeConfigRefusals('get_record', config).map(({ code, params, path }) => ({ code, params, path }))).toEqual([
+      { code: 'node-config-refused-by-contract', params: { nodeType: 'get_record', key: 'limit' }, path: 'limit' },
+    ]);
+  });
+
+  it('defineStack refuses the probe in its ADR-0112 envelope, at flows.0.nodes.1.config.limit', () => {
+    const stack = {
+      manifest: { id: 'com.example.tokens', name: 'tokens', version: '1.0.0', type: 'app', namespace: 'tok' },
+      objects: [{ name: 'tok_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } }],
+      flows: [flowWith('get_record', { objectName: 'tok_account', limit: '{x}' }, 'tok_probe')],
+    };
+    let refusal: { code?: unknown; status?: unknown; issues?: Array<{ path: unknown[]; code: string }> } | undefined;
+    try {
+      defineStack(stack as never);
+    } catch (e) {
+      refusal = e as typeof refusal;
+    }
+    expect(refusal, 'defineStack must refuse the flow').toBeDefined();
+    expect({ code: refusal!.code, status: refusal!.status }).toEqual({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+    expect(refusal!.issues!.map((i) => ({ path: i.path.join('.'), code: i.code }))).toEqual([
+      { path: 'flows.0.nodes.1.config.limit', code: 'custom' },
+    ]);
+  });
+
+  it('CONTROL: a literal of the right type is unchanged', () => {
+    const config = { ...VALID.get_record, limit: 25 };
+    expect(flowNodeConfigRefusals('get_record', config)).toEqual([]);
+    expect(issuesOf(flowWith('get_record', config))).toEqual([]);
+  });
+
+  it('in every spelling an author writes, at each typed key', () => {
+    const TOKENS: ReadonlyArray<readonly [string, Config, string]> = [
+      ['get_record', { limit: '{page.size}' }, 'limit'],
+      ['get_record', { limit: '{{ page.size }}' }, 'limit'],
+      ['screen', { fields: [{ name: 'qty', min: '${minimum}' }] }, 'fields[0].min'],
+      ['update_record', { multi: '{bulk}' }, 'multi'],
+      ['notify', { severity: '{level}' }, 'severity'],
+      ['loop', { maxIterations: '{cap}' }, 'maxIterations'],
+      ['try_catch', { retry: { maxRetries: '{tries}' } }, 'retry.maxRetries'],
+    ];
+    for (const [type, edit, key] of TOKENS) {
+      const config = { ...VALID[type], ...edit };
+      expect(flowNodeConfigRefusals(type, config).map(({ code, path }) => ({ code, path })), JSON.stringify(edit))
+        .toEqual([{ code: 'node-config-refused-by-contract', path: key }]);
+      expect(issuesOf(flowWith(type, config)), JSON.stringify(edit)).toHaveLength(1);
+    }
+  });
+
+  it('one token at a value slot is reported once — by the value-slot judge, never beside it by this arm', () => {
+    // The contracts compose the value-slot judge, so each of these configs is
+    // refused by its contract at the slot (a collection's through its union's
+    // message); the arm exempts that refusal and the judge alone reports it.
+    const CASES: ReadonlyArray<readonly [string, Config, string]> = [
+      ['create_record', { ...VALID.create_record, fields: { title: '{record.name}' } }, 'fields.title'],
+      ['screen', { objectName: 'account', mode: 'edit', recordId: '{record.id}' }, 'recordId'],
+      ['screen', { fields: [{ name: 'qty', type: 'number', defaultValue: '{qty}' }] }, 'fields[0].defaultValue'],
+      ['loop', { ...VALID.loop, collection: '{rows}' }, 'collection'],
+      ['notify', { ...VALID.notify, recipients: '{owner}' }, 'recipients'],
+      ['http', { ...VALID.http, body: '{payload}' }, 'body'],
+    ];
+    for (const [type, config, key] of CASES) {
+      expect(getBuiltinNodeConfigContracts().get(type)!.schema.safeParse(config).success, `${type} ${key}`).toBe(false);
+      expect(judgedAtTheDoors(type, config), `${type} ${key}`).toEqual([`value-slot:${key}`]);
+    }
+  });
+
+  it('one token at a text slot is reported once — by the text-slot judge, never beside it by this arm', () => {
+    const CASES: ReadonlyArray<readonly [string, Config, string]> = [
+      ['notify', { title: { dialect: 'template', source: 'Deal {deal.name} won' } }, 'title'],
+      ['notify', { title: { dialect: 'template', source: 'Hi {{ $User.Id }}' } }, 'title'],
+      ['notify', { actionUrl: '/crm_deal/{record.id}' }, 'actionUrl'],
+      ['http', { url: 'https://example.test/{id}' }, 'url'],
+      ['http', { headers: { 'X-Kind': '{kind}' } }, 'headers.X-Kind'],
+      ['screen', { description: 'Order {order.no}' }, 'description'],
+    ];
+    for (const [type, edit, key] of CASES) {
+      const config = { ...VALID[type], ...edit };
+      expect(getBuiltinNodeConfigContracts().get(type)!.schema.safeParse(config).success, `${type} ${key}`).toBe(false);
+      expect(judgedAtTheDoors(type, config), `${type} ${key}`).toEqual([`text-slot:${key}`]);
+    }
+  });
+
+  it('a literal the executor reads as written is refused once, in the literal\'s words, never its type\'s', () => {
+    // [#19939] The contract refuses `timeoutMs: '{t}'` twice — its type, and the
+    // literal's own refusal marked READ_AS_WRITTEN_PARAM; the key is refused once.
+    const CASES: ReadonlyArray<readonly [Config, string, string]> = [
+      [{ timeoutMs: '{t}' }, 'timeoutMs', '`timeoutMs` is the per-request timeout in milliseconds, a number, a literal the executor reads as written'],
+      [{ headers: '{h}' }, 'headers', '`headers` is a map of header name to text, read as written'],
+    ];
+    for (const [edit, key, lead] of CASES) {
+      const config = { ...VALID.http, ...edit };
+      const refusals = flowNodeConfigRefusals('http', config);
+      expect(refusals.map(({ path }) => path), key).toEqual([key]);
+      expect(refusals[0]!.message, key).toContain(lead);
+      expect(refusals[0]!.message, key).not.toMatch(/expected (number|record), received string/);
+      expect(judgedAtTheDoors('http', config), key).toEqual([`contract:${key}`]);
+    }
+  });
+});
+
 describe('what stays accepted (lit controls)', () => {
   it('CONTROL: a valid node of every builtin type parses, and the judge says nothing', () => {
     expect(Object.keys(VALID).sort()).toEqual([...getBuiltinNodeConfigContracts().keys()].sort());
@@ -214,26 +343,6 @@ describe('what stays accepted (lit controls)', () => {
       expect(getBuiltinNodeConfigContracts().get(type)!.schema.safeParse(config).success, type).toBe(true);
       expect(flowNodeConfigRefusals(type, config), type).toEqual([]);
       expect(issuesOf(flowWith(type, config)), type).toEqual([]);
-    }
-  });
-
-  it('CONTROL: a token value in a typed slot is never refused for its pre-interpolation type', () => {
-    // [#19939] Not `http`: its executor interpolates nothing since then, so a
-    // token at its `timeoutMs`, `durable` or whole `headers` is read as written
-    // and refused at every door (`io-node-config.test.ts`, the http literals).
-    const TOKENS: ReadonlyArray<readonly [string, Config]> = [
-      ['get_record', { limit: '{page.size}' }],
-      ['screen', { fields: [{ name: 'qty', min: '${minimum}', max: '{maximum}' }] }],
-      ['update_record', { multi: '{bulk}' }],
-      ['loop', { maxIterations: '{cap}' }],
-      ['try_catch', { retry: { maxRetries: '{tries}' } }],
-    ];
-    for (const [type, edit] of TOKENS) {
-      const config = { ...VALID[type], ...edit };
-      // The contract itself refuses the string — only the judge holds back.
-      expect(getBuiltinNodeConfigContracts().get(type)!.schema.safeParse(config).success, JSON.stringify(edit)).toBe(false);
-      expect(flowNodeConfigRefusals(type, config), JSON.stringify(edit)).toEqual([]);
-      expect(issuesOf(flowWith(type, config)), JSON.stringify(edit)).toEqual([]);
     }
   });
 

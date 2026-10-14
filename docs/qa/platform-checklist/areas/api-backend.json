@@ -1608,7 +1608,7 @@
       ],
       "acceptance": [
         {
-          "clause": "AUTHORITY RUNS FIRST and a refused caller learns nothing: the non-admin's mis-bodied undeclared-action probe answers 403 PERMISSION_DENIED with the manage_metadata sentence ('switching a shipped artifact off is functionally equivalent to deleting it', #10243) — NOT the 400 the body deserves and NOT the 404 the lookup would give, so neither the body contract nor the action namespace is disclosed. The refusal recommends NO clone (action-clone is deliberately unchartered — ACTION_ACTIVATION_SUBJECT's remedy names the operator and authoring a sibling action)",
+          "clause": "AUTHORITY RUNS FIRST and a refused caller learns nothing: the non-admin's mis-bodied undeclared-action probe answers 403 PERMISSION_DENIED with the manage_metadata sentence ('switching a shipped artifact off is functionally equivalent to deleting it', #10243) — NOT the 400 the body deserves and NOT the 404 the lookup would give, so neither the body contract nor the action namespace is disclosed. The refusal recommends NO clone (action-clone is deliberately unchartered — ACTION_ACTIVATION_SUBJECT's remedy names the operator alone: under a wall, where this refusal is answered, authoring a sibling action is the operator's too, ADR-0131 D12 items 7–8)",
           "oracle": "api",
           "verify": "step-2 non-admin trace: 403 + code PERMISSION_DENIED + the capability-naming message with no clone recommendation; the anonymous twin answers the 401 UNAUTHENTICATED baseline (the ADR-0056 floor sits ahead of even this)",
           "evidence": "both traces"

@@ -29,6 +29,7 @@ import {
   applyOrganizationOwnership,
   checkpointFromDetails,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+  TemplateChoiceRefusal,
   type ApplyExecutor,
   type CeremonyLedgerPort,
   type ColumnDropOutcome,
@@ -84,8 +85,9 @@ async function confirm(question: string): Promise<boolean> {
  * The writing mode. It asks about the backup first — the operator's act and
  * the precondition (D10 item 2): `--backup-taken`, or a yes at the prompt; a
  * non-interactive run without the flag is refused before the boot. It then
- * performs the fates in order — attribution, the verified id→name rewrite,
- * mirror deletion, column drops — through `../../utils/organization-ownership-apply.ts`,
+ * performs the fates in order — attribution, the authored catalog conversion,
+ * the template promotion, the settings global-rung move, the verified id→name
+ * rewrite, mirror deletion, column drops — through `../../utils/organization-ownership-apply.ts`,
  * checkpointing each finished step in the deployment ledger (`sys_migration`,
  * row {@link ORGANIZATION_OWNERSHIP_MIGRATION_ID}) so an interrupted run
  * resumes where it stopped, and ends with the post-check. The ledger row is
@@ -106,7 +108,8 @@ export default class MigrateOrganizationOwnership extends Command {
     'The v18 organization-ownership ceremony (ADR-0131 D10). Without --apply, the read-only plan: per table, the fate, ' +
     'the row counts, the rows whose owner cannot be derived (by id), and which tables will receive NOT NULL, written ' +
     'to a file — never a row or a column changed; it refuses, naming it, any table it cannot enumerate. With --apply ' +
-    '(and a backup): attribution, the verified id-to-name rewrite, mirror deletion and column drops, in that order, ' +
+    '(and a backup): attribution, the authored catalog conversion, the template promotion, the settings move, the ' +
+    'verified id-to-name rewrite, mirror deletion and column drops, in that order, ' +
     'resumable from a recorded checkpoint, then the post-check.';
 
   static override examples = [
@@ -140,6 +143,13 @@ export default class MigrateOrganizationOwnership extends Command {
         'none; without this flag the run asks, and a non-interactive run is refused',
       default: false,
     }),
+    'template-choice': Flags.string({
+      description:
+        'With --apply: the sys_email_template row id the environment keeps for a listed template conflict ' +
+        '(rows of one name and locale that differ). Repeat once per conflict; the other rows of that conflict are ' +
+        'deleted only after the chosen body is promoted and verified',
+      multiple: true,
+    }),
   };
 
   async run(): Promise<void> {
@@ -170,6 +180,10 @@ export default class MigrateOrganizationOwnership extends Command {
 
     if (flags.apply) {
       await this.runApply(flags, posture, refuse);
+      return;
+    }
+    if (flags['template-choice']?.length) {
+      await refuse({ reason: 'flag-without-apply', detail: '--template-choice is only meaningful with --apply' }, '--template-choice is only meaningful with --apply.');
       return;
     }
     if (flags['backup-taken']) {
@@ -261,6 +275,15 @@ export default class MigrateOrganizationOwnership extends Command {
           `${table.notNull.willReceive ? chalk.green(' NOT NULL') : ''}`,
       );
     }
+    for (const table of plan.tables) {
+      for (const conflict of table.templateConflicts ?? []) {
+        printWarning(
+          `Template conflict ${conflict.name} (${conflict.locale}): ` +
+            conflict.candidates.map((c) => `${c.id} (organization ${c.organizationId ?? 'none'})`).join(', ') +
+            ' differ. --apply blocks on it until one row is chosen with --template-choice ROW_ID.',
+        );
+      }
+    }
     console.log('');
     const { summary } = plan;
     printInfo(
@@ -276,7 +299,7 @@ export default class MigrateOrganizationOwnership extends Command {
 
   /** `--apply`: the backup precondition, the boot, the ceremony, the report file. */
   private async runApply(
-    flags: { 'database-url'?: string; out?: string; json?: boolean; 'backup-taken'?: boolean },
+    flags: { 'database-url'?: string; out?: string; json?: boolean; 'backup-taken'?: boolean; 'template-choice'?: string[] },
     posture: string,
     refuse: (payload: Record<string, unknown>, message: string) => Promise<void>,
   ): Promise<void> {
@@ -342,6 +365,7 @@ export default class MigrateOrganizationOwnership extends Command {
       const engine = kernel.getService('objectql') as Parameters<typeof recordDataMigrationRun>[0] & { registry?: unknown };
       const protocol = kernel.getService('protocol') as {
         saveMetaItem?: (request: Record<string, unknown>) => Promise<unknown>;
+        getMetaItemsForExecution?: (request: { type: string }) => Promise<{ items?: unknown[] }>;
       } | undefined;
       const catalog = createSecurityCatalogReader({
         registry: engine.registry as never,
@@ -371,6 +395,7 @@ export default class MigrateOrganizationOwnership extends Command {
       const liveStack = stack;
       report = await applyOrganizationOwnership({
         executor,
+        ...(flags['template-choice']?.length ? { templateChoices: flags['template-choice'] } : {}),
         posture,
         database: stack.dbLabel,
         catalog,
@@ -380,6 +405,29 @@ export default class MigrateOrganizationOwnership extends Command {
               throw new Error('no metadata protocol is composed on this stack');
             }
             await protocol.saveMetaItem({ type, name, item: body, actor: CEREMONY_ACTOR });
+          },
+        },
+        templates: {
+          // The environment's own row first (it is what a promotion must never
+          // overwrite), then what the registry serves for the bundle member.
+          find: async (name, locale) => {
+            const stored = await executor.query(
+              'SELECT metadata FROM sys_metadata WHERE type = ? AND name = ? AND state = ? AND organization_id IS NULL ' +
+                'AND (bundle_member = ? OR (bundle_member IS NULL AND ? = ?))',
+              ['email_template', name, 'active', locale, locale, 'en-US'],
+            );
+            if (stored.length > 0) {
+              const raw = stored[0]!.metadata;
+              const definition = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>;
+              return { definition, environment: true };
+            }
+            if (typeof protocol?.getMetaItemsForExecution !== 'function') return undefined;
+            const listed = await protocol.getMetaItemsForExecution({ type: 'email_template' });
+            const served = (listed?.items ?? []).find((item) => {
+              const i = item as Record<string, unknown> | null;
+              return !!i && i.name === name && (typeof i.locale === 'string' && i.locale ? i.locale : 'en-US') === locale;
+            }) as Record<string, unknown> | undefined;
+            return served ? { definition: served, environment: false } : undefined;
           },
         },
         columnDrops: {
@@ -411,6 +459,10 @@ export default class MigrateOrganizationOwnership extends Command {
       });
     } catch (error: unknown) {
       if (isExitSignal(error)) throw error;
+      if (error instanceof TemplateChoiceRefusal) {
+        await refuse({ reason: 'template-choice-refused', detail: error.message }, `Refused: ${error.message}`);
+        return;
+      }
       if (error instanceof OrganizationOwnershipPlanRefusal) {
         await refuse(
           { reason: error.reason, ...(error.table ? { table: error.table } : {}), detail: error.message },
@@ -454,15 +506,24 @@ export default class MigrateOrganizationOwnership extends Command {
     console.log('');
     for (const table of report.tables) {
       if (!table.before) continue;
-      if (table.attributed + table.deleted + table.unattributable.length + table.remaining + table.departures.length === 0 && !table.columnDropped) continue;
+      if (table.attributed + table.deleted + table.movedOut + table.movedIn + table.unattributable.length + table.remaining + table.departures.length === 0 && !table.columnDropped) continue;
       console.log(
         `  ${chalk.white(table.object.padEnd(34))} ${table.fate.padEnd(16)} attributed ${String(table.attributed).padStart(6)}  ` +
-          `deleted ${String(table.deleted).padStart(6)}  ${table.columnDropped ? chalk.green('column dropped  ') : ''}` +
+          `deleted ${String(table.deleted).padStart(6)}  ` +
+          `${table.movedOut ? `moved out ${table.movedOut}  ` : ''}${table.movedIn ? `moved in ${table.movedIn}  ` : ''}` +
+          `${table.columnDropped ? chalk.green('column dropped  ') : ''}` +
           `${table.unattributable.length ? chalk.yellow(`reported ${table.unattributable.length}  `) : ''}` +
           `${table.remaining ? chalk.red(`remaining ${table.remaining}`) : ''}`,
       );
       for (const departure of table.departures) {
         console.log(chalk.yellow(`      ${departure.rows} row(s) still to leave by a step not yet run — ${departure.label}`));
+      }
+      for (const conflict of table.templateConflicts ?? []) {
+        console.log(chalk.yellow(
+          `      template conflict ${conflict.name} (${conflict.locale}): ` +
+            conflict.candidates.map((c) => `${c.id} (organization ${c.organizationId ?? 'none'})`).join(', ') +
+            ' — choose one with --template-choice ROW_ID',
+        ));
       }
     }
     console.log('');

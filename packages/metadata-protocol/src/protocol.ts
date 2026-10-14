@@ -938,6 +938,104 @@ function runtimeHookWithoutBodyRefusal(
     return err;
 }
 
+/**
+ * [ADR-0086 D3] The refusal of a permission set whose body `packageId`
+ * disagrees with the package binding of the row a write door writes it into.
+ *
+ * D3 declares the key as "the owning package for a package-shipped set
+ * (absent ⇒ env-authored)", and every reader of a set's owner reads the
+ * binding: the row's `package_id`, served as `_packageId`. A body that
+ * declared another owner was accepted and its declaration silently
+ * overridden, so an author (an AI build above all) was never told the owner it
+ * wrote is not the owner it got. Refused instead, at every door a body reaches
+ * `active` through: the save ({@link ObjectStackProtocolImplementation.saveMetaItem},
+ * draft and publish mode), the restore of a stored version
+ * ({@link ObjectStackProtocolImplementation.rollbackMetaItem} and
+ * `revertCommit`'s restore limb, through `restoredBodyWriter`) and the draft
+ * promotion that the per-item publish and
+ * {@link ObjectStackProtocolImplementation.publishPackageDrafts} share — the
+ * three doors `savedItemNameRefusal` judges a body's `name` at.
+ *
+ * What disagrees, judged on the body as authored:
+ *
+ * | body `packageId` | the row's binding | verdict |
+ * |:--|:--|:--|
+ * | absent | anything | accepted: an absent key declares nothing |
+ * | `'P'` | `'P'` | accepted, as before |
+ * | `'Q'` | `'P'` | refused |
+ * | any string, `''` included | none | refused: a present key declares a package-shipped set, and the set is environment-authored |
+ *
+ * A value that is not a string is the schema's to refuse (`z.string()`), with
+ * its own located `422`. `binding` is the RESOLVED binding of the row the
+ * write lands in, never the request's spelling: a draft save that names no
+ * package lands in the package of the item's active row (#11087), a direct
+ * save that names none lands in the row its address resolves, and a restore
+ * writes into the item's active row, whose binding `put` keeps. An empty-string
+ * binding is no package, the normalisation both hydration seams apply.
+ *
+ * `VALIDATION_ERROR` / 400, the envelope of the door's other body-against-
+ * address refusal: `savedItemNameRefusal`, which judges the body's `name`
+ * against the name the row is written under, at the same doors. No code is
+ * minted. The message prescribes first, because a 4xx message crosses the REST
+ * boundary bounded at 500 characters with its TAIL truncated, names both
+ * values, and offers the two remedies the ruling names: drop the key, or write
+ * the set into the package it declares. A restore writes a stored version its
+ * caller cannot edit in place, so its remedy is the save that fixes it: the
+ * item saved again with the key dropped or set to the binding, instead of
+ * restoring the version (the name judge's restore wording). `issues[]` locates
+ * the key, the shape the Studio designer keys on.
+ *
+ * Every writer through the save door is judged, the two server-stated
+ * re-savers included (`migrateStoredMetadata`, which records the refusal as
+ * the row's failure, and `duplicatePackage`, which rewrites a body naming its
+ * source package to the target first). A row stored before this rule keeps its
+ * bytes and keeps reading by its binding; it is refused on its next write.
+ */
+function permissionSetOwnerBindingRefusal(
+    singularType: string,
+    item: unknown,
+    name: string,
+    binding: string | null | undefined,
+    door: 'save' | 'restore' | 'publish',
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] }) | undefined {
+    if (singularType !== 'permission') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const declared = (item as { packageId?: unknown }).packageId;
+    if (typeof declared !== 'string') return undefined;
+    const bound = typeof binding === 'string' && binding !== '' ? binding : null;
+    if (declared === bound) return undefined;
+    const into = (pkg: string | null) => (pkg === null ? 'into no package' : `into package '${pkg}'`);
+    const intoDeclared = declared === ''
+        ? ''
+        : `, or ${door === 'save' ? 'save the set' : 'save it'} into package '${declared}' `
+            + `(?package=${declared} on the REST door, packageId in process)`;
+    const owner = bound === null
+        ? 'a set written into no package is authored in this environment, which an absent `packageId` states'
+        : 'the package a set is written into is its owner';
+    const tail = `and ${owner} (ADR-0086 D3): a \`packageId\` that disagrees is refused, never silently overridden.`;
+    const message = door === 'save'
+        ? `Drop \`packageId\` from permission set '${name}'${intoDeclared}, then send it again. Nothing was written. `
+            + `Its body declares \`packageId\` '${declared}', but this save writes it ${into(bound)}, ${tail}`
+        : door === 'restore'
+        ? `Save permission set '${name}' again with \`packageId\` ${bound === null ? 'dropped' : `dropped or set to '${bound}'`}, `
+            + 'instead of restoring this version. Nothing was restored. '
+            + `The version's body declares \`packageId\` '${declared}', but it is restored ${into(bound)}, ${tail}`
+        : `Save the draft of permission set '${name}' again with \`packageId\` dropped${intoDeclared}, then publish it. `
+            + `Nothing was published. Its body declares \`packageId\` '${declared}', but it is published ${into(bound)}, ${tail}`;
+    const err = new Error(message) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.issues = [{
+        path: 'packageId',
+        message: `Disagrees with the package the set is written into (${bound === null ? 'none' : `'${bound}'`}): `
+            + (door === 'restore'
+                ? `drop it${bound === null ? '' : `, or set it to '${bound}'`}.`
+                : `drop it${declared === '' ? '' : `, or write the set into package '${declared}'`}.`),
+        code: 'custom',
+    }];
+    return err;
+}
+
 /** The author-facing lock block (ADR-0010 Phase 4.3), as the spec mounts it on a metadata item. */
 const PROTECTION_BLOCK_KEY = 'protection';
 
@@ -6710,14 +6808,26 @@ export class ObjectStackProtocolImplementation implements
      * `failed[]`. A body that passes comes out of the strip, or byte for byte
      * where the type has no credential channel.
      *
+     * [ADR-0086 D3] …and, second, the permission set's owner judge
+     * ({@link permissionSetOwnerBindingRefusal}), with the same envelope: a
+     * version stored before the save door judged `packageId` can carry one that
+     * disagrees with the row it is restored into, and restoring it would make it
+     * active with an owner nobody reads. `binding` is the active row's
+     * `package_id`, which both callers read before the restore and which
+     * `restoreVersion` → `put` keeps on the row it writes, so the judge and the
+     * write read one binding.
+     *
      * @param type The canonical (singular) type the row is restored under.
      * @param name The name the row is restored under.
+     * @param binding The package binding of the active row the version is restored into (`null`: none).
      */
-    private restoredBodyWriter(type: string, name: string): (historyBody: unknown) => unknown {
+    private restoredBodyWriter(type: string, name: string, binding: string | null): (historyBody: unknown) => unknown {
         const derive = this.restoredBodyDerivation(type);
         return (historyBody) => {
             const nameRefusal = savedItemNameRefusal(type, historyBody, name, 'restore');
             if (nameRefusal) throw nameRefusal;
+            const ownerRefusal = permissionSetOwnerBindingRefusal(type, historyBody, name, binding, 'restore');
+            if (ownerRefusal) throw ownerRefusal;
             return derive ? derive(historyBody) : historyBody;
         };
     }
@@ -21122,6 +21232,50 @@ export class ObjectStackProtocolImplementation implements
         return withLockFamily(body, stored);
     }
 
+    /**
+     * [ADR-0086 D3] The package binding of the row a save writes, as
+     * {@link permissionSetOwnerBindingRefusal} compares a body's `packageId`
+     * against it: the binding the write RESOLVES, never the request's spelling.
+     *
+     * - A save that names a package writes that package's row (ADR-0048).
+     * - A draft save that names none writes into the package of the item's
+     *   active row when it has one (#11087): the repository's own write-address
+     *   resolution answers it ({@link SysMetadataRepository.headAt}, the binding
+     *   `put` stamps), so the judge and the write read one answer.
+     * - A direct save that names none writes the row its address resolved
+     *   before this is asked, which names no package here.
+     *
+     * The store is read only when the judge has something to compare: a
+     * permission set whose body carries a string `packageId`, saved as a draft
+     * that names no package. Every other save answers from the request. An
+     * unprovisioned store holds no row and so no binding; any other failed read
+     * propagates (#5532), because a guessed binding would judge a row the write
+     * does not land in.
+     */
+    private async saveWriteBinding(
+        singularType: string,
+        request: { name: string; item?: unknown; packageId?: string | null },
+        mode: 'draft' | 'publish',
+    ): Promise<string | null> {
+        if (typeof request.packageId === 'string' && request.packageId !== '') return request.packageId;
+        if (singularType !== 'permission' || mode !== 'draft') return null;
+        const body = request.item;
+        if (!body || typeof body !== 'object' || typeof (body as { packageId?: unknown }).packageId !== 'string') return null;
+        try {
+            const repo = this.getOverlayRepo();
+            const ref = { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
+            const target = await repo.headAt(ref, {
+                state: 'draft',
+                packageId: null,
+                member: itemDiscriminator(singularType, body),
+            });
+            return target.packageId;
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            return null;
+        }
+    }
+
     // [#21207] `parentVersion` is a CALLER's version token — the keyed form a
     // receipt served — and is compared in that form (`storedParentForToken`).
     // `storedParentVersion` is the in-process twin for a caller that read the
@@ -21735,6 +21889,21 @@ export class ObjectStackProtocolImplementation implements
             {
                 const nameRefusal = savedItemNameRefusal(singularType, request.item, request.name, 'save');
                 if (nameRefusal) throw nameRefusal;
+            }
+            // [ADR-0086 D3] …and a permission set whose body `packageId`
+            // disagrees with the package the row is written into, with the
+            // same envelope: the body against its address, the second half.
+            // Judged against the binding this save RESOLVES, never the
+            // request's spelling — see {@link saveWriteBinding}. Asked of every
+            // writer, as the name judge is. See
+            // {@link permissionSetOwnerBindingRefusal}.
+            {
+                const ownerRefusal = permissionSetOwnerBindingRefusal(
+                    singularType, request.item, request.name,
+                    await this.saveWriteBinding(singularType, request, mode),
+                    'save',
+                );
+                if (ownerRefusal) throw ownerRefusal;
             }
             // [#21639] …and a view container whose save name, or any name its
             // expansion produces, is a name already served from elsewhere —
@@ -22611,6 +22780,12 @@ export class ObjectStackProtocolImplementation implements
      *   a pre-protocol shape it cannot rewrite without changing what it means
      *   — a page filter carrying `$or`, which a flat rule list cannot spell —
      *   leaves the site byte-identical and reports a TODO instead of a notice.
+     *   The same list carries the shapes protocol 18 refuses that no
+     *   conversion covers (#23269, #23270, #23271: a `controlled_by_parent`
+     *   object without exactly one required `master_detail`, a view bound to
+     *   the retired view-level API source, a flow value slot carrying a `{…}`
+     *   token), each TODO naming the D3 entry that refuses it. A flow row's
+     *   TODOs come back from the flow canonicalizer.
      *   Every such site is listed under its row (`rows[].todos`) with the
      *   block and the reason, whatever the row's outcome; a row whose ONLY
      *   finding is TODOs has nothing to persist and is reported `skipped`,
@@ -22897,8 +23072,14 @@ export class ObjectStackProtocolImplementation implements
             // still changing the body. Both passes are copy-on-write, so
             // identity is the precise test there: `storable === body` exactly
             // when nothing was rewritten at all.
+            //
+            // [#23269] A flow's TODOs come back from the canonicalizer, which
+            // runs the same chain with the same sink: until they did, a stored
+            // flow carrying a `{…}` token at a value slot — a CRUD filter
+            // operand among them — parsed, rewrote nothing and was counted
+            // `canonical`, while `registerFlow` refused it at boot.
             const { item, notices, todos } = flowResult
-                ? { item: flowResult.storable, notices: flowResult.notices, todos: [] as ConversionTodoNotice[] }
+                ? { item: flowResult.storable, notices: flowResult.notices, todos: flowResult.todos ?? [] }
                 : this.convertStoredItemDetailed(singular, body);
             const changed = flowResult ? item !== body : notices.length > 0;
             // [#17321] A site the chain left as stored — no lossless rewrite
@@ -22931,8 +23112,8 @@ export class ObjectStackProtocolImplementation implements
                     outcome: 'skipped',
                     reason: `the conversion chain rewrites nothing here: it left ${flattenedTodos.length} `
                         + 'site(s) of this row as stored, because no lossless rewrite exists for them — '
-                        + 'each TODO below names the site and why. The row keeps loading unchanged; '
-                        + 'rewrite each site by hand.',
+                        + 'each TODO below names the site and why. The row is read as stored, unchanged, '
+                        + 'and each TODO says what that leaves it doing; rewrite each site by hand.',
                 });
                 continue;
             }
@@ -23580,6 +23761,19 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate) {
             const nameRefusal = savedItemNameRefusal(singularType, draftForGate.body, request.name, 'publish');
             if (nameRefusal) throw nameRefusal;
+        }
+        // [ADR-0086 D3] …and a permission-set draft whose body `packageId`
+        // disagrees with the package it is promoted into: the key resolved
+        // above, the one `repo.promoteDraft` writes under. A draft stored
+        // before the save door judged the key can carry one, and promoting it
+        // would make it active with an owner nobody reads. Refused with the
+        // save door's judge and envelope, so a batch publish aborts on it as
+        // on the name refusal. See {@link permissionSetOwnerBindingRefusal}.
+        if (draftForGate) {
+            const ownerRefusal = permissionSetOwnerBindingRefusal(
+                singularType, draftForGate.body, request.name, draftKey ?? null, 'publish',
+            );
+            if (ownerRefusal) throw ownerRefusal;
         }
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet
@@ -25888,7 +26082,20 @@ export class ObjectStackProtocolImplementation implements
                 }
             }
             const rewritten = deepRewrite(item);
-            if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) rewritten.name = newName;
+            if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) {
+                rewritten.name = newName;
+                // [ADR-0086 D3] A permission set that declares its SOURCE
+                // package as its owner is copied declaring the target, the
+                // package the copy is saved into: the save door refuses a
+                // `packageId` that disagrees with that binding
+                // ({@link permissionSetOwnerBindingRefusal}), and the copy's
+                // owner is the target. Any other declared value is left as
+                // stored, so a source row that already disagreed with its own
+                // binding is reported in `failed[]` with the door's remedy.
+                if (singular === 'permission' && rewritten.packageId === request.sourcePackageId) {
+                    rewritten.packageId = request.targetPackageId;
+                }
+            }
             try {
                 await this.saveMetaItem({
                     type: row.type,
@@ -27107,12 +27314,14 @@ export class ObjectStackProtocolImplementation implements
                         source: 'protocol.revertCommit',
                         message: `revert commit ${request.commitId}`,
                         intent,
-                        // [#21470] The divergent `name` refusal, then [#20790]
-                        // R2's credential-channel strip. A refused version lands
+                        // [#21470] The divergent `name` refusal, [ADR-0086 D3]
+                        // the permission set's owner judge against the binding
+                        // read above, then [#20790] R2's credential-channel
+                        // strip. A refused version lands
                         // in `failed[]` below, with nothing written. Judged under
                         // the SINGULAR type, the spelling the write-through
                         // registers under. See {@link restoredBodyWriter}.
-                        deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name),
+                        deriveRestoredBody: this.restoredBodyWriter(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name, restorePackageId),
                         ...memberOption(member),
                     });
                     // [#6621] #4521 — a revert is a live write like any other: the
@@ -27468,11 +27677,12 @@ export class ObjectStackProtocolImplementation implements
                 source: 'protocol.rollbackMetaItem',
                 ...(request.message ? { message: request.message } : {}),
                 intent,
-                // [#21470] The divergent `name` refusal, rethrown below with
-                // nothing written; then [#20790] R2 — a rollback past the
+                // [#21470] The divergent `name` refusal and [ADR-0086 D3] the
+                // permission set's owner judge against the binding read above,
+                // rethrown below with nothing written; then [#20790] R2 — a rollback past the
                 // credential move keeps the write-only channel's current
                 // credential and stores none. See {@link restoredBodyWriter}.
-                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name),
+                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name, rollbackPackageId),
                 // [#22877] The member whose lineage `toVersion` is taken from.
                 ...memberOption(member),
             });

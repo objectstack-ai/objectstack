@@ -73,8 +73,8 @@ import {
     // environment-wide and every read resolves environment → code.
     metaWriteCapabilityVerdict,
     type MetaWriteCapabilityVerdict,
-    // [ADR-0131 D3] The walled catalog refusal the same four doors ask next.
-    isSecurityCatalogType,
+    // [ADR-0131 D3 · D12 items 7–8] The walled refusal the same four doors ask
+    // next, for every type they write.
     walledCatalogWriteVerdict,
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
@@ -3657,12 +3657,14 @@ export class RestServer {
     private static readonly STORED_VERSION_DOOR_POLICY: MetaReadGatePolicy = metaReadGate.STORED_VERSION_DOOR_POLICY;
 
     /**
-     * [ADR-0131 D3] The walled catalog refusal for one `/meta` item write: the
-     * shared `walledCatalogWriteVerdict` (`@objectstack/metadata-core`), asked
-     * by this transport's four write doors (save, reset, publish, rollback)
-     * after {@link metaSaveVerdict}'s capability gate. A type outside the
-     * security catalog is admitted without reading the posture. The posture is
-     * read through {@link resolveAnonymousFormTenancy}, the wiring that mirrors
+     * [ADR-0131 D3 · D12 items 7–8] The walled refusal for one `/meta` write:
+     * the shared `walledCatalogWriteVerdict` (`@objectstack/metadata-core`),
+     * asked by this transport's four item write doors (save, reset, publish,
+     * rollback) after {@link metaSaveVerdict}'s capability gate, and by
+     * `POST /meta/_migrate-stored` after its own, for every type
+     * (ruling A on #23231: the catalog is no longer a special case, so this
+     * method no longer pre-filters on it). The posture is read through
+     * {@link resolveAnonymousFormTenancy}, the wiring that mirrors
      * `resolveProtocol`, so the posture judged and the protocol that writes
      * always come from the same kernel; a `tenancy` service that is registered
      * and cannot answer raises `AuthzStoreUnavailableError` (the door's 503),
@@ -3674,7 +3676,6 @@ export class RestServer {
         environmentId: string | undefined,
         req: any,
     ): Promise<MetaWriteCapabilityVerdict> {
-        if (!isSecurityCatalogType(type)) return { allowed: true };
         return walledCatalogWriteVerdict({
             type,
             tenancyPosture: effectiveTenancyPosture(await this.resolveAnonymousFormTenancy(environmentId, req)),
@@ -5941,6 +5942,26 @@ export class RestServer {
                             });
                             return;
                         }
+                        // [ADR-0131 D12 items 7–8] The walled refusal, after the
+                        // capability gate and before the protocol is resolved or
+                        // a row is read: this rewrites every stored row of the
+                        // environment's metadata, which under `isolated` /
+                        // `group` is the platform operator's (ruling A on
+                        // #23231). A preview is refused too: it is the same
+                        // install-wide pass, without the write. Inert under
+                        // `single`. See {@link walledCatalogRefusal}.
+                        {
+                            const walled = await this.walledCatalogRefusal('sys_metadata', ctx, environmentId, req);
+                            if (!walled.allowed) {
+                                res.status(403).json({
+                                    error: {
+                                        code: 'FORBIDDEN',
+                                        message: walled.message,
+                                    },
+                                });
+                                return;
+                            }
+                        }
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).migrateStoredMetadata !== 'function') {
                             res.status(501).json({
@@ -7064,13 +7085,12 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
                     // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` the security catalog is shared by every
-                    // organization, so only the platform operator rung (or the
-                    // engine itself) writes it. Inert under `single`, and no
-                    // posture is read for any other type. See
-                    // {@link walledCatalogRefusal}.
+                    // `isolated` / `group` every organization shares the
+                    // environment's metadata, so only the platform operator rung
+                    // (or the engine itself) writes it, whatever the type. Inert
+                    // under `single`. See {@link walledCatalogRefusal}.
                     {
                         const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
                         if (!walled.allowed) {
@@ -7290,13 +7310,12 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
                     // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` the security catalog is shared by every
-                    // organization, so only the platform operator rung (or the
-                    // engine itself) writes it. Inert under `single`, and no
-                    // posture is read for any other type. See
-                    // {@link walledCatalogRefusal}.
+                    // `isolated` / `group` every organization shares the
+                    // environment's metadata, so only the platform operator rung
+                    // (or the engine itself) writes it, whatever the type. Inert
+                    // under `single`. See {@link walledCatalogRefusal}.
                     {
                         const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
                         if (!walled.allowed) {
@@ -7760,13 +7779,12 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
                     // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` the security catalog is shared by every
-                    // organization, so only the platform operator rung (or the
-                    // engine itself) writes it. Inert under `single`, and no
-                    // posture is read for any other type. See
-                    // {@link walledCatalogRefusal}.
+                    // `isolated` / `group` every organization shares the
+                    // environment's metadata, so only the platform operator rung
+                    // (or the engine itself) writes it, whatever the type. Inert
+                    // under `single`. See {@link walledCatalogRefusal}.
                     {
                         const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
                         if (!walled.allowed) {
@@ -7945,13 +7963,12 @@ export class RestServer {
                             return;
                         }
                     }
-                    // [ADR-0131 D3] The walled catalog refusal, after the
+                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
                     // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` the security catalog is shared by every
-                    // organization, so only the platform operator rung (or the
-                    // engine itself) writes it. Inert under `single`, and no
-                    // posture is read for any other type. See
-                    // {@link walledCatalogRefusal}.
+                    // `isolated` / `group` every organization shares the
+                    // environment's metadata, so only the platform operator rung
+                    // (or the engine itself) writes it, whatever the type. Inert
+                    // under `single`. See {@link walledCatalogRefusal}.
                     {
                         const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
                         if (!walled.allowed) {

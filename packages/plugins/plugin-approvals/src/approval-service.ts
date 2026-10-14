@@ -283,6 +283,13 @@ export interface ApprovalMessagingSurface {
     dedupKey?: string;
     source?: { object: string; id: string };
     actorId?: string;
+    /**
+     * [#23284] The organization the notification belongs to — the request's
+     * (`EmitInput.organizationId` of the messaging service, which stamps it on
+     * `sys_notification` and every row below it). Absent only for a request
+     * stored with none.
+     */
+    organizationId?: string;
   }): Promise<unknown>;
 }
 
@@ -1614,11 +1621,24 @@ export class ApprovalService implements IApprovalService {
     topic: string;
     audience: string[];
     payload: ApprovalNotificationPayload;
+    /**
+     * [#23284] The organization of the request the notification is about —
+     * the request row's own `organization_id` (`requestOrg` while the request
+     * opens). A REQUIRED key, `null` included, so no call site can send an
+     * approval notification without having said whose it is: before it
+     * existed every approval notification reached `sys_notification` with
+     * `organization_id` NULL, a user-driven `approval.requested` included,
+     * because nothing here passed one. ⛔ Never the actor's organization: an
+     * approver acting from another organization does not move the request.
+     */
+    organizationId: string | null | undefined;
     dedupKey?: string;
     source?: { object: string; id: string };
     actorContext?: ExecutionContext;
   }): Promise<number> {
-    const { actorContext, ...event } = input;
+    const { actorContext, organizationId, ...event } = input;
+    const organization =
+      organizationId != null && String(organizationId) !== '' ? String(organizationId) : undefined;
     const audience = event.audience.filter(a => a && !a.includes(':'));
     if (!this.messaging || !audience.length) return 0;
     const person = actorContext ? recordedActor(actorContext) : null;
@@ -1637,6 +1657,7 @@ export class ApprovalService implements IApprovalService {
     try {
       await this.messaging.emit({
         severity: 'info', ...event, payload, audience, ...(person ? { actorId: person } : {}),
+        ...(organization ? { organizationId: organization } : {}),
       });
       return audience.length;
     } catch (err: any) {
@@ -3495,6 +3516,7 @@ export class ApprovalService implements IApprovalService {
       }, { context: SYSTEM_CTX });
       await this.notify({
         topic: 'approval.ooo_substituted',
+        organizationId: requestOrg,
         audience: [sub.to],
         source: { object: 'sys_approval_request', id },
         dedupKey: `approval-ooo-${id}-${sub.to}`,
@@ -3506,6 +3528,7 @@ export class ApprovalService implements IApprovalService {
       });
       await this.notify({
         topic: 'approval.ooo_skipped',
+        organizationId: requestOrg,
         audience: [sub.from],
         source: { object: 'sys_approval_request', id },
         dedupKey: `approval-ooo-skip-${id}-${sub.from}`,
@@ -3565,6 +3588,7 @@ export class ApprovalService implements IApprovalService {
     for (const approver of openedOn) {
       await this.notify({
         topic: 'approval.requested',
+        organizationId: requestOrg,
         audience: [approver],
         actorContext: context,
         source: { object: 'sys_approval_request', id },
@@ -4672,6 +4696,7 @@ export class ApprovalService implements IApprovalService {
       if (raw.submitter_id) {
         await this.notify({
           topic: 'approval.returned',
+          organizationId: raw.organization_id,
           audience: [String(raw.submitter_id)],
           actorContext: context,
           source: { object: 'sys_approval_request', id: requestId },
@@ -4715,6 +4740,7 @@ export class ApprovalService implements IApprovalService {
     if (raw.submitter_id) {
       await this.notify({
         topic: 'approval.returned',
+        organizationId: raw.organization_id,
         audience: [String(raw.submitter_id)],
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
@@ -4974,6 +5000,7 @@ export class ApprovalService implements IApprovalService {
 
     await this.notify({
       topic: 'approval.reassigned',
+      organizationId: raw.organization_id,
       audience: [to],
       actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
@@ -5033,6 +5060,7 @@ export class ApprovalService implements IApprovalService {
         const tokens = await this.issueActionTokens(requestId, approver);
         notified += await this.notify({
           topic: 'approval.reminder',
+          organizationId: raw.organization_id,
           audience: [approver],
           actorContext: context,
           source: { object: 'sys_approval_request', id: requestId },
@@ -5056,6 +5084,7 @@ export class ApprovalService implements IApprovalService {
     if (literals.length) {
       notified += await this.notify({
         topic: 'approval.reminder',
+        organizationId: raw.organization_id,
         audience: literals,
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
@@ -5304,6 +5333,7 @@ export class ApprovalService implements IApprovalService {
     if (raw.submitter_id) {
       await this.notify({
         topic: 'approval.request_info',
+        organizationId: raw.organization_id,
         audience: [String(raw.submitter_id)],
         actorContext: context,
         source: { object: 'sys_approval_request', id: requestId },
@@ -5351,6 +5381,7 @@ export class ApprovalService implements IApprovalService {
     const audience = isSubmitter ? pending : [String(raw.submitter_id ?? '')].filter(Boolean);
     await this.notify({
       topic: 'approval.comment',
+      organizationId: raw.organization_id,
       audience,
       actorContext: context,
       source: { object: 'sys_approval_request', id: requestId },
@@ -6397,6 +6428,7 @@ export class ApprovalService implements IApprovalService {
       await this.syncApproverIndex(raw.id, escalatees, raw.organization_id ?? null, now);
       await this.notify({
         topic: 'approval.escalated',
+        organizationId: raw.organization_id,
         audience: escalatees,
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
@@ -6415,6 +6447,7 @@ export class ApprovalService implements IApprovalService {
       // 'notify' (and the reassign-without-target fallback)
       await this.notify({
         topic: 'approval.sla_breached',
+        organizationId: raw.organization_id,
         audience: [...pending, ...escalatees],
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
@@ -6428,6 +6461,7 @@ export class ApprovalService implements IApprovalService {
     if (esc.notifySubmitter !== false && raw.submitter_id) {
       await this.notify({
         topic: 'approval.sla_breached',
+        organizationId: raw.organization_id,
         audience: [String(raw.submitter_id)],
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {

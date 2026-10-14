@@ -66,7 +66,7 @@ import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // hand-written `trim()` here is exactly the drift the #15662 campaign built the
 // shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
-import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, type ConversionNotice, type ConversionConflictNotice, type ConversionTodoNotice } from '@objectstack/spec';
 // [ADR-0126 §7.3, #20761] "Does a code package ship this flow?" is NOT read
 // off a definition here. The subflow guards, the arming gate and the
 // activation door ask {@link AutomationEngine.packagedFlowOwner} — the loader's
@@ -4368,12 +4368,21 @@ export class AutomationEngine implements IAutomationService {
      * a flow carrying an unrecognized key is a hard error here rather than a
      * silent drop; a caller migrating stored rows reports that row as failed
      * instead of persisting a guess.
+     *
+     * `todos` (#23269) are the sites the chain leaves as stored because no
+     * lossless rewrite exists — above all a value slot carrying a `{…}`
+     * template token, a CRUD filter operand among them, which
+     * {@link registerFlow} goes on to refuse. The parse accepts such a flow, so
+     * without them the stored pass would read a flow the boot refuses as on
+     * protocol. They change nothing in `parsed` or `storable`; `registerFlow`
+     * ignores them, since its own refusal names the same sites.
      */
     canonicalizeStoredFlow(name: string, definition: unknown): {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
         conflicts: ConversionConflictNotice[];
+        todos: ConversionTodoNotice[];
     } {
         // ADR-0087 D2 — the runtime load seam. A stored flow authored against an
         // old shape (a `webhook`/`http_request` callout node, a `delete_record`
@@ -4408,6 +4417,7 @@ export class AutomationEngine implements IAutomationService {
         ]);
         const notices: ConversionNotice[] = [];
         const conflicts: ConversionConflictNotice[] = [];
+        const todos: ConversionTodoNotice[] = [];
         const converted = applyConversionsToFlow(definition, {
             reservedNodeTypes,
             includeRetired: true,
@@ -4419,6 +4429,11 @@ export class AutomationEngine implements IAutomationService {
             onConflict: (c) => {
                 conflicts.push(c);
                 this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`);
+            },
+            // Collected, not logged: a site listed here is one `registerFlow`
+            // refuses below with its own located message.
+            onTodo: (t) => {
+                todos.push(t);
             },
         });
         // #4347 / #4415 — one call, canonical at every depth. `FlowNodeSchema`
@@ -4444,6 +4459,7 @@ export class AutomationEngine implements IAutomationService {
             storable: graftConditionEnvelopes(converted, parsed),
             notices,
             conflicts,
+            todos,
         };
     }
 

@@ -17,7 +17,7 @@ import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog, ExecutionStatus, FlowRunSummary } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
-import type { ConversionNotice, ConversionConflictNotice } from '../conversions/types';
+import type { ConversionNotice, ConversionConflictNotice, ConversionTodoNotice } from '../conversions/types';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
 import type { FlowRegistration } from '../api/protocol.zod';
 
@@ -802,7 +802,8 @@ export interface IAutomationService {
      *   `storable` (persistence shape — conversions plus the schema's
      *   `condition` envelopes, deliberately WITHOUT schema defaults, so a
      *   written-back row is not frozen on today's default values), plus the
-     *   conversions applied and any rewrite the guard refused.
+     *   conversions applied, any rewrite the guard refused, and (`todos`) the
+     *   sites left as stored for want of a lossless rewrite.
      * @throws when the definition cannot be canonicalized at all (a strict-schema
      *   violation, a malformed control-flow region) — such a flow cannot be
      *   registered either, so a caller reports it rather than persisting a guess.
@@ -812,6 +813,14 @@ export interface IAutomationService {
         storable: unknown;
         notices: ConversionNotice[];
         conflicts: ConversionConflictNotice[];
+        /**
+         * The sites the conversion chain left as stored because no lossless
+         * rewrite exists — a value slot carrying a `{…}` token among them, which
+         * {@link registerFlow} refuses although the parse accepts it — so
+         * `os migrate meta --stored` lists a flow the boot refuses (#23269);
+         * absent reads as none.
+         */
+        todos?: ConversionTodoNotice[];
     };
 
     /**

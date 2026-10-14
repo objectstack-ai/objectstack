@@ -176,6 +176,17 @@ export interface IdentityImportDeps {
   smsInviteAvailable(): boolean;
   /** #2780 — deliver the invitation SMS (no credential in the message). */
   sendInviteSms(phone: string): Promise<void>;
+  /**
+   * [#23152] Optional — the absolute URL of the Console's set-password page
+   * (`AuthManager.getConsoleUrl('/reset-password')`), handed to better-auth
+   * as the invitation reset request's `redirectTo`. better-auth puts it in the
+   * emailed link as `callbackURL`, and its `GET /reset-password/:token`
+   * redirects there with `?token=`. Without it the link carries an EMPTY
+   * `callbackURL`, which that handler refuses with `?error=INVALID_TOKEN`, so
+   * a host that mounts this import itself wires it to get a working invitation.
+   * Absent, the request is today's `{ email }`, byte for byte.
+   */
+  consoleResetPasswordUrl?(): string;
   noteMustChangePasswordIssued(): void;
   logger?: { warn(msg: string): void };
 }
@@ -701,7 +712,13 @@ export async function runAdminImportUsers(
           r.delivery = 'email';
           delivery.emailInvite++;
           try {
-            await authApi.requestPasswordReset({ body: { email: invite.email } });
+            // [#23152] The link lands on the Console's set-password page only
+            // when the request names it; see `consoleResetPasswordUrl`.
+            await authApi.requestPasswordReset({
+              body: deps.consoleResetPasswordUrl
+                ? { email: invite.email, redirectTo: deps.consoleResetPasswordUrl() }
+                : { email: invite.email },
+            });
           } catch (e) {
             // The account exists; only the email failed. Not a rollback —
             // remediation is re-sending or an admin set-user-password.

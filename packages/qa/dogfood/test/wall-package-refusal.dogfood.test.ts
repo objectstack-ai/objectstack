@@ -30,9 +30,10 @@
 //     resolution does not move;
 //   - the `/packages` delete of a package holding stored catalog items answers
 //     `403 PERMISSION_DENIED`, and B's resolution does not move;
-//   - CONTROLS: A installs, upgrades and uninstalls a catalog-free package and
-//     deletes a catalog-free runtime package as before; the platform operator
-//     upgrades, uninstalls and deletes the catalog-carrying ones.
+//   - [ADR-0131 D12 items 7–8] A catalog-free package is refused to A the same
+//     way (ruling A on #23231 stops special-casing the catalog);
+//   - CONTROLS: the platform operator upgrades, uninstalls and deletes the
+//     catalog-carrying ones.
 // And under `single` (CONTROL): the same `manage_metadata` holder, who is not
 // the platform operator, does all of it as before.
 //
@@ -224,17 +225,26 @@ for (const posture of ['isolated', 'group'] as const) {
       expect(still.status).toBe(200);
     });
 
-    it('CONTROL: A installs, upgrades and uninstalls a catalog-free package, and deletes a catalog-free runtime package, as before', async () => {
-      for (const version of ['1.0.0', '1.1.0']) {
-        const res = await h.stack.apiAs(h.tokA, 'POST', INSTALL_LOCAL, packageBody('com.w2.free', version));
-        expect(res.status, await res.clone().text()).toBe(200);
-      }
-      const removed = await h.stack.apiAs(h.tokA, 'DELETE', `${INSTALL_LOCAL}/com.w2.free`);
-      expect(removed.status, await removed.clone().text()).toBe(200);
+    it('[ADR-0131 D12 items 7–8] a catalog-free package is the platform operator\'s too: A\'s install, upgrade and uninstall answer 403 FORBIDDEN, and A\'s /packages delete 403 PERMISSION_DENIED; nothing moves', async () => {
+      // Ruling A on #23231 stops special-casing the catalog: what was this
+      // file's catalog-free CONTROL (A installs, upgrades, uninstalls and
+      // deletes as before) is refused now, whatever the package carries.
+      const installed = await h.stack.apiAs(h.tokA, 'POST', INSTALL_LOCAL, packageBody('com.w2.free', '1.0.0'));
+      expect(await envelopeOf(installed)).toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      const listedFree = await h.stack.apiAs(h.operator, 'GET', '/packages/com.w2.free');
+      expect(listedFree.status).toBe(404);
+      const opInstalled = await h.stack.apiAs(h.operator, 'POST', INSTALL_LOCAL, packageBody('com.w2.free2', '1.0.0'));
+      expect(opInstalled.status, await opInstalled.clone().text()).toBe(200);
+      const upgraded = await h.stack.apiAs(h.tokA, 'POST', INSTALL_LOCAL, packageBody('com.w2.free2', '1.1.0'));
+      expect(await envelopeOf(upgraded)).toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      const removed = await h.stack.apiAs(h.tokA, 'DELETE', `${INSTALL_LOCAL}/com.w2.free2`);
+      expect(await envelopeOf(removed)).toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      expect((await h.stack.apiAs(h.operator, 'GET', '/packages/com.w2.free2')).status).toBe(200);
       const created = await h.stack.apiAs(h.operator, 'POST', '/packages', { id: 'com.w2.freert', name: 'free', version: '1.0.0', type: 'app' });
       expect(created.status, await created.clone().text()).toBe(201);
       const deleted = await h.stack.apiAs(h.tokA, 'DELETE', '/packages/com.w2.freert');
-      expect(deleted.status, await deleted.clone().text()).toBe(200);
+      expect(await envelopeOf(deleted)).toMatchObject({ status: 403, code: 'PERMISSION_DENIED' });
+      expect((await h.stack.apiAs(h.operator, 'GET', '/packages/com.w2.freert')).status).toBe(200);
     });
 
     it('CONTROL: the platform operator installs, upgrades and uninstalls a catalog-carrying package, and deletes one at /packages', async () => {
