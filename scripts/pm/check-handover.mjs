@@ -24,9 +24,9 @@
  *                         with #23193 at `pm:dispatched`, its own assignee on it, and no `Release:`.
  *   (b) DECISION NOT IN   an OPEN issue on which the departing session's LATEST comment authored by
  *       THE INBOX         `objectstack-fleet[bot]` and carrying `--session` contains the four-facet marker
- *                         (`DECISION_FACET_MARKER`, `os-decision-facets`, read by `hasDecisionFacetMarker` — the
- *                         literal grep the shape prescribes, so the plain line and its HTML-comment form both
- *                         read), with no ruling comment (`check-prior-rulings.mjs`'s `classifyRulingComment`)
+ *                         (`DECISION_FACET_MARKER`, `os-decision-facets`, read by `hasDecisionFacetMarker` over
+ *                         the comment with its code blanked — `stripMarkdownCode` — so the plain line and its
+ *                         HTML-comment form both read while a QUOTATION in code does not), with no ruling comment (`check-prior-rulings.mjs`'s `classifyRulingComment`)
  *                         newer than it, and whose state labels (`PM_EXCLUSIVE_STATE_LABELS`, the six
  *                         mutually exclusive states of `SKILL.md`) are anything but `needs-user-decision` alone.
  *
@@ -191,13 +191,25 @@ export function decisionOutsideInbox(issue, sessionComments, cardComments) {
   if (issue?.pull_request || issue?.state !== 'open') return null;
   const mine = (Array.isArray(sessionComments) ? sessionComments : []).filter((c) => c?.user?.login === FLEET_BOT_LOGIN);
   const latest = mine.reduce((best, c) => (best === null || isNewer(c, best) ? c : best), null);
-  if (latest === null || !hasDecisionFacetMarker(latest.body)) return null;
+  if (latest === null || !carriesFacetMarker(latest.body)) return null;
   const ruled = (Array.isArray(cardComments) ? cardComments : []).find((c) => isNewer(c, latest) && classifyRulingComment(c?.body) !== null);
   if (ruled) return null;
   const labels = labelNames(issue);
   const states = PM_EXCLUSIVE_STATE_LABELS.filter((l) => labels.includes(l));
   if (states.length === 1 && states[0] === DECISION_INBOX_LABEL) return null;
   return { number: issue.number, title: issue.title ?? '', states, comment: latest };
+}
+
+/**
+ * Does this comment CARRY the four-facet marker, rather than quote it? `hasDecisionFacetMarker` over the comment with
+ * fenced and inline code blanked (`stripMarkdownCode`). H62's literal grep is right for a report-only reader, whose
+ * accepted error is a quoting card read as clean; in a REFUSAL the same reading refuses a seat for quoting the token.
+ * Measured on two days of the comment stream: the 20 real markers are a bare `os-decision-facets` line or its
+ * HTML-comment wrapping, never in code; the 3 other hits are quotations in code (the reading, the ruling and the dev
+ * report on #23396 — the last one refused a live run of this check before this reading existed).
+ */
+export function carriesFacetMarker(body) {
+  return hasDecisionFacetMarker(stripMarkdownCode(String(body ?? '')));
 }
 
 /** The comment stream grouped by card number: the departing session's fleet-bot comments, and every comment. */
@@ -220,7 +232,7 @@ export function decisionCandidates(byCard) {
   for (const [number, entry] of byCard) {
     if (entry.session.length === 0) continue;
     const latest = entry.session.reduce((best, c) => (best === null || isNewer(c, best) ? c : best), null);
-    if (hasDecisionFacetMarker(latest.body)) out.push(number);
+    if (carriesFacetMarker(latest.body)) out.push(number);
   }
   return out.sort((a, b) => a - b);
 }
@@ -587,6 +599,8 @@ export function selfTest() {
   t('⛔ (b) THE MEASURED ANALYSES carried no marker — so (b), as ruled, does not fire on them; the recall gap is stated, not hidden', decisionOutsideInbox(card(['pm:blocked']), [ANALYSIS(5, 10, false)], []) === null);
   t('(b) a closed card and a pull request are out', decisionOutsideInbox(card(['pm:dispatched'], undefined, { state: 'closed' }), [ANALYSIS(5, 10)], []) === null && decisionOutsideInbox(card(['pm:dispatched'], undefined, { pull_request: {} }), [ANALYSIS(5, 10)], []) === null);
 
+  t('⛔ (b) a QUOTATION of the token in code is not the marker — the measured shape of this card\'s own dev report, which a live run refused', decisionOutsideInbox(card(['pm:dispatched']), [comment(6, 10, `os-dev-report\n\n\`\`\`json\n{ "predicate": "contains the \`${DECISION_FACET_MARKER}\` token", "session": "${S}" }\n\`\`\``)], []) === null && decisionOutsideInbox(card(['pm:dispatched']), [comment(6, 10, `The check keys on \`${DECISION_FACET_MARKER}\`. \`${S}\``)], []) === null);
+  t('(b) …while the bare marker line, as every measured facet block writes it, still reads', decisionOutsideInbox(card(['pm:dispatched']), [comment(6, 10, `${DECISION_FACET_MARKER}\n\`${S}\``)], []) !== null && carriesFacetMarker(`<!-- ${DECISION_FACET_MARKER} -->`) === true);
   // the stream
   const STREAM = [ANALYSIS(5, 10), comment(8, 20, `note \`${S}\``, FLEET_BOT_LOGIN, 23169), comment(9, 30, 'another seat', FLEET_BOT_LOGIN, 23169), { ...ANALYSIS(10, 40), issue_url: 'https://api.github.com/repos/o/r/issues/23300', user: { login: 'zhuangjianguo' } }];
   const grouped = groupStream(STREAM, S);
