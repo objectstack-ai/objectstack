@@ -221,6 +221,11 @@ describe('[#22114] the item read serves the version token the save door pins wit
         expect(refused.currentVersion).toBe(first.version);
         expect(ok(await h.read({ state: 'draft' })).version).toBe(refused.currentVersion);
         expect(await h.stored('draft')).toEqual(['first']);
+        // [#23406] The sentence states what the pin asserted — no draft row —
+        // and names the draft that contradicts it; this caller loaded nothing.
+        expect(refused.error).toContain('no draft row exists');
+        expect(refused.error).toContain(`current is ${first.version}`);
+        expect(refused.error).not.toContain('since you loaded it');
     }, 60_000);
 
     it('after a publish (no draft row): a held `If-Match` is refused 409 with `currentVersion: null`; `If-None-Match: *` writes the next draft', async () => {
