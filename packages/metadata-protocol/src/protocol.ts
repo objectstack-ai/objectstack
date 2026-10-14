@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type {
-    DataProtocol, MetadataProtocol, PackageProtocol,
+    DataProtocol, FlowRegistration, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
 import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
@@ -9,7 +9,7 @@ import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } fr
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
 // the posture, is what the runtime authoring gate is told.
-import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+import { judgePermissionSetOwnerBinding, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 // [commit 376c70f98] The derived `version` this file's `getDiscovery()` serves as the
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
@@ -956,34 +956,22 @@ function runtimeHookWithoutBodyRefusal(
  * {@link ObjectStackProtocolImplementation.publishPackageDrafts} share — the
  * three doors `savedItemNameRefusal` judges a body's `name` at.
  *
- * What disagrees, judged on the body as authored:
- *
- * | body `packageId` | the row's binding | verdict |
- * |:--|:--|:--|
- * | absent | anything | accepted: an absent key declares nothing |
- * | `'P'` | `'P'` | accepted, as before |
- * | `'Q'` | `'P'` | refused |
- * | any string, `''` included | none | refused: a present key declares a package-shipped set, and the set is environment-authored |
- *
- * A value that is not a string is the schema's to refuse (`z.string()`), with
- * its own located `422`. `binding` is the RESOLVED binding of the row the
- * write lands in, never the request's spelling: a draft save that names no
- * package lands in the package of the item's active row (#11087), a direct
- * save that names none lands in the row its address resolves, and a restore
- * writes into the item's active row, whose binding `put` keeps. An empty-string
- * binding is no package, the normalisation both hydration seams apply.
+ * What disagrees, and the words, are the one judge every door of this rule
+ * calls: `judgePermissionSetOwnerBinding` (`@objectstack/spec/security`, whose
+ * header holds the verdict table), which the stack schema (the build door) and
+ * `ObjectQL.registerApp` (the registration door) call too. This function is the
+ * write doors' envelope around it, and its words for these three doors are byte
+ * for byte the words this function built before the judge moved. `binding` is
+ * the RESOLVED binding of the row the write lands in, never the request's
+ * spelling: a draft save that names no package lands in the package of the
+ * item's active row (#11087), a direct save that names none lands in the row
+ * its address resolves, and a restore writes into the item's active row, whose
+ * binding `put` keeps.
  *
  * `VALIDATION_ERROR` / 400, the envelope of the door's other body-against-
  * address refusal: `savedItemNameRefusal`, which judges the body's `name`
  * against the name the row is written under, at the same doors. No code is
- * minted. The message prescribes first, because a 4xx message crosses the REST
- * boundary bounded at 500 characters with its TAIL truncated, names both
- * values, and offers the two remedies the ruling names: drop the key, or write
- * the set into the package it declares. A restore writes a stored version its
- * caller cannot edit in place, so its remedy is the save that fixes it: the
- * item saved again with the key dropped or set to the binding, instead of
- * restoring the version (the name judge's restore wording). `issues[]` locates
- * the key, the shape the Studio designer keys on.
+ * minted. `issues[]` locates the key, the shape the Studio designer keys on.
  *
  * Every writer through the save door is judged, the two server-stated
  * re-savers included (`migrateStoredMetadata`, which records the refusal as
@@ -999,40 +987,12 @@ function permissionSetOwnerBindingRefusal(
     door: 'save' | 'restore' | 'publish',
 ): (Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] }) | undefined {
     if (singularType !== 'permission') return undefined;
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
-    const declared = (item as { packageId?: unknown }).packageId;
-    if (typeof declared !== 'string') return undefined;
-    const bound = typeof binding === 'string' && binding !== '' ? binding : null;
-    if (declared === bound) return undefined;
-    const into = (pkg: string | null) => (pkg === null ? 'into no package' : `into package '${pkg}'`);
-    const intoDeclared = declared === ''
-        ? ''
-        : `, or ${door === 'save' ? 'save the set' : 'save it'} into package '${declared}' `
-            + `(?package=${declared} on the REST door, packageId in process)`;
-    const owner = bound === null
-        ? 'a set written into no package is authored in this environment, which an absent `packageId` states'
-        : 'the package a set is written into is its owner';
-    const tail = `and ${owner} (ADR-0086 D3): a \`packageId\` that disagrees is refused, never silently overridden.`;
-    const message = door === 'save'
-        ? `Drop \`packageId\` from permission set '${name}'${intoDeclared}, then send it again. Nothing was written. `
-            + `Its body declares \`packageId\` '${declared}', but this save writes it ${into(bound)}, ${tail}`
-        : door === 'restore'
-        ? `Save permission set '${name}' again with \`packageId\` ${bound === null ? 'dropped' : `dropped or set to '${bound}'`}, `
-            + 'instead of restoring this version. Nothing was restored. '
-            + `The version's body declares \`packageId\` '${declared}', but it is restored ${into(bound)}, ${tail}`
-        : `Save the draft of permission set '${name}' again with \`packageId\` dropped${intoDeclared}, then publish it. `
-            + `Nothing was published. Its body declares \`packageId\` '${declared}', but it is published ${into(bound)}, ${tail}`;
-    const err = new Error(message) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    const refusal = judgePermissionSetOwnerBinding(item, name, binding, door);
+    if (!refusal) return undefined;
+    const err = new Error(refusal.message) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
     err.code = 'VALIDATION_ERROR';
     err.status = 400;
-    err.issues = [{
-        path: 'packageId',
-        message: `Disagrees with the package the set is written into (${bound === null ? 'none' : `'${bound}'`}): `
-            + (door === 'restore'
-                ? `drop it${bound === null ? '' : `, or set it to '${bound}'`}.`
-                : `drop it${declared === '' ? '' : `, or write the set into package '${declared}'`}.`),
-        code: 'custom',
-    }];
+    err.issues = [{ path: 'packageId', message: refusal.issueMessage, code: 'custom' }];
     return err;
 }
 
@@ -6570,6 +6530,54 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23316] The automation engine's verdict reader for a `flow` read — the
+     * `registration` beside the item read's envelope and the `registrations`
+     * beside the list's items (`FlowRegistrationSchema` in `@objectstack/spec`).
+     *
+     * The same seam as {@link resolveFlowCanonicalizer}: the kernel's service
+     * table, read by name and per call, for the member the automation service
+     * declares on `IAutomationService` (`getFlowRegistration`). This package
+     * never imports the automation service, and resolution stays lazy for the
+     * reason that docblock gives.
+     *
+     * `undefined` — so the read serves NO verdict — for every other type, and
+     * where no reachable service declares the member: a control-plane or
+     * metadata-only host judges no flow, and an absent field is how that is
+     * said. ⛔ Never a third state the protocol makes up: the field is the
+     * engine's answer or nothing. The answer is the engine of THIS process; no
+     * cross-process store is read.
+     */
+    private resolveFlowRegistrationReader(type: string): ((name: string) => FlowRegistration) | undefined {
+        if (canonicalMetaType(type) !== 'flow') return undefined;
+        const automation = this.getServicesRegistry?.().get('automation') as
+            | { getFlowRegistration?: (name: string) => FlowRegistration }
+            | undefined;
+        const read = automation?.getFlowRegistration;
+        if (typeof read !== 'function') return undefined;
+        return (name) => read.call(automation, name);
+    }
+
+    /**
+     * [#23316] The list's `registrations`: the engine's verdict per listed
+     * item, keyed by its `name` — or nothing, where
+     * {@link resolveFlowRegistrationReader} resolves no reader. A pending draft
+     * (`_draft: true`, the `previewDrafts` overlay) gets no entry: no engine
+     * holds a draft, exactly as the lock resolution above skips one.
+     * `Object.fromEntries`, so a name is an own key whatever it spells.
+     */
+    private flowRegistrationsOf(type: string, items: readonly unknown[]): { registrations?: Record<string, FlowRegistration> } {
+        const read = this.resolveFlowRegistrationReader(type);
+        if (!read) return {};
+        const entries: Array<[string, FlowRegistration]> = [];
+        for (const it of items) {
+            const name = (it as { name?: unknown } | null | undefined)?.name;
+            if (typeof name !== 'string' || (it as { _draft?: unknown })._draft === true) continue;
+            entries.push([name, read(name)]);
+        }
+        return { registrations: Object.fromEntries(entries) };
+    }
+
+    /**
      * [#20312] The deployment's ADR-0080 SDUI component manifest, when the host
      * registered one under {@link SDUI_MANIFEST_SERVICE} — `os serve` does, from
      * the CLI's `resolveSduiManifest`. Read per publish, exactly as
@@ -10263,6 +10271,10 @@ export class ObjectStackProtocolImplementation implements
             // [#20552] Served: diagnostics + per-type credential redaction.
             // Execution: the stored bodies — see `getMetaItemsForExecution`.
             items: audience === 'served' ? decorateMetadataItems(request.type, governed) : governed,
+            // [#23316] Served only: the engine's verdict on each listed flow —
+            // see {@link flowRegistrationsOf}. The execution face is the
+            // engine's own read, so it carries none.
+            ...(audience === 'served' ? this.flowRegistrationsOf(request.type, governed) : {}),
         };
     }
 
@@ -11093,6 +11105,13 @@ export class ObjectStackProtocolImplementation implements
         const lockState = this.servedLockState(
             request.type, request.name, decorated, artifactBacked, itemLock, storedRowServed,
         );
+        // [#23316] Beside `lock`, never inside `item`: the automation engine's
+        // verdict on this flow ({@link resolveFlowRegistrationReader}), for an
+        // item this read serves. The draft returns above carry none — a
+        // pending body is not what the engine holds.
+        const readRegistration = decorated !== undefined && decorated !== null
+            ? this.resolveFlowRegistrationReader(request.type)
+            : undefined;
         return {
             type: request.type,
             name: request.name,
@@ -11117,6 +11136,7 @@ export class ObjectStackProtocolImplementation implements
             ...(request.previewDrafts
                 ? {}
                 : { version: storedRowServed ? await this.readVersionToken({ ...request, member }, 'active') : null }),
+            ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
         };
     }
 
@@ -15409,7 +15429,7 @@ export class ObjectStackProtocolImplementation implements
      * environment → code read order (ADR-0131 D6) — the whole reason this
      * method delegates rather than re-reading.
      */
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse> {
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration }> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -15423,6 +15443,11 @@ export class ObjectStackProtocolImplementation implements
                 name: request.name,
             });
             const item = (result as any)?.item;
+            // [#23316] The automation engine's verdict on a flow, as the
+            // delegate read above just resolved it — live, on every call. It
+            // rides beside `data` for the REST layer's default door, and is
+            // never hashed into the ETag below (see the 304 note there).
+            const registration = (result as { registration?: FlowRegistration } | undefined)?.registration;
 
             if (!item) {
                 // [#5532] Structured: 404 + the catalog's `RESOURCE_NOT_FOUND`.
@@ -15476,7 +15501,16 @@ export class ObjectStackProtocolImplementation implements
             const etag = { value: hash, weak: false };
 
             // Check If-None-Match header
-            if (request.cacheRequest?.ifNoneMatch) {
+            //
+            // [#23316] …except for a read that carries `registration`: the
+            // served body holds the engine's verdict and this validator does
+            // not (it hashes the document alone, and the verdict stays out of
+            // it), so a 304 here would pin the caller to the verdict it was
+            // served before — after the engine re-registered or refused the
+            // flow under an unchanged body. Such a read is always answered in
+            // full; the work is the same either way, since this method always
+            // performs the delegate read.
+            if (request.cacheRequest?.ifNoneMatch && registration === undefined) {
                 const clientEtag = request.cacheRequest.ifNoneMatch.replace(/^"(.*)"$/, '$1').replace(/^W\/"(.*)"$/, '$1');
                 if (clientEtag === hash) {
                     // Return 304 Not Modified
@@ -15490,6 +15524,7 @@ export class ObjectStackProtocolImplementation implements
             // Return full metadata with cache headers
             return {
                 data: item,
+                ...(registration !== undefined ? { registration } : {}),
                 etag,
                 lastModified: new Date().toISOString(),
                 cacheControl: {

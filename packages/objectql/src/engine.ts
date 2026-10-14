@@ -221,6 +221,7 @@ import {
   type TenancyPosture,
   type TenantLayer0Verdict,
   postureUsesUnionScope,
+  judgePermissionSetOwnerBinding,
 } from '@objectstack/spec/security';
 
 /**
@@ -4141,6 +4142,42 @@ function stampPackage<T>(item: T, packageId: string, packageVersion: string | un
 }
 
 /**
+ * [ADR-0086 D3] The registration door's refusal of a permission set whose body
+ * `packageId` disagrees with the package {@link ObjectQL.registerApp} registers
+ * it under (`ownerId`; none for a manifest that carries no id).
+ *
+ * The judgement and its words are the one judge every door of the rule calls,
+ * `judgePermissionSetOwnerBinding` (`@objectstack/spec/security`, whose header
+ * holds the verdict table): the stack schema runs it at the build door
+ * (`defineStack`, `os validate`, `os build`, the artifact door's parse), so this
+ * seam is the door for a manifest no schema parse judged — a programmatic
+ * `registerApp`, a nested plugin, a `strict: false` stack, a package installed
+ * from a stored manifest. ⛔ Never a second comparison here.
+ *
+ * `VALIDATION_ERROR` / 400, thrown before the set is filed: the envelope of
+ * this seam's other body-against-key refusal, the divergent view-container
+ * `name` (`viewContainerNameRefusal`), which the same loop throws one statement
+ * earlier. `issues[]` locates the key, as the metadata write doors' refusal of
+ * the same rule does. No code is minted.
+ */
+function permissionSetOwnerRegistrationRefusal(
+  item: unknown,
+  name: string,
+  ownerId: string | undefined,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }> }) | undefined {
+  const refusal = judgePermissionSetOwnerBinding(item, name, ownerId, 'register');
+  if (!refusal) return undefined;
+  const err = new Error(refusal.message) as Error & {
+    code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }>;
+  };
+  err.code = 'VALIDATION_ERROR';
+  err.status = 400;
+  err.httpStatus = 400;
+  err.issues = [{ path: 'packageId', message: refusal.issueMessage, code: 'custom' }];
+  return err;
+}
+
+/**
  * {@link stampPackage} for an authored OBJECT definition, on a shallow copy.
  * The registry stamps an object schema on its own copy (`applySystemFields`
  * and friends run first), so `registerApp` leaves the caller's definition
@@ -8045,6 +8082,17 @@ export class ObjectQL implements IObjectQLEngine {
               // it anywhere else: one judge, two doors.
               if (key === 'views') {
                   const refusal = viewContainerNameRefusal(item, sourceLabel, ownerId);
+                  if (refusal) throw refusal;
+              }
+              // [ADR-0086 D3] A permission set whose body `packageId` disagrees
+              // with the package this seam registers it under is refused, in
+              // the same place and envelope as the container refusal above:
+              // `registerItem` stamps `ownerId` as the set's `_packageId`, the
+              // owner every reader reads, so the body's key used to be
+              // registered over in silence. See
+              // {@link permissionSetOwnerRegistrationRefusal}.
+              if (key === 'permissions') {
+                  const refusal = permissionSetOwnerRegistrationRefusal(item, itemName, ownerId);
                   if (refusal) throw refusal;
               }
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };

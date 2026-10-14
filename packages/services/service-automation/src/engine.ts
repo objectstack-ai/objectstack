@@ -11,6 +11,7 @@ import type {
     FlowRunSummary,
 } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult } from '@objectstack/spec/contracts';
+import type { FlowRegistration, FlowRegistrationRefusal } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import { createEvalUser, type EvalUserParsed } from '@objectstack/spec/identity';
 import {
@@ -2524,6 +2525,21 @@ export class AutomationEngine implements IAutomationService {
      */
     private flowShadowing = new Map<string, FlowShadowingRecord>();
     /**
+     * [#23316] Refused registrations, keyed by the bare flow name: what this
+     * engine threw when a host's sync handed it a stored flow it would not
+     * register, for a name it holds nothing under. The record behind
+     * {@link getFlowRegistration}'s `refused`.
+     *
+     * Present only while the name is unheld: {@link registerFlow} succeeding
+     * and {@link withdrawFlow} both delete the entry, so a name is never
+     * `refused` and registered at once. The host writes it
+     * ({@link recordFlowRefusal}) — the engine cannot tell a sync's refusal
+     * from a write door's, which answers its caller instead and must leave no
+     * record. Like {@link flowShadowing} it is a receipt: it never affects
+     * dispatch.
+     */
+    private flowRefusals = new Map<string, FlowRegistrationRefusal>();
+    /**
      * [ADR-0126 §7.2] Flows the durable ACTIVATION LEDGER currently marks
      * inactive — the local projection of `sys_metadata_activation`, keyed by
      * flow name. Membership means "a row says `active: false`"; absence means
@@ -4636,6 +4652,8 @@ export class AutomationEngine implements IAutomationService {
         this.flowVersionHistory.set(name, history);
 
         this.flows.set(name, parsed);
+        // [#23316] Held now, so no longer refused — see {@link flowRefusals}.
+        this.flowRefusals.delete(name);
         // Enable/disable from the persisted deployment `status`. `obsolete`/`invalid`
         // flows are DISABLED (unbound + guarded in execute); `draft`/`active` — and
         // any legacy flow with no explicit status — stay enabled, so existing flows
@@ -4763,7 +4781,48 @@ export class AutomationEngine implements IAutomationService {
         // an in-process bind attempt that no longer has a subject.
         this.policyDisabledFlows.delete(name);
         this.subflowDeclinedFlows.delete(name);
+        // [#23316] A withdrawal ends a refusal as it ends a registration: the
+        // record's subject is gone. A host that withdraws BECAUSE it refused
+        // records the refusal after this — see {@link recordFlowRefusal}.
+        this.flowRefusals.delete(name);
         this.logger.info(`Flow unregistered: ${name}`);
+    }
+
+    /**
+     * [#23316] Record that a host's sync handed this engine a stored flow and
+     * the engine refused it, leaving nothing registered under `name` — the
+     * fact {@link getFlowRegistration} answers as `refused`.
+     *
+     * The record keeps what the engine threw, verbatim: the error's own string
+     * `code` when it set one (absent otherwise — never invented) and its
+     * `message`. A later {@link registerFlow} success or a
+     * {@link withdrawFlow} of the name deletes it.
+     *
+     * Ignored while the engine holds a registration under `name`: a refused
+     * re-registration leaves the old one in place (`registerFlow` throws
+     * before it changes anything), and that flow is registered, not refused.
+     */
+    recordFlowRefusal(name: string, error: unknown): void {
+        if (this.flows.has(name)) return;
+        const thrown = (error ?? {}) as { code?: unknown; message?: unknown };
+        this.flowRefusals.set(name, {
+            ...(typeof thrown.code === 'string' ? { code: thrown.code } : {}),
+            message: typeof thrown.message === 'string' ? thrown.message : String(error),
+        });
+    }
+
+    /**
+     * [#23316] This engine's verdict on one flow name, for the metadata read
+     * that serves it beside the stored flow — see
+     * `IAutomationService.getFlowRegistration`. Total over this engine's state:
+     * `registered` while {@link flows} holds the name, `refused` with the
+     * recorded reason while {@link flowRefusals} does, `unregistered`
+     * otherwise. A read: it records nothing.
+     */
+    getFlowRegistration(name: string): FlowRegistration {
+        if (this.flows.has(name)) return { state: 'registered' };
+        const refusal = this.flowRefusals.get(name);
+        return refusal ? { state: 'refused', reason: { ...refusal } } : { state: 'unregistered' };
     }
 
     /**

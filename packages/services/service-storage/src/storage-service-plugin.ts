@@ -42,6 +42,7 @@ import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSe
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
+import { FileAttachmentService, type FileAttachmentEngine } from './file-attachment-service.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
 // storage domain, not the audit/compliance ledger. Definition stays in
@@ -168,8 +169,12 @@ export class StorageServicePlugin implements Plugin {
    * instance so existing callers of either spelling resolve identically —
    * the `http.server` / `http-server` pattern. The alias registration is
    * dropped through the standard retirement flow at the next major.
+   *
+   * [#23306] `file-attachments` (`FILE_ATTACHMENT_SERVICE`) is the server-side
+   * attach verb (`file-attachment-service.ts`): a slot of its own, because the
+   * `storage` slot's contract is the adapters' blob store.
    */
-  providesServices = ['storage', 'file-storage'];
+  providesServices = ['storage', 'file-storage', 'file-attachments'];
   /**
    * `com.objectstack.engine.objectql` — init() registers sys_file /
    * sys_upload_session / sys_attachment through the `manifest` service
@@ -212,6 +217,15 @@ export class StorageServicePlugin implements Plugin {
 
   private readonly options: StorageServicePluginOptions;
   private storage: SwappableStorageService | null = null;
+  /**
+   * [#23306] The data engine the attach verb writes through — set at
+   * `kernel:bootstrapped`, after every plugin's `kernel:ready` handler has
+   * installed its gates on the `sys_attachment` insert, and never before: until
+   * then the verb refuses (`503`) rather than write a row a gate has not yet
+   * judged. Stays `null` on a kernel with no hook-capable engine, where those
+   * gates cannot exist.
+   */
+  private attachmentEngine: FileAttachmentEngine | null = null;
   private metrics: MetricsRegistry = new NoopMetricsRegistry();
   /**
    * What the CURRENTLY installed adapter points at (#4096). Set beside every
@@ -328,6 +342,20 @@ export class StorageServicePlugin implements Plugin {
     ctx.registerService('storage', this.storage);
     // Deprecated v17 alias — same instance under the old spelling (#9683).
     ctx.registerService('file-storage', this.storage);
+    // [#23306] The server-side attach verb, under `FILE_ATTACHMENT_SERVICE`.
+    // Registered on every path (ADR-0116); everything it writes through is read
+    // per call, so it serves once `kernel:bootstrapped` arms the engine
+    // (`start()`).
+    const storage = this.storage;
+    ctx.registerService(
+      'file-attachments',
+      new FileAttachmentService({
+        getEngine: () => this.attachmentEngine,
+        getStorage: () => storage,
+        getLimitsSnapshot: () => storage.getLimitsSnapshot(),
+        logger: ctx.logger,
+      }),
+    );
     ctx.logger.info(
       `StorageServicePlugin: registered ${adapter} storage adapter (swappable, metrics=${this.metrics.constructor?.name ?? 'unknown'})`,
     );
@@ -365,6 +393,16 @@ export class StorageServicePlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    // [#23306] The engine the `kernel:ready` hook below installs this plugin's
+    // `sys_attachment` gates on. The attach verb is armed with it only at
+    // `kernel:bootstrapped`, once EVERY plugin's `kernel:ready` handler has run —
+    // other plugins install their gates on the same insert from theirs (the
+    // `enable.files` gate among them), so a verb armed any earlier could write
+    // a row one of them never judged.
+    let gatedEngine: FileAttachmentEngine | null = null;
+    ctx.hook('kernel:bootstrapped', async () => {
+      this.attachmentEngine = gatedEngine;
+    });
     ctx.hook('kernel:ready', async () => {
       let engine: IDataEngine | null = null;
       try {
@@ -422,6 +460,9 @@ export class StorageServicePlugin implements Plugin {
         // stays the last word there (maintainer ruling; the reasoning is in
         // `attachment-delete-floor-alternate.ts`). Delete limb only.
         contributeAttachmentDeleteFloorAlternate(() => ctx.getService<unknown>('security'), ctx.logger);
+        // [#23306] The engine the attach verb writes through, once armed at
+        // `kernel:bootstrapped` (see the top of `start()`).
+        gatedEngine = engine as FileAttachmentEngine;
         // Parent-derived READ visibility (#2970 item 1) — list/find/count of
         // sys_attachment only returns rows whose parent record the caller can
         // read. Middleware (not a hook) so list `total` is filtered too.

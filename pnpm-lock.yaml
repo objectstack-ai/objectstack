@@ -2958,6 +2958,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/plugin-audit':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-audit
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3

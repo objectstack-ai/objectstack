@@ -835,13 +835,18 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
    * what makes the metadata↔config boundary machine-checkable and package
    * uninstall well-defined (remove the package's own sets).
    *
-   * The owner is the package the set is saved into: every reader of a set's
-   * owner reads that binding. So the metadata save, restore and publish doors
-   * refuse a body `packageId` that disagrees with it — another package's id,
-   * or any value on a set saved into no package — rather than accept it and
-   * override it silently; a value equal to the binding is accepted.
+   * The owner is the package that ships the set or that it is saved into:
+   * every reader of a set's owner reads that binding. So every door that files
+   * a set under a package refuses a body `packageId` that disagrees with it —
+   * another package's id, or any value on a set no package ships or saves —
+   * rather than accept it and override it silently; a value equal to the
+   * binding is accepted. The doors: the stack schema (`defineStack`,
+   * `os validate`, `os build`, the artifact load), the package registration
+   * (`ObjectQL.registerApp`), and the metadata save, restore and publish doors.
+   * One judge serves them all: `judgePermissionSetOwnerBinding`
+   * (`permission-set-owner-binding.ts`).
    */
-  packageId: z.string().optional().describe('[ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored); the metadata save, restore and publish doors refuse a value that disagrees with the package the set is saved into'),
+  packageId: z.string().optional().describe('[ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored); a value that disagrees with the package that ships the set, or that it is saved into, is refused by the stack schema (defineStack, os validate, os build), the package registration, and the metadata save, restore and publish doors'),
 
   /**
    * [ADR-0086 D3] Per-record provenance on the existing

@@ -20,6 +20,11 @@ were already Accepted.
 maintainer 「同意」) — D3 item 6: the guest reaches rows only through share links (and, when it
 exists, an explicit guest sharing rule), never through the object's sharing model; ADR-0090 D9 and
 D11 are unchanged.
+· **Amended** (2026-10-14, ruling C on [#23267](https://github.com/objectstack-ai/objectstack/issues/23267),
+[`6159279205`](https://github.com/objectstack-ai/objectstack/issues/23267#issuecomment-6159279205),
+maintainer 「23267 我们的系统 和 salesforce 类似，暂时没有 没有公开站点或门户的产品计划」) — D3 item 5: the
+guest's bind door is built implementation-first, when a named deployment needs to grant the guest on
+a public surface; until then no door binds a set to `guest`, and the record carries the door's shape.
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -365,10 +370,33 @@ unchanged. **Card**: E2.
    modify-all, no system permissions (ADR-0090 D9; `describeAnchorForbiddenBits`, enforced by
    `SecurityPlugin.assertAudienceAnchorBindingGate`). A delegated administrator never binds an anchor
    (ADR-0090 D12; `ANCHOR_POSITIONS`). Unchanged.
-5. **How a deployment grants.** An administrator binds a low-privilege set to `guest`, directly or
-   by confirming a package's suggestion
-   (`packages/plugins/plugin-security/src/suggested-audience-bindings.ts#confirmAudienceBindingSuggestion`).
-   Packages suggest; they never bind (ADR-0090 D9).
+5. **How a deployment grants: implementation-first.** The bind door is built when a named
+   deployment needs to grant the guest on a public surface (a site or portal) and the class-1 form
+   doors cannot serve it. Until then E1's reader stays at the declared empty state (item 2),
+   because no door binds a set to `guest`: a save of the packaged `guest` position answers 403
+   `NOT_OVERRIDABLE`, the package door refuses a built-in position name, and
+   `packages/plugins/plugin-security/src/suggested-audience-bindings.ts#confirmAudienceBindingSuggestion`
+   refuses a `guest` row, which the suggestion sync never produces.
+   **The door's shape.** An act of the environment's administrator, never of a package (ADR-0090
+   D9), writes one confirmed `sys_audience_binding_suggestion` row for anchor `guest` (D8's `guest`
+   value, live with this door), `package_id` optional, scoped to the public surface that publishes
+   the door: the binding carries the app or site it serves, and the anchor stays one identity. The
+   security plugin re-derives the `guest` definition from the accepted rows, as it does
+   `everyone`'s, and on every write and every derivation runs
+   `describeAnchorForbiddenBits(set, 'guest')` and refuses the bypass list's objects (those record
+   sharing never scopes, declared once in `@objectstack/spec/security`; today plugin-sharing's
+   `SharingService` holds the list). No caller writes an anchor's definition
+   ([#22801](https://github.com/objectstack-ai/objectstack/issues/22801) ruling A,
+   [`6108478638`](https://github.com/objectstack-ai/objectstack/issues/22801#issuecomment-6108478638)),
+   so ⛔ opening that door (`PUT /meta/position/guest`) is refused: it reverses the seal and misses
+   environment kernels. The row half stays item 6: share links and, when built, an explicit guest
+   sharing rule (read-only, criteria-based, the strictest lint tier), the only shape in which D8's
+   retired `guest` recipient returns. **Re-read when the door is built:** item 4's guest tier of
+   `assertAudienceAnchorBindingGate`, which guards `sys_position_permission_set` rows that no
+   binding reader reads, and objectui's pin that a guest row offers no Accept
+   (`objectui:packages/app-shell/src/components/SuggestedBindingsPanel.tsx`). Amended by ruling C
+   on [#23267](https://github.com/objectstack-ai/objectstack/issues/23267)
+   ([`6159279205`](https://github.com/objectstack-ai/objectstack/issues/23267#issuecomment-6159279205)).
 6. **Row scope: one pipeline.** The guest's grant is evaluated by the same row-level pipeline as
    every caller, except that the guest never takes the pipeline's sharing-model (OWD) branch:
    neither `sharingModel` nor `externalSharingModel`. The guest owns nothing (D1), so it reaches
@@ -546,6 +574,7 @@ that card lands; no row is declared without an enforcer.
 | the list itself | D2 | the conformance matrix, `AUTHZ_CONFORMANCE` | card E2 records it |
 | no `system` flow behind an anonymous flow door | D2b | the publish path, in both directions | card E2 |
 | the guest's grants, and deny-all when none | D3 | the anonymous branch of `resolveAuthzContext` | card E1 |
+| no door binds a set to `guest` until the bind door is built | D3 item 5 (amended) | the anchors' seal (`NOT_OVERRIDABLE`; the package door's built-in names) and `confirmAudienceBindingSuggestion`'s refusal of a `guest` row | enforced; the door is follow-up F4 |
 | the anchor binding tier | ADR-0090 D9; D3 | `describeAnchorForbiddenBits`, through `assertAudienceAnchorBindingGate` | enforced |
 | no delegated binding of an anchor | ADR-0090 D12 | `ANCHOR_POSITIONS` | enforced |
 | the guest's organization | D4 | the guest entry's organization step, with `resolveSystemWriteOrganization`'s predicate | card E1 |
@@ -566,12 +595,13 @@ that card lands; no row is declared without an enforcer.
   ownership and keys are read here, and the 2026-08-08 ruling gets a record (D9). The code keeps its
   pointer to the decision (Prime Directive #13); card E2 points the module doc of
   `assemble-execution-context.ts` at this record.
-- **Bindings confirmed while inert start granting (D3).** A set bound to `guest` today, directly or
-  through a confirmed suggestion, grants nothing. On the release that lands E1 it grants what it says,
+- **Bindings confirmed while inert start granting (D3).** A set bound to `guest` before E1 granted
+  nothing. On the release that lands E1 it grants what it says,
   to anonymous callers at the guest-entry doors. Every such binding passed the strictest anchor tier,
   and the administrator who confirmed it believed it granted, so D3 honours a declaration rather than
-  widening one. The change is still visible: E1's changeset names it, and E1 counts the population
-  on the reference apps before it lands.
+  widening one. The change is still visible: E1's changeset names it, and its count on the reference
+  apps found none. None can arise before D3 item 5's door is built: until then no door binds a set
+  to `guest`.
 - **A multi-organization deployment's anonymous endpoints answer a located refusal** where they need
   an organization, until D5 is built. Today those requests are refused at the CRUD gate with nothing
   granted, so no request that is served today stops being served.
@@ -804,6 +834,9 @@ Accepted, and they landed before acceptance.
 - **F2 — the site binding** (D5), built when a named deployment needs it.
 - **F3 — ADR-0073 M2**, which adds `runAs: 'automation'` to D2b's prescription when it lands;
   ADR-0073's own trigger, a first real consumer, governs it.
+- **F4 — the guest's bind door** (D3 item 5), built when a named deployment needs to grant the
+  guest on a public surface and the class-1 form doors cannot serve it; its shape and the two items
+  it re-reads are recorded in D3 item 5.
 
 ## References
 

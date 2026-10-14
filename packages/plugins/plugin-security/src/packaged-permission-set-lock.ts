@@ -174,7 +174,7 @@ function declaredPackageIdOf(item: any, name: string): string | null {
   // A stored (tenant-authored) row is never a shipped artifact, whatever
   // package it is bound to. See the doc comment.
   if (isTenantAuthored(item)) return null;
-  const packageId = item._packageId ?? item.packageId;
+  const packageId = item._packageId; // [ADR-0086 D3] the binding only: never the body's `packageId`
   if (typeof packageId !== 'string' || packageId === '') return null;
   if (packageId === RUNTIME_SHADOW_PACKAGE_ID) return null;
   return packageId;
