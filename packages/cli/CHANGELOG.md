@@ -1,5 +1,240 @@
 # @objectstack/cli
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- ed03834: feat(cli): `os migrate organization-ownership --apply` promotes customized email templates and moves the settings global rung (ADR-0131 D10)
+  
+  Clause-②: yes (widening)
+  
+  Two steps join the ceremony, after the authored catalog conversion and before the verified id→name rewrite. Each is checkpointed and resumable like the others.
+  
+  - **`template-promotion`** (ruling C on ADR-0131 §6 Q1). Every `sys_email_template` row the mirror deletion keeps for it (customized, or with `customized` unknown, and every row no seeder wrote: `managed_by` NULL or other than package / platform / system, with or without an organization) becomes an environment `email_template` item through the metadata door, one per `(name, locale)`, before mirror deletion removes the rows. It runs under every posture. Seeded, uncustomized copies are not promoted. A promotion that already landed is skipped. The step stops, keeping every row of the template, in four cases:
+    - a conflict: rows of one `(name, locale)` that differ. Each conflict is listed in the plan and in the `--apply` report, with every candidate's row id and organization. It counts as remaining and holds back `verified_at` until the operator chooses one row with the new repeatable flag `--template-choice ROW_ID`. A choice that names no candidate, or two candidates of one conflict, is refused before anything is written. The chosen body is promoted, and the other candidates are deleted only after that promotion is verified;
+    - a customized or authored row with no name;
+    - an environment template that already exists and differs, since the environment's edit is never overwritten;
+    - a door refusal.
+  - **`settings-move`** (ADR-0131 D7). Every `sys_setting` row with `scope = 'global'` and no organization is copied into `sys_platform_setting` by the database itself (`INSERT … SELECT`), so `value` and the `value_enc` secret handle move verbatim. The destination row is read back, and only when it equals the source does the row leave `sys_setting`. A key `sys_platform_setting` already holds with the same value is only removed from `sys_setting`. The step stops, moving nothing for that key, in two cases:
+    - `sys_platform_setting` already holds the key with a different value (the one the runtime serves);
+    - `sys_setting` holds differing rows for the key.
+  
+  The `global-rung-move` departure is now executed, so it reads zero after the run and no longer holds back `verified_at`. The `declared-rule-mirrors` departure still counts until the declared-rule seeder is retired.
+  
+  Mirror deletion now also deletes the promoted template rows, and only those. Before its first template delete it runs the promotion pass again, so a row customized or authored between runs (on a resumed ceremony) is promoted, not deleted. It then deletes the seeded, uncustomized mirrors and, by id, the rows whose environment copy that pass verified. Any other promotion row stays and blocks. The apply report gains `movedOut` / `movedIn` per table, and row counts reconcile as before − deleted − moved out + moved in.
+- 2808069: feat(cli): `os migrate organization-ownership --apply` — the v18 organization-ownership ceremony's apply step and post-check (ADR-0131 D10, ceremony items 2 to 4)
+  
+  Clause-②: yes (widening)
+  
+  The command that planned the ceremony now performs it. Without `--apply` nothing changes: the read-only plan, written to a file. With `--apply`:
+  
+  - **The backup comes first.** It is the operator's act: pass `--backup-taken`, or answer yes at the prompt. A non-interactive run without the flag is refused before the database is opened.
+  - **The fates run in order**, each step stopping the run where it meets a blocker:
+    1. **Attribution** — every NULL `organization_id` row the plan derives an owner for takes it (a parent, subject or holder anchor; under `single`, the Default Organization). A row with no derivable owner is never assigned one: it stays NULL and is listed by id.
+    2. **Authored catalog rows** — permission sets and positions an organization authored in Setup become environment metadata through the metadata door (under `single`; under a wall they are reported), with each position's binding rows carried into its `permissionSets`.
+    3. **The verified id→name rewrite** — every `sys_user_permission_set` grant names its set in `permission_set`, then every grant is verified to name a set the security catalog resolves. `permission_set_id` stays.
+    4. **Mirror deletion** — only after that verification, read again just before the first delete: the seeded catalog copies (per organization and NULL residue), the binding rows, seeded capabilities and seeded templates. Authored, customized and organization-stamped rows stay.
+    5. **Column drops** — `organization_id` leaves the deployment-level objects through the schema-drift ceremony (`os migrate apply`'s machinery), never a hand `ALTER`. A table whose rows still need another step keeps its column, and the run says why.
+  - **Idempotent and resumable.** Every write is conditioned on the state it changes, and each finished step is checkpointed in `sys_migration` (row `adr-0131-organization-ownership`); a run interrupted mid-step resumes at that step and never re-derives an owner already written.
+  - **The post-check** re-reads the plan and reports, per table, what remains. The ledger row records `applied_at` once every step has finished and `verified_at` when the post-check also reads zero discrepancies. Exit code 1 while the ceremony is unfinished or the post-check finds a discrepancy.
+  - A JSON report is written beside the plan (`organization-ownership-apply-TIMESTAMP.json`, or `--out`); an existing file is never overwritten.
+  
+  ```bash
+  os migrate organization-ownership --out plan.json            # read the plan first
+  os migrate organization-ownership --apply --backup-taken     # then perform it
+  ```
+- 707b3cd: feat(cli,spec): `os migrate organization-ownership --fate-supplement FILE`. A host declares the ADR-0131 D10 fates of the objects it provides, and the ceremony plans and applies them as it does the platform's own rows
+  
+  Clause-②: yes (widening)
+  
+  The v18 organization-ownership ceremony refuses any platform-prefixed table that carries `organization_id` when its inventory gives that table no fate. That is right for the platform's own objects, but a host's objects have no row in the inventory, so every database a host runs was refused. The host now declares those fates itself, in one JSON file, and passes the file to the command. **Adoption: a host passes its supplement through the flag; with no flag, the ceremony behaves as before.**
+  
+  - **The file is declared in the spec.** `OrganizationOwnershipSupplementSchema` (`@objectstack/spec/system`) is a JSON array of `OrganizationOwnershipSupplementEntrySchema` rows. Each row gives `object`, `fate` (`column-drop`, `mirror-deletion`, `attribution` or `report`), `citation`, and only the fields its fate reads: `anchors` (required for `attribution`), `mirror`, `departures`, `categories`, `notNullExempt` and `note`. Every shape refuses an unknown key, and a key written on the wrong fate is refused rather than ignored.
+  - **Both modes read it.** The plan plans each row on the same terms as a platform row, and `--apply` performs it the same way. A row whose table is not on the database being planned is listed `absent`, so one supplement serves both a control-plane database and a tenant database.
+  - **It is refused, never half-read.** The command refuses a missing file, a file that is not JSON, a row the schema refuses, two rows for one object, or a row naming an object the platform inventory already gives a fate. The refusal comes before the database is opened, inside the `--json` envelope (`plan_refused` / `apply_refused`), and names the file, the row index and the object. A row naming one of the cloud-provided objects that the inventory lists with no fate (`cloudCarried`) replaces that placeholder row.
+  - **Nothing is read without the flag:** no environment variable and no conventional path. A host table with no declared fate is still refused by name, and the refusal now names `--fate-supplement FILE` as the remedy.
+  - The supplement's rows are part of the plan's `inventoryDigest`, so the apply's checkpoint is keyed on the supplement as well.
+  
+  ```bash
+  os migrate organization-ownership --fate-supplement host-fates.json --out plan.json
+  os migrate organization-ownership --fate-supplement host-fates.json --apply --backup-taken
+  ```
+- 6673c80: feat(cli)!: the v18 upgrade carries stored comment reactions — `os migrate comment-reactions` turns each reaction stored in the retired `sys_comment.reactions` column into a `sys_comment_reaction` record, and `os migrate apply --allow-destructive` refuses to drop that column until the conversion is verified
+  
+  Clause-②: no (narrowing) — `os migrate apply --allow-destructive` now refuses the `sys_comment.reactions` drop it accepted before, until a verified conversion is recorded; the conversion itself only writes records of an existing object, so nothing widens.
+  
+  <!-- adr-0087: not-required (already-registered sys-comment-reactions-column-retired) The narrowed input is the drop of the column that semantic entry retired, and the entry already reaches every upgrading deployment through `os migrate meta` and the upgrade guide. This changeset's prescription (convert, verify, then drop) is carried by that entry: this PR rewrites its replacement, reason and acceptance criteria to name the conversion and order it before the drop, with its id and surface unchanged. No spec key, export or stored shape moves. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  **What the upgrade now carries.** A database upgraded from 17.x keeps `sys_comment.reactions` and every emoji reaction stored in it (schema sync is additive). Those reactions are no longer lost. `os migrate comment-reactions` converts them into records:
+  
+  - **One record per stored reaction.** Each (comment, emoji, user) in a stored map becomes one `sys_comment_reaction` row with the same comment, emoji and user, in the comment's organization, owned by the user who reacted. That user can remove it like any reaction made on v18. A user id listed twice under one emoji is one reaction.
+  - **Nothing is guessed.** A stored value that is not JSON or not a map of emoji to user-id lists, an entry that is not a user id, an emoji longer than a reaction record holds, and a user id that names no `sys_user` row are each listed in the report with their comment id. Nothing is written for them. The readable entries of the same comment still convert.
+  - **Idempotent.** A reaction that already has its record is skipped, so a second run writes nothing, and re-running finishes an interrupted run.
+  - **Dry run by default.** `--apply` writes the records, reads the column back, and records the run in `sys_migration`. The run is recorded as verified only when every readable reaction has its record and no stored value is left unreadable. `--json` gives the full report. A run that lists an unreadable value or fails a write exits `1`, and so does an `--apply` run whose read-back finds anything unconverted.
+  
+  **The column drop waits for the conversion (the narrowing).** Until a verified run is recorded, `os migrate apply --allow-destructive` refuses to drop `sys_comment.reactions` and exits `1` (`--json`: `message: "refused_comment_reactions_unconverted"`, with the recorded run under `conversion`). Nothing else is applied on that run. This also covers the boot drift line, which names that command as the remedy for the orphaned column. What to do when it refuses: run the conversion below until it reports the run verified, then re-run the apply.
+  
+  **`os migrate apply --json` exits `1` when the `sys_account.issuer` retirement pre-flight refuses.** Its two refusals, `refused_account_issuer_collisions` and `refused_account_issuer_preflight_unreadable`, emitted their document with exit code `0`, so a caller gating on the status read a refused apply as a successful one. They now exit `1`, as the same refusals do without `--json`. The document is unchanged.
+  
+  **Upgrade order:** take a backup, run `os migrate comment-reactions`, then `os migrate comment-reactions --apply`. If it lists unreadable values, correct each one in the database so it reads as a map of emoji to user ids, or clear it if it holds nothing to keep, and run `--apply` again. Once the run is verified, run `os migrate apply --allow-destructive` to drop the column. Run these with the flags and environment the deployment boots with (an auth secret set), so the audit plugin's objects are composed.
+  
+  This supersedes the "stored reactions are not migrated" sentence in the entry that retired the column. `@objectstack/spec`: the protocol-18 semantic entry `sys-comment-reactions-column-retired` now names the conversion in its replacement, reason and acceptance criteria, and orders it before the drop. `os migrate meta` and the upgrade guide carry that text. Its id and surface are unchanged.
+
+### Patch Changes
+
+- eeb95f7: fix(spec,objectql)!: a permission set whose body `packageId` disagrees with the package that ships it is refused at `defineStack` / `os validate` / `os build` and at package registration, and every reader takes a set's owner from its binding only (ADR-0086 D3)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered permission-set-package-id-binding-mismatch-refused) this change widens that entry, in this diff, to the build and registration doors: same key, same ruling, same remedy, no stored row rewritten -->
+  
+  **BREAKING** (an accept-set narrowing on a published authoring surface), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0086 D3 declares `PermissionSetSchema.packageId` as the owning package of a package-shipped set, absent for an environment-authored one. The owner every reader uses is the binding: the package that ships the set or that it is saved into, served as `_packageId`. The metadata save, restore and publish doors already refuse a body `packageId` that disagrees with it. Package source and package registration did not: a set whose body named another package was registered under the package that shipped it, with no refusal and no warning, so an author, an AI build above all, never learned that the owner it wrote was not the owner it got.
+  
+  **What is refused, and where.** One judge, `judgePermissionSetOwnerBinding` (new export of `@objectstack/spec/security`), serves every door:
+  
+  - **The stack schema** (`ObjectStackDefinitionSchema`), so `defineStack`, `objectstack validate`, `objectstack build`, the lint scorer and an artifact load all refuse a set whose body `packageId` is not the id of the package that ships it: the stack's `manifest.id`, each `packages[]` body's own `id`, and `manifest.id` for a top-level set no body declares. A stack with no `manifest` ships its sets from no package, so any key there is refused, the empty string included. The issue sits at the set's `packageId` (`permissions.0.packageId`); `defineStack` throws `STACK_SCHEMA_INVALID` (422) carrying it.
+  - **Package registration** (`ObjectQL.registerApp`, the manifest and a nested plugin, for a manifest no schema parse judged) throws `400 VALIDATION_ERROR` with `issues[]` at `packageId` before the set is filed, the envelope the same seam throws for a view container whose `name` disagrees with its key.
+  
+  The message prescribes first, names both values, and offers both remedies: drop the key, or ship the set from the package it names. No error code is minted.
+  
+  **Readers.** `@objectstack/plugin-security`'s packaged-set lock (`classifyPackagedPermissionSet`) and `@objectstack/cli`'s permission-set name-collision report take a set's package from its binding only. A set filed into no package whose body named one is no longer locked as that package's, and a stack with no `manifest` declares no owner for the collision report.
+  
+  **Unchanged.** A body `packageId` equal to the package that ships the set is accepted, and an absent one is accepted everywhere. A top-level copy of a set a `packages[]` body declares (an artifact built with both halves) is judged on its body, not against the artifact's own id. The metadata save, restore and publish doors answer in the same words as before (`@objectstack/metadata-protocol` now calls the shared judge). Stored `sys_metadata` rows are not rewritten.
+  
+  ## FROM → TO
+  
+  | door | FROM | TO |
+  |:--|:--|:--|
+  | `defineStack` / `objectstack validate` / `objectstack build` | `defineStack({ manifest: { id: 'com.acme.crm', … }, permissions: [{ name: 'crm_member', packageId: 'com.acme.other', … }] })` accepted; the set was owned by `com.acme.crm` | refused at `permissions.0.packageId`, `STACK_SCHEMA_INVALID` 422 |
+  | `ObjectQL.registerApp` | the same manifest registered the set under `com.acme.crm`, silently | `400 VALIDATION_ERROR`, `issues[]` at `packageId`, nothing filed |
+  | an artifact built before this change | loaded, the set owned by the shipping package | refused at load; rebuild it without the key |
+  
+  **Remedy, in one line.** Drop `packageId` from the permission set in your stack source (the package that ships a set is its owner), or move the set into the stack of the package it names, then build again.
+- Updated dependencies [dac99c2]
+- Updated dependencies [5c9bfb0]
+- Updated dependencies [66949b7]
+- Updated dependencies [06dbc4e]
+- Updated dependencies [7958bdf]
+- Updated dependencies [9fbabd7]
+- Updated dependencies [5da2c0f]
+- Updated dependencies [87e902d]
+- Updated dependencies [3d830b7]
+- Updated dependencies [777eed2]
+- Updated dependencies [8258181]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [8024e12]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [d4aaeaf]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [c6139f2]
+- Updated dependencies [3490bf5]
+- Updated dependencies [920bc12]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [6f4c518]
+- Updated dependencies [08b38cb]
+- Updated dependencies [bae5841]
+- Updated dependencies [917b1a0]
+- Updated dependencies [d9d7edd]
+- Updated dependencies [78c13bd]
+- Updated dependencies [9543e9c]
+- Updated dependencies [d45d0e9]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [01d5034]
+- Updated dependencies [f24574a]
+- Updated dependencies [e790cfc]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [09ef77c]
+- Updated dependencies [5d3018d]
+- Updated dependencies [404fc47]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [24e064f]
+- Updated dependencies [4f1e435]
+- Updated dependencies [2de9c03]
+- Updated dependencies [5b68524]
+- Updated dependencies [5e725b8]
+- Updated dependencies [6d96721]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [28e294f]
+- Updated dependencies [775ed65]
+- Updated dependencies [02a691a]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [be50633]
+- Updated dependencies [325a92e]
+- Updated dependencies [325a92e]
+  - @objectstack/plugin-security@18.0.0-next.1
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/metadata-protocol@18.0.0-next.1
+  - @objectstack/objectql@18.0.0-next.1
+  - @objectstack/plugin-sharing@18.0.0-next.1
+  - @objectstack/lint@18.0.0-next.1
+  - @objectstack/service-settings@18.0.0-next.1
+  - @objectstack/verify@18.0.0-next.1
+  - @objectstack/service-automation@18.0.0-next.1
+  - create-objectstack@18.0.0-next.1
+  - @objectstack/service-mailbox@18.0.0-next.1
+  - @objectstack/rest@18.0.0-next.1
+  - @objectstack/runtime@18.0.0-next.1
+  - @objectstack/plugin-auth@18.0.0-next.1
+  - @objectstack/plugin-approvals@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/service-storage@18.0.0-next.1
+  - @objectstack/service-datasource@18.0.0-next.1
+  - @objectstack/plugin-webhooks@18.0.0-next.1
+  - @objectstack/cloud-connection@18.0.0-next.1
+  - @objectstack/metadata@18.0.0-next.1
+  - @objectstack/metadata-core@18.0.0-next.1
+  - @objectstack/service-messaging@18.0.0-next.1
+  - @objectstack/client@18.0.0-next.1
+  - @objectstack/console@18.0.0-next.1
+  - @objectstack/account@18.0.0-next.1
+  - @objectstack/setup@18.0.0-next.1
+  - @objectstack/driver-memory@18.0.0-next.1
+  - @objectstack/driver-mongodb@18.0.0-next.1
+  - @objectstack/driver-sql@18.0.0-next.1
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.1
+  - @objectstack/driver-turso@18.0.0-next.1
+  - @objectstack/formula@18.0.0-next.1
+  - @objectstack/mcp@18.0.0-next.1
+  - @objectstack/observability@18.0.0-next.1
+  - @objectstack/plugin-audit@18.0.0-next.1
+  - @objectstack/plugin-email@18.0.0-next.1
+  - @objectstack/plugin-hono-server@18.0.0-next.1
+  - @objectstack/service-analytics@18.0.0-next.1
+  - @objectstack/service-cache@18.0.0-next.1
+  - @objectstack/service-job@18.0.0-next.1
+  - @objectstack/service-package@18.0.0-next.1
+  - @objectstack/service-queue@18.0.0-next.1
+  - @objectstack/service-realtime@18.0.0-next.1
+  - @objectstack/service-sms@18.0.0-next.1
+  - @objectstack/trigger-api@18.0.0-next.1
+  - @objectstack/trigger-record-change@18.0.0-next.1
+  - @objectstack/trigger-schedule@18.0.0-next.1
+  - @objectstack/plugin-pinyin-search@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes
