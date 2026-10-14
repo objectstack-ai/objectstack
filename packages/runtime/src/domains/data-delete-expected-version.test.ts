@@ -92,12 +92,12 @@ async function bootStore() {
     await engine.syncSchemas();
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     await protocol.createData({ object: 'task', data: { id: 'r1', name: 'first' } } as any);
-    const row: any = await engine.findOne('task', { where: { id: 'r1' } } as any);
+    const row: any = await engine.findOne('task', { where: { id: 'r1' } });
     const version = row?.updated_at instanceof Date ? row.updated_at.toISOString() : String(row?.updated_at ?? '');
     if (!version) throw new Error('the store minted no updated_at, so no version token exists to pin');
     const deleteData = vi.spyOn(protocol, 'deleteData');
     /** Is `r1` still in the store? */
-    const present = async () => Boolean(await engine.findOne('task', { where: { id: 'r1' } } as any));
+    const present = async () => Boolean(await engine.findOne('task', { where: { id: 'r1' } }));
     return { protocol, version, present, deleteData };
 }
 
