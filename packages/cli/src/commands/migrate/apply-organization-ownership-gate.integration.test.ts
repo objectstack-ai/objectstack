@@ -9,7 +9,8 @@
  * no organization column on, so the drift report offers its physical one for
  * the destructive apply):
  *
- * 1. the drop is refused, naming the ceremony, and nothing is dropped;
+ * 1. the drop is refused, naming the ceremony, and nothing is dropped — the
+ *    whole `--allow-destructive` run is held, an unrelated drop in it included;
  * 2. a control: an unrelated destructive drop on the same table is not gated;
  * 3. once the ceremony's marker is verified, the drop proceeds.
  */
@@ -164,6 +165,16 @@ describe('os migrate apply --allow-destructive waits for the organization-owners
     expect(payload).toMatchObject({ message: 'refused_organization_ownership_unmigrated', tables: ['sys_platform_setting'] });
     expect(payload.detail).toMatch(/is not verified \(2 blocking/);
     expect(columnsOf(file, 'sys_platform_setting')).toContain('organization_id');
+  }, CASE_TIMEOUT_MS);
+
+  it('1c. the refusal holds the WHOLE run: a gated drop beside an unrelated one, and neither is applied', async () => {
+    const file = caseDb(['organization_id', 'legacy_23429_note']);
+    const { payload, exitCode } = await runJson(dropArgv(file));
+    expect(exitCode).toBe(1);
+    expect(payload).toMatchObject({
+      message: 'refused_organization_ownership_unmigrated', tables: ['sys_platform_setting'], applied: [], created: [],
+    });
+    expect(columnsOf(file, 'sys_platform_setting')).toEqual(expect.arrayContaining(['organization_id', 'legacy_23429_note']));
   }, CASE_TIMEOUT_MS);
 
   it('2. control: an unrelated destructive drop on the same table is not gated', async () => {

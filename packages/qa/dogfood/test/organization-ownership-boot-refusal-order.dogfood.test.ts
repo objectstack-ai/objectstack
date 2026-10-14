@@ -2,7 +2,7 @@
 //
 // [ADR-0131 D10 item 5] The v18 boot refusal must not deadlock the upgrade.
 //
-// The ceremony (`os migrate organization-ownership --apply`) refuses to name a
+// The ceremony (`os migrate organization-ownership --apply --plan-file FILE`) refuses to name a
 // grant's set until `sys_user_permission_set.permission_set` exists, and says
 // "Boot this release once against the database (its schema sync adds the
 // column)". The boot refusal refuses a v17-shape database until the ceremony's
@@ -20,9 +20,9 @@
 //     ALREADY added the column the ceremony waits for: the guard runs at
 //     `kernel:ready`, after every plugin's `start()`, which is where the schema
 //     sync runs;
-//  2. `os migrate organization-ownership --apply` (the real CLI, as an
-//     operator runs it) completes with no boot in between, and verifies its
-//     marker;
+//  2. `os migrate organization-ownership` writes its plan, and
+//     `--apply --plan-file PLAN` (the real CLI, as an operator runs it)
+//     completes with no boot in between, and verifies its marker;
 //  3. the next v18 boot succeeds.
 //
 // ⚠ Needs the `sys_metadata` family's no-column schema beside the refusal:
@@ -111,10 +111,15 @@ describe('[ADR-0131 D10 item 5] a 17.x database upgrades through the boot refusa
   });
 
   it('⭐ 2. the ceremony completes with no boot in between, and verifies its marker', () => {
-    const run = spawnSync(process.execPath, [
-      CLI_BIN, 'migrate', 'organization-ownership',
-      '--apply', '--backup-taken', '--database-url', `file:${file}`, '--out', join(dir, 'apply.json'),
+    // As an operator runs it (S4, #23437): the plan first, then the apply of
+    // that reviewed plan file.
+    const ceremony = (args: string[]) => spawnSync(process.execPath, [
+      CLI_BIN, 'migrate', 'organization-ownership', '--database-url', `file:${file}`, ...args,
     ], { cwd: SHOWCASE_DIR, encoding: 'utf8', timeout: 300_000, env: { ...process.env, NO_COLOR: '1' } });
+    const planFile = join(dir, 'plan.json');
+    const plan = ceremony(['--out', planFile]);
+    expect(plan.status, `${plan.stdout}\n${plan.stderr}`).toBe(0);
+    const run = ceremony(['--apply', '--plan-file', planFile, '--backup-taken', '--out', join(dir, 'apply.json')]);
     expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
     const db = new DatabaseSync(file);
     try {

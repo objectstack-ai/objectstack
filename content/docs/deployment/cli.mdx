@@ -996,11 +996,16 @@ safe. No flag skips these refusals:
   table clean (`os migrate account-issuer` reports the colliding rows).
 - `sys_comment.reactions` waits for a verified `os migrate comment-reactions --apply` run.
 - `organization_id` on any table the organization-ownership ceremony covers
-  waits for a verified `os migrate organization-ownership --apply` run. These tables are the
-  ADR-0131 D7 tables and the `sys_metadata` family. The ceremony drops those
-  columns itself once it verifies. Dropping one first would turn every legacy
+  waits for a verified `os migrate organization-ownership --apply --plan-file FILE`
+  run. These tables are the ADR-0131 D7 tables and the `sys_metadata` family.
+  The ceremony drops those columns itself, in its column-drops step, before it
+  records the run verified. Dropping one first would turn every legacy
   organization row into an environment row. Under `--json` the refusal answers
   `message: 'refused_organization_ownership_unmigrated'` and lists the `tables`.
+
+Each refusal holds the whole `--allow-destructive` run: nothing in it is
+created, applied or dropped, the run's other changes included. A run without
+`--allow-destructive` is unchanged.
 
 #### Index drift
 

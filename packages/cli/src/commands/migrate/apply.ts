@@ -501,9 +501,9 @@ export default class MigrateApply extends Command {
         const marker = await readOrganizationOwnershipMarker(engine as never);
         if (!marker.verified) {
           const detail = marker.flag
-            ? `The last run of "os migrate organization-ownership --apply" (${marker.flag.last_run_at}) is not verified `
+            ? `The last run of "os migrate organization-ownership --apply --plan-file FILE" (${marker.flag.last_run_at}) is not verified `
               + `(${marker.flag.blocking} blocking item(s)).`
-            : 'No run of "os migrate organization-ownership --apply" is recorded on this database.';
+            : 'No run of "os migrate organization-ownership --apply --plan-file FILE" is recorded on this database.';
           if (flags.json) {
             await emitJson({
               ...target, created: [], applied: [], skipped: drift, pending,
@@ -512,11 +512,12 @@ export default class MigrateApply extends Command {
             return;
           }
           printError(
-            `Refusing to drop organization_id from ${organizationDrops.join(', ')}: the organization-ownership ceremony `
+            `Refusing this --allow-destructive run: it would drop organization_id from ${organizationDrops.join(', ')}, which the organization-ownership ceremony `
             + `owns that drop, and it has not verified on this database. ${detail} Dropping the column first would turn `
             + 'every legacy organization row into an environment row without the ceremony\'s promotion or report. Run '
-            + '"os migrate organization-ownership" to review its plan, then "os migrate organization-ownership --apply"; '
-            + 'it drops these columns itself once it verifies.',
+            + '"os migrate organization-ownership --out PLAN" to write and review its plan, then '
+            + '"os migrate organization-ownership --apply --plan-file PLAN"; it drops these columns itself, in its '
+            + 'column-drops step, before it records the run verified. Nothing in this run was applied.',
           );
           this.exit(1);
           return;
