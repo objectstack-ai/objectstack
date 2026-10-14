@@ -11,6 +11,7 @@ import {
   exportNamesOf,
   holdersOf,
 } from '../../scripts/lib/export-origins-testkit';
+import { listRepoWalkFiles } from '../../scripts/lib/repo-walk-testkit';
 import { CONVERSIONS_BY_MAJOR } from '../conversions/registry';
 import { MIGRATIONS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR } from '../migrations/registry';
 
@@ -321,29 +322,22 @@ describe('tree-scoped absence: nothing inside the declared radius references a r
   it('no reference survives inside the declared radius outside the retirement kit', () => {
     const offenders: string[] = [];
     let visited = 0;
-    const walk = (dir: string) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        const rel = path.relative(REPO_ROOT, full).split(path.sep).join('/');
-        if (entry.isDirectory()) {
-          if (SKIPPED_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-          walk(full);
-          continue;
-        }
-        if (!entry.isFile()) continue;
-        const ext = path.extname(entry.name);
-        if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(ext)) continue;
-        if (entry.name === 'CHANGELOG.md') continue; // release prose records the removal
-        if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
-        if (TSUP_BUNDLED_CONFIG.test(entry.name)) continue;
-        visited += 1;
-        const text = readIfPresent(full);
-        if (text === undefined) continue;
-        const m = REFERENCE.exec(text);
-        if (m) offenders.push(`${rel} references \`${m[0].trim()}\``);
-      }
-    };
-    for (const root of WALK_ROOTS) walk(path.join(REPO_ROOT, root));
+    // What git does not ignore, never the raw filesystem: generated, gitignored
+    // output (the docs build's upgrade guide names every retired def) is not a
+    // source and never reaches CI's checkout (`scripts/lib/repo-walk-testkit.ts`).
+    const skipDir = (name: string) => SKIPPED_DIRS.has(name) || name.startsWith('.');
+    for (const rel of listRepoWalkFiles(REPO_ROOT, WALK_ROOTS, { skipDir })) {
+      const name = path.posix.basename(rel);
+      if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(path.extname(name))) continue;
+      if (name === 'CHANGELOG.md') continue; // release prose records the removal
+      if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
+      if (TSUP_BUNDLED_CONFIG.test(name)) continue;
+      visited += 1;
+      const text = readIfPresent(path.join(REPO_ROOT, rel));
+      if (text === undefined) continue;
+      const m = REFERENCE.exec(text);
+      if (m) offenders.push(`${rel} references \`${m[0].trim()}\``);
+    }
     // Anti-vacuity: the walk really covered the tree.
     expect(visited).toBeGreaterThan(1000);
     expect(offenders, 'a reference to a retired name means the retirement is being undone — nothing served, bound or consumed the family').toEqual([]);

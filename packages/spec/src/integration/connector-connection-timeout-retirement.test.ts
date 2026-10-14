@@ -69,6 +69,7 @@ import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 import { MIGRATIONS_BY_MAJOR, RETIRED_DEFS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { ObjectStackSchema } from '../stack.zod';
 import { ConnectorSchema, DeclarativeConnectorEntrySchema, type Connector } from './connector.zod';
+import { listRepoWalkFiles } from '../../scripts/lib/repo-walk-testkit';
 
 /** A well-formed catalog descriptor — every required key, none of the retired one. */
 const WELL_FORMED = {
@@ -389,8 +390,9 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     'content/docs/releases/',
     '.changeset/',
     // GITIGNORED build output (`.gitignore` line for `packages/spec/json-schema/`),
-    // reached only because this is a FILESYSTEM walk rather than a git walk.
-    // `retiredKey()` emits the tombstoned property into the generated JSON
+    // reached while this was a FILESYSTEM walk; the git listing the walk now
+    // reads (`scripts/lib/repo-walk-testkit.ts`) leaves it out, and the entry
+    // stays because its reason is the CONTENT, not the ignore. `retiredKey()` emits the tombstoned property into the generated JSON
     // Schema, exactly as it already does for the two retired siblings on this
     // same schema — measured: `Connector.json` carries `rateLimitConfig` and
     // `errorMapping` the same way. Excluding it costs no coverage: the source
@@ -457,29 +459,22 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
   it('no authoring survives inside the declared radius outside the retirement kit', () => {
     const offenders: string[] = [];
     let visited = 0;
-    const walk = (dir: string) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        const rel = path.relative(REPO_ROOT, full).split(path.sep).join('/');
-        if (entry.isDirectory()) {
-          if (SKIPPED_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-          walk(full);
-          continue;
-        }
-        if (!entry.isFile()) continue;
-        const ext = path.extname(entry.name);
-        if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(ext)) continue;
-        if (entry.name === 'CHANGELOG.md') continue; // release prose records the removal
-        if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
-        if (TSUP_BUNDLED_CONFIG.test(entry.name)) continue;
-        visited += 1;
-        const text = readIfPresent(full, rel);
-        if (text === undefined) continue;
-        const m = AUTHORING.exec(stripInlineCode(text));
-        if (m) offenders.push(`${rel} authors \`${m[0].trim()}\``);
-      }
-    };
-    for (const root of WALK_ROOTS) walk(path.join(REPO_ROOT, root));
+    // What git does not ignore, never the raw filesystem: generated, gitignored
+    // output (the docs build's upgrade guide names the retired key) is not a
+    // source and never reaches CI's checkout (`scripts/lib/repo-walk-testkit.ts`).
+    const skipDir = (name: string) => SKIPPED_DIRS.has(name) || name.startsWith('.');
+    for (const rel of listRepoWalkFiles(REPO_ROOT, WALK_ROOTS, { skipDir })) {
+      const name = path.posix.basename(rel);
+      if (!(rel.startsWith('examples/') ? EXAMPLES_EXT : SCANNED_EXT).has(path.extname(name))) continue;
+      if (name === 'CHANGELOG.md') continue; // release prose records the removal
+      if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
+      if (TSUP_BUNDLED_CONFIG.test(name)) continue;
+      visited += 1;
+      const text = readIfPresent(path.join(REPO_ROOT, rel), rel);
+      if (text === undefined) continue;
+      const m = AUTHORING.exec(stripInlineCode(text));
+      if (m) offenders.push(`${rel} authors \`${m[0].trim()}\``);
+    }
     // Anti-vacuity: the walk really covered the tree.
     expect(visited).toBeGreaterThan(1000);
     expect(offenders, 'an authoring of the retired key means the retirement is being undone').toEqual([]);

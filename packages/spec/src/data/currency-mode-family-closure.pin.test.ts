@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { listRepoWalkFiles } from '../../scripts/lib/repo-walk-testkit';
+
 // ─── [#20126] the currency-mode family: its one enumerating closure pin ────────
 //
 // The contract. `CurrencyConfigSchema` (`./field.zod.ts`) declares
@@ -100,18 +102,6 @@ const EXAMPLES_NON_CODE = new Set(['.json', '.md', '.mdx', '.yaml', '.yml']);
 const EXAMPLES_SRC_TS = /^examples\/[^/]+\/src\/.+\.ts$/;
 const RELEASES = 'content/docs/releases/';
 
-function walk(rel: string, out: string[]): void {
-  const abs = path.join(REPO_ROOT, rel);
-  for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
-    const child = `${rel}/${entry.name}`;
-    if (entry.isDirectory()) {
-      if (!SKIPPED_DIRS.has(entry.name)) walk(child, out);
-    } else if (entry.isFile()) {
-      out.push(child);
-    }
-  }
-}
-
 function inCorpusB(rel: string): boolean {
   const ext = path.extname(rel);
   if (!TEXT_EXT.has(ext)) return false;
@@ -125,8 +115,11 @@ function inCorpusA(rel: string): boolean {
   return (rel.startsWith('skills/') && rel.endsWith('.md')) || (rel.startsWith('content/docs/') && rel.endsWith('.mdx'));
 }
 
-const ALL_FILES: string[] = [];
-for (const root of WALK_ROOTS) walk(root, ALL_FILES);
+// What git does not ignore, never the raw filesystem: the docs build's
+// gitignored upgrade guide summarises a whole major in one paragraph, where the
+// date record and a currency change share a line, and CI's checkout never holds
+// it (`scripts/lib/repo-walk-testkit.ts`).
+const ALL_FILES: string[] = listRepoWalkFiles(REPO_ROOT, WALK_ROOTS, { skipDir: (name) => SKIPPED_DIRS.has(name) });
 const CORPUS_A = ALL_FILES.filter(inCorpusA);
 const CORPUS_B = ALL_FILES.filter(inCorpusB);
 const read = (rel: string): string => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
