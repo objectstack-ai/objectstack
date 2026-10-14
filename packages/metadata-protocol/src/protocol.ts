@@ -20473,21 +20473,24 @@ export class ObjectStackProtocolImplementation implements
             // An outage is not an absence: a failed read stops the walk with
             // nothing retired, as a degraded baseline read does below. An
             // unprovisioned store holds no row.
+            // The canonical key the repository stores rows under, and the one
+            // the write-through registers under (#8862, #9111).
+            const canonical = canonicalMetaType(type);
             let storedRows: Array<Record<string, unknown>> | null | undefined;
             try {
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
                 storedRows = await this.engine.find('sys_metadata', {
-                    where: { type: singular, name, state: 'active', organization_id: null, ...overlayMemberWhere(singular, member) },
+                    where: { type: canonical, name, state: 'active', organization_id: null, ...overlayMemberWhere(canonical, member) },
                     context: { isSystem: true },
                 });
             } catch (error) {
                 this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
             }
-            const remainingRows = singular === 'object' && this.isUnservedSealedOverlay(singular, name)
+            const remainingRows = canonical === 'object' && this.isUnservedSealedOverlay(canonical, name)
                 ? []
                 : storedRows ?? [];
             if (remainingRows.length > 0) {
-                if (singular === 'object' && !this.isArtifactBacked(singular, name)) {
+                if (canonical === 'object' && !this.isArtifactBacked(canonical, name)) {
                     const bindings = new Set(remainingRows.map((row) => boundPackageOf(row.package_id) ?? 'sys_metadata'));
                     const owner = typeof registry.getObjectOwner === 'function' ? registry.getObjectOwner(name) : undefined;
                     if (owner && !bindings.has(owner.packageId) && typeof registry.unregisterObject === 'function') {
@@ -20504,9 +20507,9 @@ export class ObjectStackProtocolImplementation implements
                 }
                 for (const row of remainingRows) {
                     await this.applyRegistryWriteThrough({
-                        type: singular,
+                        type: canonical,
                         name,
-                        item: this.convertStoredItem(String(row.type ?? singular), storedRowDocument(row)),
+                        item: this.convertStoredItem(String(row.type ?? canonical), storedRowDocument(row)),
                         packageId: boundPackageOf(row.package_id) ?? null,
                         organizationId: null,
                     });
