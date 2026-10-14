@@ -69,6 +69,7 @@ describe('owner anchor guard + owner-scoped bulk writes (#3004 / #2982)', () => 
     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
     const headers = new Headers({ authorization: `Bearer ${token}` });
     return resolveAuthzContext({
+      userAuthGates: undefined,
       ql,
       headers,
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

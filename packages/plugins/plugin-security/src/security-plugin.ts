@@ -40,7 +40,6 @@ import {
   registerGrantPermissionSetNameHooks,
   unregisterGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
-import { runOneTimeGrantPermissionSetNameBackfill } from './grant-permission-set-name-backfill.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
 import {
   explainAccessForAsker,
@@ -4465,41 +4464,13 @@ export class SecurityPlugin implements Plugin {
       void runBootstrap();
     }
 
-    // [ADR-0131 D4] Name the permission set on every grant written before
-    // `sys_user_permission_set.permission_set` existed — once per deployment,
-    // recorded in `sys_migration`. At `kernel:bootstrapped`, not `kernel:ready`:
-    // every `kernel:ready` handler has settled by then (the bootstrap above
-    // among them), so the security catalog read each
-    // name is verified through sees every definition this boot registers. A
-    // name it still does not resolve leaves the verdict unrecorded, so the next
-    // boot tries again. See `grant-permission-set-name-backfill.ts`.
-    const runGrantNameBackfill = async (): Promise<void> => {
-      try {
-        await runOneTimeGrantPermissionSetNameBackfill(ql as any, {
-          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
-          logger: ctx.logger,
-        });
-      } catch (e) {
-        ctx.logger.warn(
-          '[security] the sys_user_permission_set name backfill did not run — grants written before the ' +
-            'permission_set column existed keep no name until a later boot runs it',
-          { error: (e as Error)?.message },
-        );
-      }
-    };
-    if (typeof (ctx as any).hook === 'function') {
-      (ctx as any).hook('kernel:bootstrapped', runGrantNameBackfill);
-    } else {
-      void runGrantNameBackfill();
-    }
-
     // [ADR-0131 D3/D4] The catalog reference report: per organization, every
     // assignment and grant whose name the security catalog does not resolve,
     // and every grant that names nothing. A reference that resolves nowhere
-    // confers nothing; this is what makes that loud. Registered AFTER the
-    // grant-name backfill above, so it runs after it (handlers run in
-    // registration order) and does not report a name it resolved this boot.
-    // It writes nothing. Only at `kernel:bootstrapped`: run any earlier, it
+    // confers nothing; this is what makes that loud. A grant written before
+    // the name column existed is named by the v18 ceremony's verified
+    // rewrite (`os migrate organization-ownership --apply`, ADR-0131 D10),
+    // never at boot. It writes nothing. Only at `kernel:bootstrapped`: run any earlier, it
     // would judge a catalog that is still being filled. See `catalog-reference-report.ts`.
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {

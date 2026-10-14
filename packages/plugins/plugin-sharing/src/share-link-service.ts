@@ -796,12 +796,24 @@ export class ShareLinkService implements IShareLinkService {
     if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
 
     // Audience gating.
+    //
+    // [#23328] `signed_in`'s early return is kept: it reveals only whether the
+    // CALLER is signed in, which the caller already knows, so the work it skips
+    // leaks nothing about a server-side secret.
     if (row.audience === 'signed_in' && !probe.signedInUserId) return null;
-    if (row.audience === 'email') {
-      const allow = row.email_allowlist ?? [];
-      const supplied = (probe.recipientEmail ?? '').trim().toLowerCase();
-      if (!supplied || !allow.includes(supplied)) return null;
-    }
+    // [#23474] `email`'s verdict is computed here and combined with the
+    // password verdict below, so an `email` link's refusal does the same work
+    // whatever email and password are presented, as its answer bytes are
+    // already the same (#23372). Scoped to `email`: it is the audience whose
+    // satisfaction is a server-side list the caller supplies a guess against.
+    const audiencePassed =
+      row.audience === 'email'
+        ? (() => {
+            const allow = row.email_allowlist ?? [];
+            const supplied = (probe.recipientEmail ?? '').trim().toLowerCase();
+            return Boolean(supplied) && allow.includes(supplied);
+          })()
+        : true;
 
     // [#21197] `password_hash` is `internal`, so the row comes back without
     // it, and reading `row.password_hash` would read EVERY link as
@@ -817,14 +829,23 @@ export class ShareLinkService implements IShareLinkService {
     // current one — but only once every later gate has passed (below), so a
     // switched-off, gone or ineligible link takes no write.
     let upgradePasswordFrom: string | undefined;
+    let passwordPassed = true;
     if (passwordHash) {
-      if (!probe.providedPassword) return null;
-      const ok = await this.verifyPassword(probe.providedPassword, String(passwordHash));
-      if (!ok) return null;
-      if (this.upgradesLegacyPasswordHashes && isLegacyShareLinkPasswordHash(passwordHash)) {
-        upgradePasswordFrom = probe.providedPassword;
+      if (!probe.providedPassword) {
+        passwordPassed = false;
+      } else {
+        const ok = await this.verifyPassword(probe.providedPassword, String(passwordHash));
+        if (!ok) {
+          passwordPassed = false;
+        } else if (audiencePassed && this.upgradesLegacyPasswordHashes && isLegacyShareLinkPasswordHash(passwordHash)) {
+          // The upgrade write stays on the fully-passed path only.
+          upgradePasswordFrom = probe.providedPassword;
+        }
       }
     }
+    // [#23474] A link serves only when its audience AND its password both
+    // passed; otherwise the same `null`.
+    if (!audiencePassed || !passwordPassed) return null;
 
     // [commit fc9ba76a5] The object's policy is read HERE, before the record probe,
     // because it decides that probe's projection. `redactFields` is still

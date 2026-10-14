@@ -3,5 +3,5 @@
   "adrs": [
     "ADR-0131"
   ],
-  "invariant": "A grant names its permission set BY NAME beside the id (D4), and the two never disagree: on every sys_user_permission_set write that carries permission_set_id, for every caller, the name is derived from the id and a supplied name that names another set is refused. The id column may be dropped (D10) only once every grant's name is written and verified this way."
+  "invariant": "A grant names its permission set BY NAME alone (D4): the legacy permission_set_id is retired (D10), so nothing derives a name from an id, and a non-system write naming a set the security catalog does not hold is refused 400 reference_not_found. These hooks judge no duplicate: one grant per user, set and organization is the declared unique 'organization' index's, whose NULL-safe organization key part (ADR-0120 D3) refuses a second platform-wide grant too, for every writer and write path."
 }

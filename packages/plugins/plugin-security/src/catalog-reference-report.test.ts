@@ -5,8 +5,8 @@
  * whose name the security catalog does not resolve, per organization.
  *
  * Measured on a REAL `ObjectQL` engine over the SQL driver with the REAL
- * `SecurityPlugin` started on it (so the two `kernel:bootstrapped` backfills
- * the report runs after are the real ones), and the REAL metadata door
+ * `SecurityPlugin` started on it (so the `kernel:bootstrapped` handler that
+ * runs the report is the real one), and the REAL metadata door
  * (`ObjectStackProtocolImplementation`) for the definition saves. The catalog
  * is S1's read (`createSecurityCatalogReader`) over the engine registry and a
  * metadata service whose declarations a test can remove and re-add — the way
@@ -228,7 +228,7 @@ const findings = (report: CatalogReferenceReport) =>
     organizationId: o.organizationId,
     positionAssignments: o.positionAssignments.map((r) => `${r.id}:${r.name}`),
     permissionSetGrants: o.permissionSetGrants.map((r) => `${r.id}:${r.name}`),
-    unnamedGrants: o.unnamedGrants.map((g) => `${g.id}:${g.permissionSetId}`),
+    unnamedGrants: o.unnamedGrants.map((g) => `${g.id}:${g.userId}`),
   }));
 
 describe('[ADR-0131 D4] the catalog reference report — references whose names resolve nowhere, per organization', () => {
@@ -264,7 +264,7 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
     // a grant whose permission set has gone.
     await insertRows(b, 'sys_permission_set', [{ id: 'ps_auditor', name: AUDITOR.name, label: 'Auditor' }]);
     await insertRows(b, 'sys_user_permission_set', [
-      { id: 'g_ghost', user_id: 'usr_a', permission_set_id: 'ps_gone', permission_set: 'ghost_set', organization_id: ORG },
+      { id: 'g_ghost', user_id: 'usr_a', permission_set: 'ghost_set', organization_id: ORG },
       { id: 'g_ok', user_id: 'usr_a', permission_set: AUDITOR.name, organization_id: ORG },
     ]);
 
@@ -290,28 +290,28 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
     expect(report.organizations[1].positionAssignments[0].userId).toBe('usr_a');
   });
 
-  it('a grant on a row-only set stays unnamed after the name backfill, confers nothing, and is listed', async () => {
+  it('an unnamed grant stays unnamed through the boot (no boot names it, ADR-0131 D10), confers nothing, and is listed', async () => {
     const b = await boot();
     await insertUser(b, 'usr_row_only');
-    // A set row whose name no declaration carries: the backfill cannot show
-    // the name names a definition, so the grant keeps no name.
+    // A set row whose name no declaration carries, beside a grant that names
+    // nothing: only the v18 ceremony's rewrite names a legacy grant.
     await insertRows(b, 'sys_permission_set', [
       { id: 'ps_row_only', name: 's3_row_only', label: 'Row only', system_permissions: ['s3_row_only_bit'] },
     ]);
     await insertUnnamedGrants(b, [
-      { id: 'g_row_only', user_id: 'usr_row_only', permission_set_id: 'ps_row_only', organization_id: ORG },
+      { id: 'g_row_only', user_id: 'usr_row_only', organization_id: ORG },
     ]);
     await b.bootstrapped();
 
     const [grant] = (await b.engine.find('sys_user_permission_set', { where: { id: 'g_row_only' }, context: SYS })) as any[];
-    expect(grant.permission_set ?? null, 'the name backfill left it unnamed').toBeNull();
+    expect(grant.permission_set ?? null, 'no boot names it').toBeNull();
     const resolved = await resolveUserAuthzGrants(b.engine as any, 'usr_row_only', { tenantId: ORG });
     expect({ permissions: resolved.permissions.includes('s3_row_only'), bit: resolved.systemPermissions.includes('s3_row_only_bit') })
       .toEqual({ permissions: false, bit: false });
     expect(findings(await b.report())).toEqual([{
       organizationId: ORG,
       positionAssignments: [], permissionSetGrants: [],
-      unnamedGrants: ['g_row_only:ps_row_only'],
+      unnamedGrants: ['g_row_only:usr_row_only'],
     }]);
   });
 });
@@ -527,22 +527,18 @@ describe('[ADR-0131 D4] a read that did not happen is never "resolves nowhere"',
 });
 
 describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped', () => {
-  it('after the grant-name backfill — a name it resolved this boot is not reported — and the report writes nothing', async () => {
+  it('as the last kernel:bootstrapped handler, and the report writes nothing', async () => {
     const b = await boot();
-    // An unnamed grant whose set row's name the catalog resolves, which the
-    // grant-name backfill names this boot: it may not be reported. (The
-    // row-only position backfill ran here too until C3 stage 8 unwired it.)
+    // (The grant-name backfill ran ahead of it until the v18 ceremony's
+    // rewrite replaced it, ADR-0131 D10; the row-only position backfill until
+    // C3 stage 8 unwired it.)
     await insertRows(b, 'sys_user_position', [
       { id: 'up_ghost', user_id: 'usr_a', position: 'ghost_lead', organization_id: ORG },
     ]);
-    await insertRows(b, 'sys_permission_set', [{ id: 'ps_auditor', name: AUDITOR.name, label: 'Auditor' }]);
-    await insertUnnamedGrants(b, [
-      { id: 'g_backfilled', user_id: 'usr_a', permission_set_id: 'ps_auditor', organization_id: ORG },
-    ]);
 
     const handlers = b.hooks.get('kernel:bootstrapped') ?? [];
-    // The grant-name backfill, then this report (ADR-0131 D4).
-    expect(handlers).toHaveLength(2);
+    // This report alone: the grant-name backfill that ran ahead of it is retired (ADR-0131 D10).
+    expect(handlers).toHaveLength(1);
     for (const handler of handlers.slice(0, -1)) await handler();
     const writes = [
       vi.spyOn(b.engine, 'insert'), vi.spyOn(b.engine, 'update'), vi.spyOn(b.engine, 'delete'),
