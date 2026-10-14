@@ -26453,9 +26453,10 @@ export class ObjectStackProtocolImplementation implements
         const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const re = olds.length ? new RegExp(`(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g') : null;
         // ⭐ AT AN OBJECT-REFERENCE PROPERTY, A NAME IS REWRITTEN WHOLE — the
-        // only place a BARE name is rewritten. Measured: a free-text rewrite of
-        // `ticket` also renames a lookup FIELD called `ticket` (`fields.ticket.
-        // name`) and the word in "A support ticket raised by a customer". So a
+        // only place a BARE name is rewritten. Measured: putting `ticket` in the
+        // free-text rewrite above turns "A support ticket raised by a customer"
+        // into "A support iojn2_ticket raised …", and the same match renames the
+        // value of a lookup FIELD called `ticket` (`fields.ticket.name`). So a
         // value is rewritten only where it sits under a property that names an
         // object — the derived site index (`REFERENCE_SITES`, target `object`:
         // `reference`, `object`, `objectName`, `objects`, …), read by property
