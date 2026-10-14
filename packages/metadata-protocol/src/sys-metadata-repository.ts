@@ -864,19 +864,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // misses it — creating a second draft row would fork the pending change.
     // That package-less row is the one the write updates; `put`'s stamp
     // (`existingPkg ?? targetPackageId`) then adopts it into the package.
-    //
-    // [#23291, ADR-0070 TL;DR 1] …and the same for a write that NAMES its
-    // package, at either state: the package-unbound row is "only a read-side
-    // rehydration detail and a migration source", and a write naming the
-    // package is that migration. Inserting the package's row beside it left
-    // the item `[null, P]`: the read naming no package (ADR-0048 §3.3, first
-    // match) kept serving the unbound row while the package-less save and
-    // delete (#23165) addressed the package's, so one name reached two rows.
-    // Adopted, the item has one row and every door addresses it. Only when
-    // the package has no row of its own here: a package-unbound row stored
-    // beside one (rows minted before this) is left as it is, and a row bound
-    // to another package is never found, as above.
-    if (!row && targetPackageId !== null) {
+    if (!row && state === 'draft' && packageId == null && targetPackageId !== null) {
       row = await this.engine.findOne('sys_metadata', {
         where: this.whereFor(ref, state, null, member),
         context,
@@ -1394,12 +1382,7 @@ export class SysMetadataRepository implements MetadataRepository {
     // Read the active row through the SAME package scope we will write, so the
     // optimistic-lock `parentVersion` matches the exact row `put` upserts.
     // (Package-less drafts → packageId null → identical to the prior behaviour.)
-    //
-    // [#23291] Through {@link headAt}, the put's own write-address resolution,
-    // never {@link get} at the key: a draft bound to a package whose item has
-    // only the package-unbound active row ADOPTS that row, so the parent is
-    // that row's version.
-    const currentActive = (await this.headAt(ref, { state: 'active', packageId: draftPackageId, member: opts.member })).head;
+    const currentActive = await this.get(ref, { state: 'active', packageId: draftPackageId, member: opts.member });
     const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(draft.body) : draft.body;
     const result = await this.put(ref, activeBody, {
       parentVersion: currentActive?.hash ?? null,

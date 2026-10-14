@@ -10689,6 +10689,31 @@ export class ObjectStackProtocolImplementation implements
         // is answered as a draft, as above.
         const storedRowDeclined = readState === 'active' && this.declinesStoredRow(request.type, request.name);
 
+        // [#23291, ADR-0048 §3.3, ADR-0070 TL;DR 1] The package whose stored
+        // content a read that names no package serves: the address a save or
+        // a delete naming none writes ({@link packagelessAddress}), read from
+        // the item's ACTIVE rows at both states, as the draft save inherits
+        // its package from them (#11087). For an item bound to exactly one
+        // package, the read then serves what the read naming that package
+        // serves (its own row, else the package-less one); otherwise any row,
+        // the best-effort first match ADR-0048 §3.3 states.
+        //
+        // Before, it took the first row of any package. A save naming the
+        // package beside the item's package-unbound row mints the package's
+        // row and leaves the unbound one stored first, so this read kept
+        // serving the unbound body while the package-less save wrote the
+        // package's row, the package-less delete removed it, the list served
+        // it, and this read's own `version` named it (#23165). The package-less
+        // row is not converted or removed: ADR-0070 keeps it as a read-side
+        // detail and a migration source, and it still stands in for every
+        // package with no row of its own (ADR-0048 prefer-local).
+        //
+        // Content only: the lock is selected from the item's rows at the
+        // address the `_lock` gate judges a package-less save at, below.
+        const contentPackageId = request.packageId
+            || (await this.packagelessAddress(PLURAL_TO_SINGULAR[request.type] ?? request.type, request.name, member)).packageId
+            || undefined;
+
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
         // fall back to the active read below. This differs from the strict
@@ -10704,7 +10729,7 @@ export class ObjectStackProtocolImplementation implements
                     type: request.type,
                     name: request.name,
                     state: 'draft',
-                    ...(request.packageId ? { packageId: request.packageId } : {}),
+                    ...(contentPackageId ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
                 }))?.row;
                 if (draftRec) {
@@ -10750,7 +10775,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: readState,
-                ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...(contentPackageId ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             }))?.row;
             storedRowServed = record !== undefined && record !== null;

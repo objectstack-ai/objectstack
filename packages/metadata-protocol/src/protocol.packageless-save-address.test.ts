@@ -41,6 +41,10 @@
  *  - the draft path: a package-less draft save still inherits the package
  *    (its own suite, `sys-metadata-repository.draft-package-inherit.test.ts`,
  *    holds the rest).
+ *  - [#23291] the read naming no package serves the row that save writes,
+ *    with a package-unbound row stored beside the package's: the card's five
+ *    steps, both storage orders, the draft reads, the stand-in for another
+ *    package, and an item another package holds too.
  *
  * Refusals are asserted as the envelope an HTTP boundary answers with
  * (`resolveThrownHttpError`): `code` and `status`, never a bare throw.
@@ -688,30 +692,28 @@ describe('[#23297] CONTROL: one package and a package-less active row — the dr
 });
 
 /**
- * [#23291, ADR-0070 TL;DR 1, ADR-0048] A save NAMING a package, of an item
- * whose only row at the address is the package-unbound one, ADOPTS that row
- * into the package: it updates the row and stamps the binding, and never
- * mints a second row beside it.
+ * [#23291, ADR-0048 §3.3, ADR-0070 TL;DR 1] The read that names no package
+ * serves the row a save naming none writes.
  *
- * Before, the save inserted the package's row beside the unbound one, so the
- * item held `[null, P]`, the unbound row first. The read naming no package
- * (ADR-0048 §3.3, first match) then kept serving the unbound row, while the
- * package-less save (#23165) wrote the package's row and the package-less
- * delete removed it, the receipt saying the package-less row remained. A
- * read and a save addressed by the same name reached different rows.
+ * A save naming a package, of an item whose only row is the package-unbound
+ * one, stores the package's row beside it, the unbound row first. The read
+ * naming no package took the first row of any package, so it kept serving the
+ * unbound body while the package-less save wrote the package's row (#23165),
+ * the package-less delete removed it, the list served it, and the read's own
+ * `version` named it: one name, two rows.
  *
- * Adopt, not refuse or re-route the read: ADR-0070 makes the package-less
- * state "only a read-side rehydration detail and a migration source", and a
- * save naming the package is that migration. The draft save already adopted
- * an orphan package-less draft the same way (#11087); this is the same
- * resolution for every write that names its package, the publish of a
- * package's draft included.
+ * The read now resolves the address the save and the delete resolve
+ * (`packagelessAddress`): for an item bound to exactly one package it serves
+ * what the read naming that package serves. The package-unbound row is kept:
+ * ADR-0070 leaves it as a read-side detail and a migration source, and it still
+ * stands in for every package with no row of its own (ADR-0048 prefer-local),
+ * which `protocol.org-scoped-write-refused.test.ts` pins for view containers.
  *
  * Each step's read is asserted against the address its save resolved.
  */
-describe('[#23291] a save naming a package beside the item\'s package-unbound row adopts that row', () => {
+describe('[#23291] the read naming no package serves the row the save naming none writes', () => {
     it('the card\'s five steps: every read serves the row the save addressed', async () => {
-        const { protocol, rows, metadataWrites } = makeProtocol();
+        const { protocol, rows } = makeProtocol();
         const name = 's6_app';
 
         // 1. A package-less save of an item with no binding: the unbound row.
@@ -719,164 +721,129 @@ describe('[#23291] a save naming a package beside the item\'s package-unbound ro
         expect(first.message).toBe(`Saved app '${name}' (env-wide, state=active) [seq=${first.seq}]`);
         expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([null]);
         expect((await protocol.getMetaItem({ type: 'app', name })).item.label).toBe('unbound');
-        const unboundId = rows('app', name)[0]!.id;
 
-        // 2. A save naming the package: the same row, now bound. No insert.
-        const insertsBefore = metadataWrites().filter((w) => w.op === 'insert').length;
+        // 2. A save naming the package writes the package's row; the unbound row stays, first.
         const named = await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg' }), packageId: WRITABLE });
         expect(named.message).toContain(`package=${WRITABLE}`);
-        expect(rows('app', name).map((r) => [r.id, r.package_id ?? null])).toEqual([[unboundId, WRITABLE]]);
-        expect(metadataWrites().filter((w) => w.op === 'insert' && w.table === 'sys_metadata')).toHaveLength(insertsBefore);
+        expect(rows('app', name).map((r) => [r.package_id ?? null, JSON.parse(r.metadata).label]))
+            .toEqual([[null, 'unbound'], [WRITABLE, 'pkg']]);
 
-        // 3. Both reads serve it, with one version token: one address.
+        // 3. The read naming no package serves the package's row, with the
+        //    content and the version token of the read naming the package.
         const unnamedRead = await protocol.getMetaItem({ type: 'app', name });
         const namedRead = await protocol.getMetaItem({ type: 'app', name, packageId: WRITABLE });
         expect(unnamedRead.item).toMatchObject({ label: 'pkg', _packageId: WRITABLE });
         expect(namedRead.item).toMatchObject({ label: 'pkg' });
         expect(unnamedRead.version).toEqual(expect.any(String));
-        expect(namedRead.version).toBe(unnamedRead.version);
+        expect(unnamedRead.version).toBe(namedRead.version);
 
-        // 4. A package-less save resolves that package (#23165), and the read
-        //    naming no package, the read naming it and the list all serve it.
+        // 4. A package-less save, pinned to that token, writes the package's
+        //    row (#23165), and the reads and the list serve what it wrote.
         const third = await protocol.saveMetaItem({
             type: 'app', name, item: app(name, { label: 'third' }), parentVersion: unnamedRead.version,
         });
         expect(third.message).toBe(`Saved app '${name}' (env-wide, package=${WRITABLE}, state=active) [seq=${third.seq}]`);
-        expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
+        expect(bodiesByBinding(rows('app', name))).toEqual({ null: app(name, { label: 'unbound' }), [WRITABLE]: app(name, { label: 'third' }) });
         expect((await protocol.getMetaItem({ type: 'app', name })).item.label).toBe('third');
         expect((await protocol.getMetaItem({ type: 'app', name, packageId: WRITABLE })).item.label).toBe('third');
         const listed = (await protocol.getMetaItems({ type: 'app' })).items.filter((i: any) => i?.name === name);
         expect(listed.map((i: any) => i.label)).toEqual(['third']);
 
-        // 5. A package-less delete removes that row, and the item is gone.
+        // 5. A package-less delete removes the package's row and says the
+        //    package-less row remains; that row is now the address of the
+        //    read and of the next package-less save alike.
         const receipt = await protocol.deleteMetaItem({ type: 'app', name });
-        expect(receipt.message).toBe(`Deleted app '${name}' (package=${WRITABLE}) — it no longer exists. [seq=${receipt.seq}]`);
+        expect(receipt.message).toBe(
+            `Deleted app '${name}' (package=${WRITABLE}), and it still exists: its package-less row remains. [seq=${receipt.seq}]`,
+        );
+        expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([null]);
+        expect((await protocol.getMetaItem({ type: 'app', name })).item.label).toBe('unbound');
+        const after = await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound again' }) });
+        expect(after.message).toBe(`Saved app '${name}' (env-wide, state=active) [seq=${after.seq}]`);
+        expect((await protocol.getMetaItem({ type: 'app', name })).item.label).toBe('unbound again');
+        // And a second package-less delete removes it: the item is gone.
+        const last = await protocol.deleteMetaItem({ type: 'app', name });
+        expect(last.message).toBe(`Deleted app '${name}' — it no longer exists. [seq=${last.seq}]`);
         expect(rows('app', name)).toEqual([]);
-        const after = await protocol.getMetaItem({ type: 'app', name }).catch((e: unknown) => e);
-        expect(after?.item ?? null).toBeNull();
     });
 
-    it('the read naming the package serves the token of the row the save adopts, and read → save with it is accepted', async () => {
-        const { protocol, rows } = makeProtocol();
-        const name = 's6_token_app';
+    for (const unboundFirst of [true, false]) {
+        it(`whichever order the store holds the two rows in (package-unbound row ${unboundFirst ? 'first' : 'second'})`, async () => {
+            const { protocol, seedRow } = makeProtocol();
+            const name = 's6_order_app';
+            const unbound = () => seedRow({ type: 'app', name, package_id: null, metadata: JSON.stringify(app(name, { label: 'unbound' })), checksum: 'sha-unbound' });
+            if (unboundFirst) unbound();
+            seedRow({ type: 'app', name, package_id: WRITABLE, metadata: JSON.stringify(app(name, { label: 'pkg' })), checksum: 'sha-pkg' });
+            if (!unboundFirst) unbound();
+
+            const read = await protocol.getMetaItem({ type: 'app', name });
+
+            expect(read.item).toMatchObject({ label: 'pkg', _packageId: WRITABLE });
+            expect(read.version).toBe((await protocol.getMetaItem({ type: 'app', name, packageId: WRITABLE })).version);
+        });
+    }
+
+    it('the package-unbound row still stands in for a package with no row of its own (ADR-0048 prefer-local)', async () => {
+        const { protocol } = makeProtocol();
+        const name = 's6_standin_app';
         await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound' }) });
-
-        const { version } = await protocol.getMetaItem({ type: 'app', name, packageId: WRITABLE });
-        // The unbound row's token: the head the save naming the package writes.
-        expect(version).toBe((await protocol.getMetaItem({ type: 'app', name })).version);
-        expect(version).toEqual(expect.any(String));
-
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg' }), packageId: WRITABLE, parentVersion: version });
-        expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
-
-        // A create assertion meets the row that exists at the address.
-        const envelope = resolveThrownHttpError(await refusalOf(() => protocol.saveMetaItem({
-            type: 'app', name, item: app(name, { label: 'again' }), packageId: OTHER_WRITABLE, parentVersion: version,
-        })));
-        expect(envelope).toMatchObject({ status: 409, code: 'METADATA_CONFLICT' });
-    });
-
-    it('the adopted row keeps the lock family it stores', async () => {
-        const { protocol, rows } = makeProtocol();
-        const name = 's6_locked_app';
-        const stamped = { _lock: 'no-delete', _lockReason: 'Stamped by the platform.', _lockSource: 'package' };
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, stamped), packageId: null, source: 'migrate-stored', force: true });
-
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'Edited' }), packageId: WRITABLE });
-
-        expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
-        expect(bodiesByBinding(rows('app', name))[WRITABLE]).toMatchObject({ label: 'Edited', ...stamped });
-    });
-
-    it('a draft saved naming the package, then published, adopts the unbound active row', async () => {
-        const { protocol, rows } = makeProtocol();
-        const name = 's6_publish_app';
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound' }) });
-
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'drafted' }), packageId: WRITABLE, mode: 'draft' });
-        expect(rows('app', name, 'draft').map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
-        await protocol.publishMetaItem({ type: 'app', name, packageId: WRITABLE });
-
-        expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
-        expect(rows('app', name, 'draft')).toEqual([]);
-        expect((await protocol.getMetaItem({ type: 'app', name })).item.label).toBe('drafted');
-    });
-
-    it('a draft naming the package adopts the item\'s package-unbound draft', async () => {
-        const { protocol, rows } = makeProtocol();
-        const name = 's6_draft_app';
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound draft' }), mode: 'draft' });
-        expect(rows('app', name, 'draft').map((r) => r.package_id ?? null)).toEqual([null]);
-
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg draft' }), packageId: WRITABLE, mode: 'draft' });
-
-        expect(rows('app', name, 'draft').map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
-        expect((await protocol.getMetaItem({ type: 'app', name, state: 'draft' })).item.label).toBe('pkg draft');
-    });
-
-    it('edge: another package already holds a row — the unbound row is adopted, and the item is then a two-package item', async () => {
-        const { protocol, rows, seedRow } = makeProtocol();
-        const name = 's6_shared_app';
-        // Rows stored before this fix: the package-unbound row beside another
-        // package's (no door mints that pair now: the save naming the other
-        // package would have adopted the unbound row).
-        seedRow({ type: 'app', name, package_id: null, metadata: JSON.stringify(app(name, { label: 'unbound' })), checksum: 'sha-unbound' });
-        seedRow({ type: 'app', name, package_id: OTHER_WRITABLE, metadata: JSON.stringify(app(name, { label: 'other' })), checksum: 'sha-other' });
-
         await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg' }), packageId: WRITABLE });
 
-        expect(bodiesByBinding(rows('app', name))).toEqual({
-            [WRITABLE]: app(name, { label: 'pkg' }),
-            [OTHER_WRITABLE]: app(name, { label: 'other' }),
+        expect((await protocol.getMetaItem({ type: 'app', name, packageId: OTHER_WRITABLE })).item.label).toBe('unbound');
+    });
+
+    it('the draft reads serve the draft a package-less draft save writes: the package\'s', async () => {
+        const { protocol, rows, seedRow } = makeProtocol();
+        const name = 's6_draft_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound' }) });
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg' }), packageId: WRITABLE });
+        // Drafts stored before this: the package-unbound one first, the package's beside it.
+        seedRow({ type: 'app', name, state: 'draft', package_id: null, metadata: JSON.stringify(app(name, { label: 'unbound draft' })), checksum: 'sha-ud' });
+        seedRow({ type: 'app', name, state: 'draft', package_id: WRITABLE, metadata: JSON.stringify(app(name, { label: 'pkg draft' })), checksum: 'sha-pd' });
+
+        const strict = await protocol.getMetaItem({ type: 'app', name, state: 'draft' });
+        expect(strict.item.label).toBe('pkg draft');
+        expect(strict.version).toBe((await protocol.getMetaItem({ type: 'app', name, state: 'draft', packageId: WRITABLE })).version);
+        expect((await protocol.getMetaItem({ type: 'app', name, previewDrafts: true })).item).toMatchObject({ label: 'pkg draft', _draft: true });
+
+        // The package-less draft save, pinned to that token, writes that draft
+        // (it inherits the package of the active rows, #11087).
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg draft 2' }), mode: 'draft', parentVersion: strict.version });
+        expect(bodiesByBinding(rows('app', name, 'draft'))).toEqual({
+            null: app(name, { label: 'unbound draft' }),
+            [WRITABLE]: app(name, { label: 'pkg draft 2' }),
         });
-        // Each read naming a package serves its own row; no package-unbound row is left to serve.
-        expect((await protocol.getMetaItem({ type: 'app', name, packageId: WRITABLE })).item.label).toBe('pkg');
-        expect((await protocol.getMetaItem({ type: 'app', name, packageId: OTHER_WRITABLE })).item.label).toBe('other');
-        expect(['pkg', 'other']).toContain((await protocol.getMetaItem({ type: 'app', name })).item.label);
-        // The package-less save and delete are refused as for any two-package item (#23165).
+        expect((await protocol.getMetaItem({ type: 'app', name, state: 'draft' })).item.label).toBe('pkg draft 2');
+    });
+
+    it('edge: another package holds a row too — the read is ADR-0048 §3.3\'s best effort, and the package-less save and delete are refused', async () => {
+        const { protocol, rows } = makeProtocol();
+        const name = 's6_shared_app';
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound' }) });
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg' }), packageId: WRITABLE });
+        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other' }), packageId: OTHER_WRITABLE });
+        const before = bodiesByBinding(rows('app', name));
+        expect(Object.keys(before).sort()).toEqual([WRITABLE, OTHER_WRITABLE, 'null'].sort());
+
+        // No package-less write address exists, so neither write is guessed.
         for (const run of [
             () => protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'x' }) }),
             () => protocol.deleteMetaItem({ type: 'app', name }),
         ]) {
             expect(resolveThrownHttpError(await refusalOf(run))).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
         }
-        expect(rows('app', name)).toHaveLength(2);
-    });
+        expect(bodiesByBinding(rows('app', name))).toEqual(before);
+        // Each read naming a package serves its own row; the read naming none serves a stored row.
+        expect((await protocol.getMetaItem({ type: 'app', name, packageId: WRITABLE })).item.label).toBe('pkg');
+        expect((await protocol.getMetaItem({ type: 'app', name, packageId: OTHER_WRITABLE })).item.label).toBe('other');
+        expect(['unbound', 'pkg', 'other']).toContain((await protocol.getMetaItem({ type: 'app', name })).item.label);
 
-    it('edge: a save naming a second package after the adoption writes its own row, never the first package\'s', async () => {
-        const { protocol, rows } = makeProtocol();
-        const name = 's6_second_app';
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound' }) });
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg' }), packageId: WRITABLE });
-
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other' }), packageId: OTHER_WRITABLE });
-
-        expect(bodiesByBinding(rows('app', name))).toEqual({
-            [WRITABLE]: app(name, { label: 'pkg' }),
-            [OTHER_WRITABLE]: app(name, { label: 'other' }),
-        });
-    });
-
-    it('CONTROL: a package\'s own row is written in place; a package-unbound row stored beside it stays as it is', async () => {
-        const { protocol, rows, seedRow } = makeProtocol();
-        const name = 's6_residue_app';
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name), packageId: WRITABLE });
-        seedRow({ type: 'app', name, package_id: null, metadata: JSON.stringify(app(name, { active: false })), checksum: 'sha-residue' });
-
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'Edited' }), packageId: WRITABLE });
-
-        const bodies = bodiesByBinding(rows('app', name));
-        expect(bodies[WRITABLE]).toMatchObject({ label: 'Edited' });
-        expect(bodies.null).toEqual(app(name, { active: false }));
-    });
-
-    it('CONTROL: a delete naming the package removes no package-unbound row', async () => {
-        const { protocol, rows } = makeProtocol();
-        const name = 's6_delete_named_app';
-        await protocol.saveMetaItem({ type: 'app', name, item: app(name) });
-
-        await protocol.deleteMetaItem({ type: 'app', name, packageId: WRITABLE });
-
-        expect(rows('app', name).map((r) => r.package_id ?? null)).toEqual([null]);
+        // A delete naming one package leaves a one-package item: the reads and
+        // the package-less doors address that package's row again.
+        await protocol.deleteMetaItem({ type: 'app', name, packageId: OTHER_WRITABLE });
+        expect((await protocol.getMetaItem({ type: 'app', name })).item.label).toBe('pkg');
+        const saved = await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pkg 2' }) });
+        expect(saved.message).toContain(`package=${WRITABLE}`);
+        expect((await protocol.getMetaItem({ type: 'app', name })).item.label).toBe('pkg 2');
     });
 });
