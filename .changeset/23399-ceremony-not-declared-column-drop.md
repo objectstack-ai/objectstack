@@ -12,6 +12,6 @@ Such a table is now answered `not-declared`:
 
 - the step still blocks and keeps the column;
 - its blocker names the table and the remedy: re-run the ceremony where the deployment's composition is declared, from its project directory and environment (the `requires` capability whose provider declares the object, and `OS_AUTH_SECRET` for the objects the auth family declares);
-- the `column-drops` step's summary counts these tables as `notDeclared`, in the `--json` report and in the checkpoint.
+- the `column-drops` step's summary counts these tables as `notDeclared` in the apply report (the report file and `--json`).
 
 The "not proposed" blocker is unchanged. It is now given only for an object the composition does declare.
