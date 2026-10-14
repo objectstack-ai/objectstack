@@ -792,7 +792,7 @@ jobs:
                rule lives, and everything in it the axis does not reach is still
                prose.
 
-            2. It releases nothing (.github/, .claude/, skills/, docs/, content/,
+            2. It releases nothing (.github/, .claude/, docs/, content/,
                examples/, tests-only, and the like)
                -> apply the 'skip-changeset' label.   <<< PREFERRED
                The label is a gate-level exemption. It produces NO input for
@@ -809,15 +809,12 @@ jobs:
                still fires a 'labeled' event and that run goes green -- but the
                red left here does not clear itself.
 
-               'skills/**' is on that list, and it is spelled out because the git
-               log says otherwise (#5947). Changes to PUBLISHED skills have
-               repeatedly shipped with an empty changeset instead -- #4607, #5130,
-               #5451 / PR #5799 -- on the reasoning "skills/ ships with no npm
-               package, so there is no package to name". That premise is true:
-               skills/ is not a workspace member and no package's 'files' field
-               includes it. The conclusion does not follow. Naming no package is
-               precisely what the LABEL is for; an empty changeset names no package
-               EITHER, and pays #4898 for the privilege. Take the label.
+               'skills/**' is NOT on that list: it ships in '@objectstack/skills',
+               whose build copies it into the 'dist' that package's 'files' field
+               publishes. A skills/** change releases that package -- route 1,
+               naming '@objectstack/skills', never the label. Older text here, and
+               older skills PRs, reasoned "skills/ ships with no npm package, so
+               there is no package to name"; that premise is no longer true.
 
             3. (CLOSED) An empty-frontmatter changeset. Still present in the
                repository's history and still counted by the counting step above,
@@ -839,7 +836,7 @@ jobs:
           by nobody. Route 0 is not part of that trade -- it is answered by the diff,
           not by judgement, and the label is wrong there however unsure you are.
           MSG
-            echo "::error::This PR adds no changeset. FIRST: if its only .changeset rows are CHANGED, not added, this PR corrects somebody else's pending release note -- do NOT apply 'skip-changeset'; write the confirmation on the PR, naming the note and what changed under it, and leave this check red (#18375). Otherwise, if it releases nothing (including any 'skills/**' change -- see #5947), apply the 'skip-changeset' label; otherwise run 'pnpm changeset' and name the packages. An empty-frontmatter changeset is NOT a third option any more: the step below rejects newly added ones (#5471), because it is a real input to changesets/action and an all-empty set stalls the release silently and greenly (#4898). Full comparison in this step's log."
+            echo "::error::This PR adds no changeset. FIRST: if its only .changeset rows are CHANGED, not added, this PR corrects somebody else's pending release note -- do NOT apply 'skip-changeset'; write the confirmation on the PR, naming the note and what changed under it, and leave this check red (#18375). Otherwise, if it releases nothing, apply the 'skip-changeset' label; otherwise run 'pnpm changeset' and name the packages (a 'skills/**' change releases '@objectstack/skills' and never takes the label). An empty-frontmatter changeset is NOT a third option any more: the step below rejects newly added ones (#5471), because it is a real input to changesets/action and an all-empty set stalls the release silently and greenly (#4898). Full comparison in this step's log."
             exit 1
           fi
           echo "This PR adds $ADDED changeset(s), so it declares a release of its own."

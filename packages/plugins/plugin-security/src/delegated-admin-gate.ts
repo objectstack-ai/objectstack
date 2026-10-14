@@ -14,16 +14,19 @@
  *   its explicit per-table `allowEdit:false` overrides — unchanged).
  * - DELEGATES (non-tenant-admins holding ≥1 `adminScope`) may write ONLY
  *   what one of their scopes fully approves: the right kind of action
- *   (manageAssignments / manageBindings / authorEnvironmentSets), inside
- *   their BU subtree, handing out only allowlisted sets, with STRICT
- *   containment whenever the touched set itself carries an adminScope.
+ *   (manageAssignments), inside their BU subtree, handing out only
+ *   allowlisted sets, with STRICT containment whenever the granted set itself
+ *   carries an adminScope. The rows it governs are the two assignment tables
+ *   (`sys_user_position`, `sys_user_permission_set`); the binding and set
+ *   authoring rows retired with the catalog row objects (ADR-0131 D3), so a
+ *   position's sets and a set's definition are written through the metadata
+ *   door alone.
  * - EVERYONE ELSE is denied — holding plain CRUD on `sys_user_position`
  *   no longer makes you a permission administrator (fail closed, D12).
  *
- * The `everyone` / `guest` audience anchors stay tenant-level only: no
- * delegated scope can touch their bindings, and DIRECT position assignments
- * to an anchor are rejected for every caller (anchors are implicit — a
- * stored assignment row is a modeling error).
+ * DIRECT position assignments to the `everyone` / `guest` audience anchors
+ * are rejected for every caller (anchors are implicit — a stored assignment
+ * row is a modeling error).
  *
  * `sys_member` (organization membership) is likewise tenant-level only: no
  * `adminScope` axis expresses membership, and an admin-grade membership row is
@@ -63,8 +66,6 @@ const SYSTEM_CTX = { isSystem: true } as const;
 const ANCHOR_CANDIDATE_LIMIT = 50;
 /** Max BU-tree depth walked when expanding a scope subtree (safety bound). */
 const MAX_TREE_DEPTH = 32;
-/** Max existing assignments examined for a binding blast-radius check. */
-const BLAST_RADIUS_CAP = 500;
 /** [ADR-0091 D3] Default self-delegation ceiling: 30 days. A "temporary"
  *  grant that can be rolled forever is a permanent grant with extra steps. */
 const DEFAULT_DELEGATION_CEILING_MS = 30 * 24 * 60 * 60 * 1000;
@@ -106,9 +107,10 @@ function callerOrganizationId(context: any): string | undefined {
  * `organizationId` undefined (a context carrying no organization) drops nothing.
  *
  * Every holding the gate reasons about goes through this, because
- * `sys_user_position.position` is a position NAME and `sys_position.name` is
- * unique per organization only — so under a walled posture another
- * organization's holding of a same-named position is the same string. The
+ * `sys_user_position.position` is a position NAME, the same string in every
+ * organization that holds it (ADR-0131 D3: one environment catalog) — so under
+ * a walled posture another organization's holding of the position is the same
+ * string. The
  * gate must count exactly the holdings the runtime grants: counting another
  * organization's lets a user self-delegate a position they do not hold there;
  * dropping organization-less ones refuses holdings the runtime honours.
@@ -130,9 +132,7 @@ function toEpochMs(value: unknown): number | undefined {
 
 const GOVERNED_OBJECTS = new Set([
   'sys_user_position',
-  'sys_position_permission_set',
   'sys_user_permission_set',
-  'sys_permission_set',
   // [#3697 follow-up] Organization MEMBERSHIP is an authority surface too: a
   // row whose `role` is admin-grade is auto-elevated to `organization_admin`
   // by `auto-org-admin-grant.ts`, whose wildcard `modifyAllRecords` IS
@@ -399,10 +399,6 @@ export class DelegatedAdminGate {
         return this.assertAssignmentWrite(opCtx, held);
       case 'sys_user_permission_set':
         return this.assertDirectGrantWrite(opCtx, held);
-      case 'sys_position_permission_set':
-        return this.assertBindingWrite(opCtx, held);
-      case 'sys_permission_set':
-        return this.assertSetAuthoring(opCtx, held, organizationId);
     }
   }
 
@@ -840,111 +836,6 @@ export class DelegatedAdminGate {
     }
   }
 
-  // ── sys_position_permission_set: position ↔ set bindings ────────────
-
-  private async assertBindingWrite(opCtx: any, held: HeldScope[]): Promise<void> {
-    const targets = await this.materializeTargets(opCtx, 'sys_position_permission_set');
-    for (const t of targets) {
-      const row = t.next ?? t.prev ?? {};
-      const position = await this.positionById(row.position_id);
-      const positionName = position.name;
-      if (ANCHOR_POSITIONS.has(positionName)) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: bindings of the '${positionName}' audience anchor are ` +
-            `tenant-level only — no delegated scope can touch them (ADR-0090 D12).`,
-          { operation: opCtx.operation, object: opCtx.object, position: positionName },
-        );
-      }
-      const setRow = await this.loadSetRowById(row.permission_set_id);
-      const setName = String(setRow?.name ?? row.permission_set_id ?? '');
-      const radius = positionName
-        ? await this.assignmentAnchorsOfPosition(positionName, position.organizationId)
-        : { anchors: new Set<string>(), overCap: false, unanchored: 0 };
-
-      const failure = this.firstApprovalFailure(held, (s) => {
-        if (!s.scope.manageBindings) return 'the scope does not grant manageBindings';
-        if (!s.scope.assignablePermissionSets.includes(setName)) {
-          return `permission set '${setName}' is not in the scope's allowlist`;
-        }
-        // Blast radius: re-composing a position re-composes EVERY holder's
-        // capability. A delegate may only do that when all current holders
-        // sit inside their subtree (fail closed on unanchored/over-cap).
-        if (radius.overCap) return `position '${positionName}' has more than ${BLAST_RADIUS_CAP} assignments — only a tenant admin may re-compose it`;
-        if (radius.unanchored > 0) return `position '${positionName}' has ${radius.unanchored} unanchored assignment(s) (no business_unit_id) — only a tenant admin may re-compose it`;
-        for (const bu of radius.anchors) {
-          if (!s.subtree.has(bu)) return `position '${positionName}' is held in business unit '${bu}', outside the delegated subtree`;
-        }
-        if (setRow) {
-          const contained = this.assertScopeGrantContainment(setRow, held, true);
-          if (contained) return contained;
-        }
-        return null;
-      });
-      if (failure) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: delegated '${opCtx.operation}' on sys_position_permission_set rejected — ${failure}.`,
-          { operation: opCtx.operation, object: opCtx.object, position: positionName, permissionSet: setName },
-        );
-      }
-    }
-  }
-
-  // ── sys_permission_set: environment-set authoring ────────────────────
-
-  private async assertSetAuthoring(opCtx: any, held: HeldScope[], organizationId?: string): Promise<void> {
-    // Package-managed rows were already rejected by the two-doors gate; what
-    // reaches here is environment-owned authoring.
-    const targets = await this.materializeTargets(opCtx, 'sys_permission_set');
-    for (const t of targets) {
-      const payload = t.next ?? {};
-      const existing = t.prev ?? null;
-      const setName = String(payload.name ?? existing?.name ?? '');
-      const authoredScope: AdminScope | undefined =
-        parseMaybeJson(payload.admin_scope ?? payload.adminScope) ?? undefined;
-
-      const failure = this.firstApprovalFailure(held, (s) => {
-        if (!s.scope.authorEnvironmentSets) return 'the scope does not grant authorEnvironmentSets';
-        // Mutating/deleting an existing env set is only in-domain when the
-        // delegate distributes it (allowlist); fresh inserts are inert until
-        // distributed, so they pass this check.
-        if (existing && !s.scope.assignablePermissionSets.includes(setName)) {
-          return `environment set '${setName}' is outside the scope's allowlist — only its tenant-level owner may change it`;
-        }
-        return null;
-      });
-      if (failure) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: delegated '${opCtx.operation}' on sys_permission_set rejected — ${failure}.`,
-          { operation: opCtx.operation, object: opCtx.object, permissionSet: setName },
-        );
-      }
-
-      // A delegate may suggest nothing tenant-wide: isDefault is the D5
-      // install-suggestion to bind to `everyone` — tenant-level only.
-      if (t.next && (t.next.isDefault === true || t.next.is_default === true)) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: 'isDefault' (the everyone-binding suggestion) is tenant-level ` +
-            `only — a delegated administrator cannot set it (ADR-0090 D12).`,
-          { operation: opCtx.operation, object: opCtx.object, permissionSet: setName },
-        );
-      }
-
-      // Authoring a set that CARRIES an adminScope = minting administration:
-      // requires a held scope that STRICTLY contains the minted one.
-      if (authoredScope) {
-        const containment = await this.checkStrictContainment(authoredScope, held, organizationId);
-        if (containment) {
-          throw new PermissionDeniedError(
-            `[Security] Access denied: the authored adminScope is not strictly contained by your ` +
-              `own — ${containment} (ADR-0090 D12: granting an admin scope requires holding a scope ` +
-              `that strictly contains it).`,
-            { operation: opCtx.operation, object: opCtx.object, permissionSet: setName },
-          );
-        }
-      }
-    }
-  }
-
   // ── Shared helpers ────────────────────────────────────────────────────
 
   /** First scope that fully approves wins; otherwise the FIRST failure reason
@@ -972,9 +863,8 @@ export class DelegatedAdminGate {
       parseMaybeJson(setRowOrDef.admin_scope ?? setRowOrDef.adminScope) ?? undefined;
     if (!carried) return null;
     // NOTE: containment needs resolved subtrees — checked synchronously against
-    // the pre-resolved held scopes; the carried scope's subtree is resolved in
-    // checkStrictContainment for the authoring path. For grant paths we compare
-    // conservatively by definition (name + flags + allowlist).
+    // the pre-resolved held scopes. Grant paths compare conservatively by
+    // definition (name + flags + allowlist).
     for (const s of held) {
       if (this.definitionContainsStrictly(s.scope, carried)) return null;
     }
@@ -1016,43 +906,6 @@ export class DelegatedAdminGate {
       innerFull.assignable.length === outer.assignablePermissionSets.length &&
       innerFull.assignable.every((n) => outer.assignablePermissionSets.includes(n));
     return !(equalRights && equalTree && equalAllow);
-  }
-
-  /** Authoring-path strict containment with resolved subtrees. Returns a
-   *  failure description, or null when some held scope strictly contains. */
-  private async checkStrictContainment(
-    minted: AdminScope,
-    held: HeldScope[],
-    organizationId?: string,
-  ): Promise<string | null> {
-    const mintedSubtree = await this.resolveSubtree(
-      minted.businessUnit,
-      minted.includeSubtree !== false,
-      organizationId,
-    );
-    if (mintedSubtree.size === 0) return `its business unit '${minted.businessUnit}' does not resolve`;
-    for (const s of held) {
-      let treeContained = true;
-      for (const bu of mintedSubtree) if (!s.subtree.has(bu)) { treeContained = false; break; }
-      if (!treeContained) continue;
-      if ((minted.manageAssignments === true) && !s.scope.manageAssignments) continue;
-      if ((minted.manageBindings === true) && !s.scope.manageBindings) continue;
-      if ((minted.authorEnvironmentSets === true) && !s.scope.authorEnvironmentSets) continue;
-      const mintedAllow = minted.assignablePermissionSets ?? [];
-      if (!mintedAllow.every((n) => s.scope.assignablePermissionSets.includes(n))) continue;
-      // Strictness on the resolved tuple.
-      const equalTree = mintedSubtree.size === s.subtree.size;
-      const equalRights =
-        (minted.manageAssignments === true) === (s.scope.manageAssignments === true) &&
-        (minted.manageBindings === true) === (s.scope.manageBindings === true) &&
-        (minted.authorEnvironmentSets === true) === (s.scope.authorEnvironmentSets === true);
-      const equalAllow =
-        mintedAllow.length === s.scope.assignablePermissionSets.length &&
-        mintedAllow.every((n) => s.scope.assignablePermissionSets.includes(n));
-      if (equalTree && equalRights && equalAllow) continue; // identical — not STRICT
-      return null;
-    }
-    return 'no held scope covers its subtree, rights and allowlist with room to spare';
   }
 
   /** Resolve every adminScope carried by the actor's resolved sets, inside the
@@ -1309,81 +1162,6 @@ export class DelegatedAdminGate {
     } catch {
       return null;
     }
-  }
-
-  private async loadSetRowById(id: unknown): Promise<any | null> {
-    if (id == null || !this.deps.ql?.find) return null;
-    try {
-      const rows = await this.deps.ql.find('sys_permission_set', { where: { id }, limit: 1, context: SYSTEM_CTX });
-      return Array.isArray(rows) && rows[0] ? rows[0] : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /** A `sys_position` row by id: its name, and the organization that owns it
-   *  (undefined = an organization-less row). */
-  private async positionById(id: unknown): Promise<{ name: string; organizationId: string | undefined }> {
-    const none = { name: '', organizationId: undefined };
-    if (id == null || !this.deps.ql?.find) return none;
-    try {
-      const rows = await this.deps.ql.find('sys_position', { where: { id }, limit: 1, context: SYSTEM_CTX });
-      const row = Array.isArray(rows) && rows[0] ? (rows[0] as any) : null;
-      if (!row) return none;
-      return { name: String(row.name ?? ''), organizationId: rowOrganizationId(row) || undefined };
-    } catch {
-      return none;
-    }
-  }
-
-  /**
-   * BU anchors of every assignment a re-binding of this position row reaches
-   * (blast radius).
-   *
-   * An assignment names the position by NAME, and a binding hangs off one
-   * `sys_position` ROW, which the runtime reaches only from the organization
-   * that owns it. So the holders a binding re-composes are the ones whose
-   * holding takes effect in the bound row's organization
-   * ({@link holdingTakesEffectIn}) — that organization's own holdings plus the
-   * organization-less ones — never another organization's same-named
-   * assignments, which would otherwise refuse the write as outside the
-   * subtree or push it over {@link BLAST_RADIUS_CAP}. Keyed on the bound
-   * row's organization rather than the caller's, so a binding written against
-   * another organization's row is still judged by THAT organization's holders.
-   * An organization-less row reaches every organization: no holding is dropped.
-   *
-   * The organization rides the read's context, so the driver's tenant scope
-   * (`organization_id = :org OR organization_id IS NULL`, the governed spelling
-   * of exactly this rule) applies BEFORE the cap — another organization's rows
-   * can neither fill the page nor trip {@link BLAST_RADIUS_CAP}. The same rule
-   * is re-applied to what comes back, for a driver that does not scope.
-   */
-  private async assignmentAnchorsOfPosition(
-    positionName: string,
-    positionOrganizationId?: string,
-  ): Promise<{ anchors: Set<string>; overCap: boolean; unanchored: number }> {
-    const anchors = new Set<string>();
-    let unanchored = 0;
-    const ql = this.deps.ql;
-    if (!ql?.find) return { anchors, overCap: false, unanchored };
-    let rows: any[] = [];
-    try {
-      rows = await ql.find('sys_user_position', {
-        where: { position: positionName },
-        limit: BLAST_RADIUS_CAP + 1,
-        context: organizationScopedCtx(positionOrganizationId),
-      });
-    } catch {
-      rows = [];
-    }
-    const list = Array.isArray(rows) ? rows : [];
-    if (list.length > BLAST_RADIUS_CAP) return { anchors, overCap: true, unanchored };
-    for (const r of list.filter((row) => holdingTakesEffectIn(row, positionOrganizationId))) {
-      const bu = (r as any)?.business_unit_id;
-      if (bu == null || bu === '') unanchored += 1;
-      else anchors.add(String(bu));
-    }
-    return { anchors, overCap: false, unanchored };
   }
 
   /** Target user's BU memberships (sys_business_unit_member ∪ primary projection). */

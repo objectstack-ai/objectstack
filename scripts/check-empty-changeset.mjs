@@ -510,12 +510,12 @@ function report(violations) {
       '',
       'Pick by what this PR actually releases:',
       '',
-      '  * It releases nothing (.github/, .claude/, skills/, docs/, content/, examples/,',
+      '  * It releases nothing (.github/, .claude/, docs/, content/, examples/,',
       '    tests-only, and the like)',
       "    -> delete the changeset and apply the 'skip-changeset' label (route 2). The label",
       '       is a gate-level exemption: it produces NO input for changesets/action.',
       '',
-      '  * It releases something',
+      '  * It releases something -- a skills/** change does: it ships in @objectstack/skills',
       "    -> name the packages in the frontmatter ('pnpm changeset').",
       '',
       'The empty changesets already on the base commit are EXEMPT and must not be cleaned up',
@@ -676,7 +676,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'RED 1: a PR that ADDS an empty-frontmatter changeset': 3,
   'GREEN 1: the stock. Empty changesets on base, untouched by the PR': 2,
   'GREEN 2: a PR that adds a NON-empty changeset': 1,
-  'GREEN 3: a skills/**-only PR carrying NO changeset (route 2)': 2,
+  'GREEN 3: a skills/**-only PR carrying NO changeset: nothing to judge': 2,
   'RED 2: a stock NON-empty changeset EMPTIED in place': 2,
   'GREEN 4: a stock EMPTY changeset whose prose is edited': 2,
   'RED 3: a new changeset with no frontmatter fence at all': 1,
@@ -910,10 +910,15 @@ function selfTest() {
       assert(r.violations.length === 0, 'GREEN 2: a declaring changeset must be accepted');
     }
 
-    // ── GREEN 3: a skills/**-only PR carrying NO changeset (route 2) ─────────
-    // The #5947 destination. Such a PR takes the `skip-changeset` label; this
-    // gate must have nothing to say about it, label or no label.
-    battery('GREEN 3: a skills/**-only PR carrying NO changeset (route 2)');
+    // ── GREEN 3: a skills/**-only PR carrying NO changeset: nothing to judge ─
+    // This gate reads only the `.changeset/*.md` rows a diff touches, so a PR
+    // adding none gets nothing from it, label or no label. That is not "it
+    // releases nothing": `skills/**` ships in `@objectstack/skills` (#22658),
+    // so the PR owes a changeset naming that package (AGENTS.md's post-task
+    // checklist), never the `skip-changeset` label. Asking for it is the
+    // `Require a changeset` step's job, and a wrong label is review's catch;
+    // neither is this gate's.
+    battery('GREEN 3: a skills/**-only PR carrying NO changeset: nothing to judge');
     {
       const { dir, base } = makeRepo(
         { 'skills/objectstack-upgrade/SKILL.md': 'two axes\n', '.changeset/stock-empty.md': EMPTY },

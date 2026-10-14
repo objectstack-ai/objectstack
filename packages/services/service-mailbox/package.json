@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-mailbox",
-  "version": "18.0.0-next.0",
+  "version": "18.0.0-next.1",
   "license": "Apache-2.0",
   "description": "Mailbox Service for ObjectStack \u2014 inbound mail: the mirrored message (sys_mail_message), its record associations and their read gates.",
   "type": "module",
@@ -35,6 +35,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/lint": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/service-storage": "workspace:*",
     "@types/node": "^26.6.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

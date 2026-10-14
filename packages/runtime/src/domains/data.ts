@@ -31,7 +31,24 @@ import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatch
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 // [#23214] The `/data` list's filter-slot arity rule (#7390), the one
 // `RestServer`'s list asks, imported rather than restated.
-import { assertFilterParamSuppliedOnce } from '@objectstack/rest';
+// [#23265] …and the repo's one sentence for a repeated single-valued
+// parameter, which the delete's `?expectedVersion` answers.
+import { assertFilterParamSuppliedOnce, repeatedQueryParamMessage } from '@objectstack/rest';
+
+/**
+ * [#23265] The request's `If-Match`, from either header shape a host hands
+ * `dispatch()`: the raw Fetch `Request`'s `Headers` (the `@objectstack/hono`
+ * catch-all) or a plain header record (a Node host). `Headers.get` answers
+ * `null` for an absent header; that is folded to `undefined`, the record's
+ * absence, so the two shapes answer one question. The `/meta` save reads its
+ * precondition headers off the same two shapes (`metaSaveRequestOptions`).
+ */
+function requestIfMatch(headers: unknown): unknown {
+    if (!headers || typeof headers !== 'object') return undefined;
+    const h = headers as { get?: unknown } & Record<string, unknown>;
+    if (typeof h.get === 'function') return (h.get as (name: string) => unknown).call(headers, 'if-match') ?? undefined;
+    return h['if-match'] ?? h['If-Match'];
+}
 
 export function createDataDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -145,8 +162,31 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
         // PATCH /data/:object/:id
         if (parts.length === 2 && m === 'PATCH') {
             const id = parts[1];
+            // [#23462] The optimistic-concurrency token, read the way
+            // `RestServer`'s twin of this route reads it: the body's
+            // `expectedVersion`, else `If-Match`, and forwarded to `updateData`,
+            // which refuses an update whose version moved (`409
+            // CONCURRENT_UPDATE`). This branch read neither and handed the
+            // whole body over as the patch, so through the `@objectstack/hono`
+            // catch-all a stale `If-Match` update was APPLIED, and a body
+            // `expectedVersion` reached the engine as a field it refused as
+            // unknown. The key is stripped from the patch whatever its value,
+            // and a token is forwarded only when truthy: the twin's own
+            // statements, so both doors send `updateData` the same thing.
+            const bodyVersion = (body && typeof body === 'object') ? body.expectedVersion : undefined;
+            const expectedVersion = bodyVersion ?? requestIfMatch(_context.request?.headers);
+            let data = body;
+            if (body && typeof body === 'object' && 'expectedVersion' in body) {
+                const { expectedVersion: _token, ...patch } = body;
+                data = patch;
+            }
             // Spec: returns UpdateDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, _context, 'update', { object: objectName, id, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'update', {
+                object: objectName,
+                id,
+                data,
+                ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+            }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 
@@ -160,7 +200,32 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // already right). It described the ObjectQL fallback's off-spec
             // body as if it were the spec, so the next reader of this line
             // would have written a consumer against `deleted`.
-            const result = await actionExec.callData(deps, _context, 'delete', { object: objectName, id }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            //
+            // [#23265] The optimistic-concurrency token, read the way
+            // `RestServer`'s twin of this route reads it: `?expectedVersion`,
+            // else `If-Match`, and forwarded to `deleteData`, which refuses a
+            // delete whose version moved (`409 CONCURRENT_UPDATE`). This
+            // branch read neither, so through the `@objectstack/hono`
+            // catch-all a stale delete was APPLIED, answered `200` like a
+            // request that sent no token. A repeated `?expectedVersion` is
+            // refused first, as the twin's arity gate refuses it, before the
+            // service is asked; a one-element array is one occurrence and an
+            // empty one is none. A token is forwarded only when non-empty, the
+            // twin's own test, so both doors send `deleteData` the same thing.
+            const rawVersion = query?.expectedVersion;
+            if (Array.isArray(rawVersion) && rawVersion.length > 1) {
+                return {
+                    handled: true,
+                    response: deps.error(repeatedQueryParamMessage('expectedVersion', rawVersion.length), 400, { code: 'VALIDATION_ERROR' }),
+                };
+            }
+            const queryVersion = Array.isArray(rawVersion) ? rawVersion[0] : rawVersion;
+            const expectedVersion = queryVersion ?? requestIfMatch(_context.request?.headers);
+            const result = await actionExec.callData(deps, _context, 'delete', {
+                object: objectName,
+                id,
+                ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+            }, _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
     } else {

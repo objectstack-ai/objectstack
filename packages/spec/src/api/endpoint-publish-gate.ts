@@ -19,10 +19,12 @@
  * declarations is exactly the set the runtime executes — the `declared =
  * enforced` state the whole program exists to reach.
  *
- * ## Every gate has a runtime counterpart, and the runtime is the source
+ * ## Every per-endpoint gate has a runtime counterpart, and the runtime is the source
  *
- * Nothing here is invented. Each gate mirrors a refusal the runtime already
- * makes, so publish and execution can never disagree about what is servable:
+ * Nothing here is invented. Each per-endpoint gate mirrors a refusal the
+ * runtime already makes, so publish and execution can never disagree about what
+ * is servable (the one cross-item gate, ADR-0138 D2b in section (f), is a
+ * publish refusal by the record's decision and says why there):
  *
  * | gate | runtime counterpart |
  * |---|---|
@@ -43,8 +45,13 @@
  * value, and the fix — enough to act on without opening this file, the ADR, or
  * the issue. That is the same posture as a `retiredKey()` tombstone.
  *
- * ## Two rulings this module implements verbatim
+ * ## Three rulings this module implements verbatim
  *
+ *  - **ADR-0138 D2b** — publish refuses an `authRequired: false` endpoint of
+ *    `type: 'flow'` whose target flow declares `runAs: 'system'`, in both
+ *    directions, with a prescription: no anonymous door triggers an elevated
+ *    flow directly. Section (f); its D3 record is the semantic entry
+ *    `api-endpoint-anonymous-elevated-flow-refused`.
  *  - **ADR-0121 D2 / #5040 Q1 = A** — the namespace segment comes from an
  *    EXPLICIT `manifest.namespace`. There is no `deriveNamespaceFromPackageId`
  *    fallback here on purpose: an outward URL contract must not shift because
@@ -575,6 +582,205 @@ function policyGate(
     }
 
     return undefined;
+}
+
+// ============================================================================
+// (f) The anonymous door × elevated flow — ADR-0138 D2b
+// ============================================================================
+//
+// `policyGate` above reads ONE endpoint. D2b is a property of a PAIR — an
+// `authRequired: false` endpoint of `type: 'flow'` and the flow its `target`
+// names, refused when that flow declares `runAs: 'system'` — so it cannot be a
+// member of `firstFailure`: no single declaration carries both halves. The
+// judge below is the one cross-item reading, and every publish door that holds
+// both items calls it (ADR-0138 D2b, "Enforced by": "The cross-item read sits
+// where both items are readable at publish, beside the per-endpoint …
+// `policyGate`, which reads one endpoint only"):
+//
+// | door | what it holds | direction |
+// |---|---|---|
+// | the stack parse (`ObjectStackDefinitionSchema` → `applyApiEndpointGates`) | the stack's `apis` and `flows` together | both, as one input |
+// | `MetadataManager.publishPackage` (`@objectstack/metadata`) | the package's `api` and `flow` items, and the manager's index of both | both |
+// | the metadata protocol's flow publish (`saveMetaItem` in publish mode, the draft promotion) | the flow being published, and the declared endpoints | a flow set to `system` |
+//
+// Both directions, because either item can be the last one edited: the
+// endpoint's publish reads its target's `runAs`, and a flow's publish that sets
+// `runAs: 'system'` reads the anonymous endpoints that target it.
+//
+// ⛔ Not a mirror of a runtime refusal, unlike the gates above. The endpoint
+// executor's `refusesElevatedSelfTriggeredStart` refuses a non-system caller
+// only for a SELF-TRIGGERED `system` flow (`autolaunched`, `record_change`,
+// `schedule`); a `system` flow of type `api` or `screen` behind an anonymous
+// endpoint executes, elevated. The record places D2b at publish, and this is
+// that refusal.
+//
+// The prescription is the record's, scenario by scenario: an authenticated
+// endpoint for a partner that can hold a credential, the signed inbound-hook
+// channel (ADR-0041) for a partner webhook, a public form for anonymous intake.
+// `runAs: 'automation'` joins it when ADR-0073 M2 lands; until then the enum
+// has no such value, and prescribing it would send an author to a key value the
+// schema refuses.
+//
+// Out of scope by the record's own words ("recorded and not decided"): a
+// guest-written row firing a record-change flow. The trigger there is the write,
+// not the door.
+
+/**
+ * What the D2b judge reads of an endpoint. A parsed {@link ApiEndpoint}
+ * satisfies it, and so does a stored body read as it sits: each field is read
+ * structurally and only the exact value counts, so an absent `authRequired`
+ * (whose schema default is `true`) is never anonymous.
+ */
+export interface AnonymousFlowDoorCandidate {
+    readonly name?: unknown;
+    readonly type?: unknown;
+    readonly authRequired?: unknown;
+    readonly target?: unknown;
+}
+
+/**
+ * What the D2b judge reads of a flow: its `name`, and its declared `runAs`
+ * (absent reads as the schema default, `'user'`).
+ */
+export interface ElevatedFlowCandidate {
+    readonly name?: unknown;
+    readonly runAs?: unknown;
+}
+
+/** One refused pair: an anonymous flow endpoint and the `runAs: 'system'` flow it triggers. */
+export interface AnonymousElevatedFlowPair {
+    /** Index into the `endpoints` the judge was handed. */
+    endpointIndex: number;
+    /** The endpoint's `name`, or `apis[<index>]` when it carries none. */
+    endpoint: string;
+    /** Index into the `flows` the judge was handed. */
+    flowIndex: number;
+    /** The flow's `name`, which is the endpoint's `target`. */
+    flow: string;
+}
+
+/**
+ * The flow an endpoint opens to an anonymous caller: its `target`, when the
+ * endpoint is `type: 'flow'` with `authRequired: false` and names a target;
+ * otherwise `undefined`.
+ */
+export function anonymousFlowDoorTarget(
+    endpoint: AnonymousFlowDoorCandidate | null | undefined,
+): string | undefined {
+    if (!endpoint || typeof endpoint !== 'object') return undefined;
+    if (endpoint.type !== 'flow' || endpoint.authRequired !== false) return undefined;
+    return typeof endpoint.target === 'string' && endpoint.target !== '' ? endpoint.target : undefined;
+}
+
+/**
+ * ADR-0138 D2b, the cross-item judge: every pair of an anonymous flow endpoint
+ * (see {@link anonymousFlowDoorTarget}) and a flow of that name declaring
+ * `runAs: 'system'`.
+ *
+ * Pure, total and order-preserving (endpoint order, then flow order). The
+ * caller decides which half it is publishing and words the refusal for that
+ * half: {@link anonymousEndpointElevatedFlowMessage} when the endpoint is the
+ * item being published, {@link elevatedFlowAnonymousEndpointsMessage} when the
+ * flow is.
+ */
+export function anonymousElevatedFlowPairs(
+    endpoints: readonly (AnonymousFlowDoorCandidate | null | undefined)[] | undefined,
+    flows: readonly (ElevatedFlowCandidate | null | undefined)[] | undefined,
+): AnonymousElevatedFlowPair[] {
+    if (!endpoints || endpoints.length === 0 || !flows || flows.length === 0) return [];
+
+    /** flow name → the indexes of the `system` flows of that name. */
+    const elevated = new Map<string, number[]>();
+    for (let flowIndex = 0; flowIndex < flows.length; flowIndex++) {
+        const flow = flows[flowIndex];
+        if (!flow || typeof flow !== 'object' || flow.runAs !== 'system') continue;
+        if (typeof flow.name !== 'string' || flow.name === '') continue;
+        const indexes = elevated.get(flow.name);
+        if (indexes) indexes.push(flowIndex);
+        else elevated.set(flow.name, [flowIndex]);
+    }
+    if (elevated.size === 0) return [];
+
+    const pairs: AnonymousElevatedFlowPair[] = [];
+    for (let endpointIndex = 0; endpointIndex < endpoints.length; endpointIndex++) {
+        const endpoint = endpoints[endpointIndex];
+        const target = anonymousFlowDoorTarget(endpoint);
+        const flowIndexes = target === undefined ? undefined : elevated.get(target);
+        if (!flowIndexes) continue;
+        const name = typeof endpoint?.name === 'string' && endpoint.name !== ''
+            ? endpoint.name
+            : `apis[${endpointIndex}]`;
+        for (const flowIndex of flowIndexes) {
+            pairs.push({ endpointIndex, endpoint: name, flowIndex, flow: target! });
+        }
+    }
+    return pairs;
+}
+
+/**
+ * The record's prescription, one serving channel per scenario. Short on
+ * purpose: a 4xx message crosses the REST boundary with its tail truncated, so
+ * the prescription comes before the reason in both sentences below.
+ */
+const ANONYMOUS_ELEVATED_FLOW_PRESCRIPTION =
+    'an authenticated endpoint (`authRequired: true`) for a partner that can hold a credential, the flow\'s '
+    + 'signed inbound hook (ADR-0041) for a partner webhook, or a public form for anonymous intake';
+
+const ANONYMOUS_ELEVATED_FLOW_REASON =
+    "Behind an anonymous door a `runAs: 'system'` flow would run every request's data steps as the system "
+    + 'principal, past row-level security, with the rate limit as its only brake.';
+
+/**
+ * D2b's refusal when the ENDPOINT is the item being published (the stack
+ * parse, a package publish): it names the endpoint, the flow and the
+ * prescription.
+ */
+export function anonymousEndpointElevatedFlowMessage(endpoint: string, flow: string): string {
+    return `Endpoint '${endpoint}' is anonymous (\`authRequired: false\`) and triggers flow '${flow}', which `
+        + "declares `runAs: 'system'`: no anonymous door may start an elevated flow (ADR-0138 D2b), so publish "
+        + 'refuses the pair whichever of the two is published last. Serve that caller with '
+        + `${ANONYMOUS_ELEVATED_FLOW_PRESCRIPTION}. ${ANONYMOUS_ELEVATED_FLOW_REASON}`;
+}
+
+/**
+ * D2b's refusal when the FLOW is the item being published with
+ * `runAs: 'system'` while anonymous endpoints name it (the metadata protocol's
+ * flow publish, a package publish whose flow an endpoint outside it names).
+ *
+ * @param endpoints the anonymous endpoints' names, at least one.
+ */
+export function elevatedFlowAnonymousEndpointsMessage(flow: string, endpoints: readonly string[]): string {
+    const quoted = endpoints.map((name) => `'${name}'`);
+    const triggers = quoted.length === 1
+        ? `the anonymous endpoint ${quoted[0]} (\`authRequired: false\`) triggers it`
+        : `the anonymous endpoints ${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]} `
+          + '(`authRequired: false`) trigger it';
+    return `Flow '${flow}' cannot be published with \`runAs: 'system'\`: ${triggers}, and no anonymous door may `
+        + 'start an elevated flow (ADR-0138 D2b). Nothing was published. Serve that caller with '
+        + `${ANONYMOUS_ELEVATED_FLOW_PRESCRIPTION} first. ${ANONYMOUS_ELEVATED_FLOW_REASON}`;
+}
+
+/**
+ * D2b over one stack's `apis` and `flows` — the stack parse's leg, raised as
+ * Zod issues by `applyApiEndpointGates`. One issue per refused pair, located at
+ * the endpoint's `authRequired` (`['apis', <index>, 'authRequired']`): both
+ * items are in the one input, so the stack is refused whichever of the two its
+ * author edited last, and the issue sits on the door, which is what the
+ * prescription changes.
+ *
+ * Independent of {@link validateApiEndpointDeclarations}'s per-endpoint
+ * first-failure order: a pair is a fact about two declarations, never a
+ * cascade of another gate's failure, so an anonymous endpoint that also lacks
+ * its armed budget (ADR-0121 D6) is reported for both.
+ */
+export function validateAnonymousElevatedFlows(
+    endpoints: readonly (AnonymousFlowDoorCandidate | null | undefined)[] | undefined,
+    flows: readonly (ElevatedFlowCandidate | null | undefined)[] | undefined,
+): EndpointGateIssue[] {
+    return anonymousElevatedFlowPairs(endpoints, flows).map((pair) => ({
+        path: ['apis', pair.endpointIndex, 'authRequired'],
+        message: anonymousEndpointElevatedFlowMessage(pair.endpoint, pair.flow),
+    }));
 }
 
 // ============================================================================

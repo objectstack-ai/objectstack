@@ -153,7 +153,7 @@
  * them: the BATCH SUMMARY of the failures the catch just counted.
  *
  *   packages/plugins/plugin-email/src/outbox-sweep.ts             "N stranded sys_email row(s) could NOT be delivered"
- *   packages/plugins/plugin-security/src/permission-set-projection.ts  "N FAILED backfill(s)"
+ *   packages/plugins/plugin-security/src/permission-set-projection.ts  "N FAILED backfill(s)"  (since retired)
  *
  * The repair made the split WORSE, not better: against an `error`-less sink the
  * per-row line now lands at `warn` while the total stays silent, so the detail
@@ -411,10 +411,6 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
     [
         'persistGrantNameBackfillRecord',
         "The one-time grant-name backfill (ADR-0131 D4) named the grants it could, but its `sys_migration` verdict row was never written. Every log line reads clean and the names it wrote stand, while the record that makes the pass ONE-TIME is absent, so every later boot scans the whole grant table again and re-reports the grants it cannot name.",
-    ],
-    [
-        'persistPositionBackfillRecord',
-        "The one-time row-only position backfill (ADR-0131 D3) gave the positions it could their environment definitions, but its `sys_migration` verdict row was never written. Every log line reads clean and the definitions it wrote stand, while the record that makes the pass ONE-TIME is absent, so every later boot scans the whole position table again and re-reports the positions it cannot give a definition.",
     ],
     [
         'runWideningAlters',

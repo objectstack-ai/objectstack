@@ -76,10 +76,10 @@ async function refusePackageRequest(
   //
   // No path is consulted. This registrar's base is the host's argument, and
   // the publish route is no remediation or bootstrap route, so the allow-list
-  // has nothing to exempt here. `code` is declared as a bare string on the
-  // envelope's `authGate`. Its one producer (plugin-auth's `customSession`
-  // enrichment) writes only `PASSWORD_EXPIRED` and `MFA_REQUIRED`, both members
-  // of the vocabulary.
+  // has nothing to exempt here. The envelope's `authGate.code` is a member of
+  // the closed posture vocabulary
+  // (`AuthGateCodeSchema`), every member of which is registered in the
+  // error-code vocabulary.
   if (ctx?.authGate) {
     sendError(res, 403, ctx.authGate.code as ErrorCode, ctx.authGate.message);
     return true;

@@ -23,9 +23,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { permissionSetDefinitionFromRow } from '@objectstack/core';
 import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn } from '@objectstack/metadata-core';
+import { inventoryDigest } from './organization-ownership-plan.js';
 import {
   applyOrganizationOwnership,
   MetadataChoiceRefusal,
+  ReviewedPlanRefusal,
+  reviewedPlanFromFile,
   TemplateChoiceRefusal,
   type ApplyExecutor,
   type CatalogPort,
@@ -34,6 +37,7 @@ import {
   type ColumnDropPort,
   type MetadataDoorPort,
   type OrganizationOwnershipApplyReport,
+  type ReviewedPlan,
   type ServedViewsPort,
   type TemplatePort,
 } from './organization-ownership-apply.js';
@@ -411,11 +415,21 @@ const apply = (
     metadataChoices?: string[];
     views?: ServedViewsPort;
     columnDrops?: ColumnDropPort;
+    reviewed?: Partial<ReviewedPlan>;
   } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
   return applyOrganizationOwnership({
     views: opts.views ?? servedViews(c),
+    // The plan the operator reviewed: by default, the one this run computes.
+    reviewedPlan: {
+      file: 'plan.json',
+      generatedAt: '2026-10-11T00:00:00Z',
+      database: file,
+      inventoryDigest: inventoryDigest(),
+      posture: opts.posture ?? 'single',
+      ...opts.reviewed,
+    },
     executor: opts.executor ?? executor(),
     ...(opts.templateChoices ? { templateChoices: opts.templateChoices } : {}),
     ...(opts.metadataChoices ? { metadataChoices: opts.metadataChoices } : {}),
@@ -571,6 +585,110 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     const after = await accessAfter(c);
     expect(after).not.toEqual(before);
     expect(before.filter((g) => !after.includes(g))).toEqual([expect.stringMatching(/^usr_3\|org_default\|field_auditor\|/)]);
+  });
+});
+
+describe('ADR-0131 D10 --apply — only the reviewed plan is executed', () => {
+  it('refuses, before any write, a plan file whose inventory digest is not the one this run computes', async () => {
+    const c = catalog();
+    const l = ledger();
+    const hash = createHash('sha256').update(readFileSync(file)).digest('hex');
+
+    const refused = apply(c, l, { reviewed: { inventoryDigest: 'a'.repeat(64) } });
+
+    await expect(refused).rejects.toBeInstanceOf(ReviewedPlanRefusal);
+    await expect(refused).rejects.toMatchObject({
+      reason: 'plan-digest-mismatch',
+      detail: { reviewed: 'a'.repeat(64), current: inventoryDigest() },
+    });
+    expect(writes).toEqual([]);
+    expect(l.checkpoint).toBeNull();
+    expect(l.verdicts).toEqual([]);
+    expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(hash);
+  });
+
+  it('refuses, before any write, a plan computed under another tenancy posture, naming both and the remedy', async () => {
+    const c = catalog();
+    const l = ledger();
+    const hash = createHash('sha256').update(readFileSync(file)).digest('hex');
+
+    // Reviewed under a wall, where anchorless rows are reported; run under single, where they would take an owner.
+    const refused = apply(c, l, { posture: 'single', reviewed: { posture: 'isolated' } });
+
+    await expect(refused).rejects.toBeInstanceOf(ReviewedPlanRefusal);
+    await expect(refused).rejects.toMatchObject({
+      reason: 'plan-posture-mismatch',
+      detail: { reviewed: 'isolated', current: 'single' },
+      message: expect.stringMatching(/computed under the isolated tenancy posture, and this run resolves single .*Nothing was written\..*--plan-file/s),
+    });
+    expect(writes).toEqual([]);
+    expect(l.checkpoint).toBeNull();
+    expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(hash);
+  });
+
+  it('refuses, before any write, a plan file computed for another database', async () => {
+    const c = catalog();
+    const l = ledger();
+
+    await expect(apply(c, l, { reviewed: { database: '/elsewhere/other.db' } })).rejects.toMatchObject({
+      reason: 'plan-database-mismatch',
+      detail: { reviewed: '/elsewhere/other.db', current: file },
+    });
+    expect(writes).toEqual([]);
+    expect(l.checkpoint).toBeNull();
+  });
+
+  it('a checkpoint recorded under another digest is superseded by the reviewed plan: every step runs again, and the report names it', async () => {
+    const c = catalog();
+    const l = ledger();
+    l.checkpoint = {
+      ceremony: 'ADR-0131 D10',
+      inventoryDigest: 'b'.repeat(64),
+      completed: { attribution: { at: '2026-10-10T00:00:00Z', summary: {} }, rewrite: { at: '2026-10-10T00:00:00Z', summary: {} } },
+    };
+
+    const report = await apply(c, l);
+
+    expect(report.restartedFrom).toEqual({ inventoryDigest: 'b'.repeat(64), steps: ['attribution', 'rewrite'] });
+    expect(report.resumedFrom).toEqual([]);
+    expect(report.steps.find((s) => s.step === 'attribution')!.status).toBe('done');
+    expect(report.reviewedPlan).toEqual({ file: 'plan.json', generatedAt: '2026-10-11T00:00:00Z' });
+    expect(l.checkpoint!.inventoryDigest).toBe(inventoryDigest());
+  });
+
+  it('a resumed run under the same digest reports no restart', async () => {
+    const c = catalog();
+    const l = ledger();
+    await apply(c, l);
+    const again = await apply(c, l);
+    expect(again.restartedFrom).toBeUndefined();
+  });
+});
+
+describe('reviewedPlanFromFile', () => {
+  const plan = {
+    kind: 'organization-ownership-plan', ceremony: 'ADR-0131 D10', generatedAt: 'g', database: 'd', inventoryDigest: 'x', posture: 'single',
+  };
+
+  it('reads the compared fields of a plan file', () => {
+    expect(reviewedPlanFromFile('p.json', JSON.stringify({ ...plan, tables: [] }))).toEqual({
+      file: 'p.json', generatedAt: 'g', database: 'd', inventoryDigest: 'x', posture: 'single',
+    });
+  });
+
+  it.each([
+    ['not JSON', '{'],
+    ['an apply report, not a plan', JSON.stringify({ ...plan, kind: 'organization-ownership-apply' })],
+    ['no digest', JSON.stringify({ ...plan, inventoryDigest: '' })],
+    ['no database', JSON.stringify({ ...plan, database: undefined })],
+    ['no posture', JSON.stringify({ ...plan, posture: undefined })],
+  ])('refuses a file that is %s', (_label, text) => {
+    expect(() => reviewedPlanFromFile('p.json', text)).toThrow(ReviewedPlanRefusal);
+    try {
+      reviewedPlanFromFile('p.json', text);
+    } catch (error) {
+      expect(error).toMatchObject({ reason: 'plan-file-unusable', detail: { file: 'p.json' } });
+    }
   });
 });
 
@@ -820,6 +938,44 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
         expect(c.templates.size).toBe(0);
       },
     );
+  });
+
+  it('a column-drop table the booted composition does not declare is not-declared, counted, kept and blocking — not blamed on the release', async () => {
+    db.exec(`CREATE TABLE sys_flow_dispatch (id TEXT PRIMARY KEY, organization_id TEXT)`);
+    const c = catalog();
+    const l = ledger();
+    const answering = async (outcome: 'not-declared' | 'not-proposed'): Promise<OrganizationOwnershipApplyReport> => {
+      const real = columnDrops.drop;
+      columnDrops.drop = async (tables) => [
+        ...(await real(tables.filter((t) => t !== 'sys_flow_dispatch'))),
+        ...(tables.includes('sys_flow_dispatch') ? [{ table: 'sys_flow_dispatch', outcome }] : []),
+      ];
+      try {
+        return await apply(c, l);
+      } finally {
+        columnDrops.drop = real;
+      }
+    };
+    const flowDispatchBlocker = (report: OrganizationOwnershipApplyReport): string[] =>
+      report.steps.find((s) => s.step === 'column-drops')!.blockers.filter((b) => b.includes('sys_flow_dispatch.organization_id'));
+
+    const notDeclared = await answering('not-declared');
+    const drops = notDeclared.steps.find((s) => s.step === 'column-drops')!;
+    expect(drops.status).toBe('blocked');
+    expect(drops.summary).toEqual({ dropped: 1, due: 2, notDeclared: 1 });
+    expect(flowDispatchBlocker(notDeclared)).toHaveLength(1);
+    expect(rows(`SELECT name FROM pragma_table_info('sys_flow_dispatch') WHERE name = 'organization_id'`)).toHaveLength(1);
+    expect(rows(`SELECT name FROM pragma_table_info('sys_job') WHERE name = 'organization_id'`)).toHaveLength(0);
+
+    // The control: the same table on the resumed run, answered `not-proposed`
+    // (a declared object the differ proposed no drop for).
+    const notProposed = await answering('not-proposed');
+    expect(notProposed.resumedFrom).toEqual(['attribution', 'authored-conversion', 'template-promotion', 'settings-move', 'rewrite', 'mirror-deletion']);
+    const control = notProposed.steps.find((s) => s.step === 'column-drops')!;
+    expect(control.status).toBe('blocked');
+    expect(control.summary).toEqual({ dropped: 0, due: 1, notDeclared: 0 });
+    expect(flowDispatchBlocker(notProposed)).toHaveLength(1);
+    expect(flowDispatchBlocker(notProposed)[0]).not.toBe(flowDispatchBlocker(notDeclared)[0]);
   });
 
   it('holds a column whose rows another stage owns, and reports it', async () => {

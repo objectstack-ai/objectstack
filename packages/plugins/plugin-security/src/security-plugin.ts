@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
 import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, recordNotFoundError, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
-import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
+import { describeHighPrivilegeBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
@@ -108,7 +108,6 @@ import {
   type ObjectAccessScope,
   type TenancyPosture,
 } from '@objectstack/spec/security';
-import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import {
   RLS_MEMBERSHIP_RESOLVER_SERVICE,
   RESERVED_RLS_MEMBERSHIP_KEYS,
@@ -584,24 +583,6 @@ interface CbpRelation {
 }
 
 /**
- * [ADR-0066 / #2918] Provenance spec for the platform/application asset objects
- * whose managed rows are write-protected by {@link SecurityPlugin.assertSystemRowWriteGate}.
- *
- * Both objects share the unified A4 (#2920) `managed_by` vocabulary — a row
- * authored by the platform or an application package is not the admin's to
- * delete or rewrite:
- *   • `platform` / `package` are managed; `admin`/∅ (tenant-authored) rows are
- *     the admin's.
- *   • sys_position additionally keeps its LEGACY values `system` (→ platform)
- *     and `config` (→ package) in the managed map: no boot pass heals stored
- *     rows to the canonical vocabulary any more (ADR-0131 retired it with the
- *     catalog seeders), so a row still carrying a legacy value keeps its
- *     protection here. Dropping the legacy keys is what silently disarmed this
- *     gate for sys_position after the A4 rename (#2926 ①).
- * The map value for each managed `managed_by` is the human owner label used in
- * the (business-message-only) deny text.
- */
-/**
  * [#7281] The scope `checkAuthoredRowWrite`'s probe read runs under.
  *
  * The method asks ONE question — "does the declared, app-authored widener admit
@@ -793,28 +774,6 @@ function copyOfCallerPredicate(where: unknown): unknown {
 function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
   return filter === RLS_DENY_FILTER;
 }
-
-const SYSTEM_ROW_PROVENANCE: Record<
-  string,
-  { noun: string; pluralNoun: string; managed: Record<string, string> }
-> = {
-  sys_position: {
-    noun: 'position',
-    pluralNoun: 'positions',
-    managed: {
-      platform: 'the platform',
-      package: 'an application package',
-      // Legacy pre-A4 values — keep guarded until every store is normalized.
-      system: 'the platform',
-      config: 'an application package',
-    },
-  },
-  sys_capability: {
-    noun: 'capability',
-    pluralNoun: 'capabilities',
-    managed: { platform: 'the platform', package: 'an application package' },
-  },
-};
 
 /** Normalize a raw object `requiredPermissions` (string[] | per-op map) into buckets. */
 function normalizeRequiredPermissions(raw: unknown): NormalizedRequiredPermissions {
@@ -1572,6 +1531,13 @@ export class SecurityPlugin implements Plugin {
       ],
     });
 
+    // [ADR-0131 D2, ADR-0090 D5] The six built-in positions and the `everyone`
+    // anchor's deployment baseline are declarations, so they are made here, in
+    // the kernel contract's declaration phase — where a boot that composes this
+    // plugin for its declarations only reaches them too. See
+    // {@link declareBuiltinPositions}.
+    this.declareBuiltinPositions(ctx);
+
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
     // service on kernel:ready (the i18n plugin may register after this one).
     if (typeof (ctx as any).hook === 'function') {
@@ -1732,34 +1698,15 @@ export class SecurityPlugin implements Plugin {
     this.metadata = metadata;
     this.ql = ql;
 
-    // [ADR-0131 D2, C3's built-ins slice pulled into C2] The six built-in
-    // positions — the identity names and the `everyone` / `guest` anchors — are
-    // declared metadata of THIS plugin, as its permission sets are. Not through
-    // the manifest registration in `init()`: measured, a manifest `positions`
-    // key reaches no registry (see `builtin-positions.ts`), so they go to the
-    // engine registry by the registry's own seam, under this plugin's package
-    // id — the provenance the manifest stamps on `permissions`. Here, on the
-    // engine handle `start()` already holds, before `kernel:ready` runs the
-    // bootstrap and before any request reaches the metadata door. The
-    // declaration is their one home: the boot writes no `sys_position` row for
-    // them (ADR-0131 D2).
-    const builtinRegistry = (ql as { registry?: unknown }).registry;
-    if (registerBuiltinPositions(builtinRegistry, SECURITY_PLUGIN_ID) === 0) {
-      ctx.logger.warn(
-        '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
-          + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
-          + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
-          + '`everyone` baseline sets are granted through no position.',
-      );
-    }
-    // [ADR-0090 D5, ADR-0131 D3/D4] `everyone` declares the deployment's
-    // baseline in its `permissionSets` — the binding the authorization resolver
-    // reads, in place of the junction rows the boot used to write — plus every
-    // package default a `manage_metadata` holder accepted (#22801 → A). At
-    // `kernel:ready`, because the high-privilege check reads the stack's
-    // declared capabilities (#18535) and they are all in by then; derived again
-    // on every accept, revoke, uninstall and package publish
-    // (`declareEveryone`).
+    // [ADR-0131 D2] The six built-in positions, and `everyone`'s deployment
+    // baseline as the fail-closed reading gives it, were declared in `init()`
+    // ({@link declareBuiltinPositions}).
+    // [ADR-0090 D5, ADR-0131 D3/D4] Here `everyone` is derived again with what
+    // only a started kernel has: the high-privilege check against the stack's
+    // declared capabilities (#18535), which are all in by `kernel:ready`, plus
+    // every package default a `manage_metadata` holder accepted (#22801 → A),
+    // which is a database read. Derived again on every accept, revoke,
+    // uninstall and package publish (`declareEveryone`).
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', () => this.declareEveryone(ctx.logger));
     }
@@ -2473,59 +2420,6 @@ export class SecurityPlugin implements Plugin {
           { operation: opCtx.operation, object: opCtx.object },
         );
       }
-
-      // [ADR-0086 P2 — 块2, evolved by ADR-0094] Two-doors write gate. A
-      // permission set stamped `managed_by:'package'` is owned by the PACKAGE
-      // door: its BASELINE is authored in the package and lands via publish
-      // (块1). The admin door must never FORGE that provenance (insert or
-      // update), and the lifecycle ops with no overlay translation
-      // (transfer/restore/purge) stay refused on package rows. Ordinary
-      // `update`/`delete` on a package row are handled downstream by the
-      // ADR-0094 write-through, which TRANSLATES them into a metadata write.
-      // Whether that write is ACCEPTED is ADR-0005's call, not this gate's,
-      // and since ADR-0094 D5-R (commit ee58392e1 rolled `permission` back to
-      // `allowEnvironmentOverlay: false`) a CODE-DECLARED set is refused there with
-      // 403 `NOT_OVERRIDABLE` — the 2026-07-14 "customize / reset via an env
-      // overlay" direction this comment used to state is RETIRED.
-      // Placed BEFORE the principal-less refusal and the CRUD check so the
-      // forging boundary holds even for a principal-less context and a
-      // superuser with modifyAllRecords. System/boot writes carry `isSystem`
-      // and already short-circuited the whole middleware above.
-      await this.assertPackageManagedWriteGate(opCtx);
-
-      // [ADR-0066 / #2918] Built-in row-write guardrail for the platform/app
-      // ASSET objects sys_position / sys_capability. Like the package gate
-      // above, an unconditional data-layer boundary: a row authored by the
-      // platform or an application package (provenance recorded in
-      // `managed_by`) may not be deleted or rewritten through the admin door.
-      // Unlike sys_permission_set there is NO ADR-0094 overlay write-through
-      // for these objects, so the refusal must hold for update/delete here
-      // rather than deferring to a downstream translation. Runs BEFORE the
-      // principal-less refusal and the CRUD check so the boundary holds even
-      // for a principal-less context and a superuser with modifyAllRecords.
-      // System/boot writes carry `isSystem` and already short-circuited above,
-      // so the seeder and package publish are unaffected.
-      await this.assertSystemRowWriteGate(opCtx);
-
-      // [#8552 / ADR-0066 D1] Curated-name authoring refusal for
-      // sys_capability. A name in PLATFORM_CAPABILITY_NAMES is a capability
-      // the PLATFORM defines; a Setup-authored row claiming one is a
-      // declaration the platform cannot honour, so it is refused here —
-      // create and rename-to both — rather than answered 200 and then
-      // declined by the seeder on every boot. Runs AFTER the provenance gate
-      // above (a platform/package row's rename is already refused there on
-      // provenance) and, like it, BEFORE the principal-less refusal and
-      // the CRUD check. System/boot writes carry `isSystem` and
-      // short-circuited above, so the curated seeder itself is unaffected.
-      await this.assertCuratedCapabilityNameGate(opCtx);
-
-      // [ADR-0090 D5/D9] Audience-anchor binding guard — like the package
-      // gate above, an unconditional data-layer boundary: a permission set
-      // carrying high-privilege bits must never be bound to the `everyone`
-      // or `guest` positions, no matter who asks. (Boot/system writes carry
-      // `isSystem` and short-circuited above; the dev-mode default binding
-      // is validated at seed time by the same predicate.)
-      await this.assertAudienceAnchorBindingGate(opCtx);
 
       // [ADR-0103] Engine-owned write guard. Fail-closed on a user-context
       // generic write to a `system`/`append-only` object whose resolved
@@ -4466,9 +4360,8 @@ export class SecurityPlugin implements Plugin {
             });
             everyoneMutationWired = true;
           }
-          // [#2747] When the owning package is uninstalled, revoke its data-plane permission
-          // rows (package-owned sets + their position/user bindings + the
-          // package's suggestion rows) and the grants naming the sets it
+          // [#2747] When the owning package is uninstalled, remove the
+          // package's suggestion rows and revoke the grants naming the sets it
           // declared (`args.declared`, captured by the door before it withdrew
           // the package) so grants die with the package — the "no ghost
           // grants" clause of ADR-0090 D5.
@@ -4777,13 +4670,8 @@ export class SecurityPlugin implements Plugin {
     const ql = this.ql;
     try {
       const anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
-      const sets = this.baselinePermissionSets.filter((name) => {
-        const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
-        const offending = boot ? describeHighPrivilegeBits(boot, anchorContext) : null;
-        if (offending) {
-          logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set: name, offending });
-        }
-        return !offending;
+      const sets = this.everyoneBaseline(anchorContext, (set, offending) => {
+        logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set, offending });
       });
       try {
         const derived = await readAcceptedEveryoneSets(ql, this.metadata);
@@ -4809,6 +4697,73 @@ export class SecurityPlugin implements Plugin {
     } catch (e) {
       logger.warn('[security] everyone-anchor declaration failed (non-fatal)', { error: (e as Error).message });
     }
+  }
+
+  /**
+   * [ADR-0090 D5] The deployment's baseline as `everyone` names it: the
+   * declared baseline minus every shipped set carrying a high-privilege bit,
+   * judged against `context` — the stack's declared capabilities. Pure: the
+   * one derivation {@link declareBuiltinPositions} and {@link declareEveryone}
+   * share. `onWithheld` hears each set it leaves out.
+   */
+  private everyoneBaseline(
+    context: AnchorBindingContext | undefined,
+    onWithheld?: (set: string, offending: string) => void,
+  ): string[] {
+    return this.baselinePermissionSets.filter((name) => {
+      const boot = this.bootstrapPermissionSets.find((p) => p.name === name);
+      const offending = boot ? describeHighPrivilegeBits(boot, context) : null;
+      if (offending) onWithheld?.(name, offending);
+      return !offending;
+    });
+  }
+
+  /**
+   * [ADR-0131 D2, ADR-0090 D5] Declare the six built-in positions, with
+   * `everyone` naming the deployment's baseline, to the engine registry — from
+   * `init()`, the kernel contract's declaration phase.
+   *
+   * They are metadata of THIS plugin, as its permission sets are, and their one
+   * home: no boot step writes a `sys_position` row for them. Not through the
+   * manifest registration: a manifest `positions` key reaches no registry (see
+   * `builtin-positions.ts`), so they go to the engine registry by its own seam,
+   * under this plugin's package id. Registry writes only — nothing here reads or
+   * writes the database.
+   *
+   * Why `init()`: a boot that composes this plugin for its declarations only
+   * runs `init()` and no `start()` and no hook — `os migrate
+   * organization-ownership --apply` resolves position bindings against this
+   * catalog, and declared from `start()` and `kernel:ready` neither the
+   * built-ins nor the baseline reached it.
+   *
+   * The baseline here is the fail-closed reading: no declared-capability
+   * context, because the stack's declarations are still arriving while plugins
+   * initialize, and a verdict read off a still-filling registry is one the boot
+   * can contradict. With no context a token is never excused, so this list is
+   * never wider than the one {@link declareEveryone} derives at `kernel:ready`,
+   * which replaces it on a started kernel and adds the accepted package
+   * defaults (a database read, which stays there). Nothing is reported here:
+   * {@link declareEveryone} reports what it withholds.
+   */
+  private declareBuiltinPositions(ctx: PluginContext): void {
+    let ql: { registry?: unknown } | undefined;
+    try {
+      ql = ctx.getService<{ registry?: unknown }>('objectql');
+    } catch {
+      return; // No engine: `start()` reports it, and nothing can be declared.
+    }
+    if (!ql) return;
+    if (registerBuiltinPositions(ql.registry, SECURITY_PLUGIN_ID) === 0) {
+      ctx.logger.warn(
+        '[security] the built-in positions (platform_admin, org_owner, org_admin, org_member, everyone, guest) '
+          + 'were NOT declared as position metadata: the ObjectQL engine exposes no registry that can register '
+          + 'them. The security catalog read and GET /api/v1/meta/position will not list them, and the '
+          + '`everyone` baseline sets are granted through no position.',
+      );
+      return;
+    }
+    const baseline = this.everyoneBaseline(undefined);
+    if (baseline.length > 0) declareEveryoneBaseline(ql.registry, SECURITY_PLUGIN_ID, baseline);
   }
 
   async destroy(): Promise<void> {
@@ -6155,9 +6110,10 @@ export class SecurityPlugin implements Plugin {
    *  - **The remaining PRE-RESOLUTION gates, which run beside arms 2 and 3 and
    *    are not asked here.** Two judge a row's PROVENANCE, which a preview
    *    holds no row to carry: the ADR-0086/0094 package-managed write gate and
-   *    the ADR-0066 system-row write gate. Two judge a payload VALUE: the
-   *    ADR-0066 D1 curated-capability-name refusal and the ADR-0090 D5/D9
-   *    audience-anchor binding guard. And the ADR-0056 `publicFormGrant` scope,
+   *    the ADR-0066 system-row write gate. One judges a payload VALUE: the
+   *    ADR-0066 D1 curated-capability-name refusal. (The ADR-0090 D5/D9
+   *    audience-anchor binding guard is gone: it judged `sys_position_permission_set`
+   *    writes, an object C3 stage 8 retired.) And the ADR-0056 `publicFormGrant` scope,
    *    which admits create plus read-back on exactly the granted object and
    *    refuses everything else pre-resolution — not asked because no wire
    *    caller and no constructor in the tree presents the grant here (it is
@@ -6795,463 +6751,6 @@ export class SecurityPlugin implements Plugin {
    * `*Many` paths, out of scope for the by-id pre-image check).
    */
   /**
-   * [ADR-0086 P2 — 块2, evolved by ADR-0094] Two-doors data-layer gate for
-   * `sys_permission_set`.
-   *
-   * A row with `managed_by:'package'` is owned by the package door (its
-   * baseline is authored in the package, materialized on publish). This gate
-   * refuses (a) FORGING that provenance through the admin door — insert or
-   * update, single object or array — and (b) the lifecycle ops with no
-   * overlay translation (`transfer`/`restore`/`purge`) on package rows.
-   * Ordinary `update`/`delete` pass through: the ADR-0094 write-through
-   * downstream translates them into env-scope overlay operations (customize /
-   * reset), and re-asserts the refusal itself when the kernel has no metadata
-   * overlay layer. Fails CLOSED and never depends on the caller's grants, so
-   * a platform admin with `modifyAllRecords` cannot forge provenance either.
-   * System/boot writes never reach here (the middleware short-circuits on
-   * `isSystem`), so system writes are unaffected.
-   */
-  /**
-   * [ADR-0090 D5/D9] Reject binding a HIGH-PRIVILEGE permission set to an
-   * audience anchor (`everyone` / `guest`). The anchors are implicit for
-   * whole principal classes, so a dangerous binding here is an instant
-   * tenant-wide (or anonymous-wide) grant — the one shape the model must
-   * make unrepresentable rather than merely discouraged.
-   */
-  private async assertAudienceAnchorBindingGate(opCtx: any): Promise<void> {
-    if (opCtx?.object !== 'sys_position_permission_set') return;
-    if (!['insert', 'update'].includes(opCtx.operation)) return;
-    const rows = Array.isArray(opCtx.data)
-      ? opCtx.data
-      : (opCtx.data && typeof opCtx.data === 'object' ? [opCtx.data] : []);
-    if (rows.length === 0) return;
-
-    const ql = this.ql;
-    // [#18535, ADR-0090 D5] The stack's declared `capabilities:`, read at most
-    // ONCE per gate pass and only once an anchor row is actually in play — the
-    // common write on this table names an ordinary position and must not pay
-    // for a read it does not use. Same source as the boot binding and as
-    // `confirmAudienceBindingSuggestion`, which is this gate's friendly early
-    // rendition: a second source there would let a confirm pass its own check
-    // and then be refused by the insert it performs.
-    let anchorContext: AnchorBindingContext | undefined;
-    let anchorContextLoaded = false;
-    const declaredCapabilityContext = async (): Promise<AnchorBindingContext | undefined> => {
-      if (!anchorContextLoaded) {
-        anchorContext = await readDeclaredCapabilityContext(ql, this.metadata);
-        anchorContextLoaded = true;
-      }
-      return anchorContext;
-    };
-    for (const row of rows) {
-      const positionId = (row as any)?.position_id;
-      if (!positionId || !ql?.find) continue;
-      let positionName = '';
-      try {
-        const posRows = await ql.find('sys_position', { where: { id: positionId }, limit: 1, context: { isSystem: true } });
-        positionName = String((Array.isArray(posRows) && posRows[0] ? (posRows[0] as any).name : '') ?? '');
-      } catch { positionName = ''; }
-      if (positionName !== 'everyone' && positionName !== 'guest') continue;
-
-      // Resolve the target set definition (bootstrap sets by name, else the
-      // sys_permission_set row itself carries the authored definition).
-      const setId = (row as any)?.permission_set_id;
-      let setName = '';
-      let setDef: any = null;
-      try {
-        const setRows = await ql.find('sys_permission_set', { where: { id: setId }, limit: 1, context: { isSystem: true } });
-        const sr: any = Array.isArray(setRows) && setRows[0] ? setRows[0] : null;
-        if (sr) {
-          setName = String(sr.name ?? '');
-          setDef = sr;
-        }
-      } catch { /* fall through to bootstrap lookup below */ }
-      const boot = this.bootstrapPermissionSets.find((p) => p.name === setName);
-      // [ADR-0090 D9] Anchor-tier predicate: `guest` faces the strictest tier
-      // (additionally no edit bit — read-only by default, create is the single
-      // case-by-case write); `everyone` uses the high-privilege predicate.
-      // [#18535] `guest` faces the strictest tier and the predicate DROPS the
-      // context for it (D5's app-token excusal is the `everyone` tier's alone),
-      // so the same call serves both anchors.
-      const offending = describeAnchorForbiddenBits(
-        boot ?? setDef,
-        positionName as 'everyone' | 'guest',
-        await declaredCapabilityContext(),
-      );
-      if (offending) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: permission set '${setName || setId}' cannot be bound to the '${positionName}' audience anchor — it carries ${offending} (ADR-0090 D5/D9). ` +
-            `Audience anchors accept low-privilege sets only; grant powerful sets through ordinary positions instead.`,
-          { operation: opCtx.operation, object: opCtx.object, position: positionName, permissionSet: setName || setId },
-        );
-      }
-    }
-  }
-
-  private async assertPackageManagedWriteGate(opCtx: any): Promise<void> {
-    if (opCtx?.object !== 'sys_permission_set') return;
-    const op = opCtx.operation;
-    if (!['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(op)) return;
-
-    // (a) Reject any admin-door PAYLOAD that CLAIMS package provenance
-    //     (`managed_by:'package'`), on insert OR update, single object OR array
-    //     (`engine.insert`/`update` both accept `T | T[]` and route arrays
-    //     through this same middleware). Only the package publish path — which
-    //     carries `isSystem` and short-circuited the whole middleware above —
-    //     may stamp package provenance. This also closes update-to-forge: an
-    //     env row cannot be re-badged package-managed through the admin door.
-    const payloadRows = Array.isArray(opCtx.data)
-      ? opCtx.data
-      : (opCtx.data && typeof opCtx.data === 'object' ? [opCtx.data] : []);
-    if (payloadRows.some((r: unknown) => r && typeof r === 'object' && (r as Record<string, unknown>).managed_by === 'package')) {
-      throw new PermissionDeniedError(
-        `[Security] Access denied: cannot set 'managed_by:package' on a permission set through the admin door — ` +
-          `package permission sets are authored in their package and land via publish (ADR-0086 two-doors).`,
-        { operation: op, object: opCtx.object },
-      );
-    }
-    if (op === 'insert') return; // no existing row to protect
-
-    // [ADR-0094 D5-R] `update`/`delete` on a package-managed row are not
-    // refused HERE: the write-through middleware (which runs after this gate
-    // + the delegated-admin gate + the CRUD checks) translates them into a
-    // metadata write, and the refusal is LEFT TO THAT PRODUCER. Since commit
-    // ee58392e1 rolled `permission` back to `allowEnvironmentOverlay: false`, a
-    // CODE-DECLARED (artifact-backed) set is refused there with 403
-    // `NOT_OVERRIDABLE`; a `sys_metadata`-backed set rides
-    // `allowRuntimeCreate` and still lands. The 2026-07-14 "customize / reset
-    // via the standard ADR-0005 layering" direction this comment used to cite
-    // is RETIRED. The lifecycle ops below have no metadata translation, so the
-    // package-row protection stays for them.
-    if (op === 'update' || op === 'delete') return;
-
-    if (!this.ql) return;
-
-    const targetId = this.extractSingleId(opCtx);
-    if (targetId == null) {
-      // Multi-row / filter write with no single id. Deny ONLY if a package-owned
-      // row actually falls within the write's own filter — so a bulk edit that
-      // targets only env-authored rows still succeeds (no over-broad block). A
-      // whole-table write (no filter) matches every package row, so it is denied.
-      const writeWhere = opCtx?.options?.where;
-      const packageWhere = writeWhere && typeof writeWhere === 'object'
-        ? { $and: [writeWhere, { managed_by: 'package' }] }
-        : { managed_by: 'package' };
-      // [#7505] No `.catch(() => null)`: a fault here is not "no package row
-      // matched". Swallowed, it stood this guard down for the duration of a
-      // store outage and let the admin-door write through — the same collapse
-      // `readRowById` carried on the by-id branch just below, and this gate
-      // must not answer one way for a single id and the opposite for a filter.
-      // The fault propagates, so the write is refused and the caller sees the
-      // outage.
-      const hitsPackageRow = await this.ql
-        .findOne('sys_permission_set', { where: packageWhere, context: { isSystem: true } });
-      if (hitsPackageRow) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: this '${op}' on 'sys_permission_set' targets one or more package-managed ` +
-            `rows — change those by editing their package and re-publishing, not through the admin door ` +
-            `(ADR-0086 two-doors separation).`,
-          { operation: op, object: opCtx.object },
-        );
-      }
-      return;
-    }
-
-    const existing = await this.readRowById('sys_permission_set', targetId, { isSystem: true });
-    if (existing && (existing as Record<string, unknown>).managed_by === 'package') {
-      const row = existing as Record<string, unknown>;
-      throw new PermissionDeniedError(
-        `[Security] Access denied: '${String(row.name ?? targetId)}' is a package-managed permission set ` +
-          `(managed_by:'package') — change it by editing its package and re-publishing, not through the ` +
-          `admin door (ADR-0086 two-doors separation).`,
-        {
-          operation: op,
-          object: opCtx.object,
-          recordId: targetId,
-          packageId: (row.package_id as string | null) ?? null,
-        },
-      );
-    }
-  }
-
-  /**
-   * [ADR-0066 / #2918] Built-in row-write guardrail for the platform/application
-   * ASSET objects `sys_position` and `sys_capability`.
-   *
-   * ADR-0066's asset-ownership model splits authoring from assignment: WHAT a
-   * position or capability *is* is defined by the platform or an application
-   * package developer; a customer admin only decides WHO it is assigned to (via
-   * the RBAC link tables, which are governed separately by the delegated-admin
-   * gate). The `managed_by` provenance column on each object already records
-   * that ownership, but until now nothing ENFORCED it at the data layer — an
-   * admin could delete or rewrite a platform/package-managed row and silently
-   * break that app's authorization baseline (ADR-0049: a provenance attribute
-   * that exists but is never enforced is exactly the gap to close).
-   *
-   * This gate is an unconditional data-layer boundary, mirroring the
-   * `sys_permission_set` two-doors gate above:
-   *   (a) The admin door may never FORGE managed provenance — stamping
-   *       `managed_by` to a platform/package value on insert OR update (single
-   *       object OR array) is refused; only the platform seeder / package
-   *       publish path (which carries `isSystem` and short-circuited the whole
-   *       middleware above) may author it. This also closes update-to-forge.
-   *   (b) delete / update / transfer / restore / purge on a row whose EXISTING
-   *       `managed_by` is platform/package-owned are refused — unlike
-   *       `sys_permission_set`, these objects have NO ADR-0094 overlay
-   *       write-through, so the mutation would otherwise go straight to the
-   *       driver.
-   *   (c) admin-authored rows (`managed_by` user/∅/admin) are untouched — the
-   *       admin fully owns those (incl. a delegate's rows in their own subtree).
-   *   (d) [#22360] ONE carve-out from (b): an `update` of a PACKAGE-provided
-   *       `sys_position` row whose patch touches only ROW STATE passes — see
-   *       {@link SecurityPlugin.PACKAGE_POSITION_ROW_STATE_COLUMNS}. Platform
-   *       rows and `sys_capability` get no carve-out.
-   * Fails CLOSED and never depends on the caller's grants, so a superuser with
-   * modifyAllRecords cannot delete a platform position either.
-   */
-  private async assertSystemRowWriteGate(opCtx: any): Promise<void> {
-    const spec = SYSTEM_ROW_PROVENANCE[opCtx?.object as string];
-    if (!spec) return;
-    const op = opCtx.operation;
-    if (!['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(op)) return;
-
-    const managedValues = Object.keys(spec.managed);
-
-    // (a) Reject any admin-door PAYLOAD that CLAIMS platform/package provenance,
-    //     on insert OR update, single object OR array. Only the seeder / publish
-    //     path (which carries `isSystem` and short-circuited above) may stamp it.
-    const payloadRows = Array.isArray(opCtx.data)
-      ? opCtx.data
-      : (opCtx.data && typeof opCtx.data === 'object' ? [opCtx.data] : []);
-    if (
-      payloadRows.some(
-        (r: unknown) =>
-          r &&
-          typeof r === 'object' &&
-          managedValues.includes(String((r as Record<string, unknown>).managed_by ?? '')),
-      )
-    ) {
-      throw new PermissionDeniedError(
-        `[Security] Access denied: cannot stamp a platform/package 'managed_by' value on a ${spec.noun} ` +
-          `through the admin door — ${spec.pluralNoun} provided by the platform or an application package are ` +
-          `authored there and land via seeding/publish, not through Setup (ADR-0066 asset ownership).`,
-        { operation: op, object: opCtx.object },
-      );
-    }
-    if (op === 'insert') return; // no existing row to protect
-
-    if (!this.ql) return;
-
-    // (d) Whether this write is the row-state-only update the carve-out admits.
-    const rowStateOnly = SecurityPlugin.isPackagePositionRowStatePatch(opCtx);
-
-    const targetId = this.extractSingleId(opCtx);
-    if (targetId == null) {
-      // Multi-row / filter write with no single id. Deny ONLY if a managed row
-      // actually falls within the write's own filter — so a bulk edit that
-      // targets only admin-authored rows still succeeds (no over-broad block). A
-      // whole-table write (no filter) matches every managed row, so it is denied.
-      //
-      // (d) A row-state-only patch asks only about the rows the carve-out does
-      // not cover: package positions in the filter no longer refuse it, a
-      // platform position in the filter still does.
-      const guardedValues = rowStateOnly
-        ? managedValues.filter((v) => !SecurityPlugin.PACKAGE_POSITION_PROVENANCE.has(v))
-        : managedValues;
-      const writeWhere = opCtx?.options?.where;
-      const managedWhere =
-        writeWhere && typeof writeWhere === 'object'
-          ? { $and: [writeWhere, { managed_by: { $in: guardedValues } }] }
-          : { managed_by: { $in: guardedValues } };
-      // [#7505] No `.catch(() => null)` — see the sibling gate: a swallowed
-      // fault made this asset guard answer "nothing managed matched" and admit
-      // the write. Fail-closed: propagate.
-      const hitsManagedRow = await this.ql
-        .findOne(opCtx.object, { where: managedWhere, context: { isSystem: true } });
-      if (hitsManagedRow) {
-        throw new PermissionDeniedError(
-          `[Security] Access denied: this '${op}' on '${opCtx.object}' targets one or more ${spec.pluralNoun} ` +
-            `provided by the platform or an application package — those cannot be deleted or modified through ` +
-            `the admin door (ADR-0066 asset ownership).`,
-          { operation: op, object: opCtx.object },
-        );
-      }
-      return;
-    }
-
-    const existing = await this.readRowById(opCtx.object, targetId, { isSystem: true });
-    const existingManagedBy = existing
-      ? String((existing as Record<string, unknown>).managed_by ?? '')
-      : '';
-    const ownerLabel = spec.managed[existingManagedBy];
-    // (d) The carve-out: a row-state-only patch of a package-provided position.
-    if (existing && rowStateOnly && SecurityPlugin.PACKAGE_POSITION_PROVENANCE.has(existingManagedBy)) return;
-    if (existing && ownerLabel) {
-      const row = existing as Record<string, unknown>;
-      const source = ownerLabel === 'the platform' ? 'platform definition' : 'application package';
-      throw new PermissionDeniedError(
-        `[Security] Access denied: '${String(row.name ?? row.label ?? targetId)}' is a ${spec.noun} provided ` +
-          `by ${ownerLabel} — it cannot be deleted or modified through the admin door. Change it by editing ` +
-          `its ${source} and re-publishing (ADR-0066 asset ownership).`,
-        { operation: op, object: opCtx.object, recordId: targetId, managedBy: existingManagedBy },
-      );
-    }
-  }
-
-  /**
-   * [#22360] The ROW-STATE columns of `sys_position`: the one named allowlist
-   * the carve-out (d) of {@link SecurityPlugin.assertSystemRowWriteGate} admits
-   * on a package-provided position.
-   *
-   * A package position row is locked the way a packaged permission set is.
-   * `permission-set-projection.ts`'s write door (#4669) passes a bare
-   * `{ active }` patch on a packaged set straight through: switching a packaged
-   * set off is not a customization of it. Under #15196's Q2 = A,
-   * `sys_position.active` stays row-authoritative, so switching a package's
-   * position off — or making it the default for new users — is the operator's
-   * lever on the row, not an edit of the package's definition. Neither column
-   * is a `PositionSchema` key.
-   *
-   * Everything else stays refused, with the gate's own code and message:
-   * a definition column (`name`, `label`, `description`, `delegatable`), any
-   * column not named here, `delete`, and `transfer` / `restore` / `purge`.
-   * `delegatable` is deliberately NOT row state: it is declared on the position
-   * definition, and the triage ruling locks it ahead of #15196's S8b reader
-   * switch. ⛔ Widening this set is a ruling, not an edit.
-   */
-  private static readonly PACKAGE_POSITION_ROW_STATE_COLUMNS: ReadonlySet<string> = new Set(['active', 'is_default']);
-
-  /**
-   * [#22360] The `sys_position` provenance values carve-out (d) applies to:
-   * `package`, and `config`, its legacy pre-A4 spelling, which
-   * `SYSTEM_ROW_PROVENANCE` guards as the same owner ("an application
-   * package") — the two vocabularies are kept in lockstep there, so a legacy
-   * row the boot normalizer has not healed yet answers as its canonical twin.
-   * ⛔ Never `platform` / `system`: switching off a built-in such as
-   * `everyone` is not an operator lever.
-   */
-  private static readonly PACKAGE_POSITION_PROVENANCE: ReadonlySet<string> = new Set(['package', 'config']);
-
-  /**
-   * [#22360] Is this the write carve-out (d) admits: an `update` of
-   * `sys_position` whose patch is ONE object naming at least one row-state
-   * column and nothing else? `id` is the row's identifier (the single-id
-   * branch reads it from the payload), not a column the patch changes. An
-   * array payload is never admitted here: its rows are judged by the gate
-   * exactly as before.
-   */
-  private static isPackagePositionRowStatePatch(opCtx: any): boolean {
-    if (opCtx?.object !== 'sys_position' || opCtx?.operation !== 'update') return false;
-    const patch = opCtx.data;
-    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return false;
-    const columns = Object.keys(patch).filter((k) => k !== 'id');
-    return columns.length > 0
-      && columns.every((k) => SecurityPlugin.PACKAGE_POSITION_ROW_STATE_COLUMNS.has(k));
-  }
-
-  /**
-   * [#8552 / ADR-0066 D1] Curated-name authoring refusal for `sys_capability`.
-   *
-   * A name in `PLATFORM_CAPABILITY_NAMES` is a capability the PLATFORM
-   * defines: grants (`systemPermissions`) and requirements
-   * (`requiredPermissions`) resolve it by name, and its definition is served
-   * by the registry (`builtin-capabilities.ts`, ADR-0131 D3), not by a row. A
-   * Setup-authored row claiming such a name is a declaration the platform
-   * cannot honour — it can never BE the curated capability (provenance
-   * forging is refused by the gate above). Maintainer ruling on
-   * #8552 (2026-08-13): refuse the collision AT THE WRITE DOOR — create and
-   * rename both — naming the colliding curated name; never answer 200.
-   *
-   * What is refused, and exactly that:
-   *   - `insert` whose payload names a curated capability (every row of an
-   *     array payload);
-   *   - `update` that RENAMES a row TO a curated name. A payload repeating
-   *     the row's OWN existing curated name is not a rename and passes: the
-   *     ruling deliberately leaves pre-existing colliding rows to the
-   *     operator, so the operator's remediation on one (edit the label,
-   *     deactivate, rename AWAY) must stay open, and a full-record PATCH from
-   *     Setup echoes `name` unchanged. The pre-image is read under a system
-   *     context to establish that fact; per the #7505 ruling the read fails
-   *     CLOSED — an engine fault propagates, and an absent pre-image refuses,
-   *     because a write claiming a curated name for a row that cannot be
-   *     shown to already hold it is exactly the state this gate prevents.
-   *   - a FILTER update stamping a curated name is allowed only when the
-   *     filter provably matches nothing but rows already holding that name
-   *     (`$ne` probe, the sibling gate's bulk-check shape); no filter at all
-   *     is a whole-table stamp and is refused.
-   *
-   * Deliberately NOT covered: `restore` of a soft-deleted row that already
-   * held a curated name re-establishes a pre-existing collision rather than
-   * minting a new one — that residue is the operator's (option 1 of the
-   * ruling), not this gate's. Creating NON-curated names stays open — the
-   * legitimate half of both measured flows (community NULL-bucket `admin`
-   * rows, package declarations), and the seeders themselves carry `isSystem`
-   * and short-circuit the middleware entirely.
-   */
-  private async assertCuratedCapabilityNameGate(opCtx: any): Promise<void> {
-    if (opCtx?.object !== 'sys_capability') return;
-    const op = opCtx.operation;
-    if (op !== 'insert' && op !== 'update') return;
-
-    const payloadRows: unknown[] = Array.isArray(opCtx.data)
-      ? opCtx.data
-      : opCtx.data && typeof opCtx.data === 'object'
-        ? [opCtx.data]
-        : [];
-
-    const curatedNameOf = (r: unknown): string | null => {
-      if (!r || typeof r !== 'object') return null;
-      const name = (r as Record<string, unknown>).name;
-      return typeof name === 'string' && PLATFORM_CAPABILITY_NAMES.has(name) ? name : null;
-    };
-
-    const refuse = (name: string): never => {
-      throw new PermissionDeniedError(
-        `[Security] Access denied: '${name}' is a platform-curated capability name — a sys_capability ` +
-          `row cannot be created with it or renamed to it through the admin door. The platform defines ` +
-          `this capability and seeds its own row for it; grants and requiredPermissions already resolve ` +
-          `the name. A curated name is refused at authoring so that no admin-authored row can collide ` +
-          `with the row the platform seeds for it. Choose a different capability name (ADR-0066 asset ` +
-          `ownership).`,
-        { operation: op, object: opCtx.object, name, curated: true },
-      );
-    };
-
-    if (op === 'insert') {
-      for (const r of payloadRows) {
-        const name = curatedNameOf(r);
-        if (name != null) refuse(name);
-      }
-      return;
-    }
-
-    // update — refuse a rename TO a curated name.
-    const isScalarId = (v: unknown): v is string | number | bigint =>
-      v !== null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint');
-    for (const r of payloadRows) {
-      const name = curatedNameOf(r);
-      if (name == null) continue;
-      const ownId = (r as Record<string, unknown>).id;
-      const rowId = isScalarId(ownId) ? ownId : this.extractSingleId(opCtx);
-      if (rowId != null) {
-        if (!this.ql) refuse(name);
-        // [#7505] Fail-closed: a probe fault propagates; `null` means absent.
-        const existing = await this.readRowById('sys_capability', rowId, { isSystem: true });
-        if (existing && String((existing as Record<string, unknown>).name ?? '') === name) continue;
-        refuse(name);
-      }
-      const writeWhere = opCtx?.options?.where;
-      if (!writeWhere || typeof writeWhere !== 'object' || !this.ql) refuse(name);
-      // [#7505] No swallow here either — a probe fault propagates (fail closed).
-      const renamesOtherRow = await this.ql.findOne('sys_capability', {
-        where: { $and: [writeWhere, { name: { $ne: name } }] },
-        context: { isSystem: true },
-      });
-      if (renamesOtherRow) refuse(name);
-    }
-  }
-
-  /**
    * [commit 6feac910b] Does this object declare that its access — writes included — derives
    * from a master record (ADR-0055 `controlled_by_parent`)?
    *
@@ -7455,11 +6954,10 @@ export class SecurityPlugin implements Plugin {
    *   - `assertControlledByParentWrite` answered `404 RECORD_NOT_FOUND` — an
    *     SDK treats that as TERMINAL (drop the id, do not retry) when the
    *     truthful answer was a transient outage it should have backed off on;
-   *   - the two admin-door provenance gates
-   *     (`assertPackageManagedWriteGate`, `assertSystemRowWriteGate`) read
-   *     `null` as "this row is not package/platform-managed" and let the write
-   *     THROUGH — fail-OPEN, the whole guard silently stood down for the
-   *     duration of a store fault.
+   *   - the two admin-door provenance gates on the catalog row objects
+   *     (retired with those objects, ADR-0131 D3) read `null` as "this row is
+   *     not package/platform-managed" and let the write THROUGH — fail-OPEN,
+   *     the whole guard silently stood down for the duration of a store fault.
    *
    * Maintainer ruling of 2026-08-11 on #7505: FAIL-CLOSED. An engine fault
    * PROPAGATES out of this probe instead of being flattened, so the write is

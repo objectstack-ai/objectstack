@@ -713,31 +713,35 @@ describe('validateComponentProps — object-* blocks are dispatched (#7751)', ()
 });
 
 /**
- * Why the registry entry reads the NORMALIZED tier.
+ * The normalized tier, after `page-header-subtitle-alias` retired from the
+ * load path at 18 (#23421).
  *
- * The props bag survives the Zod parse unchanged (`z.record(z.string(),
- * z.unknown())`), so the two tiers carry identical props and the choice looks
- * free. It is not: the ADR-0087 D2 conversion layer runs INSIDE
- * `normalizeStackInput`, and `page-header-subtitle-alias` rewrites
- * `properties.description` → `subtitle` on header nodes. Reading the raw
- * authored input would report a key the conversion layer has already fixed —
- * the rule contradicting a declared conversion, which is exactly the
- * second-de-facto-contract shape Prime Directive #12 forbids.
+ * The registry entry reads the NORMALIZED tier, and while that conversion was
+ * live it rewrote `properties.description` → `subtitle` on header nodes inside
+ * `normalizeStackInput`, so `os validate` passed a page the metadata save door
+ * (which judges the raw page) refused. Retired, the conversion no longer runs
+ * in the authoring funnel: both tiers now carry the authored `description`,
+ * and both refuse it with the rename `PageHeaderProps` declares — the same
+ * answer every door gives. The conversion still canonicalizes data at rest.
  */
 describe('validateComponentProps — reads the post-conversion (normalized) tier', () => {
   const authored = stackWith([
     { type: 'page:header', properties: { title: 'Lead', description: 'All open leads' } },
   ]);
+  const DESCRIPTION_PATH = 'pages[0].regions[0].components[0].properties.description';
 
-  it('says nothing about a key the ADR-0087 conversion layer canonicalizes', () => {
-    expect(validateComponentProps(normalizeStackInput(authored))).toEqual([]);
+  it('refuses a retired conversion\'s old key at the normalized tier, naming the rename', () => {
+    const findings = validateComponentProps(normalizeStackInput(authored));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [COMPONENT_PROPS_UNKNOWN_KEY, 'error', DESCRIPTION_PATH],
+    ]);
+    expect(findings[0].message).toContain('subtitle');
   });
 
-  it('WOULD report it pre-conversion — which is why the tier is not free', () => {
+  it('gives the raw tier the same answer — the two doors no longer disagree on this page', () => {
     const raw = validateComponentProps(authored);
-    expect(unknownKeys(raw).map((f) => f.path)).toEqual([
-      'pages[0].regions[0].components[0].properties.description',
-    ]);
+    expect(unknownKeys(raw).map((f) => f.path)).toEqual([DESCRIPTION_PATH]);
+    expect(unknownKeys(raw)[0].message).toContain('subtitle');
   });
 });
 

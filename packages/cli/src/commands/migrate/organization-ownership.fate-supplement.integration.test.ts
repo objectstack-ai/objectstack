@@ -88,6 +88,23 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * A plan file as a plan run writes it: `--apply` executes only a reviewed plan.
+ * The apply step is mocked here, so only the file's parse runs.
+ */
+function writePlan(): string {
+  const file = join(dir, 'reviewed-plan.json');
+  writeFileSync(file, JSON.stringify({
+    kind: 'organization-ownership-plan',
+    ceremony: 'ADR-0131 D10',
+    generatedAt: '2026-10-13T00:00:00.000Z',
+    database: 'fixture.db',
+    inventoryDigest: 'f'.repeat(64),
+    posture: 'single',
+  }));
+  return file;
+}
+
 function writeSupplement(rows: unknown): string {
   const file = join(dir, 'host-fates.json');
   writeFileSync(file, JSON.stringify(rows));
@@ -144,7 +161,7 @@ describe('the plan reads the host fate supplement through --fate-supplement', ()
 describe('--apply hands the merged inventory to the apply step', () => {
   it('with --fate-supplement, the apply step receives the host row', async () => {
     const file = writeSupplement([{ object: 'sys_domain', fate: 'report', citation: CITE }]);
-    const { payload } = await runJson(['--apply', '--backup-taken', '--fate-supplement', file, ...out('apply.json')]);
+    const { payload } = await runJson(['--apply', '--backup-taken', '--plan-file', writePlan(), '--fate-supplement', file, ...out('apply.json')]);
     expect(payload).toMatchObject({ report: { kind: 'organization-ownership-apply' } });
     expect(apply).toHaveBeenCalledTimes(1);
     const inventory = (apply.mock.calls[0]![0] as { inventory?: Array<Record<string, unknown>> }).inventory;
@@ -152,9 +169,25 @@ describe('--apply hands the merged inventory to the apply step', () => {
   }, CASE_TIMEOUT_MS);
 
   it('control: without it, the apply step is handed no inventory and reads the platform\'s', async () => {
-    await runJson(['--apply', '--backup-taken', ...out('apply.json')]);
+    await runJson(['--apply', '--backup-taken', '--plan-file', writePlan(), ...out('apply.json')]);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(apply.mock.calls[0]![0]).not.toHaveProperty('inventory');
+  }, CASE_TIMEOUT_MS);
+});
+
+describe('a refusal of the reviewed plan raised after the boot', () => {
+  it('reaches the operator as apply_refused with its reason and both values, never as a resumable failure', async () => {
+    const { ReviewedPlanRefusal } = await import('../../utils/organization-ownership-apply.js');
+    apply.mockImplementation(async () => {
+      throw new ReviewedPlanRefusal('plan-posture-mismatch', 'computed under isolated, this run resolves single', {
+        file: 'reviewed-plan.json',
+        reviewed: 'isolated',
+        current: 'single',
+      });
+    });
+    const { payload, exitCode } = await runJson(['--apply', '--backup-taken', '--plan-file', writePlan(), ...out('apply.json')]);
+    expect(payload).toMatchObject({ error: 'apply_refused', reason: 'plan-posture-mismatch', reviewed: 'isolated', current: 'single' });
+    expect(exitCode).toBe(1);
   }, CASE_TIMEOUT_MS);
 });
 

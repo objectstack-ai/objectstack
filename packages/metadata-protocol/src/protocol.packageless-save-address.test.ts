@@ -595,3 +595,94 @@ describe('CONTROL: what the delete resolution leaves alone', () => {
         expect((await protocol.getMetaItem({ type: 'app', name })).item).toMatchObject({ active: false });
     });
 });
+
+/**
+ * [#23297, ADR-0048] The DRAFT save naming no package, of an item two packages
+ * hold.
+ *
+ * The draft save resolves its address in the repository: a draft that names no
+ * package is stored in the package of the item's active row (#11087,
+ * `SysMetadataRepository.resolveWriteHead`). That resolution read ONE active
+ * row with a package-agnostic `findOne`, so with two packages' rows the draft
+ * went into whichever package the store returned first, and the save answered
+ * `200` "(env-wide, state=draft)" without naming it. Measured on a booted
+ * showcase (SQLite): the draft landed in the package whose id sorts first,
+ * whichever package was saved first. The direct save and the delete refuse
+ * that request since #23165; the draft save now refuses it the same way, with
+ * the same `409 RESOURCE_CONFLICT` and the same `?package=` remedy.
+ *
+ * Both orders are pinned, so a fix that merely flips which package wins
+ * cannot pass: the draft is refused under both.
+ */
+describe('[#23297] an item TWO packages hold: a DRAFT save naming neither is refused', () => {
+    const ORDERS = [
+        { order: `${WRITABLE} saved first`, packages: [WRITABLE, OTHER_WRITABLE] },
+        { order: `${OTHER_WRITABLE} saved first`, packages: [OTHER_WRITABLE, WRITABLE] },
+    ] as const;
+
+    for (const { order, packages } of ORDERS) {
+        it(`409 RESOURCE_CONFLICT naming both packages, and no draft is written (${order})`, async () => {
+            const name = 'shared_draft_save_app';
+            const { protocol, rows, metadataWrites } = makeProtocol();
+            for (const packageId of packages) {
+                await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: `Active ${packageId}` }), packageId });
+            }
+            const before = metadataWrites().length;
+
+            const err = await refusalOf(() => protocol.saveMetaItem({
+                type: 'app', name, item: app(name, { label: 'Pending' }), mode: 'draft',
+            }));
+
+            const envelope = resolveThrownHttpError(err);
+            expect(envelope.status).toBe(409);
+            expect(envelope.code).toBe('RESOURCE_CONFLICT');
+            expect(err.message).toContain(`'${WRITABLE}'`);
+            expect(err.message).toContain(`'${OTHER_WRITABLE}'`);
+            expect(err.message).toContain('?package=');
+            expect(rows('app', name, 'draft')).toEqual([]);
+            expect(metadataWrites()).toHaveLength(before);
+        });
+    }
+
+    it('naming one of them saves that package\'s draft, and the other package has none', async () => {
+        const name = 'shared_draft_save_app';
+        const { protocol, rows } = makeProtocol();
+        for (const packageId of [WRITABLE, OTHER_WRITABLE]) {
+            await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: `Active ${packageId}` }), packageId });
+        }
+
+        const saved = await protocol.saveMetaItem({
+            type: 'app', name, item: app(name, { label: 'Pending' }), mode: 'draft', packageId: OTHER_WRITABLE,
+        });
+
+        expect(saved.state).toBe('draft');
+        expect(rows('app', name, 'draft').map((r) => r.package_id ?? null)).toEqual([OTHER_WRITABLE]);
+    });
+});
+
+/**
+ * [#23297] CONTROL: with ONE package the draft still inherits it (#11087), and
+ * now whichever row the store returns first. A package-less active row beside
+ * the package's is not a second package (#23165's rule for the direct save):
+ * the draft goes into the package. Before, the inheritance read one active row,
+ * so with the package-less row first in storage the draft stayed package-less.
+ */
+describe('[#23297] CONTROL: one package and a package-less active row — the draft inherits the package in either storage order', () => {
+    for (const residueFirst of [false, true]) {
+        it(`the package-less row stored ${residueFirst ? 'first' : 'second'}`, async () => {
+            const { protocol, rows, seedRow } = makeProtocol();
+            const name = 'residue_draft_app';
+            const residue = () => seedRow({
+                type: 'app', name, package_id: null, metadata: JSON.stringify(app(name, { active: false })), checksum: 'sha-residue',
+            });
+            if (residueFirst) residue();
+            await protocol.saveMetaItem({ type: 'app', name, item: app(name), packageId: WRITABLE });
+            if (!residueFirst) residue();
+
+            const saved = await protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'Pending' }), mode: 'draft' });
+
+            expect(saved.state).toBe('draft');
+            expect(rows('app', name, 'draft').map((r) => r.package_id ?? null)).toEqual([WRITABLE]);
+        });
+    }
+});

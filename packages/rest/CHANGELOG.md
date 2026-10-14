@@ -1,5 +1,177 @@
 # @objectstack/rest
 
+## 18.0.0-next.1
+
+### Minor Changes
+
+- 8024e12: fix(runtime)!: the runtime dispatcher's by-name `/meta` doors ask the query decision `RestServer` asks, so `?member=` is honoured on the item read and refused where it is not read, never dropped
+  
+  `@objectstack/rest` exports one portable decision for the query a by-name `/meta` door accepts, `metaItemQueryRefusal(door, query)`, and the bundle member selector's one reading, `metaMemberSelector(query)`. Both transports call them, so a door's closed set, its sentences and their order are one answer. On a host whose `/meta` is answered by the runtime dispatcher alone (the `@objectstack/hono` `createHonoApp` catch-all), the item read, `PUT`, `/layers` and `/published` declared no closed query set: `GET /meta/email_template/x?member=zh-CN` was answered with the canonical member, a misspelling such as `?memeber=` the same, and `PUT ?member=zh-CN` beside an `en-US` body wrote `en-US`.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed. `@objectstack/rest` gains two exports (`metaItemQueryRefusal`, `metaMemberSelector`), and the module constants that moved beside them are still exported, unchanged, from `rest-server.ts`. No stored row or package source changes, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is four runtime doors' query accept sets on the runtime dispatcher (`GET` and `PUT /meta/:type/:name`, `/layers`, `/published`): a query parameter those doors dropped now answers a located `400 VALIDATION_ERROR`, and the remedy is in the request a caller sends to that door, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What each runtime dispatcher door accepts now, and what to do when it refuses. The answers are `RestServer`'s, in the dispatcher's own envelope, `{ success: false, error: { code: 'VALIDATION_ERROR', message } }`, and the message names the refused parameter:
+  
+  - `GET /meta/:type/:name` accepts `layers`, `state`, `preview`, `package`, `locale` and `member`, the six names `RestServer`'s item read accepts. `?member=` now reads that member of a bundled type (an `email_template`'s `zh-CN`); a member the bundle does not hold is `404`, and a selector on a type with no members is the protocol's located `400`. A single-valued name supplied twice is refused, and `?member=` beside `?layers=` is refused (the layered view shows the canonical member's layers). Read one member with `?member=` alone.
+  - `PUT /meta/:type/:name` accepts `package` and `mode`. It takes no `force`: this door never honoured one, and its `409` remedy already says so. Drop `?force=`, and send a body that keeps what the stored item carries. A save is addressed by its body: to save one member of a bundled type, put that member's own discriminator in the body and drop `?member=`.
+  - `GET /meta/:type/:name/layers` accepts `package`. Read one member with `GET /meta/:type/:name?member=…`.
+  - `GET /meta/:type/:name/published` accepts no query parameter. Send none.
+  
+  A request that sends only names the door reads is answered as before, except that `?member=` on the item read is now honoured. `RestServer`'s item read asks the same decision, and its answers are byte for byte what they were. Every name the `@objectstack/client` SDK and the Studio metadata client send to these doors is accepted, except `force` on a save: the SDK sends it only when its caller passes `force: true`, and Studio only to retry a save after a `409 DESTRUCTIVE_CHANGE`. On a dispatcher-only host that retry already failed with the same `409`, and it now answers the located `400` that names `force`.
+- 543b33d: fix(metadata-protocol)!: a metadata save or delete that names no package addresses the row of the one package the item belongs to, and a name two or more packages hold is refused `409 RESOURCE_CONFLICT`; the delete door can name its package (ADR-0048, ADR-0070)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or deleted, so there is nothing for `objectstack migrate meta` to rewrite. One optional request key is ADDED (`DeleteMetaItemRequestSchema.packageId`, with `?package=` on the REST reset door), a widening that asks nothing of an existing caller. What narrows is two runtime write doors: a save or a delete through the metadata API that names no package, of an item two or more packages hold, is refused, as is a package-less save of an item a read-only package holds; the remedy is in the request a caller sends (name the package), never a rewrite of a package source or a stored row. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A `sys_metadata` row is keyed by its package (ADR-0048), so one item can hold one row per package. A save that names a package (`?package=` on the REST door, `packageId` in process) writes that package's row. A save that named none always wrote the package-unbound row, even for an item a package owns, and a delete named no package at all: it removed whichever row of the item the store returned first. The draft save already resolved this: a draft that names no package is stored in the package of the item's active row.
+  
+  **FROM.** Save an item into a package (`PUT /api/v1/meta/app/my_app?package=com.acme.app`), then save it again without `?package=`: the second save answered `200` "Saved app 'my_app' (env-wide, state=active)" and wrote a second, package-less row beside the package's row. The item read kept serving the package's row, so nothing the save carried took effect, and a console "Disable" reported success while the app stayed enabled. The same held for the API, the CLI and agents, and for an overlay row bound to a code package. A `DELETE /api/v1/meta/app/my_app` of an item two packages hold removed one of the two rows, the other was then served, and the receipt said "it no longer exists". Uninstalling a package, or discarding its drafts, deleted each of its items by name the same way, so it could remove another package's row of the same name and leave its own.
+  
+  **TO.** A direct save, or a delete, that names no package resolves its address from the item's rows (the active rows for a save and a delete, the draft rows for a draft discard):
+  
+  - **Bound to one package.** The save writes that package's row, exactly as a save naming the package does, and the item read serves it next; the delete removes that row. The receipts name the package: "Saved app 'my_app' (env-wide, package=com.acme.app, state=active)" and "Deleted app 'my_app' (package=com.acme.app) — it no longer exists." Every check on the row the save writes reads that package: its stored lock, a stored credential carried forward, the optimistic lock, and the writable-base rule. The item read that names no package serves that row's `version`, so a read followed by a save or a delete with the served `If-Match` is accepted.
+  - **Bound to two or more packages.** The save or delete is refused `409 RESOURCE_CONFLICT` and changes nothing. The message names the packages and the remedy: name one with `?package=`.
+  - **Bound to none.** The save writes, and the delete removes, the package-unbound row, as before, and the receipts read as before.
+  
+  The delete door gains the address a save has: `DELETE /api/v1/meta/:type/:name?package=<id>` (`packageId` in process, `DeleteMetaItemRequestSchema.packageId`) removes that package's row and no other; `all` and an empty value name no package, as on the save door. A repeated `?package=` is refused `400`. A delete receipt now says when another row of the item is still stored, naming it, instead of claiming the item is gone or back at its artifact default. Uninstalling a package and discarding its drafts name the package, so each removes only its own rows.
+  
+  **Also refused now**, each as the same save naming the package is refused: a package-less save of an item held by a read-only package (a code package's runtime-only item, or an installed `system`/`cloud` package's) answers `422 WRITABLE_PACKAGE_REQUIRED`; and a package-less save asserting a create (`If-None-Match: *`) of an item a package holds answers `409 METADATA_CONFLICT`.
+  
+  `packageId: null` in process names no package too, as the request contracts state. The server-side rewrites keep the row they name: `os migrate meta --stored --apply` and the stored flow credential move pass `null` for a package-unbound row they rewrite, and that row is still the one written; package duplication names its target package.
+  
+  **Unchanged.** A save or a delete that names a package exactly. A draft save, which keeps its own inheritance. An item a code package ships with no stored row: the package-less save still writes the package-unbound overlay, and the read serves it. Package-less rows already stored beside a package's row stay as they are; none is converted. A package-less delete of such an item removes the package's row and its receipt says the package-less row remains.
+  
+  **Remedy.** For an item two packages hold, send the save or the delete with `?package=` naming the package whose row it edits or removes. A receipt now names the package when the write addressed a package's row; a client that compares receipt text should expect `, package=<id>` after `env-wide` on a save and ` (package=<id>)` after the item on a delete.
+  
+  `@objectstack/spec`: the `SaveMetaItemRequestSchema.packageId` description now states what an `active` save that names no package writes, where it said the env-local overlay; `DeleteMetaItemRequestSchema` declares the optional `packageId`. `@objectstack/rest`: `package` joins the reset door's closed query set (`META_ITEM_RESET_PARAMS`).
+- d9d7edd: fix(runtime,rest,cloud-connection)!: the declared-endpoint fallback, REST's direct-mounted publish and federation routes, and cloud-connection's session doors refuse a session the ADR-0069 authentication policy holds
+  
+  Clause-②: no (narrowing) — a session ADR-0069 holds out of protected resources is refused by doors that answered it; core's existing exports only, no published schema or export moves.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at three groups of doors, not a metadata change. No spec key, export, option, config field, response field or stored shape is removed, renamed or re-shaped, and a session the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which sessions these doors serve: a session whose user carries the ADR-0069 posture (an expired password, or enforced MFA not yet enrolled) is now refused with the gate's 403 before the door's own logic runs. The other categories are closed on facts: the three packages publish (not unpublished); no ADR-0087 id covers these doors and this diff adds none (not registered / already-registered); and no published interface or type changes, the new fields living on package-internal types only (not runtime-interface-only / type-surface-only). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 holds a signed-in user out of every protected resource while their password has expired or while enforced MFA is not yet enrolled, until they remediate. REST's `enforceAuth` and the runtime dispatcher already refuse such a session. Three groups of doors that resolve a session on their own never asked, so they served it as an ordinary signed-in caller:
+  
+  - **`@objectstack/runtime`**: the declared-endpoint fallback (app-declared `apis:` endpoints, served by the dispatcher plugin's fallback seam). Its policy chain now asks the shared decision (`evaluateAuthGate`, `@objectstack/core`) before `authRequired` and before the endpoint's target runs, on every declared endpoint, an `authRequired: false` one included, because the target runs as the caller. While a gate feature is active the chain reads the session for this, and when an active gate cannot read the session the request is answered `503` (`SERVICE_UNAVAILABLE`), as REST answers it. No declared path is handed to the allow-list, so no endpoint can exempt itself through the prefix it sits under.
+  - **`@objectstack/rest`**: the direct-mounted package publish door (`registerPackageRoutes`) and the external-datasource federation family (`registerExternalDatasourceRoutes`). Each refuses on the `authGate` the REST resolver already puts on the execution context it hands them.
+  - **`@objectstack/cloud-connection`**: `CloudConnectionPlugin`'s seven session doors (bind, poll, unbind, install, and the three installed-state reads) and all five `MarketplaceInstallLocalPlugin` doors (install, list, uninstall, reseed, purge). Each plugin asks the gate once, where it resolves the session, and every door that resolves one refuses on it.
+  
+  - **Refused now:** a held session gets `403` with the gate's own `code` (`PASSWORD_EXPIRED` or `MFA_REQUIRED`) and `message`, in each door's declared error envelope, before the door does anything else. This is the answer REST gives the same session.
+  - **Unchanged:** a session the policy does not hold is served exactly as before, an API-key caller is unaffected because it has no session to hold, and an anonymous caller gets the same `401`. `CloudConnectionPlugin`'s status read and `MarketplaceProxyPlugin`'s catalog proxy resolve no session and answer every caller alike, so they are unchanged.
+  
+  What changes for you. A user the policy holds must remediate (change the password, or enroll an authenticator) before these doors answer them, as on every other protected route. Nothing needs configuring: the posture comes from the kernel's `auth` service, as it does for REST and the dispatcher.
+- d45d0e9: fix(runtime)!: the runtime dispatcher's read points refuse a repeated single-valued query name as their `RestServer` twins do, instead of reading one value, a joined value or an array
+  
+  The runtime dispatcher's `/meta`, `/ui`, `/i18n`, `/security`, `/packages` and `/data` read points each read a query name as ONE value. None of them guarded against the name arriving twice, because the only door in front of most of them, the `@objectstack/hono` `createHonoApp` catch-all, has always flattened a repeat to its last value. Handed an array, they answered wrongly: `GET /meta/object/:name/state/:field?from=a&from=b` answered a dead end for the joined state `'a,b'`; `_drafts`, `/ui/view` and the `/data` filter slot passed the array into the protocol call; both `/i18n` query-locale arms threw, which surfaced as a `500`; and the `/meta` list, the book tree, `/security/suggested-bindings` and `/packages` answered an empty or unscoped `200`. Each now refuses the repeat before any protocol or service call.
+  
+  `@objectstack/rest` publishes the lists and rules both transports read, so the two cannot drift: `META_QUERY_ARITY_DOORS` (the single-valued names of the `/meta` list, book tree, `_drafts` and state machine doors, which `RestServer`'s twins of those doors now read from), the decision `metaQueryArityRefusal(door, query)`, and `assertFilterParamSuppliedOnce`, the `/data` list's filter-slot rule, on the package entry.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed. `@objectstack/rest` gains three exports (`META_QUERY_ARITY_DOORS` and `metaQueryArityRefusal`, new in `meta-item-read-gate.ts`, and `assertFilterParamSuppliedOnce`, already exported from its module and now on the entry). The four lists `RestServer` spelled inline were never exported, and its answers are byte for byte what they were. No stored row or package source changes, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the query accept set of ten runtime dispatcher routes (seventeen names, the `/data` filter slot counted once): a single-valued name supplied more than once now answers a located `400`, and the remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you: a request that repeats one of the names below to the runtime dispatcher is now refused `400` in the dispatcher's own envelope, `{ success: false, error: { code, message } }`, instead of being answered with one value, a joined value or an array. The `code` is `VALIDATION_ERROR` with the sentence `RestServer` answers ("The "NAME" query parameter was supplied N times…"), except on the `/data` filter slot, which answers `INVALID_FILTER` with `RestServer`'s repeated-filter sentence. Send each name once.
+  
+  - `GET /meta/:type`: `package`, `preview`, `object`, `include`, `id`.
+  - `GET /meta/book/:name/tree`: `package`.
+  - `GET /meta/_drafts`: `packageId`, `type`.
+  - `GET /meta/object/:name/state/:field`: `from`.
+  - `GET /ui/view/:object`: `type`, when the path names no type.
+  - `GET /i18n/translations` and `GET /i18n/labels/:object`: `locale`, when the path names no locale.
+  - `GET /security/suggested-bindings`: `status`, `packageId`. A repeated `status` was already refused `400`, as an unknown status; it now gets the multiplicity sentence.
+  - `GET /packages`: `status`, `type`, beside `enabled`, which was already refused.
+  - `GET /data/:object`: every spelling of the filter slot (`filter`, `where` and their aliases, `filters`, `$filter`). Genuinely multi-valued names such as `select` and `expand` are untouched.
+  
+  A name sent once is answered as before, and one sent once as a one-element array now reads as that one value everywhere. Where a caller meets this today: `GET /packages` through `@objectstack/plugin-hono-server`, whose adapter already keeps repeats as arrays. Every other point is reached on a shipped host only through `createHonoApp`, which still flattens a repeat to its last value, so until that adapter keeps repeats the refusals are visible only to a caller of `HttpDispatcher.dispatch()` that passes an array. The `@objectstack/client` SDK sends each of these names once.
+- 430e5f5: fix(security)!: under a walled posture every environment-metadata write is the platform operator's, whatever its type (ADR-0131 D12 items 7–8, D11)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered walled-environment-metadata-writes-retired -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor` under the repo's launch-window convention for breaking changes. ADR-0131 D12 item 7: a walled deployment is "one environment, one schema, one catalog … The metadata-authoring capability (`manage_metadata` / `studio.access`) is what headquarters IT holds and plant admins do not." Item 8: a plant "cannot create a position, a permission set, a capability, a template or any metadata … A plant that needs its own catalog is given its own environment." D11: the rules are identical in every posture; only whether the wall is enforced differs.
+  
+  **Why.** The environment definition ledger carries no organization column, so a write lands for every organization. Measured on booted `isolated` and `group` stacks before this change: an organization owner granted `manage_metadata` inside their own organization created an object, a view and a flow at `/api/v1/meta`, edited, published, rolled back and reset the operator's view, ran `POST /api/v1/meta/_migrate-stored`, passed all thirteen `/api/v1/packages` write doors, installed, upgraded and uninstalled packages through `install-local`, and created a flow at `/api/v1/automation`, each with `2xx`; another organization's owner read every result. The security catalog was refused at these doors already; every other type was not.
+  
+  **FROM → TO**, on a `group` or `isolated` deployment, for a caller below the platform operator (the `PLATFORM_ADMIN` rung: the deployment's declared `OS_PLATFORM_OWNER_EMAIL` owner):
+  
+  - `PUT`, `DELETE`, `POST …/publish` and `POST …/rollback` of `/api/v1/meta/:type/:name` on `@objectstack/rest`, and `PUT /meta/:type/:name` on the runtime dispatcher, for a type outside the security catalog (`object`, `view`, `flow`, `app`, `dashboard`, `translation` and every other type): **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` (the dispatcher answers `403 PERMISSION_DENIED`).
+  - Every `/api/v1/packages` write on the runtime dispatcher — create, the manifest `PATCH`, enable, disable, publish, publish-drafts, discard-drafts, revert, rollback, `commits/:commitId/revert`, duplicate, adopt-orphans and delete — for a package carrying no position, permission set or capability: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before anything is read or written. The refusal no longer reads the package's items.
+  - `POST /api/v1/marketplace/install-local` (install and upgrade) and `DELETE /api/v1/marketplace/install-local/:id` (uninstall) on `@objectstack/cloud-connection`, for a package carrying no catalog item: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN`. The refusal's `error.details` no longer carries `catalogItems`; it carries `manifestId`.
+  - `POST /api/v1/automation`, `PUT /api/v1/automation/:name`, `DELETE /api/v1/automation/:name` and `POST /api/v1/automation/:name/clone`: **FROM** admitted to any `manage_metadata` holder **TO** `403 PERMISSION_DENIED`, before the automation service is touched.
+  - `POST /api/v1/meta/_migrate-stored`, the install-wide rewrite of the stored metadata, preview and apply alike: **FROM** admitted to any `manage_metadata` holder **TO** `403 FORBIDDEN` on `@objectstack/rest` and `403 PERMISSION_DENIED` on the runtime dispatcher, before a row is read.
+  - Every one of these refusals carries one sentence: it names the written type (`a package` at the package doors, `the environment's stored metadata` at the rewrite), the posture and "ADR-0131 D3, D12 items 7–8, D11", and points at an environment of the organization's own. The catalog refusals that shipped before keep their envelopes and now read the same sentence.
+  - The activation refusals under a wall (`POST /api/v1/automation/:name/toggle`, `POST /api/v1/actions/_activation/…`, `POST /api/v1/security/_activation/permission/…`) no longer recommend cloning a flow or a permission set, or authoring a sibling action, since those writes are the operator's under a wall too; they name the platform operator.
+  
+  **Unchanged.** Reads. Assignments: `sys_user_position` and `sys_user_permission_set` rows stay organization rows. The platform operator and the engine's own writes (seeders, installers, migrations) write as before. Under `single` (and with no `tenancy` service), a `manage_metadata` holder writes exactly as before.
+  
+  **The remedy.** The platform operator authors the environment's metadata, in Studio or through a managed package; an organization that needs metadata of its own is given an environment of its own. `@objectstack/spec` registers the change as the ADR-0087 semantic entry `walled-environment-metadata-writes-retired`. `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) now judges every type alike: a custom door that writes environment metadata asks it after its capability gate, with no `isSecurityCatalogType` pre-filter.
+- d89f491: A stored flow the automation engine refuses is no longer served as running: the flow meta read serves the engine's verdict beside the item as `registration`, an envelope sibling of `lock`, and the flow list serves it as `registrations` keyed by flow name, so a refused flow reads `{ state: 'refused', reason: { code?, message } }` beside its stored `status`, which stays as authored.
+  
+  Clause-②: yes (widening)
+  
+  - **The shape** (`@objectstack/spec`). `FlowRegistrationSchema` is a closed set: `registered` (the engine holds the flow), `refused` (it refused the stored flow and holds nothing under the name; `reason` carries the engine's own `message` and, when the thrown error set one, its `code`, verbatim), and `unregistered` (it holds nothing and refused nothing: a read during boot, between a save and the engine following it, or after a deliberate unregister). `GetMetaItemResponseSchema` gains `registration` and `GetMetaItemsResponseSchema` gains `registrations`, both optional. New exports: `FlowRegistrationSchema`, `FlowRegistrationRefusalSchema` and the types `FlowRegistration` and `FlowRegistrationRefusal`. `IAutomationService` gains the optional member `getFlowRegistration(name)`.
+  - **Where the verdict comes from** (`@objectstack/service-automation`). The `kernel:ready` cold-boot bind records each flow it refuses, with what the engine threw, after it withdraws the flow; the `metadata:reloaded` re-sync and the metadata-change sync record a refusal that leaves the name unregistered. A later successful registration of the name, or its withdrawal, ends the record. `AutomationEngine` answers `getFlowRegistration(name)` and takes `recordFlowRefusal(name, error)`. The refusal's warn line, its level and the withdrawal are unchanged.
+  - **Where it is served** (`@objectstack/metadata-protocol`). The protocol reads the engine through the kernel's service table by name, as it already reads the engine's stored-flow canonicalizer; it does not import the automation service. The field is absent where no automation service declares the member, on every type other than `flow`, on a draft read and on the execution face the engine binds from: absence means no engine judged the flow, never `registered`. The verdict is the engine of the process that answered the read.
+  - **The default door** (`@objectstack/rest`, `@objectstack/metadata-protocol`, `@objectstack/spec`). `GET /api/v1/meta/flow/:name` on a default deployment (`metadata.enableCache: true`) is answered by the cached item branch, which now carries `registration` too. `getMetaItemCached` returns it beside `data`, read live from its delegate read on every call, and `GetMetaItemCachedResponseSchema` declares it. It is never part of the ETag, so a cached read that carries it is never answered `304 Not Modified`: a judged flow is always served in full. The cached branch's other envelope keys are unchanged.
+
+### Patch Changes
+
+- Updated dependencies [dac99c2]
+- Updated dependencies [66949b7]
+- Updated dependencies [7958bdf]
+- Updated dependencies [87e902d]
+- Updated dependencies [777eed2]
+- Updated dependencies [ed03834]
+- Updated dependencies [5f37d36]
+- Updated dependencies [1912af4]
+- Updated dependencies [76815b9]
+- Updated dependencies [4d1e4a8]
+- Updated dependencies [4cc3ff9]
+- Updated dependencies [c056979]
+- Updated dependencies [4f68ba1]
+- Updated dependencies [107853c]
+- Updated dependencies [543b33d]
+- Updated dependencies [b529a5c]
+- Updated dependencies [1623faf]
+- Updated dependencies [b4d573a]
+- Updated dependencies [3c1a046]
+- Updated dependencies [37510aa]
+- Updated dependencies [c857a93]
+- Updated dependencies [345d1be]
+- Updated dependencies [430e5f5]
+- Updated dependencies [14a13bc]
+- Updated dependencies [ca0bdbc]
+- Updated dependencies [572ecfb]
+- Updated dependencies [707b3cd]
+- Updated dependencies [6673c80]
+- Updated dependencies [5e725b8]
+- Updated dependencies [eeb95f7]
+- Updated dependencies [d89f491]
+- Updated dependencies [dc39326]
+- Updated dependencies [775ed65]
+- Updated dependencies [e4ec6ec]
+- Updated dependencies [325a92e]
+  - @objectstack/spec@18.0.0-next.1
+  - @objectstack/platform-objects@18.0.0-next.1
+  - @objectstack/core@18.0.0-next.1
+  - @objectstack/types@18.0.0-next.1
+  - @objectstack/metadata@18.0.0-next.1
+  - @objectstack/metadata-core@18.0.0-next.1
+  - @objectstack/observability@18.0.0-next.1
+  - @objectstack/service-package@18.0.0-next.1
+
 ## 18.0.0-next.0
 
 ### Minor Changes

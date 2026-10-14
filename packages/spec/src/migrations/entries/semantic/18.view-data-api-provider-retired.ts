@@ -37,8 +37,9 @@ export const entry: SemanticMigration = {
     + 'move either: deleting its `data` would make it query its object instead.',
   acceptanceCriteria: "No view in `stack.views[]`, in any object's `listViews` / `formViews` map or in a stored "
     + "`sys_metadata` view row carries `data.provider: 'api'`, and no page component's `data` prop does; the "
-    + 'parse refuses one in a view, and the component-props gate of `os validate`, `os build` and `os lint` '
-    + 'refuses one in a page component, with the prescription. '
+    + 'parse refuses one in a view and in a page component, at every door that parses a page (the metadata '
+    + 'save door\'s 422 included), and the component-props gate of `os validate`, `os build` and `os lint` '
+    + 'refuses one in a page component too, with the prescription. '
     + "Every endpoint such a view read is either a page component's API binding on a same-origin path "
     + 'with no credential key, or dropped on purpose; and every converted view binds its object or static '
     + 'rows and loads. `os migrate meta --stored` lists each stored view, and each page component of a stored '

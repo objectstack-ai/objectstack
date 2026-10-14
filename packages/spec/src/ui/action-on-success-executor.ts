@@ -34,6 +34,16 @@
  *   app-shell `utils/flowResponse.ts`), so the hop fires while that screen or
  *   the refusal notice is still open.
  *
+ * `operation: 'update'` is read BEFORE any executor (`ActionRunner.execute`,
+ * `:1384-1388` at the pin): the runner performs the declarative write through
+ * the platform action route, runs no handler and no executor of its own, and
+ * then hands the action to `handlePostExecution` like every other branch. So a
+ * hop beside it follows the write, whose success carries neither a handler's
+ * return nor a call's response for `${result.*}` to read.
+ * `ActionSchema` refuses `onSuccess` beside `operation: 'update'` on every
+ * `type`, and the page action rows refuse it the same way, with the one text
+ * {@link onSuccessBesideUpdateOperationRefusal} prints.
+ *
  * A page action row adds one case `ActionSchema` cannot have, because the
  * action's `type` defaults to `script`: a row that names no executor. The
  * runner dispatches it on nothing, so no executor's success is there for the
@@ -112,4 +122,20 @@ export function onSuccessBesideExecutorRefusal(
       return `${subject} would follow a result the contract does not declare: a \`${executor}\` action's `
         + `success carries none, and ${HOPS_AFTER_EVERY_EXECUTOR}. ${DECLARED_BESIDE} ${MOVE_THE_HOP}`;
   }
+}
+
+/**
+ * The refusal of an `onSuccess` beside `operation: 'update'`, on `ActionSchema`
+ * and on a page action row alike: the runner reads `operation` before any
+ * executor, so the hop would follow the declarative write, and whatever
+ * executor the action or row names is never run. `subject` opens it ("An
+ * `operation: 'update'` action's `onSuccess`").
+ */
+export function onSuccessBesideUpdateOperationRefusal(subject: string): string {
+  return `${subject} would follow a result the contract does not declare: the console's action runner reads `
+    + "`operation` before any executor, so an `operation: 'update'` action runs no handler and no executor of its "
+    + 'own (the platform action route writes `patch` to the current record as the caller), and the runner then '
+    + 'performs the post-success hop after that write succeeds. `${result.*}` reads a handler\'s return or a '
+    + "call's response, and the declarative write declares neither. Drop `onSuccess`; post-success navigation "
+    + 'after the declarative write is a spec proposal, not a silent key.';
 }

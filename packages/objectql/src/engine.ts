@@ -4128,6 +4128,25 @@ function cascadeSetAdd(index: Map<string, Set<string>>, object: string, id: unkn
 }
 
 /**
+ * [#23221] The one child delete a cascade walk is issuing, for that delete to
+ * recognise itself by — see {@link ObjectQL.cascadeIssuedDeletes}. The walk
+ * opens one per `cascade` dependent, around its own `delete()` call, and the
+ * `delete()` whose object and id match claims it.
+ */
+interface CascadeIssuedDelete {
+  /** The child object the walk is deleting from, as the registry names it. */
+  readonly object: string;
+  /** The child row's id, as a string (the walk's `String(depId)`). */
+  readonly id: string;
+  /**
+   * Set by the `delete()` that recognised itself. One token, one dispatch: a
+   * later delete of the same row inside that call (a hook's own) finds it
+   * claimed and is not marked.
+   */
+  claimed: boolean;
+}
+
+/**
  * [ADR-0010 §3.7] Stamp a manifest item with its owning package's
  * `(packageId, packageVersion)` before the registry stores it: the call the
  * artifact loader makes (`metadata/plugin.ts`), so both load paths serve one
@@ -4268,6 +4287,28 @@ export class ObjectQL implements IObjectQLEngine {
    * into a present one on every nested delete.
    */
   private readonly cascadeDeleteSets = new AsyncLocalStorage<CascadeDeleteSet>();
+
+  /**
+   * [#23221] The child delete {@link walkReferencingRelations} is issuing right
+   * now, so that `delete()` can tell the cascade's own child delete from every
+   * other delete and project the fact onto the DECLARED
+   * `HookContext.referentialCascadeDelete` (see
+   * {@link claimReferentialCascadeDelete}).
+   *
+   * Ambient, for {@link cascadeDeleteSets}' reason — a context key would change
+   * what the child delete is handed (where no transaction is opened, an absent
+   * caller context would become a present one, and both `buildSession` and
+   * `buildHookApi` branch on its absence) — and for one more
+   * the update twin's `__referentialFieldClear` never had to weigh, because its
+   * envelope semantics predated its declared projection: the child delete's
+   * context is the very object `buildHookApi` hands to `ScopedContext`, so a
+   * key stamped on it would ride into every write that child's hooks issue
+   * through `ctx.api`, and a hook's own delete during the cascade would read
+   * as cascade-issued. Keyed on the exact object and id the walk issues, and
+   * claimed once, the marker reaches that one delete's dispatches and no other.
+   * Engine-private: nothing a request carries can name a record into it.
+   */
+  private readonly cascadeIssuedDeletes = new AsyncLocalStorage<CascadeIssuedDelete>();
 
   private drivers = new Map<string, IDataDriver>();
   private defaultDriver: string | null = null;
@@ -5514,9 +5555,10 @@ export class ObjectQL implements IObjectQLEngine {
    *  - **The remaining PRE-RESOLUTION gates, which run beside the two named
    *    above.** Two judge a row's PROVENANCE, which the preview holds no row to
    *    carry: the ADR-0086/0094 package-managed write gate and the ADR-0066
-   *    system-row write gate. Two judge a payload VALUE: the ADR-0066 D1
-   *    curated-capability-name refusal and the ADR-0090 D5/D9 audience-anchor
-   *    binding guard. And the ADR-0056 `publicFormGrant` scope, which admits
+   *    system-row write gate. One judges a payload VALUE: the ADR-0066 D1
+   *    curated-capability-name refusal (the ADR-0090 D5/D9 audience-anchor
+   *    binding guard retired with `sys_position_permission_set`, C3 stage 8).
+   *    And the ADR-0056 `publicFormGrant` scope, which admits
    *    create plus read-back on exactly the granted object and refuses
    *    everything else — not asked because no wire caller and no constructor
    *    in the tree presents that grant here (only the public form-submit route
@@ -6361,6 +6403,29 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private buildReferentialFieldClear(execCtx?: ExecutionContext): true | undefined {
     return (execCtx as any)?.__referentialFieldClear === true ? true : undefined;
+  }
+
+  /**
+   * [#23221] Build the declared `HookContext.referentialCascadeDelete` marker,
+   * the delete twin of {@link buildReferentialFieldClear}: `true` when THIS
+   * `delete()` of `object`/`id` is the child delete
+   * {@link walkReferencingRelations} issued for a `cascade` relation, and
+   * `undefined` for every other delete — the same "absent unless true"
+   * contract, so a handler reads `ctx.referentialCascadeDelete === true`.
+   *
+   * Reads {@link cascadeIssuedDeletes}, not the envelope (that field says why),
+   * and CLAIMS the token it matches. Called once per `delete()`, below the
+   * `afterDelete` unit re-entry (`opensAfterAbortUnit`): a call that re-enters
+   * itself returns before reaching here, so the claim is made by the inner
+   * call, the one that dispatches the hooks, and nothing later inside it can
+   * match the same token again.
+   */
+  private claimReferentialCascadeDelete(object: string, id: unknown): true | undefined {
+    const issued = this.cascadeIssuedDeletes.getStore();
+    if (!issued || issued.claimed || id == null) return undefined;
+    if (issued.object !== object || issued.id !== String(id)) return undefined;
+    issued.claimed = true;
+    return true;
   }
 
   /**
@@ -8856,9 +8921,10 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * On the RBAC link tables that is a security-surface record that resolves to
    * nothing: an administrator auditing permissions sees a binding whose target
-   * cannot be inspected, and the audience-anchor gate has to resolve that very
-   * set to evaluate the grant — so a dangling row is an unevaluable gate input,
-   * not merely an untidy one.
+   * cannot be inspected, and the audience-anchor gate had to resolve that very
+   * set to evaluate the grant — so a dangling row was an unevaluable gate input,
+   * not merely an untidy one. (That gate and `sys_position_permission_set` are
+   * retired since C3 stage 8; the check stands for the link tables that remain.)
    *
    * ## Scope, deliberately narrow
    *
@@ -18688,7 +18754,21 @@ export class ObjectQL implements IObjectQLEngine {
             if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
             // Recurse via the public delete so the child's own cascade,
             // hooks and events fire.
-            await this.delete(childName, { where: { id: depId }, context } as any);
+            //
+            // [#23221] Inside a token naming exactly this child, which that
+            // delete claims and projects onto the DECLARED
+            // `HookContext.referentialCascadeDelete` (see
+            // claimReferentialCascadeDelete): on the real request path the
+            // caller's context reaches the child unchanged, so without it a
+            // freeze guard cannot tell this delete from a hand delete of the
+            // same row. The context is passed as before, by reference and
+            // unmarked — see `cascadeIssuedDeletes` for why the marker is not
+            // a context key. A grandchild is issued by the child's own walk,
+            // inside a token of its own.
+            await this.cascadeIssuedDeletes.run(
+              { object: childName, id: String(depId), claimed: false },
+              () => this.delete(childName, { where: { id: depId }, context } as any),
+            );
           } else {
             // [#3023] Clear the FK as an engine-internal referential-integrity
             // write, tagged so plugin-security's ownership-anchor guard (#3004)
@@ -18799,6 +18879,9 @@ export class ObjectQL implements IObjectQLEngine {
     // reads THIS predicate cannot be looser than this method.
     const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
     const id: any = dispatch.kind === 'by-id' ? dispatch.id : undefined;
+    // [#23221] Is this the child delete a cascade issued? Decided here, once,
+    // before any middleware or hook runs, so the claim is this call's alone.
+    const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id);
 
     const opCtx: OperationContext = {
       object,
@@ -18828,6 +18911,11 @@ export class ObjectQL implements IObjectQLEngine {
           input: { id, options: opCtx.options },
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
+          // [#23221] The declared cascade-delete marker, the delete twin of
+          // `update()`'s `referentialFieldClear` spread: conditional for the
+          // same reason, "absent unless true". Bound once on this context,
+          // which `afterDelete` reuses, so both phases carry it.
+          ...(referentialCascadeDelete ? { referentialCascadeDelete: true as const } : {}),
           user: this.buildUser(opCtx.context),
           api: this.buildHookApi(opCtx.context),
           transaction: opCtx.context?.transaction,
@@ -20839,7 +20927,8 @@ export class ObjectRepository implements IScopedObjectRepository {
    * middleware (`:1616`, `canExport` at `:4573`); the ADR-0103 engine-owned/
    * append-only write guard (`system-write-guard.ts:96,120`, called at
    * `security-plugin.ts:1736`); the package-managed / system-row /
-   * curated-capability-name / audience-anchor write gates
+   * curated-capability-name write gates (and, until C3 stage 8, the
+   * audience-anchor gate)
    * (`security-plugin.ts:1690-1724`); the referential-integrity check
    * (`:5892` in this file) and the tenant-audit mute (`:3773`) — in addition
    * to the static `readonly`/runtime-owned strip on BOTH update paths

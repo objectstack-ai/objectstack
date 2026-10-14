@@ -3,6 +3,14 @@
 import type {
     DataProtocol, FlowRegistration, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
+// [ADR-0138 D2b] The one cross-item judge of the anonymous flow endpoint ×
+// `runAs: 'system'` flow pair, and the flow-direction refusal it words — see
+// `anonymousElevatedFlowRefusal`.
+import {
+    anonymousElevatedFlowPairs,
+    elevatedFlowAnonymousEndpointsMessage,
+    type AnonymousFlowDoorCandidate,
+} from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, objectNotFoundError, recordNotFoundError, relationConditionSites } from '@objectstack/core';
 import { declaredUserMessage, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
@@ -55,6 +63,7 @@ import {
     envWritableMetadataTypes,
     historyRowsOfMember,
     packageScopedRowWhere,
+    packagelessAddressAmbiguityRefusal,
     resetEnvWritableMetadataTypes,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
@@ -142,6 +151,9 @@ import { planUnmanagedImport, unmanagedInstallPostureRefusal } from './package-u
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+// [#23183] The app item read's package-id key — the one spelling of the arm
+// `GetMetaItemRequestSchema.name` declares ({@link resolveAppPackageIdKey}).
+import { isAppPackageIdKey } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -1178,51 +1190,6 @@ function authoredLockFamilyRefusal(
             + 'Sent back exactly as a read of this item serves it, the key is accepted and ignored.',
         code: 'custom',
     }));
-    return err;
-}
-
-/**
- * [#23165, ADR-0048] The refusal of a direct save, or a delete, that names no
- * package, of an item whose rows at the address are bound to two or more
- * packages ({@link ObjectStackProtocolImplementation.packagelessAddress}).
- *
- * A `sys_metadata` row is keyed `(org, type, name, package_id)`, so such a
- * write has no one row to write or remove. Before this refusal the save wrote
- * a package-less row beside the packages' rows and answered `200`, for a row
- * the item read does not serve, and the delete removed whichever row the
- * package-agnostic `findOne` met first and answered "it no longer exists"
- * while another package's row stayed served. Choosing one of the packages is
- * that driver-order coin toss (#8907). The remedy is the request's: name the
- * package, which is the address every door of the item takes (`?package=`,
- * ADR-0048).
- *
- * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member for
- * a refusal that comes from environment state rather than the body (the same
- * request is accepted once it names its package), and the code this
- * package already answers when a name is held by more than one owner
- * (`importUnmanagedPackage`). The prescription first, because a 4xx message
- * crosses the REST boundary bounded at 500 characters with its tail
- * truncated; the candidates follow, sorted, so the message is the same on
- * every driver.
- */
-function packagelessAddressAmbiguityRefusal(
-    verb: 'save' | 'delete',
-    type: string,
-    name: string,
-    packageIds: readonly string[],
-): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
-    const shown = packageIds.slice(0, 5).map((id) => `'${id}'`).join(', ');
-    const more = packageIds.length > 5 ? ` and ${packageIds.length - 5} more` : '';
-    const [nothing, single] = verb === 'save'
-        ? ['Nothing was written.', 'no single row to write']
-        : ['Nothing was deleted.', 'no single row to remove'];
-    const err = new Error(
-        `Name the package this ${verb} is for, then send it again: on the REST door add ?package= with the package id, `
-        + `in process pass packageId. ${nothing} ${type} '${name}' belongs to ${packageIds.length} packages `
-        + `(${shown}${more}), and a ${verb} that names none has ${single}.`,
-    ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
-    err.code = 'RESOURCE_CONFLICT';
-    err.status = 409;
     return err;
 }
 
@@ -5744,8 +5711,8 @@ export type PublishMaterializer = (args: {
 /**
  * Uninstall-time data-plane cleanup (ADR-0086 D3, #2747). The exact mirror of
  * {@link PublishMaterializer}: domain plugins own data-plane tables the
- * protocol layer must not know the shape of (e.g. plugin-security's
- * `sys_permission_set` and its binding tables), so they register a named
+ * protocol layer must not know the shape of (e.g. plugin-security's grant
+ * table, `sys_user_permission_set`), so they register a named
  * cleanup here and {@link ObjectStackProtocolImplementation.deletePackage}
  * invokes every cleanup with the uninstalled package id. Cleanups run
  * best-effort — a failure is REPORTED on the uninstall response (`cleanups`),
@@ -5980,8 +5947,8 @@ export interface MetaItemPublishedEvent {
  * Awaited per-type mutation projector (ADR-0094). Invoked AFTER a metadata
  * mutation persists — `saveMetaItem` (draft AND active saves),
  * `publishMetaItem`, `deleteMetaItem` — and AWAITED before the write returns,
- * so a data-plane read-model derived from the metadata (e.g. `permission` →
- * `sys_permission_set`) is already consistent when the caller's next read
+ * so a data-plane read-model derived from the metadata (e.g. the
+ * `datasource` projector's) is already consistent when the caller's next read
  * lands. This is what makes such a read-model a PURE projection: the
  * projector is its only writer, and it runs in the same awaited operation as
  * every metadata write, instead of a fire-and-forget subscriber a new write
@@ -6017,8 +5984,7 @@ export interface MutationProjectionOutcome {
  * write by throwing — it is the seam for domain invariants that must hold on
  * every runtime-authored body regardless of which HTTP surface produced it
  * (e.g. plugin-security's OWD posture gate: an environment may only TIGHTEN
- * a packaged object's `sharingModel`, and `externalSharingModel ≤
- * sharingModel` per ADR-0090 D11).
+ * a packaged object's `sharingModel`).
  *
  * Invoked inside `saveMetaItem` for BOTH draft and publish-mode saves, after
  * the ADR-0005 overlay/runtime-create authorization and the per-type spec
@@ -6354,11 +6320,10 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Publish-time materializers keyed by singular metadata type (ADR-0086 P2).
      * When a draft of a registered type is published, its body is projected
-     * into a data-plane representation the admin surface reads — e.g. a
-     * `permission` set is upserted into `sys_permission_set` with
-     * `managed_by:'package'`. Domain plugins own the projection (the generic
-     * protocol layer must not know `sys_permission_set`'s field shape), so they
-     * register here at init. Best-effort — a materializer failure is surfaced on
+     * into a data-plane representation — e.g. service-automation's `flow`
+     * materializer, which promotes the draft's credentials on publish. Domain
+     * plugins own the projection (the generic protocol layer must not know the
+     * data-plane shape), so they register here at init. Best-effort — a materializer failure is surfaced on
      * the publish response, never thrown (publishing metadata always succeeds
      * independently; the same contract as `seed` apply).
      */
@@ -6638,8 +6603,8 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * Register a publish-time materializer for a metadata type (ADR-0086 P2).
-     * Called by domain plugins at init (e.g. plugin-security registers the
-     * `permission` → `sys_permission_set` projection). The singular type name is
+     * Called by domain plugins at init (e.g. service-automation registers the
+     * `flow` materializer). The singular type name is
      * used — `permissions` and `permission` both resolve here. One materializer
      * per type; a second registration replaces the first (idempotent re-init).
      */
@@ -6651,9 +6616,9 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Register a named uninstall-time data-plane cleanup (ADR-0086 D3, #2747).
      * Called by domain plugins at init — e.g. plugin-security registers the
-     * cleanup that removes its package-owned `sys_permission_set` rows and
-     * their bindings when the owning package is uninstalled, so grants are
-     * revoked everywhere at once (no ghost grants). One cleanup per name; a
+     * cleanup that revokes every grant naming a permission set the package
+     * declared when the owning package is uninstalled, so grants are revoked
+     * everywhere at once (no ghost grants). One cleanup per name; a
      * second registration replaces the first (idempotent re-init).
      */
     registerUninstallCleanup(name: string, cleanup: UninstallCleanup): void {
@@ -6701,8 +6666,8 @@ export class ObjectStackProtocolImplementation implements
                 });
             } catch (e: any) {
                 // [#8136] A cleanup is arbitrary plugin code that goes straight
-                // at the engine (plugin-security deletes `sys_permission_set`
-                // rows and their bindings), so a driver failure lands here
+                // at the engine (plugin-security deletes the grant rows that
+                // name the package's sets), so a driver failure lands here
                 // verbatim — and this outcome rides on the RESPONSE by design,
                 // inside `details`, where no boundary's message withhold can
                 // reach it. Quoted only when the cleanup declared a refusal.
@@ -6730,8 +6695,8 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Register the awaited mutation projector for a metadata type (ADR-0094).
      * Called by the domain plugin that owns the derived read-model (e.g.
-     * plugin-security registers the `permission` → `sys_permission_set`
-     * projector). Singular or plural type names both resolve.
+     * service-datasource registers the `datasource` projector). Singular or
+     * plural type names both resolve.
      */
     registerMutationProjector(type: string, projector: MetadataMutationProjector): void {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -10661,6 +10626,97 @@ export class ObjectStackProtocolImplementation implements
         }, options);
     }
 
+    /**
+     * [#23183] The packages {@link resolveAppPackageIdKey} has reported as
+     * holding more than one app, keyed by package and app set, so the operator
+     * is told once per state rather than once per read.
+     */
+    private readonly reportedMultiAppPackages = new Set<string>();
+
+    /**
+     * [#23183] ADR-0048 §3.1: "The route/container coordinate for an installed
+     * package's UI is its package id … With the current one-app-per-package
+     * invariant, the app *is* the package container." So the app item read
+     * answers for a package id as it answers for the app's own name, as
+     * `GetMetaItemRequestSchema.name` declares. This is the one place the key is
+     * resolved: both transports' item reads hand {@link getMetaItem} the key
+     * they were asked for, and neither resolves it itself.
+     *
+     * Recognised by `isAppPackageIdKey` (`@objectstack/spec/api`): `type: 'app'`
+     * and a key in the package-id grammar, which no app name is in. Every other
+     * request is returned untouched, so every by-name read of every type is
+     * unchanged.
+     *
+     * "The package's app" is what the package-scoped list serves
+     * ({@link getMetaItems} with `packageId`, the read behind
+     * `GET /meta/app?package=`): the apps the package ships, its stored rows
+     * included, none for a disabled package. Its drafts are in view exactly
+     * when this read reads drafts (`state: 'draft'` or `previewDrafts`), so the
+     * key resolves to the app the read itself would serve.
+     *
+     *  - ONE app: the request becomes that app's by-name read, scoped to the
+     *    package (`packageId`, ADR-0048 prefer-local). The envelope names the
+     *    app by its own `name`, the address a save of it uses and the item its
+     *    `version` token belongs to.
+     *  - NONE, or MORE THAN ONE (a package breaking ADR-0019 D3's at-most-one
+     *    rule, which the save door does not enforce): the request is returned
+     *    as asked, and its by-name read answers absence, because no legal app
+     *    name is in the package-id grammar. Absence, and no answer of its own:
+     *    the doors' read gate answers an unpublished app as absent (ADR-0045
+     *    §3), and a separate "two apps" answer would let a caller see an app
+     *    being built in the package before it is published. The operator is
+     *    told instead, in the log.
+     *
+     * A `packageId` naming a different package is refused `400 INVALID_REQUEST`:
+     * the key already names the package, and a prefer-local scope from a
+     * second package would read that package's same-name app, not this one's.
+     *
+     * A failed list read propagates: a store outage is never answered as "no
+     * such package" (#5532).
+     */
+    private async resolveAppPackageIdKey<R extends {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
+    }>(request: R): Promise<R> {
+        if (!isAppPackageIdKey(request.type, request.name)) return request;
+        const packageId = request.name;
+        if (request.packageId !== undefined && request.packageId !== packageId) {
+            const err: any = new Error(
+                `The app read's key '${packageId}' is a package id, and it names a different package `
+                + `than packageId '${request.packageId}'. Name the package once: read the app by its `
+                + `package id alone, or by its own app name with packageId as its scope.`,
+            );
+            err.code = 'INVALID_REQUEST';
+            err.status = 400;
+            throw err;
+        }
+        const readsDrafts = request.state === 'draft' || request.previewDrafts === true;
+        const listed = await this.getMetaItems({
+            type: 'app',
+            packageId,
+            ...(readsDrafts ? { previewDrafts: true } : {}),
+        });
+        const names = [...new Set(
+            ((listed as { items?: unknown[] } | undefined)?.items ?? [])
+                .map((app) => (app as { name?: unknown } | null)?.name)
+                .filter((name): name is string => typeof name === 'string' && name.length > 0),
+        )];
+        if (names.length === 1) return { ...request, name: names[0], packageId };
+        if (names.length > 1) {
+            const key = `${packageId}|${[...names].sort().join(',')}`;
+            if (!this.reportedMultiAppPackages.has(key)) {
+                this.reportedMultiAppPackages.add(key);
+                console.warn(
+                    `[metadata-protocol] Package '${packageId}' holds ${names.length} apps `
+                    + `(${[...names].sort().join(', ')}), so reading the app by its package id answers `
+                    + `"not found": with one app per package the app is the package container `
+                    + `(ADR-0048 §3.1), and a package may define at most one app (ADR-0019 D3). `
+                    + `Fold them into one app, or move all but one into packages of their own.`,
+                );
+            }
+        }
+        return request;
+    }
+
     async getMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
@@ -10668,6 +10724,12 @@ export class ObjectStackProtocolImplementation implements
     }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
+        // [#23183] ADR-0048 §3.1: the app read keyed by PACKAGE ID, resolved
+        // ONCE, here, to the package's one app read by its own name in that
+        // package, so every step below (the stored row, the lock, the version
+        // token) reads the app exactly as its by-name read does. See
+        // {@link resolveAppPackageIdKey}.
+        request = await this.resolveAppPackageIdKey(request);
         // [#22877] Ruling 6116165299 (Q2 i): ONE member of a bundled type is
         // addressed by name, the selector's or else the canonical one. Every
         // layer below answers that member or nothing — the stored row, the
@@ -14644,11 +14706,12 @@ export class ObjectStackProtocolImplementation implements
         // The same measurement, one outcome over: `success` was still a
         // LITERAL for every answer that was not the contract's `false`, so a
         // row that MATCHED and was deliberately NOT removed reported a
-        // deletion. `sys_permission_set` is the shipped case — a
-        // package-declared set's delete is an ADR-0005 RESET, the record
-        // re-projects to the declared body instead of vanishing — and the
-        // envelope was byte-identical to a real delete, so a UI fired a
-        // success toast and showed the row again on refresh.
+        // deletion. `sys_permission_set` was the shipped case until C3 stage
+        // 8 retired that object — a package-declared set's delete was an
+        // ADR-0005 RESET, the record re-projected to the declared body instead
+        // of vanishing — and the envelope was byte-identical to a real
+        // delete, so a UI fired a success toast and showed the row again on
+        // refresh.
         //
         // `success` is declared "Whether deletion succeeded", and this is the
         // only key on `DeleteDataResponseSchema` that can carry the
@@ -15845,11 +15908,12 @@ export class ObjectStackProtocolImplementation implements
                         // LITERAL for every result that was not the contract's
                         // `false`, so that row was reported as a deletion too.
                         //
-                        // `sys_permission_set` is the shipped shape of it: deleting
-                        // a package-declared set is an ADR-0005 RESET — the overlay
-                        // tombstones and the record re-projects to the declared body
-                        // instead of vanishing — so the row MATCHED, the write ran,
-                        // and the record is still there. On a security-configuration
+                        // `sys_permission_set` was the shipped shape of it until C3
+                        // stage 8 retired that object: deleting a package-declared
+                        // set was an ADR-0005 RESET — the overlay tombstoned and the
+                        // record re-projected to the declared body instead of
+                        // vanishing — so the row MATCHED, the write ran, and the
+                        // record was still there. On a security-configuration
                         // write this envelope told an operator a permission set was
                         // gone while it was still being enforced.
                         //
@@ -16505,11 +16569,12 @@ export class ObjectStackProtocolImplementation implements
                 // every answer that was not the contract's `false`, so that row
                 // was reported as a deletion too.
                 //
-                // `sys_permission_set` is the shipped case: a package-declared
-                // set's delete is an ADR-0005 RESET — plugin-security's
-                // write-through tombstones the overlay and the record
-                // re-projects to the declared body instead of vanishing — so the
-                // row MATCHED, the write ran, and the record is still there. The
+                // `sys_permission_set` was the shipped case until C3 stage 8
+                // retired that object: a package-declared set's delete was an
+                // ADR-0005 RESET — plugin-security's write-through tombstoned the
+                // overlay and the record re-projected to the declared body
+                // instead of vanishing — so the row MATCHED, the write ran, and
+                // the record was still there. The
                 // batch envelope said `success: true` and counted it in
                 // `succeeded`, which on a security-configuration write tells an
                 // operator a permission set is gone while it is still enforced.
@@ -18616,11 +18681,20 @@ export class ObjectStackProtocolImplementation implements
     private async assertLockAllowsDelete(args: {
         type: string;
         name: string;
+        /**
+         * [#23297] The package the delete names (ADR-0048 `?package=`), handed
+         * to the gate as the save's is ({@link lockWriteRefusal}): part of the
+         * item's address. It never narrows the rows or the shipping packages
+         * the lock is resolved over (#21761, #21803: the strictest of them
+         * binds, so a delete naming a package is refused whenever the save
+         * naming it is); it picks whose prose the refusal carries.
+         */
+        packageId?: string;
         actor?: string;
         source?: string;
         requestId?: string;
     }): Promise<Error | null> {
-        const state = await this.getEffectiveLock(args.type, args.name);
+        const state = await this.getEffectiveLock(args.type, args.name, args.packageId);
         const refusal = evaluateLockForDelete(state.lock);
         if (!refusal) return null;
         const reason = state.lockReason ?? refusal.reason;
@@ -18830,8 +18904,9 @@ export class ObjectStackProtocolImplementation implements
      * one package's row of an item two packages hold, or the package-less row
      * beside a package's, and claimed the item gone. The draft save has
      * resolved its address from the item's active row since #11087
-     * (`SysMetadataRepository.resolveWriteHead`, unchanged); the direct save
-     * and the delete did not, and this is that half.
+     * (`SysMetadataRepository.resolveWriteHead`, which [#23297] reads every
+     * active row and refuses two packages' with the same refusal); the direct
+     * save and the delete did not, and this is that half.
      *
      * The rows are the ones the item read chooses among
      * ({@link findServedOverlayRow}): the environment's (ADR-0131 D6), the
@@ -20429,6 +20504,87 @@ export class ObjectStackProtocolImplementation implements
                     healed = registry.removeRuntimeShadow(type, name, memberKey) || healed;
                 }
             }
+
+            // ── [#23297, ADR-0048] A ROW OF THE ITEM IS STILL STORED ──
+            //
+            // The tiers below conclude what is served next from the layers
+            // UNDER the deleted row (a packaged artifact, a MetadataService
+            // baseline, or nothing) and on "nothing" retire the entry. That
+            // presumed the deleted row was the item's only row. A delete names
+            // its package (#23165), so an item two packages hold keeps the
+            // other package's row stored and served by the item read and the
+            // list, while tier 3 retired the registry entry: the
+            // registry-backed doors (`getObject`, which data CRUD dispatches
+            // on, and the registry lookups) answered "not registered" until
+            // the next boot or save. Measured on a booted showcase: after
+            // `DELETE /api/v1/meta/object/x?package=P` with Q's row remaining,
+            // `GET /api/v1/meta/object/x` served Q's row and
+            // `GET /api/v1/data/x` answered 404 `OBJECT_NOT_FOUND`.
+            //
+            // So the store is asked first. A row still stored at the address
+            // (the environment's active rows, the canonical type, this member,
+            // every package) is what is served next: it is registered again
+            // the way a write makes a row live ({@link applyRegistryWriteThrough}),
+            // in the order the boot hydration ({@link loadMetaFromDb}) reads
+            // and with its sealed-object skip, and nothing is retired. Tier 1
+            // above has already lifted the deleted row's shadow off a packaged
+            // artifact, so a remaining row the hydration declines (#22057)
+            // leaves the artifact served, as a boot does.
+            //
+            // An `object` has ONE owner per name in the registry (ADR-0029
+            // D3): a second package's runtime-authored row never registered
+            // (its write-through was refused at save), so the owner can be the
+            // deleted row's package. That owner is unregistered first, only
+            // for a name no code package ships (the tier-3 limb's own guard),
+            // so the remaining row can take the name. An extender keeps it
+            // registered, said as tier 3 says it.
+            //
+            // An outage is not an absence: a failed read stops the walk with
+            // nothing retired, as a degraded baseline read does below. An
+            // unprovisioned store holds no row.
+            // The canonical key the repository stores rows under, and the one
+            // the write-through registers under (#8862, #9111).
+            const canonical = canonicalMetaType(type);
+            let storedRows: Array<Record<string, unknown>> | null | undefined;
+            try {
+                // [#21911] The explicit system opt-in — see findServedOverlayRow.
+                storedRows = await this.engine.find('sys_metadata', {
+                    where: { type: canonical, name, state: 'active', organization_id: null, ...overlayMemberWhere(canonical, member) },
+                    context: { isSystem: true },
+                });
+            } catch (error) {
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            }
+            const remainingRows = canonical === 'object' && this.isUnservedSealedOverlay(canonical, name)
+                ? []
+                : storedRows ?? [];
+            if (remainingRows.length > 0) {
+                if (canonical === 'object' && !this.isArtifactBacked(canonical, name)) {
+                    const bindings = new Set(remainingRows.map((row) => boundPackageOf(row.package_id) ?? 'sys_metadata'));
+                    const owner = typeof registry.getObjectOwner === 'function' ? registry.getObjectOwner(name) : undefined;
+                    if (owner && !bindings.has(owner.packageId) && typeof registry.unregisterObject === 'function') {
+                        try {
+                            registry.unregisterObject(name);
+                        } catch (err: any) {
+                            console.warn(
+                                `[Protocol] object '${name}' was deleted from sys_metadata but stays registered: `
+                                + `${err?.message ?? err}`,
+                            );
+                            return;
+                        }
+                    }
+                }
+                for (const row of remainingRows) {
+                    await this.applyRegistryWriteThrough({
+                        type: canonical,
+                        name,
+                        item: this.convertStoredItem(String(row.type ?? canonical), storedRowDocument(row)),
+                        packageId: boundPackageOf(row.package_id) ?? null,
+                        organizationId: null,
+                    });
+                }
+                return;
+            }
             if (healed) return;
 
             const baseline = await this.readItemFromMetadataService(type, name);
@@ -20690,6 +20846,57 @@ export class ObjectStackProtocolImplementation implements
         if (state !== 'active') return false;
         if (name.startsWith('sys_')) return false;
         return true;
+    }
+
+    /**
+     * [#23415, ADR-0048] The refusal of a delete that asks to drop an object's
+     * table ({@link shouldDropStorage} says yes) while another stored row of
+     * the object stays after it. A `sys_metadata` row is keyed by its package,
+     * so one object can hold one row per package (and a package-less row), and
+     * every such row serves the object over the ONE table its name maps to.
+     * Dropping the table with one of them left the others' object served
+     * with its records gone: measured at `DELETE
+     * /api/v1/meta/object/NAME?package=P&dropStorage=true` on a booted
+     * showcase, `200` with a receipt naming Q's remaining row, then `500` on
+     * the object's next data read.
+     *
+     * Refused, not skipped: an explicit `dropStorage` that drops nothing would
+     * be an opt-in the runtime does not honour while the receipt answers
+     * success. Refused before any write, so nothing is deleted and the request
+     * succeeds once the remedy is applied: without `dropStorage` (this row
+     * goes, the table stays), or with the object's last row.
+     *
+     * The rows that count are the ones the delete's own address read
+     * ({@link packagelessAddress}) holds: the environment's ACTIVE rows of the
+     * object. A draft row is not one: a draft is never materialised and never
+     * served, so it holds no records, and the last active row's delete still
+     * drops the table it was the last to serve.
+     *
+     * `RESOURCE_CONFLICT` / 409, no code minted: the standard catalog's member
+     * for a refusal that comes from environment state rather than the request
+     * (the same request is accepted once the other rows are gone), as
+     * {@link packagelessAddressAmbiguityRefusal} answers for the same rows.
+     * The prescription first, because a 4xx message crosses the REST boundary
+     * bounded at 500 characters with its tail truncated.
+     */
+    private static dropStorageRemainingRowsRefusal(
+        type: string,
+        name: string,
+        deletedPackage: string | null,
+        remainingPackages: readonly string[],
+        unboundRemains: boolean,
+    ): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+        const which = deletedPackage !== null ? ` (package=${deletedPackage})` : '';
+        const err = new Error(
+            'Send the delete again without dropStorage to remove this row and keep the table, or delete the '
+            + "object's other rows first and drop the table with the last one. Nothing was deleted. "
+            + `After this delete${which}, ${type} '${name}' is still served: `
+            + `${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}, and the object's records are in its table. `
+            + "dropStorage drops an object's table only with the object's last row.",
+        ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+        err.code = 'RESOURCE_CONFLICT';
+        err.status = 409;
+        return err;
     }
 
     /**
@@ -20979,6 +21186,93 @@ export class ObjectStackProtocolImplementation implements
         err.status = 422;
         err.object = object;
         err.holders = unique;
+        return err;
+    }
+
+    /**
+     * [ADR-0138 D2b] The flow half of the anonymous door × elevated flow
+     * refusal: a flow published with `runAs: 'system'` while an
+     * `authRequired: false` endpoint of `type: 'flow'` names it.
+     *
+     * The record refuses the pair "in both directions, because either item can
+     * be the last one edited". An endpoint is code-only (`api` is
+     * `allowRuntimeCreate: false`; the code-only inlet refuses its write), so its
+     * own publish is the stack parse and the metadata layer's package publish,
+     * where the judge runs over both items. A flow is authorable here, so this
+     * door is where the OTHER direction is read: the flow is the item being
+     * published, and the endpoints that name it are read from what declares
+     * them on this host. Both judges are the one in
+     * `@objectstack/spec/api` (`anonymousElevatedFlowPairs`), so the stack and
+     * this door cannot grow two opinions of the pair.
+     *
+     * Asked at every door a flow body reaches `active` through: the save in
+     * publish mode ({@link saveMetaItem}) and the draft promotion
+     * ({@link promoteDraftForPublish}) the per-item publish and
+     * `publishPackageDrafts` share. A draft save is let through: a draft does
+     * not execute, and its publish is judged here. `migrate-stored` re-saves
+     * (the credential move, `os migrate meta --stored`) are not judged: they
+     * rewrite a row that already exists, and refusing one would leave a
+     * credential the move exists to take out of the row in cleartext. Such a
+     * row keeps executing as published until its next publish, which this
+     * refuses (the semantic entry `api-endpoint-anonymous-elevated-flow-refused`
+     * says so to an upgrading author).
+     *
+     * Where the endpoints are read, both, because each is a home a code
+     * stack's `apis` has on a real boot: the engine registry's `api` items
+     * (`registerApp` files every stack's `apis` there) and the `metadata`
+     * service's `list('api')`, the manager whose index the endpoint matcher
+     * serves from. Their items are read as bodies, as {@link getMetaItems}
+     * reads the same two sources. ⛔ `sys_metadata` is not read: an `api` row
+     * there is never served (the matcher does not read the store) and none can
+     * be written any more. A read that fails propagates: answering "no
+     * endpoint names it" from a read that never happened would publish the
+     * very pair this refuses.
+     *
+     * `INVALID_METADATA` / 422 with `issues[]` at `runAs` — the envelope this
+     * door's other publish-time contract refusals carry (the schema gate and
+     * the runtime authoring gate), so Studio highlights the key the refusal is
+     * about. ⛔ No new code. The message prescribes before it explains (a 4xx
+     * message crosses the REST boundary with its tail truncated) and carries no
+     * tracker number.
+     */
+    private async anonymousElevatedFlowRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        if (singularType !== 'flow') return undefined;
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+        if ((item as { runAs?: unknown }).runAs !== 'system') return undefined;
+
+        const endpoints: unknown[] = [];
+        const registry = this.engine.registry;
+        if (typeof registry?.listItems === 'function') {
+            endpoints.push(...registry.listItems('api'));
+        }
+        const metadataService = this.getServicesRegistry?.()?.get('metadata');
+        if (metadataService && typeof metadataService.list === 'function') {
+            const listed = await metadataService.list('api');
+            if (Array.isArray(listed)) endpoints.push(...listed);
+        }
+
+        const pairs = anonymousElevatedFlowPairs(
+            endpoints as AnonymousFlowDoorCandidate[],
+            [{ name, runAs: 'system' }],
+        );
+        if (pairs.length === 0) return undefined;
+
+        const names = [...new Set(pairs.map((pair) => pair.endpoint))];
+        const err = new Error(elevatedFlowAnonymousEndpointsMessage(name, names)) as Error & {
+            code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[];
+        };
+        err.code = 'INVALID_METADATA';
+        err.status = 422;
+        err.issues = [{
+            path: 'runAs',
+            message: `An anonymous endpoint (\`authRequired: false\`) triggers this flow: ${names.map((n) => `'${n}'`).join(', ')}. `
+                + "No anonymous door may start a `runAs: 'system'` flow (ADR-0138 D2b).",
+            code: 'custom',
+        }];
         return err;
     }
 
@@ -22233,6 +22527,17 @@ export class ObjectStackProtocolImplementation implements
             if (defaultPageRefusal) throw defaultPageRefusal;
         }
 
+        // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
+        // anonymous endpoint of `type: 'flow'` names it is refused, in publish
+        // mode only (a draft does not execute; its publish is judged at the
+        // promotion), before the authoring gate and every write. A
+        // `migrate-stored` re-save rewrites an existing row and is not judged.
+        // See {@link anonymousElevatedFlowRefusal}.
+        if (mode !== 'draft' && writeSource !== 'migrate-stored') {
+            const elevatedRefusal = await this.anonymousElevatedFlowRefusal(singularType, request.item, request.name);
+            if (elevatedRefusal) throw elevatedRefusal;
+        }
+
         // The #4463 runtime authoring gate — the shared author-time rule
         // registry, on the write path. `active` saves only (D1): this is the
         // publish verb, and it is the same table `os build` gates on. Placed
@@ -22607,8 +22912,8 @@ export class ObjectStackProtocolImplementation implements
                 note: mode === 'draft' ? 'draft' : 'active',
             });
             // [ADR-0094] Awaited projection BEFORE the fire-and-forget
-            // listeners: a derived read-model (e.g. sys_permission_set)
-            // is already consistent when this save returns.
+            // listeners: a derived read-model (e.g. the `datasource`
+            // projector's) is already consistent when this save returns.
             const projectionApplied = await this.runMutationProjector({
                 type: singularTypeForRepo,
                 name: request.name,
@@ -23442,8 +23747,8 @@ export class ObjectStackProtocolImplementation implements
         };
         /**
          * Present when a publish-time materializer is registered for this type
-         * (ADR-0086 P2 — e.g. `permission` → `sys_permission_set`): the result
-         * of projecting the published body into its data-plane row. Best-effort,
+         * (ADR-0086 P2 — e.g. `flow`): the result of projecting the published
+         * body into its data-plane representation. Best-effort,
          * same contract as `seedApplied` — surfaced, never thrown.
          */
         materializeApplied?: PublishMaterializeResult;
@@ -23854,6 +24159,17 @@ export class ObjectStackProtocolImplementation implements
             const defaultPageRefusal = await this.defaultRecordPageSaveRefusal(singularType, draftForGate.body, request.name, 'published');
             if (defaultPageRefusal) throw defaultPageRefusal;
         }
+        // [ADR-0138 D2b] …and a flow draft that would go `active` with
+        // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
+        // it: the draft save let it through (a draft does not execute), so its
+        // publish is where the pair is judged — on the draft body, with the
+        // save door's predicate and envelope, before `repo.promoteDraft` writes,
+        // so a batch publish aborts on it too. See
+        // {@link anonymousElevatedFlowRefusal}.
+        if (draftForGate) {
+            const elevatedRefusal = await this.anonymousElevatedFlowRefusal(singularType, draftForGate.body, request.name);
+            if (elevatedRefusal) throw elevatedRefusal;
+        }
         // [#9176] The gate's return is its advisory half (#4717): captured and
         // handed out so `publishMetaItem` can attach it to the 2xx this
         // promotion is about to earn, exactly as `saveMetaItem` attaches its
@@ -24065,10 +24381,9 @@ export class ObjectStackProtocolImplementation implements
             out.seedApplied = await this.applySeedBodies([args.body]);
         }
         // Publish-time materializer (ADR-0086 P2): project the published body
-        // into its data-plane row (e.g. `permission` → `sys_permission_set`
-        // with `managed_by:'package'`). Unlike seeds this needs no batch
-        // ordering — permission sets carry no cross-item references — so it
-        // runs on every publish path, package-draft batch included. The
+        // into its data-plane representation (e.g. `flow`). Unlike seeds this
+        // needs no batch ordering, so it runs on every publish path,
+        // package-draft batch included. The
         // owning `package_id` rides on the draft's binding, so a package-door
         // set materializes under the right owner.
         const materializer = this.publishMaterializers.get(args.singularType);
@@ -24082,8 +24397,7 @@ export class ObjectStackProtocolImplementation implements
                 });
             } catch (e: any) {
                 // [#8333 · P8] A materializer is arbitrary PLUGIN code going
-                // straight at the engine (plugin-security upserts
-                // `sys_permission_set`), so a driver failure lands here
+                // straight at the engine, so a driver failure lands here
                 // verbatim — and this string is copied onto
                 // `materializeApplied.failures[].error` of a **200** publish
                 // response, where no boundary withhold can reach it.
@@ -24507,11 +24821,10 @@ export class ObjectStackProtocolImplementation implements
         seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] };
         /**
          * ADR-0086 P2 — aggregate result of publish-time materializers across the
-         * batch (e.g. `permission` → `sys_permission_set`). Absent when no
-         * published item had a registered materializer. `failures` names each
-         * item whose projection did NOT land (e.g. a permission-set name owned by
-         * the env door or another package) so the caller surfaces it instead of
-         * reporting a clean publish over a set that never went live.
+         * batch (e.g. `flow`). Absent when no published item had a registered
+         * materializer. `failures` names each item whose projection did NOT
+         * land, so the caller surfaces it instead of reporting a clean publish
+         * over an item that never went live.
          */
         materializeApplied?: {
             success: boolean;
@@ -25808,8 +26121,8 @@ export class ObjectStackProtocolImplementation implements
 
         // [#2747] Data-plane cleanups registered by domain plugins (mirror of
         // the publish materializers): revoke what the package's metadata
-        // granted — e.g. plugin-security removes its package-owned
-        // sys_permission_set rows and their bindings. Best-effort per cleanup;
+        // granted — e.g. plugin-security revokes every grant naming a set the
+        // package declared. Best-effort per cleanup;
         // outcomes ride on the response so a failed revocation (ghost grants —
         // a security condition) is visible to the caller, never silent.
         // [#21490] Through the registry's one runner, which install-local's
@@ -27792,8 +28105,8 @@ export class ObjectStackProtocolImplementation implements
             // [ADR-0094] Awaited projection BEFORE the fire-and-forget
             // listener below — the order `saveMetaItem`'s comment
             // establishes. A rollback restores the row and the in-memory
-            // registry to the target version; a derived read-model (e.g.
-            // `permission` -> `sys_permission_set`) must be just as current
+            // registry to the target version; a derived read-model (e.g. the
+            // `datasource` projector's) must be just as current
             // when this call returns, not only after the next unrelated
             // write or boot reconciliation (ADR-0094 D4) eventually heals it.
             // `body` is the restored version's own — the same value the
@@ -28203,6 +28516,9 @@ export class ObjectStackProtocolImplementation implements
          * is removed (object + active only; never `sys_`). Default false keeps
          * delete non-destructive to data. Used by the "discard a previewed
          * object" flow so a publish-to-preview leaves no orphan table.
+         * [#23415] Only with the object's last stored row: while another row
+         * of it stays stored, the delete is refused `409 RESOURCE_CONFLICT`
+         * ({@link dropStorageRemainingRowsRefusal}).
          */
         dropStorage?: boolean;
         /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
@@ -28340,6 +28656,8 @@ export class ObjectStackProtocolImplementation implements
             const lockErr = await this.assertLockAllowsDelete({
                 type: request.type,
                 name: request.name,
+                // [#23297] The delete's address carries its package, as the save's does.
+                ...(request.packageId ? { packageId: request.packageId } : {}),
                 ...(request.actor ? { actor: request.actor } : {}),
                 source: 'protocol.deleteMetaItem',
             });
@@ -28394,6 +28712,9 @@ export class ObjectStackProtocolImplementation implements
             // more packages hold: the door's own verdict, rethrown as it is by
             // the `catch` below, never re-wrapped as a delete that failed.
             let addressRefusal: Error | undefined;
+            // [#23415] The refusal of a table drop another stored row of the
+            // object still needs: rethrown as it is, as `addressRefusal` is.
+            let dropRefusal: Error | undefined;
 
             try {
                 const targetState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
@@ -28490,6 +28811,25 @@ export class ObjectStackProtocolImplementation implements
                     };
                 }
 
+                // [#23165] What is still stored at this address once this row
+                // is gone, from the rows the address read already holds. Read
+                // by the table drop's verdict just below and by the receipt.
+                const remainingPackages = rowsAtAddress.candidates.filter((id) => id !== packageId);
+                const unboundRemains = rowsAtAddress.unbound && packageId !== null;
+                const remains = remainingPackages.length > 0 || unboundRemains;
+                // [#23415] The table drop, decided ONCE, before anything is
+                // written: an object's table goes only with its last stored
+                // row. A `dropStorage` delete that would leave another row of
+                // the object stored, and served over this table, is refused
+                // whole — see {@link dropStorageRemainingRowsRefusal}.
+                const dropsStorage = this.shouldDropStorage(request.type, request.name, request.dropStorage, targetState);
+                if (dropsStorage && remains) {
+                    dropRefusal = ObjectStackProtocolImplementation.dropStorageRemainingRowsRefusal(
+                        singularTypeForRepo, request.name, packageId, remainingPackages, unboundRemains,
+                    );
+                    throw dropRefusal;
+                }
+
                 // Last-write-wins parent resolution unless the caller pinned
                 // an explicit version (Studio's "Reset" button is unpinned;
                 // a future "delete vN" flow can pass parentVersion).
@@ -28541,7 +28881,9 @@ export class ObjectStackProtocolImplementation implements
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
                 // for a discarded object so a publish-to-preview leaves no residue.
-                if (this.shouldDropStorage(request.type, request.name, request.dropStorage, targetState)) {
+                // [#23415] Decided above; reached only when this was the
+                // object's last stored row.
+                if (dropsStorage) {
                     await this.dropObjectStorage(singularTypeForRepo, request.name);
                 }
 
@@ -28574,11 +28916,6 @@ export class ObjectStackProtocolImplementation implements
                     organizationId: orgId,
                     ...mutationEventMember(singularTypeForRepo, member),
                 });
-                // [#23165] What is still stored at this address once this row
-                // is gone, from the rows the address read already holds.
-                const remainingPackages = rowsAtAddress.candidates.filter((id) => id !== packageId);
-                const unboundRemains = rowsAtAddress.unbound && packageId !== null;
-                const remains = remainingPackages.length > 0 || unboundRemains;
                 const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
                 return {
                     success: true,
@@ -28628,7 +28965,11 @@ export class ObjectStackProtocolImplementation implements
                 // [#21899] The door's own verdict, not a store failure: it
                 // leaves with its envelope and sentence, never re-wrapped as an
                 // overlay delete that failed.
-                if (err === originGatedRefusal || (addressRefusal !== undefined && err === addressRefusal)) throw err;
+                if (
+                    err === originGatedRefusal
+                    || (addressRefusal !== undefined && err === addressRefusal)
+                    || (dropRefusal !== undefined && err === dropRefusal)
+                ) throw err;
                 if (err instanceof ConflictError) {
                     // [#21207] Keyed values or none in the text and attributes.
                     const conflict = await this.metadataConflictRefusal(
