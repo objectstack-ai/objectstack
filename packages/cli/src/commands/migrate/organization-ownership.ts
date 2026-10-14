@@ -33,6 +33,7 @@ import {
 import {
   applyOrganizationOwnership,
   checkpointFromDetails,
+  MetadataChoiceRefusal,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
   TemplateChoiceRefusal,
   type ApplyExecutor,
@@ -173,6 +174,14 @@ export default class MigrateOrganizationOwnership extends Command {
         'deleted only after the chosen body is promoted and verified',
       multiple: true,
     }),
+    'metadata-choice': Flags.string({
+      description:
+        'With --apply: the sys_metadata row id the environment keeps for a listed customization conflict (rows ' +
+        'of one type, name and package once the organization leaves the key). Repeat once per conflict; the ' +
+        'other rows of that conflict are deleted only after the chosen row is promoted and read back. Under a ' +
+        'wall, also an organization row promoted knowingly',
+      multiple: true,
+    }),
     'fate-supplement': Flags.string({
       description:
         'A JSON file of the fates the host declares for the objects it provides (OrganizationOwnershipSupplementSchema, ' +
@@ -235,6 +244,10 @@ export default class MigrateOrganizationOwnership extends Command {
     }
     if (flags['template-choice']?.length) {
       await refuse({ reason: 'flag-without-apply', detail: '--template-choice is only meaningful with --apply' }, '--template-choice is only meaningful with --apply.');
+      return;
+    }
+    if (flags['metadata-choice']?.length) {
+      await refuse({ reason: 'flag-without-apply', detail: '--metadata-choice is only meaningful with --apply' }, '--metadata-choice is only meaningful with --apply.');
       return;
     }
     if (flags['backup-taken']) {
@@ -339,7 +352,7 @@ export default class MigrateOrganizationOwnership extends Command {
         printWarning(
           `Customization conflict ${conflict.type} ${conflict.name}${conflict.packageId ? ` (package ${conflict.packageId})` : ''}: ` +
             conflict.candidates.map((c) => `${c.id} (${c.organizationId ? `organization ${c.organizationId}` : 'environment'})`).join(', ') +
-            ' hold one key. --apply blocks on it until one row is kept and the others are removed.',
+            ' hold one key. --apply blocks on it until one row is chosen with --metadata-choice ROW_ID.',
         );
       }
     }
@@ -358,7 +371,14 @@ export default class MigrateOrganizationOwnership extends Command {
 
   /** `--apply`: the backup precondition, the boot, the ceremony, the report file. */
   private async runApply(
-    flags: { 'database-url'?: string; out?: string; json?: boolean; 'backup-taken'?: boolean; 'template-choice'?: string[] },
+    flags: {
+      'database-url'?: string;
+      out?: string;
+      json?: boolean;
+      'backup-taken'?: boolean;
+      'template-choice'?: string[];
+      'metadata-choice'?: string[];
+    },
     posture: string,
     refuse: (payload: Record<string, unknown>, message: string) => Promise<void>,
     inventory: readonly InventoryEntry[] | undefined,
@@ -457,6 +477,7 @@ export default class MigrateOrganizationOwnership extends Command {
       report = await applyOrganizationOwnership({
         executor,
         ...(flags['template-choice']?.length ? { templateChoices: flags['template-choice'] } : {}),
+        ...(flags['metadata-choice']?.length ? { metadataChoices: flags['metadata-choice'] } : {}),
         posture,
         database: stack.dbLabel,
         catalog,
@@ -538,6 +559,10 @@ export default class MigrateOrganizationOwnership extends Command {
       });
     } catch (error: unknown) {
       if (isExitSignal(error)) throw error;
+      if (error instanceof MetadataChoiceRefusal) {
+        await refuse({ reason: 'metadata-choice-refused', detail: error.message }, `Refused: ${error.message}`);
+        return;
+      }
       if (error instanceof TemplateChoiceRefusal) {
         await refuse({ reason: 'template-choice-refused', detail: error.message }, `Refused: ${error.message}`);
         return;

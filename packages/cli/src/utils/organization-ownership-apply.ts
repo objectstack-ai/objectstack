@@ -27,6 +27,7 @@ import {
   predicateSql,
   Sql,
   type AttributionSink,
+  type MetadataConflict,
   type MetadataKeyRow,
   type TemplateConflict,
   type OrganizationOwnershipPlan,
@@ -64,9 +65,12 @@ import {
  *     presentational types whose overlay key no other row holds becomes an
  *     environment row in place (its `organization_id` cleared). A key held by
  *     more than one row is a conflict: listed, kept, and blocking until the
- *     operator keeps one row (the ceremony deletes none of them: `sys_metadata`
- *     is not a fate-2 table). Under a wall the rows are reported, never
- *     promoted: one organization's view is not every organization's.
+ *     operator chooses one row with `--metadata-choice ROW_ID`; the chosen row
+ *     is promoted and read back, any form withdrawal an unchosen row holds is
+ *     carried onto it, and only then are the unchosen rows deleted, by id
+ *     (ruling B on #23413 Q1, the template path's shape). Under a wall
+ *     nothing is promoted unless the operator names the row (ruling A on
+ *     #23413 Q6): the rest are reported and hold the column.
  *  2b. `template-promotion` — ruling C on ADR-0131 §6 Q1: every
  *     `sys_email_template` row an organization customized or authored becomes
  *     an environment `email_template` item through the metadata door (core's
@@ -260,6 +264,13 @@ export interface ApplyOptions {
    * anything is written ({@link TemplateChoiceRefusal}).
    */
   templateChoices?: readonly string[];
+  /**
+   * The operator's choice per `sys_metadata` conflict (the row the environment
+   * keeps; the others are deleted once it is promoted and read back), and under
+   * a wall the organization rows promoted knowingly. Validated before anything
+   * is written ({@link MetadataChoiceRefusal}).
+   */
+  metadataChoices?: readonly string[];
   now?: () => Date;
   /** One line per milestone, for the command's human face. */
   onProgress?: (message: string) => void;
@@ -314,6 +325,14 @@ interface Run {
    * promotion pass mirror deletion re-runs, so a resumed run verifies afresh.
    */
   verifiedTemplateIds: Set<string>;
+}
+
+/** A `--metadata-choice` that names no row awaiting a choice, or two of one conflict. Nothing is written. */
+export class MetadataChoiceRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MetadataChoiceRefusal';
+  }
 }
 
 /** A `--template-choice` that names no candidate of a listed conflict, or two of one. Nothing is written. */
@@ -735,8 +754,108 @@ async function carryFormWithdrawals(run: Run, rows: readonly MetadataKeyRow[], s
   }
 }
 
+/** One conflict the operator chose a row for, and the rows that go once that row is promoted and verified. */
+interface MetadataResolution {
+  conflict: MetadataConflict;
+  chosen: MetadataConflict['candidates'][number];
+  unchosen: string[];
+}
+
+/** The `metadata` bodies of the given `sys_metadata` rows, by id. */
+async function metadataBodies(run: Run, ids: readonly string[]): Promise<Map<string, Record<string, unknown> | null>> {
+  const t = METADATA_OBJECT;
+  const sql = run.sql;
+  const out = new Map<string, Record<string, unknown> | null>();
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    const found = await sql.read(
+      t,
+      `SELECT ${['id', 'name', 'metadata'].map((c) => `${sql.q(c, t)} AS ${sql.q(c, t)}`).join(', ')} ` +
+        `FROM ${sql.q(t, t)} WHERE ${sql.q('id', t)} IN (${chunk.map(() => '?').join(', ')})`,
+      chunk,
+    );
+    for (const row of found) out.set(String(row.id), parseBody(row));
+  }
+  return out;
+}
+
+/** Clear `organization_id` on the given rows of one organization. */
+async function promoteRows(run: Run, organizationId: string, ids: readonly string[]): Promise<void> {
+  const t = run.sql.q(METADATA_OBJECT, METADATA_OBJECT);
+  const org = run.sql.q(ORG, METADATA_OBJECT);
+  const id = run.sql.q('id', METADATA_OBJECT);
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    await execute(
+      run,
+      METADATA_OBJECT,
+      `UPDATE ${t} SET ${org} = NULL WHERE ${org} = ? AND ${id} IN (${chunk.map(() => '?').join(', ')})`,
+      [organizationId, ...chunk],
+    );
+  }
+}
+
+/**
+ * Resolve one chosen conflict: promote the chosen row (an organization's), read
+ * it back as an environment row, carry onto it every public-form withdrawal an
+ * unchosen row holds (fail-closed: choosing never reopens a form), and only then
+ * delete the unchosen rows, by id — ruling B on #23413 Q1, the `--template-choice`
+ * path's shape. Returns a blocker, or `null` once the rows are gone.
+ */
+async function resolveMetadataConflict(run: Run, r: MetadataResolution): Promise<string | null> {
+  const { conflict, chosen, unchosen } = r;
+  const sql = run.sql;
+  const t = sql.q(METADATA_OBJECT, METADATA_OBJECT);
+  const id = sql.q('id', METADATA_OBJECT);
+  const what = `the ${conflict.type} ${conflict.name}${conflict.packageId ? ` (package ${conflict.packageId})` : ''}`;
+  if (chosen.organizationId !== null) await promoteRows(run, chosen.organizationId, [chosen.id]);
+  const back = await sql.read(
+    METADATA_OBJECT,
+    `SELECT ${sql.q(ORG, METADATA_OBJECT)} AS ${sql.q(ORG, METADATA_OBJECT)} FROM ${t} WHERE ${id} = ?`,
+    [chosen.id],
+  );
+  if (back.length !== 1 || (back[0]![ORG] !== null && back[0]![ORG] !== undefined && back[0]![ORG] !== '')) {
+    throw new Error(
+      `The chosen row ${chosen.id} of ${what} did not read back as an environment row; none of the rows ` +
+        `${unchosen.join(', ')} was deleted.`,
+    );
+  }
+  if (conflict.type === 'view') {
+    const bodies = await metadataBodies(run, [chosen.id, ...unchosen]);
+    const body = bodies.get(chosen.id);
+    const layer = unchosen.map((u) => bodies.get(u)).filter((b): b is Record<string, unknown> => !!b);
+    if (body) {
+      const closing = anonymousFormIntakeCandidates(body).filter((c) => anonymousFormIntakeWithdrawnIn(layer, body, c));
+      if (closing.length > 0) {
+        for (const candidate of closing) {
+          candidate.form.sharing = { ...(candidate.form.sharing as Record<string, unknown>), enabled: false };
+        }
+        try {
+          await run.opts.door.save('view', conflict.name, body, { packageId: conflict.packageId });
+        } catch (error) {
+          return (
+            `The row ${chosen.id} chosen for ${what} serves the public form(s) ${closing.map((c) => c.slug).join(', ')} ` +
+            'open, an unchosen row withdraws them, and the metadata door refused to carry that withdrawal onto the ' +
+            `chosen row: ${error instanceof Error ? error.message : String(error)}. Withdraw the form on the chosen row ` +
+            '(sharing.enabled false), then re-run; no unchosen row is deleted until then.'
+          );
+        }
+      }
+    }
+  }
+  const ids = unchosen;
+  const where = `${id} IN (${ids.map(() => '?').join(', ')})`;
+  await execute(run, METADATA_OBJECT, `DELETE FROM ${t} WHERE ${where}`, ids);
+  if ((await sql.count(METADATA_OBJECT, `SELECT COUNT(*) AS n FROM ${t} WHERE ${where}`, ids)) !== 0) {
+    throw new Error(`The delete of the unchosen rows of ${what} left rows behind.`);
+  }
+  run.deleted.set(METADATA_OBJECT, (run.deleted.get(METADATA_OBJECT) ?? 0) + ids.length);
+  run.opts.onProgress?.(`promotion: ${what} keeps row ${chosen.id}; ${ids.length} unchosen row(s) deleted`);
+  return null;
+}
+
 async function runMetadataPromotion(run: Run): Promise<StepReport> {
-  const summary: Record<string, number> = { withdrawalsCarried: 0, promoted: 0, conflicts: 0, reported: 0 };
+  const summary: Record<string, number> = { withdrawalsCarried: 0, promoted: 0, conflicts: 0, chosen: 0, unchosenDeleted: 0, reported: 0 };
   const blockers: string[] = [];
   const notes: string[] = [];
   const cols = await columnsOf(run, METADATA_OBJECT);
@@ -748,50 +867,98 @@ async function runMetadataPromotion(run: Run): Promise<StepReport> {
   // Withdrawals first, under every posture: closing a form is never a leak.
   await carryFormWithdrawals(run, rows, summary, blockers);
 
-  if (run.opts.posture !== 'single') {
-    summary.reported = orgRows.length;
-    notes.push(
-      `${orgRows.length} organization-scoped presentational ${METADATA_OBJECT} row(s) are reported, not promoted: under the ` +
-        `${run.opts.posture} posture one organization's customization is not the environment's. They keep the ` +
-        `${METADATA_OBJECT} column from being dropped.`,
-    );
-    return { step: 'metadata-promotion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
-  }
-
+  // Under a wall nothing is promoted unless the operator names the row
+  // (--metadata-choice): one organization's customization is not the
+  // environment's, and only a knowing choice makes it so (ruling A on #23413 Q6).
+  const walled = run.opts.posture !== 'single';
+  const choices = new Set(run.opts.metadataChoices ?? []);
   const { promotable, conflicts } = groupMetadataKeyRows(rows);
-  summary.conflicts = conflicts.length;
+
+  const resolutions: MetadataResolution[] = [];
   for (const conflict of conflicts) {
+    const chosen = conflict.candidates.find((c) => choices.has(c.id));
+    if (chosen) {
+      resolutions.push({ conflict, chosen, unchosen: conflict.candidates.filter((c) => c.id !== chosen.id).map((c) => c.id) });
+      continue;
+    }
+    summary.conflicts++;
     blockers.push(
       `The ${conflict.type} ${conflict.name}` +
         `${conflict.packageId ? ` (package ${conflict.packageId})` : ''}${conflict.bundleMember ? ` [${conflict.bundleMember}]` : ''} ` +
         `is held by ${conflict.candidates.length} rows once the organization leaves its key: ` +
         conflict.candidates.map((c) => `${c.id} (${c.organizationId ? `organization ${c.organizationId}` : 'environment'}, ${c.state ?? 'no state'})`).join(', ') +
-        '. Which one the environment keeps is never guessed, and the ceremony deletes none of them: keep one row and ' +
-        `remove the others from ${METADATA_OBJECT}, then re-run.` +
-        (conflict.type === 'view'
-          ? ' If any of them withdraws a public form, keep one that withdraws it too: an upgrade never reopens a withdrawn form.'
-          : ''),
+        '. Which one the environment keeps is never guessed: choose one with --metadata-choice ROW_ID, then re-run. ' +
+        'The others are deleted only once the chosen row is promoted and read back' +
+        (conflict.type === 'view' ? ', and a public form any of them withdraws stays withdrawn on the chosen row.' : '.'),
     );
   }
-  const t = run.sql.q(METADATA_OBJECT, METADATA_OBJECT);
-  const org = run.sql.q(ORG, METADATA_OBJECT);
-  const id = run.sql.q('id', METADATA_OBJECT);
+
+  const lone = promotable.filter((row) => !walled || choices.has(row.id));
   const byOrganization = new Map<string, string[]>();
-  for (const row of promotable) byOrganization.set(row.organizationId!, [...(byOrganization.get(row.organizationId!) ?? []), row.id]);
+  for (const row of lone) byOrganization.set(row.organizationId!, [...(byOrganization.get(row.organizationId!) ?? []), row.id]);
   for (const [organizationId, ids] of byOrganization) {
-    for (let i = 0; i < ids.length; i += IN_CHUNK) {
-      const chunk = ids.slice(i, i + IN_CHUNK);
-      await execute(
-        run,
-        METADATA_OBJECT,
-        `UPDATE ${t} SET ${org} = NULL WHERE ${org} = ? AND ${id} IN (${chunk.map(() => '?').join(', ')})`,
-        [organizationId, ...chunk],
+    await promoteRows(run, organizationId, ids);
+    summary.promoted += ids.length;
+  }
+  for (const resolution of resolutions) {
+    const blocker = await resolveMetadataConflict(run, resolution);
+    if (blocker) {
+      blockers.push(blocker);
+      continue;
+    }
+    summary.chosen++;
+    summary.unchosenDeleted += resolution.unchosen.length;
+  }
+
+  if (walled) {
+    const held = promotable.length - lone.length;
+    summary.reported = held;
+    if (held > 0) {
+      notes.push(
+        `${held} organization-scoped presentational ${METADATA_OBJECT} row(s) are reported, not promoted: under the ` +
+          `${run.opts.posture} posture one organization's customization is not the environment's. Promote one ` +
+          `knowingly with --metadata-choice ROW_ID; until then they keep the ${METADATA_OBJECT} column from being dropped.`,
       );
     }
-    summary.promoted += ids.length;
   }
   if (summary.promoted) run.opts.onProgress?.(`promotion: ${summary.promoted} organization customization(s) are environment rows now`);
   return { step: 'metadata-promotion', status: blockers.length ? 'blocked' : 'done', summary, blockers, notes };
+}
+
+/**
+ * Refuse, before anything is written, a `--metadata-choice` that names no row
+ * awaiting a choice — a candidate of a listed conflict or, under a wall, an
+ * organization's presentational row its key alone holds — or two candidates
+ * of one conflict.
+ */
+async function validateMetadataChoices(run: Run): Promise<void> {
+  const choices = run.opts.metadataChoices ?? [];
+  if (choices.length === 0) return;
+  const cols = await columnsOf(run, METADATA_OBJECT);
+  const rows = cols?.has(ORG) ? await readMetadataKeyRows(run.sql, METADATA_OBJECT, cols) : [];
+  const { promotable, conflicts } = groupMetadataKeyRows(rows);
+  const keyOf = (c: MetadataConflict): string => `${c.type} ${c.name}${c.packageId ? ` (package ${c.packageId})` : ''}`;
+  const groupOf = new Map<string, string>();
+  for (const c of conflicts) for (const cand of c.candidates) groupOf.set(cand.id, keyOf(c));
+  if (run.opts.posture !== 'single') for (const row of promotable) groupOf.set(row.id, `the ${row.type} ${row.name} (row ${row.id})`);
+  const listed = conflicts.length
+    ? conflicts.map((c) => `${keyOf(c)}: ${c.candidates.map((cand) => cand.id).join(', ')}`).join('; ')
+    : 'none';
+  const seen = new Map<string, string>();
+  for (const id of choices) {
+    const group = groupOf.get(id);
+    if (!group) {
+      throw new MetadataChoiceRefusal(
+        `--metadata-choice ${id} names no row awaiting a choice. The conflicts are: ${listed}` +
+          (run.opts.posture !== 'single' ? '; under a wall, any organization row of a presentational type its key alone holds.' : '.'),
+      );
+    }
+    const other = seen.get(group);
+    if (other !== undefined && other !== id) {
+      throw new MetadataChoiceRefusal(`--metadata-choice ${other} and ${id} both choose for ${group}; choose exactly one row per conflict.`);
+    }
+    seen.set(group, id);
+  }
 }
 
 // ── Step 2b: template promotion (ruling C) ──────────────────────────────────
@@ -1369,6 +1536,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
   // Refuses (driver, catalog, an uninventoried table) before anything is written.
   run.plan = await planFor(run);
   validateTemplateChoices(run);
+  await validateMetadataChoices(run);
   const before = run.plan;
 
   const stored = await opts.ledger.read();

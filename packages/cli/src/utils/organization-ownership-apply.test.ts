@@ -25,6 +25,7 @@ import { permissionSetDefinitionFromRow } from '@objectstack/core';
 import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn } from '@objectstack/metadata-core';
 import {
   applyOrganizationOwnership,
+  MetadataChoiceRefusal,
   TemplateChoiceRefusal,
   type ApplyExecutor,
   type CatalogPort,
@@ -340,13 +341,14 @@ async function accessAfter(c: ReturnType<typeof catalog>): Promise<string[]> {
 const apply = (
   c: ReturnType<typeof catalog>,
   l: ReturnType<typeof ledger>,
-  opts: { posture?: string; executor?: ApplyExecutor; templateChoices?: string[]; views?: ServedViewsPort } = {},
+  opts: { posture?: string; executor?: ApplyExecutor; templateChoices?: string[]; metadataChoices?: string[]; views?: ServedViewsPort } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
   return applyOrganizationOwnership({
     views: opts.views ?? servedViews(c),
     executor: opts.executor ?? executor(),
     ...(opts.templateChoices ? { templateChoices: opts.templateChoices } : {}),
+    ...(opts.metadataChoices ? { metadataChoices: opts.metadataChoices } : {}),
     posture: opts.posture ?? 'single',
     database: file,
     catalog: c,
@@ -894,5 +896,116 @@ describe('ADR-0131 D10 --apply — organization customizations and form withdraw
     const report = await apply(refusing, ledger(), { views: servedViews(c) });
     expect(step(report).status).toBe('blocked');
     expect(step(report).blockers.join('\n')).toMatch(/lead-intake of the view crm_lead\.intake \(package pkg_a\).*NOT_OVERRIDABLE.*sharing\.enabled false/);
+  });
+});
+
+describe('ADR-0131 D10 --apply — a customization conflict resolved by --metadata-choice (ruling 6163114098: Q1 B, Q6 A)', () => {
+  const metadataTable = (values: string): void => {
+    db.exec(`
+      CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, organization_id TEXT, type TEXT, name TEXT, state TEXT,
+        package_id TEXT, bundle_member TEXT, metadata TEXT);
+      INSERT INTO sys_metadata VALUES ${values};
+    `);
+  };
+  const md = (id: string, org: string | null, type: string, name: string, body: Record<string, unknown>, pkg: string | null = null): string =>
+    `('${id}', ${org === null ? 'NULL' : `'${org}'`}, '${type}', '${name}', 'active', ${pkg === null ? 'NULL' : `'${pkg}'`}, NULL, '${JSON.stringify(body)}')`;
+  const step = (report: OrganizationOwnershipApplyReport) => report.steps.find((s) => s.step === 'metadata-promotion')!;
+  const owners = (): Array<[unknown, unknown]> => {
+    const scoped = rows(`SELECT name FROM pragma_table_info('sys_metadata') WHERE name = 'organization_id'`).length > 0;
+    return rows(`SELECT id${scoped ? ', organization_id' : ''} FROM sys_metadata ORDER BY id`).map((r) => [r.id, r.organization_id ?? null]);
+  };
+  const deletes = (): string[] => writes.filter((w) => /^DELETE FROM "sys_metadata"/.test(w));
+  const conflictRows = [
+    md('md_org', 'org_default', 'view', 'deal_list', { name: 'deal_list', label: 'Org list' }),
+    md('md_env', null, 'view', 'deal_list', { name: 'deal_list', label: 'Env list' }),
+  ].join(', ');
+
+  it('⭐ no row of a conflict is deleted before a choice is made', async () => {
+    metadataTable(conflictRows);
+    const report = await apply(catalog(), ledger());
+    expect(step(report).status).toBe('blocked');
+    expect(step(report).blockers.join('\n')).toMatch(/choose one with --metadata-choice ROW_ID/);
+    expect(deletes()).toEqual([]);
+    expect(owners()).toEqual([['md_env', null], ['md_org', 'org_default']]);
+  });
+
+  it('choosing the organization\'s row: it is promoted and read back, then the environment row it displaces is deleted by id', async () => {
+    metadataTable(conflictRows);
+    const report = await apply(catalog(), ledger(), { metadataChoices: ['md_org'] });
+    expect(step(report)).toMatchObject({ status: 'done', summary: { chosen: 1, unchosenDeleted: 1, conflicts: 0 } });
+    expect(owners()).toEqual([['md_org', null]]);
+    // The promotion's write precedes the delete.
+    const promote = writes.findIndex((w) => /^UPDATE "sys_metadata" SET "organization_id" = NULL/.test(w));
+    const remove = writes.findIndex((w) => /^DELETE FROM "sys_metadata"/.test(w));
+    expect(promote).toBeGreaterThanOrEqual(0);
+    expect(remove).toBeGreaterThan(promote);
+  });
+
+  it('choosing the environment\'s row: the organization row is deleted by id, and nothing is promoted', async () => {
+    metadataTable(conflictRows);
+    const report = await apply(catalog(), ledger(), { metadataChoices: ['md_env'] });
+    expect(step(report)).toMatchObject({ status: 'done', summary: { chosen: 1, unchosenDeleted: 1, promoted: 0 } });
+    expect(owners()).toEqual([['md_env', null]]);
+  });
+
+  it('two organizations on one key: the chosen one is promoted, the other deleted', async () => {
+    metadataTable([md('md_a', 'org_a', 'translation', 'fr', { name: 'fr', a: 1 }), md('md_b', 'org_b', 'translation', 'fr', { name: 'fr', b: 1 })].join(', '));
+    const report = await apply(catalog(), ledger(), { metadataChoices: ['md_b'] });
+    expect(step(report).summary).toMatchObject({ chosen: 1, unchosenDeleted: 1 });
+    expect(owners()).toEqual([['md_b', null]]);
+  });
+
+  it('⭐ fail-closed: choosing a row that serves a form an unchosen row withdraws carries the withdrawal onto it before the delete', async () => {
+    metadataTable([
+      md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false, 'Org copy')),
+      md('md_env', null, 'view', 'crm_lead.intake', formView(true, 'Env copy')),
+    ].join(', '));
+    const c = catalog();
+    const views = servedViews(c);
+    const report = await apply(c, ledger(), { views, metadataChoices: ['md_env'] });
+    expect(step(report).status).toBe('done');
+    expect(c.viewSaves.map((v) => [v.packageId, (v.body.config as any).sharing.enabled])).toEqual(
+      expect.arrayContaining([[null, false]]),
+    );
+    expect(owners()).toEqual([['md_env', null]]);
+    expect(await doorsServe(views, 'lead-intake')).toEqual([]);
+  });
+
+  it('a door that refuses that carry blocks the conflict, and its unchosen row is not deleted', async () => {
+    metadataTable([
+      md('md_org', 'org_default', 'view', 'crm_lead.intake', formView(false, 'Org copy')),
+      md('md_env', null, 'view', 'crm_lead.intake', formView(true, 'Env copy')),
+    ].join(', '));
+    const c = catalog();
+    const refusing: ReturnType<typeof catalog> = {
+      ...c,
+      async save(type, name, body, target) {
+        if (type === 'view' && target?.packageId === null) throw new Error('VALIDATION_ERROR: refused');
+        return c.save(type, name, body, target);
+      },
+    };
+    const report = await apply(refusing, ledger(), { views: servedViews(c), metadataChoices: ['md_env'] });
+    expect(step(report).status).toBe('blocked');
+    expect(step(report).blockers.join('\n')).toMatch(/no unchosen row is deleted until then/);
+    expect(deletes()).toEqual([]);
+    expect(owners()).toEqual([['md_env', null], ['md_org', 'org_default']]);
+  });
+
+  it('under a wall a row is promoted only when chosen; the rest stay reported', async () => {
+    metadataTable([md('md_a', 'org_a', 'dashboard', 'sales', { name: 'sales' }), md('md_b', 'org_a', 'report', 'pipe', { name: 'pipe' })].join(', '));
+    const report = await apply(catalog(), ledger(), { posture: 'isolated', metadataChoices: ['md_a'] });
+    expect(step(report).summary).toMatchObject({ promoted: 1, reported: 1 });
+    expect(owners()).toEqual([['md_a', null], ['md_b', 'org_a']]);
+  });
+
+  it('refuses, before any write, a choice naming no row awaiting one, and two choices for one conflict', async () => {
+    metadataTable([conflictRows, md('md_lone', 'org_default', 'dashboard', 'sales', { name: 'sales' })].join(', '));
+    await expect(apply(catalog(), ledger(), { metadataChoices: ['md_nope'] })).rejects.toBeInstanceOf(MetadataChoiceRefusal);
+    // Under single a lone row is promoted without a choice, so it awaits none.
+    await expect(apply(catalog(), ledger(), { metadataChoices: ['md_lone'] })).rejects.toThrow(/md_lone names no row awaiting a choice/);
+    await expect(apply(catalog(), ledger(), { metadataChoices: ['md_org', 'md_env'] })).rejects.toThrow(
+      /md_org and md_env both choose for view deal_list/,
+    );
+    expect(writes).toEqual([]);
   });
 });
