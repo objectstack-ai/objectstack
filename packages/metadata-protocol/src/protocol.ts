@@ -3247,6 +3247,22 @@ function isoFromValidDate(value: unknown): unknown {
     return value;
 }
 
+/**
+ * ADR-0087 conversions the save door's flow fallback verdict (#21982) does
+ * not replay, by id — the same DEFAULT-FLIP refusal the automation engine's
+ * canonicalizer makes (`CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in
+ * `service-automation/src/engine.ts`), because the fallback stands in for that
+ * canonicalizer and must reach the same verdict on the same body.
+ *
+ * - `flow-decision-mode-inclusive-explicit` (#15429) rewrites an omitted
+ *   decision `mode` into `'inclusive'`, which is sound only where "this body
+ *   predates the flip" is a fact; a save never knows that, exactly as the
+ *   engine's canonicalizer does not.
+ */
+const FLOW_FALLBACK_VERDICT_NOT_REPLAYED: readonly string[] = [
+    'flow-decision-mode-inclusive-explicit',
+];
+
 // Lifecycle columns the engine always owns; the clone path drops them by NAME
 // so the insert re-stamps fresh values instead of copying the source's. Mirrors
 // record-validator's SKIP_FIELDS (system-injected, never author-supplied).
@@ -22350,11 +22366,14 @@ export class ObjectStackProtocolImplementation implements
         // conversions applied (`applyConversionsToFlow`) — for the VERDICT
         // only: what is stored stays the raw request body, exactly as before.
         // The flow parse judges an undeclared config key on the builtin node
-        // types, so a D2 spelling the load path still rewrites (`filters`,
+        // types, so a D2 spelling the canonicalizer rewrites (`filters`,
         // script `functionName`, subflow `flow`, …) would otherwise be refused
-        // here and accepted at every converting door (`os validate`,
-        // `defineStack`, `registerFlow`): a verdict that depended on whether
-        // this host runs an automation service. No `reservedNodeTypes` (no
+        // here and accepted by `registerFlow`, which the canonicalizer is: a
+        // verdict that depended on whether this host runs an automation
+        // service. So the fallback replays the chain the canonicalizer replays
+        // — the FULL chain, retired entries included (#23487 retired those
+        // spellings from the authoring funnel, not from this seam), minus the
+        // same default flip ({@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}). No `reservedNodeTypes` (no
         // engine here): a node-type rename's conflict guard keeps its one home
         // in the engine's canonicalizer, and this converted body is never
         // persisted. A key no conversion rewrites is judged exactly as written.
@@ -22429,7 +22448,12 @@ export class ObjectStackProtocolImplementation implements
                     canonicalized = true;
                 }
             }
-            if (!canonicalized) flowGateVerdictBody = applyConversionsToFlow(request.item);
+            if (!canonicalized) {
+                flowGateVerdictBody = applyConversionsToFlow(request.item, {
+                    includeRetired: true,
+                    excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
+                });
+            }
         }
 
         // Spec-conformance check: if a Zod schema is registered for this
