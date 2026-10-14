@@ -66,6 +66,7 @@ import { isValueDomainMember } from '@objectstack/spec/shared';
 
 import { resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyRefusalReason } from './api-key.js';
+import { normalizeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
 import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
 import { openRequestGrantsMemo, withRequestGrantsMemo } from './request-grants-memo.js';
@@ -116,6 +117,33 @@ export interface ResolvedAuthzContext {
    * anonymous requests carry no rung.
    */
   posture?: AuthzPosture;
+  /**
+   * [#23287, ruling C′ item 3] The credential that admitted {@link userId}:
+   * `'api_key'` when an API key did (step 1 below), `'session'` when the
+   * session / bearer read did (step 2). Absent for an anonymous request and for
+   * a refused key.
+   *
+   * A transport that re-reads the session for the ADR-0069 gate does so only
+   * for `'session'`: a key-admitted request is judged by the key's answer
+   * ({@link authGate}), never by a cookie that rode along beside the key.
+   */
+  credential?: 'api_key' | 'session';
+  /**
+   * [ADR-0069 · #23287, ruling C′ item 3] The principal's authentication-policy
+   * posture, decided once here for whichever credential admitted it:
+   *
+   *  - `'api_key'` — the key OWNER's `account`-scope posture
+   *    (`resolveApiKeyAdmission`'s `held` arm, asked of
+   *    {@link ResolveAuthzInput.userAuthGates}). A `credential`-scope posture
+   *    holds password sign-in alone and never appears here for a key.
+   *  - `'session'` — the session user's posture, as the session read reports
+   *    it (`normalizeAuthGate`), every scope included: a session IS the
+   *    password sign-in.
+   *
+   * Absent when no policy holds the principal. A door refuses a context that
+   * carries it with `403` and its `code` / `message` (`evaluateAuthGate`).
+   */
+  authGate?: AuthGate;
 }
 
 export interface ResolveAuthzInput {
@@ -157,6 +185,18 @@ export interface ResolveAuthzInput {
    * never adopted the guest entry.
    */
   guestEntry?: boolean;
+  /**
+   * [#23287, ruling C′ item 3] The auth service's per-user posture
+   * computation, bound by `userAuthGateSourceOf(authService)`. The API-key
+   * admission seam asks it for a key's owner and holds the key on an
+   * `account`-scope posture ({@link ResolvedAuthzContext.authGate}).
+   *
+   * Supplied by the transport, like {@link tenancyPosture}, because this
+   * resolver is kernel-agnostic. OMITTING it leaves a key's owner unasked —
+   * the behaviour before the ruling — so an unwired caller is never made
+   * worse, only less strict.
+   */
+  userAuthGates?: UserAuthGateSource;
 }
 
 /**
@@ -401,7 +441,13 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   let sessionId: string | undefined;
 
   // 1. API key (explicit opt-in via header) takes precedence over session.
-  const admission = await resolveApiKeyAdmission(ql, headers, input.nowMs, input.tenancyPosture);
+  const admission = await resolveApiKeyAdmission(
+    ql,
+    headers,
+    input.nowMs,
+    input.tenancyPosture,
+    input.userAuthGates,
+  );
   // [#8287] A REFUSED key stops here and does NOT fall through to the session
   // path. Falling through would be more permissive than the behaviour this
   // replaced (an API key already outranks a session), and a refusal that
@@ -418,10 +464,21 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     });
     return ctx;
   }
-  const keyPrincipal = admission.outcome === 'admitted' ? admission.principal : undefined;
+  // [#23287, ruling C′ item 3] A HELD key is a held principal, exactly like a
+  // held session: it resolves as the owner, carrying the owner's account-scope
+  // posture, and the door refuses it with that posture's `403`. ⛔ It does NOT
+  // fall through to the session path (a cookie beside the key never answers
+  // for it), and it is not a refusal into anonymity: the caller is told what to
+  // remediate, as the session is.
+  const keyPrincipal = admission.outcome === 'admitted' || admission.outcome === 'held'
+    ? admission.principal
+    : undefined;
+  let credential: ResolvedAuthzContext['credential'];
+  let authGate: AuthGate | undefined = admission.outcome === 'held' ? admission.gate : undefined;
   if (keyPrincipal) {
     userId = keyPrincipal.userId;
     tenantId = keyPrincipal.tenantId;
+    credential = 'api_key';
     for (const scope of keyPrincipal.scopes) {
       if (!ctx.permissions.includes(scope)) ctx.permissions.push(scope);
     }
@@ -433,6 +490,12 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
       const sessionData = await input.getSession(headers);
       userId = sessionData?.user?.id ?? sessionData?.session?.userId;
       tenantId = tenantId ?? sessionData?.session?.activeOrganizationId;
+      if (userId) {
+        credential = 'session';
+        // [ADR-0069 · #23287] The session's posture, off the same read that
+        // admitted it — so a door asks one field for either credential.
+        authGate = normalizeAuthGate(sessionData?.user) ?? undefined;
+      }
       // [#15409] Identity of the session, for the dropped-claim log line below.
       // ⛔ The ROW id, never `session.token` — the token is the credential.
       const rawSessionId = sessionData?.session?.id;
@@ -465,6 +528,8 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   }
   ctx.userId = userId;
   if (tenantId) ctx.tenantId = tenantId;
+  if (credential) ctx.credential = credential;
+  if (authGate) ctx.authGate = authGate;
   if (!ql || typeof ql.find !== 'function') return ctx;
 
   // The principal is now known — delegate ALL position/permission/RLS

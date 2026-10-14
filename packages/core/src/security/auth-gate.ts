@@ -17,7 +17,8 @@
  * drift on what is blocked.
  */
 
-import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { ExecutionContext, AuthGateScope } from '@objectstack/spec/kernel';
+import { AUTH_GATE_SCOPES, AuthGateCodeSchema } from '@objectstack/spec/kernel';
 
 /**
  * The gate posture, DERIVED from its declaration on `ExecutionContextSchema`
@@ -50,11 +51,77 @@ const DEFAULT_AUTH_GATE_MESSAGE = 'Access is blocked by an authentication policy
 export function normalizeAuthGate(sessionUser: any): AuthGate | null {
   const gate = sessionUser?.authGate;
   if (!gate || typeof gate.code !== 'string') return null;
+  // [#23287, ruling C′ item 1] The code is a member of the CLOSED posture
+  // vocabulary (`AuthGateCodeSchema`) or it is not a declared posture at all —
+  // the same verdict a non-string code gets. Its one producer (plugin-auth's
+  // `resolveUserAuthGates`) is typed against that vocabulary, so this arm is
+  // reached only by a producer that bypassed the declaration.
+  const code = AuthGateCodeSchema.safeParse(gate.code);
+  if (!code.success) return null;
   return {
-    code: gate.code,
+    code: code.data,
     message:
       typeof gate.message === 'string' && gate.message ? gate.message : DEFAULT_AUTH_GATE_MESSAGE,
   };
+}
+
+/**
+ * [ADR-0069 · #23287, ruling C′ item 1] What `gate` HOLDS, read off the one
+ * declaration (`AUTH_GATE_SCOPES`, `@objectstack/spec/kernel`): `account` holds
+ * every credential of the user, `credential` holds password sign-in alone.
+ */
+export function authGateScope(gate: AuthGate): AuthGateScope {
+  return AUTH_GATE_SCOPES[gate.code];
+}
+
+/**
+ * [ADR-0069 · #23287, ruling C′ item 3] The per-user posture computation the
+ * auth service exposes (`IAuthService.resolveUserAuthGates`), as the API-key
+ * admission seam asks it: every posture `userId` holds, most urgent first.
+ * `organizationId` is the organization the credential operates in.
+ */
+export type UserAuthGateSource = (
+  userId: string,
+  options: { organizationId?: string },
+) => Promise<readonly AuthGate[]>;
+
+/**
+ * Bind an auth service's per-user posture computation into the
+ * {@link UserAuthGateSource} a transport hands `resolveAuthzContext`, or
+ * `undefined` when the service implements none (a kernel composed without
+ * `plugin-auth` has no policy to hold anyone with). Structural on purpose:
+ * `@objectstack/core` does not depend on the plugin that provides it.
+ *
+ * The bound source normalizes every entry through {@link normalizeAuthGate},
+ * so a posture outside the closed vocabulary never reaches a door.
+ */
+export function userAuthGateSourceOf(
+  authService: {
+    resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
+  } | null | undefined,
+): UserAuthGateSource | undefined {
+  if (!authService || typeof authService.resolveUserAuthGates !== 'function') return undefined;
+  const service = authService;
+  return async (userId, options) => {
+    const gates = await service.resolveUserAuthGates!(userId, options);
+    if (!Array.isArray(gates)) return [];
+    const out: AuthGate[] = [];
+    for (const raw of gates) {
+      const gate = normalizeAuthGate({ authGate: raw });
+      if (gate) out.push(gate);
+    }
+    return out;
+  };
+}
+
+/**
+ * The first `account`-scope posture in `gates` — the one an API key whose
+ * owner holds `gates` is refused with — or `null` when every posture held is
+ * `credential`-scope (or none is held). Order is the source's: most urgent first.
+ */
+export function accountScopeAuthGate(gates: readonly AuthGate[]): AuthGate | null {
+  for (const gate of gates) if (authGateScope(gate) === 'account') return gate;
+  return null;
 }
 
 // Endpoints a gated user MUST still reach to remediate or bootstrap the

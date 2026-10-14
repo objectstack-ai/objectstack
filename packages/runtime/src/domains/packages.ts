@@ -939,6 +939,44 @@ function readEnabledFilter(raw: unknown): { kind: 'repeated'; count: number } | 
 }
 
 /**
+ * [#23214] The package WRITE doors' single-valued query flags — `?keepData=`
+ * on `DELETE /packages/:id`, `?overwrite=` on `POST /packages` — answered the
+ * way `enabled` and `version` already are: a name supplied more than once is
+ * refused `400` with {@link repeatedQueryParamMessage}, the one sentence this
+ * door uses for the condition.
+ *
+ * Both were read as `query?.<name> === 'true'`, so a repeat — an array, on
+ * every adapter that keeps repeats (`plugin-hono-server`'s `readQuery`, and
+ * `@objectstack/hono`'s catch-all since this card) — compared unequal and was
+ * read as ABSENT. For `keepData` that is the destructive default: the protocol
+ * drops object storage unless `keepData === true`, so a caller who asked twice
+ * to keep the tables had them dropped, answered `200`. For `overwrite` it
+ * turned an overwrite into a `409` whose sentence misnames the cause.
+ *
+ * A ONE-element array is one occurrence and is unwrapped in place, and an
+ * empty one is none (the `status`/`type` rule above). Asked before the
+ * registry or the protocol is touched.
+ *
+ * @returns the refusal to answer, or `null` with `query[name]` left as one value.
+ */
+function refuseRepeatedWriteFlag(
+    deps: DomainHandlerDeps,
+    query: any,
+    name: 'keepData' | 'overwrite',
+): HttpDispatcherResult | null {
+    const raw = query?.[name];
+    if (!Array.isArray(raw)) return null;
+    if (raw.length > 1) {
+        return {
+            handled: true,
+            response: deps.error(repeatedQueryParamMessage(name, raw.length), 400),
+        };
+    }
+    query[name] = raw[0];
+    return null;
+}
+
+/**
  * Whether a registry row counts as enabled, for {@link readEnabledFilter}'s
  * comparison (commit 0862063ba).
  *
@@ -1287,6 +1325,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // surfaced in Studio package-create dogfooding. Reject with 409 Conflict
             // instead. Intentional upgrade / re-install flows opt back in with
             // `overwrite: true` (wrapped body) or `?overwrite=true` (either form).
+            // [#23214] A repeated `?overwrite=` is refused here, ahead of the
+            // 409 and the registry read (`refuseRepeatedWriteFlag`).
+            const repeatedOverwrite = refuseRepeatedWriteFlag(deps, query, 'overwrite');
+            if (repeatedOverwrite) return repeatedOverwrite;
             const overwrite =
                 request?.overwrite === true || query?.overwrite === 'true' || query?.overwrite === true;
             if (!overwrite && registry.getPackage(pkgId)) {
@@ -2171,6 +2213,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Deleting package "${id}"`);
             if (walled) return walled;
+            // [#23214] A repeated `?keepData=` is refused before the registry or
+            // the protocol is touched: read as absent, it dropped the tables
+            // the caller asked to keep (`refuseRepeatedWriteFlag`).
+            const repeatedKeepData = refuseRepeatedWriteFlag(deps, query, 'keepData');
+            if (repeatedKeepData) return repeatedKeepData;
             // [#7560] ADR-0070: refuse BEFORE `uninstallPackage`, which is the
             // call that removed a platform package from the running registry
             // listing (and with it every object the package registers) until

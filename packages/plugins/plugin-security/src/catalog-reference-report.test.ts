@@ -389,6 +389,102 @@ describe('[ADR-0131 D4] a removed declaration is reported; re-adding it clears t
   });
 });
 
+describe('[ADR-0131 D4] a position definition naming a permission set the catalog does not resolve — listed per position', () => {
+  /** A package that declares one permission set, and a package position binding it beside the auditor set. */
+  const SET_PKG = 'com.example.s3.sets';
+  const PKG_SET = { name: 's3_pkg_set', label: 'Package set', objects: {} };
+  const BINDING_POSITION = 's3_bound_lead';
+
+  const installSet = (b: Booted) =>
+    (b.engine as any).registry.registerItem('permission', structuredClone(PKG_SET), 'name', SET_PKG);
+  /** The set leaves the registry the way an uninstall of its package removes it. */
+  const uninstallSet = (b: Booted) => (b.engine as any).registry.unregisterItem('permission', PKG_SET.name);
+  const bindPositions = (b: Booted) => {
+    (b.engine as any).registry.registerItem(
+      'position',
+      { name: BINDING_POSITION, label: 'Bound lead', permissionSets: [PKG_SET.name, AUDITOR.name, PKG_SET.name] },
+      'name',
+      PKG,
+    );
+  };
+
+  it('a fresh deployment reports no position: every built-in, declared and packaged position binds a set the catalog resolves', async () => {
+    const b = await boot();
+    installSet(b);
+    bindPositions(b);
+    // Anti-vacuity: the catalog really serves positions that name sets.
+    const named = (await b.catalog.list('position')).filter((e) => Array.isArray(e.definition.permissionSets)
+      && (e.definition.permissionSets as unknown[]).length > 0).map((e) => e.name);
+    expect(named).toEqual(expect.arrayContaining([FIELD_LEAD.name, BINDING_POSITION]));
+    expect((await b.report()).positions).toEqual([]);
+  });
+
+  it('lists each position once, with only the names that resolve nowhere, its owner, and position order', async () => {
+    const b = await boot();
+    installSet(b);
+    bindPositions(b);
+    uninstallSet(b);
+    b.declared.permission.delete(AUDITOR.name);
+
+    const report = await b.report();
+    expect(report.stopped).toBeUndefined();
+    expect(report.positions).toEqual([
+      { position: BINDING_POSITION, packageId: PKG, permissionSets: [PKG_SET.name, AUDITOR.name] },
+      { position: FIELD_LEAD.name, packageId: null, permissionSets: [AUDITOR.name] },
+    ]);
+    // A definition belongs to no organization: nothing is filed under one.
+    expect(findings(report)).toEqual([]);
+  });
+
+  it('clears by itself once the package is installed again: the next report lists nothing', async () => {
+    const b = await boot();
+    installSet(b);
+    bindPositions(b);
+    uninstallSet(b);
+    expect((await b.report()).positions).toEqual([
+      { position: BINDING_POSITION, packageId: PKG, permissionSets: [PKG_SET.name] },
+    ]);
+    installSet(b);
+    expect((await b.report()).positions).toEqual([]);
+  });
+
+  it('logs one error line naming each position and its unresolved sets, and the clean line only once nothing is left', async () => {
+    const b = await boot();
+    installSet(b);
+    bindPositions(b);
+    uninstallSet(b);
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await reportCatalogReferences(b.engine as any, { catalog: b.catalog, logger });
+    expect(logger.error.mock.calls.map(([, , meta]: any[]) => meta)).toEqual([{
+      count: 1,
+      permissionSets: [PKG_SET.name],
+      positions: { items: [{ position: BINDING_POSITION, packageId: PKG, permissionSets: [PKG_SET.name] }] },
+    }]);
+    expect(logger.info).not.toHaveBeenCalled();
+
+    installSet(b);
+    logger.error.mockClear();
+    await reportCatalogReferences(b.engine as any, { catalog: b.catalog, logger });
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unreadable position list stops the report: no finding, and the stop is said', async () => {
+    const b = await boot();
+    await insertRows(b, 'sys_user_position', [
+      { id: 'up_ghost', user_id: 'usr_a', position: 'ghost_lead', organization_id: ORG },
+    ]);
+    for (const list of [vi.fn().mockRejectedValue(new Error('registry offline')), vi.fn().mockResolvedValue(undefined)]) {
+      const catalog = { resolve: b.catalog.resolve.bind(b.catalog), list };
+      const report = await collectCatalogReferences(b.engine as any, { catalog });
+      expect({ stopped: report.stopped, organizations: report.organizations, positions: report.positions }).toEqual({
+        stopped: 'catalog-unreadable', organizations: [], positions: [],
+      });
+      expect(list).toHaveBeenCalledWith('position');
+    }
+  });
+});
+
 describe('[ADR-0131 D4] a read that did not happen is never "resolves nowhere"', () => {
   it('an unreadable catalog stops the report: no finding, and the stop is said', async () => {
     const b = await boot();
@@ -418,13 +514,14 @@ describe('[ADR-0131 D4] a read that did not happen is never "resolves nowhere"',
       .toEqual({ stopped: 'scan-unreadable', reading: 'sys_user_permission_set', organizations: [] });
   });
 
-  it('a composition without the objects reads nothing and names what it lacks', async () => {
+  it('a composition without the objects scans no table, still reads the positions, and names what it lacks', async () => {
     const engine: CatalogReferenceReportEngine = { getObject: () => undefined, find: vi.fn() };
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const catalog = { resolve: vi.fn(), list: vi.fn() };
+    const catalog = { resolve: vi.fn(), list: vi.fn().mockResolvedValue([]) };
     const report = await reportCatalogReferences(engine, { catalog, logger });
     expect(report.absent).toEqual(['sys_user_position', 'sys_user_permission_set']);
     expect(engine.find).not.toHaveBeenCalled();
+    expect(catalog.list.mock.calls).toEqual([['position']]);
     expect([logger.info, logger.warn, logger.error].map((f) => f.mock.calls.length)).toEqual([0, 0, 0]);
   });
 });
@@ -440,7 +537,8 @@ describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped
     ]);
 
     const handlers = b.hooks.get('kernel:bootstrapped') ?? [];
-    expect(handlers.length).toBeGreaterThanOrEqual(1);
+    // This report alone: the grant-name backfill that ran ahead of it is retired (ADR-0131 D10).
+    expect(handlers).toHaveLength(1);
     for (const handler of handlers.slice(0, -1)) await handler();
     const writes = [
       vi.spyOn(b.engine, 'insert'), vi.spyOn(b.engine, 'update'), vi.spyOn(b.engine, 'delete'),

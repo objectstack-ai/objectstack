@@ -80,7 +80,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_user_position: {
     label: "ユーザーポジション",
     pluralLabel: "ユーザーポジション",
-    description: "ポジション（sys_position.name）をユーザーに割り当てます。プラットフォーム管理（ADR-0057 D4、ADR-0090 D3）。",
+    description: "ポジションを名前でユーザーに割り当てます。プラットフォーム管理（ADR-0057 D4、ADR-0090 D3）。",
     fields: {
       id: {
         label: "割り当て ID",
@@ -96,7 +96,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       position: {
         label: "ポジション",
-        help: "ポジションのマシン名（sys_position.name を参照）。"
+        help: "ポジションのマシン名（セキュリティカタログで解決）。"
       },
       business_unit_id: {
         label: "ビジネスユニット",

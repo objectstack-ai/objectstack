@@ -172,9 +172,9 @@ function relayAuthzStoreOutage(res: IHttpResponse, err: unknown): boolean {
  * inherit an exemption it never declared. The anonymous floor below is asked
  * without the path for the same reason.
  *
- * `code` is declared as a bare string on the posture; its one producer
- * (plugin-auth's `customSession` enrichment) writes only `PASSWORD_EXPIRED` /
- * `MFA_REQUIRED`, both members of the error-code vocabulary.
+ * `code` is a member of the closed posture vocabulary (`AuthGateCodeSchema`,
+ * `@objectstack/spec/kernel`), every member of which is registered in the
+ * error-code vocabulary.
  */
 function refuseHeldSession(res: IHttpResponse, ctx: SettingsContext | undefined): boolean {
   const gate = evaluateAuthGate(ctx, '');

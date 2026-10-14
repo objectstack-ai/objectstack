@@ -267,6 +267,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.app-package-id-key.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.audit-field-governance.test.ts",
       "verb": "delete",
       "pinned": 1

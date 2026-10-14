@@ -277,8 +277,9 @@ const GATE_VOCABULARY_IDENT = 'DURABILITY_CRITICAL_CALLEES';
  *                           (`packages/spec/src/contracts/data-driver.ts`).
  *   - `objectql`         -- the ObjectQL-level write surface the seeders use.
  *   - `seed-wrapper`     -- the `catch { return null; }` helpers this family IS
- *                           (`permission-set-projection.ts` and its per-file
- *                           copies) that the gate does NOT declare. `tryInsert`
+ *                           (the per-file copies of the retired
+ *                           `permission-set-projection.ts` one) that the gate
+ *                           does NOT declare. `tryInsert`
  *                           and `tryUpdate` sat here until the ruling's last step
  *                           handed them over (PR #15458); they are
  *                           `gate-vocabulary` now, because that is what the tree
@@ -331,7 +332,6 @@ const WRITE_SHAPED_CALLEES = new Map([
   ['persistSeedTenancyReceiptRow', 'gate-vocabulary'],
   ['persistLedgerDecisionRow', 'gate-vocabulary'],
   ['persistGrantNameBackfillRecord', 'gate-vocabulary'],
-  ['persistPositionBackfillRecord', 'gate-vocabulary'],
   ['recordLog', 'gate-vocabulary'],
   ['runWideningAlters', 'gate-vocabulary'],
   ['applyConfigPatch', 'gate-vocabulary'],

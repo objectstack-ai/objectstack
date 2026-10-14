@@ -4343,11 +4343,16 @@ describe('AuthManager', () => {
       expect(m.isAuthGateActive()).toBe(true);
     });
 
-    it('returns PASSWORD_EXPIRED for a flagged user with every config feature off', async () => {
+    // [#23287, ruling C′ item 2] The forced change has its OWN code now (scope
+    // `credential`); it used to reuse PASSWORD_EXPIRED.
+    it('returns PASSWORD_RESET_REQUIRED for a flagged user with every config feature off', async () => {
       const m = mgr(makeEngine({ id: 'u1', must_change_password: true }), {});
       m.noteMustChangePasswordIssued(); // as the admin route does
       const gate = await (m as any).computeAuthGate('u1', undefined, false);
-      expect(gate?.code).toBe('PASSWORD_EXPIRED');
+      expect(gate).toEqual({
+        code: 'PASSWORD_RESET_REQUIRED',
+        message: 'You must change your password before continuing.',
+      });
     });
 
     it('does NOT gate an unflagged user even when the cache is hot', async () => {
@@ -4497,6 +4502,61 @@ describe('AuthManager', () => {
       (m as any)._orgMfaCache = { value: false, at: Date.now() };
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
       expect(engine.findOne).not.toHaveBeenCalled();
+    });
+
+    // [#23287 — ruling C′ item 3] ONE per-user posture computation: the session
+    // gate takes its first entry, and the API-key admission seam asks the whole
+    // list for a key's owner and holds the key on an `account`-scope entry.
+    // Keyed by user id, so a caller outside both seams asks the same oracle.
+    // Driven over this block's engine double (sys_user + sys_organization).
+    describe('resolveUserAuthGates — the per-user posture computation (#23287)', () => {
+      const OLD = () => new Date(Date.now() - 400 * 86_400_000).toISOString();
+
+      it('lists every held posture, most urgent first, so a credential-scope entry cannot hide an account one', async () => {
+        const m = mgr(
+          makeEngine(
+            { id: 'u1', must_change_password: true, password_changed_at: OLD(), two_factor_enabled: false, mfa_required_at: OLD() },
+            null,
+          ),
+          { passwordExpiryDays: 90, mfaRequired: true, mfaGracePeriodDays: 7 },
+        );
+        m.noteMustChangePasswordIssued();
+        const gates = await m.resolveUserAuthGates('u1');
+        expect(gates.map((g) => g.code)).toEqual(['PASSWORD_RESET_REQUIRED', 'PASSWORD_EXPIRED', 'MFA_REQUIRED']);
+        // The session shows the first; the list does not change what it shows.
+        expect(await (m as any).computeAuthGate('u1', undefined, false)).toEqual(gates[0]);
+      });
+
+      it('answers [] for a user no policy holds, and reads nothing when no policy is enabled', async () => {
+        const enrolled = makeEngine({ id: 'u1', two_factor_enabled: true }, null);
+        expect(await mgr(enrolled, { mfaRequired: true }).resolveUserAuthGates('u1')).toEqual([]);
+        const idle = makeEngine({ id: 'u1' }, null);
+        const m = mgr(idle, {});
+        (m as any)._orgMfaCache = { value: false, at: Date.now() };
+        (m as any)._mustChangeCache = { value: false, at: Date.now() };
+        expect(await m.resolveUserAuthGates('u1')).toEqual([]);
+        expect(idle.findOne).not.toHaveBeenCalled();
+      });
+
+      it('asks the organization the credential operates in for a per-org MFA requirement', async () => {
+        const engine = makeEngine(
+          { id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() },
+          { id: 'org_key', require_mfa: true },
+        );
+        const m = mgr(engine, { mfaGracePeriodDays: 7 });
+        (m as any)._orgMfaCache = { value: true, at: Date.now() };
+        expect((await m.resolveUserAuthGates('u1', { organizationId: 'org_key' })).map((g) => g.code))
+          .toEqual(['MFA_REQUIRED']);
+        // No organization: the global floor alone, which is off.
+        expect(await m.resolveUserAuthGates('u1')).toEqual([]);
+      });
+
+      it('fails open on a lookup error, as the session gate does', async () => {
+        const engine = makeEngine(null, null);
+        engine.findOne.mockImplementation(async () => { throw new Error('db down'); });
+        const m = mgr(engine, { mfaRequired: true });
+        expect(await m.resolveUserAuthGates('u1')).toEqual([]);
+      });
     });
   });
 

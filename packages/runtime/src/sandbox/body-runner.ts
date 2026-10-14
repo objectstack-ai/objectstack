@@ -1163,6 +1163,13 @@ function buildSandboxContext(
     // else is left ABSENT, so `ctx.referentialFieldClear === true` reads "not
     // a referential cleanup" exactly as the spec prescribes.
     ...(engineCtx?.referentialFieldClear === true ? { referentialFieldClear: true } : {}),
+    // [#23221] Its delete twin, the declared cascade-delete marker — carried the
+    // same way, in its declared shape only (`true`), absent otherwise, so a
+    // body's `ctx.referentialCascadeDelete === true` reads exactly what an
+    // in-process handler reads. A body has no other way to learn it: the engine
+    // keeps no envelope key for this fact at all, so `ctx.api` carries nothing
+    // a body could sniff instead.
+    ...(engineCtx?.referentialCascadeDelete === true ? { referentialCascadeDelete: true } : {}),
     crypto: globalThis.crypto,
   };
 }

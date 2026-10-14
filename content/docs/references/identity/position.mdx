@@ -28,7 +28,7 @@ const result = PositionSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Position name, unique per organization (lowercase snake_case) |
+| **name** | `string` | ✅ | Position name, unique within the security catalog the environment serves (lowercase snake_case) |
 | **label** | `string` | ✅ | Display label (e.g. VP of Sales) |
 | **description** | `string` | optional |  |
 | **permissionSets** | `string[]` | optional | ADR-0131 D3/D4: the permission sets this position distributes, by name (resolved in the environment catalog). |

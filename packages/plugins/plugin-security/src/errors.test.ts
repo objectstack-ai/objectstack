@@ -41,7 +41,6 @@ const FLOOR = [
   'MasterReferenceMissingError',
   'MaskedValueWriteError',
   'ExplainObjectNotFoundError',
-  'PermissionSetNameConflictError',
 ];
 
 /**

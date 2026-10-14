@@ -171,6 +171,7 @@ export interface EndpointResult {
 }
 
 import { generatePlaceholderEmail } from './placeholder-email.js';
+import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './forced-reset-revocation.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
 
@@ -405,6 +406,12 @@ type AdminAuditDecisions =
   | {
       event: 'user.admin_password_set';
       passwordGenerated: boolean;
+      /** [#23287] Whether the administrator asked for the forced reset's revocation. */
+      revokeSessionsAndKeys: boolean;
+      /** What the revocation landed (present only when it was asked for) — counts, never a credential. */
+      revokedSessions?: number;
+      revokedApiKeys?: number;
+      revocationComplete?: boolean;
     };
 
 /**
@@ -680,6 +687,14 @@ export async function runAdminSetUserPassword(
     return badRequest('userId is required');
   }
   const mustChangePassword = body.mustChangePassword !== false; // default true
+  // [#23287 — ruling C′ item 2] The forced reset's explicit revocation switch:
+  // revoke the user's sessions and API keys. ON by default, because the act
+  // records no reason and the ruling sets the default for a suspected
+  // compromise — the case where a surviving key is the hole the reset was meant
+  // to close. An administrator doing a routine reset turns it off explicitly
+  // (`revokeSessionsAndKeys: false`). Only a literal boolean switches it off; a
+  // malformed value keeps the safe default.
+  const revokeSessionsAndKeys = body.revokeSessionsAndKeys !== false;
 
   const resolved = await resolvePassword(deps, body, 'newPassword');
   if ('status' in resolved) return resolved;
@@ -721,6 +736,14 @@ export async function runAdminSetUserPassword(
     ? await stampMustChangePassword(deps, userId, true)
     : await stampMustChangePassword(deps, userId, false);
 
+  // Revoked AFTER the new password is set, so a session the old password
+  // opened cannot outlive the reset, and never before it: a revocation that
+  // ran and then a failed password write would sign the user out with their
+  // old password still the valid one.
+  const revocation: ForcedResetRevocationOutcome | undefined = revokeSessionsAndKeys
+    ? await revokeSessionsAndApiKeys(deps.getDataEngine(), userId, { logger: deps.logger })
+    : undefined;
+
   await writeAdminAudit(deps, {
     action: 'update',
     actor,
@@ -730,6 +753,16 @@ export async function runAdminSetUserPassword(
     metadata: {
       event: 'user.admin_password_set',
       passwordGenerated: resolved.generated,
+      // [#23287] Whether the administrator asked for the revocation, and what
+      // landed — counts only, never a session token or a key.
+      revokeSessionsAndKeys,
+      ...(revocation
+        ? {
+            revokedSessions: revocation.sessions,
+            revokedApiKeys: revocation.apiKeys,
+            revocationComplete: revocation.complete,
+          }
+        : {}),
     },
   });
 
@@ -740,6 +773,10 @@ export async function runAdminSetUserPassword(
       data: {
         userId,
         mustChangePassword: mustChangePassword && stamped,
+        // [#23287] The administrator is TOLD what the switch did: an
+        // incomplete revocation is a fact on the response, never a silent one.
+        revokeSessionsAndKeys,
+        ...(revocation ? { revoked: revocation } : {}),
         ...(resolved.generated ? { temporaryPassword: resolved.password } : {}),
       },
     },

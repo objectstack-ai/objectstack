@@ -18,8 +18,8 @@
  *    headers may carry UTF-8. Such a part is read for its headers only, and a
  *    part nested inside it is not read at all: the seam reads the forward the
  *    user made, not the forwards inside it. A forwarded message quoted inline
- *    in the body is not read (that is the `inline` source, and its parser is
- *    separate work);
+ *    in the body is not read here: that is the `inline` source, read from
+ *    {@link ParsedInboundMessage.text} by `inline-forward.ts`;
  *  - the threading ids (Message-ID, In-Reply-To, References, RFC 5322 §3.6.4),
  *    angle brackets stripped;
  *  - the header values automatic-mail suppression reads, and the top-level
@@ -53,6 +53,7 @@ export interface ParsedInboundMessage {
   fromName: string | null;
   /** The `Date` header as an ISO timestamp, or `null` when absent or unreadable. */
   sentAt: string | null;
+  /** The text/plain body; `null` for a message with an HTML body only (it is not rendered to text). */
   text: string | null;
   html: string | null;
   /** The received message's own participants (the `outer` source). */

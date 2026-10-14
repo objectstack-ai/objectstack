@@ -587,6 +587,13 @@ export class QuickJSScriptRunner implements ScriptRunner {
     if (ctx.referentialFieldClear === true) {
       vm.setProp(ctxObj, 'referentialFieldClear', vm.true);
     }
+    // [#23221] Its delete twin, the declared cascade-delete marker — the same
+    // true-only installation for the same reasons: a body reads
+    // `ctx.referentialCascadeDelete === true`, an absent key means "not a delete
+    // the cascade issued", and a plain boolean needs no freeze/graft ceremony.
+    if (ctx.referentialCascadeDelete === true) {
+      vm.setProp(ctxObj, 'referentialCascadeDelete', vm.true);
+    }
     // [commit f19475c0a] The action face's caller-scope load verdict — same true-only
     // installation, same reason: a body reads `ctx.recordLoadDenied === true`
     // and an absent key means "nothing was refused". A plain boolean, so no
