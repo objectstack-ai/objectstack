@@ -556,8 +556,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 54,
   '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
   '⛔ the queued pull-back: the remedy names no dequeue act a seat has': 4,
-  '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 11,
+  '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 13,
   'the per-row repository scope (ruling B2, 2026-10-13)': 14,
+  '⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -565,7 +566,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // contract-review carrier battery left with the label it read (ruling record
 // 5770886272 on #19061, letter B): the ordinary direction, one battery, one row.
 // Raised 23 → 24 with the queued pull-back battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 25;
+// Raised 25 → 26 with the B′-with-C face battery (ruling record 6159870311): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 26;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4144,6 +4146,70 @@ export async function selfTest() {
     JSON.stringify(tierAbsent.entries[0].record),
   );
 
+  // ── ⭐ B′ with C: the record stands at the tier its FACE maps to ─────────
+  //
+  // Ruling record 6159870311 on #23352. The face is read off the entry's own
+  // committed-tree paths by the IMPORTED `reviewFace`, and the record stands at
+  // that face's NAME exactly. Every entry this leg reads is governed, so the
+  // live leg is pinned at the contract-review tier; `recordVerdict` is pure, so
+  // the declaration face — which no governed entry can be on — is driven on it
+  // directly, with the real recognisers.
+  battery('⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths');
+  const { TIER_DEFAULT_NAME: DEFAULT_TOKEN, TIER_DEFAULT: DEFAULT_VALUE } = await import('./dispatch-gates.mjs');
+  const tierDefaultOnS = await tierRun({ comments: [recordComment({ tierLine: `Served-tier: 75/75 \`${DEFAULT_TOKEN}\`` })] });
+  assert(
+    '⛔ a-TIER_DEFAULT-record-on-a-Tier-S-PR-is-REFUSED-governed-rules-text-maps-to-the-contract-review-tier',
+    tierDefaultOnS.exitCode === EXIT_REFUSED_UNAPPROVED && tierDefaultOnS.entries[0].record.state === 'below-tier' &&
+      tierDefaultOnS.entries[0].record.face === 'rules' && tierDefaultOnS.entries[0].record.tierName === TIER_TOKEN,
+    JSON.stringify(tierDefaultOnS.entries[0].record),
+  );
+  assert(
+    '…and-the-refusal-names-the-face-and-the-NAME-it-maps-to-and-quotes-the-declared-NAME-never-a-value',
+    /rules face maps to/.test(renderGuardVerdict(tierDefaultOnS)) && renderGuardVerdict(tierDefaultOnS).includes(`\`${TIER_TOKEN}\``) &&
+      renderGuardVerdict(tierDefaultOnS).includes(`\`${DEFAULT_TOKEN}\``) && !renderGuardVerdict(tierDefaultOnS).includes(TIER),
+    renderGuardVerdict(tierDefaultOnS),
+  );
+  assert(
+    'the-PASS-carries-its-face-and-tier-so-the-clear-says-which-tier-stood',
+    tierPass.entries[0].record.face === 'rules' && tierPass.entries[0].record.tierName === TIER_TOKEN &&
+      new RegExp(`naming \`${TIER_TOKEN}\`, the tier its rules face maps to`).test(renderGuardVerdict(tierPass)),
+    renderGuardVerdict(tierPass),
+  );
+  const facePair = (paths, line) => ({
+    pr: 70, card: REF_CARD, headSha: REF_HEAD, repo: REPO, paths,
+    prComments: [recordComment({ tierLine: line })], cardComments: [],
+  });
+  const DECL = ['packages/rest/src/routes.ts'];
+  const SCHEMA = ['packages/spec/src/data/field.zod.ts'];
+  const atDefault = `Served-tier: 75/75 \`${DEFAULT_TOKEN}\``;
+  const atContract = `Served-tier: 75/75 \`${TIER_TOKEN}\``;
+  assert(
+    '⭐ the-SAME-reading-STANDS-a-TIER_DEFAULT-record-on-a-declaration-only-pair',
+    recordVerdict({ pair: facePair(DECL, atDefault), recognisers: live }).state === 'stands' &&
+      recordVerdict({ pair: facePair(DECL, atDefault), recognisers: live }).face === 'declaration',
+  );
+  assert(
+    '⛔ and-REFUSES-it-on-a-schema-pair-exact-never-a-floor',
+    recordVerdict({ pair: facePair(SCHEMA, atDefault), recognisers: live }).state === 'below-tier' &&
+      recordVerdict({ pair: facePair(SCHEMA, atContract), recognisers: live }).state === 'stands',
+  );
+  assert(
+    '⛔ exact-in-BOTH-directions-a-contract-review-record-does-not-stand-on-a-declaration-only-pair',
+    recordVerdict({ pair: facePair(DECL, atContract), recognisers: live }).state === 'below-tier',
+  );
+  assert(
+    '⛔ the-default-tiers-VALUE-is-an-identifier-refused-and-never-quoted-back',
+    (() => {
+      const r = recordVerdict({ pair: facePair(DECL, `Served-tier: 75/75 \`${DEFAULT_VALUE}\``), recognisers: live });
+      return r.state === 'below-tier' && r.servedIsIdentifier === true;
+    })(),
+  );
+  assert(
+    '⛔ a-pair-that-carries-NO-path-list-cannot-name-its-face-UNREADABLE-never-the-cheaper-tier',
+    recordVerdict({ pair: { ...facePair(DECL, atDefault), paths: undefined }, recognisers: live }).state === 'unreadable' &&
+      recordVerdict({ pair: { ...facePair(DECL, atDefault), paths: [] }, recognisers: live }).state === 'unreadable',
+  );
+
   // ── ⭐ #18701: the record lives on the PR **or its card**, and both are read ──
   //
   battery('⭐ #18701: the record lives on the PR or its card, and BOTH are read');
@@ -4314,6 +4380,7 @@ export async function selfTest() {
       /deliveredCard/.test(renamed.reason) &&
       /servedTierStands/.test(renamed.reason) &&
       /isModelIdentifierToken/.test(renamed.reason) &&
+      /reviewFace/.test(renamed.reason) &&
       /threads/.test(renamed.reason),
     renamed.reason,
   );
@@ -4454,6 +4521,14 @@ export async function selfTest() {
   assert('⛔ and-a-group-whose-BASE-this-build-could-not-read-is-UNREADABLE-never-clean', (await tierRun({ comments: onOldHead, runGit: qgit(qCarry) })).exitCode === EXIT_REFUSED_UNREADABLE);
   assert('⛔ CONTROL-the-ordinary-old-head-refusal-is-unmoved-where-no-line-claims-the-exception', (await tierRun({ comments: [recordComment({ sha: REF_OLD.slice(0, 12) })], runGit: gitPure, baseRef: QBASE })).exitCode === EXIT_REFUSED_UNAPPROVED);
   assert('⛔ CONTROL-a-record-on-the-CURRENT-head-still-clears-without-reading-any-tree', (await tierRun({ comments: [recordComment()], runGit: () => { throw new Error('no tree may be read when the record is already on this head'); } })).exitCode === EXIT_CLEAR);
+  // ⭐ the PROSE arm at the queue (B′ with C, ruling record 6159870311): a head that moved only on prose
+  // faces outside the review surface — the pull request's OWN changeset and docs — carries the record.
+  const qProse = { moved: '.changeset/brave-owls.md\0content/docs/guides/x.mdx\0', attrs: '', own: { [REF_HEAD]: '.changeset/brave-owls.md\0content/docs/guides/x.mdx\0' } };
+  const qProseCode = { moved: '.changeset/brave-owls.md\0scripts/pm/x.mjs\0', attrs: 'scripts/pm/x.mjs\0merge\0unspecified\0', own: { [REF_HEAD]: '.changeset/brave-owls.md\0scripts/pm/x.mjs\0' } };
+  const proseCarried = await tierRun({ comments: onOldHead, runGit: qgit(qProse), baseRef: QBASE });
+  assert('⭐ a-record-on-an-OLDER-head-CARRIES-when-the-head-moved-ONLY-on-prose-faces-outside-the-review-surface', proseCarried.exitCode === EXIT_CLEAR && proseCarried.entries[0].record.state === 'stands' && proseCarried.entries[0].record.carriedHops === 1, JSON.stringify(proseCarried.entries[0].record));
+  const proseCode = await tierRun({ comments: onOldHead, runGit: qgit(qProseCode), baseRef: QBASE });
+  assert('⛔ a-CODE-path-moved-beside-the-prose-REFUSES-exactly-as-an-uncarried-old-head-does', proseCode.exitCode === EXIT_REFUSED_UNAPPROVED && proseCode.entries[0].record.state === 'absent', JSON.stringify(proseCode.entries[0].record));
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so

@@ -64,6 +64,7 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
@@ -1158,11 +1159,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 10,
+  '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 25,
+  '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+// Raised 8 → 10 with the two B′-with-C batteries (ruling record 6159870311): two batteries, two rows.
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1325,6 +1329,48 @@ export async function selfTest() {
   t('⭐ THE MEASURED SPELLING — a continuation after the stamp control reads `unreadable`', readServedTier(`Served-tier: ${MEASURED_SPELLING}`).state === 'unreadable');
   t('…and does not stand, on whatever record carries it', !servedTierStands(servedOn([SERVED(MEASURED_SPELLING, '2026-09-14T08:17:29Z', 3501)])));
 
+  // -- B′ with C: the review TIER follows the FACE that made it owed ----------
+  //
+  // Ruling record 6159870311 on #23352. ⛔ No specimen spells a tier VALUE: the
+  // names are the constants', and the values are read from `dispatch-gates.mjs`.
+  battery('⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor');
+  const SCHEMA_PATH = ['packages', 'spec', 'src', 'data', 'field.zod.ts'].join('/');
+  const SCHEMA_TEST_PATH = ['packages', 'spec', 'src', 'data', 'field.test.ts'].join('/');
+  const RULES_PATH = '.claude/skills/pm-dispatch/references/contract-review.md';
+  const DECL_PATHS = [['packages', 'rest', 'src', 'routes.ts'].join('/'), ['apps', 'console', 'src', 'i18n.ts'].join('/')];
+  const AT = (name) => readServedTier(`Served-tier: 12/12 \`${name}\``);
+  t('⭐ a published schema maps to CONTRACT_REVIEW_TIER', (() => { const f = reviewFace([SCHEMA_PATH]); return f.face === 'schema' && f.tierName === CONTRACT_REVIEW_TIER_NAME && f.hits.schema.join() === SCHEMA_PATH; })());
+  t('⭐ governed rules text maps to CONTRACT_REVIEW_TIER — the register decides, every governed surface alike', ['AGENTS.md', RULES_PATH, ['skills', 'x', 'SKILL.md'].join('/'), ['.github', 'workflows', 'lint.yml'].join('/'), ['docs', 'adr', '0001-x.md'].join('/')].every((p) => { const f = reviewFace([p]); return f.face === 'rules' && f.tierName === CONTRACT_REVIEW_TIER_NAME && f.hits.rules.join() === p; }));
+  t('⭐ a diff with NEITHER — the review owed by the `Clause-②: yes` line alone — maps to TIER_DEFAULT', (() => { const f = reviewFace(DECL_PATHS); return f.face === 'declaration' && f.tierName === TIER_DEFAULT_NAME && f.hits.schema.length === 0 && f.hits.rules.length === 0; })());
+  t('⭐ a MIXED diff maps to CONTRACT_REVIEW_TIER on ONE hit, and names the path that decided', reviewFace([...DECL_PATHS, SCHEMA_PATH]).tierName === CONTRACT_REVIEW_TIER_NAME && reviewFace([...DECL_PATHS, 'AGENTS.md']).tierName === CONTRACT_REVIEW_TIER_NAME && reviewFace([...DECL_PATHS, 'AGENTS.md']).hits.rules.join() === 'AGENTS.md');
+  t('…a schema hit outranks a governed one in the NAMING only — both faces map to the same tier', reviewFace([SCHEMA_PATH, 'AGENTS.md']).face === 'schema' && reviewFace([SCHEMA_PATH, 'AGENTS.md']).tierName === reviewFace(['AGENTS.md']).tierName);
+  t('⛔ a spec TEST file is not a published schema — the suspect surface\'s own exception, imported, not respelled', reviewFace([SCHEMA_TEST_PATH]).face === 'declaration');
+  t('the faces are the closed set of three, and they map to exactly two NAMES', REVIEW_FACES.map((f) => f.id).join() === 'schema,rules,declaration' && REVIEW_TIER_NAMES.join() === `${CONTRACT_REVIEW_TIER_NAME},${TIER_DEFAULT_NAME}`);
+  t('⭐ a TIER_DEFAULT record STANDS on a declaration-only pull request', servedTierStands(AT(TIER_DEFAULT_NAME), reviewFace(DECL_PATHS).tierName));
+  t('⛔ …and does NOT stand on a schema pull request, nor on a governed one', !servedTierStands(AT(TIER_DEFAULT_NAME), reviewFace([SCHEMA_PATH]).tierName) && !servedTierStands(AT(TIER_DEFAULT_NAME), reviewFace([RULES_PATH]).tierName));
+  t('⭐ a CONTRACT_REVIEW_TIER record stands on the schema and governed faces', servedTierStands(AT(CONTRACT_REVIEW_TIER_NAME), reviewFace([SCHEMA_PATH]).tierName) && servedTierStands(AT(CONTRACT_REVIEW_TIER_NAME), reviewFace([RULES_PATH]).tierName));
+  t('⛔ EXACT, never a floor, in BOTH directions — the contract-review NAME does not stand on the declaration face', !servedTierStands(AT(CONTRACT_REVIEW_TIER_NAME), reviewFace(DECL_PATHS).tierName));
+  t('⛔ a tier name no face maps to stands NOTHING — a caller that lost the face fails closed', !servedTierStands(AT('TIER_FLOOR'), 'TIER_FLOOR') && !servedTierStands(AT(TIER_DEFAULT_NAME), null) && !servedTierStands(AT(TIER_DEFAULT_NAME), 'TIER_DEFAULT_X'));
+  t('the one-argument call is unchanged — the contract-review face, as every governed reading always was', servedTierStands(AT(CONTRACT_REVIEW_TIER_NAME)) && !servedTierStands(AT(TIER_DEFAULT_NAME)));
+  t('⭐ the default tier\'s VALUE is refused as an identifier and stands nowhere, while its NAME is no identifier', isModelIdentifierToken(TIER_DEFAULT) && !isModelIdentifierToken(TIER_DEFAULT_NAME) && !servedTierStands(AT(TIER_DEFAULT), reviewFace(DECL_PATHS).tierName));
+  const DECL_TPL = contractReviewTemplateLines({ face: 'declaration' }).join('\n');
+  const declOn = (body, headSha = RECORD_TEMPLATE_PLACEHOLDERS.headSha) => locateReviewOfRecord(pairOf({ headSha, prComments: [{ id: 3701, created_at: '2026-10-14T03:00:00Z', body }] }));
+  t('⭐ `--face declaration`\'s template carries TIER_DEFAULT, round-trips through the locator and STANDS on that face', (() => { const r = declOn(DECL_TPL); return readServedTier(DECL_TPL).value === TIER_DEFAULT_NAME && r.state === 'found' && servedTierStands(r.served, reviewFace(DECL_PATHS).tierName); })());
+  t('⛔ …and the same printed record does NOT stand on a governed face — the template cannot teach the wrong face', !servedTierStands(declOn(DECL_TPL).served, reviewFace([RULES_PATH]).tierName));
+  t('the schema and rules faces print the contract-review NAME, byte-identical to the bare template\'s record', ['schema', 'rules'].every((id) => contractReviewTemplateLines({ face: id }).join('\n').includes(`Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``)) && contractReviewRecordLines().join('\n') === contractReviewRecordLines({ tierName: CONTRACT_REVIEW_TIER_NAME }).join('\n'));
+  t('⛔ no template spells a tier VALUE — neither the identifier shape nor the default tier\'s word', ['schema', 'rules', 'declaration', undefined].every((id) => { const text = contractReviewTemplateLines(id === undefined ? {} : { face: id }).join('\n'); return !isModelIdentifierToken(text) && !new RegExp(`\\b${TIER_DEFAULT}\\b`).test(text) && !text.includes(CONTRACT_REVIEW_TIER); }));
+  t('⛔ a tier name or a face no table maps is REFUSED, never printed', (() => { try { contractReviewRecordLines({ tierName: 'TIER_FLOOR' }); return false; } catch { /* refused */ } try { contractReviewTemplateLines({ face: 'lane' }); return false; } catch { return true; } })());
+  t('the brief names the face\'s tier and the face\'s record command', (() => { const b = contractReviewBriefLines({ face: 'declaration' }).join('\n'); return b.includes(`You review at \`${TIER_DEFAULT_NAME}\``) && b.includes('--template --face declaration') && !isModelIdentifierToken(b) && !new RegExp(`\\b${TIER_DEFAULT}\\b`).test(b); })());
+  const faceCli = (args) => spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...args], { encoding: 'utf8', timeout: 60_000 });
+  t('⭐ `--template --face declaration` prints exactly that face\'s template and exits 0', (() => { const r = faceCli(['--template', '--face', 'declaration']); return r.status === 0 && r.stdout === `${DECL_TPL}\n`; })());
+  t('⛔ `--face` naming no face is REFUSED with the usage, exit 1', (() => { const r = faceCli(['--template', '--face', 'lane']); return r.status === 1 && says(r.stderr, 'usage:'); })() && faceCli(['--template', '--face']).status === 1);
+  t('`--brief-template --face declaration` prints exactly that face\'s brief', (() => { const r = faceCli(['--brief-template', '--face', 'declaration']); return r.status === 0 && r.stdout === `${contractReviewBriefLines({ face: 'declaration' }).join('\n')}\n`; })());
+  // The rule text and this table name the same two NAMES and the same prose faces: the charter is the
+  // rule and this file its machine copy, so a charter edit dropping one reds here rather than drifting.
+  const CHARTER = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8');
+  t('⭐ the charter names BOTH tier constants by NAME, and the `--face declaration` template', says(CHARTER, `\`${CONTRACT_REVIEW_TIER_NAME}\``) && says(CHARTER, `\`${TIER_DEFAULT_NAME}\``) && says(CHARTER, '--face declaration'));
+  t('…and every prose face this file excludes from the review surface', REVIEW_SURFACE_EXCLUDED_PROSE_FACES.every((f) => says(CHARTER, f.prefix !== undefined ? f.prefix.replace(/\/$/, '') : f.basename.replace(/\.md$/, ''))));
+
   // -- the 2026-09-20 ruling: a PURE REGENERATION keeps the record -----------
   battery('⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees');
   const NEW_HEAD = 'e1ae0257'; // the head a whole-tree regeneration produced, as the board abbreviated it.
@@ -1384,6 +1430,18 @@ export async function selfTest() {
   t('⇒ the DELTA decides, ⛔ never the path name: one path, two specimens, two verdicts', unexplainedPathsBetween(GIT(CARRY_OVER), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).length === 0 && unexplainedPathsBetween(GIT(HAND_RESOLVED), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).join() === 'AGENTS.md');
   t('…and the delta is read ONCE PER HEAD against `merge-base BASE head`, ⛔ never once per path', GIT_SEEN.includes(`merge-base ${BASE} ${HEAD_9AF9}`) && GIT_SEEN.includes(`diff -z --name-only mb-${NEW_HEAD} ${NEW_HEAD}`), GIT_SEEN.slice(-4).join(' | '));
   t('⛔ (iv) a run naming NO base ref cannot tell main\'s carry-over from a hand edit — UNREADABLE, ⛔ never clean', (() => { const r = regenCarry(withGit(GIT(CARRY_OVER), { baseRef: null })); return r.state === 'unreadable' && r.gaps.some((g) => g.includes('base ref')); })());
+
+  // ⭐ the PROSE arm (B′ with C, ruling record 6159870311): a head that moves only on faces outside the
+  // review surface keeps the record — decided on the same committed trees, by the same line.
+  battery('⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration');
+  const PROSE_MOVE = { moved: '.changeset/brave-owls.md\0content/docs/guides/x.mdx\0packages/core/CHANGELOG.md\0', attrs: '', own: { [NEW_HEAD]: '.changeset/brave-owls.md\0content/docs/guides/x.mdx\0' } };
+  const PROSE_AND_CODE = { moved: '.changeset/brave-owls.md\0packages/core/src/kernel.ts\0', attrs: 'packages/core/src/kernel.ts\0merge\0unspecified\0', own: { [NEW_HEAD]: '.changeset/brave-owls.md\0packages/core/src/kernel.ts\0' } };
+  t('⭐ a head that moved ONLY prose faces — the pull request\'s OWN changeset and docs edit — CARRIES the record', regenCarry(withGit(GIT(PROSE_MOVE))).state === 'carried' && locateReviewOfRecord(withGit(GIT(PROSE_MOVE))).state === 'found');
+  t('…and nothing about it was read off the attribute: a prose path is explained by its face before `check-attr` runs', unexplainedPathsBetween(GIT(PROSE_MOVE), { from: HEAD_9AF9, to: NEW_HEAD, base: BASE }).length === 0);
+  t('⛔ a CODE path moved beside the prose — refused, and the reason names the code path, never the changeset', (() => { const r = regenCarry(withGit(GIT(PROSE_AND_CODE))); return r.state === 'refused' && says(r.reason, 'packages/core/src/kernel.ts') && !says(r.reason, '.changeset/') && says(r.reason, 'prose-only'); })() && locateReviewOfRecord(withGit(GIT(PROSE_AND_CODE))).state === 'absent');
+  t('the prose faces are the four the charter names: `.changeset/**`, any CHANGELOG.md, `content/docs/**`, `apps/docs/**`', ['.changeset/x.md', 'CHANGELOG.md', 'packages/spec/CHANGELOG.md', 'content/docs/a/b.mdx', 'apps/docs/app/page.tsx'].every((p) => isOutsideReviewSurface(p)));
+  t('⛔ and nothing beside them: near-miss names, schema paths and governed rules text stay ON the review surface', ['.changesets/x.md', 'CHANGELOG.md.bak', 'docs/CHANGELOG.txt', 'content/docs-old/x.mdx', 'apps/docsite/x.ts', 'packages/spec/src/data/field.zod.ts', '.claude/skills/pm-dispatch/references/contract-review.md', 'AGENTS.md'].every((p) => !isOutsideReviewSurface(p)));
+  t('⛔ a prose-only move with NO `Regen-provenance:` line carries nothing — the line still points the reader at the trees', regenCarry(moved([RECORD_ON_9AF9], GIT(PROSE_MOVE))).state === 'none' && locateReviewOfRecord(moved([RECORD_ON_9AF9], GIT(PROSE_MOVE))).state === 'absent');
 
   // -- the `Local-runs:` reading ---------------------------------------------
   //
@@ -1609,8 +1667,10 @@ export async function selfTest() {
     `✓ record-recognisers self-test: ${cases.length} cases pass (the locator on either thread with its `
       + 'recognition dialects, the unsigned and newest-governs readings and the two gaps; the head sha in a span '
       + 'of its own; the `Served-tier:` reading — at tier, below, missing, unreadable, the identifier refused by '
-      + 'value and by shape, the stamp control and the measured continuation spelling; the pure-regeneration '
-      + 'carry decided on committed trees in every direction; the copyable template driven back through the '
+      + 'value and by shape, the stamp control and the measured continuation spelling; the review tier read off '
+      + 'the face — schema, governed rules text, the declaration alone — exact in both directions, and the charter '
+      + 'naming both tiers; the pure-regeneration carry and the prose-only carry decided on committed trees in '
+      + 'every direction; the copyable template, per face, driven back through the '
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; and the ONE '
       + 'thread set, driven through the queue guard itself).',
