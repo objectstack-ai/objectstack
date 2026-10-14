@@ -3,23 +3,27 @@
 import type { SemanticMigration } from '../../types.js';
 
 // A permission set's body `packageId` that disagrees with the package the set
-// is saved into is refused at the metadata save, restore and publish doors. Stored rows
-// are deliberately not rewritten: every reader already takes the owner from
-// the row's binding, so a stored disagreement reads as its binding and is
-// refused on its next write.
+// is shipped from or saved into is refused at every door that files it under a
+// package: the stack schema (defineStack, os validate, os build, an artifact
+// load), the package registration (ObjectQL.registerApp), and the metadata save,
+// restore and publish doors. Stored rows are deliberately not rewritten: every
+// reader already takes the owner from the row's binding, so a stored
+// disagreement reads as its binding and is refused on its next write.
 export const entry: SemanticMigration = {
   id: 'permission-set-package-id-binding-mismatch-refused',
   // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
   // code span already, and a nested backtick would close it.
   surface:
-    'security.permission.packageId (PermissionSetSchema, ADR-0086 D3) saved or published through the '
-    + 'metadata API with a value that disagrees with the package the set is saved into: another '
-    + 'package\'s id, or any value (the empty string included) on a set saved into no package',
+    'security.permission.packageId (PermissionSetSchema, ADR-0086 D3) with a value that disagrees with '
+    + 'the package the set is shipped from or saved into: another package\'s id, or any value (the empty '
+    + 'string included) on a set that no package ships or that is saved into no package. Judged in '
+    + 'package source (the stack schema: defineStack, os validate, os build, an artifact load), at '
+    + 'package registration (ObjectQL.registerApp), and at the metadata API\'s save, restore and publish',
   replacement:
-    'no `packageId` in the body: the package the set is saved into is its owner, and every reader of a '
-    + 'set\'s owner reads that binding. To make the declared package the owner, save the set into it '
-    + '(`?package=<id>` on the REST door, `packageId` in process) instead. A value equal to the package '
-    + 'the set is saved into is accepted as before.',
+    'no `packageId` in the body: the package that ships the set, or that it is saved into, is its '
+    + 'owner, and every reader of a set\'s owner reads that binding. To make the declared package the '
+    + 'owner, ship the set from that package\'s stack, or save the set into it (`?package=<id>` on the '
+    + 'REST door, `packageId` in process) instead. A value equal to that package is accepted as before.',
   reason:
     'The seat\'s ruling on the card (refuse, not retire; ADR-0086 D3 declares the key as "the owning '
     + 'package for a package-shipped set (absent ⇒ env-authored)", and retiring it would amend an '
@@ -31,7 +35,12 @@ export const entry: SemanticMigration = {
     + 'promotion behind the per-item publish and the package publish now refuse it, '
     + '400 VALIDATION_ERROR with issues[] at packageId, naming both values and the two remedies; a '
     + 'package publish that meets one aborts the whole batch, as it does on a draft whose name '
-    + 'disagrees with its row, and a commit revert reports it in failed[]. The binding judged is the one the write resolves: a draft save that '
+    + 'disagrees with its row, and a commit revert reports it in failed[]. Package source and package '
+    + 'registration refuse it too, where a set used to be registered under the package that ships it '
+    + 'whatever its body said: the stack schema raises an issue at permissions[i].packageId (each '
+    + 'packages[] body\'s sets judged against that body\'s id), so defineStack throws STACK_SCHEMA_INVALID '
+    + 'and os validate and os build fail, and ObjectQL.registerApp throws 400 VALIDATION_ERROR before the '
+    + 'set is filed. The binding judged is the one the write resolves: a draft save that '
     + 'names no package lands in the package of the item\'s active row and is judged against it. '
     + 'Package duplication copies a set that declares its source package as declaring the target. '
     + 'The audience-binding suggestion reader stops reading the body key as a fallback owner for a set '
@@ -57,9 +66,11 @@ export const entry: SemanticMigration = {
     + 'For a set bound to no package whose body named one, check the audience-binding suggestions in '
     + 'Setup: a suggestion that set produced under the named package is no longer offered, and an '
     + 'accepted one is withheld from everyone with a warn line naming the set; bind the set to a '
-    + 'position directly, or save it into the package it named. Package source (defineStack '
-    + 'permissions) is not judged by this entry: an installed package\'s sets are owned by the '
-    + 'package that ships them whatever the body says. The repo and example apps carried zero '
-    + 'permission sets with a body packageId at the time of the change, so no fixture had to be '
-    + 'rewritten.',
+    + 'position directly, or save it into the package it named. Package source is judged too: search '
+    + 'every stack\'s permissions, and each packages[] body\'s, for a body packageId that is not the '
+    + 'id of the package that ships it (the stack\'s manifest.id, or the body\'s id; any value on a '
+    + 'stack with no manifest), and drop it; os validate names each one at its packageId. A package '
+    + 'artifact built before the change that carries one is refused when it is loaded or registered: '
+    + 'rebuild it without the key. The repo and example apps carried zero permission sets with a body '
+    + 'packageId at the time of the change, so no fixture had to be rewritten.',
 };
