@@ -165,6 +165,10 @@ function servicesPlugin(): Plugin {
                 },
             });
             ctx.registerService('objectql', {
+                // [#23287] A registry, so the dispatcher's identity resolution
+                // takes THIS engine (`getObjectQLService` keys on it) and the
+                // shared key-admission seam can look the key up.
+                registry: { getObject: () => null, getRegisteredTypes: () => [] },
                 async find(object: string, options: any) {
                     if (object === 'sys_api_key') {
                         return options?.where?.key === API_KEY_HASH
@@ -315,9 +319,13 @@ describe('ADR-0069 at the declared-endpoint fallback (real boot, real socket)', 
         expect(observed.taskReads).toBe(0);
     });
 
+    // On the public endpoint: this fallback's `authRequired` floor keys on the
+    // SESSION principal (`resolveSessionPrincipalId`), so a key alone meets the
+    // default endpoint's 401 whatever its owner's standing. The public endpoint
+    // runs as the key's principal, which is where the posture would bite.
     it('API KEY (credential scope): a key whose owner holds only PASSWORD_EXPIRED is served', async () => {
         observed.keyOwnerPostures = [PASSWORD_EXPIRED];
-        const res = await request(READ, undefined, { 'x-api-key': API_KEY });
+        const res = await request(OPEN, undefined, { 'x-api-key': API_KEY });
         expect(res.status, await res.text()).toBe(200);
         expect(observed.taskReads).toBe(1);
     });
