@@ -52,7 +52,6 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
-import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '@objectstack/runtime';
 import { createHonoApp } from '@objectstack/hono';
 
@@ -64,11 +63,25 @@ const AUTHOR = { userId: 'u_author', isSystem: false, systemPermissions: ['manag
  * A real `LiteKernel` carrying what these doors consult — the package registry
  * (`objectql`), a recording `protocol`, and `security` for the `/meta` item
  * read's gate — and the REAL `createHonoApp` over it.
+ *
+ * The registry is a three-method double over one installed package
+ * (`getAllPackages`, `getPackage`, `uninstallPackage` — every call these rows'
+ * `/packages` branches make, `isWritablePackage` included): the rows assert
+ * what the DOMAIN answers through the adapter, not what a registry does, and
+ * the domain's own pins over a real `SchemaRegistry` live in
+ * `packages/runtime/src/domains/packages-write-flag-arity.test.ts`.
  */
 async function boot() {
-    const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
-    (registry as any).logLevel = 'silent';
-    registry.installPackage({ id: PKG, name: PKG, namespace: 'app', version: '1.0.0', type: 'app' } as any);
+    const installed = new Map<string, any>([[PKG, {
+        manifest: { id: PKG, name: PKG, namespace: 'app', version: '1.0.0', type: 'app' },
+        status: 'installed',
+        enabled: true,
+    }]]);
+    const registry = {
+        getAllPackages: () => [...installed.values()],
+        getPackage: (id: string) => installed.get(id),
+        uninstallPackage: (id: string) => installed.delete(id),
+    };
     const protocol = {
         getMetaItem: vi.fn(async ({ type, name }: any) => ({ type, name, item: { name, label: 'CRM' } })),
         deletePackage: vi.fn(async (_r: any) => ({ success: true })),
