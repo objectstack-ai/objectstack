@@ -26327,6 +26327,11 @@ export class ObjectStackProtocolImplementation implements
      * A copied permission set's field rules follow too: in `fields`, keyed
      * `<object>.<field>`, a key's object part takes the renamed object's name
      * and its field part is left as stored.
+     *
+     * A rename at a reference site that meets a name the item already holds
+     * there (a permission set's or a translation's `objects` key, a hook's
+     * `object` entry) is never merged: the item is refused in `failed[]`,
+     * naming both, before anything is written for it.
      */
     async duplicatePackage(request: {
         sourcePackageId: string;
@@ -26550,26 +26555,75 @@ export class ObjectStackProtocolImplementation implements
         // KEY (`permission.objects` is keyed by object name) or a `.name`. The
         // record key holds for prefixed names too: a copied permission set
         // otherwise kept `objects.<source object>`, a grant on the SOURCE.
+        //
+        // ⛔ REFUSED, NEVER MERGED: at a reference site, a renamed name can
+        // meet a name the item already holds there — the source also names
+        // the object the copy is about to be called (`dupdst_customer`, an
+        // object outside the package or not yet created) beside its own
+        // (`dupsrc_customer`). Two record KEYS that land on one key keep only
+        // the last entry: a permission set's `objects` dropped a grant (and
+        // the copied object could gain edit and delete its source never gave
+        // it), a translation's `objects` dropped a label. Two array ELEMENTS
+        // that land on one name bind it twice: a hook's handler ran twice per
+        // event on the copied object. So every such meeting is recorded in
+        // `collisions` — the path, the name that moved, the name it met — and
+        // the call site refuses the item in `failed[]` before anything is
+        // written for it. `renameMap` is one-to-one, so a meeting is always a
+        // renamed name and a name this copy does not rename; an element the
+        // source itself repeats is copied as stored.
         const objectReferenceProperties = new Set(
             (REFERENCE_SITES.byTarget.get('object') ?? []).map((site) => site.property),
         );
-        const deepRewrite = (v: any, atReference = false): any => {
+        type ReferenceCollision = { at: string; shape: 'key' | 'entry'; moved: string; met: string };
+        const deepRewrite = (v: any, collisions: ReferenceCollision[], atReference = false, at = ''): any => {
             if (typeof v === 'string') {
                 const whole = atReference ? renameMap.get(v) : undefined;
                 if (whole !== undefined) return whole;
                 return re ? v.replace(re, (m) => renameMap.get(m) ?? m) : v;
             }
-            if (Array.isArray(v)) return v.map((element) => deepRewrite(element, atReference));
+            if (Array.isArray(v)) {
+                const out = v.map((element, i) => deepRewrite(element, collisions, atReference, `${at}[${i}]`));
+                if (atReference) {
+                    const firstAt = new Map<string, number>();
+                    out.forEach((element, i) => {
+                        if (typeof element !== 'string') return;
+                        const j = firstAt.get(element);
+                        if (j === undefined) {
+                            firstAt.set(element, i);
+                        } else if (v[j] !== v[i]) {
+                            collisions.push({ at, shape: 'entry', moved: v[i] !== element ? v[i] : v[j], met: element });
+                        }
+                    });
+                }
+                return out;
+            }
             if (v && typeof v === 'object') {
                 const o: any = {};
+                const from = new Map<string, string>();
                 for (const [k, val] of Object.entries(v)) {
                     const key = atReference ? (renameMap.get(k) ?? k) : k;
-                    o[key] = deepRewrite(val, objectReferenceProperties.has(k) || (atReference && k === 'name'));
+                    const other = from.get(key);
+                    if (other !== undefined) {
+                        collisions.push({ at, shape: 'key', moved: key === k ? other : k, met: key });
+                    }
+                    from.set(key, k);
+                    o[key] = deepRewrite(
+                        val, collisions,
+                        objectReferenceProperties.has(k) || (atReference && k === 'name'),
+                        at ? `${at}.${k}` : k,
+                    );
                 }
                 return o;
             }
             return v;
         };
+        const describeCollision = (c: ReferenceCollision): string =>
+            `its \`${c.at}\` ${c.shape} '${c.moved}' follows the copied object to '${c.met}', `
+            + `${c.shape === 'key' ? 'a key' : 'an entry'} it already holds there, which this copy does not rename. `
+            + (c.shape === 'key'
+                ? 'A record keeps one entry per key, so the copy would drop one of the two. '
+                : `The copy would name '${c.met}' twice. `)
+            + `Remove '${c.moved}' or '${c.met}' on the source, then duplicate again.`;
         // ⭐ A COPIED PERMISSION SET'S FIELD RULES FOLLOW THE RENAMED OBJECTS.
         // `PermissionSetSchema.fields` is a record keyed `<entity_name>.<field_name>`
         // (`packages/spec/src/security/permission.zod.ts`), and the security
@@ -26738,7 +26792,21 @@ export class ObjectStackProtocolImplementation implements
                     continue;
                 }
             }
-            const rewritten = deepRewrite(item);
+            const collisions: ReferenceCollision[] = [];
+            const rewritten = deepRewrite(item, collisions);
+            if (collisions.length > 0) {
+                const noun = singular === 'permission'
+                    ? 'Permission set'
+                    : `${singular.charAt(0).toUpperCase()}${singular.slice(1)}`;
+                const more = collisions.length - 1;
+                failed.push({
+                    type: row.type,
+                    name: row.name,
+                    error: `${noun} '${row.name}' is not copied: ${describeCollision(collisions[0]!)}`
+                        + (more > 0 ? ` It has ${more} more such collision${more === 1 ? '' : 's'}.` : ''),
+                });
+                continue;
+            }
             if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) {
                 rewritten.name = newName;
                 // [ADR-0086 D3] A permission set that declares its SOURCE
