@@ -59,6 +59,33 @@ export interface AuthResult {
     error?: string;
 }
 
+/**
+ * [#23367, ruling A] The API-key lifecycle policy, as the auth service holds
+ * it ({@link IAuthService.resolveApiKeyLifecyclePolicy}). Every number is in
+ * whole days and already defaulted; the defaults are the ruling's (90, 365,
+ * 90).
+ */
+export interface ApiKeyLifecyclePolicy {
+    /** Days a key lives when its signing names no `expires_at`. */
+    defaultExpiryDays: number;
+    /** The longest life a signing may ask for, in days from the signing; a longer `expires_at` is refused. */
+    maxExpiryDays: number;
+    /**
+     * Days without a recorded use (`sys_api_key.last_used_at`) after which a
+     * key is refused as inactive. `0` turns the inactivity expiry off.
+     */
+    inactivityDays: number;
+    /**
+     * When this deployment started enforcing the policy (ISO 8601), recorded
+     * once and kept in the `auth` settings. A key with no recorded use counts
+     * its inactivity from here (or from its own signing, when later), and a
+     * key signed with no expiry expires a year after it. Absent when it could
+     * not be recorded (no settings service): such keys are then judged on
+     * their own row alone.
+     */
+    startedAt?: string;
+}
+
 export interface IAuthService {
     /**
      * Handle an incoming HTTP authentication request
@@ -182,6 +209,22 @@ export interface IAuthService {
         userId: string,
         options?: { organizationId?: string },
     ): Promise<readonly NonNullable<ExecutionContext['authGate']>[]>;
+
+    /**
+     * [#23367, ruling A] The API-key lifecycle policy in force, read from the
+     * auth configuration (the `auth` settings keys `api_key_*`, bound into the
+     * service). Two readers, one source: the signing door (`POST /keys`,
+     * `@objectstack/runtime`) applies the default expiry and refuses a longer
+     * one than the ceiling, and the key-admission seam
+     * (`resolveApiKeyAdmission`, `@objectstack/core`) judges inactivity and
+     * the grace of keys signed with no expiry.
+     *
+     * Synchronous and cheap: the answer is the configuration already held in
+     * memory, so a transport may ask it on every request that carries a key.
+     *
+     * @returns The policy, every number already defaulted
+     */
+    resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy;
 
     /**
      * Verify an OAuth 2.1 access token issued by this deployment's embedded
