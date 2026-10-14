@@ -54,6 +54,14 @@ import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
  * unified to the single canonical `http` node (see
  * `services/service-automation/src/builtin/http-nodes.ts`). A pure enum
  * re-spelling — losslessly convertible.
+ *
+ * **Stays on the load path at 18 — a recorded verdict (#23487).** `flow.node.type`
+ * is an open namespace (ADR-0018), so no door refuses `http_request` /
+ * `http_call` / `webhook`: retired, this entry would leave an authored node
+ * silently carrying a type no builtin executor owns, where today it converts
+ * with a notice. It can retire once the authoring doors refuse those three
+ * reserved names with the rename to `http`, which is a decision about
+ * reserving retired official names inside an open namespace.
  */
 const flowNodeHttpRename: MetadataConversion = {
   id: 'flow-node-http-callout-rename',
@@ -123,6 +131,13 @@ const flowNodeHttpRename: MetadataConversion = {
  * `'jsx'` is a documented deprecated alias of the canonical `'html'` page kind
  * (ADR-0080; see `spec/src/ui/page.zod.ts`). The `source` semantics are
  * identical, so the rename is lossless.
+ *
+ * **Stays on the load path at 18 — a recorded verdict (#23487).** `'jsx'` is
+ * still a declared member of `PageSchema.kind` and of `COMPILED_PAGE_KINDS`,
+ * which the save-time compile reads, so retired, this entry would leave the
+ * value silently accepted at every door rather than refused. It can retire
+ * once the value itself is retired from the enum (an `enumWithRetiredValues`
+ * prescription naming `html`), together with the paths that still branch on it.
  */
 const pageKindJsxToHtml: MetadataConversion = {
   id: 'page-kind-jsx-to-html',
@@ -157,10 +172,23 @@ const pageKindJsxToHtml: MetadataConversion = {
  * dialect tolerance is promoted here into one declared, expiring conversion and
  * the executor fallback is deleted: the load path now hands the executor the
  * canonical `filter` key, so the executor reads `cfg.filter` directly.
+ *
+ * **Retired from the load path at 18** — its window (protocol 11) ran long
+ * ago, and the entry stayed live only because nothing marked it (#23487). The
+ * authoring funnel no longer rewrites `filters`, so an author meets the CRUD
+ * node's strict config contract, whose refusal names `filter` and this release
+ * (`CRUD_ALIAS_GUIDANCE`), at every door that judges a flow: `os validate` /
+ * `os build` / `os lint`. Stored flows keep healing: the automation engine's
+ * flow rehydration and stored-row rehydration (`applyConversionsToStoredItem`)
+ * replay the full chain, this entry included, and so does the
+ * artifact-ingestion door inside its window. `os migrate meta` does not reach
+ * it: protocol 11 is below `MIGRATION_SUPPORT_FLOOR`.
  */
 const flowNodeFilterAlias: MetadataConversion = {
   id: 'flow-node-crud-filter-alias',
   toMajor: 11,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.config.filter',
   summary: "CRUD flow-node config key 'filters' → 'filter'",
   apply(stack, emit) {
@@ -468,6 +496,13 @@ function renameVisibilityAlias(
  * key (the zod schemas also normalize it at parse — this entry makes the
  * acceptance *declared, loud, and expiring* per ADR-0087 D2, and will
  * graduate into the step-16 chain when the alias is removed).
+ *
+ * **Stays on the load path at 18 — a recorded verdict (#23487).** `visibleOn` is
+ * still a declared `[DEPRECATED]` key on the form field and section schemas
+ * (`view.zod.ts`), which fold it into `visibleWhen` at parse, so retiring this
+ * entry alone changes nothing an author can observe: the old spelling would
+ * still be accepted without a word. It retires with the alias itself, once
+ * those schemas tombstone `visibleOn` (`retiredKey`, naming `visibleWhen`).
  */
 const viewVisibleOnToVisibleWhen: MetadataConversion = {
   id: 'view-visibleOn-to-visibleWhen',
@@ -568,6 +603,12 @@ const viewVisibleOnToVisibleWhen: MetadataConversion = {
  * (#6776, #6775). **Live window**, same terms as
  * {@link viewVisibleOnToVisibleWhen}. (An AI agent's `visibility` property is
  * a different, unrelated surface and is not touched.)
+ *
+ * **Stays on the load path at 18 — a recorded verdict (#23487).** `visibility` is
+ * still a declared `[DEPRECATED]` key on `PageComponentSchema` (`page.zod.ts`),
+ * folded into `visibleWhen` at parse, so retiring this entry alone would leave
+ * the old spelling silently accepted. It retires with the alias itself, once
+ * that schema tombstones `visibility` (`retiredKey`, naming `visibleWhen`).
  */
 const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
   id: 'page-component-visibility-to-visibleWhen',
@@ -863,20 +904,30 @@ const agentToolsToSkills: MetadataConversion = {
  * old and new shapes are already behaviourally identical, so the loader can
  * convert with zero consumer action.
  *
- * **Live window** — deliberately unlike its three step-17 siblings, which are
- * `retiredFromLoadPath` because each was an already-deprecated key whose schema
- * now tombstones it with a fix-it error. `full` carried no prior deprecation and
- * a removed enum VALUE yields only a generic zod message, so it gets the
- * ADR-0087 D2 default instead: the protocol-17 loader accepts it for one major
- * (this entry runs at `normalizeStackInput`, *before* the enum rejects it) and
- * retires at 18. Accepting it is zero-risk precisely because the rewrite is
- * behaviour-preserving. The runtime counterpart for already-persisted rows lives
- * in `plugin-sharing` (grant-time normalisation + a boot backfill over
- * `sys_sharing_rule` / `sys_record_share`).
+ * It shipped as a **live window**, deliberately unlike its three step-17
+ * siblings, which were `retiredFromLoadPath` from the start because each was an
+ * already-deprecated key whose schema tombstones it with a fix-it error. `full`
+ * carried no prior deprecation and a removed enum VALUE yields only a generic
+ * zod message, so it got the ADR-0087 D2 default instead: the protocol-17
+ * loader accepted it for one major (this entry ran at `normalizeStackInput`,
+ * *before* the enum rejects it). The runtime counterpart for already-persisted
+ * rows lives in `plugin-sharing` (grant-time normalisation + a boot backfill
+ * over `sys_sharing_rule` / `sys_record_share`).
+ *
+ * **Retired from the load path at 18** — that window has run (#23487). The
+ * generic message is gone with it: `SharingLevel` is an
+ * `enumWithRetiredValues` whose `full` prescription names `edit` and this
+ * release, so that refusal is what an author meets at every door that judges
+ * a sharing rule (`os validate` / `os build` / `os lint`). Stored rows keep
+ * healing: stored-row rehydration (`applyConversionsToStoredItem`) replays the
+ * full chain, this entry included, and so do the artifact-ingestion door
+ * (inside its window) and `os migrate meta --from 16`.
  */
 const sharingRuleAccessLevelFullToEdit: MetadataConversion = {
   id: 'sharing-rule-access-level-full-to-edit',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'sharingRule.accessLevel',
   summary: "sharing-rule accessLevel 'full' → 'edit' (`full` never granted more than `edit`; a sharing rule grants read or edit, while delete and transfer come from object permissions and ownership)",
   apply(stack, emit) {
@@ -944,12 +995,23 @@ function renameFlowConfigAliases(
  * {@link flowNodeFilterAlias} pioneered: the alias is rewritten to the
  * canonical key at load — including the `AutomationEngine.registerFlow`
  * rehydration seam — so the CRUD executors read `cfg.objectName` directly and
- * the shim is deleted. **Live window**: stored flows authored with `object`
- * keep loading through this major; retires at 18.
+ * the shim is deleted.
+ *
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23487). The authoring funnel no longer rewrites the old
+ * spelling, so an author meets the CRUD node's strict config contract (`CRUD_ALIAS_GUIDANCE`), whose refusal names the rename and
+ * this release, at every door that judges a flow: `os validate` /
+ * `os build` / `os lint`. Stored flows keep healing: the automation
+ * engine's flow rehydration and stored-row rehydration
+ * (`applyConversionsToStoredItem`) replay the full chain, this entry
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  */
 const flowNodeCrudObjectAlias: MetadataConversion = {
   id: 'flow-node-crud-object-alias',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.config.objectName',
   summary: "CRUD flow-node config key 'object' → 'objectName' (the last alias in the executors' `readAliasedConfig` shim graduates into this layer, and the shim is deleted)",
   apply(stack, emit) {
@@ -1067,11 +1129,22 @@ function liftNotifySourceShape(stack: Dict, emit: Emit): Dict {
  * platform means "HTTP endpoint to call" (`http` node, webhooks), a different
  * concept from this in-app click-through target. The executor precedence
  * already put `actionUrl` first, so the choice is behaviour-preserving.
- * **Live window**; retires at 18.
+ *
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23487). The authoring funnel no longer rewrites the old
+ * spelling, so an author meets the `notify` contract (`NOTIFY_KEY_GUIDANCE`), whose refusal names the rename and
+ * this release, at every door that judges a flow: `os validate` /
+ * `os build` / `os lint`. Stored flows keep healing: the automation
+ * engine's flow rehydration and stored-row rehydration
+ * (`applyConversionsToStoredItem`) replay the full chain, this entry
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  */
 const flowNodeNotifyConfigAliases: MetadataConversion = {
   id: 'flow-node-notify-config-aliases',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.notify.config',
   summary:
     "notify flow-node config keys 'to' → 'recipients', 'subject' → 'title', 'body' → 'message', 'url' → 'actionUrl' (executor `??` fallbacks graduated into this layer; `actionUrl` is canonical because the notification chain downstream already uses it), " +
@@ -1278,7 +1351,16 @@ function liftWaitEventConfig(stack: Dict, emit: Emit): Dict {
 /**
  * Wait flow-node loose `config` keys → the declared `waitEventConfig` sibling
  * (protocol 17, #4045). See {@link liftWaitEventConfig} for the precedence rules
- * and why `eventType` is defaulted. **Live window**; retires at 18.
+ * and why `eventType` is defaulted.
+ *
+ * **Stays on the load path at 18 — a recorded verdict (#23487).** `wait` has no
+ * `config` contract (its contract is the sibling block), so retired, a loose
+ * key beside a declared `waitEventConfig` would be silently ignored, and a node
+ * with only loose keys would meet the missing-block refusal, which does not
+ * name the move. Refusing the loose keys under `config` would also refuse
+ * stored flows whose loose key the block shadows, because the rehydration seam
+ * parses the same schema and this entry leaves a shadowed key in place; it can
+ * retire once that shadowed shape has a ruling.
  */
 const flowNodeWaitEventConfigLift: MetadataConversion = {
   id: 'flow-node-wait-event-config-lift',
@@ -1355,11 +1437,23 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
  * executor for the #4045 reconciliation.
  *
  * A pure key rename with unchanged values, so the pair mechanism expresses it
- * directly. **Live window**; retires at 18.
+ * directly.
+ *
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23487). The authoring funnel no longer rewrites the old
+ * spelling, so an author meets the `map` contract (`MapConfigSchema`), whose refusal names the rename and
+ * this release, at every door that judges a flow: `os validate` /
+ * `os build` / `os lint`. Stored flows keep healing: the automation
+ * engine's flow rehydration and stored-row rehydration
+ * (`applyConversionsToStoredItem`) replay the full chain, this entry
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  */
 const flowNodeMapFlowAlias: MetadataConversion = {
   id: 'flow-node-map-flow-alias',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.map.config.flowName',
   summary: "map flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback; it graduates into this layer)",
   apply(stack, emit) {
@@ -1412,11 +1506,23 @@ const flowNodeMapFlowAlias: MetadataConversion = {
  * including the `AutomationEngine.registerFlow` rehydration seam, so the
  * executor reads `cfg.flowName` only.
  *
- * A pure key rename with unchanged values. **Live window**; retires at 18.
+ * A pure key rename with unchanged values.
+ *
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23487). The authoring funnel no longer rewrites the old
+ * spelling, so an author meets the `subflow` contract (`SUBFLOW_KEY_GUIDANCE`), whose refusal names the rename and
+ * this release, at every door that judges a flow: `os validate` /
+ * `os build` / `os lint`. Stored flows keep healing: the automation
+ * engine's flow rehydration and stored-row rehydration
+ * (`applyConversionsToStoredItem`) replay the full chain, this entry
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  */
 const flowNodeSubflowFlowAlias: MetadataConversion = {
   id: 'flow-node-subflow-flow-alias',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.subflow.config.flowName',
   summary: "subflow flow-node config key 'flow' → 'flowName' (an undeclared spelling the executor accepted through a bare fallback, found when the schemaless nodes were reconciled with their executors; it graduates into this layer)",
   apply(stack, emit) {
@@ -1519,7 +1625,15 @@ function liftConnectorConfigShape(stack: Dict, emit: Emit): Dict {
 /**
  * Connector flow-node loose `config` keys → the declared `connectorConfig`
  * sibling (protocol 17, #4045). See {@link liftConnectorConfigShape} for the
- * precedence rules and the completeness guard. **Live window**; retires at 18.
+ * precedence rules and the completeness guard.
+ *
+ * **Stays on the load path at 18 — a recorded verdict (#23487).** Like `wait`,
+ * `connector_action` has no `config` contract, so retired, a loose key beside
+ * a complete `connectorConfig` would be silently ignored: a loose `input` next
+ * to a declared pair would dispatch the action with no input. Refusing the
+ * loose keys under `config` would also refuse stored flows whose loose key the
+ * block shadows (the rehydration seam parses the same schema), so it can retire
+ * once that shadowed shape has a ruling.
  */
 const flowNodeConnectorConfigLift: MetadataConversion = {
   id: 'flow-node-connector-config-lift',
@@ -1628,7 +1742,17 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
  * `input` alias almost certainly leaked from `connector_action`, whose
  * `connectorConfig.input` (singular) is a *different, canonical* surface and is
  * deliberately not touched here. Both are pure key renames with unchanged
- * values. **Live window**; retires at 18.
+ * values.
+ *
+ * **Retired from the load path at 18** — its one-major window (protocol 17)
+ * has run (#23487). The authoring funnel no longer rewrites the old
+ * spelling, so an author meets the `script` contract (`SCRIPT_KEY_GUIDANCE`), whose refusal names the rename and
+ * this release, at every door that judges a flow: `os validate` /
+ * `os build` / `os lint`. Stored flows keep healing: the automation
+ * engine's flow rehydration and stored-row rehydration
+ * (`applyConversionsToStoredItem`) replay the full chain, this entry
+ * included, and so do the artifact-ingestion door (inside its window) and
+ * `os migrate meta --from 16`.
  *
  * The fixture below carried `actionType: 'invoke_function'` through both sides
  * until #4343 retired that key — an end state protocol 17 no longer reaches, so
@@ -1637,6 +1761,8 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
 const flowNodeScriptConfigAliases: MetadataConversion = {
   id: 'flow-node-script-config-aliases',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.script.config',
   summary: "script flow-node config keys 'functionName' → 'function', 'input' → 'inputs' (executor `??` fallbacks, graduated into this layer)",
   apply(stack, emit) {
@@ -3520,6 +3646,11 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
  * for a deployment that skipped the migration. There is therefore no loud
  * rejection for a live-window entry to pre-empt, and every rehydration seam
  * converging on one spelling is the whole point.
+ *
+ * **A recorded verdict at 18 (#23487):** it stays. Retiring it needs a decision
+ * first: retire `'mongo'` as a value, refused with a prescription naming
+ * `mongodb`, or record this entry as permanent. While the value is legal there
+ * is no refusal for a retirement to hand the author to.
  */
 const datasourceDriverMongoToMongodb: MetadataConversion = {
   id: 'datasource-driver-mongo-to-mongodb',
@@ -4061,6 +4192,14 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
  * conversion layer is the only seam that can declare and retire that spelling.
  * The `RetryPolicySchema` tombstone still fires for anyone who reaches the
  * policy through a parsed job.
+ *
+ * **A recorded verdict at 18 (#23487):** it stays. Re-measured on the 18 line,
+ * a `try_catch` node's `config.retry: { retryDelayMs }` still passes the flow
+ * parse unrefused, and a source job that omits `maxRetries` would silently drop
+ * from three retries to none without the step-0 default materialization. It can
+ * retire once that `retry` block refuses `retryDelayMs` naming `backoffMs`, and
+ * the job default flip is settled for sources (or the entry is recorded as
+ * permanent).
  */
 const retryPolicyConverged: MetadataConversion = {
   id: 'retry-policy-converged',
