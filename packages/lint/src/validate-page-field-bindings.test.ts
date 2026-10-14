@@ -365,6 +365,111 @@ describe('validatePageFieldBindings — related lists bind the related object', 
   });
 });
 
+// [#23207] A related list carries two bindings and each batch of refs is judged
+// against its own object: the node-level `dataSource` is the CHILD rows (else
+// `properties.objectName`), and `relationshipValueField` names a field of the
+// PARENT — the object the list inherits (here the page's `crm_lead`).
+describe('validatePageFieldBindings — a related list splits its child and parent bindings', () => {
+  const LIST = 'pages[0].regions[0].components[0].properties';
+  const findingsOf = (component: Record<string, unknown>) =>
+    validatePageFieldBindings({ ...baseStack(), pages: [pageWith([{ type: 'record:related_list', ...component }])] })
+      .map((f) => [f.rule, f.severity, f.path, f.message]);
+
+  it('a dataSource-bound list resolves relationshipValueField on the parent: no finding', () => {
+    // `amount` is a crm_lead (page) field and not a crm_account (child) field.
+    expect(findingsOf({
+      dataSource: { object: 'crm_account' },
+      properties: { relationshipField: 'region', relationshipValueField: 'amount', columns: ['name', 'region'] },
+    })).toEqual([]);
+  });
+
+  it('a dataSource-bound list checks its child columns against dataSource.object', () => {
+    expect(findingsOf({
+      dataSource: { object: 'crm_account' },
+      properties: { relationshipField: 'region', relationshipValueField: 'amount', columns: ['name', 'status'] },
+    })).toEqual([[
+      PAGE_FIELD_UNKNOWN,
+      'warning',
+      `${LIST}.columns[1]`,
+      expect.stringContaining('field "status" is not a field on object "crm_account"'),
+    ]]);
+  });
+
+  it('a dataSource-bound list checks sort, filter and relationshipField against the child too', () => {
+    expect(findingsOf({
+      dataSource: { object: 'crm_account' },
+      properties: {
+        relationshipField: 'ghost_fk',
+        sort: [{ field: 'ghost_sort', order: 'asc' }],
+        filter: [{ field: 'ghost_filter', operator: 'equals', value: 'x' }],
+      },
+    }).map(([, , path, message]) => [path, message])).toEqual([
+      [`${LIST}.sort[0]`, expect.stringContaining('"ghost_sort" is not a field on object "crm_account"')],
+      [`${LIST}.filter[0]`, expect.stringContaining('"ghost_filter" is not a field on object "crm_account"')],
+      [`${LIST}.relationshipField`, expect.stringContaining('"ghost_fk" is not a field on object "crm_account"')],
+    ]);
+  });
+
+  it('dataSource.object wins over properties.objectName for the child refs', () => {
+    expect(findingsOf({
+      dataSource: { object: 'crm_account' },
+      // `status` is on crm_lead, so naming crm_lead here must not hide the miss.
+      properties: { objectName: 'crm_lead', relationshipField: 'region', columns: ['status'] },
+    }).map(([, , path, message]) => [path, message])).toEqual([
+      [`${LIST}.columns[0]`, expect.stringContaining('"status" is not a field on object "crm_account"')],
+    ]);
+  });
+
+  it('a parent-side ref that really is missing still reports, against the parent, on both spellings', () => {
+    const expected = [[
+      PAGE_FIELD_UNKNOWN,
+      'warning',
+      `${LIST}.relationshipValueField`,
+      expect.stringContaining('field "ghost_key" is not a field on object "crm_lead"'),
+    ]];
+    expect(findingsOf({
+      dataSource: { object: 'crm_account' },
+      properties: { relationshipField: 'region', relationshipValueField: 'ghost_key' },
+    })).toEqual(expected);
+    expect(findingsOf({
+      properties: { objectName: 'crm_account', relationshipField: 'region', relationshipValueField: 'ghost_key' },
+    })).toEqual(expected);
+  });
+
+  it('control: the properties.objectName list keeps its single finding on the bad column', () => {
+    expect(findingsOf({
+      properties: { objectName: 'crm_account', relationshipField: 'region', relationshipValueField: 'amount', columns: ['status'] },
+    })).toEqual([[
+      PAGE_FIELD_UNKNOWN,
+      'warning',
+      `${LIST}.columns[0]`,
+      expect.stringContaining('field "status" is not a field on object "crm_account"'),
+    ]]);
+  });
+
+  it('a list nested in a dataSource-bound container resolves its parent ref on the container object', () => {
+    const findings = validatePageFieldBindings({
+      ...baseStack(),
+      pages: [pageWith([{
+        type: 'flex',
+        dataSource: { object: 'crm_account' },
+        properties: {
+          children: [{
+            type: 'record:related_list',
+            dataSource: { object: 'crm_lead' },
+            // `region` is on crm_account (the container), not on crm_lead (the child).
+            properties: { relationshipField: 'account', relationshipValueField: 'region', columns: ['ghost'] },
+          }],
+        },
+      }])],
+    });
+    expect(findings.map((f) => [f.path, f.message])).toEqual([[
+      `${LIST}.children[0].properties.columns[0]`,
+      expect.stringContaining('"ghost" is not a field on object "crm_lead"'),
+    ]]);
+  });
+});
+
 describe('validatePageFieldBindings — binding precedence and traversal', () => {
   it('dataSource.object overrides the page object', () => {
     const findings = validatePageFieldBindings({
