@@ -351,6 +351,24 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         expect(served.fields.title.inlineAmountField).toBe('id');
     });
 
+    it('deletes a `referenceDeletedWhen` predicate whose sibling is denied, and keeps one over a readable sibling', () => {
+        // #23735 — `field` names a sibling `select` of this object; `value` is an
+        // option value, never a field, so a value spelled like a denied field
+        // costs nothing.
+        const denied = mask({
+            name: 'thing',
+            fields: fieldsWith({ referenceVia: 'id', referenceDeletedWhen: { field: 'secret_score', value: 'gone' } }),
+        });
+        expect(denied.fields.title).not.toHaveProperty('referenceDeletedWhen');
+        expect(denied.fields.title.referenceVia).toBe('id');
+
+        const readable = mask({
+            name: 'thing',
+            fields: fieldsWith({ referenceVia: 'id', referenceDeletedWhen: { field: 'id', value: 'secret_score' } }),
+        });
+        expect(readable.fields.title.referenceDeletedWhen).toEqual({ field: 'id', value: 'secret_score' });
+    });
+
     it('leaves names of ANOTHER object\'s fields alone — they are that object\'s projection', () => {
         const served = mask({
             name: 'thing',
