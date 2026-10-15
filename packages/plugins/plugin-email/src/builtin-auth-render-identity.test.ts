@@ -39,6 +39,7 @@ const DATA = {
   verificationUrl: 'https://example.test/verify?token=v1&next=/home',
   magicLinkUrl: 'https://example.test/magic?token=m1&next=/home',
   acceptUrl: 'https://example.test/accept?invite=i1&next=/home',
+  setPasswordUrl: 'https://example.test/reset-password/s1?callbackURL=%2Fset&next=/home',
   expiresInMinutes: 30,
   otp: '424242',
   newEmail: 'ada+new@example.test',
@@ -133,6 +134,29 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
     html: '9f49cf12933faf499b1000b8895d29c4dbfba9b051e695bd845e885b22e7db02',
     text: 'f7acc0d60a7fdcb68611e6d69b905a1260b104b9c947e9ae74b595fe25b7330e',
   },
+  // [#23343] Declared after the row path was deleted, so these four never had
+  // a seeded row: they are pinned against their first registry render, in the
+  // commit that added them. Every byte is still pinned from here on.
+  'auth.account_invitation@en-US': {
+    subject: 'Grace <Hopper> invited you to Acme & <Co>',
+    html: 'baa6c29af47c46bf06368450cbb16ecd5c79053143409abef1cdbf58533866f4',
+    text: '7c2019d448f34c6d851eb3d35b76462d68932162473987300e2b0aef11c9cff6',
+  },
+  'auth.account_invitation@zh-CN': {
+    subject: 'Grace <Hopper> 邀请您使用 Acme & <Co>',
+    html: '9c93150a86230d4270a6758c4944214be62625b5a63e195be0649d3f0f1a9511',
+    text: '31a9c79bd0278bec9dbc89835716ea7f0014608e74a7e38d99206cc73f652561',
+  },
+  'auth.account_invitation@ja-JP': {
+    subject: 'Grace <Hopper> さんから Acme & <Co> への招待が届いています',
+    html: 'af385b49931a8420788849426c932e340ae3c3b32a21942eae231ea2f6667405',
+    text: '85fad1dda634370822d8a36f1278e41939179870a405d264d09ffa84be01e0dd',
+  },
+  'auth.account_invitation@es-ES': {
+    subject: 'Grace <Hopper> te ha invitado a Acme & <Co>',
+    html: '5429cef2368584d991992021d2d309593ccdffad75bf1dd00dcee0cc555bd16f',
+    text: '8f9882fab386469509598af8a41f6f00aeb59ce75184c1060d13b895c4b32722',
+  },
   'auth.two_factor_otp@en-US': {
     subject: 'Your Acme & <Co> verification code',
     html: '3ff1c9565d4c5b9fb98964395062a0f702bb14fb290ccb17e24a0538d3353b5e',
@@ -210,7 +234,7 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
       rendered[`${tpl.name}@${tpl.locale}`] = { subject: r.subject, html: sha256(r.html), text: sha256(r.text) };
     }
 
-    expect(Object.keys(rendered)).toHaveLength(24);
+    expect(Object.keys(rendered)).toHaveLength(28);
     expect(rendered).toEqual(RENDERED);
   });
 });

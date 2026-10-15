@@ -450,15 +450,15 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE: EmailTemplate = {
   subject: '{{inviter.name}} invited you to {{appName}}',
   bodyHtml: wrap('Set your password', `
 <p>Hi {{user.name}},</p>
-<p><strong>{{inviter.name}}</strong> ({{inviter.email}}) has created a {{appName}} account for you, with the email address <strong>{{user.email}}</strong>.</p>
+<p><strong>{{inviter.name}}</strong> ({{inviter.email}}) has created an account for you on {{appName}}, with the email address <strong>{{user.email}}</strong>.</p>
 <p>Set your password to start using it. This link expires in {{expiresInMinutes}} minutes.</p>
 <p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">Set your password</a></p>
 <p style="font-size:13px;color:#6b7280">Or copy and paste this URL into your browser:<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
 <p>If the link has expired, contact {{inviter.name}}.</p>
-`, 'You received this email because {{inviter.name}} created a {{appName}} account for this address.'),
+`, 'You received this email because {{inviter.name}} created an account on {{appName}} for this address.'),
   bodyText: `Hi {{user.name}},
 
-{{inviter.name}} ({{inviter.email}}) has created a {{appName}} account for you, with the email address {{user.email}}.
+{{inviter.name}} ({{inviter.email}}) has created an account for you on {{appName}}, with the email address {{user.email}}.
 
 Set your password (link expires in {{expiresInMinutes}} minutes):
 {{setPasswordUrl}}
