@@ -14978,7 +14978,7 @@ export class ObjectStackProtocolImplementation implements
         id: string,
         current: any,
         expectedVersion: string | undefined,
-        context: unknown,
+        context: EngineQueryOptionsParsed['context'],
     ): Promise<void> {
         assertVersionTokenNotMalformed(expectedVersion);
         const expected = normaliseVersionToken(expectedVersion);
@@ -15028,7 +15028,7 @@ export class ObjectStackProtocolImplementation implements
         object: string,
         id: string,
         expectedVersion: string | undefined,
-        context: unknown,
+        context: EngineQueryOptionsParsed['context'],
     ): Promise<void> {
         assertVersionTokenNotMalformed(expectedVersion);
         if (!normaliseVersionToken(expectedVersion)) return;
@@ -15042,8 +15042,8 @@ export class ObjectStackProtocolImplementation implements
      * spelling as the write it precedes: passed only when the request carried
      * one, so a caller with no context reads as its write would run.
      */
-    private async readAsCaller(object: string, id: string, context: unknown): Promise<any> {
-        const opts: any = { where: { id } };
+    private async readAsCaller(object: string, id: string, context: EngineQueryOptionsParsed['context']): Promise<any> {
+        const opts: EngineQueryOptionsParsed = { where: { id } };
         if (context !== undefined) opts.context = context;
         return this.engine.findOne(object, opts);
     }

@@ -42,6 +42,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
@@ -69,7 +70,7 @@ const MEMBER_SET = PermissionSetSchema.parse({
     rowLevelSecurity: [{ name: 'region_scope', object: SCOPED, operation: 'all', using: "record.region != 'HIDDEN'" }],
 });
 
-const MEMBER_CTX = { userId: 'usr_member', positions: [], permissions: [MEMBER_SET.name], posture: 'MEMBER' };
+const MEMBER_CTX = { userId: 'usr_member', positions: [] as string[], permissions: [MEMBER_SET.name], posture: 'MEMBER' as const };
 
 /** A well-formed instant no row here carries: a token read before a write that moved it. */
 const STALE = '2000-01-01T00:00:00.000Z';
@@ -80,6 +81,9 @@ const HIDDEN_ID = 'h1';
 const MASKED_ID = 'v1';
 /** The positive control's row. */
 const PLAIN_ID = 'p1';
+
+/** A by-id read's options, typed to the engine's contract. */
+const byId = (id: string, context: EngineQueryOptions['context']): EngineQueryOptions => ({ where: { id }, context });
 
 const clone = <T>(v: T): T => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
 
@@ -179,7 +183,7 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
 
     /** The row as the system reads it now (`null` once deleted). */
     const systemRow = async (object: string, id: string) =>
-        (await engine.findOne(object, { where: { id }, context: SYS_CTX } as any)) as any;
+        (await engine.findOne(object, byId(id, SYS_CTX))) as any;
     /** The row's current version token, as the system reads it. */
     const versionOf = async (object: string, id: string): Promise<string> => {
         const row = await systemRow(object, id);
@@ -316,7 +320,7 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
                     const record: any = doorIndex === 0 ? conflictState(stale.body).currentRecord : thrownRecord;
                     expect(record).toMatchObject({ id: MASKED_ID, title: 'visible', region: 'NA' });
                     expect(record).not.toHaveProperty('secret');
-                    const callerRead: any = await engine.findOne(SCOPED, { where: { id: MASKED_ID }, context: clone(MEMBER_CTX) } as any);
+                    const callerRead: any = await engine.findOne(SCOPED, byId(MASKED_ID, clone(MEMBER_CTX)));
                     expect(callerRead).not.toHaveProperty('secret');
                     expect(record).toEqual(callerRead);
 
