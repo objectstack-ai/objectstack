@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
@@ -28,6 +28,14 @@ import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
  * dialect (`interpolateFilter`): a flow token resolved against the run's
  * variables, an unresolved one was erased and refused here, and a placeholder
  * no flow variable shadowed was handed on.
+ *
+ * #15953 row 11 (the service-automation half) is the last describe: a flow
+ * filter's date value reaches the data engine resolved, the query engine's
+ * `{today}` is handed on for it to resolve, and the retired `{TODAY()}` macro
+ * is refused before any query. It lets objectstack-ai/hotcrm retire
+ * `test/flow-filter-today-token.test.ts` (objectstack-ai/hotcrm#1583), whose
+ * `interpolateFilter` no longer exists. The objectql half (`resolveFilterTokens`
+ * resolves `{today}` and refuses `{TODAY()}`) is the engine's.
  */
 
 function createTestLogger(): any {
@@ -324,5 +332,111 @@ describe('a flow `{…}` token at a filter operand is refused at every door (#19
         expect(result.errorClass).toBe('guard');
         expect(result.error).toContain('filter operand(s) evaluated to nothing');
         expect(data.seen[verb]).toBeUndefined();
+    });
+});
+
+/**
+ * #15953 row 11 — a filter's DATE value, in the dialect a filter reads today.
+ *
+ * The 17.x executor resolved a `{TODAY()}` macro against the clock before the
+ * query. The macro is retired with the rest of the template dialect (#19939):
+ * its spelling is the CEL envelope `isoDate(today())`, which the executor
+ * evaluates, so the `where` the data engine receives holds the date itself.
+ * `{today}` is a different word: a query placeholder, the query engine's to
+ * resolve, so the executor hands it on as written. The clock is pinned, so
+ * each case asserts the exact value the engine received.
+ *
+ * Directions decided before running: the envelope reaches the engine as
+ * `YYYY-MM-DD` text, `{today}` reaches it untouched, and `{TODAY()}` reaches
+ * nothing — refused at `registerFlow` and by the executor's contract parse,
+ * naming `isoDate(today())`.
+ */
+describe("a filter's date value reaches the data engine resolved (#15953 row 11)", () => {
+    // Midday UTC, so the reference-timezone day is this one wherever the run's
+    // clock is read; only `Date` is faked, the engine's own timers stay real.
+    const NOW = new Date('2026-03-14T12:00:00.000Z');
+
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(NOW);
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it.each(NODES)('%s: a CEL date envelope is evaluated before the query — the engine receives the date', async (nodeType, verb, extra) => {
+        const data = fakeData();
+        const engine = new AutomationEngine(createTestLogger());
+        registerCrudNodes(engine, ctxWith(data.service));
+        engine.registerFlow('crud_flow', crudFlow(nodeType, {
+            objectName: 'deal',
+            filter: {
+                close_date: { $lt: CEL('isoDate(today())') },
+                created: { $gte: CEL('isoDate(daysAgo(30))') },
+            },
+            ...extra,
+        }));
+        const result = await engine.execute('crud_flow', { record: { id: 'r1' } } as any);
+
+        expect(result.success, `run failed: ${JSON.stringify(result)}`).toBe(true);
+        expect(data.seen[verb]).toEqual({
+            close_date: { $lt: '2026-03-14' },
+            created: { $gte: '2026-02-12' },
+        });
+    });
+
+    it.each(NODES)('%s: the `{today}` query placeholder reaches the engine untouched — it is not the executor\'s to resolve', async (nodeType, verb, extra) => {
+        const data = fakeData();
+        const engine = new AutomationEngine(createTestLogger());
+        registerCrudNodes(engine, ctxWith(data.service));
+        engine.registerFlow('crud_flow', crudFlow(nodeType, {
+            objectName: 'deal',
+            filter: { close_date: { $lt: '{today}' }, due: '{today}' },
+            ...extra,
+        }));
+        const result = await engine.execute('crud_flow', { record: { id: 'r1' } } as any);
+
+        expect(result.success, `run failed: ${JSON.stringify(result)}`).toBe(true);
+        expect(data.seen[verb]).toEqual({ close_date: { $lt: '{today}' }, due: '{today}' });
+    });
+
+    it.each(NODES)('%s: `registerFlow` refuses the retired `{TODAY()}` macro, located at the operand, naming its CEL spelling', async (nodeType, _verb, extra) => {
+        const engine = new AutomationEngine(createTestLogger());
+        registerCrudNodes(engine, ctxWith(fakeData().service));
+        let thrown: unknown;
+        try {
+            engine.registerFlow('crud_flow', crudFlow(nodeType, {
+                objectName: 'deal', filter: { close_date: { $lt: '{TODAY()}' } }, ...extra,
+            }));
+        } catch (err) {
+            thrown = err;
+        }
+        expect(thrown, 'a flow carrying `{TODAY()}` at a filter operand registered').toBeInstanceOf(Error);
+        expect((thrown as Error).message).toContain(`${nodeType} filter operand at config.filter.close_date.$lt: ${VALUE_SLOT_TEMPLATE_REFUSAL}`);
+        expect((thrown as Error).message).toContain('isoDate(today())');
+        expect(await engine.getFlow('crud_flow'), 'the refused flow must not be held').toBeNull();
+    });
+
+    it.each(NODES)('%s: the executor\'s contract parse refuses `{TODAY()}` as a guard, and nothing is queried', async (nodeType, verb, extra) => {
+        const data = fakeData();
+        const executors = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
+        const recorder = new Proxy(new AutomationEngine(createTestLogger()), {
+            get(target, key, receiver) {
+                if (key === 'registerNodeExecutor') return (e: any) => { executors.set(e.type, e); };
+                return Reflect.get(target, key, receiver);
+            },
+        });
+        registerCrudNodes(recorder as AutomationEngine, ctxWith(data.service));
+
+        const result = await executors.get(nodeType)!.execute(
+            { id: 'op', type: nodeType, label: 'Op', config: { objectName: 'deal', filter: { close_date: { $lt: '{TODAY()}' } }, ...extra } },
+            new Map<string, unknown>(),
+            {},
+        );
+        expect(result.success).toBe(false);
+        expect(result.errorClass).toBe('guard');
+        expect(result.error).toContain(VALUE_SLOT_TEMPLATE_REFUSAL);
+        expect(result.error).toContain('isoDate(today())');
+        expect(data.seen[verb], 'a refused filter must not reach the data engine').toBeUndefined();
     });
 });

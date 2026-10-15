@@ -10,10 +10,21 @@
  * was skipped), so runAs was inert in both directions. These tests capture the
  * exact `context` each data op receives, proving the switch — and the regression
  * test fails loudly if the threading is ever removed (so it can't go dead again).
+ *
+ * #15953 row 8 (the service-automation half): "a flow's `runAs` decides
+ * `isSystem` for its writes", per writer kind — a flow node (the first
+ * describe), a screen flow's resumed leg and a subflow (the last describe).
+ * Together they carry what objectstack-ai/hotcrm `test/readonly-write-semantics.test.ts`
+ * pins about flow writers, so hotcrm can retire that file's flow-writer rows
+ * (objectstack-ai/hotcrm#1583). The objectql half (an update strips `readonly`
+ * fields iff its context is not system) and the PATCH / `beforeUpdate` writer
+ * kinds are the engine's, not this package's.
  */
 import { describe, it, expect } from 'vitest';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
+import { registerScreenNodes } from './screen-nodes.js';
+import { registerSubflowNode } from './subflow-node.js';
 import {
   resolveRunDataContext,
   runIsUnscopedUserMode,
@@ -497,5 +508,150 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
       expect(c.ctx.userId).toBe('u1');
       expect(c.ctx.permissions).toEqual([]); // unresolved → data middleware applies its baseline
     }
+  });
+});
+
+/**
+ * #15953 row 8 — the same switch, for the two flow writer kinds whose write
+ * does not run on the leg `execute()` started. Each case reads the `isSystem`
+ * the WRITE received, never the run's own `runAs`.
+ *
+ *  - A screen flow parks at its screen and writes on the RESUMED leg, from the
+ *    run context the suspension persisted — not from the resume call, which
+ *    carries no identity.
+ *  - A subflow is its own run: the CHILD flow's `runAs` decides its writes, in
+ *    both directions — a caller's elevation does not leak into a `'user'`
+ *    child, and a `'user'` caller does not narrow a `'system'` child.
+ *
+ * Directions decided before running: every write follows the `runAs` of the
+ * flow that owns its node, and the triggering user rides every write (#5494).
+ */
+describe("flow.runAs decides isSystem for every flow writer kind (#15953 row 8)", () => {
+  /** An engine with the three node families these flows use, over the recording data engine. */
+  function writerEngine() {
+    const engine = new AutomationEngine(makeLogger());
+    const { data, calls } = fakeData();
+    const ctx = ctxWith(data);
+    registerCrudNodes(engine, ctx);
+    registerScreenNodes(engine, ctx);
+    registerSubflowNode(engine, ctx);
+    return { engine, calls };
+  }
+
+  /** start → screen (one field, so it parks) → update_record → end. */
+  function screenWriteFlow(name: string, runAs?: 'system' | 'user') {
+    return {
+      name,
+      label: name,
+      type: 'screen',
+      ...(runAs ? { runAs } : {}),
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'ask', type: 'screen', label: 'Ask', config: { fields: [{ name: 'note', label: 'Note', type: 'text' }] } },
+        { id: 'up', type: 'update_record', label: 'Update', config: { objectName: 'thing', filter: { id: 'x' }, fields: { a: 2 } } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'ask' },
+        { id: 'e2', source: 'ask', target: 'up' },
+        { id: 'e3', source: 'up', target: 'end' },
+      ],
+    } as any;
+  }
+
+  /** start → create_record(`obj`) → end: the child, which writes `obj` so its write is told apart. */
+  function childFlow(name: string, obj: string, runAs?: 'system' | 'user') {
+    return {
+      name,
+      label: name,
+      type: 'autolaunched',
+      ...(runAs ? { runAs } : {}),
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'mk', type: 'create_record', label: 'Create', config: { objectName: obj, fields: { a: 1 } } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'mk' },
+        { id: 'e2', source: 'mk', target: 'end' },
+      ],
+    } as any;
+  }
+
+  /** start → update_record(parent_thing) → subflow(child) → end. */
+  function parentFlow(name: string, child: string, runAs?: 'system' | 'user') {
+    return {
+      name,
+      label: name,
+      type: 'autolaunched',
+      ...(runAs ? { runAs } : {}),
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'up', type: 'update_record', label: 'Update', config: { objectName: 'parent_thing', filter: { id: 'p' }, fields: { a: 2 } } },
+        { id: 'call', type: 'subflow', label: 'Call', config: { flowName: child } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'up' },
+        { id: 'e2', source: 'up', target: 'call' },
+        { id: 'e3', source: 'call', target: 'end' },
+      ],
+    } as any;
+  }
+
+  it.each([
+    ["runAs:'system'", 'system', true],
+    ["runAs:'user'", 'user', false],
+    ['runAs omitted', undefined, false],
+  ] as const)("screen flow, %s: the write on the resumed leg is isSystem %s", async (_label, runAs, elevated) => {
+    const { engine, calls } = writerEngine();
+    engine.registerFlow('screen_write', screenWriteFlow('screen_write', runAs));
+
+    const paused = await engine.execute('screen_write', { userId: 'u1', tenantId: 'org1' });
+    expect(paused.status, 'the screen must park the run, so the write runs on the resumed leg').toBe('paused');
+    expect(calls, 'nothing is written before the screen is answered').toEqual([]);
+
+    // The resume carries no identity: the write's context comes from the run.
+    const res = await engine.resume(paused.runId!, { variables: { note: 'done' } });
+    expect(res.success, `resume failed: ${JSON.stringify(res)}`).toBe(true);
+
+    const update = calls.find((c) => c.op === 'update' && c.obj === 'thing');
+    expect(update, 'the resumed leg never reached the data engine').toBeTruthy();
+    expect(update!.ctx.isSystem, "the screen flow's runAs did not decide the resumed write").toBe(elevated);
+    expect(update!.ctx.userId, 'the triggering user must ride the resumed write').toBe('u1');
+    expect(update!.ctx.tenantId).toBe('org1');
+  });
+
+  it("subflow: a 'system' child called by a 'user' parent writes elevated; the parent's own write stays the user's", async () => {
+    const { engine, calls } = writerEngine();
+    engine.registerFlow('sys_child', childFlow('sys_child', 'child_thing', 'system'));
+    engine.registerFlow('user_parent', parentFlow('user_parent', 'sys_child'));
+
+    const res = await engine.execute('user_parent', { userId: 'u1', tenantId: 'org1' });
+    expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
+
+    const parentWrite = calls.find((c) => c.obj === 'parent_thing');
+    const childWrite = calls.find((c) => c.obj === 'child_thing');
+    expect(parentWrite!.ctx.isSystem, "the 'user' parent's own write was elevated").toBe(false);
+    expect(childWrite, "the child's write never reached the data engine").toBeTruthy();
+    expect(childWrite!.ctx.isSystem, "the 'system' child's runAs did not decide its write").toBe(true);
+    expect(childWrite!.ctx.actor, 'the elevated write names the CHILD flow').toBe('svc:flow:sys_child');
+    expect(childWrite!.ctx.userId, 'the triggering user must ride the child write').toBe('u1');
+  });
+
+  it("subflow: a child with no runAs called by a 'system' parent writes as the user — the caller's elevation does not leak", async () => {
+    const { engine, calls } = writerEngine();
+    engine.registerFlow('user_child', childFlow('user_child', 'child_thing'));
+    engine.registerFlow('sys_parent', parentFlow('sys_parent', 'user_child', 'system'));
+
+    const res = await engine.execute('sys_parent', { userId: 'u1', tenantId: 'org1' });
+    expect(res.success, `run failed: ${JSON.stringify(res)}`).toBe(true);
+
+    const parentWrite = calls.find((c) => c.obj === 'parent_thing');
+    const childWrite = calls.find((c) => c.obj === 'child_thing');
+    expect(parentWrite!.ctx.isSystem, "the 'system' parent's own write was not elevated").toBe(true);
+    expect(childWrite, "the child's write never reached the data engine").toBeTruthy();
+    expect(childWrite!.ctx.isSystem, "the parent's elevation leaked into a 'user' child's write").toBe(false);
+    expect(childWrite!.ctx.userId, "the child's write must run as the triggering user").toBe('u1');
   });
 });
