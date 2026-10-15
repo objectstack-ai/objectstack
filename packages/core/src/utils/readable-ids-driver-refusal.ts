@@ -215,12 +215,14 @@ export function readableIdsDriverRefusal(
  * The slice of a driver's logger the refusal needs: the message alone, because
  * the drivers' loggers disagree on what follows it (`SqlDriver`'s takes a meta
  * object, core's `Logger` an `Error`). `error` is optional because a driver's
- * injectable logger declares it so (`SqlDriver`'s does); a sink that carries
- * none gets the line at `warn`, never no line.
+ * injectable logger declares it so (`SqlDriver`'s does); `warn` is REQUIRED,
+ * the guaranteed fallback, so a sink that carries no `error` gets the line at
+ * `warn` — every value of this type prints it (the optional-`error` sink
+ * contract, AGENTS.md → "Degradation log levels").
  */
 export interface ReadableIdsRefusalLog {
   error?(message: string): void;
-  warn?(message: string): void;
+  warn(message: string): void;
 }
 
 /**
@@ -241,7 +243,7 @@ export function refuseReadableIdsOnce(
     state.logged = true;
     const line = `${err.message} Logged once for this driver; later refusals answer the caller the same way.`;
     if (typeof log?.error === 'function') log.error(line);
-    else log?.warn?.(line);
+    else log?.warn(line);
   }
   return err;
 }
