@@ -32,13 +32,14 @@
  *    returns (a refresh through `registerInMemory` is synchronous), and the
  *    listing agrees;
  *  - created after boot, the object has a copy at once;
- *  - deleted, the copy and its listing entry are gone;
+ *  - deleted, the copy and its listing entry are gone, and a code package's
+ *    copy is the very entry the bridge wrote;
  *  - deleted and created again while the removal is still awaiting the
  *    service, the new object keeps its copy;
- *  - CONTROL: a code package's copy is left exactly as the bridge made it, by
- *    a runtime edit of another object and by a delete naming the package's own
- *    object (which restores the baseline and removes nothing), and a runtime
- *    object that stays exposed keeps saying so.
+ *  - CONTROL (green with the follow removed, by design): a code package's copy
+ *    is left exactly as the bridge made it by runtime edits and by a delete
+ *    naming the package's own object (which restores the baseline and removes
+ *    nothing), and a runtime object that stays exposed keeps saying so.
  *
  * The negative control (red with the follow removed) is a one-time ablation,
  * cited in the PR, not a permanent case.
@@ -200,6 +201,14 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
         return { copy: await k.metadata.getObject(name), listed };
     }
 
+    /** What a code package ships, registered ahead of the bridge. */
+    const withShippedPackage = (engine: ObjectQL) => {
+        engine.registerApp({
+            id: SHIPPED_PKG, name: SHIPPED_PKG, version: '1.0.0', type: 'app',
+            objects: [objectBody(SHIPPED, 'Shipped')],
+        });
+    };
+
     /** The object saved exposed, two boots ago: the second kernel hydrates it and the bridge copies it. */
     async function bootHydrated(stores: Stores, beforeBoot?: (engine: ObjectQL) => void): Promise<Booted> {
         const k1 = await boot(stores, beforeBoot);
@@ -240,9 +249,11 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
         expect(listed).toBeDefined();
     });
 
-    it('deleted: the copy is gone and the listing no longer names the object', async () => {
+    it('deleted: the copy is gone and the listing no longer names the object, and a code package\'s copy is the one it was', async () => {
         const stores: Stores = new Map();
-        const k = await bootHydrated(stores);
+        const k = await bootHydrated(stores, withShippedPackage);
+        const shipped = await k.metadata.getObject(SHIPPED);
+        expect(shipped).toMatchObject({ label: 'Shipped', _packageId: SHIPPED_PKG, _provenance: 'package' });
 
         const del = await k.protocol.deleteMetaItem({ type: 'object', name: NAME });
 
@@ -254,6 +265,8 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
             expect(copy).toBeUndefined();
             expect(listed).toBeUndefined();
         });
+        // The very entry the bridge wrote: same object, not an equal one.
+        expect(await k.metadata.getObject(SHIPPED)).toBe(shipped);
     });
 
     it('deleted, then created again while the removal is still awaiting the service: the new object keeps its copy', async () => {
@@ -284,27 +297,25 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
 
     it('CONTROL: a code package\'s copy is left as the bridge made it, and a runtime object that stays exposed keeps saying so', async () => {
         const stores: Stores = new Map();
-        const k = await bootHydrated(stores, (engine) => {
-            engine.registerApp({
-                id: SHIPPED_PKG, name: SHIPPED_PKG, version: '1.0.0', type: 'app',
-                objects: [objectBody(SHIPPED, 'Shipped')],
-            });
-        });
+        const k = await bootHydrated(stores, withShippedPackage);
         const shipped = await k.metadata.getObject(SHIPPED);
         expect(shipped).toMatchObject({ label: 'Shipped', _packageId: SHIPPED_PKG, _provenance: 'package' });
         expect((await save(k, OTHER, 'Other', { apiEnabled: true })).success).toBe(true);
 
-        // A runtime edit, a runtime delete and a delete naming the package's own object.
+        // Runtime edits, and a delete naming the package's own object (no stored
+        // row: it restores the baseline and removes nothing).
         expect((await save(k, NAME, 'Gadget Q', { apiEnabled: false })).success).toBe(true);
-        expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
+        expect((await save(k, OTHER, 'Other Q', { apiEnabled: true })).success).toBe(true);
         expect(await k.protocol.deleteMetaItem({ type: 'object', name: SHIPPED }))
             .toMatchObject({ success: true, reset: false });
-        await vi.waitFor(async () => expect((await copyOf(k, NAME)).copy).toBeUndefined());
+        // Nothing is expected to change, so there is no signal to wait for: a
+        // bounded quiet period lets any change the follow would wrongly make land.
+        await new Promise((resolve) => setTimeout(resolve, 150));
 
         // The very entry the bridge wrote: same object, not an equal one.
         expect(await k.metadata.getObject(SHIPPED)).toBe(shipped);
         expect(k.engine.registry.getObject(SHIPPED)).toMatchObject({ label: 'Shipped' });
         // The runtime object nobody turned off still says it is exposed.
-        expect((await copyOf(k, OTHER)).copy).toMatchObject({ label: 'Other', enable: { apiEnabled: true } });
+        expect((await copyOf(k, OTHER)).copy).toMatchObject({ label: 'Other Q', enable: { apiEnabled: true } });
     });
 });
