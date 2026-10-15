@@ -61,6 +61,7 @@ import {
   SysMetadataObject,
   SysMetadataHistoryObject,
   SysMetadataAuditObject,
+  SysMetadataCommitObject,
 } from '@objectstack/metadata-core';
 import { PackageServicePlugin } from '@objectstack/service-package';
 import { HttpDispatcher } from './http-dispatcher.js';
@@ -124,7 +125,9 @@ async function boot() {
     connection: { filename: join(dir, 'data.sqlite') },
     useNullAsDefault: true,
   });
-  const objects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+  // `sys_metadata` holds the rows under test; the other three are what the
+  // real publish path writes through on its way there.
+  const objects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject] as any[];
   await driver.initObjects(objects);
 
   const engine = new ObjectQL();
