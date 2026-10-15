@@ -37,10 +37,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { EngineAggregateOptions } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
-import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
+import { StandardErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
-// envelope asks: the registered code AND the class name, never message text.
-import { isEngineDuplicateRecordEnvelope } from '@objectstack/types';
+// envelope asks (the registered code AND the class name, never message text),
+// and the one classification whose arm states the wire code for it.
+import { isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -383,12 +384,6 @@ export interface ThrownRefusalEnvelope {
 }
 
 /**
- * [#23701] The wire spelling of a unique-constraint refusal. Typed against the
- * registered vocabulary, so a misspelling fails to compile.
- */
-const UNIQUE_VIOLATION_WIRE_CODE = 'UNIQUE_VIOLATION' satisfies ErrorCode;
-
-/**
  * Read the ADR-0112 `code`, message and `status` off a thrown value, or
  * `undefined` when it carries no non-empty string `code`.
  *
@@ -427,9 +422,27 @@ const UNIQUE_VIOLATION_WIRE_CODE = 'UNIQUE_VIOLATION' satisfies ErrorCode;
 export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
   const thrownCode = (err as { code?: unknown } | null | undefined)?.code;
   if (typeof thrownCode !== 'string' || thrownCode.length === 0) return undefined;
-  const code = isEngineDuplicateRecordEnvelope(err) ? UNIQUE_VIOLATION_WIRE_CODE : thrownCode;
   const status = (err as { status?: unknown }).status;
-  return { code, message: messageOf(err), ...(typeof status === 'number' ? { status } : {}) };
+  return {
+    code: wireCodeOf(err, thrownCode),
+    message: messageOf(err),
+    ...(typeof status === 'number' ? { status } : {}),
+  };
+}
+
+/**
+ * [#23701] The code a thrown refusal crosses to an MCP client with: the
+ * thrown one, except for the engine's `DuplicateRecordError`, whose wire code
+ * is read off the shared classification's arm for that class
+ * (`structuredCodeAnswer`, `@objectstack/types`, the arm `RestServer`
+ * answers with). So this package spells no copy of the wire code of its own:
+ * it relays the classification's answer, as the REST door does, and the
+ * pins in `mcp-unique-violation-wire-code.test.ts` hold what that answer is.
+ */
+function wireCodeOf(err: unknown, thrownCode: string): string {
+  if (!isEngineDuplicateRecordEnvelope(err)) return thrownCode;
+  const armCode = structuredCodeAnswer(err)?.body.code;
+  return typeof armCode === 'string' ? armCode : thrownCode;
 }
 
 /**
