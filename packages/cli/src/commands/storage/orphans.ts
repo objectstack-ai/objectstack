@@ -58,7 +58,7 @@ export default class StorageOrphans extends Command {
   static override description =
     'Report-only inventory of stranded sys_file orphans — attachments-scope files that no ' +
     'sys_attachment join row and no ref_* owner holds, and that no lifecycle policy can ever ' +
-    'nominate for reaping. Writes nothing, tombstones nothing, deletes nothing.';
+    'nominate for reaping. Writes no row or table, tombstones nothing, deletes nothing.';
 
   static override examples = [
     '$ os storage orphans',
