@@ -645,3 +645,69 @@ describe('[#23657] an item never published into a package: the draft save naming
         expect(await beside.stored('draft')).toHaveLength(3);
     }, 60_000);
 });
+
+describe('[#23715] the strict draft read naming no package serves its content from the draft its version names, on the real routes', () => {
+    const Q = 'com.probe.q';
+
+    /**
+     * No active row; drafts `[package-unbound, Q]` in either storage order.
+     * Stored second, the package-unbound draft is seeded, as an older build
+     * left it (#23657: a draft save naming no package now updates Q's only
+     * draft).
+     */
+    const ORDERS = {
+        'the package-unbound draft saved first': async () => {
+            const h = await boot();
+            ok(await h.save(view('unbound'), { mode: 'draft' }));
+            ok(await h.save(view('q'), { mode: 'draft', package: Q }));
+            return h;
+        },
+        'Q\'s draft saved first': async () => {
+            const h = await boot();
+            ok(await h.save(view('q'), { mode: 'draft', package: Q }));
+            await h.seed('draft', null, view('unbound'));
+            return h;
+        },
+        // Both seeded, Q's first, in insertion order and in id order
+        // (`seed_draft_com.probe.q` < `seed_draft_unbound`). Measured: this
+        // store still answers a package-agnostic lookup with the
+        // package-unbound row, whose NULL `package_id` sorts first in
+        // `sys_metadata`'s `(type, name, package_id, bundle_member)` index, so
+        // here content and version agreed before the fix too, by index order
+        // alone; the protocol suite's in-memory double is the order that
+        // diverged.
+        'both seeded, Q\'s first': async () => {
+            const h = await boot();
+            await h.seed('draft', Q, view('q'));
+            await h.seed('draft', null, view('unbound'));
+            return h;
+        },
+    } as const;
+
+    for (const [order, build] of Object.entries(ORDERS)) {
+        it(`drafts [package-unbound, Q] (${order}): content and version are the package-unbound draft's, and an If-Match save edits the row read`, async () => {
+            const h = await build();
+            const read = ok(await h.read({ state: 'draft' }));
+            expect(read.item.label).toBe('unbound');
+            expect(read.version).toMatch(KEYED);
+            const q = ok(await h.read({ state: 'draft', package: Q }));
+            expect(q.item.label).toBe('q');
+            expect(q.version).not.toBe(read.version);
+
+            ok(await h.save(view('edited'), { mode: 'draft' }, { 'if-match': read.version }));
+            expect(await h.stored('draft')).toEqual(expect.arrayContaining([
+                { label: 'edited', packageId: null }, { label: 'q', packageId: Q },
+            ]));
+            expect(await h.stored('draft')).toHaveLength(2);
+            expect(ok(await h.read({ state: 'draft' })).item.label).toBe('edited');
+        }, 60_000);
+    }
+
+    it('control: a single draft is served with the version its save answered', async () => {
+        const h = await boot();
+        const saved = ok(await h.save(view('only'), { mode: 'draft', package: Q }));
+        const read = ok(await h.read({ state: 'draft' }));
+        expect(read.item.label).toBe('only');
+        expect(read.version).toBe(saved.version);
+    }, 60_000);
+});

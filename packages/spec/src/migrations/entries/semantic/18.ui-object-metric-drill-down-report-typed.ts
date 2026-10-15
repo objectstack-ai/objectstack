@@ -9,7 +9,7 @@ import type { SemanticMigration } from '../../types.js';
 // `ReportSchema` by reference, once a joined report refuses a block that binds
 // no dataset (#21702), so a report the member admits is one the drawer draws.
 // D3 only: page-component `properties` is not parsed on the metadata save or
-// load path, so a stored page is never refused; and the authored census found
+// load path, so a stored page is never refused at load; and the authored census found
 // no drawn report to respell — the refused values are objectui's probes of the
 // values the drawer does NOT draw.
 export const entry: SemanticMigration = {
@@ -27,8 +27,8 @@ export const entry: SemanticMigration = {
     + 'names for the member — and, since a joined report refuses a block that binds no `dataset`, every report it '
     + 'admits is one the drawer draws. It is read where every page component\'s props are: the component-props gate '
     + 'reports a refused value as a `component-props-invalid` / `component-props-unknown-key` error on '
-    + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still saves and loads, '
-    + 'because a page component\'s `properties` is not parsed on the metadata save or load path. No conversion is '
+    + '`objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still loads, '
+    + 'because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is '
     + 'registered: nothing on the load path refuses the shape, and the authored census found no drawn report to '
     + 'respell. Deployed metadata NOT MEASURED.',
   acceptanceCriteria: 'Every `object-metric` node validates: `objectstack validate` reports no '

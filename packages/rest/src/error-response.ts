@@ -760,7 +760,9 @@ export function sandboxFaultAnswer(
  * ## Why it exists
  *
  * Three hand-built route families in `rest-server.ts` — the sharing-rule, the
- * suggested-binding (and the since-retired overlay-discard) and the approval arms — answered a
+ * suggested-binding (and the since-retired overlay-discard) and the approval arms, which
+ * have since moved to `sharing-routes.ts`, `security-routes.ts` and `approvals-routes.ts`
+ * (#23050 slices 4, 6 and 3) — answered a
  * refusal their own arms could not read as a server fault, relaying
  * `.message`. For a sandboxed hook's refusal `.message` is the QuickJS debug
  * wrapper, so each answered `500` with `hook '<name>' threw: Error: …` where

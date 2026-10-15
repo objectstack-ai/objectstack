@@ -346,7 +346,9 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         // (50 and 65 before, +1 each per new host-literal forwarder).
         // [#23050 slice 5] 5 → 6 (`analytics-routes.ts`): 53 and 68, +1 each
         // for that slice's forwarder.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(6);
+        // [#23050 slice 6] 6 → 7 (`security-routes.ts`): 55 and 70, +1 each
+        // per new host-literal forwarder (two registrars, two forwarders).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(7);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });
