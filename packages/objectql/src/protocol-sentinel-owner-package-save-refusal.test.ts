@@ -646,9 +646,11 @@ describe('#23514 — a save naming a package beside an object its package-less d
             expect(promoteErr?.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
             expect(promoteErr?.status).toBe(422);
             expect(promoteErr?.message).toMatch(pRowDelete);
-            expect(promoteErr?.message).toContain('then publish this draft again.');
+            expect(promoteErr?.message).toContain(
+                `then POST /api/v1/meta/object/${NAME}/publish?package=${Q}.`,
+            );
 
-            // The walk the promote text names: P's row, the package-less definition, then the same publish.
+            // The walk the promote text names: P's row, the package-less definition, then the publish naming Q.
             expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME, packageId: P })).success).toBe(true);
             expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
             expect((await k.protocol.publishMetaItem({ type: 'object', name: NAME, packageId: Q })).success).toBe(true);
@@ -658,6 +660,53 @@ describe('#23514 — a save naming a package beside an object its package-less d
             const k2 = await boot(stores, drops);
             expect((await served(k2)).owner).toBe(Q);
             expect((await served(k2)).records).toBe(2);
+            expect(drops).toEqual([]);
+        });
+
+        it('another package\'s row `[package-less, P]` with BOTH P\'s draft and a draft bound to no package, published naming no package: the text names P in its publish step, and that walk promotes P\'s draft', async () => {
+            const stores: Stores = new Map();
+            const drops: string[] = [];
+            const k = await seedLegacyRows(stores, drops, [P]);
+            const rows = stores.get('sys_metadata')!;
+            const unbound = Array.from(rows.values())
+                .find((r) => r.type === 'object' && r.name === NAME && r.package_id == null && r.state === 'active')!;
+            const asDraft = (id: string, pkg: string | null, label: string) => {
+                const body = typeof unbound.metadata === 'string'
+                    ? JSON.parse(unbound.metadata as string)
+                    : { ...(unbound.metadata as Record<string, unknown>) };
+                body.label = label;
+                rows.set(id, {
+                    ...unbound, id, package_id: pkg, state: 'draft',
+                    metadata: typeof unbound.metadata === 'string' ? JSON.stringify(body) : body,
+                });
+            };
+            asDraft('unbound_draft', null, 'Gadget unbound draft');
+            asDraft('p_draft', P, 'Gadget P draft');
+
+            // The address is P's draft (one active binding, and P's draft stored); D9.9 refuses it.
+            const err = await k.protocol.publishMetaItem({ type: 'object', name: NAME }).then(() => null, (e: any) => e);
+            expect(err?.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
+            expect(err?.status).toBe(422);
+            expect(err?.packageId).toBe(P);
+            expect(err?.message).toMatch(new RegExp(`^Object '${NAME}' is served by its package-less definition; `));
+            expect(err?.message).toContain(
+                `then POST /api/v1/meta/object/${NAME}/publish?package=${P}.`,
+            );
+
+            // The walk, in the named order: P's row, the package-less definition, then the publish NAMING P.
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME, packageId: P })).success).toBe(true);
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
+            expect((await k.protocol.publishMetaItem({ type: 'object', name: NAME, packageId: P })).success).toBe(true);
+            // P's draft is live in P; the unbound draft is left stored, unpublished.
+            expect(await served(k)).toEqual({
+                owner: P, dataPlaneLabel: 'Gadget P draft', metaReadLabel: 'Gadget P draft', records: 2,
+            });
+
+            await k.kernel.shutdown();
+            const k2 = await boot(stores, drops);
+            expect(await served(k2)).toEqual({
+                owner: P, dataPlaneLabel: 'Gadget P draft', metaReadLabel: 'Gadget P draft', records: 2,
+            });
             expect(drops).toEqual([]);
         });
 
@@ -789,13 +838,14 @@ describe('#23514 — a save naming a package beside an object its package-less d
         expect(err.ownerPackageId).toBeNull();
         expect(err.message).toMatch(new RegExp(
             `^Move object '${NAME}' into package '${Q.replace(/\./g, '\\.')}' first: delete its package-less `
-            + 'definition without dropStorage, .*then publish this draft again',
+            + `definition without dropStorage, .*then POST /api/v1/meta/object/${NAME}/publish\\?package=`
+            + `${Q.replace(/\./g, '\\.')}: the draft then serves the object at once`,
         ));
         expect(await served(k)).toEqual({
             owner: SENTINEL, dataPlaneLabel: 'Gadget unbound', metaReadLabel: 'Gadget unbound', records: 2,
         });
 
-        // The order the refusal names: the delete, then the same publish.
+        // The order the refusal names: the delete, then the publish naming Q.
         expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
         expect(k.engine.registry.getObjectOwner(NAME)).toBeUndefined();
         expect((await k.protocol.publishMetaItem({ type: 'object', name: NAME, packageId: Q })).success).toBe(true);

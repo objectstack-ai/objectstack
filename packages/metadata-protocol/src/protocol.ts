@@ -19696,7 +19696,12 @@ export class ObjectStackProtocolImplementation implements
                 + `Delete the '${q}' row first (REST: DELETE ${path}?package=${q}), then send this save again: it `
                 + 'then saves the package-less definition.' + tail;
         } else if (rows.length > 0) {
-            const finish = state.at === 'promote' ? 'publish this draft again' : `save it naming '${q}' in publish mode`;
+            // [#23514] A promotion's last step NAMES the draft's package: a
+            // publish naming none resolves by the rows the deletes leave, and
+            // can then address another draft (`packagelessDraftAddress`).
+            const finish = state.at === 'promote'
+                ? `POST ${path}/publish?package=${q}`
+                : `save it naming '${q}' in publish mode`;
             // Every step is a request, in order, so the whole way out fits the
             // REST message bound with two packages' rows and long names.
             message = `Object '${name}' is served by its package-less definition; ${rowsServed}. To move it into `
@@ -19707,7 +19712,7 @@ export class ObjectStackProtocolImplementation implements
             // promotion is the save that moves the object (it registers).
             message = `Move object '${name}' into package '${q}' first: delete its package-less definition without `
                 + `dropStorage, which keeps its table and records (REST: DELETE ${path} with no package `
-                + 'parameter), then publish this draft again: it then serves the object at once.' + tail;
+                + `parameter), then POST ${path}/publish?package=${q}: the draft then serves the object at once.` + tail;
         } else if (state.mode === 'draft') {
             message = `Move object '${name}' into package '${q}' first: delete its package-less definition without `
                 + `dropStorage, which keeps its table and records (REST: DELETE ${path} with no package parameter), `
