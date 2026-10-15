@@ -505,9 +505,10 @@ These three are answered on every endpoint that accepts an API key: the endpoint
 **Retry:** `no_retry`
 
 The engine throws `DuplicateRecordError`, whose in-process `code` is
-`DUPLICATE_RECORD`; the REST door translates that envelope at the boundary, so
-every route answers the wire code `UNIQUE_VIOLATION` and the in-process spelling
-never crosses HTTP.
+`DUPLICATE_RECORD`; the REST door and the
+[Hono doors](/docs/protocol/kernel/error-handling#hono-doors) translate that envelope at
+the boundary, so every route answers the wire code `UNIQUE_VIOLATION` and the in-process
+spelling never crosses HTTP.
 
 ### `LOCK_CONFLICT`
 **Cause:** The record is locked by another process or user.  

@@ -48,6 +48,7 @@ import {
     looksLikeInternalErrorLeak,
     INTERNAL_ERROR_MESSAGE,
     structuredCodeAnswer,
+    isEngineDuplicateRecordEnvelope,
 } from '@objectstack/types';
 
 /**
@@ -278,9 +279,33 @@ function toLoggableError(thrown: unknown): Error {
  * not carved out.
  *
  * ⛔ `declaredCode` is deliberately NOT forwarded. Under this gate the
- * producer's spelling IS the registered member sitting in `code`, so
- * `demotedDeclaredCode` returns `undefined` by construction — forwarding it
- * would put two spellings of one fact on every envelope this seam renders.
+ * producer's spelling IS a registered member, so `demotedDeclaredCode`
+ * returns `undefined` by construction — forwarding it would put two
+ * spellings of one fact on every envelope this seam renders. That holds for
+ * the one throw whose `code` is translated below as well: `DUPLICATE_RECORD`
+ * is registered, and `RestServer`'s arm sends no `declaredCode` beside its
+ * `UNIQUE_VIOLATION` either.
+ *
+ * ## One wire spelling for a unique-constraint refusal (#23587)
+ *
+ * Maintainer ruling (2026-09-03, recorded in commit 65846bc46): one wire
+ * spelling on every route, `UNIQUE_VIOLATION`. The engine's
+ * `DuplicateRecordError` declares `409` and its in-process identity,
+ * `DUPLICATE_RECORD`, which an in-process caller (a hook, a flow node)
+ * branches on and which is ⛔ not renamed. What crosses the HTTP boundary is
+ * translated: `RestServer`'s arm, `metadata-protocol`'s batch rows and the
+ * import runner's rows already answer that class as `UNIQUE_VIOLATION`, and
+ * the Hono doors answered `DUPLICATE_RECORD` until this.
+ *
+ * So this seam decides the envelope's `code` for that class BEFORE the arm
+ * is consulted, keyed exactly as the arm keys it: the registered code AND the
+ * class name ({@link isEngineDuplicateRecordEnvelope}, `@objectstack/types`,
+ * the same predicate the import runner asks), never message text. Then the
+ * arm agrees with the envelope, and its fields ride `details` under the rule
+ * {@link declaredArmContext} states for every arm. A producer that merely
+ * SPEAKS `DUPLICATE_RECORD` (a hook throwing the registered code without
+ * being the engine's class) keeps its own code and its own body. The
+ * `message` stays the thrown one, as on every other code at these doors.
  *
  * ## Exported for the other Hono door (#23365)
  *
@@ -330,10 +355,16 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
         ? INTERNAL_ERROR_MESSAGE
         : resolved.message;
 
+    // [#23587] The envelope's code: the producer's own, except the engine's
+    // unique-constraint envelope, which crosses HTTP as the one ruled wire
+    // spelling (see "One wire spelling" above). Decided here, before the arm
+    // is consulted, so the arm's agreement rule below is unchanged.
+    const code = isEngineDuplicateRecordEnvelope(thrown) ? 'UNIQUE_VIOLATION' : resolved.code;
+
     // [#23531, #23587] The structured context `RestServer`'s classification
     // states for this refusal joins the producer's own context in `details`.
     // Absent unless the producer stated it.
-    const armContext = declaredArmContext(thrown, resolved);
+    const armContext = declaredArmContext(thrown, { status: resolved.status, code });
     const details = armContext ? { ...resolved.details, ...armContext } : resolved.details;
 
     return {
@@ -341,7 +372,7 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
         body: {
             success: false,
             error: {
-                code: resolved.code,
+                code,
                 message,
                 // The producer's structured context and its END-USER-addressed
                 // refusal text (commit 79c46da90), forwarded exactly as the REST twin
@@ -386,9 +417,11 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
  *
  * Both the status and the code must match the envelope already decided, so
  * an arm can only add context to that envelope, never change it. An arm that
- * answers a different code is not consulted: `DuplicateRecordError`'s arm
- * answers `UNIQUE_VIOLATION` where this door answers the producer's own
- * registered `DUPLICATE_RECORD`, so none of that arm's fields ride here.
+ * answers a different code is not consulted. `DuplicateRecordError`'s arm
+ * answers `UNIQUE_VIOLATION`, and it agrees because the envelope's code for
+ * that class is decided as `UNIQUE_VIOLATION` before this function is asked
+ * ({@link declaredEnvelopeForThrow}, "One wire spelling"); this rule does not
+ * move a code itself.
  *
  * ## Where they land
  *
