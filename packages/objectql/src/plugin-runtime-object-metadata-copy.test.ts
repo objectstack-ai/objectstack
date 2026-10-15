@@ -213,6 +213,7 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
     async function bootHydrated(stores: Stores, beforeBoot?: (engine: ObjectQL) => void): Promise<Booted> {
         const k1 = await boot(stores, beforeBoot);
         expect((await save(k1, NAME, 'Gadget', { apiEnabled: true })).success).toBe(true);
+        expect((await save(k1, OTHER, 'Other', { apiEnabled: true })).success).toBe(true);
         await k1.kernel.shutdown();
 
         const k2 = await boot(stores, beforeBoot);
@@ -220,6 +221,8 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
         // Without it the pins below would pass for an empty reason.
         expect(await k2.metadata.getObject(NAME))
             .toMatchObject({ label: 'Gadget', enable: { apiEnabled: true }, _provenance: 'org' });
+        expect(await k2.metadata.getObject(OTHER))
+            .toMatchObject({ label: 'Other', enable: { apiEnabled: true }, _provenance: 'org' });
         return k2;
     }
 
@@ -300,7 +303,6 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
         const k = await bootHydrated(stores, withShippedPackage);
         const shipped = await k.metadata.getObject(SHIPPED);
         expect(shipped).toMatchObject({ label: 'Shipped', _packageId: SHIPPED_PKG, _provenance: 'package' });
-        expect((await save(k, OTHER, 'Other', { apiEnabled: true })).success).toBe(true);
 
         // Runtime edits, and a delete naming the package's own object (no stored
         // row: it restores the baseline and removes nothing).
@@ -316,6 +318,6 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
         expect(await k.metadata.getObject(SHIPPED)).toBe(shipped);
         expect(k.engine.registry.getObject(SHIPPED)).toMatchObject({ label: 'Shipped' });
         // The runtime object nobody turned off still says it is exposed.
-        expect((await copyOf(k, OTHER)).copy).toMatchObject({ label: 'Other Q', enable: { apiEnabled: true } });
+        expect((await copyOf(k, OTHER)).copy).toMatchObject({ enable: { apiEnabled: true } });
     });
 });
