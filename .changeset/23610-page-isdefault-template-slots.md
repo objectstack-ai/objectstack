@@ -20,6 +20,7 @@ Migration:
 
 - **`isDefault` on a non-record page** → delete it. A page does not choose where an app opens: an app's landing page is its **first navigation item** (by `order`), so to land on the page put its entry first in the app's `navigation`; the root landing follows the app's own `isDefault`. A record page meant as an object's default record page binds that object with `object`.
 - **`template: 'full-width'`** → `template: 'default'` (or delete the key — `default` is the default). The page renders exactly as before.
+- **A `template` held in a widened `string`** (a shared base object, `{ template: 'default' }` spread into `definePage`) no longer type-checks against the closed set → `template: 'default' as const`.
 - **An unregistered template** → one of `default` (header, sidebar, main, aside, footer), `header-sidebar-main` (header, sidebar, main), `three-column` (header, sidebar, main, aside, footer) or `dashboard` (header, footer, and every other region a grid cell).
 - **An unplaced region** → name it for the slot it fills: `left_sidebar` → `sidebar`, `right_sidebar` → `aside`, `content` → `main`; or choose `dashboard` when the regions are a grid. Names match case-insensitively, as the console's do. `slotted`, `html` and `react` pages are not judged on region names.
 
