@@ -76,30 +76,35 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  * are still `this.resolveExecCtx(environmentId, req)` on a `RestServer` route, so
  * they are still this census's population. A site is therefore identified by
  * `file:line`, never by a line alone.
+ *
+ * [#23050 slice 2] `RestServer#registerBatchEndpoints`' body followed, unedited, to
+ * `batch-routes.ts`, and its five sites with it — on the same terms.
  */
-const SITE_FILES = ['rest-server.ts', 'data-action-routes.ts'] as const;
+const SITE_FILES = ['rest-server.ts', 'data-action-routes.ts', 'batch-routes.ts'] as const;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
     file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
 ]));
 const siteKey = (file: string, line: number) => `${file}:${line}`;
 
 /**
- * The one frame in `rest-server.ts` that is NOT a consumer: the host literal
- * `registerDataActionEndpoints` hands the moved body forwards each member to the
- * server with `(...a) => this.<member>(...a)`, so a moved site's stack shows that
- * forwarder above the site itself. The site is the first censused frame that is
- * not it. Found by its spelling, so a respelt forwarder is a control failure in
- * §2 rather than every moved site silently attributed to it.
+ * The frames in `rest-server.ts` that are NOT consumers: the host literal each
+ * moved registrar (`registerDataActionEndpoints`, `registerBatchEndpoints`) hands
+ * its moved body forwards each member to the server with
+ * `(...a) => this.<member>(...a)`, so a moved site's stack shows that forwarder
+ * above the site itself. The site is the first censused frame that is not one.
+ * Found by their spelling, and §2 pins ONE per moved module, so a respelt
+ * forwarder — or a module moved without joining `SITE_FILES` — is a control
+ * failure there rather than every moved site silently attributed to it.
  */
-const FORWARDER_LINE = SOURCE.split('\n').findIndex((l) =>
-    l.includes('resolveExecCtx: (...a) => this.resolveExecCtx(...a),')) + 1;
-const FORWARDER = siteKey('rest-server.ts', FORWARDER_LINE);
+const FORWARDER_LINES = SOURCE.split('\n').flatMap((l, i) =>
+    l.includes('resolveExecCtx: (...a) => this.resolveExecCtx(...a),') ? [i + 1] : []);
+const FORWARDERS = new Set(FORWARDER_LINES.map((line) => siteKey('rest-server.ts', line)));
 
 /** The census site a `resolveExecCtx` call came from, read off its stack. */
 function siteOfStack(stack: string): string | undefined {
-    for (const m of stack.matchAll(/(rest-server|data-action-routes)\.ts:(\d+):\d+/g)) {
+    for (const m of stack.matchAll(/(rest-server|data-action-routes|batch-routes)\.ts:(\d+):\d+/g)) {
         const key = siteKey(`${m[1]}.ts`, Number(m[2]));
-        if (key !== FORWARDER) return key;
+        if (!FORWARDERS.has(key)) return key;
     }
     return undefined;
 }
@@ -534,9 +539,18 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // RestServer['resolveExecCtx']`, two). The forwarder is the one
         // `rest-server.ts` frame `siteOfStack` steps over; the control below
         // proves it is still where that spelling says it is.
+        //
+        // [#23050 slice 2] 62 sites UNCHANGED / 81 → 85 mentions — the same MOVE.
+        // `registerBatchEndpoints`' body left for `batch-routes.ts` with its five
+        // BARE sites, so this census reads three files: 48 + 9 + 5 = 62 sites.
+        // The four new mentions are that slice's seam, the same two spellings
+        // (its host literal's forwarder, two; its host interface's member, two).
+        // There are now two forwarders, one per moved module, and the control
+        // pins that pairing.
         expect(SITES.length).toBe(62);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(81);
-        expect(FORWARDER_LINE, 'the host literal\'s resolveExecCtx forwarder was respelt or removed').toBeGreaterThan(0);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(85);
+        expect(FORWARDER_LINES, 'one host-literal resolveExecCtx forwarder per moved module: one was respelt or removed, or a module moved without joining SITE_FILES')
+            .toHaveLength(SITE_FILES.length - 1);
     });
 
     it('the split is 16 locally caught / 46 bare — NOT 12 / 46, which does not add to 62', () => {
