@@ -2,7 +2,7 @@
 //
 // Build-time diagnostics for AI-authored HTML-source pages (ADR-0080).
 //
-// Applies to `kind:'html'` (and its deprecated alias `kind:'jsx'`) — the tier
+// Applies to `kind:'html'` — the tier
 // whose `source` is constrained JSX/HTML parsed (never executed) to the tree.
 // `kind:'react'` (ADR-0081) is intentionally NOT linted here: its source is
 // real JavaScript, not constrained JSX, so the constrained parser would
@@ -41,8 +41,8 @@ type AnyRec = Record<string, unknown>;
 export function validateJsxPages(stack: AnyRec, opts: { manifest?: Manifest } = {}): JsxPageFinding[] {
   const findings: JsxPageFinding[] = [];
   for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
-    // html tier (+ deprecated 'jsx' alias). react pages are not constrained JSX.
-    if (!page || (page.kind !== 'html' && page.kind !== 'jsx')) continue;
+    // html tier only. react pages are not constrained JSX.
+    if (!page || page.kind !== 'html') continue;
     const name = String(page.name ?? pagePath);
     const source = page.source;
     if (typeof source !== 'string' || source.trim() === '') {

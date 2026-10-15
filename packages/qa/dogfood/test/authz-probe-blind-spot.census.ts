@@ -512,7 +512,8 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
       'indentation and the subtrahend is pinned at 1 by the `forwarder slice:` control, never inferred from a ' +
       'terminator spelling), PLUS `registerPerItemRoute(` call sites; counted over this file AND ' +
-      '`data-action-routes.ts`, the module `registerDataActionEndpoints`\' body moved to; ' +
+      '`data-action-routes.ts` and `batch-routes.ts`, the modules the bodies of `registerDataActionEndpoints` ' +
+      'and `registerBatchEndpoints` moved to; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -645,10 +646,22 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // mention, and left `data-action-routes.ts` untouched. No call site was
     // added. ⚠️ The dogfood shards skip on PRs and in the merge queue, so this
     // move was seen only by the hourly full run on `main`.
+    // [#23050 slice 2] 70 / 19 / 51 UNCHANGED, the same measurement as slice 1:
+    // `registerBatchEndpoints`' body (five routes, all outside
+    // `registerMetadataEndpoints`, so all five in the blind spot) moved to
+    // `batch-routes.ts`, and the population rule reads that module too.
+    // `this.routeManager.register(` stays 63 over the three files (49 here + 9
+    // + 5, the new control), `private register*Endpoints(` stays 16 (the
+    // registrar is still declared here), and `enforceAuth` 64 -> 68 is
+    // RE-ANCHORED, not relaxed: the five call sites moved with their routes and
+    // are counted in both readings; the four new occurrences are that slice's
+    // seam, the same two spellings as slice 1's (the host literal's forwarder,
+    // two; the host interface's member, two). No call site was added.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
       'data-action-routes.ts: this.routeManager.register(': 9,
+      'batch-routes.ts: this.routeManager.register(': 5,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -656,7 +669,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 64,
+      enforceAuth: 68,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
@@ -1033,7 +1046,12 @@ export function deriveProbeFileCensus(): {
     // no `registerPerItemRoute`, so appending it moves neither the forwarder
     // slice nor the `reachable` slice; its own control below proves it is read.
     const moved = read('packages/rest/src/data-action-routes.ts');
-    const all = `${src}\n${moved}`;
+    // [#23050 slice 2] The same lesson, again: `registerBatchEndpoints`' body
+    // moved to `batch-routes.ts` with its five registration sites. Appended for
+    // the same reason and on the same terms — it declares no registrar and no
+    // `registerPerItemRoute` either — with its own control below.
+    const movedBatch = read('packages/rest/src/batch-routes.ts');
+    const all = `${src}\n${moved}\n${movedBatch}`;
     const registrarRe = /^\s*private\s+register[A-Za-z]*Endpoints\s*\(/gm;
     const mountRe = /this\.routeManager\.register\(/g;
     // Matches the CALL sites only. The declaration reads
@@ -1137,6 +1155,7 @@ export function deriveProbeFileCensus(): {
         // [#23050 slice 1] The moved module's own share, so a reading that
         // silently stopped appending it cannot hide behind the total above.
         'data-action-routes.ts: this.routeManager.register(': occurrences(moved, /this\.routeManager\.register\(/g),
+        'batch-routes.ts: this.routeManager.register(': occurrences(movedBatch, /this\.routeManager\.register\(/g),
         'registerPerItemRoute(': occurrences(src, /registerPerItemRoute\(/g),
         'const registerPerItemRoute =': occurrences(src, /const\s+registerPerItemRoute\s*=/g),
         // ⭐ The one control here that is NOT a whole-file count, deliberately:

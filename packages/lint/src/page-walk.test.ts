@@ -284,8 +284,8 @@ describe('walkPageComponents — cycle guard', () => {
 });
 
 describe('isSourceAuthoredPage', () => {
-  it('treats html/react/jsx as source-authored and skips their regions', () => {
-    for (const kind of ['html', 'react', 'jsx']) {
+  it('treats html/react as source-authored and skips their regions', () => {
+    for (const kind of ['html', 'react']) {
       expect(isSourceAuthoredPage({ kind })).toBe(true);
       expect(
         paths({ kind, regions: [{ name: 'main', components: [{ type: 'a' }] }] }),

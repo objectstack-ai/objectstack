@@ -293,7 +293,7 @@ export function jsxGateStacks(stack: AnyRec): AnyRec[] {
 
 /**
  * The pages one stack's JSX gate checks AGAINST a manifest: `kind: 'html'`
- * (and its deprecated alias `'jsx'`) with a non-empty `source`, over the
+ * with a non-empty `source`, over the
  * collection authored either as an array or as a name-keyed map — each keyed
  * by the name the gate reports it under (`page "NAME"`; a map entry's key when
  * the entry carries no `name`), or by the record itself when it has neither.
@@ -314,7 +314,7 @@ function checkedPageKeys(stack: AnyRec): unknown[] {
   const keys: unknown[] = [];
   for (const [mapKey, page] of entries) {
     if (!isRecord(page)) continue;
-    if (page.kind !== 'html' && page.kind !== 'jsx') continue;
+    if (page.kind !== 'html') continue;
     if (typeof page.source !== 'string' || page.source.trim() === '') continue;
     const name = typeof page.name === 'string' && page.name !== '' ? page.name : mapKey;
     keys.push(name === undefined ? page : `page:${name}`);

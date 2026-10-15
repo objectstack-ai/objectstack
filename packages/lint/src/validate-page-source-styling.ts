@@ -38,7 +38,7 @@ export function validatePageSourceStyling(stack: AnyRec): SourceStyleFinding[] {
   for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
     if (!page) continue;
     const kind = page.kind;
-    if (kind !== 'html' && kind !== 'react' && kind !== 'jsx') continue;
+    if (kind !== 'html' && kind !== 'react') continue;
     const source = page.source;
     if (typeof source !== 'string' || source.trim() === '') continue;
     const name = String(page.name ?? pagePath);

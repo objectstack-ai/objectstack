@@ -171,16 +171,15 @@ describe('#6775 — walkPageComponents and the conversion walk reach the same co
   it('source-authored pages are the one deliberate difference', () => {
     // Lint yields nothing for them (the regions are a derived cache, not
     // authored metadata); the conversion still normalizes that cache.
-    const jsxPage = { name: 'j', kind: 'jsx', source: '<div/>', regions: [{ name: 'main', components: [probe('cached')] }] };
-    expect(walkPageComponents(jsxPage as unknown as Record<string, unknown>, 'pages[0]')).toEqual([]);
+    const htmlPage = { name: 'j', kind: 'html', source: '<div/>', regions: [{ name: 'main', components: [probe('cached')] }] };
+    expect(walkPageComponents(htmlPage as unknown as Record<string, unknown>, 'pages[0]')).toEqual([]);
 
     const notices: string[] = [];
     applyConversions(
-      { pages: [structuredClone(jsxPage)] },
+      { pages: [structuredClone(htmlPage)] },
       {
         includeRetired: true,
-        // `kind: 'jsx'` itself converts (`page-kind-jsx-to-html`, protocol 11);
-        // what this pins is the component inside the derived cache.
+        // What this pins is the component inside the derived cache.
         onNotice: (n) => { if (n.conversionId === 'page-header-subtitle-alias') notices.push(n.path); },
       },
     );

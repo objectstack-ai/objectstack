@@ -667,8 +667,13 @@ export const PAGE_REQUIRES_DISAGREES_WITH_SOURCE = 'page-requires-disagrees-with
  */
 export const HTML_PAGE_SOURCE_COMPILE = 'html-page-source-compile';
 
-/** The page kinds whose `source` is constrained JSX (the deprecated `jsx` spells `html`). */
-const COMPILED_PAGE_KINDS: ReadonlySet<unknown> = new Set(['html', 'jsx']);
+/**
+ * The page kinds whose `source` is constrained JSX — `html` alone, the spec's
+ * `COMPILED_PAGE_KINDS`. Its first name `jsx` was retired at 18: the page parse
+ * refuses it before this gate runs, and a stored `jsx` row reaches the gate as
+ * `html`, rewritten by the stored-row conversion pass.
+ */
+const COMPILED_PAGE_KINDS: ReadonlySet<unknown> = new Set(['html']);
 
 /**
  * Whether a value can be compiled against: an object with a `components` map,

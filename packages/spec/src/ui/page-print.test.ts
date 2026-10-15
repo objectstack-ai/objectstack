@@ -115,7 +115,6 @@ describe('checkPagePrintComposition — a print page prints exactly the blocks i
   it.each([
     ['slotted', { kind: 'slotted' }, /kind: 'slotted'.*synthesized default layout/s],
     ['html', { kind: 'html', source: 'Card' }, /kind: 'html'.*compiled from `source`/s],
-    ['jsx', { kind: 'jsx', source: 'Card' }, /kind: 'jsx'.*compiled from `source`/s],
     ['react', { kind: 'react', source: 'Card' }, /kind: 'react'.*executed from `source`/s],
   ])('refuses `print` on a `%s` page, at `print`', (_kind, page, message) => {
     const issues = issuesOf({ ...BASE, ...page, regions: REGIONS, print: {} });

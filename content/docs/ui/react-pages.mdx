@@ -15,8 +15,9 @@ string** instead, for layouts and interactions the fixed schema cannot express.
 
 Both set `source` and leave `regions` unused. `source` is **authoritative over
 `regions`** on both tiers, and a page with either `kind` and no non-empty `source` is
-rejected by the schema rather than rendering empty. `'jsx'` is a deprecated alias for
-`'html'` that is still accepted and converted at load.
+rejected by the schema rather than rendering empty. `'jsx'`, the first name of the
+`'html'` tier, was retired in `@objectstack/spec` 18 and is refused with the prescription
+naming `'html'`.
 
 ## Choosing between `react` and `html`
 

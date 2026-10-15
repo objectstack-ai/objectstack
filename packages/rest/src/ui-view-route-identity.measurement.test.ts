@@ -79,8 +79,10 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 // [#23050 slice 1] The reverse checks below count a term's spelling over the
 // files RestServer's registrars live in, which since that slice include the
 // module `registerDataActionEndpoints`' body moved to. Sliced readings of ONE
-// registrar still read `SOURCE` alone.
-const REGISTRAR_SOURCES = SOURCE + '\n' + readFileSync(resolve(HERE, 'data-action-routes.ts'), 'utf8');
+// registrar still read `SOURCE` alone. [#23050 slice 2] …and the module
+// `registerBatchEndpoints`' body moved to.
+const REGISTRAR_SOURCES = [SOURCE, ...['data-action-routes.ts', 'batch-routes.ts']
+    .map((file) => readFileSync(resolve(HERE, file), 'utf8'))].join('\n');
 
 const BASE = '/api/v1';
 const UI_ROUTE = `GET ${BASE}/ui/view/:object/:type`;

@@ -1204,7 +1204,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       source: {
         label: "Código fuente",
-        helpText: "Texto fuente de la página. Con kind 'html' (alias 'jsx') es JSX restringido que se compila al árbol de componentes al guardar: se analiza, nunca se ejecuta. Con kind 'react' es React real que el runtime de confianza ejecuta al renderizar."
+        helpText: "Texto fuente de la página. Con kind 'html' es JSX restringido que se compila al árbol de componentes al guardar: se analiza, nunca se ejecuta. Con kind 'react' es React real que el runtime de confianza ejecuta al renderizar."
       },
       object: {
         label: "Objeto",
