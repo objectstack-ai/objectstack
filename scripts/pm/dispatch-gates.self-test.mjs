@@ -66,6 +66,7 @@ import {
   DEFAULT_BASE_BRANCH,
   DEFAULT_BASE_REF,
   DEFAULT_BASE_REMOTE,
+  DURABILITY_SEAM_GATE,
   ESCAPABLE_LITERAL_LEDGER,
   GENERATED_MODULE_SOURCES,
   HARVEST_SNIPPET,
@@ -124,6 +125,7 @@ import {
   deadHintSweep,
   deadNamesNote,
   declaredArgvDefaults,
+  declaredMapKeys,
   declaredFileTarget,
   declaredInheritedPopulation,
   declaredLocalEnv,
@@ -141,6 +143,7 @@ import {
   discoverFamilies,
   discoveryPassCount,
   driftLines,
+  durabilityCriticalCallees,
   emitsAnHttpStatus,
   escapableLiteralKey,
   escapableLiteralRows,
@@ -165,6 +168,7 @@ import {
   globInNonFinalSegment,
   governedReadCensus,
   governedSisterRepo,
+  guardsADurabilityCriticalCall,
   hashCommentProgram,
   hintCovers,
   hintReachesTree,
@@ -4690,6 +4694,117 @@ export function selfTest({ tier = 'full' } = {}) {
   const statusStale = changeKindLines([STATUS_SPECIMEN], () => null, statusEntry);
   t('an undiscoverable status gate renders STALE for this entry',
     statusStale.filter((l) => l.includes('⚠ check:error-status-conformance: STALE')).length === 1);
+
+  // ── The durability-seam CONTENT kind (#23584) ────────────────────────────
+  //
+  // The third content entry, pinned in the shape of the two above, plus the
+  // half they do not have: its vocabulary is READ out of the guard's source,
+  // so the reader gets its own cases first (the layouts, a phantom key, the
+  // refusals). Then the predicate is driven through an INJECTED vocabulary,
+  // then the live tree, then the rendered section. The specimen is the seam
+  // PR #23567 lost a CI round on.
+  const throwsNaming = (fn, needle) => {
+    try {
+      fn();
+      return false;
+    } catch (error) {
+      return String(error.message).includes(needle);
+    }
+  };
+  const TABLE = (body) => `const OTHER = new Map([['decoy', 'x']]);\nconst T = new Map([\n${body}\n]);\nconst AFTER = new Map([['after', 'y']]);\n`;
+  t("declaredMapKeys: the guard's multi-line tuple layout reads every key, in order",
+    JSON.stringify(declaredMapKeys(TABLE("    [\n        'recordLog',\n        \"why one\",\n    ],\n    [\n        'tryInsert',\n        'why two',\n    ],"), 'T')) === '["recordLog","tryInsert"]');
+  t('declaredMapKeys: one-line tuples, and an object value, read the same way',
+    JSON.stringify(declaredMapKeys(TABLE("['a', 'x'], ['b', { via: 'return', why: 'w' }]"), 'T')) === '["a","b"]');
+  t('declaredMapKeys: a bracket inside a reason string opens no phantom key',
+    JSON.stringify(declaredMapKeys(TABLE("['a', \"see ['b', 1] there\"]"), 'T')) === '["a"]');
+  t('declaredMapKeys: a commented-out tuple is not a key',
+    JSON.stringify(declaredMapKeys(TABLE("// ['ghost', 'x'],\n['a', 'x']"), 'T')) === '["a"]');
+  t("declaredMapKeys: the read stops at the table's own close, so a later Map's keys are not its",
+    JSON.stringify(declaredMapKeys(TABLE("['a', 'x']"), 'T')) === '["a"]');
+  t('declaredMapKeys: a module that declares no such table answers null', declaredMapKeys('const T = new Set([1]);', 'T') === null);
+  t('declaredMapKeys: a key that is not a quoted identifier THROWS rather than reading fewer names',
+    throwsNaming(() => declaredMapKeys(TABLE('[NAME_CONST, "x"]'), 'T'), 'has no quoted identifier'));
+  const famWith = (files) => ({ byCheck: new Map([[DURABILITY_SEAM_GATE, { files }]]) });
+  t('durabilityCriticalCallees: a gate no workflow runs THROWS, naming the gate',
+    throwsNaming(() => durabilityCriticalCallees({ byCheck: new Map() }), `no workflow runs ${DURABILITY_SEAM_GATE}`));
+  t('durabilityCriticalCallees: a family whose files declare no table THROWS, naming the table',
+    throwsNaming(() => durabilityCriticalCallees(famWith(['package.json'])), 'declares a non-empty DURABILITY_CRITICAL_CALLEES'));
+
+  const VOCAB = () => ['saveMetaItem', 'syncSchema'];
+  const seams = (text, path = 'packages/x/src/a.ts', callees = VOCAB) => guardsADurabilityCriticalCall(path, codeSrc(text), callees);
+  const SEAM_STMT = 'try { await store.saveMetaItem(item); } catch (e) { log.warn(e); }';
+  t('a catch around a declared callee is a hit', seams(SEAM_STMT));
+  t('a binding-less catch is a hit too', seams('try { await engine.syncSchema(o); } catch { return; }'));
+  t('a const alias spells the name, so a call through it is a hit',
+    seams('const sync = engine.syncSchema;\ntry { await sync.call(engine, o); } catch (e) { log.warn(e); }'));
+  t('a declared callee with no catch clause anywhere is not a hit', !seams('export async function save(store) { await store.saveMetaItem(item); }'));
+  t('a promise .catch( is not a clause, so it is not a hit', !seams('store.saveMetaItem(item).catch(() => undefined);'));
+  t('…nor when the .catch( sits on its own line', !seams('store\n  .saveMetaItem(item)\n  .catch(() => undefined);'));
+  t('a catch clause with no declared callee is not a hit: the shape the clause-alone net fires on',
+    !seams('try { JSON.parse(raw); } catch (e) { return null; }'));
+  t('a callee named only in a comment is not a hit', !seams('// saveMetaItem is guarded elsewhere\ntry { x(); } catch (e) { log.warn(e); }'));
+  t('a catch written only in a comment is not a hit', !seams('// try { x(); } catch (e) { }\nawait store.saveMetaItem(item);'));
+  t('a name that merely CONTAINS a declared callee is not a hit',
+    !seams('try { await store.saveMetaItemDraft(item); } catch (e) { log.warn(e); }'));
+  t('an EMPTIED vocabulary reaches nothing, so the vocabulary limb is consulted', !seams(SEAM_STMT, 'packages/x/src/a.ts', () => []));
+  t('a test file holding a seam is not a hit', !seams(SEAM_STMT, 'packages/x/src/a.test.ts'));
+  t('a d.ts holding a seam is not a hit', !seams(SEAM_STMT, 'packages/x/src/a.d.ts'));
+  t('a non-TS file holding a seam is not a hit', !seams(SEAM_STMT, 'packages/x/README.md'));
+  t('a path with nothing to read is not a hit, and does not throw', !guardsADurabilityCriticalCall('packages/x/src/a.ts', () => null, VOCAB));
+  let vocabularyReads = 0;
+  const countingVocab = () => {
+    vocabularyReads += 1;
+    return VOCAB();
+  };
+  guardsADurabilityCriticalCall('packages/x/src/a.ts', codeSrc('export const x = 1;'), countingVocab);
+  guardsADurabilityCriticalCall('packages/x/src/a.test.ts', codeSrc(SEAM_STMT), countingVocab);
+  t('the vocabulary is never read for a file with no catch clause, nor for a test file', vocabularyReads === 0);
+
+  // The live tree: the vocabulary is read off the guard, the specimen is
+  // reached, the control is not, and the trigger discriminates. Spelled rather
+  // than discovered, like the two specimens above.
+  const liveCallees = durabilityCriticalCallees();
+  t(`the live guard's vocabulary is read: ${liveCallees.length} declared callee name(s), every one an identifier`,
+    liveCallees.length > 10 && liveCallees.every((n) => /^[A-Za-z_$][\w$]*$/.test(n)));
+  t('…and a second ask is the memoised read, not a second parse', durabilityCriticalCallees() === liveCallees);
+  const SEAM_SPECIMEN = 'packages/runtime/src/domains/automation.ts';
+  t('the live tree still carries the PR #23567 seam, and the predicate reaches it', guardsADurabilityCriticalCall(SEAM_SPECIMEN));
+  const SEAM_CONTROL = 'packages/services/service-storage/src/storage-routes.ts';
+  t('a live .ts holding catch clauses and no declared callee is not reached',
+    !guardsADurabilityCriticalCall(SEAM_CONTROL) && /\bcatch\s*\(/.test(readFileSync(nodePath.join(ROOT, SEAM_CONTROL), 'utf8')));
+  // The discrimination pin, held at a TENTH rather than the quarter the two
+  // entries above use: a catch clause alone matched a fifth of this corpus
+  // when the entry landed, so a widening back to that net fails here.
+  const seamHits = codeCorpus.filter((f) => guardsADurabilityCriticalCall(f));
+  t(`the durability trigger discriminates: ${seamHits.length} of ${codeCorpus.length} non-test TS files (neither vacuous nor tree-wide)`,
+    seamHits.length > 10 && seamHits.length < codeCorpus.length / 10);
+
+  // The rendered section, through this entry alone, then through the whole
+  // table and the runnable union, which is where the card's acceptance holds.
+  const seamEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === DURABILITY_SEAM_GATE));
+  t('exactly one entry in the table names the durability guard', seamEntry.length === 1);
+  t("…and it is the entry whose predicate reads that same gate's vocabulary",
+    seamEntry[0]?.matches === guardsADurabilityCriticalCall && seamEntry[0]?.gates.length === 1);
+  const seamKind = changeKindLines([SEAM_SPECIMEN], resolved, seamEntry);
+  t('the seam path emits the durability convention section',
+    seamKind.length === 2 && seamKind[0].includes('durability-critical callee') && seamKind[0].includes('judged from CONTENT'));
+  t('and it names the guard runnably, anchored on the delimiter', seamKind.some((l) => l.includes(`- pnpm ${DURABILITY_SEAM_GATE}   —`)));
+  const seamLine = seamKind.find((l) => l.includes(`- pnpm ${DURABILITY_SEAM_GATE}   —`)) ?? '';
+  t('the durability line states why no path derivation reaches it', /bare package root/.test(seamLine) && /wide-population ruling/.test(seamLine));
+  t('…and pushes the repair to error, a rethrow or the caller, never the optional call or a baseline entry',
+    /CONSEQUENCE/.test(seamLine) && /logger\.error\?\./.test(seamLine) && /never by baselining correct code/.test(seamLine));
+  t('…and says it needs no build', /needs NO build/.test(seamLine));
+  t('…and writes the false-positive trade down', /not only one whose seam changed/.test(seamLine) && /CI round trip/.test(seamLine));
+  const throughTableSeam = (p) => changeKindLines([p], resolved).some((l) => l.includes(`- pnpm ${DURABILITY_SEAM_GATE}   —`));
+  t('through the whole table, the specimen derives the durability guard', throughTableSeam(SEAM_SPECIMEN));
+  t('…the control does not', !throughTableSeam(SEAM_CONTROL));
+  t('…and a docs-only path does not', !throughTableSeam('content/docs/ai/agents.mdx'));
+  t('the runnable union carries the durability guard for the specimen',
+    commandsFor({ kindGroups: changeKindGates([SEAM_SPECIMEN], resolved) }).includes(`pnpm ${DURABILITY_SEAM_GATE}`));
+  const seamStale = changeKindLines([SEAM_SPECIMEN], () => null, seamEntry);
+  t('an undiscoverable durability guard renders STALE for this entry',
+    seamStale.filter((l) => l.includes(`⚠ ${DURABILITY_SEAM_GATE}: STALE`)).length === 1);
 
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
