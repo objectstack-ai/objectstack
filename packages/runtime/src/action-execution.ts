@@ -240,30 +240,41 @@ async function refuseUnservedRelationTargets(
 }
 
 /**
+ * [#23528] The data door's two exposure codes, by the gate's verdict: `404
+ * OBJECT_API_DISABLED` for an object whose `apiEnabled` is `false`, and `405
+ * OBJECT_API_METHOD_NOT_ALLOWED` with the effective operation set as `allowed`
+ * for a verb its `apiMethods` leaves out. That is the pairing `RestServer`
+ * answers for the same declaration (`apiAccessDenialFromEnable`).
+ *
+ * The ONE table both exposure refusals in this file stamp: the addressed
+ * object's ({@link refuseUnexposedDataAction}) and a nested-relation
+ * condition's target's ({@link unservedRelationTargetError}). One table, so one
+ * `callData` never answers the same verdict with two codes. A denial from
+ * {@link checkApiExposure} carries exactly one of these two statuses.
+ */
+function exposureRefusalFields(gate: ApiExposureDecision):
+    | { code: 'OBJECT_API_DISABLED'; status: 404 }
+    | { code: 'OBJECT_API_METHOD_NOT_ALLOWED'; status: 405; allowed: string[] } {
+    return gate.status === 404
+        ? { code: 'OBJECT_API_DISABLED', status: 404 }
+        : { code: 'OBJECT_API_METHOD_NOT_ALLOWED', status: 405, allowed: gate.allowedOperations ?? [] };
+}
+
+/**
  * [#22823] The data door's refusal of an unserved nested-relation condition
  * target, field for field (`refuseUnservedRelationTarget`): `code` and `status`
- * by the gate's verdict, the TARGET as `object` (the route's object is not the
- * one switched off), the condition's position as `param`, and the effective
- * operation set as `allowed` on a 405.
+ * by the gate's verdict ({@link exposureRefusalFields}), the TARGET as `object`
+ * (the route's object is not the one switched off), the condition's position
+ * as `param`, and the effective operation set as `allowed` on a 405.
  */
 function unservedRelationTargetError(target: string, param: string, gate: ApiExposureDecision): Error {
     const consequence = `, so the condition on it at '${param}' was not evaluated and the query was not run. `
         + 'Filter on the lookup\'s stored id instead, or remove the condition.';
-    const disabled = gate.status === 404;
-    const err: any = new Error(disabled
+    const refusal = exposureRefusalFields(gate);
+    const message = refusal.status === 404
         ? `Object '${target}' is not exposed via the API${consequence}`
-        : `API operation '${RELATION_CONDITION_TARGET_OPERATION}' is not allowed on object '${target}'${consequence}`);
-    if (disabled) {
-        err.code = 'OBJECT_API_DISABLED';
-        err.status = 404;
-    } else {
-        err.code = 'OBJECT_API_METHOD_NOT_ALLOWED';
-        err.status = 405;
-        err.allowed = gate.allowedOperations ?? [];
-    }
-    err.object = target;
-    err.param = param;
-    return err;
+        : `API operation '${RELATION_CONDITION_TARGET_OPERATION}' is not allowed on object '${target}'${consequence}`;
+    return Object.assign(new Error(message), refusal, { object: target, param });
 }
 
 /** The engine for a schema lookup, or `undefined` — a lookup failure is judged by the caller's fail-closed branch. */
@@ -290,6 +301,16 @@ async function resolveEngineQuietly(deps: ActionExecutionDeps, requestContext: H
  * about the body it sent. `RestServer` asks `enforceApiAccess` before its
  * twin gate for the same reason. Moved, not copied: this is the one place the
  * dispatcher's exposure decision is resolved.
+ *
+ * [#23528] The refusal is the data door's, as the nested-relation target's
+ * already was: an `Error` carrying `code` and `status` from
+ * {@link exposureRefusalFields}, the addressed object as `object`, and
+ * `allowed` on a 405. It used to throw `{ statusCode, message }` with no code,
+ * so the dispatcher's `/data` door answered `404 RESOURCE_NOT_FOUND` / `405
+ * METHOD_NOT_ALLOWED` (codes derived from the status) and the `/mcp` tools
+ * rendered the message alone, where `RestServer` and the MCP stdio face answer
+ * the same declaration `OBJECT_API_DISABLED` / `OBJECT_API_METHOD_NOT_ALLOWED`.
+ * The statuses do not move, and neither does the message.
  */
 export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
@@ -308,7 +329,7 @@ export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     }
     const gate = checkApiExposure(def, action);
     if (!gate.allowed) {
-        throw { statusCode: gate.status ?? 403, message: gate.reason ?? 'API access denied' };
+        throw Object.assign(new Error(gate.reason ?? 'API access denied'), exposureRefusalFields(gate), { object });
     }
 }
 
