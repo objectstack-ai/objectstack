@@ -437,7 +437,9 @@ describe('[ADR-0139 D4] the leaf path: one ReadableIds leaf per parent object, a
     const existing = { type: 'updated' };
     for (const operation of ['find', 'findOne', 'count', 'aggregate'] as const) {
       const { mw } = installClassifying({ objects: ['crm_case'] });
-      const { where } = await read(mw, { operation, ast: { object: 'sys_activity', where: existing } });
+      const where = (await read(mw, { operation, ast: { object: 'sys_activity', where: existing } })).where as {
+        $and: unknown[];
+      };
       expect(where.$and[0]).toBe(existing);
       expect(leafObjectOf(where.$and[1])).toBe('crm_case');
     }
