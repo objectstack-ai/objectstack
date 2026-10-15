@@ -573,6 +573,12 @@ describe('[#23657] an item never published into a package: the draft save naming
         expect(await d.stored('draft')).toEqual([]);
     }, 60_000);
 
+    it('the only draft bound to Q: a first-write pin (`If-None-Match: *`) is refused 409 METADATA_CONFLICT, because Q\'s draft is the row it writes', async () => {
+        const s = await corner();
+        refusedConflict(await s.save(view('first?'), { mode: 'draft' }, { 'if-none-match': '*' }));
+        expect(await s.stored('draft')).toEqual([{ label: 'pending', packageId: Q }]);
+    }, 60_000);
+
     it('the discard receipt names the package of the draft it removed; a package-unbound draft\'s receipt reads as before', async () => {
         const d = await corner();
         const bound = ok(await d.remove({ state: 'draft' }));
