@@ -19,8 +19,8 @@ export const entry: SemanticMigration = {
     "A maintainer ruling retired `jsx` as a page kind at 18. It was the first name of the constrained-JSX "
     + 'tier (ADR-0080), which ADR-0081 renamed `html`; through 17 the loader rewrote an authored '
     + "`kind: 'jsx'` to `html` with a notice. At 18 the page parse refuses it by name with the "
-    + 'prescription naming `html`, at every door that parses a page: `objectstack validate`, '
-    + '`objectstack build`, `objectstack lint`, `defineStack` and the metadata save door (a 422). The '
+    + 'prescription naming `html`: at `objectstack validate`, `objectstack build`, the metadata save '
+    + 'door (a 422) and `defineStack`, so under `objectstack lint` too when the config calls it. The '
     + 'rename is lossless — the source is compiled and rendered exactly as before — but no tool makes it '
     + 'for an authored source: the D2 conversion `page-kind-jsx-to-html` belongs to protocol 11, below '
     + 'the migration floor, so change the value by hand. Stored pages need no edit: every stored-row '

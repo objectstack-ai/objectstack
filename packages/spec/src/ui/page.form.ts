@@ -48,7 +48,7 @@ export const pageForm = defineForm({
         // already uses for every other program-text row (`action.body.source`,
         // `object.fields.expression`). `visibleWhen` is a MEANINGFULNESS gate,
         // not a parse gate — `PageSchema` accepts the key whatever the `kind`,
-        // but only the three source-compiled kinds ever read it; the two layout
+        // but only the two source kinds (`html` / `react`) ever read it; the two layout
         // kinds (`full` / `slotted`) compose regions and slots instead.
         { field: 'source', type: 'code', language: 'jsx', colSpan: 2, visibleWhen: "data.kind in ['html','react']", helpText: "Page source text. For kind 'html' it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime." },
       ],
