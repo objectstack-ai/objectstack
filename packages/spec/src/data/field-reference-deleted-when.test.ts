@@ -178,7 +178,9 @@ describe('`referenceDeletedWhen` — sibling half (ObjectSchema)', () => {
     expect(() => ObjectSchema.create(request({ field: 'cancel_reason', value: 'deleted' }) as never)).toThrow(
       /referenceDeletedWhen/,
     );
-    const created = ObjectSchema.create(request({ field: 'cancel_reason', value: 'record_deleted' }) as never);
+    const created = ObjectSchema.create(request({ field: 'cancel_reason', value: 'record_deleted' }) as never) as {
+      fields: Record<string, { referenceDeletedWhen?: unknown }>;
+    };
     expect(created.fields.record_id.referenceDeletedWhen).toEqual({ field: 'cancel_reason', value: 'record_deleted' });
   });
 

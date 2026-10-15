@@ -250,7 +250,19 @@
       "verifiedAt": "2026-10-15",
       "evidenceScope": "in-repo",
       "evidence": "packages/spec/src/data/field.zod.ts#referenceDeletedWhen (the parse-time door, field half: the FieldSchema superRefine refuses the key on a field that declares no `referenceVia`); packages/spec/src/data/object.zod.ts#refuseDishonestReferenceDeletedWhen (the parse-time door, sibling half: the ObjectSchema superRefine refuses a `field` that is not a declared single-value `select` with inline `options` on the same object, and a `value` that is not one of its option values); packages/spec/src/data/field-reference-deleted-when.test.ts (the accept and refuse pins)",
-      "note": "PLANNED — declared ahead of both carriers by the ruling's own sequencing (objectui#12489 ruling 6203737086, letter A; this key is its spec half). PRODUCER: objectstack #23736 (Blocked-by this key) declares it on `sys_approval_request.record_id` as `{ field: 'cancel_reason', value: 'record_deleted' }` — the cancel reason plugin-approvals already writes when a request's record is deleted. CONSUMER: objectui#12489 step 4, the record pointer renderer, which draws the tombstone from the option's own label, reads nothing and links nothing; dispatched once the spec is installable at objectui's pin. Measured in this repo at 3b46855fb: no author of the key and no reader outside packages/spec (it is new). objectui was not walked from this seat, so the scope is in-repo. No `authorWarn`, on the `field.settledWhen` precedent: a display refinement with named, blocked carriers, whose authoring half (parse, sibling and option checks) is already enforced; an author who sets it today loses nothing and re-authors nothing when the renderer lands. Flip to `live` on the objectui#12489 step 4 landing, citing its renderer at the pin that carries it, with #23736's object declaration as `producer`."
+      "note": "PLANNED — declared ahead of both carriers by the ruling's own sequencing (objectui#12489 ruling 6203737086, letter A; this key is its spec half). PRODUCER: objectstack #23736 (Blocked-by this key) declares it on `sys_approval_request.record_id` as `{ field: 'cancel_reason', value: 'record_deleted' }` — the cancel reason plugin-approvals already writes when a request's record is deleted. CONSUMER: objectui#12489 step 4, the record pointer renderer, which draws the tombstone from the option's own label, reads nothing and links nothing; dispatched once the spec is installable at objectui's pin. Measured in this repo at 3b46855fb: no author of the key and no reader outside packages/spec (it is new). objectui was not walked from this seat, so the scope is in-repo. No `authorWarn`, on the `field.settledWhen` precedent: a display refinement with named, blocked carriers, whose authoring half (parse, sibling and option checks) is already enforced; an author who sets it today loses nothing and re-authors nothing when the renderer lands. Flip to `live` on the objectui#12489 step 4 landing, citing its renderer at the pin that carries it, with #23736's object declaration as `producer`.",
+      "children": {
+        "field": {
+          "status": "planned",
+          "verifiedAt": "2026-10-15",
+          "note": "The sibling `select` field whose value marks the target deleted. Judged at parse by the container's evidence (snake_case; a declared single-value `select` with inline `options` on the same object, never the declaring field itself); read by nothing until the objectui#12489 step 4 renderer lands. Shares the container's verdict and its flip."
+        },
+        "value": {
+          "status": "planned",
+          "verifiedAt": "2026-10-15",
+          "note": "The option value meaning 'deleted by the platform'; its option's label is the tombstone's text. Judged at parse by the container's evidence (one of the sibling's declared option values); read by nothing until the objectui#12489 step 4 renderer lands. Shares the container's verdict and its flip."
+        }
+      }
     },
     "mailAssociation": {
       "status": "live",
