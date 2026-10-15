@@ -103,9 +103,11 @@
 // its own) and FILTERS the verdict. An anchor is judged only when its target
 // file is in the change set, and the run reds only on judged anchors that no
 // longer resolve. Nothing else this gate checks is judged in this mode: the
-// ledger's structure, coverage, traps and floor, and any anchor broken by a
-// file outside the change set. So a branch never inherits a red it did not
-// cause, and the full gate stays the full gate.
+// ledger's structure, coverage, traps and floor, and any anchor whose target
+// file is outside the change set. So a branch never inherits a red from a file
+// it did not touch, and the full gate stays the full gate. ⚠️ An anchor that is
+// ALREADY broken on REF, in a file the branch also touches, is reported too:
+// the mode judges the working tree, not the delta against REF.
 //
 //   - "Lost" means a judged anchor that the shared resolver does not resolve
 //     at the WORKING TREE. Either its symbol is gone from the file
@@ -2329,7 +2331,7 @@ function scopedAnchorVerdict({ ref, change, targets, findings, onResidual }) {
       state: 'lost',
       exitCode: 1,
       lines: [
-        `${head}: ${lost.length} LOST anchor(s). The change set removed or renamed what these checklist citations name (${scope}):`,
+        `${head}: ${lost.length} LOST anchor(s). These checklist citations name what the change set's files no longer declare (${scope}):`,
         ...lost.map((l) => `  ✗ ${l.doc} line ${l.line}: \`${l.anchor}\` — ${l.kind === 'unresolved-path'
           ? `${l.path} is not a tracked file any more (deleted, or the old side of a rename).`
           : `${l.absent.map((s) => `\`${s}\``).join(' and ')} ${l.absent.length > 1 ? 'are' : 'is'} no longer declared in ${l.path}.`}`),
@@ -2358,10 +2360,10 @@ function scopedAnchorVerdict({ ref, change, targets, findings, onResidual }) {
   };
 }
 
-/** A refused change set: say so, never judge anything in its place, exit 2. */
+/** A refused run: say so, never judge anything in its place, exit 2. */
 function refuseScoped(reason) {
   console.error(`check-platform-checklist ${SCOPED_FLAG}: REFUSED — ${reason}`);
-  console.error('\nThis is a REFUSAL, not a pass: no change set was read, so nothing was judged, and the full corpus is not judged in its place. The full gate is `pnpm check:platform-checklist`.');
+  console.error('\nThis is a REFUSAL, not a pass: nothing was judged, and the full corpus is not judged in its place. The full gate is `pnpm check:platform-checklist`.');
   process.exit(SCOPED_REFUSED_EXIT);
 }
 
@@ -2702,9 +2704,13 @@ function selfTestSymbolAnchors() {
   t('L4 the anchor population the scoped mode counts IS the sweep\'s: the same extractor and options, equal document by document',
     liveTargets.disagreements.length === 0 && liveTargets.targets.length === liveSweep.counts.anchors && liveTargets.targets.length > 0,
     `${liveTargets.targets.length} read vs ${liveSweep.counts.anchors} swept; ${liveTargets.disagreements.join('; ')}`);
-  t('L5 the real `git` answers in this checkout: a REF that cannot exist is refused AND HEAD is read, so a refusal is the runner reporting and not a runner that always fails',
-    Boolean(changedFilesSince('refs/heads/no-such-ref/scoped-mode-self-test', gitInRoot).refusal)
-      && Array.isArray(changedFilesSince('HEAD', gitInRoot).files));
+  // ⚠️ The control resolves HEAD through the runner rather than reading a whole
+  // change set: a change set depends on the tree's state (an unstaged deletion
+  // is refused by design), and a control that reds on a dirty tree would red
+  // the full gate for a reason it does not judge.
+  t('L5 the real `git` answers in this checkout: HEAD resolves through it AND a REF that cannot exist is refused, so a refusal is the runner reporting and not a runner that always fails',
+    gitInRoot(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']).status === 0
+      && Boolean(changedFilesSince('refs/heads/no-such-ref/scoped-mode-self-test', gitInRoot).refusal));
 
   symbolAnchorsReachedVerdict = true;
   return { checked, failures };
