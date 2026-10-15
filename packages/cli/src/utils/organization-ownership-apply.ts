@@ -24,7 +24,6 @@ import {
   SEEDED_BY,
   TEMPLATE_OBJECT,
   columnNameOf,
-  dialectOf,
   predicateSql,
   Sql,
   type AttributionSink,
@@ -2559,11 +2558,12 @@ function refuseUnreviewedChoices(plan: OrganizationOwnershipPlan, opts: ApplyOpt
  * the report.
  */
 export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<OrganizationOwnershipApplyReport> {
-  const dialect = dialectOf(opts.executor.client);
   const now = opts.now ?? (() => new Date());
   const run: Run = {
     opts,
-    sql: new Sql(opts.executor, dialect ?? 'sqlite'),
+    // The executor's dialect was resolved from the driver before this call
+    // (`ceremonyDialectOf`, which refuses an unresolved one): never a default.
+    sql: new Sql(opts.executor, opts.executor.dialect),
     plan: undefined as unknown as OrganizationOwnershipPlan,
     columns: new Map(),
     attributed: new Map(),
