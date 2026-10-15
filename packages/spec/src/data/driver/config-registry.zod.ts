@@ -124,7 +124,7 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  * authored one with a notice. At 18 it is retired: it left the selection face
  * (no boot host accepts `OS_DATABASE_DRIVER=mongo`), and an authored
  * `datasource.driver: 'mongo'` is refused at parse with the prescription naming
- * `mongodb` ({@link retiredDriverIdGuidance}, read by `DriverType`). It lives on
+ * `mongodb` ({@link RETIRED_DRIVER_ID_GUIDANCE}, read by `DriverType`). It lives on
  * as a {@link DriverVocabularyEntry.retiredAliases} key, which keeps it on the
  * CONTRACT face only — and that half is load-bearing, not a second spelling.
  * Data at rest never meets the refusal: a stored row is replayed through the
@@ -183,7 +183,7 @@ export interface DriverVocabularyEntry {
    *
    *  - **authoring** — refused by name: `DriverType` (`datasource.zod.ts`)
    *    raises the prescription for an authored `datasource.driver`, through
-   *    {@link retiredDriverIdGuidance}. `driver` is an open namespace (a plugin
+   *    {@link RETIRED_DRIVER_ID_GUIDANCE}. `driver` is an open namespace (a plugin
    *    ships `com.vendor.snowflake`), so the field is `z.string()` and
    *    `enumWithRetiredValues` cannot carry this; the prescription type and
    *    its writing conventions are that helper's ({@link RetiredValueGuidance}).
@@ -298,29 +298,19 @@ export const DRIVER_ID_ALIASES: Readonly<Record<string, BuiltinDriverId>> = Obje
 );
 
 /**
- * Retired spelling → its prescription, across every row — the lookup table
- * behind {@link retiredDriverIdGuidance}.
+ * Retired spelling → its prescription, across every row's
+ * {@link DriverVocabularyEntry.retiredAliases}. Keys are lower-case, the way
+ * {@link resolveDriverId} reads a spelling.
+ *
+ * Exported for `DriverType` (`datasource.zod.ts`), which refuses each key in a
+ * form the JSON Schema projection keeps (a `pattern`), so a document validated
+ * against the published schema meets the refusal too. Iterate it by own
+ * entries; a bare index by an arbitrary spelling reaches `Object.prototype`
+ * (see {@link lookupDriverId}).
  */
-const RETIRED_DRIVER_ID_GUIDANCE: Readonly<Record<string, string>> = Object.freeze(
+export const RETIRED_DRIVER_ID_GUIDANCE: Readonly<Record<string, string>> = Object.freeze(
   Object.fromEntries(VOCABULARY_ROWS.flatMap((entry) => Object.entries(entry.retiredAliases ?? {}))),
 );
-
-/**
- * The prescription for a RETIRED driver spelling, or `undefined` for every
- * other value — a live alias, a plugin's driver id, a typo, a non-string.
- *
- * Read the way {@link resolveDriverId} reads a spelling (trimmed,
- * case-insensitive, own keys only), so `' Mongo '` meets the same refusal the
- * resolver would have resolved. What `DriverType` refuses an authored
- * `datasource.driver` with; see {@link DriverVocabularyEntry.retiredAliases}
- * for why the spelling still resolves the contract.
- */
-export function retiredDriverIdGuidance(driver: unknown): string | undefined {
-  if (typeof driver !== 'string') return undefined;
-  const spelling = driver.trim().toLowerCase();
-  if (!Object.prototype.hasOwnProperty.call(RETIRED_DRIVER_ID_GUIDANCE, spelling)) return undefined;
-  return RETIRED_DRIVER_ID_GUIDANCE[spelling];
-}
 
 /**
  * The spellings a BOOT HOST accepts as a driver selection — every selection
