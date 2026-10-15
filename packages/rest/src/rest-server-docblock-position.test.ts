@@ -147,7 +147,7 @@ describe('rest-server.ts docblock position', () => {
  * host interfaces' blocks and two functions' (it holds two registrars' bodies),
  * plus the three blocks that moved with the record-share body (`respondError`'s,
  * `sharingDeclaredExtra`'s and `sharingFaultMessage`'s), which `rest-server.ts`
- * therefore no longer holds (168 → 165 there, above its floor).
+ * therefore no longer holds (three fewer there, still far above its floor).
  */
 const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
     'data-action-routes.ts': 4,
