@@ -7,7 +7,8 @@
  *
  * ## The defect, reproduced before it was repaired
  *
- * `respondSharingError` (`rest-server.ts`) asks {@link classifiedRefusalAnswer}
+ * `respondSharingError` (`sharing-routes.ts` since #23050 slice 4, `rest-server.ts`
+ * before) asks {@link classifiedRefusalAnswer}
  * — the flat `/data` door's own classification — and re-dressed `status`,
  * `code`, the message and (since #12510) `declaredCode` into the nested
  * ADR-0112 D5 envelope (#8111). The classification's body was ALREADY carrying

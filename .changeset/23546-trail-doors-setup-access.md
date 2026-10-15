@@ -11,7 +11,7 @@ Clause-②: yes (narrowing)
 
 **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
 
-Organization admins hold `setup.access`. Under a wall (the `isolated` and `group` postures), these four doors handed every organization's admin the environment-wide authoring trail of items no organization authors (ADR-0131 C5): who saved each item and when, its superseded bodies, and every package's commit timeline. The data door on the same three tables (`sys_metadata_history`, `sys_metadata_audit`, `sys_metadata_commit`) already refused them (`requiredPermissions: ['studio.access']`, ADR-0131 D7). The doors now follow the same rule. The narrowing applies in every posture, `single` included.
+Organization admins hold `setup.access`. Under a wall (the `isolated` and `group` postures), these four doors handed every organization's admin the environment-wide authoring trail of items no organization authors (ADR-0131 C5): who saved each item and when, its superseded bodies, and every package's commit timeline. The data door on the same three tables (`sys_metadata_history`, `sys_metadata_audit`, `sys_metadata_commit`) refuses them (`requiredPermissions: ['studio.access']`, ADR-0131 D7), and the doors now follow the same rule. The narrowing applies in every posture, `single` included.
 
 Each door, and the callers it now refuses:
 

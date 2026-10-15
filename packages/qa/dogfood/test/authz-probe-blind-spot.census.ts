@@ -519,8 +519,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'indentation and the subtrahend is pinned at 1 by the `forwarder slice:` control, never inferred from a ' +
       'terminator spelling), PLUS `registerPerItemRoute(` call sites; counted over this file AND every ' +
       'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
-      '`data-action-routes.ts`, `batch-routes.ts` and `approvals-routes.ts`, the modules the bodies of ' +
-      '`registerDataActionEndpoints`, `registerBatchEndpoints` and `registerApprovalsEndpoints` moved to; ' +
+      '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts` and `sharing-routes.ts`, the modules the ' +
+      'bodies of `registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
+      '`registerSharingEndpoints` and `registerSharingRuleEndpoints` moved to; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -677,13 +678,27 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // readings; the four new occurrences are this slice's seam, the same two
     // spellings (the host literal's forwarder, two; the host interface's
     // member, two). No call site was added.
+    // [#23050 slice 4] 70 / 19 / 51 UNCHANGED, the same measurement again:
+    // `registerSharingEndpoints`' and `registerSharingRuleEndpoints`' bodies
+    // (eight registration sites, three and five, all outside
+    // `registerMetadataEndpoints`, so all in the blind spot) moved to ONE
+    // module, `sharing-routes.ts`, which joins the list (length 4 -> 5) with its
+    // own control. `this.routeManager.register(` stays 63 over the five files
+    // (34 here + 9 + 5 + 7 + 8), `private register*Endpoints(` stays 16 (both
+    // registrars are still declared here), and `enforceAuth` 72 -> 80 is
+    // RE-ANCHORED, not relaxed: the eight call sites moved with their routes
+    // and are counted in both readings; the eight new occurrences are this
+    // slice's seam, the same two spellings TWICE, because the module carries
+    // two registrars (two host literals' forwarders, four; two host
+    // interfaces' members, four). No call site was added.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 4,
+      'registrar list length': 5,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
+      'sharing-routes.ts: this.routeManager.register(': 8,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -691,7 +706,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 72,
+      enforceAuth: 80,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +

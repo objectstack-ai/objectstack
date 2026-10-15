@@ -1,0 +1,8 @@
+{
+  "file": "packages/rest/src/sharing-routes.ts",
+  "adrs": [
+    "ADR-0111",
+    "ADR-0112"
+  ],
+  "invariant": "The record-sharing REST doors, moved here whole from `rest-server.ts` (#23050 slice 4): the per-record share family (`GET` / `POST {base}/data/:object/:id/shares`, `DELETE …/shares/:shareId`) and the sharing-rule family under `{base}/sharing/rules`. ADR-0111 — the doors decide no share authority of their own: the SERVICE enforces it (its D1/D2, and D6 for the rule surface's `manage_sharing` gate), and the doors only map its verdicts onto HTTP: a listing is management-gated (an invisible record answers 404, a visible record to a non-manager 403; its D5); a revoke forwards the URL's (object, id) as its scope, so a share id is revoked only through the record it belongs to (its D4); an inert grant or rule evaluation refuses 422 `SHARING_NOT_ENABLED` instead of materialising rows nothing reads (its D7). ADR-0112 — the per-record family answers every refusal through ONE emitter (`respondError`) at the nested position, where `error.code` carries the semantic code (its D5), typed as the closed `ErrorCode` vocabulary and filled from the catalog's own floor (`standardErrorCodeForHttpStatus`) when a classified refusal names none (its D4). A mapping arm dropped, a new one invented here, or a refusal answered in a second dialect is the drift both records forbid; the bodies' own comments carry each citation."
+}
