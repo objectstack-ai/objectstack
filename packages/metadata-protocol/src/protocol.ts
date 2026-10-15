@@ -24477,6 +24477,42 @@ export class ObjectStackProtocolImplementation implements
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft', packageId: draftKey, ...memberOption(request.member) },
         );
+        // [ADR-0029 D9.9, #23630] …and the save door's representability
+        // refusal, asked of the row this promotion writes: an `object` row
+        // bound to a package that does not own the object. A draft save is
+        // judged against the owner of its own moment, so package `Q`'s draft
+        // of an object no row held yet was stored, correctly; when package
+        // `P`'s runtime-authored row of that object was saved after it, `P`
+        // owned the object, and promoting `Q`'s draft wrote `Q`'s active row
+        // beside `P`'s and answered success, while the registry write-through
+        // refused it into a `console.warn` and kept serving `P` — the
+        // disagreement {@link overlayPackageMismatchError} exists to prevent.
+        //
+        // Judged on `promoteInto`, the package the active row is written
+        // under (the stated binding, or for an unbound draft adopted into the
+        // item's package, that package), exactly as the save door judges the
+        // address it resolved; with the save door's judge and envelope, and
+        // before `repo.promoteDraft` writes, so a batch publish aborts on it
+        // as on the refusals below (ADR-0067 D2). Both doors reach it: the
+        // per-item publish and `publishPackageDrafts` promote through here.
+        //
+        // ⛔ Not asked of SEALED managed content ({@link isSealedManagedItem}):
+        // an object a code package ships. The save door answers that row's
+        // package door first ({@link refusePackagedBaseOverride},
+        // `NOT_OVERRIDABLE` / 403, ahead of its D9.9 call), and the promotion
+        // reaches the same refusal at the store (`repo.promoteDraft` →
+        // `assertAllowed`). Asking `classifyObjectContribution` there would
+        // answer its packaged `mismatch` arm instead — a second dialect for
+        // one row, whose prescription ("bind to the owner") the sealed rule
+        // refuses. One row, one refusal: the save door's.
+        if (draftForGate && singularType === 'object' && !this.isSealedManagedItem(singularType, request.name)) {
+            const layer = this.classifyObjectContribution(request.name, promoteInto);
+            if (layer.kind === 'mismatch') {
+                throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                    request.name, layer.packageId, layer.ownerPackageId,
+                );
+            }
+        }
         // [#21470] …and the divergent `name` refusal, on the same body and for
         // the same reason: a draft stored before `saveMetaItem` judged every
         // type can carry a `name` that is not its row's, and promoting it

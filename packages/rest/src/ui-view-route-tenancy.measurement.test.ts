@@ -1108,7 +1108,10 @@ describe('[#13214] §4 preconditions', () => {
 
         // ⛔ Reverse-checked: the same terms counted over the WHOLE file, so
         // these readings are about this registrar and not about a misspelling.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        // [#23050 slice 4] The list's length 4 → 5 (`sharing-routes.ts`); over
+        // it the first two terms read 52 and 67 (50 and 65 before, +1 each per
+        // new host-literal forwarder) and the ownership guard stays at 1.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(5);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
         // ...and the ownership guard is NOT sprayed across the file — it is a

@@ -339,6 +339,11 @@ const MODULES = {
     // string `error` body of `registerApprovalsEndpoints`' handlers left this
     // file with that body for `approvals-routes.ts`, declared below at the count
     // it had here; the sum is unchanged (17 + 13 + 8 + 1 = 39).
+    //
+    // 17 → 17 (#23050 slice 4): the record-sharing and sharing-rule bodies left
+    // this file for `sharing-routes.ts` carrying NO literal string `error` body
+    // (every arm there computes its message), so this count does not move and
+    // that module declares 0 below; the sum is unchanged (17 + 13 + 8 + 1 + 0 = 39).
     stringError: 17,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
@@ -390,7 +395,13 @@ const MODULES = {
     // above. Nine `{ code, error }` bodies left with the approvals body for
     // `approvals-routes.ts`, declared below; the sum is unchanged
     // (22 + 15 + 8 + 9 = 54).
-    siblingCode: 22,
+    //
+    // 22 → 18 (#23050 slice 4): NOT progress — the same MOVE as `stringError`
+    // above. The four `{ code, error }` bodies of the sharing-rule family's
+    // `handleError` (`VALIDATION_FAILED`, `PERMISSION_DENIED`, `RULE_NOT_FOUND`
+    // and its 500 terminal) left with that body for `sharing-routes.ts`,
+    // declared below; the sum is unchanged (18 + 15 + 8 + 9 + 4 = 54).
+    siblingCode: 18,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -480,6 +491,24 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 1,
     siblingCode: 9,
+  },
+
+  // [#23050 slice 4] `RestServer#registerSharingEndpoints`' and
+  // `#registerSharingRuleEndpoints`' bodies — the per-record share family and
+  // the sharing-rule family — moved out of `rest-server.ts` whole, into ONE
+  // module, on exactly slice 1's terms above: a MOVE, no wire answer changed,
+  // so it inherits `dialectOnly` and the two dialect facts, and no write-site
+  // count. Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 17 → 17, siblingCode 22 → 18),
+  // so each sum is unchanged. Both only ever tick down. Discovered by the
+  // `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/sharing-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 4 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 4,
   },
 };
 

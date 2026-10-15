@@ -2138,6 +2138,54 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * The storage fixes for a deployment where nothing serves `sys_metadata`,
+   * worded exactly as the CLI's boot-time `⚠ No storage:` line names them
+   * (`packages/cli` `serve.ts`, `noStorageRemedies`): the operator meets the
+   * same three remedies from either line, never two vocabularies. ⛔ Not a
+   * place to add a fourth — a remedy the CLI line does not name belongs there
+   * first.
+   */
+  private static readonly NO_STORAGE_REMEDIES = [
+    'set OS_DATABASE_URL (e.g. file:./data/app.db, or a postgres:// or mysql:// URL)',
+    "mount a storage driver in the stack's plugins (e.g. new DriverPlugin(driver) from @objectstack/runtime)",
+    'run with --dev (an in-memory SQLite store, for development)',
+  ] as const;
+
+  /**
+   * Is `sys_metadata` unreadable because NO STORAGE exists — no datasource
+   * declared, no driver registered — rather than because a datasource that
+   * exists failed to answer?
+   *
+   * Read off the engine's own routing, the facts `getDriver` throws on, and
+   * never off the text of the error the read produced (that string is the
+   * driver's and the engine's to reword):
+   *
+   * - a driver serves it ⇒ the read itself failed: a datasource problem;
+   * - it is bound to a named datasource (explicit, mapping, lifecycle or
+   *   package binding) whose driver is missing ⇒ that datasource is declared:
+   *   a datasource problem;
+   * - the datasource layer recorded a declared datasource it could not use
+   *   (policy-refused, or a connect failure the operator waved through) ⇒ a
+   *   datasource problem.
+   *
+   * Only when all three are empty does nothing at all stand behind the
+   * object, which is the case the datasource remedy cannot help with.
+   *
+   * Asked ONLY once the read has already failed, so a healthy boot pays
+   * nothing, and answered as of this moment of the boot — which is the same
+   * moment, against the same registries, that the failed read was judged at.
+   * A start() that registers a driver later does not undo the verdict the
+   * line already states for this process.
+   */
+  private sysMetadataHasNoStorage(): boolean {
+    const ql = this.ql;
+    if (!ql) return false;
+    if (ql.getDriverForObject('sys_metadata')) return false;
+    if (ql.resolveEffectiveDatasource('sys_metadata') !== undefined) return false;
+    return ql.listUnavailableDatasources().length === 0;
+  }
+
+  /**
    * Restore persisted metadata from the database (sys_metadata) on startup.
    *
    * Calls `protocol.loadMetaFromDb()` to bulk-load all active metadata
@@ -2163,6 +2211,10 @@ export class ObjectQLPlugin implements Plugin {
    * still continues in the degraded state (refusing to boot on an unreadable
    * overlay store would turn a transient outage into an outright outage),
    * it just no longer claims that state is health.
+   *
+   * The outage line names the fix that matches its cause
+   * ({@link sysMetadataHasNoStorage}): the storage remedies when no datasource
+   * is declared and no driver is registered, the datasource remedy when one is.
    */
   private async restoreMetadataFromDb(ctx: PluginContext): Promise<void> {
     // Phase 1: Resolve protocol service (separate from DB I/O for clearer diagnostics)
@@ -2190,12 +2242,26 @@ export class ObjectQLPlugin implements Plugin {
         // ranks any count taken from a read that did not happen. The line owes
         // the two things AGENTS.md requires of a durability `error` — the
         // concrete consequence, and the fix.
+        //
+        // The fix depends on WHY the read did not happen, and the engine knows:
+        // a deployment that declared no datasource and registered no driver has
+        // no connection or credentials to check, so the datasource remedy would
+        // send the operator hunting for a store nobody configured. Level and
+        // consequence are the same in both arms; only the cause and the fix
+        // differ.
+        const noStorage = this.sysMetadataHasNoStorage();
         ctx.logger.error(
-          'sys_metadata could NOT be read at boot — persisted metadata was NOT restored, and this kernel will keep reporting healthy. ' +
+          'sys_metadata could NOT be read at boot — ' +
+            (noStorage
+              ? 'no storage is configured: no datasource is declared and no driver is registered, so nothing serves sys_metadata. Persisted metadata was NOT restored, '
+              : 'persisted metadata was NOT restored, ') +
+            'and this kernel will keep reporting healthy. ' +
             'Every overlay object, view, app, permission and hook stored in the database is absent from the SchemaRegistry for the life of this process: ' +
             'registry lookups answer "not declared" rather than "unavailable", so unknown-column query guards, hooks and relationships silently degrade, ' +
             'and overlay objects get neither a synced table nor a metadata bridge. Authoring against this kernel writes on top of state it never loaded. ' +
-            'Fix: check the datasource behind sys_metadata — connection, credentials, and that the table exists — then restart. ' +
+            (noStorage
+              ? `Fix: ${ObjectQLPlugin.NO_STORAGE_REMEDIES[0]}; ${ObjectQLPlugin.NO_STORAGE_REMEDIES[1]}; or ${ObjectQLPlugin.NO_STORAGE_REMEDIES[2]} — then restart. `
+              : 'Fix: check the datasource behind sys_metadata — connection, credentials, and that the table exists — then restart. ') +
             'A store that merely has not been provisioned yet is NOT this case; that first-boot path stays quiet.',
           // `Logger.error(message, error?: Error, meta?)` — the error slot is
           // genuinely empty here: `loadMetaFromDb` swallows the driver error

@@ -97,7 +97,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
   const allFields = (object: string): string[] =>
     Object.keys(((engine as any).getSchema(object)?.fields ?? {}) as Record<string, unknown>);
 
-  /** The double: the two contract members, answered per reader. */
+  /** The double: the two field members, answered per reader, and the two read halves (below). */
   const security = {
     async getReadableFields(object: string, context?: any): Promise<string[] | undefined> {
       const all = allFields(object);
@@ -109,6 +109,21 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     },
     async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
       return security.getReadableFields(object, context);
+    },
+    // [ADR-0139 E5] Every reader reads every parent record here: the two halves
+    // of a read the engine composes the parent-record gate's ReadableIds
+    // leaves from — the object-level admission and the read scope (none).
+    async canReadObject(): Promise<boolean> {
+      return true;
+    },
+    async getReadFilter(): Promise<Record<string, unknown> | undefined> {
+      return undefined;
+    },
+    // The engine's fallback admission when `canReadObject` is absent. Like
+    // plugin-security's (measured), it explains a principal's access and
+    // answers a SYSTEM context "not allowed".
+    async explain(_request: { object: string }, context?: any): Promise<{ allowed: boolean }> {
+      return { allowed: !context?.isSystem };
     },
   };
 
@@ -253,6 +268,23 @@ describe('[#21388] an update whose every recorded change is withheld from the re
       walked.push(String(page[0].id));
     }
     expect(walked).toEqual((await read(MEMBER)).map((r) => String(r.id)));
+  });
+
+  it('[ADR-0139 E5] with no canReadObject on the service, the row is still withheld: no leaf is written for the rule to re-read as SYSTEM', async () => {
+    // The rule pre-scans this read's WHERE as SYSTEM. A ReadableIds leaf there
+    // would be admitted by `explain`, which refuses SYSTEM, so it would select
+    // nothing, and the rule would serve the rows it never saw.
+    const own = Object.getOwnPropertyDescriptor(security, 'canReadObject');
+    expect(own, 'the double carries canReadObject as its own member').toBeTruthy();
+    delete (security as { canReadObject?: unknown }).canReadObject;
+    try {
+      const rows = await read(MEMBER);
+      expect(rows.map((r) => r.id)).not.toContain(rowIds.withheld);
+      // Armed: the member is still served the rows it is served with the admission.
+      expect(rows.map((r) => r.id).sort()).toEqual([rowIds.created, rowIds.mixed, rowIds.empty, rowIds.served].sort());
+    } finally {
+      Object.defineProperty(security, 'canReadObject', own!);
+    }
   });
 
   it('findOne: the withheld row is absent by id for the member and present for the admin', async () => {
