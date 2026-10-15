@@ -1552,7 +1552,14 @@ export const CEILINGS = new Map([
   // that raised it, recorded on #19641 comment 5771401251 together with the
   // option A text it accepted (raise to 1116, ruling quoted in the PR body).
   // Landed count, headroom 0, same convention.
-  ['AGENTS.md', 1116],
+  //
+  // 1116 → 1117 (card #23534, PR #23596): the per-file test-budget sentence
+  // ruling record 6181973363 item 4 orders — bought by CONTENT; a greedy rewrap
+  // at the paragraph's own width needs 4 lines for the 3-line tail (measured).
+  // Maintainer ruling, verbatim and untranslated: 「A 上限抬到 1117 (Recommended)」
+  // — the maintainer's live answer to the seat session, recorded on PR #23596
+  // comment 6184004601. Landed count, headroom 0, same convention.
+  ['AGENTS.md', 1117],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to

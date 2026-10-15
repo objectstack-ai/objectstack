@@ -137,13 +137,20 @@ async function mountImport(manager: AuthManager): Promise<Hono> {
 const importBody = (email: string) =>
   JSON.stringify({ format: 'json', mode: 'insert', passwordPolicy: 'auto', rows: [{ email, name: 'Invitee' }] });
 
-/** The invitation email better-auth sent to `address`, once its background send settles. */
+/**
+ * The invitation email better-auth sent to `address`, once its background send
+ * settles. [#23343] It is `auth.account_invitation`, whose link variable is
+ * `setPasswordUrl`; the token is the link's last path segment.
+ */
 async function invitationTo(sent: SentMail[], address: string): Promise<SentMail> {
   await vi.waitFor(() =>
-    expect(sent.some((m) => m.template === 'auth.password_reset' && m.to.address === address)).toBe(true),
+    expect(sent.some((m) => m.template === 'auth.account_invitation' && m.to.address === address)).toBe(true),
   );
-  return sent.find((m) => m.template === 'auth.password_reset' && m.to.address === address)!;
+  return sent.find((m) => m.template === 'auth.account_invitation' && m.to.address === address)!;
 }
+
+const linkOf = (mail: SentMail) => new URL(String(mail.data.setPasswordUrl));
+const tokenOf = (mail: SentMail) => linkOf(mail).pathname.split('/').pop()!;
 
 /** GET a link the way a browser follows it, with no redirect followed. */
 const follow = (manager: AuthManager, link: string) => manager.handleRequest(new Request(link));
@@ -166,8 +173,8 @@ describe('[#23152] the identity import invitation link', () => {
     expect(answer.data?.rows?.[0]?.code, 'the invitation was requested').toBeUndefined();
 
     const mail = await invitationTo(sent, email);
-    const link = new URL(String(mail.data.resetUrl));
-    const token = String(mail.data.token);
+    const link = linkOf(mail);
+    const token = tokenOf(mail);
     expect(link.origin + link.pathname).toBe(`${ORIGIN}${BASE}/reset-password/${token}`);
 
     // Where the invitee lands first: before the fix this read
@@ -222,6 +229,6 @@ describe('[#23152] the identity import invitation link', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
 
     const mail = await invitationTo(sent, email);
-    expect(String(mail.data.resetUrl)).toBe(`${ORIGIN}${BASE}/reset-password/${String(mail.data.token)}?callbackURL=`);
+    expect(String(mail.data.setPasswordUrl)).toBe(`${ORIGIN}${BASE}/reset-password/${tokenOf(mail)}?callbackURL=`);
   }, 120_000);
 });

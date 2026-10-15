@@ -110,6 +110,7 @@ import {
   removalBlockedByOwnerTarget,
 } from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { readAccountInvitation } from './account-invitation-marker.js';
 import {
   REVOKE_SESSION_NOT_FOUND_CODE,
   REVOKE_SESSION_NOT_FOUND_MESSAGE,
@@ -1780,36 +1781,71 @@ export class AuthManager {
               `Password-reset email could not be sent to ${user.email}: no email service is configured for this deployment.`,
             );
           }
-          const ttlSec = this.config.emailAndPassword?.resetPasswordTokenExpiresIn ?? 60 * 60;
+          // The lifetime the token in `url` really has: better-auth mints it
+          // with `resetPasswordTokenExpiresIn || 3600` seconds (installed
+          // 1.7.3 `routes/password.mjs`) — `||`, so a configured `0` is its
+          // default too, and the mail must not say "0 minutes" for it.
+          const ttlSec = this.config.emailAndPassword?.resetPasswordTokenExpiresIn || 60 * 60;
+          // [#23343] An account an administrator created (the identity
+          // import) is INVITED through this same reset mint, because
+          // better-auth hands the link to nobody but this callback. The import
+          // marks its own request; that one send names the new account and
+          // its inviter instead of a reset nobody asked for. Every other
+          // reset — above all a public `POST /request-password-reset`, which
+          // always carries its Request — reads no marker and sends
+          // `auth.password_reset` exactly as before. The marker's header
+          // (`account-invitation-marker.ts`) holds the four legs that keep it
+          // server-only, and why it rides better-auth's request state.
+          const invitation = await readAccountInvitation(user.email, request);
           // Surface both template-resolution throws and transport failures
           // (status:'failed'); resilience is preserved by better-auth's
           // background-task handling (see sendVerificationEmail) and the
           // forget-password route always returns {status:true}, so this never
           // leaks whether an address exists nor turns the request into a 500.
           // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
-          // admin-initiated reset (`admin-import-users.ts` calls
-          // `requestPasswordReset`) reaches this callback with the ADMIN's
-          // request, so without this rung the user's mail carries the admin's
-          // browser language. Best-effort; `undefined` leaves the #14319
-          // ladder exactly as it was.
+          // admin-initiated send (`admin-import-users.ts` calls
+          // `requestPasswordReset` server-side) reaches this callback with NO
+          // request at all (measured on 1.7.3, #23343), so without this rung
+          // the user's mail carries only the deployment default. Best-effort;
+          // `undefined` leaves the #14319 ladder exactly as it was.
           const storedLocale = await this.storedRecipientLocale({ id: user.id });
-          const result = await email.sendTemplate({
-            template: 'auth.password_reset',
-            to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-            ...this.emailLocaleArg(request, storedLocale),
-            data: {
-              user: { name: user.name || user.email, email: user.email, id: user.id },
-              resetUrl: url,
-              token,
-              expiresInMinutes: Math.round(ttlSec / 60),
-              appName: this.getAppName(),
-            },
-            relatedObject: 'sys_user',
-            relatedId: user.id,
-          });
+          const result = await email.sendTemplate(invitation
+            ? {
+              // Exactly the variables `auth.account_invitation` declares —
+              // what the import really holds, and nothing it does not (no
+              // organization, no role). No request rung on the locale: the
+              // marker is honoured only when there is no request, and the one
+              // that started the import is the ADMIN's anyway.
+              template: 'auth.account_invitation',
+              to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
+              ...this.emailLocaleArg(undefined, storedLocale),
+              data: {
+                user: { name: user.name || user.email, email: user.email },
+                inviter: { name: invitation.inviter.name, email: invitation.inviter.email },
+                setPasswordUrl: url,
+                expiresInMinutes: Math.round(ttlSec / 60),
+                appName: this.getAppName(),
+              },
+              relatedObject: 'sys_user',
+              relatedId: user.id,
+            }
+            : {
+              template: 'auth.password_reset',
+              to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
+              ...this.emailLocaleArg(request, storedLocale),
+              data: {
+                user: { name: user.name || user.email, email: user.email, id: user.id },
+                resetUrl: url,
+                token,
+                expiresInMinutes: Math.round(ttlSec / 60),
+                appName: this.getAppName(),
+              },
+              relatedObject: 'sys_user',
+              relatedId: user.id,
+            });
           if (result?.status === 'failed') {
             throw new Error(
-              `Password-reset email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
+              `${invitation ? 'Account-invitation' : 'Password-reset'} email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
             );
           }
         },

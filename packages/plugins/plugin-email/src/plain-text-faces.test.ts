@@ -85,7 +85,10 @@ function harness(extraRows: EmailTemplateRow[] = []) {
 
 const USER = { name: 'Alice', email: 'alice@acme.test', id: 'usr_1' };
 
-/** The three link-carrying sends the card names, plus the magic link that shares the shape. */
+/**
+ * The three link-carrying sends the card names, plus the magic link that shares
+ * the shape and [#23343] the account invitation's set-password link.
+ */
 const LINK_SENDS = [
   { template: 'auth.verify_email', data: { user: USER, verificationUrl: LINK, appName: 'Acme' } },
   { template: 'auth.password_reset', data: { user: USER, resetUrl: LINK, expiresInMinutes: 30, appName: 'Acme' } },
@@ -100,6 +103,16 @@ const LINK_SENDS = [
     },
   },
   { template: 'auth.magic_link', data: { magicLinkUrl: LINK, expiresInMinutes: 10, appName: 'Acme' } },
+  {
+    template: 'auth.account_invitation',
+    data: {
+      user: USER,
+      inviter: { name: 'Bob', email: 'bob@acme.test' },
+      setPasswordUrl: LINK,
+      expiresInMinutes: 60,
+      appName: 'Acme',
+    },
+  },
 ] as const;
 
 describe('auth mail: the plain-text part carries the link verbatim', () => {
