@@ -1022,7 +1022,9 @@ describe('[#23495] the draft doors naming no package act on the draft the draft 
             await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pending' }), packageId: P, mode: 'draft' });
         } else {
             await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pending' }), packageId: P, mode: 'draft' });
-            await saveDraft(f, 'stale');
+            // [#23657] Seeded, as an older build left it: a draft save naming no
+            // package over an item whose only draft is P's now updates P's draft.
+            f.seedRow({ type: 'app', name, state: 'draft', package_id: null, metadata: JSON.stringify(app(name, { label: 'stale' })), checksum: 'sha-stale' });
             await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live' }), packageId: P });
         }
         return f;
@@ -1180,7 +1182,9 @@ describe('[#23495] the draft doors naming no package act on the draft the draft 
                     const f = { ...makeProtocol(), name };
                     if (unboundFirst) await saveDraft(f, 'unbound');
                     await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other' }), packageId: Q, mode: 'draft' });
-                    if (!unboundFirst) await saveDraft(f, 'unbound');
+                    // [#23657] Seeded, as an older build left it: a draft save naming
+                    // no package over Q's only draft now updates Q's draft.
+                    if (!unboundFirst) f.seedRow({ type: 'app', name, state: 'draft', package_id: null, metadata: JSON.stringify(app(name, { label: 'unbound' })), checksum: 'sha-unbound' });
                     return f;
                 };
 

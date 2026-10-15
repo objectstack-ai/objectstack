@@ -611,6 +611,23 @@ describe('[ADR-0086 D3] the save door refuses a permission set whose body `packa
         ]);
     });
 
+    it('[#23657] an item never published into a package, whose only draft is BOUND\'s: a draft naming no package is judged against BOUND, the draft it writes', async () => {
+        // No active row, so the draft address is read from the drafts: the
+        // only draft is BOUND's, and a package-less draft save updates it.
+        // Before, the save wrote a package-unbound draft beside it, and an
+        // agreeing body was refused 400 for declaring a package "into no package".
+        const h = makeProtocol();
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: perm('probe_member', BOUND), packageId: BOUND, mode: 'draft' });
+
+        const { error } = await attempt(() => h.protocol.saveMetaItem({
+            type: 'permission', name: 'probe_member', item: perm('probe_member', OTHER), mode: 'draft',
+        }));
+        expectOwnerRefusal(error, OTHER, BOUND);
+
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'probe_member', item: { ...perm('probe_member', BOUND), label: 'Edited' }, mode: 'draft' });
+        expect(storedSets(h)).toEqual([{ row: 'probe_member', state: 'draft', binding: BOUND, body: BOUND }]);
+    });
+
     it('a direct save that names no package is judged against the one package its address resolves to', async () => {
         // The item's only active row is bound to BOUND, so a package-less
         // direct save writes BOUND's row: an agreeing body passes, and a
