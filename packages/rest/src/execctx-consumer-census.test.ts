@@ -90,6 +90,9 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  * [#23050 slice 4] …and `registerSharingEndpoints`' and
  * `registerSharingRuleEndpoints`' bodies to `sharing-routes.ts`, with their eight
  * (three and five) — the first module on the list to carry TWO registrars.
+ *
+ * [#23050 slice 5] …and `registerAnalyticsEndpoints`' body to
+ * `analytics-routes.ts`, with its one.
  */
 const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
@@ -101,7 +104,7 @@ const siteKey = (file: string, line: number) => `${file}:${line}`;
  * The frames in `rest-server.ts` that are NOT consumers: the host literal each
  * moved registrar (`registerDataActionEndpoints`, `registerBatchEndpoints`,
  * `registerApprovalsEndpoints`, `registerSharingEndpoints`,
- * `registerSharingRuleEndpoints`) hands
+ * `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`) hands
  * its moved body forwards each member to the server with
  * `(...a) => this.<member>(...a)`, so a moved site's stack shows that forwarder
  * above the site itself. The site is the first censused frame that is not one.
@@ -588,9 +591,16 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // forwarders (four) and two host interfaces' members (four) — because
         // the module carries two registrars. Five forwarders now: one per moved
         // registrar, which is one per moved module plus `EXTRA_MOVED_REGISTRARS`.
-        expect(SITE_FILES).toHaveLength(5);
+        //
+        // [#23050 slice 5] 62 sites UNCHANGED / 97 → 101 mentions — the same MOVE.
+        // `registerAnalyticsEndpoints`' body left for `analytics-routes.ts` with
+        // its one BARE site: 32 + 9 + 5 + 7 + 8 + 1 = 62 sites. The four new
+        // mentions are this slice's seam, the same two spellings once (its host
+        // literal's forwarder, two; its host interface's member, two). Six
+        // forwarders now, one per moved registrar: (6 - 1) + 1.
+        expect(SITE_FILES).toHaveLength(6);
         expect(SITES.length).toBe(62);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(97);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(101);
         const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
         expect(extraMovedRegistrars).toBe(1);
         expect(FORWARDER_LINES, 'one host-literal resolveExecCtx forwarder per moved registrar: one was respelt or removed, or a module moved without joining SITE_FILES')
