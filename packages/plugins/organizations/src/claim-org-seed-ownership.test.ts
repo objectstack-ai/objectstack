@@ -28,7 +28,7 @@ interface RecordedWrite {
 
 /**
  * `where` as `claimOrgSeedOwnership` spells it: field equality, plus
- * `{ id: { $in: [...] } }` on a page write.
+ * `{ id: { $in: [...] } }` for the chunk of seeded ids every write carries.
  *
  * Anything else is REFUSED rather than answered (`check:where-matcher`): a
  * combinator read as a field name, or an unimplemented value operator read as a
@@ -43,8 +43,8 @@ function rowMatches(row: any, where: Record<string, unknown>): boolean {
     if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
       const ops = Object.keys(v as Record<string, unknown>);
       if (ops.length === 1 && ops[0] === '$in') {
-        // A Set, not `.some`: the over-ceiling fixture pairs a 10 500-row table
-        // with 5 000-member pages.
+        // A Set, not `.some`: the large fixture pairs a 10 500-row table with
+        // 5 000-member chunks.
         let members: Set<unknown> | undefined = (v as any).__set;
         if (!members) {
           members = new Set(((v as any).$in as unknown[]).map((m) => m ?? null));
@@ -72,8 +72,6 @@ function makeQL(
   rowsByObject: Record<string, any[]>,
   opts: {
     ceiling?: number;
-    /** Runs after a page read, before the page write: a concurrent writer. */
-    afterRead?: (object: string, ids: string[]) => void;
     /** Replaces the write's answer (the rows it would have moved stay put). */
     writeAnswer?: (object: string, where: any) => unknown;
     /** Throws instead of writing. */
@@ -87,9 +85,7 @@ function makeQL(
     find: vi.fn(async (object: string, query: any) => {
       const hits = (rowsByObject[object] ?? []).filter((r) => rowMatches(r, query?.where ?? {}));
       const page = typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
-      const out = page.map((r) => ({ id: r.id }));
-      opts.afterRead?.(object, out.map((r) => r.id));
-      return out;
+      return page.map((r) => ({ id: r.id }));
     }),
     update: vi.fn(async (object: string, data: any, options?: any) => {
       const dispatch = assertEngineUpdateDispatch(data, options);
@@ -118,17 +114,25 @@ function makeLogger() {
   return { info: vi.fn(), warn: vi.fn() };
 }
 
+/** [#23354] The organization's seed replay reported landing on these rows. */
+function seededIds(byObject: Record<string, string[]>): (object: string) => readonly string[] {
+  return (object) => byObject[object] ?? [];
+}
+
+const CHUNK = Math.floor(MAX_BULK_PER_ROW_HOOK_ROWS / 2);
+
 describe('claimOrgSeedOwnership', () => {
   it('returns [] when registry is unavailable', async () => {
     const ql: any = { find: vi.fn(), update: vi.fn() };
-    expect(await claimOrgSeedOwnership(ql, ORG, OWNER)).toEqual([]);
+    expect(await claimOrgSeedOwnership(ql, ORG, OWNER, { seededRecordIds: seededIds({}) })).toEqual([]);
   });
 
   it('no-ops without an org or owner', async () => {
     const schemas = [{ name: 'crm_lead', fields: BOTH_COLUMNS }];
     const { ql, writes } = makeQL(schemas, { crm_lead: [{ id: 'l1', organization_id: ORG, owner_id: null }] });
-    expect(await claimOrgSeedOwnership(ql, '', OWNER)).toEqual([]);
-    expect(await claimOrgSeedOwnership(ql, ORG, '')).toEqual([]);
+    const seededRecordIds = seededIds({ crm_lead: ['l1'] });
+    expect(await claimOrgSeedOwnership(ql, '', OWNER, { seededRecordIds })).toEqual([]);
+    expect(await claimOrgSeedOwnership(ql, ORG, '', { seededRecordIds })).toEqual([]);
     expect(writes).toHaveLength(0);
   });
 
@@ -145,12 +149,14 @@ describe('claimOrgSeedOwnership', () => {
       crm_pricebook: [{ id: 'p1', organization_id: ORG }],
       crm_global: [{ id: 'g1', owner_id: null }],
     });
-    expect(await claimOrgSeedOwnership(ql, ORG, OWNER)).toEqual([]);
+    // The seed reported every one of these rows, so each skip is the filter's.
+    const seededRecordIds = seededIds({ sys_user: ['u1'], sys_widget: ['w1'], crm_pricebook: ['p1'], crm_global: ['g1'] });
+    expect(await claimOrgSeedOwnership(ql, ORG, OWNER, { seededRecordIds })).toEqual([]);
     expect(writes).toHaveLength(0);
     expect(ql.update).not.toHaveBeenCalled();
   });
 
-  it('claims this org\'s NULL-owner rows in ONE predicate write, leaving other orgs and human-owned rows untouched', async () => {
+  it('claims this org\'s seeded NULL-owner rows in ONE predicate write, leaving other orgs and human-owned rows untouched', async () => {
     const schemas = [{ name: 'crm_lead', fields: BOTH_COLUMNS }];
     const rows = [
       { id: 'l1', organization_id: ORG, owner_id: null },          // claimed
@@ -159,19 +165,20 @@ describe('claimOrgSeedOwnership', () => {
       { id: 'l4', organization_id: ORG, owner_id: null },          // claimed
     ];
     const { ql, writes } = makeQL(schemas, { crm_lead: rows });
-    const result = await claimOrgSeedOwnership(ql, ORG, OWNER);
+    const seeded = ['l1', 'l2', 'l3', 'l4'];
+    const result = await claimOrgSeedOwnership(ql, ORG, OWNER, { seededRecordIds: seededIds({ crm_lead: seeded }) });
 
     expect(result).toEqual([{ object: 'crm_lead', count: 2 }]);
     expect(writes).toEqual([
       {
         object: 'crm_lead',
         data: { owner_id: OWNER },
-        where: { organization_id: ORG, owner_id: null },
+        where: { organization_id: ORG, owner_id: null, id: { $in: seeded } },
         matched: ['l1', 'l4'],
         context: { isSystem: true, skipAutomations: true },
       },
     ]);
-    // Under the ceiling the claim reads nothing: the predicate is the selection.
+    // The claim reads nothing: the predicate is the selection.
     expect(ql.find).not.toHaveBeenCalled();
     expect(rows.find((r) => r.id === 'l2')!.owner_id).toBe(SOMEONE);
     expect(rows.find((r) => r.id === 'l3')!.owner_id).toBeNull();
@@ -180,8 +187,49 @@ describe('claimOrgSeedOwnership', () => {
   it('is idempotent — a second run claims nothing', async () => {
     const schemas = [{ name: 'crm_lead', fields: BOTH_COLUMNS }];
     const { ql } = makeQL(schemas, { crm_lead: [{ id: 'l1', organization_id: ORG, owner_id: null }] });
-    await claimOrgSeedOwnership(ql, ORG, OWNER);
-    expect(await claimOrgSeedOwnership(ql, ORG, OWNER)).toEqual([]);
+    const seededRecordIds = seededIds({ crm_lead: ['l1'] });
+    expect(await claimOrgSeedOwnership(ql, ORG, OWNER, { seededRecordIds })).toEqual([{ object: 'crm_lead', count: 1 }]);
+    expect(await claimOrgSeedOwnership(ql, ORG, OWNER, { seededRecordIds })).toEqual([]);
+  });
+
+  // ── [#23354] only the rows the organization's seed replay wrote ──────────
+
+  it('a NULL-owner row the replay did not report keeps no owner — a guest\'s, a form\'s (ADR-0138 D1)', async () => {
+    const schemas = [{ name: 'crm_case', fields: BOTH_COLUMNS }];
+    const rows = [
+      { id: 'seed_1', organization_id: ORG, owner_id: null },
+      { id: 'guest_1', organization_id: ORG, owner_id: null },
+      { id: 'form_1', organization_id: ORG, owner_id: null },
+      { id: 'hook_1', organization_id: ORG, owner_id: 'usr_set_by_hook' },
+    ];
+    const { ql } = makeQL(schemas, { crm_case: rows });
+
+    const result = await claimOrgSeedOwnership(ql, ORG, OWNER, {
+      seededRecordIds: seededIds({ crm_case: ['seed_1', 'hook_1'] }),
+    });
+
+    expect(result).toEqual([{ object: 'crm_case', count: 1 }]);
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.owner_id]))).toEqual({
+      seed_1: OWNER,
+      guest_1: null,
+      form_1: null,
+      hook_1: 'usr_set_by_hook',
+    });
+  });
+
+  it('without a seeded reading it re-owns nothing — never every unowned row — and says so', async () => {
+    const schemas = [{ name: 'crm_case', fields: BOTH_COLUMNS }];
+    const rows = [{ id: 'c1', organization_id: ORG, owner_id: null }];
+    const { ql } = makeQL(schemas, { crm_case: rows });
+    const logger = makeLogger();
+
+    expect(await claimOrgSeedOwnership(ql, ORG, OWNER, { logger })).toEqual([]);
+    expect(ql.update).not.toHaveBeenCalled();
+    expect(rows[0].owner_id).toBeNull();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('no seed host on this kernel publishes the rows its replay landed on'),
+      { organizationId: ORG },
+    );
   });
 
   // ── [#23008] the claim's write dispatches no metadata-bound automation ────
@@ -205,7 +253,9 @@ describe('claimOrgSeedOwnership', () => {
       crm_deal: [{ id: 'd1', organization_id: ORG, owner_id: null }],
     });
 
-    expect(await claimOrgSeedOwnership(ql, ORG, OWNER)).toEqual([
+    expect(
+      await claimOrgSeedOwnership(ql, ORG, OWNER, { seededRecordIds: seededIds({ crm_lead: ['l1', 'l2'], crm_deal: ['d1'] }) }),
+    ).toEqual([
       { object: 'crm_lead', count: 2 },
       { object: 'crm_deal', count: 1 },
     ]);
@@ -216,119 +266,104 @@ describe('claimOrgSeedOwnership', () => {
     }
   });
 
-  // ── [#23054] past the per-row hook ceiling: paged, until none is left ─────
+  // ── [#23054] past the per-row hook ceiling: every seeded row, no write refused ──
 
-  it('10 500 owner-less rows are all owned after one pass, and count says 10 500', async () => {
-    // The card's pin. The whole-set write is refused (ADR-0058 D6: over the
-    // per-row hook ceiling, nothing written), so the claim takes a page off
-    // the top and tries the whole set again. A single read at the old
-    // 10 000-row cap owned 10 000 and left 500 owner-less for good.
+  it('10 500 seeded owner-less rows are all owned after one pass, and count says 10 500', async () => {
+    // The card's pin. A single read at the old 10 000-row cap owned 10 000 and
+    // left 500 owner-less for good; an unbounded predicate write is refused
+    // whole over the per-row hook ceiling (ADR-0058 D6). A chunk of seeded ids
+    // is half the ceiling, so every write lands and none is refused.
     const N = 10_500;
     const schemas = [{ name: 'crm_lead', fields: BOTH_COLUMNS }];
+    const seeded = Array.from({ length: N }, (_, i) => `l${String(i).padStart(5, '0')}`);
     const rows = [
-      ...Array.from({ length: N }, (_, i) => ({ id: `l${String(i).padStart(5, '0')}`, organization_id: ORG, owner_id: null })),
+      ...seeded.map((id) => ({ id, organization_id: ORG, owner_id: null as string | null })),
       { id: 'owned', organization_id: ORG, owner_id: SOMEONE },
       { id: 'foreign', organization_id: OTHER_ORG, owner_id: null },
     ];
     const { ql, writes } = makeQL(schemas, { crm_lead: rows });
 
-    expect(await claimOrgSeedOwnership(ql, ORG, OWNER)).toEqual([{ object: 'crm_lead', count: N }]);
+    expect(
+      await claimOrgSeedOwnership(ql, ORG, OWNER, { seededRecordIds: seededIds({ crm_lead: seeded }) }),
+    ).toEqual([{ object: 'crm_lead', count: N }]);
     expect(rows.filter((r) => r.organization_id === ORG && r.owner_id === null)).toEqual([]);
     expect(rows.filter((r) => r.owner_id === OWNER)).toHaveLength(N);
     expect(rows.find((r) => r.id === 'owned')!.owner_id).toBe(SOMEONE);
     expect(rows.find((r) => r.id === 'foreign')!.owner_id).toBeNull();
 
-    // One page, then the whole remainder: the page keeps the claim's predicate
-    // and ANDs the page's ids onto it; no landed write is over the ceiling.
-    const pageRows = Math.floor(MAX_BULK_PER_ROW_HOOK_ROWS / 2);
-    expect(writes.map((w) => w.matched.length)).toEqual([pageRows, N - pageRows]);
-    expect(Object.keys(writes[0].where).sort()).toEqual(['id', 'organization_id', 'owner_id']);
-    expect(writes[0].where).toMatchObject({ organization_id: ORG, owner_id: null });
-    expect(writes[1].where).toEqual({ organization_id: ORG, owner_id: null });
-    for (const w of writes) expect(w.context).toEqual({ isSystem: true, skipAutomations: true });
-    // The page read is a plain system read of the same predicate, bounded.
-    expect(ql.find).toHaveBeenCalledTimes(1);
-    expect(ql.find.mock.calls[0]).toEqual([
-      'crm_lead',
-      { where: { organization_id: ORG, owner_id: null }, limit: pageRows, fields: ['id'] },
-      { context: { isSystem: true } },
-    ]);
+    // Three chunks, each under the ceiling; every write keeps the claim's
+    // predicate and names its chunk; nothing was read.
+    expect(writes.map((w) => w.matched.length)).toEqual([CHUNK, CHUNK, N - 2 * CHUNK]);
+    for (const w of writes) {
+      expect(Object.keys(w.where).sort()).toEqual(['id', 'organization_id', 'owner_id']);
+      expect(w.where).toMatchObject({ organization_id: ORG, owner_id: null });
+      expect(w.where.id.$in.length).toBeLessThanOrEqual(CHUNK);
+      expect(w.context).toEqual({ isSystem: true, skipAutomations: true });
+    }
+    expect(ql.find).not.toHaveBeenCalled();
   });
 
-  // The three below run one row past the ceiling, so the whole-set write is
-  // refused and the claim pages: the page size is derived from the engine's
-  // ceiling, so a smaller fake ceiling would refuse the page write too.
-  const pastCeiling = (prefix: string) =>
-    Array.from({ length: MAX_BULK_PER_ROW_HOOK_ROWS + 1 }, (_, i) => ({
-      id: `${prefix}${String(i).padStart(5, '0')}`,
-      organization_id: ORG,
-      owner_id: null as string | null,
-    }));
-  const PAGE_ROWS = Math.floor(MAX_BULK_PER_ROW_HOOK_ROWS / 2);
-
-  it('a page write never re-owns a row claimed between its read and its write', async () => {
-    // The page write carries the predicate, not just the ids: a row someone
-    // else owned in between keeps that owner and is not counted.
+  it('an unreadable count is warned as unknown, counts nothing, and the next chunk still lands', async () => {
     const schemas = [{ name: 'crm_lead', fields: BOTH_COLUMNS }];
-    const rows = pastCeiling('l');
-    let raced = false;
+    const seeded = Array.from({ length: CHUNK + 1 }, (_, i) => `l${String(i).padStart(5, '0')}`);
+    const rows = seeded.map((id) => ({ id, organization_id: ORG, owner_id: null as string | null }));
+    const logger = makeLogger();
+    let call = 0;
     const { ql } = makeQL(schemas, { crm_lead: rows }, {
-      afterRead: (_object, ids) => {
-        if (raced) return;
-        raced = true;
-        rows.find((r) => r.id === ids[0])!.owner_id = SOMEONE;
+      // The first chunk's driver answers a record rather than a count.
+      writeAnswer: (_object, where) => {
+        call += 1;
+        if (call === 1) return { id: 'not-a-count' };
+        const ids = new Set(where.id.$in as string[]);
+        let moved = 0;
+        for (const r of rows) if (ids.has(r.id) && r.owner_id === null) { r.owner_id = OWNER; moved += 1; }
+        return moved;
       },
     });
 
-    expect(await claimOrgSeedOwnership(ql, ORG, OWNER)).toEqual([{ object: 'crm_lead', count: rows.length - 1 }]);
-    expect(rows[0].owner_id).toBe(SOMEONE);
-    expect(rows.filter((r) => r.owner_id === OWNER)).toHaveLength(rows.length - 1);
-  });
-
-  it('stops, and says so, when a page write re-owns nothing (it would read the same page forever)', async () => {
-    const schemas = [{ name: 'crm_lead', fields: BOTH_COLUMNS }];
-    const logger = makeLogger();
-    // A write-scoping middleware that narrows every page write to nothing.
-    const { ql } = makeQL(schemas, { crm_lead: pastCeiling('l') }, {
-      writeAnswer: () => 0,
-    });
-
-    expect(await claimOrgSeedOwnership(ql, ORG, OWNER, { logger })).toEqual([]);
-    expect(ql.update).toHaveBeenCalledTimes(2); // the refused whole set, then the one page
+    expect(
+      await claimOrgSeedOwnership(ql, ORG, OWNER, { logger, seededRecordIds: seededIds({ crm_lead: seeded }) }),
+    ).toEqual([{ object: 'crm_lead', count: 1 }]);
+    expect(ql.update).toHaveBeenCalledTimes(2);
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('re-owned none of them'),
-      expect.objectContaining({ object: 'crm_lead', organizationId: ORG, matched: PAGE_ROWS }),
+      expect.stringContaining('could not read an affected-row count'),
+      expect.objectContaining({ object: 'crm_lead', organizationId: ORG, ids: CHUNK }),
     );
   });
 
-  it('keeps counting what landed when a later write fails, and a failed object costs no later object its claim', async () => {
+  it('a failed chunk costs that chunk only — the next chunk and the next object are still claimed', async () => {
     const schemas = [
       { name: 'crm_lead', fields: BOTH_COLUMNS },
       { name: 'crm_deal', fields: BOTH_COLUMNS },
     ];
-    const leads = pastCeiling('l');
+    const seeded = Array.from({ length: 2 * CHUNK + 1 }, (_, i) => `l${String(i).padStart(5, '0')}`);
+    const leads = seeded.map((id) => ({ id, organization_id: ORG, owner_id: null as string | null }));
     const deals = [{ id: 'd1', organization_id: ORG, owner_id: null }];
     const logger = makeLogger();
-    let leadWholeSetWrites = 0;
+    let leadWrites = 0;
     const { ql } = makeQL(schemas, { crm_lead: leads, crm_deal: deals }, {
-      // The first whole-set write on crm_lead is refused for its size; the page
-      // lands; the retried whole set then fails outright.
-      failWrite: (object, where) => {
-        if (object !== 'crm_lead' || 'id' in where) return undefined;
-        leadWholeSetWrites += 1;
-        return leadWholeSetWrites === 2 ? new Error('a code hook refused the write') : undefined;
+      // The second crm_lead chunk is refused outright by a code hook.
+      failWrite: (object) => {
+        if (object !== 'crm_lead') return undefined;
+        leadWrites += 1;
+        return leadWrites === 2 ? new Error('a code hook refused the write') : undefined;
       },
     });
 
-    expect(await claimOrgSeedOwnership(ql, ORG, OWNER, { logger })).toEqual([
-      { object: 'crm_lead', count: PAGE_ROWS },
+    expect(
+      await claimOrgSeedOwnership(ql, ORG, OWNER, {
+        logger,
+        seededRecordIds: seededIds({ crm_lead: seeded, crm_deal: ['d1'] }),
+      }),
+    ).toEqual([
+      { object: 'crm_lead', count: CHUNK + 1 },
       { object: 'crm_deal', count: 1 },
     ]);
-    expect(leads.filter((r) => r.owner_id === OWNER)).toHaveLength(PAGE_ROWS);
+    expect(leads.filter((r) => r.owner_id === OWNER)).toHaveLength(CHUNK + 1);
     expect(deals[0].owner_id).toBe(OWNER);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('failed for crm_lead'),
-      expect.objectContaining({ object: 'crm_lead', claimed: PAGE_ROWS, error: 'a code hook refused the write' }),
+      expect.objectContaining({ object: 'crm_lead', ids: CHUNK, error: 'a code hook refused the write' }),
     );
   });
 });
