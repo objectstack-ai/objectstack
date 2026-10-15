@@ -216,27 +216,28 @@ describe('an escaped throw carrying a declared ADR-0112 envelope is rendered as 
 
 /**
  * [#23531] A stale `If-Match` on a direct-mount route: the `409
- * CONCURRENT_UPDATE` carries the server's `currentVersion`, which `RestServer`'s
- * `409` carries and objectui's conflict bar reads.
+ * CONCURRENT_UPDATE` carries the server's `currentVersion` and `currentRecord`,
+ * which `RestServer`'s `409` carries and objectui's conflict bar reads.
  *
- * `currentRecord` is asserted ABSENT. `RestServer` forwards it, but the
- * protocol reads that row with a system context before the caller's write
- * policy runs, so it is held at these doors until the producer answers #23586.
- * The producer below states it, so the absence is the door's doing.
+ * `currentRecord` is forwarded as the producer threw it, field for field: the
+ * row below stands for the caller's own read, which is what `metadata-protocol`
+ * puts there since #23586 (PR #23628). `error.details` is asserted EXACTLY, so
+ * a field the door drops or invents turns the row red.
  *
  * The producer below is shaped exactly like `metadata-protocol`'s
  * `ConcurrentUpdateError` (`name`, `code`, `status`, and the two own
  * properties), because this package does not depend on that one. The routes
  * judge the `If-Match` header against a stored version, as `updateData` /
  * `deleteData` do. The composed-host twin, over the REAL protocol, is
- * `hono-declared-envelope.conformance.test.ts` in `packages/qa/http-conformance`.
+ * `hono-declared-envelope.conformance.test.ts` in `packages/qa/http-conformance`;
+ * it also shows a field the caller's read masks staying off `currentRecord`.
  *
- * On the wrapped envelope the field rides `error.details`: that is the
+ * On the wrapped envelope the fields ride `error.details`: that is the
  * envelope's declared context slot (`ApiErrorSchema.details`), and it is where
  * `@objectstack/client` reads a wrapped body's context from
  * (`errorBody.error.details`).
  */
-describe('[#23531] a stale If-Match on a direct-mount route: the 409 carries currentVersion, and holds currentRecord (#23586)', () => {
+describe('[#23531] a stale If-Match on a direct-mount route: the 409 carries currentVersion and currentRecord', () => {
   class ConcurrentUpdateError extends Error {
     readonly code = 'CONCURRENT_UPDATE';
     readonly status = 409;
@@ -274,7 +275,7 @@ describe('[#23531] a stale If-Match on a direct-mount route: the 409 carries cur
     return s;
   }
 
-  it.each(['PATCH', 'DELETE'])('%s: 409 CONCURRENT_UPDATE with currentVersion in `error.details`, and no currentRecord', async (method) => {
+  it.each(['PATCH', 'DELETE'])('%s: 409 CONCURRENT_UPDATE with currentVersion and currentRecord in `error.details`, as the producer stated them', async (method) => {
     const res = await call(occServer(), '/api/v1/data/task/task_1', {
       method,
       headers: { 'If-Match': `"${STALE_VERSION}"`, ...(method === 'PATCH' ? { 'content-type': 'application/json' } : {}) },
@@ -285,10 +286,8 @@ describe('[#23531] a stale If-Match on a direct-mount route: the 409 carries cur
     expect(res.status, JSON.stringify(body)).toBe(409);
     expect(body.success).toBe(false);
     expect(body.error.code).toBe('CONCURRENT_UPDATE');
-    expect(body.error.details).toEqual({ currentVersion: STORED_VERSION });
-    // Held until #23586: the producer stated it, and the door does not forward it.
-    expect(body.error.details).not.toHaveProperty('currentRecord');
-    expect(JSON.stringify(body)).not.toContain('original');
+    // Exactly the two fields the producer stated: nothing dropped, nothing added.
+    expect(body.error.details).toEqual({ currentVersion: STORED_VERSION, currentRecord: STORED });
   });
 
   it('control: the version the route stores is accepted, so the 409 rows are the guard and not the rig', async () => {
