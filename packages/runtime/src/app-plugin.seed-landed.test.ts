@@ -23,19 +23,29 @@ import type { PluginContext } from '@objectstack/core';
  *    organization's creation.
  */
 
+/**
+ * `where` as the seed loader spells it here: field equality only. A combinator
+ * or a value operator is REFUSED rather than answered, so a shape this double
+ * does not implement can never read as a match or a miss.
+ */
+function rowMatches(row: any, where: Record<string, unknown> = {}): boolean {
+    return Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`engine double: unsupported combinator ${k}`);
+        if (v !== null && typeof v === 'object') {
+            throw new Error(`engine double: unsupported value operator on ${k}: ${JSON.stringify(v)}`);
+        }
+        return (row[k] ?? null) === (v ?? null);
+    });
+}
+
 /** A faithful in-memory engine: `where` filters, ids minted on insert. */
 function createEngine() {
     const store: Record<string, any[]> = {};
     let next = 0;
-    const matches = (row: any, where: Record<string, unknown> = {}) =>
-        Object.entries(where).every(([k, v]) => {
-            if (k.startsWith('$')) throw new Error(`engine double: unsupported operator ${k}`);
-            return (row[k] ?? null) === (v ?? null);
-        });
     const engine: any = {
         store,
         async find(object: string, query?: any) {
-            let rows = (store[object] ?? []).filter((r) => matches(r, query?.where));
+            let rows = (store[object] ?? []).filter((r) => rowMatches(r, query?.where));
             if (typeof query?.limit === 'number') rows = rows.slice(0, query.limit);
             return rows.map((r) => ({ ...r }));
         },
