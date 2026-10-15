@@ -41,7 +41,9 @@
  * `sys_packages`; the REAL `ObjectStackProtocolImplementation`; and the REAL
  * `HttpDispatcher`, whose `handlePackages` is the uninstall door. The objects
  * are published through the protocol's own save (`saveMetaItem`, which
- * creates the table), as the metadata door's `PUT ?package=` does.
+ * creates the table), as the metadata door's `PUT ?package=` does. The other
+ * holder's row is seeded into the store as a row at rest (see
+ * `twoPackageObject` for why).
  *
  * ⚠️ `@objectstack/metadata-protocol` resolves through `exports` to its
  * **`dist/`** (`check-test-source-alias.mjs`, `KNOWN_UNALIASED_TEST_IMPORTS`):
@@ -148,6 +150,16 @@ async function boot() {
   const dispatcher = new HttpDispatcher({ context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) } as any);
   const knex = (driver as any).knex;
 
+  async function seedStoredRow(name: string, packageId: string | null) {
+    const body = objectBody(name, `${name} ${packageId ?? 'unbound'}`);
+    const now = new Date().toISOString();
+    await engine.insert('sys_metadata', {
+      id: `seed_active_${packageId ?? 'unbound'}_${name}`, type: 'object', name, organization_id: null,
+      package_id: packageId, state: 'active', metadata: JSON.stringify(body), checksum: hashSpec(body, 'object'),
+      version: 1, created_at: now, updated_at: now,
+    }, { context: { isSystem: true } } as any);
+  }
+
   return {
     engine,
     protocol,
@@ -165,19 +177,17 @@ async function boot() {
       await (protocol as any).saveMetaItem({ type: 'object', name, item: objectBody(name, `${name} ${packageId}`), packageId });
     },
     /**
-     * A package-less row of the object as it exists at rest — the save door
-     * resolves a package-less save of an item a package holds to that
-     * package's row, so such a row is only ever a stored one.
+     * A row of the object bound to `packageId` as it exists at rest, written
+     * straight into the store, never through the save door: the shape a save
+     * stores (the body's checksum by `hashSpec`), with no registry write.
      */
-    async seedUnboundRow(name: string) {
-      const body = objectBody(name, `${name} unbound`);
-      const now = new Date().toISOString();
-      await engine.insert('sys_metadata', {
-        id: `seed_active_unbound_${name}`, type: 'object', name, organization_id: null,
-        package_id: null, state: 'active', metadata: JSON.stringify(body), checksum: hashSpec(body, 'object'),
-        version: 1, created_at: now, updated_at: now,
-      }, { context: { isSystem: true } } as any);
-    },
+    seedStoredRow,
+    /**
+     * A package-less row of the object as it exists at rest — the save door
+     * resolves a package-less save of an item a package already holds to that
+     * package's row, so this row is seeded beside the package's, not saved.
+     */
+    seedUnboundRow: (name: string) => seedStoredRow(name, null),
     /** The object's stored active rows, by binding — the store, not the door's word for it. */
     async storedBindings(name: string) {
       const rows = (await knex('sys_metadata').where({ type: 'object', name, state: 'active' }).select('package_id')) as any[];
@@ -197,15 +207,23 @@ async function boot() {
 
 type Process = Awaited<ReturnType<typeof boot>>;
 
-/** P and Q both hold `probe_ticket`; its table holds one record. */
+/**
+ * P and Q both hold `probe_ticket`; its table holds one record.
+ *
+ * [ADR-0029 D9.9] The save door refuses a save into a second package of an
+ * object a runtime-authored row owns (`OBJECT_OVERLAY_PACKAGE_MISMATCH`), so
+ * Q's row is one stored before that refusal existed: seeded, not saved, so
+ * that this pin does not depend on which doors still let such a row in. Such
+ * a row stays at rest in every store that holds it (the boot counts it in its
+ * `errors` and leaves it stored), so an uninstall still meets it. The registry
+ * holds P alone, as Q's save left it then: its write-through was refused.
+ */
 async function twoPackageObject(): Promise<Process> {
   const h = await boot();
   await h.install(P);
   await h.install(Q);
   await h.publish(P, SHARED);
-  // The registry holds one owner per object name, so Q's write-through is
-  // refused (and logged) at save time; Q's row is stored.
-  await h.publish(Q, SHARED);
+  await h.seedStoredRow(SHARED, Q);
   await h.insertRecord(SHARED, 'kept');
   expect(await h.storedBindings(SHARED), 'precondition: both packages hold the object').toEqual([P, Q]);
   expect(await h.hasTable(SHARED)).toBe(true);
