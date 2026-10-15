@@ -23,7 +23,9 @@ import { Logger, createLogger, compensatedSum } from '@objectstack/core';
 // one source for every driver.
 import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
 import type { ComposedReadableIds } from '@objectstack/spec/data';
-import { Query, Aggregator } from 'mingo';
+// [#23679] mingo over this driver's own context: `$in` hashes its list once per
+// compiled query, not once per row — see `memory-mingo.ts`.
+import { Query, Aggregator } from './memory-mingo.js';
 import {
   assertSingleTenantPosture,
   assertObjectsNotTenantScoped,
