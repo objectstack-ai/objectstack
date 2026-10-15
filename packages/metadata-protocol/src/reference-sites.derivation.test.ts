@@ -196,6 +196,31 @@ describe('[#9327] the TARGET-side gap is named too, and it is a sibling not a wi
     });
 });
 
+describe('[#23539] a permission set\'s `fields` keys name their object through a composite-key site', () => {
+    it('THE PIN: exactly one composite-key site, and it is permission.fields → object on "."', () => {
+        // `PermissionSetSchema.fields` is keyed `<object>.<field>`, a fact stated
+        // in prose only, so it is a seed — and its premises are derived: it
+        // drops out (turning this red) if `permission` stops declaring `fields`
+        // as a root record, or if `ObjectSchema.name` ever admits a ".".
+        // ⚠️ GROWS → a second hand-written key form; argue it, do not append it.
+        const all = [...REFERENCE_SITES.compositeKeyByTarget.entries()].flatMap(([target, sites]) =>
+            sites.map((s) => ({ target, fromType: s.fromType, property: s.property, separator: s.separator })));
+        expect(all).toEqual([{ target: 'object', fromType: 'permission', property: 'fields', separator: '.' }]);
+    });
+
+    it('it is NOT a byTarget row — `duplicatePackage` reads byTarget("object") as object-naming property names', () => {
+        // Measured with the row placed there: every copied object's own
+        // `fields` record (keyed by bare field name) had a key renamed after a
+        // renamed object. Its absence here is that copy's guard.
+        expect(hasSite('object', 'permission', 'fields')).toBe(false);
+    });
+
+    it('the `field` target is unmoved: permission.fields still names field items, and `field` still refuses', () => {
+        expect(hasSite('field', 'permission', 'fields')).toBe(true);
+        expect(REFERENCE_SITES.unanswerableTargetTypes).toEqual(['field']);
+    });
+});
+
 describe('[#9190] derived reference sites — derivation is a pure function of the schemas', () => {
     it('two derivations of the same schemas agree exactly', () => {
         // The module-load singleton must not be doing anything a caller cannot
@@ -209,6 +234,7 @@ describe('[#9190] derived reference sites — derivation is a pure function of t
                 .sort();
         expect(flatten(a)).toEqual(flatten(b));
         expect(flatten(a)).toEqual(flatten(REFERENCE_SITES));
+        expect([...a.compositeKeyByTarget]).toEqual([...REFERENCE_SITES.compositeKeyByTarget]);
     });
 });
 
