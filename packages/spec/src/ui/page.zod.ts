@@ -39,61 +39,6 @@ const PAGE_HISTORY =
   + 'without whatever the key was meant to configure.';
 
 /**
- * The page layout templates the console registers, and the regions each one
- * places — the layout vocabulary, declared here so an author and `os validate`
- * can see it (maintainer ruling A on objectstack#23610, record 6190536588).
- *
- * Measured against the renderer, objectui
- * `packages/components/src/renderers/layout/page.tsx` (`TEMPLATE_REGISTRY` and
- * each template's `findRegion` calls; region names match case-insensitively):
- *
- *  - `default` — header / sidebar / main / aside / footer (sidebar and aside
- *    beside main, header and footer spanning it);
- *  - `header-sidebar-main` — header / sidebar / main;
- *  - `three-column` — the same five as `default`;
- *  - `dashboard` — header / footer, and an OPEN GRID: every other region,
- *    whatever its name, is a grid cell. By design it places any name.
- *
- * A region a template does not place is not dropped by the renderer — it is
- * stacked under `main` at full width with its declared `width` ignored, which
- * is the silent mis-layout this table exists to refuse
- * ({@link checkPageRegionPlacement}). `full-width` is retired: it was a second
- * name for `default` (the same component) — {@link PAGE_TEMPLATE_RETIRED_GUIDANCE}.
- */
-export const PAGE_TEMPLATE_SLOTS = {
-  default: ['header', 'sidebar', 'main', 'aside', 'footer'],
-  'header-sidebar-main': ['header', 'sidebar', 'main'],
-  'three-column': ['header', 'sidebar', 'main', 'aside', 'footer'],
-  dashboard: ['header', 'footer'],
-} as const satisfies Readonly<Record<string, readonly string[]>>;
-
-/** The templates whose every other region is a grid cell — they place any region name. */
-export const PAGE_TEMPLATE_OPEN_GRID: readonly PageTemplate[] = ['dashboard'];
-
-/** A page layout template name — a key of {@link PAGE_TEMPLATE_SLOTS}. */
-export type PageTemplate = keyof typeof PAGE_TEMPLATE_SLOTS;
-
-// Retired template names → the prescription (an enum-value narrowing: no
-// tombstone, the enum's own error map carries it). `//`, not JSDoc, on
-// purpose — build-docs takes a file's first JSDoc per exported symbol.
-const PAGE_TEMPLATE_RETIRED_GUIDANCE = {
-  'full-width':
-    "Page `template: 'full-width'` was removed in @objectstack/spec 18 — it was a second name for "
-    + "`'default'`, drawn by the same layout. Use `template: 'default'` (or leave `template` out: it is "
-    + 'the default); the page renders exactly as before.',
-} as const;
-
-/**
- * Page Template Schema — the closed set of layout templates the console
- * registers ({@link PAGE_TEMPLATE_SLOTS}). An unregistered name used to fall
- * back to the page-type layout in silence; it is refused at the parse now.
- */
-export const PageTemplateSchema = lazySchema(() => enumWithRetiredValues(
-  Object.keys(PAGE_TEMPLATE_SLOTS) as [PageTemplate, ...PageTemplate[]],
-  PAGE_TEMPLATE_RETIRED_GUIDANCE,
-).describe("Page layout template — one the console registers: 'default' (header, sidebar, main, aside, footer), 'header-sidebar-main' (header, sidebar, main), 'three-column' (header, sidebar, main, aside, footer) or 'dashboard' (header, footer, and every other region a grid cell)."));
-
-/**
  * Page Region Schema
  * A named region in the template where components are dropped.
  */
@@ -1629,6 +1574,61 @@ export function checkPagePrintComposition(
     });
   }
 }
+
+/**
+ * The page layout templates the console registers, and the regions each one
+ * places — the layout vocabulary, declared here so an author and `os validate`
+ * can see it (maintainer ruling A on objectstack#23610, record 6190536588).
+ *
+ * Measured against the renderer, objectui
+ * `packages/components/src/renderers/layout/page.tsx` (`TEMPLATE_REGISTRY` and
+ * each template's `findRegion` calls; region names match case-insensitively):
+ *
+ *  - `default` — header / sidebar / main / aside / footer (sidebar and aside
+ *    beside main, header and footer spanning it);
+ *  - `header-sidebar-main` — header / sidebar / main;
+ *  - `three-column` — the same five as `default`;
+ *  - `dashboard` — header / footer, and an OPEN GRID: every other region,
+ *    whatever its name, is a grid cell. By design it places any name.
+ *
+ * A region a template does not place is not dropped by the renderer — it is
+ * stacked under `main` at full width with its declared `width` ignored, which
+ * is the silent mis-layout this table exists to refuse
+ * ({@link checkPageRegionPlacement}). `full-width` is retired: it was a second
+ * name for `default` (the same component) — {@link PAGE_TEMPLATE_RETIRED_GUIDANCE}.
+ */
+export const PAGE_TEMPLATE_SLOTS = {
+  default: ['header', 'sidebar', 'main', 'aside', 'footer'],
+  'header-sidebar-main': ['header', 'sidebar', 'main'],
+  'three-column': ['header', 'sidebar', 'main', 'aside', 'footer'],
+  dashboard: ['header', 'footer'],
+} as const satisfies Readonly<Record<string, readonly string[]>>;
+
+/** The templates whose every other region is a grid cell — they place any region name. */
+export const PAGE_TEMPLATE_OPEN_GRID: readonly PageTemplate[] = ['dashboard'];
+
+/** A page layout template name — a key of {@link PAGE_TEMPLATE_SLOTS}. */
+export type PageTemplate = keyof typeof PAGE_TEMPLATE_SLOTS;
+
+// Retired template names → the prescription (an enum-value narrowing: no
+// tombstone, the enum's own error map carries it). `//`, not JSDoc, on
+// purpose — build-docs takes a file's first JSDoc per exported symbol.
+const PAGE_TEMPLATE_RETIRED_GUIDANCE = {
+  'full-width':
+    "Page `template: 'full-width'` was removed in @objectstack/spec 18 — it was a second name for "
+    + "`'default'`, drawn by the same layout. Use `template: 'default'` (or leave `template` out: it is "
+    + 'the default); the page renders exactly as before.',
+} as const;
+
+/**
+ * Page Template Schema — the closed set of layout templates the console
+ * registers ({@link PAGE_TEMPLATE_SLOTS}). An unregistered name used to fall
+ * back to the page-type layout in silence; it is refused at the parse now.
+ */
+export const PageTemplateSchema = lazySchema(() => enumWithRetiredValues(
+  Object.keys(PAGE_TEMPLATE_SLOTS) as [PageTemplate, ...PageTemplate[]],
+  PAGE_TEMPLATE_RETIRED_GUIDANCE,
+).describe("Page layout template — one the console registers: 'default' (header, sidebar, main, aside, footer), 'header-sidebar-main' (header, sidebar, main), 'three-column' (header, sidebar, main, aside, footer) or 'dashboard' (header, footer, and every other region a grid cell)."));
 
 /**
  * The `isDefault` placement check attached to {@link PageSchema} (maintainer
