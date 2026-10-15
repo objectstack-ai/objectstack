@@ -595,8 +595,7 @@ function refuseHostReservedDatasourceName(datasources: readonly { name?: unknown
  * @internal
  */
 const STACK_DEFINITION_COLLECTIONS_SHAPE = {
-  datasources: z
-    .array(DatasourceSchema)
+  datasources: z.array(DatasourceSchema)
     .superRefine(refuseHostReservedDatasourceName)
     .optional()
     .describe('External Data Connections'),
