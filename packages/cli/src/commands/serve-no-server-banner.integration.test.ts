@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: four boots of the built CLI (production --no-server, --dev --no-server, a default boot, a config-mounted HonoServerPlugin under --no-server), each differing only in the input under test; 16.5 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
@@ -66,7 +67,12 @@ const READY_BANNER_TAIL = /Press Ctrl\+C to stop/;
 const BANNER_HEAD = 'Server is ready';
 /** Every banner row that names an address. */
 const ADDRESS_ROW = /\b(?:API|Console|MCP):/;
-const NO_SERVER_LINE = 'No HTTP server';
+/**
+ * The banner's own no-server row. Anchored on its `➜` and colon: the boot
+ * diagnostics under the banner carry plugins' own "No HTTP server available"
+ * lines, which are not it.
+ */
+const NO_SERVER_LINE = /➜\s+No HTTP server:/;
 
 const AUTH_SECRET = 'os-23623-auth-secret-not-a-real-credential';
 const SECRET_KEY = '0e2e'.repeat(16);
@@ -164,11 +170,14 @@ interface Boot {
   /** The banner, from its head to its tail. */
   banner: string;
   output: string;
+  /** Stop the child; call it once the port has been probed. */
+  stop: () => void;
 }
 
 /**
- * Spawn `os serve` and resolve on its COMPLETE banner (the child is then
- * stopped). A child that exits first rejects with its output.
+ * Spawn `os serve` and resolve on its COMPLETE banner, the child still
+ * running so its port can be probed. A child that exits first rejects with
+ * its output.
  */
 async function boot(cwd: string, env: Record<string, string | undefined>, args: string[]): Promise<Boot> {
   const port = await freePort();
@@ -192,9 +201,8 @@ async function boot(cwd: string, env: Record<string, string | undefined>, args: 
       if (!settled && READY_BANNER_TAIL.test(output)) {
         settled = true;
         clearTimeout(timer);
-        child.kill('SIGTERM');
         const banner = output.slice(output.lastIndexOf(BANNER_HEAD));
-        done({ banner: banner.slice(0, banner.search(READY_BANNER_TAIL)), output });
+        done({ banner: banner.slice(0, banner.search(READY_BANNER_TAIL)), output, stop: () => child.kill('SIGTERM') });
       }
     };
     child.stdout.on('data', onData);
@@ -228,12 +236,13 @@ async function statusOf(port: number, path: string): Promise<number> {
 }
 
 /** A no-server banner: no address row, and the one line. */
-function expectNoServerShape({ banner }: Boot): void {
+function expectNoServerShape({ banner, stop }: Boot): void {
+  stop();
   const seen = `\n--- banner ---\n${banner}`;
   const lines = banner.split('\n');
   expect(lines.filter((l) => ADDRESS_ROW.test(l)), `an address row printed${seen}`).toEqual([]);
   expect(banner, `the MCP connect hint printed${seen}`).not.toContain('connect an AI client');
-  const said = lines.filter((l) => l.includes(NO_SERVER_LINE));
+  const said = lines.filter((l) => NO_SERVER_LINE.test(l));
   expect(said, `not exactly one no-server line${seen}`).toHaveLength(1);
   expect(said[0], `the line does not name the flag that caused it${seen}`).toContain('--no-server');
 }
@@ -284,13 +293,17 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     'control: a default production boot prints API: and MCP:, and the API: port answers',
     async () => {
-      const { banner } = await boot(plainDir, { OS_DATABASE_URL: 'file:./ctl.db', OS_AUTH_SECRET: AUTH_SECRET }, []);
+      const { banner, stop } = await boot(plainDir, { OS_DATABASE_URL: 'file:./ctl.db', OS_AUTH_SECRET: AUTH_SECRET }, []);
       const seen = `\n--- banner ---\n${banner}`;
-      expect(banner, `the no-server line printed on a boot with a server${seen}`).not.toContain(NO_SERVER_LINE);
-      expect(banner, `no MCP row${seen}`).toMatch(/MCP:\s+http:\/\/localhost:\d+\/api\/v1\/mcp/);
-      const port = apiPort(banner);
-      expect(port, `no API row naming a localhost port${seen}`).not.toBeNull();
-      expect(await statusOf(port as number, '/api/v1/health'), `the API: port did not answer health${seen}`).toBe(200);
+      try {
+        expect(banner, `the no-server line printed on a boot with a server${seen}`).not.toMatch(NO_SERVER_LINE);
+        expect(banner, `no MCP row${seen}`).toMatch(/MCP:\s+http:\/\/localhost:\d+\/api\/v1\/mcp/);
+        const port = apiPort(banner);
+        expect(port, `no API row naming a localhost port${seen}`).not.toBeNull();
+        expect(await statusOf(port as number, '/api/v1/health'), `the API: port did not answer health${seen}`).toBe(200);
+      } finally {
+        stop();
+      }
     },
     240_000,
   );
@@ -298,15 +311,19 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     'control: --no-server with a config-mounted HonoServerPlugin prints API:, and that port answers',
     async () => {
-      const { banner } = await boot(honoDir, { OS_DATABASE_URL: 'file:./ctl.db' }, ['--no-server', '--preset', 'minimal']);
+      const { banner, stop } = await boot(honoDir, { OS_DATABASE_URL: 'file:./ctl.db' }, ['--no-server', '--preset', 'minimal']);
       const seen = `\n--- banner ---\n${banner}`;
-      // ⭐ The read is off the kernel, not off the flag: the flag skipped serve's
-      // own transport, the config composed one, and its address is real.
-      expect(banner, `the no-server line printed though the config composed a server${seen}`).not.toContain(NO_SERVER_LINE);
-      const port = apiPort(banner);
-      expect(port, `no API row naming a localhost port${seen}`).not.toBeNull();
-      // Any HTTP status proves a server listens there; `/` is not mounted on this shape.
-      expect(await statusOf(port as number, '/'), `nothing answered on the API: port${seen}`).toBeGreaterThanOrEqual(100);
+      try {
+        // ⭐ The read is off the kernel, not off the flag: the flag skipped serve's
+        // own transport, the config composed one, and its address is real.
+        expect(banner, `the no-server line printed though the config composed a server${seen}`).not.toMatch(NO_SERVER_LINE);
+        const port = apiPort(banner);
+        expect(port, `no API row naming a localhost port${seen}`).not.toBeNull();
+        // Any HTTP status proves a server listens there; `/` is not mounted on this shape.
+        expect(await statusOf(port as number, '/'), `nothing answered on the API: port${seen}`).toBeGreaterThanOrEqual(100);
+      } finally {
+        stop();
+      }
     },
     240_000,
   );

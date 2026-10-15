@@ -31,7 +31,8 @@ import { printServerReady, type ServerReadyOptions } from './format.js';
 
 /** Every banner line that names an address, or is about an address's origin. */
 const ADDRESS_ROW = /\b(?:API|Console|MCP):|connect an AI client|paths only|set OS_AUTH_URL/;
-const NO_SERVER_LINE = 'No HTTP server';
+/** The banner's own no-server row, anchored so a plugin's "No HTTP server available" diagnostic is not it. */
+const NO_SERVER_LINE = /➜\s+No HTTP server:/;
 
 /** A banner with every address row switched on, and rows that name no address. */
 const FULL: ServerReadyOptions = {
@@ -76,7 +77,7 @@ describe('printServerReady — an HTTP server is composed (#23623)', () => {
     expect(out.find((l) => l.includes('Console:'))).toContain('http://localhost:3000/_console/');
     expect(out.find((l) => l.includes('MCP:'))).toContain('http://localhost:3000/api/v1/mcp');
     expect(out.find((l) => l.includes('skill:'))).toContain('http://localhost:3000/api/v1/mcp/skill');
-    expect(out.filter((l) => l.includes(NO_SERVER_LINE))).toEqual([]);
+    expect(out.filter((l) => NO_SERVER_LINE.test(l))).toEqual([]);
   });
 
   it('still prints the paths-only note when the origin is unknown', () => {
@@ -95,7 +96,7 @@ describe('printServerReady — no HTTP server is composed (#23623)', () => {
     // No address at all: the only origin this banner knows is the one it was handed.
     expect(out.join('\n'), `an address printed${seen}`).not.toContain('http://');
 
-    const said = out.filter((l) => l.includes(NO_SERVER_LINE));
+    const said = out.filter((l) => NO_SERVER_LINE.test(l));
     expect(said, `not exactly one no-server line${seen}`).toHaveLength(1);
     expect(said[0], `the line does not name the flag that caused it${seen}`).toContain('--no-server');
   });
@@ -105,7 +106,7 @@ describe('printServerReady — no HTTP server is composed (#23623)', () => {
     const seen = `\n--- banner ---\n${out.join('\n')}`;
 
     expect(out.filter((l) => ADDRESS_ROW.test(l)), `an address row printed${seen}`).toEqual([]);
-    const said = out.filter((l) => l.includes(NO_SERVER_LINE));
+    const said = out.filter((l) => NO_SERVER_LINE.test(l));
     expect(said, `not exactly one no-server line${seen}`).toHaveLength(1);
     expect(said[0], `the line names a flag that was not given${seen}`).not.toContain('--no-server');
   });
@@ -113,7 +114,7 @@ describe('printServerReady — no HTTP server is composed (#23623)', () => {
   it('drops the paths-only note with the rows it is about', () => {
     const out = render({ ...FULL, httpServer: 'skipped-by-no-server', externalBaseOrigin: null });
     expect(out.filter((l) => ADDRESS_ROW.test(l))).toEqual([]);
-    expect(out.filter((l) => l.includes(NO_SERVER_LINE))).toHaveLength(1);
+    expect(out.filter((l) => NO_SERVER_LINE.test(l))).toHaveLength(1);
   });
 
   // ⭐ The other half of the ruling: only the address rows move. Each banner,
@@ -125,7 +126,7 @@ describe('printServerReady — no HTTP server is composed (#23623)', () => {
         const without = render({ ...FULL, missingCoreServices, httpServer });
 
         const composedRest = composed.filter((l) => !ADDRESS_ROW.test(l));
-        const withoutRest = without.filter((l) => !l.includes(NO_SERVER_LINE));
+        const withoutRest = without.filter((l) => !NO_SERVER_LINE.test(l));
         // Something was actually removed and something kept, or the equality is vacuous.
         expect(composed.length - composedRest.length).toBeGreaterThanOrEqual(4);
         expect(withoutRest.length).toBeGreaterThan(10);
