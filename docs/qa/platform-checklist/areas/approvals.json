@@ -508,12 +508,12 @@
       "source": [
         "#3358 §1 (the action-table evidence this matrix grounds in)",
         "packages/rest/src/rest-route-ledger.ts (approve/reject/recall/revise/resubmit/reassign/remind/request-info/comment + GET /:id/actions)",
-        "packages/rest/src/rest-server.ts#flowMoveRoute (flowMoveRoute: revise=pending approver, resubmit=submitter; threadRoute access per action; recall submitter-only)",
+        "packages/rest/src/approvals-routes.ts#flowMoveRoute (flowMoveRoute: revise=pending approver, resubmit=submitter; threadRoute access per action; recall submitter-only)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalService (ApprovalService.resubmit — 'traversal walks the declared back-edge into the approval node, whose executor opens the round-N+1 request'; the resubmitted row's status is never rewritten. sendBack counts prior rounds as returned siblings on flow_run_id + flow_node_id)",
         "packages/spec/src/contracts/approval-service.ts#APPROVAL_STATUSES (APPROVAL_STATUSES: pending|approved|rejected|recalled|returned)",
         "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (BudgetApprovalFlow — ADR-0044 revise loop, maxRevisions 2, exec step without a revise edge, lockRecord pair)",
         "packages/plugins/plugin-approvals/src/approval-service.ts#readBackRequest (readBackRequest — the write path's post-mutation echo; #12769 docblock: org-less rows are a live state, the null echo used to escape behind the callers' fresh! non-null assertions, now it refuses loudly; landed as PR #13181)",
-        "packages/rest/src/rest-server.ts#handleApprovalError (handleApprovalError prefix map — READ_BACK_FAILED deliberately unmapped, so it reaches the wire as the generic 500 APPROVAL_<action>_FAILED envelope carrying the named text)"
+        "packages/rest/src/approvals-routes.ts#handleApprovalError (handleApprovalError prefix map — READ_BACK_FAILED deliberately unmapped, so it reaches the wire as the generic 500 APPROVAL_<action>_FAILED envelope carrying the named text)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — decision-action matrix derived from the approvals REST route ledger and the ADR-0044 revise/resubmit flow shape", "ref": "claude/platform-test-checklist-ocwugl" },

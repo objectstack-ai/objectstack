@@ -221,15 +221,13 @@ describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', (
     const ADR_0126 = 'docs/adr/0126-packaged-metadata-customization-model.md';
 
     /**
-     * [ADR-0131 D6] The package-less sentence every regime-less type reads
-     * (`refusePackagedBaseOverride`): the managed seal, the registry flag that
-     * produced it, the hatch named only to say it does not apply, the remedy.
+     * [#23577] The package-less sentence every regime-less type's write reads
+     * (`refusePackagedBaseOverride`): what the door knows and where the names
+     * are listed — no create advice, no source-artifact advice, no hatch.
      */
     const SEALED_SAVE = (type: string, name: string) =>
-        `Metadata item '${type}/${name}' is provided by a managed package and is sealed against in-place edits: `
-        + 'its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not open '
-        + 'a managed item. Edit the source artifact and redeploy. '
-        + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.';
+        `'${type}/${name}' is provided by a managed package and is sealed: it cannot be written here. `
+        + `GET /api/v1/meta/${type} lists the names in use.`;
     /** …and its removal twin (`refusePackagedBaseRemoval`), which has no remedy to name. */
     const SEALED_DELETE = (type: string, name: string) =>
         `Metadata item '${type}/${name}' is provided by a managed package and is sealed against removal: `
@@ -279,7 +277,7 @@ describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', (
         const refusal: any = p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' });
         expect(shape(refusal)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
         expect(refusal.message).toBe(SEALED_SAVE('page', 'pkg_page'));
-        // It names the hatch only to say it does not open the item — never as a remedy.
+        // It never names the hatch as a remedy.
         expect(refusal.message).not.toMatch(/set OS_METADATA_WRITABLE|may set OS_METADATA_WRITABLE/);
     });
 

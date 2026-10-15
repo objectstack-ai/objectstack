@@ -60,6 +60,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 // `.js` on purpose — NodeNext resolution requires the extension.
 import { RestServer } from './rest-server.js';
+import { REST_SERVER_REGISTRAR_FILES } from './rest-server-registrar-files.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE_FILE = 'rest-server.ts';
@@ -68,11 +69,12 @@ const SOURCE = readFileSync(resolve(HERE, SOURCE_FILE), 'utf8');
 // own module, carrying the export door and its `page` exemption with it. The
 // census reads both files as one population — a site's key is its route or
 // function, never its file, so the ledger below did not change a row.
-const MOVED_FILES = ['data-action-routes.ts'] as const;
-const SOURCES: ReadonlyArray<readonly [string, string]> = [
-    [SOURCE_FILE, SOURCE],
-    ...MOVED_FILES.map((file) => [file, readFileSync(resolve(HERE, file), 'utf8')] as const),
-];
+// [#23050 slice 3] …and now every file on THE list of the files `RestServer`'s
+// registrars live in, imported rather than spelt here, so a registrar body the
+// split moves next stays inside this census. §2's last case pins the list's
+// length and the census's sum over it.
+const SOURCES: ReadonlyArray<readonly [string, string]> = REST_SERVER_REGISTRAR_FILES.map((file) =>
+    [file, file === SOURCE_FILE ? SOURCE : readFileSync(resolve(HERE, file), 'utf8')] as const);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The walker
@@ -309,6 +311,16 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         for (const row of LEDGER.filter((r) => r.disposition !== 'not-a-query-value')) {
             expect(keys.has(row.site), row.site).toBe(true);
         }
+    });
+
+    it('[#23050 slice 3] reads every file on the registrar list — its length and this sum are pinned', () => {
+        // A module added to the list makes this re-read its number rather than
+        // widening unnoticed. 9 sites = 8 in `rest-server.ts` + 1 in
+        // `data-action-routes.ts` (the export door's `page`); the batch and
+        // approval bodies carry none.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
+        expect(sites).toHaveLength(9);
     });
 });
 
