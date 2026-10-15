@@ -319,6 +319,9 @@ describe('tree-scoped absence: no `api` block inside the declared radius still a
   const EXCLUDED_PREFIXES = [
     // Release-owned prose records the removal; never edited by a code PR.
     'content/docs/releases/',
+    // GITIGNORED build output (`packages/spec/json-schema/`), reached only
+    // because this is a FILESYSTEM walk. Its source is `rest-server.zod.ts`.
+    'packages/spec/json-schema/',
   ];
   /** tsup's own bundle of `tsup.config.ts`, written and deleted mid-build. */
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
