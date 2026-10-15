@@ -32,7 +32,7 @@
 //
 // `@objectstack/plugin-audit` resolves through its BUILT output here (a
 // ledgered pair in `scripts/check-test-source-alias.mjs`), so a verdict on a
-// change to it is a verdict on its last build. ⚠️ No test title states a value.
+// change to it is a verdict on its last build.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
