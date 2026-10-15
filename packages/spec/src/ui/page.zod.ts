@@ -47,7 +47,7 @@ export const PageRegionSchema = lazySchema(() => strictObject({
   history: PAGE_HISTORY,
   aliases: { id: 'name', region: 'name', children: 'components', items: 'components', content: 'components', size: 'width', span: 'width' },
 }, {
-  name: z.string().describe("Region name — a slot the page's `template` places: header, sidebar, main, aside or footer on 'default' and 'three-column'; header, sidebar or main on 'header-sidebar-main'; any name on 'dashboard' (header and footer span it, every other region is a grid cell). A name the template does not place is refused.").meta({ title: 'Region' }),
+  name: z.string().describe("Region name — a slot the page's `template` places: header, sidebar, main, aside or footer on 'default' and 'three-column'; header, sidebar or main on 'header-sidebar-main'; any name on 'dashboard' (header and footer span it, every other region is a grid cell). One region per slot. A name the template does not place, and a second region filling a slot already filled, are refused.").meta({ title: 'Region' }),
   width: z.enum(['small', 'medium', 'large', 'full']).optional().meta({ title: 'Width' }),
   components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region').meta({ title: 'Components' })
 }));
@@ -1676,8 +1676,12 @@ const REGION_NAME_HINTS: Readonly<Record<string, string>> = {
  * The renderer never dropped such a region: it stacked it under `main` at full
  * width and ignored its `width`, so a `left_sidebar` or `right_sidebar` on a
  * `three-column` page drew as one column while every door reported success.
- * Names match case-insensitively, as the renderer's do. A `dashboard` page
- * places every name (its open grid). Judged on `kind: 'full'` pages only —
+ * Names match case-insensitively, as the renderer's do. A SECOND region
+ * filling a slot an earlier one already fills is refused too: the renderer
+ * draws the first (`findRegion`) and excludes every region of that name from
+ * the rest (`getRemainingRegions`), so the second is not drawn at all. A
+ * `dashboard` page places every other name (its open grid) — two `kpis`
+ * regions are two cells — but not a second `header` or `footer`. Judged on `kind: 'full'` pages only —
  * the kind whose regions the template lays out: a `slotted` page renders its
  * `slots`, and an `html` / `react` page its `source`. A template the enum
  * refuses is that refusal's, not this check's.
@@ -1692,13 +1696,34 @@ export function checkPageRegionPlacement(
   if ((page.kind ?? 'full') !== 'full' || !Array.isArray(page.regions)) return;
   const template = page.template ?? 'default';
   if (typeof template !== 'string' || !Object.prototype.hasOwnProperty.call(PAGE_TEMPLATE_SLOTS, template)) return;
-  if ((PAGE_TEMPLATE_OPEN_GRID as readonly string[]).includes(template)) return;
   const slots: readonly string[] = PAGE_TEMPLATE_SLOTS[template as PageTemplate];
+  const openGrid = (PAGE_TEMPLATE_OPEN_GRID as readonly string[]).includes(template);
   const slotList = slots.map((slot) => `\`${slot}\``).join(', ');
+  // slot → the index of the region that fills it (the renderer's `findRegion`
+  // takes the FIRST match, case-insensitively, and drops every later one).
+  const filled = new Map<string, number>();
   page.regions.forEach((region, index) => {
     const name = region && typeof region === 'object' ? (region as { name?: unknown }).name : undefined;
-    if (typeof name !== 'string' || slots.includes(name.toLowerCase())) return;
-    const hint = REGION_NAME_HINTS[name.toLowerCase()];
+    if (typeof name !== 'string') return;
+    const slot = name.toLowerCase();
+    if (slots.includes(slot)) {
+      const first = filled.get(slot);
+      if (first === undefined) {
+        filled.set(slot, index);
+        return;
+      }
+      ctx.addIssue({
+        code: 'custom',
+        path: ['regions', index, 'name'],
+        message: `Region \`${name}\` is refused on a \`template: '${template}'\` page: \`regions[${first}]\` already fills `
+          + `its \`${slot}\` slot, and the template places one region per slot (${slotList}), so a second one is not `
+          + `drawn at all. Move its components into \`regions[${first}]\`, or name it for an unfilled slot.`,
+      });
+      return;
+    }
+    // An open-grid template draws every other region, whatever its name.
+    if (openGrid) return;
+    const hint = REGION_NAME_HINTS[slot];
     const rename = hint !== undefined && slots.includes(hint)
       ? `Rename it \`${hint}\`, `
       : 'Rename it to one of those slots, ';
@@ -1807,7 +1832,7 @@ export const PageSchema = lazySchema(() => strictObject({
   // objectui dropped all references in objectui#1949.
 
   /** Layout Template */
-  template: PageTemplateSchema.default('default').describe("Layout template — 'default', 'header-sidebar-main', 'three-column' or 'dashboard'. Each places its own regions (PAGE_TEMPLATE_SLOTS); a region the template does not place is refused at the region's name."),
+  template: PageTemplateSchema.default('default').describe("Layout template — 'default', 'header-sidebar-main', 'three-column' or 'dashboard'. Each places its own regions (PAGE_TEMPLATE_SLOTS); a region the template does not place, or a second region filling the same slot, is refused at the region's name."),
   
   /** Regions & Content */
   // Optional with an empty-array default. Not every page authors regions:

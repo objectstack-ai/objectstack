@@ -376,6 +376,8 @@ const pageRegionPlacementFixtures: Fixture[] = [
   { label: 'the five slots on `default`', value: { ...PAGE_BASE, template: 'default', regions: ['header', 'sidebar', 'main', 'aside', 'footer'].map((n) => region(n)) }, refusesAt: [] },
   { label: 'a slot name in another case (`Main`) — the renderer matches case-insensitively', value: { ...PAGE_BASE, regions: [region('Main')] }, refusesAt: [] },
   { label: 'any name on `dashboard` — its open grid', value: { ...PAGE_BASE, template: 'dashboard', regions: [region('header'), region('kpis'), region('pipeline')] }, refusesAt: [] },
+  { label: 'a second `main` on the `default` default — not drawn at all', value: { ...PAGE_BASE, regions: [region('main'), region('MAIN')] }, refusesAt: ['regions.1.name'] },
+  { label: 'a second `header` on `dashboard`, beside two `kpis` cells', value: { ...PAGE_BASE, template: 'dashboard', regions: [region('header'), region('kpis'), region('kpis'), region('header')] }, refusesAt: ['regions.3.name'] },
   { label: 'an unplaced name on a `slotted` page — it renders its slots, not its regions', value: { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted', regions: [region('left_sidebar')] }, refusesAt: [] },
 ];
 

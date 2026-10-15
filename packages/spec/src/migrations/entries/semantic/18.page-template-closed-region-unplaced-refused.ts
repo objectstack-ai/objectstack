@@ -20,13 +20,15 @@ export const entry: SemanticMigration = {
     'pages[].template — a name the console does not register (full-width, two-column, single-column and any '
     + 'other); and pages[].regions[].name on a kind full page — a name the page\'s template does not place '
     + '(left_sidebar, right_sidebar, content and any other name outside header, sidebar, main, aside, footer '
-    + 'on default and three-column, or outside header, sidebar, main on header-sidebar-main)',
+    + 'on default and three-column, or outside header, sidebar, main on header-sidebar-main), and a second region '
+    + 'filling a slot an earlier region already fills (two main regions; on dashboard, a second header or footer)',
   replacement:
     'A registered template: `default` (header, sidebar, main, aside, footer), `header-sidebar-main` (header, '
     + 'sidebar, main), `three-column` (header, sidebar, main, aside, footer) or `dashboard` (header, footer, '
     + 'and every other region a grid cell) — `full-width` is `default`. Name each region for the slot it '
     + 'fills: `left_sidebar` → `sidebar`, `right_sidebar` → `aside`, `content` → `main`; or choose `dashboard` '
-    + 'when the regions are meant as a grid.',
+    + 'when the regions are meant as a grid. A second region for a filled slot: move its components into the first '
+    + 'region of that name, or name it for an unfilled slot.',
   reason:
     'PageSchema.template and regions[].name were free strings, and the slot names a template places were '
     + 'declared nowhere, so neither an author nor objectstack validate could know that left_sidebar is not a '
@@ -39,7 +41,10 @@ export const entry: SemanticMigration = {
     + 'same layout) by name with its replacement, and an unplaced region at regions.N.name, naming the '
     + 'template\'s slots — by the page parse: definePage, defineStack (so objectstack validate and objectstack '
     + 'build, STACK_SCHEMA_INVALID 422) and the metadata save door (422 INVALID_METADATA). Region names match '
-    + 'case-insensitively, as the console\'s do; dashboard places every name by design; slotted, html and '
+    + 'case-insensitively, as the console\'s do. A second region filling an already filled slot was not drawn at '
+    + 'all — the console draws the first region of a name and excludes that name from the rest — and is refused '
+    + 'at its name too, naming the region that fills the slot. dashboard places every other name by design (two '
+    + 'regions of one other name are two grid cells); slotted, html and '
     + 'react pages, which do not lay out regions by template, are not judged on region names. '
     + '⚠️ No D2 conversion: the ruling keeps no alias window for full-width, and which slot a renamed region '
     + 'fills is the author\'s call. '

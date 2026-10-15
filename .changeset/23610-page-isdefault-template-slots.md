@@ -15,6 +15,7 @@ Clause-②: yes (narrowing)
 | `template: 'full-width'` | accepted; drawn exactly as `default` | refused by name: "Page `template: 'full-width'` was removed in @objectstack/spec 18 … Use `template: 'default'`" |
 | any other `template` outside `default`, `header-sidebar-main`, `three-column`, `dashboard` (`two-column`, `single-column`, …) | accepted; drawn as the page type's default layout | refused at `template` |
 | on a `kind: 'full'` page, a region its template does not place (`left_sidebar`, `right_sidebar`, `content`, …) | accepted; stacked under `main` at full width, its `width` ignored | refused at `regions.N.name`, naming the template's slots and the rename |
+| on a `kind: 'full'` page, a second region filling a slot an earlier one fills (two `main` regions; on `dashboard`, a second `header` or `footer`) | accepted; not drawn at all — the console draws the first region of a name and leaves that name out of the rest | refused at `regions.N.name`, naming the region that already fills the slot |
 
 Migration:
 
@@ -23,6 +24,7 @@ Migration:
 - **A `template` held in a widened `string`** (a shared base object, `{ template: 'default' }` spread into `definePage`) no longer type-checks against the closed set → `template: 'default' as const`.
 - **An unregistered template** → one of `default` (header, sidebar, main, aside, footer), `header-sidebar-main` (header, sidebar, main), `three-column` (header, sidebar, main, aside, footer) or `dashboard` (header, footer, and every other region a grid cell).
 - **An unplaced region** → name it for the slot it fills: `left_sidebar` → `sidebar`, `right_sidebar` → `aside`, `content` → `main`; or choose `dashboard` when the regions are a grid. Names match case-insensitively, as the console's do. `slotted`, `html` and `react` pages are not judged on region names.
+- **A second region for a filled slot** → move its components into the first region of that name, or name it for an unfilled slot. On `dashboard`, two regions of any other one name stay two grid cells and are accepted.
 
 The template set and each template's slots are now published: `PageTemplateSchema`, `PAGE_TEMPLATE_SLOTS` and `PAGE_TEMPLATE_OPEN_GRID` (`@objectstack/spec/ui`), with the two checks `checkPageDefaultPlacement` and `checkPageRegionPlacement` and the one refusal sentence `misplacedDefaultPageRefusal` that the parse and the registry share.
 

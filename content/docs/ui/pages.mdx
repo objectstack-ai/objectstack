@@ -168,7 +168,9 @@ case-insensitively.
 On a `kind: 'full'` page, a region its template does not place — `left_sidebar`,
 `right_sidebar`, `content` — is refused by `os validate`, `os build` and the metadata save door,
 naming the template's slots: the console would stack it under `main` at full width and ignore
-its `width`. Use `sidebar` for the left column and `aside` for the right. `full-width` is no
+its `width`. Use `sidebar` for the left column and `aside` for the right. Each slot takes one
+region: a second `main` (or, on `dashboard`, a second `header` or `footer`) is not drawn at all,
+and is refused the same way. `full-width` is no
 longer a template name: it was a second name for `default`, and is refused with that
 replacement.
 

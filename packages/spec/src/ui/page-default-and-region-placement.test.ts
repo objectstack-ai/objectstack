@@ -184,6 +184,26 @@ describe('Q2 — a region the template does not place', () => {
     expect(hsm[0]!.message).toContain('Rename it to one of those slots');
   });
 
+  it.each(['default', 'three-column', 'header-sidebar-main'] as const)(
+    'refuses a SECOND region filling an already filled slot on `%s` — case-insensitively — naming the region that fills it',
+    (template) => {
+      const issues = refusalOf({ name: 'pg_page', label: 'P', type: 'home', template, regions: [region('main'), region('sidebar'), region('Main')] });
+      expect(issues.map((i) => ({ path: i.path.join('.'), code: i.code }))).toEqual([{ path: 'regions.2.name', code: 'custom' }]);
+      expect(issues[0]!.message.startsWith(`Region \`Main\` is refused on a \`template: '${template}'\` page: \`regions[0]\` already fills its \`main\` slot`)).toBe(true);
+      expect(issues[0]!.message).toContain('Move its components into `regions[0]`');
+    },
+  );
+
+  it('on `dashboard` refuses a second `header` / `footer` but keeps two regions of any other name as two grid cells', () => {
+    const issues = refusalOf({
+      name: 'pg_page', label: 'P', type: 'home', template: 'dashboard',
+      regions: [region('header'), region('kpis'), region('kpis'), region('footer'), region('HEADER'), region('footer')],
+    });
+    expect(issues.map((i) => i.path.join('.'))).toEqual(['regions.4.name', 'regions.5.name']);
+    expect(issues[0]!.message).toContain('`regions[0]` already fills its `header` slot');
+    expect(issues[1]!.message).toContain('`regions[3]` already fills its `footer` slot');
+  });
+
   it('the stack door wraps the refusal at `pages.N.regions.M.name`', () => {
     const refusal = stackRefusalOf([
       { name: 'pgs_home', label: 'Home', type: 'home', template: 'three-column', regions: [region('main'), region('right_sidebar')] },
