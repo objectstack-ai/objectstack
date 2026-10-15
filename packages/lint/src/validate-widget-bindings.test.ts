@@ -50,9 +50,27 @@ const SHORTENED_RULE_IDS: readonly string[] = [
   CHART_DIMENSIONS_MISSING,
 ];
 const firedShortened: Array<{ rule: string; message: string }> = [];
+// [#22161] Slice 17: the ids whose `fix:` line this file shortened. Every
+// finding of them is recorded too, and the hint block at the foot of the file
+// holds each recorded `fix:` line to one line of at most 200 characters.
+const HINT_SHORTENED_RULE_IDS: readonly string[] = [
+  DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  CHART_FIELD_UNKNOWN,
+  DASHBOARD_FILTER_FIELD_UNKNOWN,
+  CHART_MEASURES_MISSING,
+  WIDGET_LEGACY_ANALYTICS_SHAPE,
+  WIDGET_MEASURES_MISSING,
+  WIDGET_FILTER_FIELD_UNKNOWN,
+  WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
+  TABLE_COUNT_ONLY,
+  CHART_DIMENSIONS_MISSING,
+  DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
+];
+const firedHints: Array<{ rule: string; message: string; hint: string }> = [];
 const validateWidgetBindings: typeof validateWidgetBindingsUnrecorded = (...args) => {
   const findings = validateWidgetBindingsUnrecorded(...args);
   for (const f of findings) if (SHORTENED_RULE_IDS.includes(f.rule)) firedShortened.push(f);
+  for (const f of findings) if (HINT_SHORTENED_RULE_IDS.includes(f.rule)) firedHints.push(f);
   return findings;
 };
 
@@ -198,8 +216,12 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     // (pinned at the foot of this file), not the one-line verdict's.
     expect(findings[0].message).toContain('an authored axis `field` re-points nothing');
     expect(findings[0].message).not.toContain('will not contain');
-    expect(findings[0].hint).toContain('Did you mean "sum_amount"?');
-    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_FIELD_UNKNOWN}']`);
+    // [#22161] One remedy line plus the nearest selected measure; the
+    // suppression is the `os explain` entry's.
+    expect(findings[0].hint).toBe(
+      'Delete the key: `chartConfig.yAxis` is refused on a dataset-bound widget; select the measure BY NAME ' +
+        'in the widget\'s values. Did you mean "sum_amount"?',
+    );
   });
 
   it('(d) warns on xAxis.field that is not a dataset dimension', () => {
@@ -219,8 +241,10 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     // what the chart is actually plotting.
     expect(findings[0].message).toContain('x-axis stays bound to this widget\'s first dimension (category)');
     expect(findings[0].message).not.toContain('will not contain');
-    expect(findings[0].hint).toContain('Did you mean "category"?');
-    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_FIELD_UNKNOWN}']`);
+    expect(findings[0].hint).toBe(
+      'Delete the key: `chartConfig.xAxis` is refused on a dataset-bound widget, and the x-axis comes from ' +
+        'this widget\'s `dimensions`. Did you mean "category"?',
+    );
   });
 
   it('(d) warns on series[].name that resolves to no selected measure', () => {
@@ -248,7 +272,7 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     // (ADR-0021; ruling 2026-09-12), so advice about how to use it correctly
     // would be advice about a document the parse refuses.
     expect(findings[0].hint).toContain('`chartConfig.series` is refused on a dataset-bound widget');
-    expect(findings[0].hint).toContain('Delete the key.');
+    expect(findings[0].hint).toMatch(/^Delete the key: /);
   });
 
   it('(d) a declared-but-unselected measure gets the targeted message', () => {
@@ -264,7 +288,10 @@ describe('validateWidgetBindings (reference integrity, issue #1721)', () => {
     expect(findings[0].rule).toBe(CHART_FIELD_UNKNOWN);
     expect(findings[0].message).toContain('not selected in the widget\'s values');
     expect(findings[0].message).not.toContain('will not contain');
-    expect(findings[0].hint).toContain('Add "ticket_count" to the widget\'s values');
+    expect(findings[0].hint).toBe(
+      'Delete the key: `chartConfig.yAxis` is refused on a dataset-bound widget; to plot "ticket_count", add ' +
+        'it to the widget\'s values.',
+    );
   });
 
   it('(d) all three refused keys are suppressible per widget (#15463)', () => {
@@ -440,8 +467,12 @@ describe('validateWidgetBindings (table-count-only, issue #1719)', () => {
     expect(warnings[0].path).toBe('dashboards[0].widgets[0]');
     expect(warnings[0].message).toContain('report_count');
     expect(warnings[0].message).toContain('single summary row');
-    expect(warnings[0].hint).toContain('ListView (ADR-0017)');
-    expect(warnings[0].hint).toContain(`suppressWarnings: ['${TABLE_COUNT_ONLY}']`);
+    // [#22161] One remedy line; ADR-0017 and the suppression are the `os
+    // explain` entry's (pinned at the foot of this file).
+    expect(warnings[0].hint).toBe(
+      "List records with an object-bound ListView in app navigation, use a 'metric' widget for the count, " +
+        'or add a dimension to group the rows.',
+    );
   });
 
   it('warns for pivot widgets too', () => {
@@ -891,7 +922,11 @@ describe('validateWidgetBindings (dashboard-filter-field-unprovisioned, issue #8
     expect(f.message).toContain('injected column with no storage');
     // [#22161] The SQLite constant-false degradation is the `os explain` entry's.
     expect(f.message).toContain('the widget renders empty');
-    expect(f.hint).toContain("columnMap");
+    // [#22161] The shared one-line anchor fix.
+    expect(f.hint).toBe(
+      "If the remote table carries 'owner_id', declare it in ext_customer's own fields (mapped through " +
+        'columnMap); otherwise drop the reference or opt the object out of the injection',
+    );
     expect(f.path).toBe('dashboards[0].widgets[0]');
     // The existence rule is UNCHANGED — the name still resolves.
     expect(unknownOnly(validateWidgetBindings(stack()))).toHaveLength(0);
@@ -1076,7 +1111,13 @@ describe('dashboard-filter-field-unknown — gap 1: dotted paths are resolved (#
     // The verdict travelled: the miss is reported against crm_ACCOUNT, the
     // object the leaf lives on, not against the dataset's base object.
     expect(findings[0].message).toContain('crm_account');
-    expect(findings[0].hint).toContain('signed_at');
+    // [#22161] The nearest field is the verdict's "Did you mean"; the hint is
+    // the remedy alone, with no field list.
+    expect(findings[0].message).toContain('Did you mean "signed_at"?');
+    expect(findings[0].hint).toBe(
+      "Point filterBindings: { dateRange: '<field>' } at a path that resolves on `crm_deal`, or opt out with " +
+        'filterBindings: { dateRange: false }.',
+    );
   });
 
   it('errors when a hop is not a relationship at all', () => {
@@ -1136,7 +1177,11 @@ describe('dashboard-filter-field-not-included — the include clause (#14275)', 
     // The consequence that makes this a p2 rather than the widget-level twin:
     // the filter reaches every widget on the board.
     expect(f.message).toContain('the whole board renders empty');
-    expect(f.hint).toContain('(none)');
+    // [#22161] The remedy alone: the declared include paths are not echoed.
+    expect(f.hint).toBe(
+      'Add "account" to dataset "deal_metrics"\'s include, filter on a field of "crm_deal" itself, or opt out ' +
+        'with filterBindings: { dateRange: false }.',
+    );
   });
 
   it('is silent for a bare base column — it needs no join', () => {
@@ -1323,9 +1368,14 @@ describe('widget-filter-field-unknown (#14148 limb A)', () => {
     expect(f.message).toContain('due_daet');
     expect(f.message).toContain('duly_task');
     expect(f.path).toBe('dashboards[0].widgets[0].filter.due_daet');
-    // The "did you mean", and the object's field list, both present.
+    // The "did you mean" is the verdict's; [#22161] the hint is the remedy
+    // alone, and the object's field list is no longer echoed.
     expect(f.message).toContain('Did you mean "due_date"?');
-    expect(f.hint).toContain('business_unit');
+    expect(f.hint).toBe(
+      'Filter on a field of "duly_task" (dataset "duly_workload"), or on a relationship path whose prefix that ' +
+        "dataset's `include` declares.",
+    );
+    expect(f.hint).not.toContain('business_unit');
   });
 
   it('is silent on the clean shape — a real column', () => {
@@ -1572,8 +1622,10 @@ describe('chart-measures-missing / chart-dimensions-missing (#15462)', () => {
     // renderer returns — not an inferred one.
     expect(findings[0].message).toContain('Pick measures (values) for this dataset widget.');
     expect(findings[0].message).toContain('no chart is drawn at all');
-    expect(findings[0].hint).toContain('declared measures: sum_amount, ticket_count');
-    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_MEASURES_MISSING}']`);
+    // [#22161] One remedy line naming the declared measures (at most three).
+    expect(findings[0].hint).toBe(
+      'Select a measure of dataset "expense_line_metrics" BY NAME in `values` (declared: sum_amount, ticket_count).',
+    );
   });
 
   it('(1) an absent `values` key reports the same shape as an empty array', () => {
@@ -1593,10 +1645,10 @@ describe('chart-measures-missing / chart-dimensions-missing (#15462)', () => {
     // The consequence. [#22161] The pinned `isMetric` expression that produces
     // it is quoted by `os explain chart-dimensions-missing` (foot of this file).
     expect(findings[0].message).toContain('draws a single KPI number');
-    expect(findings[0].hint).toContain('declared dimensions: category');
+    expect(findings[0].hint).toContain('(declared: category)');
     // The honest alternative repair: declare the family that actually renders.
     expect(findings[0].hint).toContain("'metric' or 'kpi'");
-    expect(findings[0].hint).toContain(`suppressWarnings: ['${CHART_DIMENSIONS_MISSING}']`);
+    expect(findings[0].hint).not.toContain('suppressWarnings');
   });
 
   it('each shape is suppressible per widget', () => {
@@ -1626,7 +1678,7 @@ describe('chart-measures-missing / chart-dimensions-missing (#15462)', () => {
     }));
     expect(rules(findings)).toEqual([CHART_MEASURES_MISSING]);
     // The dimension is still named, so one fix round closes both.
-    expect(findings[0].hint).toContain(CHART_DIMENSIONS_MISSING);
+    expect(findings[0].hint).toMatch(/, and a dimension to plot it against\.$/);
   });
 
   it('a single-value or tabular family with no dimensions is NOT the dimensions finding', () => {
@@ -1775,8 +1827,10 @@ describe('widget-measures-missing (#15508)', () => {
     expect(findings[0].message).toContain('its KPI number is not drawn at all');
     // ...and NOT the chart family's consequence, which would be false here.
     expect(findings[0].message).not.toContain('no chart is drawn');
-    expect(findings[0].hint).toContain('declared measures: sum_amount, ticket_count');
-    expect(findings[0].hint).toContain(`suppressWarnings: ['${WIDGET_MEASURES_MISSING}']`);
+    expect(findings[0].hint).toBe(
+      'Select a measure of dataset "expense_line_metrics" BY NAME in `values` (declared: sum_amount, ' +
+        "ticket_count); a 'metric' widget needs no `dimensions`.",
+    );
   });
 
   it('warns when a `table` selects no measures, naming the TABLE consequence', () => {
@@ -1830,7 +1884,7 @@ describe('widget-measures-missing (#15508)', () => {
     }));
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(WIDGET_MEASURES_MISSING);
-    expect(findings[0].hint).not.toContain(CHART_DIMENSIONS_MISSING);
+    expect(findings[0].hint).not.toContain('a dimension to plot it against');
     expect(findings[0].hint).toContain('needs no `dimensions`');
   });
 
@@ -1894,7 +1948,7 @@ describe('widget-measures-missing (#15508)', () => {
       }],
     });
     expect(rules(findings)).toEqual([WIDGET_MEASURES_MISSING]);
-    expect(findings[0].hint).toContain('declared measures: user_count');
+    expect(findings[0].hint).toContain('(declared: user_count)');
   });
 });
 
@@ -2000,5 +2054,95 @@ describe('[#22161] one-line verdicts — the rule ids this file shortened', () =
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 17: the `fix:` line of the eleven ids above whose hint ran
+// past 200 characters. One remedy line each; the field, include-path and full
+// measure or dimension lists are no longer echoed (the verdict's "Did you
+// mean" names the nearest field, and an empty selection names at most three
+// declared names), and the reasoning and the suppression are each id's
+// `os explain` entry.
+describe('[#22161] one-line fix — the rule ids whose `fix:` line this file shortened', () => {
+  it('every `fix:` line the cases above fired for those ids is one line of at most 200 characters', () => {
+    // Coverage control: each id fired, and every hint arm of the multi-arm ids.
+    expect([...new Set(firedHints.map((f) => f.rule))].sort()).toEqual([...HINT_SHORTENED_RULE_IDS].sort());
+    const arms: Array<[string, (f: { rule: string; message: string; hint: string }) => boolean]> = [
+      ['filter: dotted', (f) => f.rule === DASHBOARD_FILTER_FIELD_UNKNOWN && f.hint.includes('at a path that resolves')],
+      ['filter: explicit', (f) => f.rule === DASHBOARD_FILTER_FIELD_UNKNOWN && f.hint.includes('at a field that exists')],
+      ['filter: inherited', (f) => f.rule === DASHBOARD_FILTER_FIELD_UNKNOWN && f.hint.startsWith('Set filterBindings')],
+      ['chart: xAxis', (f) => f.rule === CHART_FIELD_UNKNOWN && f.hint.includes('`chartConfig.xAxis`')],
+      ['chart: yAxis', (f) => f.rule === CHART_FIELD_UNKNOWN && f.hint.includes('`chartConfig.yAxis`')],
+      ['chart: series', (f) => f.rule === CHART_FIELD_UNKNOWN && f.hint.includes('`chartConfig.series`')],
+      ['chart: declared, unselected', (f) => f.rule === CHART_FIELD_UNKNOWN && f.hint.includes('to plot "')],
+      ['measures: no dimensions either', (f) => f.rule === CHART_MEASURES_MISSING && f.hint.includes('a dimension to plot it against')],
+      ['measures: with dimensions', (f) => f.rule === CHART_MEASURES_MISSING && !f.hint.includes('a dimension to plot it against')],
+    ];
+    for (const [arm, test] of arms) expect(firedHints.some(test), arm).toBe(true);
+    for (const f of firedHints) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      for (const gone of ['suppressWarnings', 'Object fields:', 'Fields on "', 'Declared include paths', 'declared measures:', 'declared dimensions:']) {
+        expect(f.hint, `${f.rule}: ${gone}`).not.toContain(gone);
+      }
+    }
+  });
+
+  it('an empty selection names at most three declared names, then an ellipsis', () => {
+    const many = ['m_one', 'm_two', 'm_three', 'm_four', 'm_five'];
+    const findings = validateWidgetBindings({
+      datasets: [{
+        name: 'wide_metrics', object: 'o',
+        dimensions: [{ name: 'stage', field: 'stage' }],
+        measures: many.map((name) => ({ name, aggregate: 'count' })),
+      }],
+      dashboards: [{ name: 'd', widgets: [{ id: 'w', type: 'bar', dataset: 'wide_metrics', dimensions: ['stage'], values: [] }] }],
+    });
+    expect(findings.map((f) => f.rule)).toEqual([CHART_MEASURES_MISSING]);
+    expect(findings[0].hint).toBe('Select a measure of dataset "wide_metrics" BY NAME in `values` (declared: m_one, m_two, m_three, …).');
+  });
+
+  it('a dataset that declares no measures says so instead of listing none', () => {
+    const findings = validateWidgetBindings({
+      datasets: [{ name: 'bare_metrics', object: 'o', dimensions: [{ name: 'stage', field: 'stage' }], measures: [] }],
+      dashboards: [{ name: 'd', widgets: [{ id: 'w', type: 'kpi', dataset: 'bare_metrics', values: [] }] }],
+    });
+    expect(findings.map((f) => f.rule)).toEqual([WIDGET_MEASURES_MISSING]);
+    expect(findings[0].hint).toBe(
+      "Select a measure of dataset \"bare_metrics\" BY NAME in `values` (it declares no measures yet); a 'kpi' widget needs no `dimensions`.",
+    );
+  });
+
+  it('the two legacy-shape ids name the semantic shape in one line', () => {
+    const shape = firedHints.find((f) => f.rule === WIDGET_LEGACY_ANALYTICS_SHAPE)!;
+    expect(shape.hint).toMatch(/^Delete the legacy keys? and select fields BY NAME through the widget's dataset: `dataset`, `dimensions`, `values`\.$/);
+    const dead = firedHints.find((f) => f.rule === WIDGET_LEGACY_ANALYTICS_UNRENDERABLE)!;
+    expect(dead.hint).toBe("Bind a semantic dataset and select fields BY NAME: `dataset: '<name>', dimensions: [...], values: [...]`.");
+  });
+
+  // What each `fix:` line stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED_FROM_HINT: Record<string, readonly string[]> = {
+    [DASHBOARD_FILTER_FIELD_UNPROVISIONED]: ['`columnMap`', '`ownership: \'none\'`', 'filterBindings: { NAME: false }', "suppressWarnings: ['dashboard-filter-field-unprovisioned']"],
+    [CHART_FIELD_UNKNOWN]: ['Run `os migrate meta --from 17` to list the mechanical edits for existing sources', 'one entry per mark', 'second `dimensions` entry to split', "suppressWarnings: ['chart-field-unknown']"],
+    [DASHBOARD_FILTER_FIELD_UNKNOWN]: ['`relationship[.relationship].field`', 'lookup, master_detail, user or tree', '`include`', '"Did you mean"'],
+    [CHART_MEASURES_MISSING]: ['chart-dimensions-missing', 'up to three', "suppressWarnings: ['chart-measures-missing']"],
+    [WIDGET_LEGACY_ANALYTICS_SHAPE]: ['DatasetWidget', 'pivot rows and columns come from `dimensions`', 'no-op', "suppressWarnings: ['widget-legacy-analytics-shape']"],
+    [WIDGET_MEASURES_MISSING]: ['measures are the whole fix', 'up to three', "suppressWarnings: ['widget-measures-missing']"],
+    [WIDGET_FILTER_FIELD_UNKNOWN]: ['`relationship[.relationship].field`', 'lookup, master_detail, user or tree', '"Did you mean"'],
+    [WIDGET_LEGACY_ANALYTICS_UNRENDERABLE]: ['DatasetWidget', 'pivot rows and columns come from `dimensions`', 'has no data at all'],
+    [TABLE_COUNT_ONLY]: ['A flat record listing is not an analytics dataset', 'ListView', 'ADR-0017', "suppressWarnings: ['table-count-only']"],
+    [CHART_DIMENSIONS_MISSING]: ['`metric` or `kpi`', 'up to three', "suppressWarnings: ['chart-dimensions-missing']"],
+    [DASHBOARD_FILTER_FIELD_NOT_INCLUDED]: ['declaring `a.b` implicitly includes `a`', 'filterBindings: { NAME: false }'],
+  };
+
+  it('covers exactly the ids whose `fix:` line was shortened', () => {
+    expect(Object.keys(MOVED_FROM_HINT).sort()).toEqual([...HINT_SHORTENED_RULE_IDS].sort());
+  });
+
+  it.each([...HINT_SHORTENED_RULE_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const explanation = explainRule(rule);
+    expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
+    const text = explanation!.paragraphs.join('\n');
+    for (const fact of MOVED_FROM_HINT[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });
