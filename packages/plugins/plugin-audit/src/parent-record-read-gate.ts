@@ -61,10 +61,23 @@
  *     datasource, that is every parent of a ledger the lifecycle split routes
  *     there.
  *
- * An engine that cannot answer those questions (no registry view, no
- * `hasObjectMiddleware`, no `resolveEffectiveDatasource` — each optional on
- * its contract) cannot tell a composable parent from a refused one, so the
- * whole read is the probe there too, and the gate says so once.
+ * Two more states send the WHOLE read to the probe, up front, and the gate
+ * says so once for each:
+ *
+ *  - an engine that cannot answer those questions (no registry view, no
+ *    `hasObjectMiddleware`, no `resolveEffectiveDatasource` — each optional on
+ *    its contract) cannot tell a composable parent from a refused one;
+ *  - a security service that answers no `canReadObject` (optional on
+ *    `ISecurityService`), or no security service at all. The engine then
+ *    admits a leaf's parent by `explain`, which answers a SYSTEM context "not
+ *    allowed" (it explains a principal's access) where `canReadObject` admits
+ *    it. This stream's withheld-update rule (`activity-field-redaction.ts`)
+ *    re-reads the WHERE this gate writes as SYSTEM, so a leaf there would
+ *    select nothing, and that rule would serve the update rows it never saw —
+ *    rows whose every recorded change is withheld from the reader (measured
+ *    on the real security plugin with `canReadObject` withdrawn). The probe's
+ *    literal id lists mean the same thing under every context. With no
+ *    security service, a leaf would select nothing for any caller.
  *
  * The probe, for the parents it is given (or for every row, for a whole-read
  * probe): pre-scan the parent pairs the query would touch under SYSTEM
@@ -208,7 +221,10 @@ export type ParentProbeClass =
   | 'federated-parent'
   /** The engine exposes no registry view, `hasObjectMiddleware` or
    * `resolveEffectiveDatasource`: the whole read is the probe. */
-  | 'engine-cannot-classify';
+  | 'engine-cannot-classify'
+  /** The security service answers no `canReadObject`, or none is composed:
+   * the whole read is the probe (module header). */
+  | 'no-object-admission';
 
 /**
  * How one read reaches its parents: the parent objects written as leaves, and
@@ -216,7 +232,7 @@ export type ParentProbeClass =
  * the whole read to the probe.
  */
 export type ParentReadPlan =
-  | { probeWholeRead: 'delegated-caller' | 'engine-cannot-classify' }
+  | { probeWholeRead: 'delegated-caller' | 'engine-cannot-classify' | 'no-object-admission' }
   | {
       probeWholeRead: null;
       /** One `ReadableIds` leaf each, in name order. */
@@ -350,16 +366,20 @@ export function enumerateParentObjects(engine: ParentRecordGateEngine, gate: Par
 
 /**
  * [ADR-0139 D4, D5] How one read of `gate.object` by `context` reaches its
- * parents. Reads the context, the registry, the middleware registrations and
- * the datasource bindings only — it asks no security service and reads no
- * row, so it decides the probe up front, never by catching a refusal.
+ * parents. Reads the context, whether the security service answers
+ * `canReadObject` (`objectAdmission`, resolved by the caller), the registry,
+ * the middleware registrations and the datasource bindings only — it asks the
+ * security service nothing and reads no row, so it decides the probe up front,
+ * never by catching a refusal.
  */
 export function planParentReads(
   engine: ParentRecordGateEngine,
   gate: ParentRecordGate,
   context: CommentReadMiddlewareCtx['context'],
+  objectAdmission: boolean,
 ): ParentReadPlan {
   if (isDelegatedCaller(context)) return { probeWholeRead: 'delegated-caller' };
+  if (!objectAdmission) return { probeWholeRead: 'no-object-admission' };
   const parents = enumerateParentObjects(engine, gate);
   const hasObjectMiddleware = engine.hasObjectMiddleware;
   const datasourceOf = engine.resolveEffectiveDatasource;
@@ -381,20 +401,43 @@ export function planParentReads(
   return { probeWholeRead: null, leaves, probed };
 }
 
-/** The engines a gate has already said "cannot classify" for, per seam. */
-const unclassifiableReported = new WeakMap<object, Set<string>>();
+/** The whole-read probe states a gate has already reported, per engine and seam. */
+const wholeReadProbeReported = new WeakMap<object, Set<string>>();
 
-function reportUnclassifiableOnce(engine: object, logger: CommentAccessLogger, gate: ParentRecordGate): void {
-  let seams = unclassifiableReported.get(engine);
-  if (!seams) unclassifiableReported.set(engine, (seams = new Set()));
-  if (seams.has(gate.seam)) return;
-  seams.add(gate.seam);
+const WHOLE_READ_PROBE_WHY: Readonly<Record<'engine-cannot-classify' | 'no-object-admission', string>> = {
+  'engine-cannot-classify':
+    'the engine exposes no registry view, hasObjectMiddleware() or resolveEffectiveDatasource(), so it cannot ' +
+    'say which parent objects a ReadableIds leaf can be composed for',
+  'no-object-admission':
+    'the security service answers no canReadObject() (or none is registered), so a ReadableIds leaf would be ' +
+    'admitted by explain(), which refuses the SYSTEM re-read of this WHERE that the withheld-update rule makes',
+};
+
+function reportWholeReadProbeOnce(
+  engine: object,
+  logger: CommentAccessLogger,
+  gate: ParentRecordGate,
+  why: 'engine-cannot-classify' | 'no-object-admission',
+): void {
+  let reported = wholeReadProbeReported.get(engine);
+  if (!reported) wholeReadProbeReported.set(engine, (reported = new Set()));
+  const key = `${gate.seam} :: ${why}`;
+  if (reported.has(key)) return;
+  reported.add(key);
   logger.warn(
-    `[audit] ${gate.seam}: the engine exposes no registry view, hasObjectMiddleware() or ` +
-      'resolveEffectiveDatasource(), so it cannot say which parent objects a ReadableIds leaf can be composed ' +
-      `for: every read is answered by the bounded probe (at most ${PARENT_GATE_SCAN_LIMIT} candidate rows, ` +
-      'fail-closed). Reported once for this engine.',
+    `[audit] ${gate.seam}: ${WHOLE_READ_PROBE_WHY[why]}: every read is answered by the bounded probe (at most ` +
+      `${PARENT_GATE_SCAN_LIMIT} candidate rows, fail-closed). Reported once for this engine.`,
   );
+}
+
+/** Whether the security service `getAdmission` resolves answers `canReadObject`. */
+function hasObjectAdmission(getAdmission: ParentObjectReadAdmissionSource): boolean {
+  try {
+    return typeof getAdmission()?.canReadObject === 'function';
+  } catch {
+    // `getService` throws on an empty slot: no security service is composed.
+    return false;
+  }
 }
 
 /**
@@ -564,8 +607,10 @@ export async function computeParentRecordFilter(
   if (gate.exemptCapability && callerHoldsCapability(ctx.context, gate.exemptCapability)) return null;
 
   // 1. Leaf or probe, per parent object, before any branch is written.
-  const plan = planParentReads(engine, gate, ctx.context);
-  if (plan.probeWholeRead === 'engine-cannot-classify') reportUnclassifiableOnce(engine, logger, gate);
+  const plan = planParentReads(engine, gate, ctx.context, hasObjectAdmission(getAdmission));
+  if (plan.probeWholeRead === 'engine-cannot-classify' || plan.probeWholeRead === 'no-object-admission') {
+    reportWholeReadProbeOnce(engine, logger, gate, plan.probeWholeRead);
+  }
 
   const branches: Array<Record<string, unknown>> = [];
   // 2. One ReadableIds leaf per composable parent object (ADR-0139 D4).

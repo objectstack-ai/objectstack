@@ -343,7 +343,8 @@ describe('installActivityReadVisibility', () => {
 
   it('an engine that cannot classify a parent sends the whole read to the probe, and says so once', async () => {
     const logger = silentLogger();
-    const { mw, calls } = install({ scan: () => [{ object_name: 'crm_case', record_id: 'c1' }], readable: { crm_case: ['c1'] }, logger });
+    const admission = () => ({ canReadObject: async () => true });
+    const { mw, calls } = install({ scan: () => [{ object_name: 'crm_case', record_id: 'c1' }], readable: { crm_case: ['c1'] }, logger, admission });
     await read(mw);
     await read(mw);
     expect(calls.scans).toHaveLength(2);
@@ -387,7 +388,13 @@ function installClassifying(opts: {
     hasObjectMiddleware: (object: string) => (opts.middleware ?? []).includes(object),
     resolveEffectiveDatasource: (object: string) => opts.datasource?.[object],
   };
-  installActivityReadVisibility(engine, opts.logger ?? silentLogger(), opts.admission ?? (() => undefined));
+  // A security service that answers `canReadObject` unless the case says otherwise:
+  // without it the gate writes no leaf (see the `no-object-admission` case).
+  installActivityReadVisibility(
+    engine,
+    opts.logger ?? silentLogger(),
+    opts.admission ?? (() => ({ canReadObject: async () => true })),
+  );
   return { mw, calls };
 }
 
@@ -518,6 +525,33 @@ describe('[ADR-0139 D5] three classes keep the bounded probe, by name, chosen be
     expect(where).toEqual({ object_name: 'crm_case', record_id: { $in: ['c1'] } });
     expect(calls.scans[0].where).toEqual({});
     expect(calls.probes[0].context).toMatchObject({ userId: 'u_agent', onBehalfOf });
+  });
+
+  it('no object-level admission (no canReadObject, or no security service): no leaf, the whole read is the probe, said once', async () => {
+    // A leaf would then be admitted by explain(), which refuses the SYSTEM
+    // re-read of this WHERE the withheld-update rule makes (gate module header).
+    const sources: ParentObjectReadAdmissionSource[] = [
+      () => undefined,
+      () => ({}),
+      () => {
+        throw new Error("service 'security' not registered");
+      },
+    ];
+    for (const admission of sources) {
+      const logger = silentLogger();
+      const { mw, calls } = installClassifying({
+        objects: ['crm_case', 'crm_deal'],
+        scan: () => [{ object_name: 'crm_case', record_id: 'c1' }],
+        readable: { crm_case: ['c1'] },
+        admission,
+        logger,
+      });
+      expect((await read(mw)).where).toEqual({ object_name: 'crm_case', record_id: { $in: ['c1'] } });
+      await read(mw);
+      expect(calls.scans.map((s) => s.where)).toEqual([{}, {}]);
+      const said = logger.warn.mock.calls.filter(([line]) => String(line).includes('answers no canReadObject()'));
+      expect(said).toHaveLength(1);
+    }
   });
 
   it('the probe’s cap warning names the class it was probing for', async () => {

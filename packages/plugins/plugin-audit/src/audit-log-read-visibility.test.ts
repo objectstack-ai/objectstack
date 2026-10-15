@@ -304,7 +304,7 @@ function installClassifying(objects: string[]) {
     hasObjectMiddleware: () => false,
     resolveEffectiveDatasource: () => undefined,
   };
-  installAuditLogReadVisibility(engine, silentLogger(), () => undefined);
+  installAuditLogReadVisibility(engine, silentLogger(), () => ({ canReadObject: async () => true }));
   return { mw, calls };
 }
 
