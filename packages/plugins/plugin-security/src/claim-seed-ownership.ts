@@ -119,13 +119,12 @@
  * this shape do its job — with no change to `plugin-sharing`.
  *
  * The unit of work is now the SET, not the row: one predicate write per unowned
- * shape (`owner_id IS NULL`, then `owner_id = usr_system`), so the matched set
- * is the same set the old two-scan rule resolved — row for row — while the
- * write count stops scaling with N. The predicates stay two narrow writes rather
- * than one `OR`/`IN` for the reason the old scans were two (driver
- * portability), and they stay disjoint in this order, because the NULL pass
- * lands `adminUserId` — never `usr_system`, that target is refused at the top of
- * this function.
+ * shape (`owner_id IS NULL` — since #23354 `AND id IN (seeded ids)`, one write
+ * per chunk of them — then `owner_id = usr_system`), so the write count stops
+ * scaling with N. The predicates stay narrow writes rather than one `OR`/`IN`
+ * for the reason the old scans were two (driver portability), and they stay
+ * disjoint in this order, because the NULL pass lands `adminUserId` — never
+ * `usr_system`, that target is refused at the top of this function.
  *
  * ### …and a paged fallback, because one write cannot always carry the set
  *
@@ -156,6 +155,20 @@
  * quadratic there, where the natural predicate is linear. 5 000 rows: 528 ms
  * whole-set versus 5 865 ms always-paged, same engine, same driver, same row
  * set. The page is therefore what the engine's refusal buys, not the default.
+ *
+ * [#23354] The NULL arm now pays that shape on purpose: its `id IN (seeded
+ * ids)` is the selection itself, the only way to tell the seed's rows from a
+ * guest's or a form's. Measured on `InMemoryDriver` through a real `ObjectQL`
+ * (one object, one write, two runs each): 5 000 unowned seeded rows, the
+ * first claim 2 587 / 2 650 ms against 297 / 435 ms for the old bare
+ * `owner_id IS NULL`; 1 000 rows, 62 / 69 ms against 17 / 53 ms. Every later
+ * pass — every warm boot, once the rows are owned — 4 / 5 ms against 2 / 3 ms,
+ * because `owner_id IS NULL` fails first and the `IN` list is never consulted.
+ * So the quadratic cost is paid on the pass that claims the rows, not on every
+ * boot; a SQL driver hands `id IN` to the database, which this measurement does
+ * not cover. A chunk is {@link CLAIM_PAGE_ROWS} ids, half the ceiling, so a
+ * NULL-arm write is never refused and never pages; the fallback below still
+ * serves the `usr_system` arm, which is one predicate over every such row.
  *
  * The page size is derived from that ceiling rather than chosen: half of it
  * leaves room for a driver's own bound-parameter limits and for the ceiling
@@ -224,7 +237,9 @@ const SYSTEM_CTX = { isSystem: true };
 const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true };
 
 /**
- * Rows a single fallback page takes off the top of an over-ceiling predicate.
+ * Rows a single fallback page takes off the top of an over-ceiling predicate —
+ * and [#23354] the seeded ids one NULL-arm write carries, for the same two
+ * reasons: it stays under the ceiling, and inside a driver's parameter limit.
  *
  * Derived from the engine's per-row hook ceiling, never a free literal: that
  * ceiling is what refuses an over-sized predicate write, so the page size has to
