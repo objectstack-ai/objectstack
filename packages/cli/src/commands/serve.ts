@@ -5120,10 +5120,12 @@ export default class Serve extends Command {
       //     onEnable) may still register a driver and some such stacks boot.
       // ⛔ Not `trackPlugin`ed, for the announcer's reason above.
       if (productionResolvedNoStorage) {
-        const noStorageRemedy =
-          'Set OS_DATABASE_URL (e.g. file:./data/app.db or a postgres:// URL), mount a storage driver '
-          + "in the stack's plugins (e.g. new DriverPlugin(driver) from @objectstack/runtime), "
-          + 'or run with --dev (an in-memory SQLite store, for development).';
+        // ONE list, rendered as the refusal's bullets and as the line's sentence.
+        const noStorageRemedies = [
+          'set OS_DATABASE_URL (e.g. file:./data/app.db, or a postgres:// or mysql:// URL)',
+          "mount a storage driver in the stack's plugins (e.g. new DriverPlugin(driver) from @objectstack/runtime)",
+          'run with --dev (an in-memory SQLite store, for development)',
+        ];
         await kernel.use({
           name: 'com.objectstack.cli.no-storage-boot-guard',
           version: '1.0.0',
@@ -5141,17 +5143,18 @@ export default class Serve extends Command {
                 + '    default datasource, and no plugin registered a storage driver by the end of plugin\n'
                 + "    init. The auth service runs under the 'single' tenancy posture, and its start()\n"
                 + '    creates the Default Organization, which needs a driver.\n\n'
-                + `    ${noStorageRemedy}\n`,
+                + '    Fix one of:\n'
+                + noStorageRemedies.map((remedy) => `      • ${remedy}\n`).join(''),
               ));
               throw new Error(
-                'Refusing to boot: no storage for a production serve whose auth service needs a driver '
-                + 'when it starts. ' + noStorageRemedy,
+                'Refusing to boot: this production serve has no storage, and its auth service needs a '
+                + 'driver when it starts. Set OS_DATABASE_URL, mount a storage driver plugin, or run with --dev.',
               );
             }
             console.warn(chalk.yellow(
               '  ⚠ No storage: no recognized OS_DATABASE_URL, and no plugin registered a storage driver by '
               + 'the end of plugin init, so objects have no store unless a plugin registers one when it '
-              + `starts. ${noStorageRemedy}`,
+              + `starts. Fix: ${noStorageRemedies[0]}; ${noStorageRemedies[1]}; or ${noStorageRemedies[2]}.`,
             ));
           },
         } as any);
