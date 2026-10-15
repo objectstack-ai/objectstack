@@ -7639,8 +7639,8 @@ export type ObjectKanbanPropsParsed = z.infer<typeof ObjectKanbanPropsSchema>;
 
 /**
  * The flat per-field spellings `ObjectCalendar` keeps reading as a
- * backward-compat fallback (`getCalendarConfig`, ObjectCalendar.tsx:150-158)
- * and that `ObjectView`/`ListView` emit on their runtime handoff. Read, but
+ * backward-compat fallback (`getCalendarConfig`; read points recorded in
+ * `liveness/page.json`, row `regions`) and that `ObjectView`/`ListView` emit on their runtime handoff. Read, but
  * NOT authorable — one composition key per concept (Prime Directive #12, the
  * `body` → `children` precedent on {@link PageContainerProps}): the authored
  * spelling is the `calendar` object.
@@ -7660,12 +7660,12 @@ const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
 ];
 
 /**
- * `object-calendar` (objectui `plugin-calendar/src/ObjectCalendar.tsx` +
- * registry shell in `plugin-calendar/src/index.tsx` @ `eb7f586b`). Read
- * points: `objectName` (throughout), `calendar` (:145 — the canonical config
- * object), `defaultView` (:188), `filter`/`sort` (fetch params), `data`/
- * `staticData` (external rows), and via the registry shell's declared host
- * hatches `locale` and `loading`.
+ * `object-calendar` (objectui's `plugin-calendar` renderer plus its registry
+ * shell; read points recorded in `liveness/page.json`, row `regions`). Read
+ * points: `objectName` (throughout), `calendar` (the canonical config object),
+ * `defaultView`, `filter`/`sort` (fetch params), `data`/`staticData` (external
+ * rows), and via the registry shell's declared host hatches `locale` and
+ * `loading`.
  */
 export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-calendar`',
@@ -7677,10 +7677,10 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
     .describe('Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead'),
   /**
    * [#21464] The list view's own `calendar` member, by reference
-   * (`CalendarConfigSchema`): `getCalendarConfig`
-   * (`plugin-calendar/src/ObjectCalendar.tsx:294-297` at the pin
-   * `89cad75d55`) returns this block as the config and reads exactly its five
-   * bindings (`:857`, `:1056`, `:1141`), so a block without `startDateField`
+   * (`CalendarConfigSchema`): `getCalendarConfig` returns this block as the
+   * config and the renderer reads exactly its five bindings (read points
+   * recorded in `liveness/page.json`, row `regions`), so a block without
+   * `startDateField`
    * placed no event, and a key outside the five — the retired `dateField` /
    * `endField` aliases among them — was never read.
    */
@@ -7690,10 +7690,10 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (#15449; the family
-   * entry on `object-grid` carries the ruling). Measured at the objectui pin
-   * `53ded82b` before the declaration moved: `ObjectCalendar.tsx` hands
-   * `schema.filter` verbatim to `$filter` and the adapter lowers a rule array
-   * exactly as it does for the kanban. The record form is refused at
+   * entry on `object-grid` carries the ruling). Measured before the
+   * declaration moved (read points recorded in `liveness/page.json`, row
+   * `regions`): the renderer handed `schema.filter` verbatim to `$filter` and
+   * the adapter lowers a rule array exactly as it does for the kanban. The record form is refused at
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
@@ -7710,16 +7710,16 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * decision batch #77, option B; the `object-grid` entry carries the verbatim
    * text). One sort orthography, one shared `SortItemSchema`.
    *
-   * Measured at the objectui pin `53ded82b`: `ObjectCalendar.tsx:431` hands
-   * `schema.sort` to the shared sink `convertSortToQueryParams`
-   * (`core/src/utils/sort-query.ts`) as the fetch's `$orderby`. ⚠️ That sink
-   * still honours the legacy string clause at this pin — `sort-query.ts:66-70`
-   * — so, exactly as on `object-grid`, this declaration lands ahead of the
-   * consumer-side retirement (objectui#8221's PR objectui#8758, merged 2026-09-09) and
-   * refuses a spelling the pinned helper still lowers. The array arm is
+   * Measured on the renderer (read points recorded in `liveness/page.json`,
+   * row `regions`): it hands `schema.sort` to the shared sink
+   * `convertSortToQueryParams` as the fetch's `$orderby`. ⚠️ That sink still
+   * honoured the legacy string clause when this was measured — so, exactly as
+   * on `object-grid`, this declaration landed ahead of the consumer-side
+   * retirement (objectui#8221's PR objectui#8758, merged 2026-09-09) and
+   * refused a spelling the helper then still lowered. The array arm is
    * unaffected: the sink folds `[{ field, order }]` into the field-direction
-   * map either way. Unlike the grid, `plugin-calendar/src/index.tsx` declares
-   * no `sort` input at all, so nothing on the registry side moves.
+   * map either way. Unlike the grid, the calendar's registry shell declares no
+   * `sort` input at all, so nothing on the registry side moves.
    */
   sort: z.array(SortItemSchema).optional()
     .describe('Row order for the fetched events — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
@@ -7732,137 +7732,10 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * maintainer ruling, verbatim `B`), the same carrier and the same def as
    * `object-kanban`'s above.
    *
-   * Measured at objectui `b9814b334` (re-read there 2026-10-14:
-   * `useNavigationOverlay.ts` is byte-identical to `1fb1ced36` (`git diff
-   * --quiet`), and `ObjectCalendar.tsx` changed above and between the anchors
-   * here (+179/-49: objectui#12291's quick-create hand-off and objectui#12030)
-   * without touching one, so each MOVED with its cited text byte-identical: the
-   * read `1055` -> `1172`, the hand-off `1057-1058` -> `1174-1175`, the overlay
-   * render `1391` -> `1518` and its `NavigationOverlay` `1404-1417` ->
-   * `1531-1544`, and the event click `1471` -> `1598`. At `1fb1ced36`, re-read
-   * there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-   * `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-   * `499799502`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * `useNavigationOverlay.ts` is byte-identical to `20c6d351a` (`git diff
-   * --quiet`), and `ObjectCalendar.tsx` changed above and between the anchors
-   * here (+75/-19: objectui#12081 item 2's windowed fetch and objectui#12082's
-   * write affordances) without touching one, so each MOVED with its cited text
-   * byte-identical: the read `1018` -> `1055`, the hand-off `1020-1021` ->
-   * `1057-1058`, the overlay render `1333` -> `1391` and its
-   * `NavigationOverlay` `1346-1359` -> `1404-1417`, and the event click `1413`
-   * -> `1471`. At `20c6d351a`, re-read there 2026-10-10:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
-   * `f0268ad78`, re-read there 2026-10-09:
-   * `ObjectCalendar.tsx` changed across the hop from `a58626c88` in one comment
-   * line only, line for line (`:1250`, objectui `c0862c1cc` re-citing the
-   * installed spec as 17.7.0), and `useNavigationOverlay.ts` is byte-identical,
-   * so every anchor held unmoved and was re-read in place: the read `1018`, the
-   * hand-off `1020-1021`, the event click `1413`, the overlay render `1333` and
-   * its `NavigationOverlay` `1346-1359`. At `a58626c88`, re-read there
-   * 2026-10-06:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`; re-measured there 2026-10-05 — `ObjectCalendar.tsx` changed
-   * across the hop from `2e818d0b5` in one comment only, line for line
-   * (`:97-98`, objectui#8347 putting `BaseSchema`'s index signature in the
-   * past tense), and `useNavigationOverlay.ts` is byte-identical, so every
-   * anchor held unmoved and was re-read in place: the read `1018`, the
-   * hand-off `1020-1021`, the event click `1413`, the overlay render `1333`
-   * and its `NavigationOverlay` `1346-1359`. At `2e818d0b5`, re-measured
-   * there 2026-10-04 — `ObjectCalendar.tsx` and
-   * `useNavigationOverlay.ts` are byte-identical to `ab1879721`
-   * (`git diff --quiet`), so every anchor held unmoved. At `ab1879721`,
-   * re-measured there 2026-10-03 — `ObjectCalendar.tsx` changed
-   * across the hop from `89cad75d5` in one comment line only, line for line
-   * (`:1250`, objectui#11438 re-citing the installed spec as 17.6.0), and
-   * `useNavigationOverlay.ts` is byte-identical, so every anchor held unmoved
-   * and was re-read in place: the read `1018`, the hand-off `1020-1021`, the
-   * event click `1413`, the overlay render `1333` and its `NavigationOverlay`
-   * `1346-1359`. At `89cad75d5` (2026-10-02) `ObjectCalendar.tsx` was
-   * byte-identical to `31971ff1e` (`git diff --quiet`), so every anchor held
-   * unmoved and was re-read in place: the read `1018`, the hand-off
-   * `1020-1021`, the event click `1413`, the overlay render `1333` and its
-   * `NavigationOverlay` `1346-1359`; objectui#11293's `page` hand-off to the
-   * host's record navigator lands in the shared `useNavigationOverlay`, past
-   * these anchors, exactly as on `object-kanban`. At `31971ff1e` (2026-10-01)
-   * `ObjectCalendar.tsx` changed
-   * across the hop from `e420df310` in one place (+11/-19, objectui#8652, the
-   * objectui half of the same ruling): `navigation` is now DECLARED on
-   * `ObjectCalendarSchema`, so the ledger comment `1008-1025` that recorded
-   * the one cast objectui#8651 left standing is replaced by the declaration
-   * note `1008-1017`, and the read `1026` -> `1018` CHANGED CONTENT, toward
-   * this row: it is spelled `schema.navigation ?? { mode: 'drawer' }`, with no
-   * cast. Every anchor after it MOVED up by 8 with its cited text
-   * byte-identical — the hand-off `1028-1029` -> `1020-1021`, the event click
-   * `1421` -> `1413`, the overlay render `1341` -> `1333`, its
-   * `NavigationOverlay` `1354-1367` -> `1346-1359`. At `e420df310`
-   * (2026-09-30) `ObjectCalendar.tsx` changed
-   * across the hop from `db11afd49` in comments only (+6/-3, objectui#11073),
-   * two of them inside the ledger comment, which now says `@objectstack/spec`
-   * 17.5.0 ships the `navigation` declaration that card waited on and that
-   * mirroring it is that card's next step, so the ledger grew `1008-1022` ->
-   * `1008-1025` and every anchor after it MOVED by 3 with its cited text
-   * byte-identical — the read `1023` -> `1026`, still spelled with the cast,
-   * the hand-off `1025-1026` -> `1028-1029`, the event click `1418` -> `1421`,
-   * the overlay render `1338` -> `1341`, its `NavigationOverlay` `1351-1364` ->
-   * `1354-1367`. At `db11afd49` (2026-09-29) `ObjectCalendar.tsx` changed
-   * again across the hop from `dd3f7e1be` (+18/-11: objectui#11005's DST
-   * wall-clock moves in `toStoredDateValue` and the month-grid handlers, and
-   * comment re-citations, two of them inside the ledger comment, which now says
-   * the card waits on an objectstack commit where it said `pm:blocked`), so every
-   * anchor was re-mapped through the diff and re-READ, and each MOVED with its
-   * cited text byte-identical — the ledger `1005-1019` -> `1008-1022`, the read
-   * `1020` -> `1023`, the hand-off `1022-1023` -> `1025-1026`, the event click
-   * `1411` -> `1418`, the overlay render `1331` -> `1338`, its
-   * `NavigationOverlay` `1344-1357` -> `1351-1364`. At `dd3f7e1be` (2026-09-28),
-   * `ObjectCalendar.tsx` changed
-   * across the hop from `f8a9d0fb0` (+128/-38: objectui#10572's invalidation
-   * bus, objectui#10663, objectui#10666's resolved filter, objectui#10668's
-   * display locale, objectui#10866's date-only days and the core row
-   * ceiling), so every anchor was re-mapped through the diff and re-READ
-   * rather than carried, and each MOVED with its cited text byte-identical —
-   * the ledger `921-935` -> `1005-1019`, the read `936` -> `1020`, the
-   * hand-off `938-939` -> `1022-1023`, the event click `1317` -> `1411`, the
-   * overlay render `1237` -> `1331`, its `NavigationOverlay` `1250-1263` ->
-   * `1344-1357`. At `f8a9d0fb0` the file was byte-identical to `62597c588`
-   * (`git diff --quiet`), so every anchor held unmoved from the re-READ taken
-   * at `62597c588` 2026-09-23. That file
-   * changed across the hop from `87af769e9` (objectui `afb228418`, the calendar's
-   * copy routed through the locale packs, +43/-17), so every anchor was
-   * re-derived rather than carried: `:921-935`, `:936` and `:938-939` did not
-   * move, and the three after the change MOVED with their cited text
-   * byte-identical — the event click `1293` -> `1317`, the overlay render
-   * `1218` -> `1237`, its `NavigationOverlay` `1228-1241` -> `1250-1263`. At
-   * `87af769e9` (2026-09-22) none was at its `53ded82bf` number. Through
-   * `e420df310` the cast was still spelled here, unlike its `object-kanban`
-   * twin; at this pin it is gone on both): `ObjectCalendar.tsx:1172`
-   * reads `schema.navigation ?? { mode: 'drawer' }`, `:1174-1175` hands
-   * it to `useNavigationOverlay`, `:1598` fires it on an event click and
-   * `:1518` renders the overlay (its `NavigationOverlay` is `:1531-1544`) —
-   * standalone, with no enclosing view.
+   * Read points recorded in `liveness/page.json`, row `regions`: the renderer
+   * reads `schema.navigation ?? { mode: 'drawer' }`, hands it to
+   * `useNavigationOverlay`, fires it on an event click and renders the overlay
+   * (its `NavigationOverlay`) — standalone, with no enclosing view.
    */
   navigation: NavigationConfigSchema.optional()
     .describe("Event-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation }). The renderer's own default is `{ mode: 'drawer' }` when the key is absent; it is documented rather than declared, so a parsed calendar carries the key only when the author wrote it"),
@@ -7891,13 +7764,12 @@ export type ObjectCalendarPropsParsed = z.infer<typeof ObjectCalendarPropsSchema
 // `issue.input` so only a value which used to be legal gets the "was removed"
 // message (the `record:chatter` `position` precedent, #8762).
 //
-// Measured at the `.objectui-sha` pin `f8a9d0fb0`: neither value ever had a
-// behaviour of its own. The simple arm folds both to 'vertical'
-// (`ObjectForm.tsx:1406-1410`, under the comment "Map 'grid' and 'inline' to
-// 'vertical' as fallback"); the drawer and modal arms (`ObjectForm.tsx:463`,
-// `:499`) and `DrawerForm.tsx:575` / `ModalForm.tsx:597` pass only 'vertical'
-// and 'horizontal' through; `TabbedForm.tsx:556`, `SplitForm.tsx:445` and
-// `WizardForm.tsx:1075` hard-code 'vertical'. Multi-column — what 'grid' would
+// Measured on the renderer (read points recorded in `liveness/page.json`, row
+// `regions`): neither value ever had a behaviour of its own. The simple arm
+// folds both to 'vertical' (under the comment "Map 'grid' and 'inline' to
+// 'vertical' as fallback"); the drawer and modal arms pass only 'vertical' and
+// 'horizontal' through; the tabbed, split and wizard forms hard-code
+// 'vertical'. Multi-column — what 'grid' would
 // mean — is `columns`, which the renderer honours under every arm; 'inline' is
 // a toolbar / filter-row pattern, not a record-form layout. The ADR-0087
 // conversion `form-layout-inline-grid-to-vertical` rewrites both values to
@@ -7921,21 +7793,18 @@ const OBJECT_FORM_LAYOUT_RETIRED: ReadonlyMap<string, string> = new Map([
 
 /**
  * [#21464] An `object-form`'s `mobile` block — the five members the form reads
- * at the `.objectui-sha` pin `89cad75d55` (`plugin-form/src/ObjectForm.tsx:1857-1942`,
- * the flat arm only), and nothing else. No form view declares the block, so
- * the shape is the read's own, as objectui declares it (`ObjectFormSchema.mobile`):
+ * (the flat arm only; read points recorded in `liveness/page.json`, row
+ * `regions`), and nothing else. No form view declares the block, so the shape
+ * is the read's own, as objectui declares it (`ObjectFormSchema.mobile`):
  *
- * - `stickyActions` pins the submit / cancel bar to the bottom of the viewport
- *   (`:1935`, `:1941`);
+ * - `stickyActions` pins the submit / cancel bar to the bottom of the viewport;
  * - `stepper` routes a flat form through the wizard: `true` always (a desktop
  *   viewport included), `'auto'` only on a phone-width viewport once the form
- *   has `stepperMinFields` fields (`:1874-1884`, default 8);
- *   `stepperFieldsPerStep` is the fields per step (`:1876`, default 1 — the
- *   read clamps a smaller count to 1);
- * - `fullscreenLongText` offers the fullscreen editor on every long-text field
- *   (`:1858-1869`).
+ *   has `stepperMinFields` fields (default 8); `stepperFieldsPerStep` is the
+ *   fields per step (default 1 — the read clamps a smaller count to 1);
+ * - `fullscreenLongText` offers the fullscreen editor on every long-text field.
  *
- * The block's presence marks the wrapper (`data-mobile-form`, `:1942`), so an
+ * The block's presence marks the wrapper (`data-mobile-form`), so an
  * empty `{}` is legal and changes nothing else. Module-private, as
  * {@link ObjectKanbanLaneSchema} is.
  */
@@ -7980,17 +7849,15 @@ function formFieldNameRefusal(input: unknown): string | undefined {
 
 /**
  * [#21464] A form's top-level `fields` — `object-form`'s, and the
- * master-detail form's, which `MasterDetailForm.tsx:1693` hands to the parent
- * form verbatim — as the form reads it at the `.objectui-sha` pin
- * `ab1879721595` (unchanged at objectui `main` `94985a92ba`): the field NAMES
- * to draw, in order, which select from the object's fields and from
- * `customFields` (`plugin-form/src/ObjectForm.tsx:961-981`,
- * `flatFields.ts:68-79`). objectui declares the member `string[]`
- * (`ObjectFormSchema.fields`), and objectstack-ai/objectui#11550's ruling
- * retired the `{ name }` entry from every authoring face; the form still draws
- * a STORED `{ name }` entry by its name (`:972`, `flatFields.ts:72`) as
- * tolerance for metadata already written, and skips any other object entry with
- * a console warning (`:978`, `warnUnresolvedTopLevelField`). So this is a list
+ * master-detail form's, which the master-detail form hands to the parent form
+ * verbatim — as the form reads it (read points recorded in
+ * `liveness/page.json`, row `regions`): the field NAMES to draw, in order,
+ * which select from the object's fields and from `customFields`. objectui
+ * declares the member `string[]` (`ObjectFormSchema.fields`), and
+ * objectstack-ai/objectui#11550's ruling retired the `{ name }` entry from
+ * every authoring face; the form still draws a STORED `{ name }` entry by its
+ * name as tolerance for metadata already written, and skips any other object
+ * entry with a console warning (`warnUnresolvedTopLevelField`). So this is a list
  * of strings, and each object entry is refused with what to write instead.
  */
 const formFieldNameList = () => z.array(z.string({
