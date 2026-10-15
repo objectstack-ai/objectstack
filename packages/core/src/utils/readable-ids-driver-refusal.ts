@@ -211,9 +211,14 @@ export function readableIdsDriverRefusal(
   return err;
 }
 
-/** The slice of a driver's logger the refusal needs. */
+/**
+ * The slice of a driver's logger the refusal needs. `error` is optional because
+ * a driver's injectable logger declares it so (`SqlDriver`'s does); a sink that
+ * carries none gets the line at `warn`, never no line.
+ */
 export interface ReadableIdsRefusalLog {
-  error(message: string, meta?: Record<string, unknown>): void;
+  error?(message: string, meta?: Record<string, unknown>): void;
+  warn?(message: string, meta?: Record<string, unknown>): void;
 }
 
 /**
@@ -232,12 +237,10 @@ export function refuseReadableIdsOnce(
   const err = readableIdsDriverRefusal(driver, site, unsupportedReason);
   if (!state.logged) {
     state.logged = true;
-    log?.error(`${err.message} Logged once for this driver; later refusals answer the caller the same way.`, {
-      code: err.code,
-      object: site.object,
-      at: site.at,
-      kind: site.kind,
-    });
+    const line = `${err.message} Logged once for this driver; later refusals answer the caller the same way.`;
+    const meta = { code: err.code, object: site.object, at: site.at, kind: site.kind };
+    if (typeof log?.error === 'function') log.error(line, meta);
+    else log?.warn?.(line, meta);
   }
   return err;
 }
