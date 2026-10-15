@@ -1241,7 +1241,25 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 51],
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 120],
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 183],
+  // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
+  // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
+  // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
+  // carrying an item whose fix lands in another lane is split out by the finding
+  // seat itself, the new card filed with no `domain:*` and first line
+  // `carries item k of #N; #N keeps items …`; triage stamps the domain at first
+  // touch and may regrade; the split-off card does not inherit the parent's
+  // domain (that inheritance stays with sub-issues of the card's own lane), and
+  // the parent keeps `Fixes` on its remaining items. Ordered by ruling record
+  // 6184818831 on #23579 (letter D, item 3); maintainer, 2026-10-15, verbatim
+  // and untranslated: 「同意」. Two lines, measured: the tightest one-line
+  // spelling of the ruled content is 235 B against the 120-byte cap, and the two
+  // lines land at 120 B and 119 B. Authorized under ruling record 6184799323 on
+  // #23606 (letter B, item 1; maintainer 「同意」): a ruling of record that orders
+  // text into a ratcheted file raises that file's ceiling by the measured lines
+  // the text needs, the ruling id and the delta quoted in the raising PR's body.
+  // This file is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
+  // applies. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 185],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
