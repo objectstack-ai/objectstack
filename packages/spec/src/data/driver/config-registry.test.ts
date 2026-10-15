@@ -303,9 +303,10 @@ describe('the retired `mongo` spelling: authoring refused, selection withdrawn, 
   it('still judges the config of a refused `mongo` datasource — the driver refusal hides nothing', () => {
     const result = DatasourceSchema.safeParse({ name: 'events', driver: 'mongo', config: { hostname: 'db.internal' } });
     expect(result.success).toBe(false);
-    const paths = result.error!.issues.map((i) => i.path.join('.'));
-    expect(paths).toContain('driver');
-    expect(paths).toContain('config.hostname');
+    // The config gate still runs against the mongodb contract and reports the
+    // misspelled key (unknown keys are reported at the record they sit in).
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['driver', 'config']);
+    expect(result.error!.issues[1]!.message).toContain('hostname');
   });
 
   it('is offered by no boot selection', () => {
