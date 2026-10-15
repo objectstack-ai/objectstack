@@ -454,8 +454,7 @@ export class WasmSqliteConnection {
     this.flushFailureReported = true;
     const reason = typeof err === 'string' ? err : (err as Error)?.message ?? String(err);
     try {
-      const sink = this.logger.error ?? this.logger.warn;
-      sink.call(
+      (this.logger.error ?? this.logger.warn).call(
         this.logger,
         `[driver-sqlite-wasm] Writing ${this.filename} to disk failed (${reason}). ` +
           `Writes since the last successful flush are NOT on disk: the database keeps ` +
