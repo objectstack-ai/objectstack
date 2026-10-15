@@ -118,7 +118,7 @@ describe('[ADR-0139 D3] InMemoryDriver — ReadableIds conformance', () => {
       const out = await driver.aggregate(BIG_CHILD, {
         where: seamed(scoped()),
         aggregations: [{ function: 'count', alias: 'n' }],
-      } as any);
+      });
       expect(Number((out[0] as any).n)).toBe(BIG_READABLE - 1);
     });
 
@@ -128,7 +128,7 @@ describe('[ADR-0139 D3] InMemoryDriver — ReadableIds conformance', () => {
       const error = vi.spyOn((fresh as any).logger, 'error');
       for (let i = 0; i < 2; i++) {
         await expect(
-          fresh.find(BIG_CHILD, { where: { record_id: { $in: ReadableIds.of(BIG_PARENT) } } as any }),
+          fresh.find(BIG_CHILD, { where: { record_id: { $in: ReadableIds.of(BIG_PARENT) } } }),
         ).rejects.toMatchObject(READABLE_IDS_REFUSAL);
       }
       expect(error).toHaveBeenCalledTimes(1);

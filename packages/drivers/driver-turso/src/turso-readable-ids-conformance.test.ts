@@ -128,7 +128,7 @@ function declareFace(face: Face): void {
       });
 
       it('a deleted parent is excluded', async () => {
-        await driver.delete(BIG_PARENT.name, 'bp00000', { bypassTenantAudit: true } as any);
+        await driver.delete(BIG_PARENT.name, 'bp00000', { bypassTenantAudit: true });
         const rows = await driver.find(BIG_CHILD.name, { where: seamed(scoped()) }, { tenantId: 'org_a' });
         expect(rows).toHaveLength(BIG_READABLE - 1);
         expect(rows.some((r) => r.record_id === 'bp00000')).toBe(false);
@@ -138,7 +138,7 @@ function declareFace(face: Face): void {
       it('aggregate agrees with find', async () => {
         const out = await driver.aggregate(
           BIG_CHILD.name,
-          { where: seamed(scoped()), aggregations: [{ function: 'count', alias: 'n' }] } as any,
+          { where: seamed(scoped()), aggregations: [{ function: 'count', alias: 'n' }] },
           { tenantId: 'org_a' },
         );
         expect(Number((out[0] as any).n)).toBe(BIG_READABLE - 1);
@@ -148,8 +148,8 @@ function declareFace(face: Face): void {
         const error = vi.spyOn((driver as any).logger, 'error');
         const uncomposed = () => ({ record_id: { $in: ReadableIds.of(BIG_PARENT.name) } });
         for (let i = 0; i < 2; i++) {
-          await expect(driver.find(BIG_CHILD.name, { where: uncomposed() as any })).rejects.toMatchObject(READABLE_IDS_REFUSAL);
-          await expect(driver.count(BIG_CHILD.name, { where: uncomposed() as any })).rejects.toMatchObject(READABLE_IDS_REFUSAL);
+          await expect(driver.find(BIG_CHILD.name, { where: uncomposed() })).rejects.toMatchObject(READABLE_IDS_REFUSAL);
+          await expect(driver.count(BIG_CHILD.name, { where: uncomposed() })).rejects.toMatchObject(READABLE_IDS_REFUSAL);
         }
         // Once for this instance — the shared cases above already refused once.
         expect(error.mock.calls.length).toBeLessThanOrEqual(1);

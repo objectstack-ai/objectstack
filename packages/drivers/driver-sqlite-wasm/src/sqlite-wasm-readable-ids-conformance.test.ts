@@ -56,16 +56,16 @@ describe('[ADR-0139 D3] driver-sqlite-wasm — ReadableIds conformance', () => {
   for (const c of READABLE_IDS_CASES) {
     if (c.verdict === 'matches') {
       it(c.name, async () => {
-        const rows = await driver.find(READABLE_IDS_CHILD_OBJECT, { where: seamed(c.where()) } as any, c.options);
+        const rows = await driver.find(READABLE_IDS_CHILD_OBJECT, { where: seamed(c.where()) }, c.options);
         const got = (rows as any[]).map((r) => String(r.id)).sort((x, y) => x.localeCompare(y));
         expect(got, c.note).toEqual(c.expected);
-        expect(await driver.count(READABLE_IDS_CHILD_OBJECT, { where: seamed(c.where()) } as any, c.options), c.note)
+        expect(await driver.count(READABLE_IDS_CHILD_OBJECT, { where: seamed(c.where()) }, c.options), c.note)
           .toBe(c.expected.length);
       });
     } else {
       it(c.name, async () => {
         await expect(
-          driver.find(READABLE_IDS_CHILD_OBJECT, { where: seamed(c.where()) } as any),
+          driver.find(READABLE_IDS_CHILD_OBJECT, { where: seamed(c.where()) }),
           c.note,
         ).rejects.toMatchObject(READABLE_IDS_REFUSAL);
       });

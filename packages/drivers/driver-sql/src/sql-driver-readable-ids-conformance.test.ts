@@ -29,6 +29,7 @@ import {
   READABLE_IDS_REFUSAL,
   ReadableIds,
   lowerFilterCondition,
+  type FilterCondition,
 } from '@objectstack/spec/data';
 import { SqlDriver } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
@@ -133,7 +134,7 @@ function declareReadableIdsSweep(cell: DialectCell): void {
       });
 
       it('a deleted parent is excluded', async () => {
-        await driver.delete(BIG_PARENT, 'bp00000', { bypassTenantAudit: true } as any);
+        await driver.delete(BIG_PARENT, 'bp00000', { bypassTenantAudit: true });
         const rows = await driver.find(BIG_CHILD, { where: seamed(scoped()) }, { tenantId: 'org_a' });
         expect(rows).toHaveLength(BIG_READABLE - 1);
         expect(rows.some((r: any) => r.record_id === 'bp00000')).toBe(false);
@@ -143,7 +144,7 @@ function declareReadableIdsSweep(cell: DialectCell): void {
       it('aggregate agrees with find: the leaf is one statement on every read verb', async () => {
         const out = await driver.aggregate(
           BIG_CHILD,
-          { where: seamed(scoped()), aggregations: [{ function: 'count', alias: 'n' }] } as any,
+          { where: seamed(scoped()), aggregations: [{ function: 'count', alias: 'n' }] },
           { tenantId: 'org_a' },
         );
         expect(Number((out[0] as any).n)).toBe(BIG_READABLE - 1);
@@ -172,7 +173,7 @@ function declareReadableIdsSweep(cell: DialectCell): void {
         const error = vi.spyOn((fresh as any).logger, 'error');
         const uncomposed = () => ({ record_id: { $in: ReadableIds.of(BIG_PARENT) } });
         for (let i = 0; i < 2; i++) {
-          await expect(fresh.find(BIG_CHILD, { where: uncomposed() as any })).rejects.toMatchObject(READABLE_IDS_REFUSAL);
+          await expect(fresh.find(BIG_CHILD, { where: uncomposed() })).rejects.toMatchObject(READABLE_IDS_REFUSAL);
         }
         expect(error).toHaveBeenCalledTimes(1);
         await fresh.disconnect?.();
@@ -180,7 +181,7 @@ function declareReadableIdsSweep(cell: DialectCell): void {
 
       it('a composed leaf outside a $in comparand is refused with the same envelope', async () => {
         const leaf = ReadableIds.compose(ReadableIds.of(BIG_PARENT), undefined);
-        await expect(driver.find(BIG_CHILD, { where: { record_id: { $nin: leaf } } as any })).rejects.toMatchObject(
+        await expect(driver.find(BIG_CHILD, { where: { record_id: { $nin: leaf } } as unknown as FilterCondition })).rejects.toMatchObject(
           READABLE_IDS_REFUSAL,
         );
       });
