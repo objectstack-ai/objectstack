@@ -1989,12 +1989,13 @@ async function unnamedForComposition(run: Run, ids: readonly string[]): Promise<
  *  - declared, and the metadata door reports it editable: add the missing sets
  *    to its `permissionSets` through that door;
  *  - declared, and not editable (ADR-0131 D6: a definition a package ships is
- *    sealed; or an ADR-0010 lock), or its state unreadable: the fact, and no
- *    act, because no door adds the sets.
+ *    sealed; or an ADR-0010 lock), or its state unreadable: the fact — the
+ *    package that ships it, when the definition's provenance names one — and
+ *    no act, because no door adds the sets.
  *
  * Whether it is editable is the metadata door's own answer
- * ({@link MetadataLockPort}), never inferred from the body. The gate still
- * refuses; nothing here writes.
+ * ({@link MetadataLockPort}), never inferred from the body; the body only
+ * names the shipping package. The gate still refuses; nothing here writes.
  */
 async function walledBindingRemedy(run: Run, name: string, sets: readonly string[]): Promise<string> {
   const why = `Under the ${run.opts.posture} posture no ceremony step carries binding rows (ADR-0131 D3).`;
@@ -2003,8 +2004,8 @@ async function walledBindingRemedy(run: Run, name: string, sets: readonly string
   if (!entry) {
     return (
       `${why} Declare the position ${name} in the environment catalog with permissionSets naming ${sets.join(', ')}, ` +
-      `through one door only: the deployment's code, or ${door}. A cold boot refuses a position name a package declares ` +
-      'and the environment catalog also holds. Then re-run.'
+      `through one door only: the deployment's code (compiled into the artifact this ceremony boots), or ${door}. A ` +
+      'cold boot refuses a position name a package declares and the environment catalog also holds. Then re-run.'
     );
   }
   let verdict: Awaited<ReturnType<MetadataLockPort['verdict']>>;
@@ -2017,11 +2018,14 @@ async function walledBindingRemedy(run: Run, name: string, sets: readonly string
     );
   }
   if (!verdict.editable) {
-    return (
-      `${why} The metadata door reports the definition of ${name} not editable (lock ${verdict.lock ?? 'unknown'}` +
-      `${verdict.lockReason ? `: ${verdict.lockReason}` : ''}; a definition a package ships is sealed, ADR-0131 D6), ` +
-      'so no door on this database adds those sets.'
-    );
+    const lock = `lock ${verdict.lock ?? 'unknown'}${verdict.lockReason ? `: ${verdict.lockReason}` : ''}`;
+    const { isCodeArtifactBody } = await import('@objectstack/metadata-core');
+    const shipped = isCodeArtifactBody(entry.definition) ? String(entry.definition._packageId) : undefined;
+    return shipped
+      ? `${why} Package ${shipped} ships the definition of ${name}, which is sealed (ADR-0131 D6: the metadata door ` +
+          `reports it not editable, ${lock}), so no door on this database adds those sets.`
+      : `${why} The metadata door reports the definition of ${name} not editable (${lock}), so no door on this ` +
+          'database adds those sets.';
   }
   const declared = Array.isArray(entry.definition.permissionSets) ? entry.definition.permissionSets.map(String) : [];
   const missing = sets.filter((set) => !declared.includes(set));
