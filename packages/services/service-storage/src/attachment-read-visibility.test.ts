@@ -266,10 +266,15 @@ describe('installAttachmentReadVisibility', () => {
     expect(where).toEqual({ id: 'a1' }); // unchanged
   });
 
-  it('leaves an already-empty result set alone (no candidates → no filter)', async () => {
-    const { mw } = install({ attachments: [], visible: {} });
+  it('a read the probe finds no candidate for is narrowed to deny-all, never left unfiltered', async () => {
+    // [ADR-0139 E7] The probe no longer answers "nothing to narrow" when its
+    // pre-scan finds no row: an unfiltered read is exactly what a row written
+    // between the pre-scan and the read would leak through. Narrowing only —
+    // the pre-scan found nothing, so nothing is lost.
+    const { mw, calls } = install({ attachments: [], visible: {} });
     const { where } = await runRead(mw, {});
-    expect(where).toBeUndefined();
+    expect(where).toEqual({ id: '__attachment_parent_denied__' });
+    expect(calls.parentFinds).toHaveLength(0);
   });
 
   it('ignores self-referential (parent_object=sys_attachment) rows — prevents probe re-entry', async () => {
