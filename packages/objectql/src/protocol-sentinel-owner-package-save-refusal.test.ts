@@ -55,6 +55,9 @@
  *    with the way out true for those rows, and that way out walks: delete Q's
  *    row by naming Q, then the save naming no package edits the package-less
  *    definition, or the object moves into Q, with its records, across a boot;
+ *  - the promote doors (ADR-0029 D9.9 there too): Q's draft stored before the
+ *    package-less row existed is refused at publish with the order true for
+ *    a promotion (the delete, then the same publish), and that order walks;
  *  - CONTROL: a save naming no package over the package-less owner is unchanged.
  *
  * The D9.9 refusal for an owner bound to a real package is pinned, unchanged,
@@ -558,6 +561,52 @@ describe('#23514 — a save naming a package beside an object its package-less d
             });
             expect(drops).toEqual([]);
         });
+    });
+
+    it('the promote door: Q\'s draft stored before the package-less row is refused at publish, and the delete, then the same publish, moves the object', async () => {
+        const stores: Stores = new Map();
+        const drops: string[] = [];
+        const k = await boot(stores, drops);
+        // Q's draft, saved while no row held the object: judged against the owner of its moment, and stored.
+        expect((await k.protocol.saveMetaItem({
+            type: 'object', name: NAME, packageId: Q, mode: 'draft', item: gadgetBody('Gadget Q draft'),
+        })).success).toBe(true);
+        // Then the package-less definition, which the sentinel owns, with two records.
+        expect((await save(k, undefined, 'Gadget unbound')).success).toBe(true);
+        await k.engine.insert(NAME, { name: 'rec-1' }, SYSTEM);
+        await k.engine.insert(NAME, { name: 'rec-2' }, SYSTEM);
+        expect(k.engine.registry.getObjectOwner(NAME)?.packageId).toBe(SENTINEL);
+
+        const err = await k.protocol.publishMetaItem({ type: 'object', name: NAME, packageId: Q })
+            .then(() => null, (e: any) => e);
+        expect(err).toBeInstanceOf(Error);
+        expect(err.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
+        expect(err.status).toBe(422);
+        expect(err.packageId).toBe(Q);
+        expect(err.ownerPackageId).toBeNull();
+        expect(err.message).toMatch(new RegExp(
+            `^Move object '${NAME}' into package '${Q.replace(/\./g, '\\.')}' first: delete its package-less `
+            + 'definition without dropStorage, .*then publish this draft again',
+        ));
+        expect(await served(k)).toEqual({
+            owner: SENTINEL, dataPlaneLabel: 'Gadget unbound', metaReadLabel: 'Gadget unbound', records: 2,
+        });
+
+        // The order the refusal names: the delete, then the same publish.
+        expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
+        expect(k.engine.registry.getObjectOwner(NAME)).toBeUndefined();
+        expect((await k.protocol.publishMetaItem({ type: 'object', name: NAME, packageId: Q })).success).toBe(true);
+        expect(storedBindings(stores)).toEqual([Q]);
+        expect(await served(k)).toEqual({
+            owner: Q, dataPlaneLabel: 'Gadget Q draft', metaReadLabel: 'Gadget Q draft', records: 2,
+        });
+
+        await k.kernel.shutdown();
+        const k2 = await boot(stores, drops);
+        expect(await served(k2)).toEqual({
+            owner: Q, dataPlaneLabel: 'Gadget Q draft', metaReadLabel: 'Gadget Q draft', records: 2,
+        });
+        expect(drops).toEqual([]);
     });
 
     it('CONTROL: a save naming no package over the package-less owner is unchanged', async () => {

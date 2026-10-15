@@ -2156,8 +2156,12 @@ interface UnboundOwnerRefusalState {
     storedRow?: boolean;
     /** The caller named no package, and the save's address resolved to the package's row. */
     namedNoPackage?: boolean;
-    /** Where the refusal is raised: the save door (default), or a registration of a stored row (boot, write-through). */
-    at?: 'save' | 'registry';
+    /**
+     * Where the refusal is raised: the save door (default), a draft promotion
+     * (the per-item publish and `publish-drafts`), or a registration of a
+     * stored row (boot, write-through).
+     */
+    at?: 'save' | 'promote' | 'registry';
 }
 
 type HydrationOptions = {
@@ -19617,6 +19621,7 @@ export class ObjectStackProtocolImplementation implements
      * | a DRAFT save naming `Q`, no `Q` row stored | the same delete, then a PUBLISH-mode save naming `Q` (it serves the object at once), then draft as before. A draft save registers nothing, so a draft sent right after the delete leaves the object unserved until it is published |
      * | a `Q` row is already stored beside the package-less one (the rows the save door wrote before this refusal existed) | delete the `Q` row by naming `Q` (the no-package delete resolves to that same row, {@link packagelessAddress}), then the package-less definition, then a publish-mode save naming `Q` |
      * | the same rows, a publish save naming NO package | it is addressed to the `Q` row ({@link packagelessAddress}); delete the `Q` row, then the same save edits the package-less definition |
+     * | a promotion of `Q`'s draft (the per-item publish, `publish-drafts`), a draft stored before the package-less row or by a draft save the door addressed to `Q` | the deletes above for the state, then the same publish: the draft stays stored, and its promotion registers it |
      *
      * The boot (`loadMetaFromDb`) and the write-through
      * ({@link applyObjectRegistryMutation}) meet the third state: the row
@@ -19642,7 +19647,18 @@ export class ObjectStackProtocolImplementation implements
             ? ` The row bound to '${q}' is not registered.`
             : ' Nothing was written.';
         let message: string;
-        if (state.storedRow && state.namedNoPackage) {
+        if (state.at === 'promote') {
+            // The draft is stored and stays stored: after the deletes, its
+            // promotion is the save that moves the object (it registers).
+            message = (state.storedRow
+                ? `Object '${name}' is served by its definition bound to no package; its stored definition bound `
+                    + `to '${q}' is never served. To move the object into '${q}': delete the '${q}' row (REST: DELETE `
+                    + `${path}?package=${q}), then the package-less definition without dropStorage, which keeps its `
+                    + 'table and records (the same DELETE with no package parameter), then publish this draft again.'
+                : `Move object '${name}' into package '${q}' first: delete its package-less definition without `
+                    + `dropStorage, which keeps its table and records (REST: DELETE ${path} with no package `
+                    + 'parameter), then publish this draft again: it then serves the object at once.') + tail;
+        } else if (state.storedRow && state.namedNoPackage) {
             message = `A save naming no package of object '${name}' is addressed to its stored definition bound to `
                 + `'${q}', which is never served: the object is served by its definition bound to no package. `
                 + `Delete the '${q}' row first (REST: DELETE ${path}?package=${q}), then send this save again: it `
@@ -24641,8 +24657,14 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate && singularType === 'object' && !this.isSealedManagedItem(singularType, request.name)) {
             const layer = this.classifyObjectContribution(request.name, promoteInto);
             if (layer.kind === 'mismatch') {
+                // [#23514] A package-less owner (the `'sys_metadata'` sentinel):
+                // the way out is a promotion, and differs where an active row
+                // bound to the package is already stored beside it.
+                const storedRow = layer.ownerPackageId === 'sys_metadata'
+                    && (await this.packagelessAddress(singularType, request.name)).candidates.includes(layer.packageId);
                 throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
                     request.name, layer.packageId, layer.ownerPackageId,
+                    { at: 'promote', storedRow },
                 );
             }
         }
