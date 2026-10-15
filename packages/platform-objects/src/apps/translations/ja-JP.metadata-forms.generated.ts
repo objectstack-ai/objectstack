@@ -1204,7 +1204,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       source: {
         label: "ページソース",
-        helpText: "ページのソーステキスト。kind が 'html'（別名 'jsx'）の場合は制約付きの JSX で、保存時にコンポーネントツリーへコンパイルされます（解析のみで、実行はしません）。kind が 'react' の場合は本物の React で、信頼済みランタイムが描画時に実行します。"
+        helpText: "ページのソーステキスト。kind が 'html' の場合は制約付きの JSX で、保存時にコンポーネントツリーへコンパイルされます（解析のみで、実行はしません）。kind が 'react' の場合は本物の React で、信頼済みランタイムが描画時に実行します。"
       },
       object: {
         label: "オブジェクト",
