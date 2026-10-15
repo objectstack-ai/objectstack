@@ -359,11 +359,11 @@ export async function handlePermissionSetCloneWrite(
             // step 5's condition, answered with step 5's refusal. The protocol's
             // own conflict sentence speaks to a `/meta` caller (it prescribes
             // `If-Match`), and this door takes no version from its caller.
+            // Rethrown to the catch below, which answers every failure here.
             if ((err as { code?: unknown } | null)?.code === 'METADATA_CONFLICT') {
-                return {
-                    handled: true,
-                    response: deps.error(nameTakenMessage(target.name), PERMISSION_SET_CLONE_NAME_TAKEN_STATUS),
-                };
+                throw Object.assign(new Error(nameTakenMessage(target.name)), {
+                    status: PERMISSION_SET_CLONE_NAME_TAKEN_STATUS,
+                });
             }
             throw err;
         }
