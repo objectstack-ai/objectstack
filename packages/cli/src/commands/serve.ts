@@ -3089,6 +3089,13 @@ export default class Serve extends Command {
       // discards as already-registered.
       // [#15006] Same seam, same reason — see the ObjectQL gate above. The
       // driver-provider duck-typing moved into it with the read it guards.
+      //
+      // [#23573] Whether this step declared NOTHING (production, no URL, no
+      // driver plugin by name). Only recorded here: this step cannot tell a
+      // boot that fails anyway from one whose own plugin registers a driver
+      // the name test misses, so the verdict waits for the no-storage boot
+      // guard at the end of Phase 1 (registered last, before runtime.start()).
+      let productionResolvedNoStorage = false;
       if (shouldAutoRegisterStorageDriver(config, plugins)) {
          const databaseUrl = process.env.OS_DATABASE_URL;
          const driverType = resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl);
@@ -3136,6 +3143,8 @@ export default class Serve extends Command {
              // every other kind AND the dev-default `:memory:` store). The ONE
              // provision, shared with the standalone boot below.
              await provisionTelemetry(resolution.sqliteFilePath);
+           } else {
+             productionResolvedNoStorage = true;
            }
          } catch (e: any) {
            // "declared ≠ enforced" guard (#3276-class): a selection the CLI
@@ -5107,6 +5116,68 @@ export default class Serve extends Command {
       // detail of the CLI's own announcement — putting it there would grow a
       // published banner surface on every boot to report a thing an operator
       // cannot act on.
+
+      // ── No-storage boot guard (#23573) ─────────────────────────────
+      // Step 2 recorded that this production boot declared no storage. Whether
+      // that is fatal is only known once every plugin's init() has run, since a
+      // stack plugin the name test missed may register a driver there. This is
+      // the LAST plugin registered, so its init() runs after every other init()
+      // and before any start() (resolvePluginOrder keeps insertion order; no
+      // plugin names this one as a dependency). It reads the one map ObjectQL
+      // adopts `driver.*` services from at its start(), plus any driver the
+      // engine already holds.
+      //   • a driver is there                ⇒ nothing to say.
+      //   • none, and the auth service runs under the 'single' posture ⇒ refuse
+      //     before any start(). AuthPlugin.start() creates the Default
+      //     Organization there, which needs a driver, and no driver can arrive
+      //     before it: AppPlugin orders ObjectQL and auth ahead of every stack
+      //     plugin, so a driver registered in any start() comes too late.
+      //     Without this, the boot died there with a driver error, after an
+      //     objectql ERROR naming a datasource nobody declared.
+      //   • none otherwise                   ⇒ ONE line, and the boot goes on.
+      //     Worded as of the end of init, because a start() (a module's
+      //     onEnable) may still register a driver and some such stacks boot.
+      // ⛔ Not `trackPlugin`ed, for the announcer's reason above.
+      if (productionResolvedNoStorage) {
+        // ONE list, rendered as the refusal's bullets and as the line's sentence.
+        const noStorageRemedies = [
+          'set OS_DATABASE_URL (e.g. file:./data/app.db, or a postgres:// or mysql:// URL)',
+          "mount a storage driver in the stack's plugins (e.g. new DriverPlugin(driver) from @objectstack/runtime)",
+          'run with --dev (an in-memory SQLite store, for development)',
+        ];
+        await kernel.use({
+          name: 'com.objectstack.cli.no-storage-boot-guard',
+          version: '1.0.0',
+          init: async (ctx: any) => {
+            const services: Map<string, any> = ctx.getServices();
+            const engine = services.get('objectql');
+            const hasDriver = [...services.keys()].some((name) => name.startsWith('driver.'))
+              || (typeof engine?.getDefaultDriverName === 'function'
+                && engine.getDefaultDriverName() !== undefined);
+            if (hasDriver) return;
+            if (services.has('auth') && services.get('tenancy')?.posture === 'single') {
+              restoreOutput();
+              console.error(chalk.red(
+                '\n  ✖ This production serve has no storage: no recognized OS_DATABASE_URL declared a\n'
+                + '    default datasource, and no plugin registered a storage driver by the end of plugin\n'
+                + "    init. The auth service runs under the 'single' tenancy posture, and its start()\n"
+                + '    creates the Default Organization, which needs a driver.\n\n'
+                + '    Fix one of:\n'
+                + noStorageRemedies.map((remedy) => `      • ${remedy}\n`).join(''),
+              ));
+              throw new Error(
+                'Refusing to boot: this production serve has no storage, and its auth service needs a '
+                + 'driver when it starts. Set OS_DATABASE_URL, mount a storage driver plugin, or run with --dev.',
+              );
+            }
+            console.warn(chalk.yellow(
+              '  ⚠ No storage: no recognized OS_DATABASE_URL, and no plugin registered a storage driver by '
+              + 'the end of plugin init, so objects have no store unless a plugin registers one when it '
+              + `starts. Fix: ${noStorageRemedies[0]}; ${noStorageRemedies[1]}; or ${noStorageRemedies[2]}.`,
+            ));
+          },
+        } as any);
+      }
 
       // Boot the runtime
       await runtime.start();

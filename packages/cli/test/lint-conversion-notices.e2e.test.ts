@@ -47,12 +47,13 @@
  * converts nothing, and `expect('conversions' in payload)` is green against a
  * `conversions: []` hard-coded at the exit — the defect with a lid on it. So:
  *
- *   - every positive fixture drives a LIVE conversion (`page-kind-jsx-to-html`,
- *     ADR-0087 D2, protocol 11, on `pages[0].kind: 'jsx'`), and the notice is
+ *   - every positive fixture drives a LIVE conversion
+ *     (`flow-node-http-callout-rename`, ADR-0087 D2, protocol 11, on
+ *     `flows[0].nodes[1].type: 'http_request'`), and the notice is
  *     asserted by IDENTITY — `conversionId` plus the converted path — over the
  *     WHOLE array, so "and NO MORE" is asserted too;
  *   - `converts nothing` runs the identical shape with the canonical spelling
- *     `kind: 'html'` and requires the field to be present and EMPTY, in both
+ *     `type: 'http'` and requires the field to be present and EMPTY, in both
  *     faces. That is the negative whose positive is every other test here:
  *     without it, a hard-coded notice would satisfy all of them.
  *
@@ -82,8 +83,11 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** The live ADR-0087 D2 conversion these fixtures drive (protocol 11). */
-const CONVERSION_ID = 'page-kind-jsx-to-html';
+/**
+ * The live ADR-0087 D2 conversion these fixtures drive (protocol 11). It was
+ * `page-kind-jsx-to-html` until `jsx` retired as a page kind at 18.
+ */
+const CONVERSION_ID = 'flow-node-http-callout-rename';
 
 interface Run {
   code: number;
@@ -117,21 +121,28 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
 }
 
 /**
- * A stack whose `pages[0].kind` drives the live conversion. `pageKind` is a
- * parameter so the negative control runs the identical shape with the CANONICAL
- * spelling, where there is nothing to convert.
- *
- * `source` is a single-root element: the `jsx-no-root` authoring rule rejects a
- * bare string, so a fixture that used one would never reach the exit under test.
- * It is `<box>`, not `<div>`: where the CLI reaches the manifest
- * `@objectstack/console` ships, the html tier refuses `div` (#19922).
+ * A stack whose `flows[0].nodes[1].type` drives the live conversion.
+ * `nodeType` is a parameter so the negative control runs the identical shape
+ * with the CANONICAL spelling, where there is nothing to convert.
  */
-function stack(ns: string, opts: { pageKind?: string } = {}): string {
-  const { pageKind = 'jsx' } = opts;
+function stack(ns: string, opts: { nodeType?: string } = {}): string {
+  const { nodeType = 'http_request' } = opts;
   return `
 export default {
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
-  pages: [{ name: 'landing', label: 'Landing', kind: '${pageKind}', source: '<box>hi</box>' }],
+  flows: [
+    {
+      name: '${ns}_notify',
+      label: 'Notify',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'call', type: '${nodeType}', label: 'Call', config: { url: 'https://example.com/hook' } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
+    },
+  ],
   objects: [
     {
       name: '${ns}_ticket',
@@ -158,10 +169,10 @@ function conversionsOf(payload: Record<string, unknown>): unknown[] {
  */
 const THE_NOTICE = {
   conversionId: CONVERSION_ID,
-  surface: 'page.kind',
-  from: 'jsx',
-  to: 'html',
-  path: 'pages[0].kind',
+  surface: 'flow.node.type',
+  from: 'http_request',
+  to: 'http',
+  path: 'flows[0].nodes[1].type',
 };
 
 /** Asserts the payload carries EXACTLY the one computed notice, and no more. */
@@ -187,8 +198,8 @@ beforeAll(() => {
   // Drives the live conversion.
   make('converts', stack('cvt'));
 
-  // ⭐ The negative control — the identical shape, the CANONICAL page kind.
-  make('canonical', stack('cnl', { pageKind: 'html' }));
+  // ⭐ The negative control — the identical shape, the CANONICAL node type.
+  make('canonical', stack('cnl', { nodeType: 'http' }));
 
   // Catch-all exit, AT LOAD — the config throws on import, ABOVE the normalize
   // step, so the run must report the field EMPTY rather than absent.
@@ -229,16 +240,16 @@ describe('#12297 — `os lint` surfaces ADR-0087 conversion notices in both face
 
     expect(Object.keys(payload), 'the field must be PRESENT even when empty').toContain('conversions');
     expect(run.stdout, 'and present in the serialized bytes').toContain('"conversions"');
-    expect(payload.conversions, 'a canonical page kind converts nothing').toEqual([]);
+    expect(payload.conversions, 'a canonical node type converts nothing').toEqual([]);
   }, 120_000);
 
   it('⭐ the human face says it too — the notice is printed, with its expiry', async () => {
     // The face an author actually reads. `--json` is not the authoring gate for
     // a human, and this command had NEITHER face.
     const run = await runCli(['lint'], dirs.converts);
-    expect(run.stdout, 'the converted path').toContain('pages[0].kind');
+    expect(run.stdout, 'the converted path').toContain('flows[0].nodes[1].type');
     expect(run.stdout, 'the conversion identity').toContain(CONVERSION_ID);
-    expect(run.stdout, 'the from → to rewrite').toMatch(/'jsx'.*'html'/);
+    expect(run.stdout, 'the from → to rewrite').toMatch(/'http_request'.*'http'/);
     expect(run.stdout, 'the EXPIRY — the part that makes it actionable').toMatch(/retires in protocol \d+/);
   }, 120_000);
 

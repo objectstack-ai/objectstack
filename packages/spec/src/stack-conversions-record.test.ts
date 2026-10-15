@@ -52,8 +52,13 @@ afterEach(() => {
  * `description` → `subtitle` alias, until that conversion retired from the
  * load path at 18 — any live page conversion carries what is pinned here.)
  * No standalone actions, so the same built stack can be composed twice.
+ *
+ * `callout` adds a flow whose node is authored as `http_request`, the spelling
+ * the live conversion `flow-node-http-callout-rename` rewrites to `http` — a
+ * second, different conversion for the ordering case. (It used to be a
+ * `kind: 'jsx'` page, until `jsx` retired as a page kind at 18.)
  */
-const source = (ns: string, headerKey: 'visibility' | 'visibleWhen', pageKind: 'jsx' | 'html' = 'html') => ({
+const source = (ns: string, headerKey: 'visibility' | 'visibleWhen', callout: 'http_request' | 'http' | null = null) => ({
   manifest: { id: `com.example.${ns}`, name: ns, version: '1.0.0', type: 'app' as const, namespace: ns },
   objects: [{ name: `${ns}_thing`, label: 'Thing', fields: { title: { type: 'text' as const, label: 'Title' } } }],
   pages: [
@@ -67,8 +72,8 @@ const source = (ns: string, headerKey: 'visibility' | 'visibleWhen', pageKind: '
         },
       ],
     },
-    ...(pageKind === 'jsx' ? [{ name: `${ns}_landing`, label: 'Landing', kind: 'jsx', source: '<div>hi</div>' }] : []),
   ],
+  ...(callout ? { flows: [{ name: `${ns}_notify`, nodes: [{ id: 'n1', type: callout }] }] } : {}),
 });
 
 const HEADER_PATH = 'pages[0].regions[0].components[0].visibleWhen';
@@ -92,12 +97,12 @@ const HEADER_NOTICE = {
   retiresIn: 16,
 };
 
-const KIND_NOTICE = {
+const CALLOUT_NOTICE = {
   code: CONVERSION_NOTICE_CODE,
-  conversionId: 'page-kind-jsx-to-html',
-  path: 'pages[1].kind',
-  from: 'jsx',
-  to: 'html',
+  conversionId: 'flow-node-http-callout-rename',
+  path: 'flows[0].nodes[0].type',
+  from: 'http_request',
+  to: 'http',
 };
 
 const quiet = () => vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -129,11 +134,11 @@ describe('defineStack records the conversions it applied', () => {
 
   it('two conversions in one source are recorded in the order they were applied', () => {
     quiet();
-    const built = defineStack(source('aa', 'visibility', 'jsx') as never, { strict: false });
+    const built = defineStack(source('aa', 'visibility', 'http_request') as never, { strict: false });
     const record = stackConversionsOf(built).map(substance);
     expect(record).toHaveLength(2);
     expect(record).toContainEqual(HEADER_NOTICE);
-    expect(record).toContainEqual(expect.objectContaining(KIND_NOTICE));
+    expect(record).toContainEqual(expect.objectContaining(CALLOUT_NOTICE));
   });
 
   it('⭐ control: the canonical spelling records nothing, on a stack that IS marked', () => {

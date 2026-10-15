@@ -3492,7 +3492,7 @@ const PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION: RuleExplanation = {
   rule: 'page-source-className-tailwind',
   covers: 'why Tailwind classes in page source produce no CSS',
   paragraphs: [
-    'A `kind: \'html\'`, `\'react\'` or `\'jsx\'` page\'s `source` is runtime metadata, and the ' +
+    'A `kind: \'html\'` or `\'react\'` page\'s `source` is runtime metadata, and the ' +
       'Console\'s Tailwind build scans only the renderer\'s own source, never an authored page string. ' +
       'So a Tailwind `className` in page source produces no CSS (ADR-0065): it styles the page only by ' +
       'coincidence, when the class happens to be one the renderer already ships.',

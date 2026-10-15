@@ -2798,7 +2798,9 @@ function simpleHash(str: string): string {
  * The HTTP layer maps this to `409 Conflict` with code `CONCURRENT_UPDATE`,
  * and includes both the current server-side version and the current record
  * payload so the client can render an informed conflict-resolution UI
- * ("Reload latest" vs. "Overwrite anyway").
+ * ("Reload latest" vs. "Overwrite anyway"). The record is the row as the
+ * caller reads it, and a row the caller cannot read is never a conflict: it
+ * answers not-found instead (#23586, see `assertVersionOf`).
  *
  * NOTE: This is an *application-level* compare-and-set — not an atomic
  * storage-layer CAS. There is a small TOCTOU window between the version
@@ -14633,7 +14635,7 @@ export class ObjectStackProtocolImplementation implements
         // 404 wins over 409 when both could apply: OCC has always declined to
         // treat a missing record as a concurrency conflict, and "this record
         // does not exist" is the more specific answer.
-        this.assertVersionOf(request.object, request.id, current, request.expectedVersion);
+        await this.assertVersionOf(request.object, request.id, current, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         // [#3407/#3431] Capture the engine's LEGAL write strips (static `readonly`
@@ -14729,7 +14731,7 @@ export class ObjectStackProtocolImplementation implements
 
     async deleteData(request: { object: string, id: string, expectedVersion?: string, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
-        await this.assertVersionMatch(request.object, request.id, request.expectedVersion);
+        await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         const deleted = await this.engine.delete(request.object, opts);
@@ -14870,10 +14872,11 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Optimistic Concurrency Control — the COMPARISON half, over a row the
-     * caller has already read. Pure: it issues no query of its own, which is
-     * what lets `updateData` run the gate on its existence probe's result
-     * rather than re-reading the record (#4435).
+     * Optimistic Concurrency Control — the COMPARISON half, over the row the
+     * existence probe has already read. A token that agrees (or no token)
+     * issues no query of its own, which is what lets `updateData` run the gate
+     * on its existence probe's result rather than re-reading the record
+     * (#4435). Only a MISMATCH reads again — see the conflict paragraph below.
      *
      * When the caller passes a non-empty `expectedVersion` token (typically the
      * `updated_at` value they read), a mismatch throws `ConcurrentUpdateError`,
@@ -14903,13 +14906,35 @@ export class ObjectStackProtocolImplementation implements
      *    SQLite family — must not decide whether a save is a conflict. See
      *    `normaliseVersionToken` for the measured input domain and for why the
      *    change cannot refuse a token that is accepted today.
+     *
+     * ## [#23586] The conflict reports only what the caller may read
+     *
+     * `current` is the SYSTEM-context probe ({@link probeRecord}: existence,
+     * not visibility), and this gate runs before `engine.update` /
+     * `engine.delete` apply the caller's policy. So a mismatch does not answer
+     * from it. It re-reads the row under the caller's own `context`, the read
+     * door's question (every RLS and FLS rule applies):
+     *
+     *  - no row → `recordNotFoundError`, the producer the security layer's
+     *    by-id write gate answers a row the caller cannot read with. The stale
+     *    token then gets exactly the answer the same request without a token
+     *    gets: no `currentVersion`, no `currentRecord`, so the `409` no longer
+     *    tells a caller that a hidden row exists or when it was last written;
+     *  - a row → the `409`, with THAT row as `currentRecord`, field-masked as
+     *    the caller's own read is. `currentVersion` stays the token this
+     *    comparison ran on.
+     *
+     * The read is issued only on a mismatch: a request whose token agrees, or
+     * that sends none, reads exactly what it read before. A read that throws
+     * (the caller's read grant withheld, a store fault) propagates as raised.
      */
-    private assertVersionOf(
+    private async assertVersionOf(
         object: string,
         id: string,
         current: any,
         expectedVersion: string | undefined,
-    ): void {
+        context: EngineQueryOptionsParsed['context'],
+    ): Promise<void> {
         assertVersionTokenNotMalformed(expectedVersion);
         const expected = normaliseVersionToken(expectedVersion);
         if (!expected) return;
@@ -14927,9 +14952,11 @@ export class ObjectStackProtocolImplementation implements
             // it names, turning a resolvable conflict into an unresolvable one.
             const currentVersion = currentToken.instant ?? currentToken.token;
             const expectedVersionText = expected.instant ?? expected.token;
+            const visible = await this.readAsCaller(object, id, context);
+            if (!visible) throw recordNotFoundError(object, id);
             throw new ConcurrentUpdateError({
                 currentVersion,
-                currentRecord: current,
+                currentRecord: visible,
                 message: `Record ${object}/${id} was modified by another user (current version ${currentVersion}, expected ${expectedVersionText})`,
             });
         }
@@ -14956,11 +14983,24 @@ export class ObjectStackProtocolImplementation implements
         object: string,
         id: string,
         expectedVersion: string | undefined,
+        context: EngineQueryOptionsParsed['context'],
     ): Promise<void> {
         assertVersionTokenNotMalformed(expectedVersion);
         if (!normaliseVersionToken(expectedVersion)) return;
         const current = await this.probeRecord(object, id);
-        this.assertVersionOf(object, id, current, expectedVersion);
+        await this.assertVersionOf(object, id, current, expectedVersion, context);
+    }
+
+    /**
+     * [#23586] The row as the CALLER reads it by id — the twin of
+     * {@link probeRecord}, which asks existence as the system. Same `context`
+     * spelling as the write it precedes: passed only when the request carried
+     * one, so a caller with no context reads as its write would run.
+     */
+    private async readAsCaller(object: string, id: string, context: EngineQueryOptionsParsed['context']): Promise<any> {
+        const opts: EngineQueryOptionsParsed = { where: { id } };
+        if (context !== undefined) opts.context = context;
+        return this.engine.findOne(object, opts);
     }
 
     // ==========================================
@@ -26052,6 +26092,9 @@ export class ObjectStackProtocolImplementation implements
      *  3. the registry's uninstall refusal (another package extends an object
      *     this one owns, ADR-0029), asked through
      *     `SchemaRegistry.assertPackageUninstallable` — pure; thrown as is;
+     *     then [#23473] the shared-object refusal (another stored row holds an
+     *     object whose table this uninstall would drop) — reads only, the
+     *     per-item delete's own address reads; `RESOURCE_CONFLICT` / 409;
      *  4. the `sys_packages` delete through the `package` service — the FIRST
      *     durable step; a refusal, returned or thrown, is thrown as this verb's
      *     failure (see {@link packagePersistFailureError});
@@ -26139,6 +26182,73 @@ export class ObjectStackProtocolImplementation implements
         const packageRegistry = (this.engine as any)?.registry;
         if (typeof packageRegistry?.assertPackageUninstallable === 'function') {
             packageRegistry.assertPackageUninstallable(request.packageId);
+        }
+
+        // [#23473, ADR-0048] THE SHARED-OBJECT REFUSAL, ALSO ASKED BEFORE THE
+        // STORE DELETE. A `sys_metadata` row is keyed by its package, so an
+        // object this package holds can also be held by another package's row,
+        // or by the package-less row, all served over the ONE table its name
+        // maps to. The per-item delete below drops an object's table only with
+        // its last stored row and otherwise refuses `409`
+        // ({@link dropStorageRemainingRowsRefusal}). Met there, that refusal
+        // came after the stored package row was gone, so it left the package
+        // half-uninstalled: no `sys_packages` row, and its row of the shared
+        // object still stored and served.
+        //
+        // So the same question is asked here, of the same rows, before anything
+        // durable: for each active object row whose table this uninstall would
+        // drop ({@link shouldDropStorage}), the per-item delete's own address
+        // read ({@link packagelessAddress}, the type folded as that delete
+        // folds it). An object this package holds there beside any other row
+        // refuses the whole uninstall, with nothing removed, as step 3 does
+        // for an extended object. ⛔ Not "uninstall and keep the shared table":
+        // dropping the tables is this verb's declared default, and an
+        // uninstall that quietly drops fewer than it says is an opt-in the
+        // runtime does not honour.
+        //
+        // With `keepData: true` no table is dropped, so sharing decides
+        // nothing and nothing is read. `RESOURCE_CONFLICT` / 409, no code
+        // minted: the per-item refusal's code for the same rows (environment
+        // state, not the request: the same uninstall is accepted once the other
+        // rows, or this package's row, are gone). A failed read is this verb's
+        // step-2 read failure ({@link metadataReadFailureError}), never "not
+        // shared". The prescription first: a 4xx message can be truncated.
+        if (request.keepData !== true) {
+            const shared: string[] = [];
+            const asked = new Set<string>();
+            for (const row of rows) {
+                if (row?.state === 'draft' || typeof row?.name !== 'string') continue;
+                const canonical = canonicalMetaType(String(row.type));
+                const type = PLURAL_TO_SINGULAR[canonical] ?? canonical;
+                if (!this.shouldDropStorage(type, row.name, true, 'active') || asked.has(row.name)) continue;
+                asked.add(row.name);
+                let at: { candidates: readonly string[]; unbound: boolean };
+                try {
+                    at = await this.packagelessAddress(type, row.name, undefined, 'active');
+                } catch (e) {
+                    throw metadataReadFailureError(e);
+                }
+                if (!at.candidates.includes(request.packageId)) continue;
+                const others = at.candidates.filter((id) => id !== request.packageId);
+                if (others.length === 0 && !at.unbound) continue;
+                shared.push(`'${row.name}' (${remainingRowsPhrase(others, at.unbound, 'row')})`);
+            }
+            if (shared.length > 0) {
+                const more = shared.length > 5 ? `; and ${shared.length - 5} more` : '';
+                const err = new Error(
+                    `Uninstall package '${request.packageId}' with keepData (?keepData=true; keepData: true in `
+                    + 'process), which keeps all its object tables, or first delete, without dropStorage, its row '
+                    + 'or the other rows of each object below (DELETE /api/v1/meta/object/NAME?package=ID). '
+                    + "Nothing was removed: an uninstall drops an object's table only with the object's last row, and "
+                    + (shared.length === 1
+                        ? 'an object of this package is'
+                        : `${shared.length} objects of this package are`)
+                    + ` also held by other rows: ${shared.slice(0, 5).join('; ')}${more}.`,
+                ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+                err.code = 'RESOURCE_CONFLICT';
+                err.status = 409;
+                throw err;
+            }
         }
 
         // [#21276] THE STORE DELETE COMES FIRST, and its refusal is this verb's

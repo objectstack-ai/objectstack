@@ -238,7 +238,6 @@ const PAGE_BASE = { name: 'home_page', label: 'Home', type: 'home' } as const;
 const pageSourceFixtures: Fixture[] = [
   { label: 'an `html` page with no `source`', value: { ...PAGE_BASE, kind: 'html' }, refusesAt: ['source'] },
   { label: 'a `react` page with a whitespace-only `source`', value: { ...PAGE_BASE, kind: 'react', source: '   ' }, refusesAt: ['source'] },
-  { label: 'a `jsx` page with an empty `source`', value: { ...PAGE_BASE, kind: 'jsx', source: '' }, refusesAt: ['source'] },
   { label: 'an `html` page with a `source`', value: { ...PAGE_BASE, kind: 'html', source: 'Card' }, refusesAt: [] },
   { label: 'a `full` page with no `source`', value: { ...PAGE_BASE, kind: 'full' }, refusesAt: [] },
   { label: 'a page with no `kind` (the `full` default)', value: { ...PAGE_BASE }, refusesAt: [] },
@@ -256,7 +255,6 @@ const pageRequiresFixtures: Fixture[] = [
   { label: '`requires` on a page with no `kind` (the `full` default)', value: { ...PAGE_BASE, requires: ['ui'] }, refusesAt: ['requires'] },
   { label: 'an EMPTY `requires` on a `react` page — the key is refused, not its contents', value: { ...PAGE_BASE, kind: 'react', source: 'Card', requires: [] }, refusesAt: ['requires'] },
   { label: '`requires` on an `html` page', value: { ...PAGE_BASE, kind: 'html', source: 'Card', requires: ['ui'] }, refusesAt: [] },
-  { label: '`requires` on a `jsx` page (the deprecated `html` alias)', value: { ...PAGE_BASE, kind: 'jsx', source: 'Card', requires: ['ui'] }, refusesAt: [] },
   { label: 'a `react` page with no `requires`', value: { ...PAGE_BASE, kind: 'react', source: 'Card' }, refusesAt: [] },
 ];
 

@@ -2258,7 +2258,7 @@
       "source": [
         "packages/spec/liveness/batch_endpoints.json (the ADR-0049 ledger this item answers: maxBatchSize, enableBatchEndpoint and three operations.* live, upsertMany and defaultAtomic dead)",
         "packages/spec/src/api/rest-server.zod.ts#BatchEndpointsConfigSchema (declared bounds 1..1000 int, default 200, and the two retiredKey tombstones)",
-        "packages/rest/src/rest-server.ts#registerBatchEndpoints (the four per-object gates, each ANDed with its protocol member, and the unconditionally-mounted cross-object door), (enforceBatchSize — the one envelope), (normalizeConfig), (parseDeclaredSubConfig)",
+        "packages/rest/src/batch-routes.ts#registerBatchEndpoints (the four per-object gates, each ANDed with its protocol member, and the unconditionally-mounted cross-object door) + packages/rest/src/rest-server.ts#enforceBatchSize (enforceBatchSize — the one envelope), (normalizeConfig), (parseDeclaredSubConfig)",
         "packages/spec/src/api/error-code-ledger.zod.ts#BATCH_TOO_LARGE (the code the cap answers with)",
         "#3939 (one cap, one envelope, every door) · #11984 (maxBatchSize 0 was the live cap under the old cast) · #14691 (the two retirements) · ADR-0119 D4 (per-request atomicity)",
         "sibling clause: api-backend.bulk-write-contract and api-backend.batch-transactional-discovery (they drive the doors' BEHAVIOUR on the default config; this item covers the config that decides the doors exist)"

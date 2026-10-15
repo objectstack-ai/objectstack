@@ -73,12 +73,13 @@ function makeService(
   const resolve = (object: string) =>
     (service as unknown as { resolveLookupFields(o: string): Array<{ key: string; reference: string }> })
       .resolveLookupFields(object);
-  // [#23594] No field-visibility answer for any object: the reader's served
-  // fields narrow nothing here, as with no security service wired.
+  // [#23594 / #23618] No security service wired, so no field-visibility answer
+  // for any object, subject or target: the reader's served fields narrow
+  // nothing here.
   const enrich = (rows: InboxRow[]) =>
     (service as unknown as {
-      enrichRows(r: InboxRow[], served: ReadonlyMap<string, string[] | undefined>): Promise<void>;
-    }).enrichRows(rows, new Map());
+      enrichRows(r: InboxRow[], served: Map<string, string[] | undefined>, context: unknown): Promise<void>;
+    }).enrichRows(rows, new Map(), { userId: 'u_reader', positions: [], permissions: [] });
   return { resolve, enrich, warn, finds };
 }
 

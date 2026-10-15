@@ -1253,7 +1253,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateResponsiveStyles(stack),
   },
-  // ADR-0080 — a `kind:'jsx'` page's `source` is parsed (never executed) and
+  // ADR-0080 — a `kind:'html'` page's `source` is parsed (never executed) and
   // compiled to the SDUI tree at save time, so malformed source must fail loudly
   // here (ADR-0078) instead of being stored and breaking only at render.
   {

@@ -577,7 +577,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
  *     must emit each key exactly once; a `Set` is the same de-duplication with
  *     nothing left to choose between two authorings.
  *
- * ⚠️ Source-authored pages (`kind: 'html' | 'react' | 'jsx'`) are NOT skipped
+ * ⚠️ Source-authored pages (`kind: 'html' | 'react'`) are NOT skipped
  * here, deliberately, even though {@link walkPageComponents} skips them. That
  * skip exists because such a page's `regions` are a derived cache the `source`
  * wins over; `interfaceConfig` is authored metadata at the page root, and both

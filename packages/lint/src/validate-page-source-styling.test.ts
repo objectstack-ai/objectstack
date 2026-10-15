@@ -34,9 +34,9 @@ describe('validatePageSourceStyling (ADR-0065 guardrail)', () => {
     expect(validatePageSourceStyling({ pages: [{ name: 'p', kind: 'full', regions: [] }] })).toEqual([]);
   });
 
-  it('also covers the deprecated jsx alias', () => {
+  it('does not read the retired jsx kind — the page parse refuses that kind first', () => {
     const f = validatePageSourceStyling(page('jsx', '<flex className="p-4" />'));
-    expect(f.length).toBe(1);
+    expect(f).toEqual([]);
   });
 });
 
@@ -52,7 +52,6 @@ describe('[#22161] one-line fix — page-source-className-tailwind', () => {
   it('each kind reads as one remedy line of at most 200 characters', () => {
     const [react] = fire('react', 'function Page(){ return <div className="grid" />; }');
     const [html] = fire('html', '<flex className="gap-4" />');
-    const [jsx] = fire('jsx', '<flex className="p-4" />');
     expect(react!.hint).toBe(
       "Replace className with inline style={{}} using hsl(var(--token)) theme colors, e.g. style={{ color: 'hsl(var(--foreground))' }}",
     );
@@ -60,8 +59,7 @@ describe('[#22161] one-line fix — page-source-className-tailwind', () => {
       "Replace className with the components' structured props (<flex direction gap>, <grid columns>) and a JSON " +
         'style object, e.g. style={{"color":"hsl(var(--foreground))"}}',
     );
-    expect(jsx!.hint).toBe(html!.hint);
-    for (const f of [react!, html!, jsx!]) {
+    for (const f of [react!, html!]) {
       expect(f.hint).not.toContain('\n');
       expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
     }

@@ -6,7 +6,7 @@ import type { SemanticMigration } from '../../types.js';
 // (one D3 entry per retirement family, even when D2 is lossless): page
 // `requires` narrowed to the kinds whose source the save door compiles, ruling
 // record 5964312254, letter A. It is a narrowing by `kind`, not a key removal:
-// the key stays live on html / jsx pages, so there is no tombstone and no
+// the key stays live on html pages, so there is no tombstone and no
 // RETIRED_KEYS_BY_MAJOR row — the parse refuses it through
 // `checkPageRequiresKind` (ui/page.zod.ts) on the other kinds.
 export const entry: SemanticMigration = {
@@ -17,18 +17,18 @@ export const entry: SemanticMigration = {
     'page.requires on a page whose kind is react, full or slotted — a page that omits kind '
     + 'included, since its kind is full',
   replacement:
-    'Nothing: delete the key. On an html page (and its deprecated jsx alias) the platform derives '
+    'Nothing: delete the key. On an html page the platform derives '
     + '`requires` from the source at save and stores it, so it is omitted there too; on a react, full '
     + 'or slotted page nothing ever derived or enforced it, and nothing takes its place.',
   reason:
     '`PageSchema` admitted `requires` on every page kind, but the platform derives it only on the '
-    + 'kinds whose source the metadata save door compiles: saving an html page (alias jsx) on a server '
+    + 'kinds whose source the metadata save door compiles: saving an html page on a server '
     + 'that has the deployment\'s SDUI component manifest compiles the source, stores the plugin '
     + 'namespaces it uses as `requires`, and refuses a written list that disagrees. A react source is '
     + 'executed at render and never compiled at save, and full and slotted pages have no source, so on '
     + 'those kinds nothing derived the key, the Studio page editor dropped it on every save, and its '
     + 'one reader was a load-time warning. The maintainer ruled (2026-10-03) that the key is accepted '
-    + 'only on html and jsx pages. The parse now refuses it on react, full and slotted pages, and a '
+    + 'only on html pages. The parse now refuses it on react, full and slotted pages, and a '
     + 'page that omits kind is a full page: `objectstack validate`, the metadata save door (a 422) and '
     + 'every other door that parses a page name the key, the page\'s kind and the compiled kinds. An '
     + 'empty list is refused like a full one, because the key is what is refused. No page body '
@@ -41,7 +41,7 @@ export const entry: SemanticMigration = {
     + 'html page, where the platform derives the list from the source and judges it at save and load.',
   acceptanceCriteria:
     '`objectstack validate` reports no issue at a page\'s `requires` path: no react, full or slotted '
-    + 'page, and no page that omits kind, carries the key, and each html or jsx page either omits it '
+    + 'page, and no page that omits kind, carries the key, and each html page either omits it '
     + 'or carries exactly the list its source compiles to. Saving each formerly affected page through '
     + 'the metadata API succeeds instead of answering a 422 that names `requires`. Replaying '
     + '`objectstack migrate meta --from 17` over the edited source lists no '
