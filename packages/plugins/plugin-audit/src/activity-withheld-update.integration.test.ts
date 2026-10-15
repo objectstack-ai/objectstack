@@ -97,7 +97,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
   const allFields = (object: string): string[] =>
     Object.keys(((engine as any).getSchema(object)?.fields ?? {}) as Record<string, unknown>);
 
-  /** The double: the two contract members, answered per reader. */
+  /** The double: the two field members, answered per reader, and the two read halves (below). */
   const security = {
     async getReadableFields(object: string, context?: any): Promise<string[] | undefined> {
       const all = allFields(object);
@@ -109,6 +109,15 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     },
     async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
       return security.getReadableFields(object, context);
+    },
+    // [ADR-0139 E5] Every reader reads every parent record here: the two halves
+    // of a read the engine composes the parent-record gate's ReadableIds
+    // leaves from — the object-level admission and the read scope (none).
+    async canReadObject(): Promise<boolean> {
+      return true;
+    },
+    async getReadFilter(): Promise<Record<string, unknown> | undefined> {
+      return undefined;
     },
   };
 

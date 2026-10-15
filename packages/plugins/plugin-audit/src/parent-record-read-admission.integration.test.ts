@@ -28,6 +28,16 @@
  * The stand-in service can withdraw `canReadObject` — the contract's
  * optional-method state — so every case compares the gate WITH the admission
  * against the gate as it reads without one, on the same kernel and rows.
+ *
+ * [ADR-0139 E5] Two readers of that admission now. The vault carries an
+ * object-scoped read middleware (the stand-in for plugin-security's
+ * refusal), so it is one of D5's classes and the gate reads it through its
+ * bounded probe, which asks `canReadObject` first — the behaviour pinned here.
+ * Every other parent object is a `ReadableIds` leaf, which the ENGINE
+ * composes from `canReadObject` (or, when that is withdrawn, `explain`) and
+ * `getReadFilter`, without reading the parent as the caller; the stand-in
+ * answers both halves, so withdrawing `canReadObject` withdraws the probe's
+ * admission alone.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -63,11 +73,25 @@ const refusals: Array<{ object: string; operation: string; userId?: string }> = 
 /** The object-level admission's questions: object and the envelope it was asked with. */
 const asked: Array<{ object: string; context: any }> = [];
 
-/** The stand-in `security` service; `canReadObject` is withdrawn by deleting it. */
-const security: { canReadObject?: (object: string, context?: any) => Promise<boolean> } = {};
+/** The admission's verdict, unrecorded. */
+const admits = (object: string, context?: any) => object !== VAULT || isAdmin(context);
+
+/**
+ * The stand-in `security` service; `canReadObject` is withdrawn by deleting it.
+ * `explain` (the engine's fallback when it is withdrawn) and `getReadFilter`
+ * (no row restriction) are the halves the engine composes a leaf from.
+ */
+const security: {
+  canReadObject?: (object: string, context?: any) => Promise<boolean>;
+  explain: (request: { object: string }, context?: any) => Promise<{ allowed: boolean }>;
+  getReadFilter: (object: string, context?: any) => Promise<Record<string, unknown> | undefined>;
+} = {
+  explain: async ({ object }, context) => ({ allowed: admits(object, context) }),
+  getReadFilter: async () => undefined,
+};
 const admit = async (object: string, context?: any) => {
   asked.push({ object, context });
-  return object !== VAULT || isAdmin(context);
+  return admits(object, context);
 };
 
 function securityStandIn(): Plugin {
@@ -179,13 +203,18 @@ describe('parent-record read gates: the object-level read admission', () => {
       }));
       expect(after.value).toEqual(before.value);
       expect(after.refusals).toEqual([]);
-      // Asked once per parent object per read, with the member's envelope minus
-      // the operation-private keys — the envelope the caller-scoped read gets.
-      expect(after.asked.map((a) => a.object).sort()).toEqual([OPEN, OPEN, VAULT, VAULT].sort());
-      for (const a of after.asked) {
+      // The gate's probe asks about the vault once per read (rows, total), with
+      // the member's envelope minus the operation-private keys — the envelope
+      // the caller-scoped read gets.
+      const probeAsked = after.asked.filter((a) => a.object === VAULT);
+      expect(probeAsked).toHaveLength(2);
+      for (const a of probeAsked) {
         expect(a.context).toMatchObject({ userId: MEMBER.userId, positions: MEMBER.positions });
         expect(a.context).not.toHaveProperty('__readScope');
       }
+      // The board is a ReadableIds leaf: the engine asks about it, once per
+      // read, while composing — and never reads it as the member.
+      expect(after.asked.filter((a) => a.object === OPEN)).toHaveLength(2);
     });
   }
 

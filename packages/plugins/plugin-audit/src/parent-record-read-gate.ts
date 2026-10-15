@@ -474,9 +474,10 @@ async function probeBranches(
     // excluded, so a very broad read may omit rows the caller could see. A
     // record timeline scopes by `object_name` + `record_id` and never hits it.
     logger.warn(
-      `[audit] ${gate.seam}: the bounded probe (${restrictTo ? restrictTo.why : 'the whole read'}) hit its ` +
-        `${PARENT_GATE_SCAN_LIMIT}-row candidate cap; the visibility filter for these rows is fail-closed and ` +
-        'may omit visible rows — scope the query by object_name and record_id',
+      `[audit] ${gate.seam}: the bounded probe's candidate pre-scan ` +
+        `(${restrictTo ? restrictTo.why : 'the whole read'}) hit the ${PARENT_GATE_SCAN_LIMIT}-row cap; the ` +
+        'visibility filter for these rows is fail-closed and may omit visible rows — scope the query by ' +
+        'object_name and record_id',
     );
   }
 
