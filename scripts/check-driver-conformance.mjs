@@ -280,6 +280,11 @@ const CASE_SETS = [
     marker: 'VALUE_ROUNDTRIP_CASES',
     what: 'value storage round-trip: what you wrote is what you read back, type included — #12393',
   },
+  {
+    file: 'readable-ids-conformance.ts',
+    marker: 'READABLE_IDS_CASES',
+    what: 'the composed ReadableIds leaf: compiled as a tenant-walled semi-join, or refused loudly — ADR-0139 D3',
+  },
 ];
 
 // ── The ledger ──────────────────────────────────────────────────────────────

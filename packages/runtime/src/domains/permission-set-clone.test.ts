@@ -257,6 +257,32 @@ describe('the permission-set clone door — refusals', () => {
         await refusal({ saveError: conflict }, PACKAGED.name, { name: 'x_copy', label: 'X' }, 409, 'RESOURCE_CONFLICT');
     });
 
+    it('a save that loses the race for the name is the name-taken 409, in the door\'s words — never the /meta door\'s If-Match advice', async () => {
+        // [#23577] The create-only save's pin refused: a row was written under
+        // the target name after the catalog read. The protocol's conflict text
+        // speaks to a `/meta` caller ("Send that version as If-Match …"); this
+        // door takes no version, so it answers its own name-taken refusal.
+        const lostRace = Object.assign(
+            new Error(
+                'permission/x_copy: this save asserted that no active row exists (the first-write pin, If-None-Match: * on '
+                + 'the REST door), but one does (current is v1). Send that version as If-Match to save over it, or re-read '
+                + 'the item to merge first.',
+            ),
+            { status: 409, code: 'METADATA_CONFLICT', currentVersion: 'v1' },
+        );
+        const h = boot({ saveError: lostRace });
+        const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'x_copy', label: 'X' });
+        expect(statusOf(res)).toBe(409);
+        expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
+        const message = String((res as any).response.body.error.message);
+        expect(message.startsWith("Permission set 'x_copy' already exists")).toBe(true);
+        expect(message).not.toContain('If-Match');
+        expect(message).not.toContain('If-None-Match');
+        // The same refusal a name the catalog already held reads.
+        const held = await clone(boot(), HOLDER(), PACKAGED.name, { name: ENV_SET.name, label: 'X' });
+        expect(message).toBe(String((held as any).response.body.error.message).replaceAll(ENV_SET.name, 'x_copy'));
+    });
+
     it('no metadata protocol to save through is 501', async () => {
         const h = boot({ noProtocol: true });
         const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'x_copy', label: 'X' });

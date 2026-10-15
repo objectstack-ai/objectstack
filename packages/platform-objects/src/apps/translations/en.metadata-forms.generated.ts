@@ -1204,7 +1204,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       source: {
         label: "Source",
-        helpText: "Page source text. For kind 'html' (alias 'jsx') it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime."
+        helpText: "Page source text. For kind 'html' it is constrained JSX compiled to the component tree at save time — parsed, never executed. For kind 'react' it is real React executed at render by the trusted runtime."
       },
       object: {
         label: "Object",

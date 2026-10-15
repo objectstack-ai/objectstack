@@ -107,6 +107,27 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 const PLUGIN = readFileSync(resolve(HERE, 'rest-api-plugin.ts'), 'utf8');
 
+/**
+ * [#23050 slice 2] The files this census reads. `RestServer#registerBatchEndpoints`'
+ * body — the cross-object batch door, the THIRD consumer — moved, unedited, to
+ * `batch-routes.ts`. It still reads `this.objectQLProvider`, now off the host
+ * literal the class hands it, whose `objectQLProvider` is a getter onto the
+ * class's own field: so it is still this slot's consumer, and still this
+ * census's population. A site is identified by `file:line`, never by a line alone.
+ */
+const SLOT_FILES = ['rest-server.ts', 'batch-routes.ts'] as const;
+const SOURCES = new Map<string, string>(SLOT_FILES.map((file) => [
+    file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
+]));
+
+/** Every invocation site of the slot over every censused file, keyed `file:line`. */
+function censusInvocationSites(field: string): Array<{ file: string; line: number; text: string; lines: string[] }> {
+    return [...SOURCES].flatMap(([file, source]) => {
+        const lines = source.split('\n');
+        return invocationSites(source, field).map((s) => ({ file, ...s, lines }));
+    });
+}
+
 const BATCH_PATH = '/api/v1/batch';
 
 // ---------------------------------------------------------------------------
@@ -153,25 +174,28 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
     });
 
     it('⭐ THREE consumers, not two — the count the two prose censuses got wrong', () => {
-        const sites = invocationSites(SOURCE, 'objectQLProvider');
+        // [#23050 slice 2] 3 UNCHANGED, over two files: 2 in `rest-server.ts`
+        // and the batch door's 1 in `batch-routes.ts`.
+        const sites = censusInvocationSites('objectQLProvider');
         // The message carries the sites, so a failure here hands the next
         // reader the new census instead of a bare number.
-        expect(sites.map((s) => `L${s.line}: ${s.text}`).join('\n')).toBeTruthy();
+        expect(sites.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBeTruthy();
         expect(sites).toHaveLength(3);
     });
 
     it('⭐ [#18559] ALL THREE consumers now reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
-        const sites = invocationSites(SOURCE, 'objectQLProvider');
+        const sites = censusInvocationSites('objectQLProvider');
         const lines = SOURCE.split('\n');
         const viaSeam = sites.filter((s) => {
             // The helper is named on the line that OPENS the call, two lines up
-            // from the invocation in all three spellings.
-            return lines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes('wiredEngineOrLoud(');
+            // from the invocation in all three spellings — read in the site's
+            // OWN file.
+            return s.lines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes('wiredEngineOrLoud(');
         });
         const direct = sites.filter((s) => !viaSeam.includes(s));
         // The message carries the offenders, so a failure hands the next reader
         // the site rather than a bare number.
-        expect(direct.map((s) => `L${s.line}: ${s.text}`).join('\n')).toBe('');
+        expect(direct.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBe('');
         expect(direct).toHaveLength(0);
         expect(viaSeam).toHaveLength(3);
 
@@ -193,16 +217,35 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // `undefined` path produces a few lines later — so "3 via the seam" is
         // pinned to include the consumer #18559 moved, not just its two siblings.
         const batch = viaSeam.filter((s) =>
-            lines.slice(s.line, s.line + 6).join('\n').includes('Transactional batch not supported by this runtime'));
+            s.lines.slice(s.line, s.line + 6).join('\n').includes('Transactional batch not supported by this runtime'));
         expect(batch).toHaveLength(1);
+        // [#23050 slice 2] …and it is the one that moved: read in `batch-routes.ts`.
+        expect(batch[0]?.file).toBe('batch-routes.ts');
     });
 
     it('⛔ the field is read only as `this.objectQLProvider` — no alias keeps a consumer out of this census', () => {
         // A dynamic read would be invisible to the scanner above, and TypeScript's
         // `private` is compile-time only, so the absence of these spellings is
         // what bounds the enumeration to what §1 can see.
-        expect(SOURCE).not.toMatch(/\[\s*['"]objectQLProvider['"]\s*\]/);
-        expect(SOURCE).not.toMatch(/as any\s*\)\s*\.objectQLProvider/);
+        //
+        // [#23050 slice 2] Over every censused file. `batch-routes.ts` spells the
+        // slot in brackets exactly ONCE, and as a TYPE that reads nothing: its
+        // host interface's member, typed `RestServer['objectQLProvider']`. That
+        // one spelling is set aside before the check and pinned at exactly one
+        // there (zero here), so setting it aside cannot grow into an exemption.
+        const HOST_MEMBER_TYPE = "RestServer['objectQLProvider']";
+        for (const [file, source] of SOURCES) {
+            expect(source.split(HOST_MEMBER_TYPE).length - 1, file).toBe(file === 'rest-server.ts' ? 0 : 1);
+            const code = source.split(HOST_MEMBER_TYPE).join('');
+            expect(code, file).not.toMatch(/\[\s*['"]objectQLProvider['"]\s*\]/);
+            expect(code, file).not.toMatch(/as any\s*\)\s*\.objectQLProvider/);
+        }
+        // [#23050 slice 2] The one way the slot leaves `RestServer` for another
+        // file: a moved registrar's host literal hands it on as a GETTER onto
+        // the class's own field. One getter per censused module beyond
+        // `rest-server.ts`, so a slot handed to a module that never joined
+        // `SLOT_FILES` reds here instead of hiding its consumer from §1.
+        expect(SOURCE.match(/\bget objectQLProvider\(\)/g) ?? []).toHaveLength(SLOT_FILES.length - 1);
         // And the shipped closure reaches `RestServer` through exactly one
         // construction site, so `rest-api-plugin.ts` cannot be wiring a second
         // consumer this file never looked at.

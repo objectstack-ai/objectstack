@@ -73,14 +73,21 @@ import {
 } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
+import { REST_SERVER_REGISTRAR_FILES } from './rest-server-registrar-files.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 // [#23050 slice 1] The reverse checks below count a term's spelling over the
 // files RestServer's registrars live in, which since that slice include the
 // module `registerDataActionEndpoints`' body moved to. Sliced readings of ONE
-// registrar still read `SOURCE` alone.
-const REGISTRAR_SOURCES = SOURCE + '\n' + readFileSync(resolve(HERE, 'data-action-routes.ts'), 'utf8');
+// registrar still read `SOURCE` alone. [#23050 slice 2] …and the module
+// `registerBatchEndpoints`' body moved to. [#23050 slice 3] …and every module
+// on THE list of the files RestServer's registrars live in, read off that list
+// (`rest-server-registrar-files.ts`) rather than named here, so the slice that
+// moves the next body widens these checks by adding its module there. The
+// reverse checks pin the list's length.
+const REGISTRAR_SOURCES = REST_SERVER_REGISTRAR_FILES
+    .map((file) => (file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'))).join('\n');
 
 const BASE = '/api/v1';
 const UI_ROUTE = `GET ${BASE}/ui/view/:object/:type`;
@@ -335,6 +342,7 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         // ⛔ Reverse-checked: a `true` from a substring test is only worth
         // something if the term is spelled the way the rest of the file spells
         // it — 52 sibling sites say it is.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });

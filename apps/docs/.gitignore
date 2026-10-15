@@ -1,0 +1,3 @@
+# Written by `node scripts/build-llms-full.mjs` (the `build` script): a build
+# artifact of every docs page, ~20 MB, never committed.
+/public/llms-full.txt

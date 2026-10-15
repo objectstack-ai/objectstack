@@ -26,20 +26,16 @@ import {
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
     // owner, shared with the runtime dispatcher's `/security` domain.
     isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
-    // The write-response rules (credential-class mask, `internal` omit) for
-    // the cross-object batch's direct-engine update arm.
-    omitInternalFieldsFromWriteResponse,
+    // `omitInternalFieldsFromWriteResponse`, the cross-object batch's update-arm
+    // write-response rules, moved with that door to `batch-routes.ts` (#23050 slice 2).
 } from '@objectstack/core';
 import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
-    // [#13807] The recogniser half of the stranded-decision carrier — see
-    // `handleApprovalError` below. Constructor and reader share one module in
-    // `@objectstack/types` because the producer is a PLUGIN and rest cannot
-    // import one.
-    strandedDecisionDetails,
+    // `strandedDecisionDetails`, the stranded-decision carrier's recogniser
+    // half, moved with `handleApprovalError` to `approvals-routes.ts` (#23050 slice 3).
     // [#20061] The thrown `VALIDATION_FAILED` + `fields[]` shape every catch in
     // this file already maps to `400` — see `readDeclaredQueryNumber` below.
     validationFailure,
@@ -164,11 +160,10 @@ import type {
     CreateDataRequest,
     UpdateDataRequest,
     DeleteDataRequest,
-    BatchDataRequest,
-    CreateManyDataRequest,
-    UpdateManyDataRequest,
-    DeleteManyDataRequest,
 } from '@objectstack/spec/api';
+// The four bulk request types (`BatchDataRequest`, `CreateManyDataRequest`,
+// `UpdateManyDataRequest`, `DeleteManyDataRequest`) moved with their doors to
+// `batch-routes.ts` (#23050 slice 2).
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
 // `string` — an invented code is a compile error at the call site instead of a
@@ -182,7 +177,6 @@ import type { ErrorCode } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document, and the
 // docs-audience and app-nav gates it is built from — one implementation, which
 // this server and the runtime dispatcher's `/meta` domain both call. The
@@ -320,6 +314,10 @@ import {
 } from './export-format.js';
 // [#23050 slice 1] The data-action routes' body moved to its own module — see its header.
 import { registerDataActionEndpoints, type DataActionRouteHost, type ServerScopedDataRequest } from './data-action-routes.js';
+// [#23050 slice 2] The batch routes' body moved to its own module — see its header.
+import { registerBatchEndpoints, type BatchRouteHost } from './batch-routes.js';
+// [#23050 slice 3] The approval routes' body moved to its own module — see its header.
+import { registerApprovalsEndpoints, type ApprovalsRouteHost } from './approvals-routes.js';
 // [#17551] The `POST …/analytics/dataset/query` door parse — the half of the
 // analytics family this route never had. See the module header for the
 // measurement that decides its shape.
@@ -1542,7 +1540,7 @@ async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | u
  * needs the SERVICE REGISTRY to stop conflating them, which is a
  * `@objectstack/core` contract change and its own card.
  */
-async function wiredEngineOrLoud<T>(
+export async function wiredEngineOrLoud<T>(
     wired: boolean,
     call: () => T | PromiseLike<T>,
 ): Promise<T | undefined> {
@@ -1855,9 +1853,48 @@ export function metaItemPackageBinding(raw: unknown): string | undefined {
 }
 
 /**
+ * [#23546] The capabilities that admit a caller to the AUTHORING TRAIL —
+ * `GET /meta/:type/:name/history`, `/audit` and `/diff` — beside `isSystem`.
+ *
+ * Both are platform-scoped: plugin-security's `PLATFORM_ADMIN_ONLY_CAPABILITIES`
+ * lists them, and no organization administrator holds either by role.
+ * `setup.access` is left out on purpose. Organization administrators hold it,
+ * and under a wall it handed each organization's administrator the
+ * environment-wide trail of every item: who saved it, when, and the superseded
+ * bodies. No organization authors that trail (ADR-0131 C5), and the data door
+ * on the same three tables already refuses them
+ * (`requiredPermissions: ['studio.access']`, ADR-0131 D7).
+ */
+const AUTHORING_TRAIL_READ_CAPABILITIES: readonly string[] = ['studio.access', 'manage_metadata'];
+
+/**
+ * [#23546] May this caller read the AUTHORING TRAIL of a metadata item — its
+ * version history, its audit rows and the diff of its stored versions? The
+ * admission {@link refuseNonAuthoringCaller} asks, and nothing else asks it.
+ *
+ * A system caller, or a holder of one of
+ * {@link AUTHORING_TRAIL_READ_CAPABILITIES}, read from `systemPermissions`
+ * exactly as `isObjectSchemaMaskExempt` reads it.
+ *
+ * It is a strict subset of {@link mayReadPendingDrafts}: it admits nobody the
+ * draft predicate refuses, and it refuses the `setup.access`-only caller the
+ * draft predicate admits. The draft switches (`GET /meta/_drafts`,
+ * `?state=draft`, `?preview=draft`) keep `mayReadPendingDrafts`, unchanged.
+ * `meta-history-diff-authoring-door.test.ts` holds the two predicates to that
+ * relation, caller by caller.
+ */
+function mayReadAuthoringTrail(caller: unknown): boolean {
+    if (!caller || typeof caller !== 'object') return false;
+    const ctx = caller as { isSystem?: unknown; systemPermissions?: unknown };
+    if (ctx.isSystem === true) return true;
+    return Array.isArray(ctx.systemPermissions)
+        && ctx.systemPermissions.some((p) => typeof p === 'string' && AUTHORING_TRAIL_READ_CAPABILITIES.includes(p));
+}
+
+/**
  * [#20378 · #20441] THE AUTHORING-DOOR REFUSAL — ruling 5865708652 (letter B),
  * carried to `/audit` by triage's grade 5871509797. Sends it and answers `true`
- * when {@link mayReadPendingDrafts} does not admit `caller`; answers `false`,
+ * when {@link mayReadAuthoringTrail} does not admit `caller`; answers `false`,
  * sending nothing, when it does. The `refuseRepeatedQueryParams` convention:
  * `if (refuseNonAuthoringCaller(ctx, res, …)) return;`.
  *
@@ -1866,10 +1903,14 @@ export function metaItemPackageBinding(raw: unknown): string | undefined {
  * event is read: `/history` and `/diff` read `sys_metadata_history`, and
  * `/audit` reads `sys_metadata_audit`. Both logs record a DRAFT save exactly
  * as they record an active one, so they have no published-only answer to fall
- * back to, and a caller who may not read pending drafts is refused as
- * `GET /meta/_drafts` refuses them: 403 `FORBIDDEN`, the same nested
- * envelope. The answer is the same for an item that exists, one that does
- * not and a draft-only one, so the door is no existence oracle.
+ * back to, and a caller the trail does not admit is refused in
+ * `GET /meta/_drafts`'s shape: 403 `FORBIDDEN`, the same nested envelope. The
+ * answer is the same for an item that exists, one that does not and a
+ * draft-only one, so the door is no existence oracle.
+ *
+ * [#23546] The admission is {@link mayReadAuthoringTrail}, no longer
+ * {@link mayReadPendingDrafts}: the trail drops `setup.access`, and the draft
+ * switches keep it.
  *
  * `reading` names THE DOOR and never drafts: a refusal worded about drafts
  * would read as "this item has one". This is ONE function so the three doors
@@ -1877,11 +1918,12 @@ export function metaItemPackageBinding(raw: unknown): string | undefined {
  * door's own name differs between them.
  */
 function refuseNonAuthoringCaller(caller: unknown, res: any, reading: string): boolean {
-    if (mayReadPendingDrafts(caller)) return false;
+    if (mayReadAuthoringTrail(caller)) return false;
     res.status(403).json({
         error: {
             code: 'FORBIDDEN',
-            message: `${reading} requires an authoring capability (studio.access, setup.access or manage_metadata).`,
+            message: `${reading} requires an authoring capability (studio.access or manage_metadata); `
+                + 'setup.access, which organization administrators hold, does not admit the authoring trail.',
         },
     });
     return true;
@@ -7559,8 +7601,8 @@ export class RestServer {
                     // not read pending drafts, lists unpublished authoring work
                     // (ADR-0106 D4: 「draft/preview reads are admin-gated
                     // upstream」). The caller is asked
-                    // {@link mayReadPendingDrafts} FIRST, and one it does not
-                    // admit is refused exactly as `GET /meta/_drafts` refuses
+                    // {@link mayReadAuthoringTrail} FIRST, and one it does not
+                    // admit is refused in `GET /meta/_drafts`'s shape
                     // (403 `FORBIDDEN`, the same nested envelope): before the
                     // protocol is resolved (no 501-vs-200 probe), before the
                     // query is parsed, before any item or event is read. The
@@ -7571,6 +7613,9 @@ export class RestServer {
                     // drafts: a refusal worded about drafts would read as
                     // "this item has one". Whoever it admits reads exactly what
                     // they read before, the per-caller refusal below included.
+                    // [#23546] `setup.access` alone no longer admits it: under a
+                    // wall it handed every organization administrator the
+                    // environment-wide trail (see AUTHORING_TRAIL_READ_CAPABILITIES).
                     //
                     // Ruling 5856774816 (#20156) item 2 is narrowed for this
                     // door and `/diff` only: `/layers` and `?layers=true` read
@@ -7707,13 +7752,14 @@ export class RestServer {
                     // withholding only the draft-save rows would hand a member
                     // a pruned log that reads as a true, complete one, the
                     // shape the ruling measured wrong. So the caller is asked
-                    // {@link mayReadPendingDrafts} FIRST and refused by
+                    // {@link mayReadAuthoringTrail} FIRST and refused by
                     // {@link refuseNonAuthoringCaller} — the refusal `/history`
                     // and `/diff` give, and `GET /meta/_drafts`'s shape — before
                     // the protocol is resolved (no 501-vs-200 probe), before the
                     // query is parsed, and before any item or event is read.
                     // Whoever it admits reads exactly what they read before,
-                    // the per-caller refusal below included.
+                    // the per-caller refusal below included. [#23546]
+                    // `setup.access` alone no longer admits it.
                     //
                     // `auditCtx` is this door's one caller resolution.
                     const auditCtx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
@@ -8168,8 +8214,8 @@ export class RestServer {
                     // so there is no exact published-only answer to fall back
                     // to: the `/meta/_drafts` shape, not the draft switches'
                     // "answer as if absent". The caller is asked
-                    // {@link mayReadPendingDrafts} FIRST, and one it does not
-                    // admit is refused exactly as `GET /meta/_drafts` refuses
+                    // {@link mayReadAuthoringTrail} FIRST, and one it does not
+                    // admit is refused in `GET /meta/_drafts`'s shape
                     // (403 `FORBIDDEN`, the same nested envelope): before the
                     // protocol is resolved, before the query is parsed, before
                     // the mask posture, the current document or any version is
@@ -8179,6 +8225,7 @@ export class RestServer {
                     // door, never drafts. Whoever it admits reads exactly what
                     // they read before: every per-caller gate below, and ruling
                     // 5856774816's author exemption, still apply to them.
+                    // [#23546] `setup.access` alone no longer admits it.
                     //
                     // Ruling 5856774816 (#20156) item 2 is narrowed for this
                     // door and `/history` only: `/layers` and `?layers=true`
@@ -11885,967 +11932,42 @@ export class RestServer {
      * without `@objectstack/plugin-approvals` fail cleanly.
      */
     private registerApprovalsEndpoints(basePath: string): void {
-        // Approval routes live at the top of the API surface (e.g.
-        // `/api/v1/approvals/requests/:id/approve`). Approvals are a
-        // cross-cutting capability — a request is not a record on a single
-        // CRUD object, so anchoring it on `basePath` (instead of
-        // `${basePath}/data`) keeps the URL semantics honest.
-        const dataPath = basePath;
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        const resolveService = async (environmentId?: string) => {
-            if (!this.approvalsServiceProvider) return undefined;
-            try { return await this.approvalsServiceProvider(environmentId); }
-            catch { return undefined; }
+        // [#23050 slice 3] The body moved to `approvals-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `ApprovalsRouteHost`, and that module's header for why
+        // `approvalsServiceProvider` is a getter).
+        const readApprovalsServiceProvider = () => this.approvalsServiceProvider;
+        const host: ApprovalsRouteHost = {
+            routeManager: this.routeManager,
+            get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
         };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Approvals service is not configured on this deployment',
-        });
-        const handleApprovalError = (res: any, err: any): boolean => {
-            const msg = String(err?.message ?? err ?? '');
-            const mapping: Array<[RegExp, number, string]> = [
-                [/^VALIDATION_FAILED/, 400, 'VALIDATION_FAILED'],
-                [/^DUPLICATE_REQUEST/, 409, 'DUPLICATE_REQUEST'],
-                [/^INVALID_STATE/, 409, 'INVALID_STATE'],
-                [/^THROTTLED/, 429, 'THROTTLED'],
-                [/^FORBIDDEN/, 403, 'FORBIDDEN'],
-                [/^REQUEST_NOT_FOUND/, 404, 'REQUEST_NOT_FOUND'],
-                // #4420 — the request and its flow run disagree about whether
-                // the work can still proceed. A conflict, like INVALID_STATE:
-                // the row is fine, the run behind it is not.
-                [/^RESUME_TARGET_LOST/, 409, 'RESUME_TARGET_LOST'],
-                // The outcome IS recorded and its run is stranded — a genuine
-                // server-side inconsistency, but named, so the client can say
-                // which run needs an operator instead of showing a bare 500.
-                [/^RESUME_FAILED/, 500, 'RESUME_FAILED'],
-                // The write IS recorded and NOT rolled back, but the updated
-                // row is invisible inside the caller's organization scope, so
-                // the result envelope cannot be built. Same class as
-                // RESUME_FAILED — a genuine server-side inconsistency, named
-                // (commit 5b3ff63cc): read the request back with a system or
-                // matching-organization context.
-                [/^READ_BACK_FAILED/, 500, 'READ_BACK_FAILED'],
-            ];
-            // [#13807, maintainer ruling 2026-09-04 batch #37] The
-            // machine-readable half of a stranded decision, when the service
-            // attached one. The status code does NOT move — a recorded
-            // decision whose run strands is still a failure and the ruling
-            // upholds that — but the body stops being prose only: `finalized`
-            // says the decision stands, `decision` / `runId` name what and
-            // where, and `repairable` carries the engine's own `'stranded'`
-            // discriminator through instead of dying at the door.
-            //
-            // Before this, a caller reading 500 had exactly one honest move —
-            // assume the rejection did not happen — and it was the wrong one:
-            // the row IS terminal and the record's mirrored status HAS moved.
-            // An operator had to regex the run id out of a sentence.
-            //
-            // ⛔ Presence-gated, never synthesised. `strandedDecisionDetails`
-            // returns `undefined` for any error that did not carry a complete
-            // envelope, and this then answers exactly the body it always did —
-            // a `RESUME_FAILED` from a caller with no decision to report must
-            // not be dressed up as one.
-            const stranded = strandedDecisionDetails(err);
-            for (const [re, status, code] of mapping) {
-                if (re.test(msg)) {
-                    // [#13095] The strip is anchored to the CODE this row just
-                    // answered — the same declared-code anchoring
-                    // `withoutDeclaredCodePrefix` (error-response.ts) and
-                    // `respondSharingError`'s prefix arm apply, converged here
-                    // by the 2026-08-31 ruling. The blanket
-                    // SCREAMING_SNAKE-colon regex that used to sit here
-                    // (`/^[A-Z_]+:\s*/`) is exactly the shape #12975 rejected:
-                    // it could eat a token the wire carries nowhere else (a
-                    // message opening with a DIFFERENT capitalised word and a
-                    // colon), where the anchored form can only ever remove a
-                    // duplicate of the `code` already on the wire.
-                    res.status(status).json({
-                        code,
-                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
-                        // Anchored to the code the envelope describes, for the
-                        // same reason the strip above is: these four facts are
-                        // about a recorded-decision-with-stranded-run and
-                        // about nothing else.
-                        ...(code === 'RESUME_FAILED' && stranded ? stranded : {}),
-                    });
-                    return true;
-                }
-            }
-            // [#22719] A refusal no prefix above matches is asked of the `/data`
-            // door's own classification before the caller's outer 500 relays
-            // `.message`. For a sandboxed hook's refusal `.message` is the
-            // QuickJS debug wrapper, so all nine write routes here answered
-            // `500 APPROVAL_*_FAILED` with `hook '<name>' threw: Error: …` where
-            // every conforming write door answers the hook's own sentence; a
-            // refusal declaring `status`/`statusCode` + `code` is answered at
-            // its own status too.
-            //
-            // AFTER the mapping, deliberately: every row above answers a code
-            // this family publishes, and none can read a sandbox error (its
-            // `.message` opens with the wrapper), so asking here moves only what
-            // used to reach the 500. Nested envelope, for the reason the
-            // sharing-rule family's `SHARING_NOT_ENABLED` arm gives: a new arm
-            // does not copy the flat `{ code, error }` dialect.
-            const refusal = classifiedRefusalAnswer(err);
-            if (refusal) {
-                const nested = nestedRefusalEnvelope(refusal);
-                sendEnvelopeError(res, nested.status, nested.code, nested.message, nested.extra);
-                return true;
-            }
-            // [#22764] A sandboxed body the doors answer as a FAULT — one that
-            // crashed, or a refusal that declared a 5xx — answers as the doors
-            // do rather than reaching the caller's outer `500
-            // APPROVAL_*_FAILED`, which relayed the QuickJS wrapper around the
-            // native error text. Logged here because answering it skips the
-            // outer arm's log line, and the operator is now the only reader.
-            const fault = sandboxFaultAnswer(err);
-            if (fault) {
-                logError('[REST] approval error:', err);
-                const nested = nestedRefusalEnvelope(fault);
-                sendEnvelopeError(res, nested.status, nested.code, nested.message, nested.extra);
-                return true;
-            }
-            return false;
-        };
-
-        // ── Requests ──────────────────────────────────────────────
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/approvals/requests`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) {
-                        // No approvals plugin loaded — return empty list rather than 501
-                        // so Console badge polls don't spam the error log on deployments
-                        // that don't run an approvals workflow.
-                        res.json({ data: [] });
-                        return;
-                    }
-                    // [#7527] The closed parameter set for this route, measured
-                    // from what the handler below actually reads. A name outside
-                    // it is REFUSED, never dropped: `?assignedToMe=true` used to
-                    // answer 200 with the whole list, and an ignored filter is
-                    // indistinguishable from one that matched everything. Paging
-                    // (`limit`/`offset`) and the snake_case alias spellings are
-                    // in the set because the handler honours them — a whitelist
-                    // built from the filters alone would break paging.
-                    if (refuseUnknownQueryParams(req, res, APPROVAL_REQUEST_LIST_PARAMS)) return;
-                    // [#6877] `approverId` / `approver_id` are the model case
-                    // for the multi-valued side and are therefore NOT listed:
-                    // the block immediately below reads their array arm ON
-                    // PURPOSE. Everything else here narrows the list to one
-                    // value and is declared single-valued.
-                    if (refuseRepeatedQueryParams(req, res, [
-                        'object', 'recordId', 'record_id', 'status',
-                        'submitterId', 'submitter_id', 'q', 'limit', 'offset',
-                    ])) return;
-                    const q = req.query ?? {};
-                    // `approverId` accepts a single id, a comma-separated
-                    // list, or the param repeated (→ array). Normalise all
-                    // three to a string[] so the Console can resolve "my
-                    // pending approvals" across every identity (user id /
-                    // email / role:<r>) in ONE request rather than looping.
-                    const rawApprover = q.approverId ?? q.approver_id;
-                    const approverIds = (Array.isArray(rawApprover) ? rawApprover : (rawApprover != null ? [rawApprover] : []))
-                        .flatMap((s: any) => String(s).split(','))
-                        .map((s: string) => s.trim())
-                        .filter(Boolean);
-                    // [#20139] Read, not coerced. `?limit=abc` (or `Infinity`) was
-                    // `NaN`, dropped by an `isFinite` guard, and answered with the
-                    // UNPAGED 500-row window and no `total` — a caller asking for a
-                    // page got a different shape of answer; `?offset=abc` was dropped
-                    // to the first page. `?limit=` / `?offset=` became `Number('')` =
-                    // 0: a ONE-row page, or the service's 50-row paged mode the caller
-                    // never asked for — so empty is refused here, not read as absent.
-                    // No request schema is declared for this door, so both read as
-                    // whole numbers; the service's own `[1, 200]` clamp is unchanged.
-                    //
-                    // Caught HERE, not by the catch below: that one answers every
-                    // throw `500 APPROVAL_REQUEST_LIST_FAILED`, and a query value the
-                    // door cannot read is the caller's `400`.
-                    let limit: number | undefined;
-                    let offset: number | undefined;
-                    try {
-                        limit = readDeclaredQueryNumber(q, 'limit',
-                            UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
-                        offset = readDeclaredQueryNumber(q, 'offset',
-                            UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: false });
-                    } catch (refusal: any) {
-                        handleRouteError(res, refusal);
-                        return;
-                    }
-                    const listFilter = {
-                        object: q.object,
-                        recordId: q.recordId ?? q.record_id,
-                        status: q.status,
-                        approverId: approverIds.length ? approverIds : undefined,
-                        submitterId: q.submitterId ?? q.submitter_id,
-                        q: typeof q.q === 'string' ? q.q : undefined,
-                        limit,
-                        offset,
-                    };
-                    const rows = await svc.listRequests(listFilter, context ?? {});
-                    // `total` only when the caller pages — counting costs a
-                    // second query and unpaged callers don't need it.
-                    if (listFilter.limit != null && typeof svc.countRequests === 'function') {
-                        const total = await svc.countRequests(listFilter, context ?? {});
-                        res.json({ data: rows, total });
-                        return;
-                    }
-                    res.json({ data: rows });
-                } catch (error: any) {
-                    logError('[REST] List approval requests error:', error);
-                    res.status(500).json({ code: 'APPROVAL_REQUEST_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'List approval requests', tags: ['approvals'] },
-        });
-
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/approvals/requests/:id`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const row = await svc.getRequest(req.params.id, context ?? {});
-                    if (!row) {
-                        res.status(404).json({ code: 'REQUEST_NOT_FOUND', error: `Approval request '${req.params.id}' not found` });
-                        return;
-                    }
-                    res.json(row);
-                } catch (error: any) {
-                    logError('[REST] Get approval request error:', error);
-                    res.status(500).json({ code: 'APPROVAL_REQUEST_GET_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Get an approval request by id', tags: ['approvals'] },
-        });
-
-        // Record a decision on a node-driven request. Both branches funnel
-        // through the contract's `decide()`, which finalizes the request and
-        // resumes the owning flow run down the matching `approve` / `reject`
-        // edge.
-        //
-        // On the `actorId` these routes forward (#3800): it is a HINT, not the
-        // acting identity. The service pins the actor to the authenticated
-        // caller and accepts a body value only when it can prove the caller
-        // holds that identity — a slot keyed by a `type:value` literal or by
-        // the caller's email, which the Console legitimately sends. It is
-        // forwarded rather than dropped for exactly those cases; naming anyone
-        // else is `FORBIDDEN` at the service, never here.
-        const decisionRoute = (decision: 'approve' | 'reject') => {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/approvals/requests/:id/${decision}`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        const svc = await resolveService(environmentId);
-                        if (!svc) return respond501(res);
-                        const body = req.body ?? {};
-                        try {
-                            const out = await svc.decide(req.params.id, {
-                                decision,
-                                actorId: body.actorId ?? body.actor_id ?? context?.userId,
-                                comment: body.comment,
-                                attachments: body.attachments,
-                                // #3447 P2: author-declared decision outputs — the
-                                // service validates keys against the node's
-                                // `decisionOutputs` whitelist before any write.
-                                outputs: body.outputs,
-                            }, context ?? {});
-                            res.json(out);
-                        } catch (err: any) {
-                            if (handleApprovalError(res, err)) return;
-                            throw err;
-                        }
-                    } catch (error: any) {
-                        logError(`[REST] ${decision} approval error:`, error);
-                        res.status(500).json({ code: `APPROVAL_${decision.toUpperCase()}_FAILED`, error: String(error?.message ?? error).slice(0, 500) });
-                    }
-                },
-                metadata: { summary: `${decision[0].toUpperCase()}${decision.slice(1)} an approval request`, tags: ['approvals'] },
-            });
-        };
-        decisionRoute('approve');
-        decisionRoute('reject');
-
-        // Recall — submitter withdraws a pending request. Mirrors the decision
-        // routes' error mapping; the service enforces submitter-only access.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/approvals/requests/:id/recall`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc || typeof svc.recall !== 'function') return respond501(res);
-                    const body = req.body ?? {};
-                    try {
-                        const out = await svc.recall(req.params.id, {
-                            actorId: body.actorId ?? body.actor_id ?? context?.userId,
-                            comment: body.comment,
-                        }, context ?? {});
-                        res.json(out);
-                    } catch (err: any) {
-                        if (handleApprovalError(res, err)) return;
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] recall approval error:', error);
-                    res.status(500).json({ code: 'APPROVAL_RECALL_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'Recall (withdraw) an approval request', tags: ['approvals'] },
-        });
-
-        // Send back for revision / resubmit (ADR-0044). Both move the flow (the
-        // request finalizes `returned` and the run parks at a wait point; a
-        // resubmit re-enters the approval node), so — like recall — they are
-        // dedicated routes rather than thread interactions. The service enforces
-        // access (send-back = a pending approver; resubmit = the submitter) and
-        // returns the flow outcome (`autoRejected` / `resumed`) verbatim.
-        const flowMoveRoute = (
-            action: 'revise' | 'resubmit',
-            invoke: (svc: any, id: string, body: any, context: any) => Promise<unknown>,
-        ) => {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/approvals/requests/:id/${action}`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        const svc = await resolveService(environmentId);
-                        if (!svc) return respond501(res);
-                        const body = req.body ?? {};
-                        try {
-                            const out = await invoke(svc, req.params.id, body, context ?? {});
-                            res.json(out);
-                        } catch (err: any) {
-                            if (handleApprovalError(res, err)) return;
-                            throw err;
-                        }
-                    } catch (error: any) {
-                        logError(`[REST] ${action} approval error:`, error);
-                        res.status(500).json({ code: `APPROVAL_${action.toUpperCase()}_FAILED`, error: String(error?.message ?? error).slice(0, 500) });
-                    }
-                },
-                metadata: { summary: `${action} an approval request`, tags: ['approvals'] },
-            });
-        };
-        flowMoveRoute('revise', (svc, id, body, context) => {
-            if (typeof svc.sendBack !== 'function') throw new Error('VALIDATION_FAILED: revise is not supported');
-            return svc.sendBack(id, {
-                actorId: body.actorId ?? body.actor_id ?? context?.userId,
-                comment: body.comment,
-            }, context);
-        });
-        flowMoveRoute('resubmit', (svc, id, body, context) => {
-            if (typeof svc.resubmit !== 'function') throw new Error('VALIDATION_FAILED: resubmit is not supported');
-            return svc.resubmit(id, {
-                actorId: body.actorId ?? body.actor_id ?? context?.userId,
-                comment: body.comment,
-            }, context);
-        });
-
-        // Thread interactions — reassign / remind / request-info / comment.
-        // None of these move the flow; they update approver slots or the
-        // audit thread. Registered generically: the service method enforces
-        // the per-action permission (slot holder / submitter / participant).
-        const threadRoute = (
-            action: 'reassign' | 'remind' | 'request-info' | 'comment',
-            invoke: (svc: any, id: string, body: any, context: any) => Promise<unknown>,
-        ) => {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/approvals/requests/:id/${action}`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        const svc = await resolveService(environmentId);
-                        if (!svc) return respond501(res);
-                        const body = req.body ?? {};
-                        try {
-                            const out = await invoke(svc, req.params.id, body, context ?? {});
-                            res.json(out);
-                        } catch (err: any) {
-                            if (handleApprovalError(res, err)) return;
-                            throw err;
-                        }
-                    } catch (error: any) {
-                        logError(`[REST] ${action} approval error:`, error);
-                        res.status(500).json({ code: `APPROVAL_${action.toUpperCase().replace('-', '_')}_FAILED`, error: String(error?.message ?? error).slice(0, 500) });
-                    }
-                },
-                metadata: { summary: `${action} on an approval request`, tags: ['approvals'] },
-            });
-        };
-        threadRoute('reassign', (svc, id, body, context) => {
-            if (typeof svc.reassign !== 'function') throw new Error('VALIDATION_FAILED: reassign is not supported');
-            return svc.reassign(id, {
-                actorId: body.actorId ?? body.actor_id ?? context?.userId,
-                to: body.to, from: body.from, comment: body.comment,
-            }, context);
-        });
-        threadRoute('remind', (svc, id, body, context) => {
-            if (typeof svc.remind !== 'function') throw new Error('VALIDATION_FAILED: remind is not supported');
-            return svc.remind(id, {
-                actorId: body.actorId ?? body.actor_id ?? context?.userId,
-                comment: body.comment,
-            }, context);
-        });
-        threadRoute('request-info', (svc, id, body, context) => {
-            if (typeof svc.requestInfo !== 'function') throw new Error('VALIDATION_FAILED: request-info is not supported');
-            return svc.requestInfo(id, {
-                actorId: body.actorId ?? body.actor_id ?? context?.userId,
-                comment: body.comment,
-            }, context);
-        });
-        threadRoute('comment', (svc, id, body, context) => {
-            if (typeof svc.comment !== 'function') throw new Error('VALIDATION_FAILED: comment is not supported');
-            return svc.comment(id, {
-                actorId: body.actorId ?? body.actor_id ?? context?.userId,
-                comment: body.comment,
-                attachments: body.attachments,
-            }, context);
-        });
-
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/approvals/requests/:id/actions`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const rows = await svc.listActions(req.params.id, context ?? {});
-                    res.json({ data: rows });
-                } catch (error: any) {
-                    logError('[REST] List approval actions error:', error);
-                    res.status(500).json({ code: 'APPROVAL_ACTIONS_FAILED', error: String(error?.message ?? error).slice(0, 500) });
-                }
-            },
-            metadata: { summary: 'List actions (audit trail) for an approval request', tags: ['approvals'] },
-        });
+        registerApprovalsEndpoints.call(host, basePath);
     }
 
     /**
      * Register batch operation endpoints
      */
     private registerBatchEndpoints(basePath: string): void {
-        const { crud, batch } = this.config;
-        const dataPath = `${basePath}${crud.dataPrefix}`;
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        const operations = batch.operations;
-        // [#3939] One cap, read once, applied by every bulk route below via
-        // {@link enforceBatchSize} — see that method for why it lives here and
-        // not in the Zod schemas.
-        const maxBatch = batch.maxBatchSize ?? 200;
-
-        // POST /batch — cross-object transactional batch (issue #1604 / ADR-0034).
-        // Runs heterogeneous create/update/delete across objects in ONE engine
-        // transaction (commit all or roll back all). Intra-batch references: a
-        // field value of `{ $ref: <earlier op index> }` resolves to that op's
-        // created id, so a child can reference its parent (master-detail). The
-        // request is validated against the spec contract, and each op is gated by
-        // the SAME per-object API-exposure rules (enable.apiEnabled / apiMethods)
-        // as the single-record routes before any transaction is opened.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${basePath}/batch`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    // [#18559] The engine seam, reached the way its two SIBLING
-                    // consumers of this same slot already reach it —
-                    // `wiredEngineOrLoud` — so "no engine is wired" and "the
-                    // engine WAS wired and could not be resolved" stay two facts
-                    // instead of being told apart only by accident. The retired
-                    // spelling this replaces was a plain read:
-                    //
-                    //     this.objectQLProvider ? await this.objectQLProvider(environmentId) : undefined
-                    //
-                    // ⚠️ It did NOT re-collapse them — that is why this is not a
-                    // regression and was not a blocker for #14251's decidable
-                    // test. A rejection escaped the plain read, missed the 501
-                    // arm below (which tests `!ql || typeof ql.transaction !==
-                    // 'function'`, and a rejection never reaches it), and was
-                    // caught by this handler's GENERIC outer catch
-                    // (`handleRouteError`). So the two facts did differ on the
-                    // wire — 500 INTERNAL_ERROR against 501 NOT_IMPLEMENTED —
-                    // but through a catch-all that knows nothing about this
-                    // seam, at a status this slot's other two consumers do not
-                    // use for the same fact.
-                    //
-                    // ⭐ What decided it, measured on a real `RestServer` over a
-                    // real `ObjectKernel` rather than argued: THIS DOOR ALREADY
-                    // ANSWERS 503 on the single-kernel wiring. There
-                    // `computeExecCtx` takes its PROVIDER branch, which is
-                    // `wiredEngineOrLoud`, and raises before this line runs. The
-                    // 500 was reachable only on the MULTI-KERNEL wiring, where
-                    // the gate's kernel branch absorbs by design (see
-                    // `wiredEngineOrLoud`'s RESIDUE note) and hands the engine
-                    // question down to this line:
-                    //
-                    // | wiring, engine wired and FAILING | before | after |
-                    // |:--|:--|:--|
-                    // | single-kernel (gate raises first)| 503    | 503 — unchanged |
-                    // | multi-kernel (gate absorbs)      | **500**| **503** |
-                    //
-                    // ⇒ the repair does not choose a new wire answer for this
-                    // door; it removes a WIRING-DEPENDENT divergence, leaving
-                    // the answer this door already gave on the composition the
-                    // open core boots.
-                    //
-                    // ⛔ NOT `seamOrUndefined`. That helper SWALLOWS, and its own
-                    // docblock forbids routing the data-engine seam back through
-                    // it "to make the seams uniform".
-                    //
-                    // The wiring fact is the provider's PRESENCE, asked once and
-                    // never inferred from what it returned, so both ABSENCE
-                    // shapes reach the 501 below byte-for-byte as before: no
-                    // provider wired at all, and a provider that RESOLVES
-                    // `undefined`, which is the seam contract declaring absence
-                    // rather than failing. `wiredEngineOrLoud` also invokes the
-                    // provider SYNCHRONOUSLY, so a host wiring a non-`async`
-                    // provider — which the seam's declared type cannot prevent —
-                    // reaches the same answer as one that rejects (commit add6a1b1c).
-                    const ql = await wiredEngineOrLoud(
-                        Boolean(this.objectQLProvider),
-                        () => this.objectQLProvider!(environmentId),
-                    );
-                    if (!ql || typeof ql.transaction !== 'function') {
-                        // Typed like every other 501 on this server (clone/search,
-                        // #4067) so a client can key on the code, not the prose.
-                        res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' });
-                        return;
-                    }
-
-                    // Validate the request against the spec contract (Zod-First).
-                    const { CrossObjectBatchRequestSchema } = await import('@objectstack/spec/api');
-                    const parsed = (CrossObjectBatchRequestSchema as any).safeParse(req.body ?? {});
-                    if (!parsed.success) {
-                        res.status(400).json({ error: 'Invalid batch request', code: 'VALIDATION_FAILED', issues: parsed.error?.issues });
-                        return;
-                    }
-                    const ops: Array<{ object: string; action: 'create' | 'update' | 'delete'; id?: string; data?: Record<string, any> }> = parsed.data.operations;
-                    // All-or-nothing by construction: refuse a request that asks for
-                    // non-atomic semantics rather than silently applying atomically
-                    // (honest contract). Per-object partial batches use the
-                    // POST /data/:object/batch route instead.
-                    if (parsed.data.atomic === false) {
-                        res.status(400).json({ error: 'Cross-object batch is always atomic; use POST /data/:object/batch for non-atomic per-object batches', code: 'BATCH_NOT_ATOMIC' });
-                        return;
-                    }
-                    if (ops.length === 0) { res.json({ results: [] }); return; }
-                    // [#3939] Same check, same envelope as every other bulk route
-                    // now — this one used to be the only one that capped at all,
-                    // and it answered without a `code` for clients to key on.
-                    if (this.enforceBatchSize(res, ops.length, maxBatch)) return;
-
-                    // update/delete need a target id — the schema can't express this
-                    // conditionally, so surface it as a 400 up front.
-                    for (const op of ops) {
-                        if ((op.action === 'update' || op.action === 'delete') && op.id == null && op.data?.id == null) {
-                            res.status(400).json({ error: `Operation '${op.action}' on '${op.object}' requires an id`, code: 'VALIDATION_FAILED' });
-                            return;
-                        }
-                    }
-
-                    // Enforce object-level API exposure (enable.apiEnabled /
-                    // apiMethods) for EVERY op BEFORE opening the transaction — the
-                    // batch write surface must honour the same per-object gate as the
-                    // single-record routes (ADR-0049 / #1889). Metadata is fetched
-                    // once; each distinct (object, action) is checked once.
-                    const p = await this.resolveProtocol(environmentId, req);
-                    const items = await this.loadObjectItems(p, environmentId);
-                    if (items.length > 0) {
-                        const byName = new Map<string, any>(items.map((o: any) => [o?.name, o]));
-                        const checked = new Set<string>();
-                        for (const op of ops) {
-                            const key = `${op.object}\u0000${op.action}`;
-                            if (checked.has(key)) continue;
-                            checked.add(key);
-                            const obj = byName.get(op.object);
-                            if (!obj) continue; // unknown object → surfaced by the op inside the tx
-                            // [#3391] Cross-object batch is a bulk surface: gate each op
-                            // as `bulk ∧ child(op.action)` — the object must grant the
-                            // `bulk` primitive AND the specific write it performs.
-                            const denial = apiAccessDenialFromEnable(obj.enable, op.object, 'bulk', { bulkChild: op.action });
-                            if (denial) { res.status(denial.status).json(denial.body); return; }
-                        }
-                    }
-
-                    // Resolve `{ $ref: <opIndex> }` values against results collected
-                    // so far. A ref MUST point at an earlier create whose id is known;
-                    // anything else is a 400 (never a silent null FK).
-                    const resolveRefs = (data: any, out: any[]): any => {
-                        if (!data || typeof data !== 'object') return data;
-                        const result: any = Array.isArray(data) ? [] : {};
-                        for (const [k, v] of Object.entries(data)) {
-                            if (v && typeof v === 'object' && '$ref' in (v as any)) {
-                                const idx = (v as any).$ref;
-                                const ref = typeof idx === 'number' ? out[idx] : undefined;
-                                const refId = ref && (ref.id ?? ref._id);
-                                if (refId == null) {
-                                    const err: any = new Error(`Unresolved $ref ${JSON.stringify(idx)} on field '${k}' — must reference an earlier create in the same batch`);
-                                    err.status = 400;
-                                    err.code = 'BATCH_UNRESOLVED_REF';
-                                    throw err;
-                                }
-                                result[k] = refId;
-                            } else {
-                                result[k] = v;
-                            }
-                        }
-                        return result;
-                    };
-
-                    // [#3794] Write-observability on THIS surface too. The engine
-                    // strips `readonly` / `readonlyWhen` writes silently, and every
-                    // other write path already reports what it dropped (#3431/#3455)
-                    // — but this one did not, and it is precisely the path the
-                    // console's record form takes for a master-detail save. Result:
-                    // a user edited a `readonlyWhen`-locked field, got "updated
-                    // successfully", and the value never changed with nothing said
-                    // (#3794 problem 2). Each event is tagged with its operation
-                    // index, since `results` entries are bare record echoes with no
-                    // envelope to hang a per-row list on.
-                    const dropped: Array<DroppedFieldsEvent & { index: number }> = [];
-                    const results = await ql.transaction(async (trxCtx: any) => {
-                        const out: any[] = [];
-                        for (const [index, op] of ops.entries()) {
-                            const data = resolveRefs(op.data, out);
-                            if (op.action === 'create') {
-                                // [#3835] Go through the protocol's create ingress —
-                                // the SAME one `POST /data/:object` uses — rather than
-                                // calling `ql.insert` directly. When this was written the
-                                // #3043 static-`readonly` strip lived at that ingress and
-                                // a direct `ql.insert` bypassed it, so `readonly` meant
-                                // two different things on two create paths. Since the
-                                // maintainer ruling of 2026-09-03 (option C, #14147) the
-                                // strip runs inside `engine.insert` for every non-system
-                                // caller, so both routes are stripped identically, and the
-                                // platform-object carve-out (a `sys_`/`managedBy` object's
-                                // own guard must REJECT a forged value, not silently
-                                // swallow it) is the engine's as well. The routing stands
-                                // on what the ingress still owns: the #3770 object-
-                                // existence gate, the #7823 `internal: true` response
-                                // strip and the `droppedFields` relay — one create
-                                // ingress, one response contract, and a future change to
-                                // its policy covers the batch for free. `trxCtx` carries
-                                // the caller's context (including `isSystem`) plus the
-                                // open transaction, so the engine's strip decides exactly
-                                // as it does on the single route and the insert still
-                                // joins this transaction.
-                                const batchCreateRequest: ServerScopedDataRequest<CreateDataRequest> = {
-                                    object: op.object, data, context: trxCtx,
-                                };
-                                const created: any = await p.createData(batchCreateRequest);
-                                for (const e of (created?.droppedFields ?? []) as DroppedFieldsEvent[]) {
-                                    dropped.push({ ...e, index });
-                                }
-                                out.push(created?.record);
-                            } else if (op.action === 'update') {
-                                // Update needs no ingress detour for the WRITE half:
-                                // the engine enforces both static `readonly` (#2948)
-                                // and `readonlyWhen` (#3042) on its own update path,
-                                // and reports them through this listener.
-                                const onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push({ ...e, index }); };
-                                const id = op.id ?? data?.id;
-                                const updated = await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped });
-                                // [#7823] …but the RESPONSE half moved to the ingress
-                                // (A-prime ruling, 2026-08-13): the engine keeps its
-                                // write results whole, so this direct-`ql.update`
-                                // mouth applies the shared write-response rules
-                                // itself (credential-class mask, then `internal`
-                                // omit) before the row rides `results` out. Called
-                                // from `@objectstack/core` directly — never through
-                                // an optional protocol method, which a protocol
-                                // without it would skip silently. FAIL CLOSED: with
-                                // no registered schema to judge the fields by, only
-                                // the id is echoed.
-                                const updateSchema = (ql as any).registry?.getObject?.(op.object);
-                                if (!updateSchema) {
-                                    out.push(updated && typeof updated === 'object' ? { id: (updated as any).id ?? id } : updated);
-                                } else {
-                                    omitInternalFieldsFromWriteResponse(updateSchema, updated);
-                                    out.push(updated);
-                                }
-                            } else { // 'delete'
-                                out.push(await ql.delete(op.object, { where: { id: op.id }, context: trxCtx }));
-                            }
-                        }
-                        return out;
-                    }, context);
-
-                    res.json({ results, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
-                } catch (error: any) {
-                    // Log only genuine server faults; client 4xx (validation,
-                    // unresolved ref, atomic rollback of a bad op) are expected.
-                    // This site used to judge on `status >= 500` alone, which
-                    // also swallowed the un-coded 400 `mapDataError` degrades an
-                    // UNRECOGNISED error to — a handler `TypeError` inside a
-                    // batch transaction vanished here. The shared predicate
-                    // keeps that one loud while staying quiet on the coded 4xx.
-                    handleRouteError(res, error);
-                }
-            },
-            metadata: {
-                summary: 'Cross-object transactional batch (atomic create/update/delete across objects)',
-                tags: ['data', 'batch'],
-            },
-        });
-
-        // POST /data/:object/batch - Generic batch endpoint
-        if (batch.enableBatchEndpoint && this.protocol.batchData) {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/:object/batch`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        // [#3391] bulk ∧ child(body.operation) — the object must grant
-                        // the `bulk` primitive AND the batched write kind.
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: req.body?.operation })) return;
-                        // [#3899] Validate against the declared contract
-                        // (`BatchUpdateRequestSchema`, catalog `requestSchema`) —
-                        // this route used to hand the body straight to the
-                        // protocol, so `{ operation: 'updat', records: {} }`
-                        // reached the engine as-is. Validation only: the ORIGINAL
-                        // body is forwarded, not the parse output, so
-                        // `BatchOptionsSchema`'s defaults (e.g. `atomic: true`)
-                        // are not injected into a request that never sent them.
-                        const { BatchUpdateRequestSchema } = await import('@objectstack/spec/api');
-                        const batchInput = req.body ?? {};
-                        const parsedBatch = (BatchUpdateRequestSchema as any).safeParse(batchInput);
-                        if (!parsedBatch.success) {
-                            res.status(400).json({
-                                error: 'Invalid batch request',
-                                code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedBatch.error?.issues, batchInput),
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
-                        // [#3939] Cap AFTER the shape check, so a caller gets the
-                        // more specific answer first.
-                        if (this.enforceBatchSize(res, parsedBatch.data.records.length, maxBatch, req.params?.object)) return;
-                        const batchRequest: ServerScopedDataRequest<BatchDataRequest> = {
-                            object: req.params.object,
-                            request: req.body,
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.batchData!(batchRequest);
-                        res.json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error, req.params?.object);
-                    }
-                },
-                metadata: {
-                    summary: 'Batch operations',
-                    tags: ['data', 'batch'],
-                },
-            });
-        }
-
-        // POST /data/:object/createMany - Bulk create
-        if (operations.createMany && this.protocol.createManyData) {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/:object/createMany`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        // [#3391] bulk ∧ create — createMany requires the `bulk` primitive.
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'create' })) return;
-                        // [#3899] Body IS the records array on this route (what
-                        // `client.data.createMany` posts). Validate the assembled
-                        // protocol request (`CreateManyDataRequestSchema`, catalog
-                        // `requestSchema`) so `{ records: [...] }` — updateMany's
-                        // envelope, an easy cross-route slip — or any other
-                        // non-array body 400s instead of reaching the engine as a
-                        // single garbage "record".
-                        const { CreateManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const createManyInput = { object: req.params.object, records: req.body ?? [] };
-                        const parsedCreateMany = (CreateManyDataRequestSchema as any).safeParse(createManyInput);
-                        if (!parsedCreateMany.success) {
-                            res.status(400).json({
-                                error: 'Invalid createMany request — the body must be a JSON array of record objects',
-                                code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedCreateMany.error?.issues, createManyInput),
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
-                        // [#3939] Cap AFTER the shape check.
-                        if (this.enforceBatchSize(res, parsedCreateMany.data.records.length, maxBatch, req.params?.object)) return;
-                        const createManyRequest: ServerScopedDataRequest<CreateManyDataRequest> = {
-                            object: req.params.object,
-                            records: req.body || [],
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.createManyData!(createManyRequest);
-                        res.status(201).json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error, req.params?.object);
-                    }
-                },
-                metadata: {
-                    summary: 'Create multiple records',
-                    tags: ['data', 'batch'],
-                },
-            });
-        }
-
-        // POST /data/:object/updateMany - Bulk update
-        if (operations.updateMany && this.protocol.updateManyData) {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/:object/updateMany`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        // [#3391] bulk ∧ update — updateMany requires the `bulk` primitive.
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'update' })) return;
-                        // [#3933] Validate against the spec contract, and write the
-                        // PATH object last. The body used to be spread over
-                        // `object: req.params.object`, so `{"object":"other", …}`
-                        // moved the write to a different object than the one
-                        // `enforceApiAccess` had just cleared — that gate reads
-                        // `req.params.object`, so `enable.apiEnabled` / `apiMethods`
-                        // (ADR-0049) was enforced on A while B was written. Zod also
-                        // strips unknown keys, which keeps a body `context` from
-                        // becoming the execution context on a deployment where none
-                        // resolves (e.g. an anonymous public-book read, #3963).
-                        const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const updateManyInput = { ...(req.body ?? {}), object: req.params.object };
-                        const parsedUpdate = UpdateManyDataRequestSchema.safeParse(updateManyInput);
-                        if (!parsedUpdate.success) {
-                            res.status(400).json({
-                                error: 'Invalid updateMany request',
-                                code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedUpdate.error?.issues, updateManyInput),
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
-                        // [#3939] Cap AFTER the shape check, so a caller gets the
-                        // more specific answer first.
-                        if (this.enforceBatchSize(res, parsedUpdate.data.records.length, maxBatch, req.params?.object)) return;
-                        const updateManyRequest: ServerScopedDataRequest<UpdateManyDataRequest> = {
-                            ...parsedUpdate.data,
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.updateManyData!(updateManyRequest);
-                        res.json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error, req.params?.object);
-                    }
-                },
-                metadata: {
-                    summary: 'Update multiple records',
-                    tags: ['data', 'batch'],
-                },
-            });
-        }
-
-        // POST /data/:object/deleteMany - Bulk delete
-        if (operations.deleteMany && this.protocol.deleteManyData) {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/:object/deleteMany`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        // [#3391] bulk ∧ delete — deleteMany requires the `bulk` primitive.
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'bulk', { bulkChild: 'delete' })) return;
-                        // [#3897] Validate against the spec contract instead of
-                        // splatting the raw body into the protocol request. Zod
-                        // object schemas STRIP unknown keys, which is what makes
-                        // this a security boundary and not just an error message:
-                        // `options` is narrowed to `BatchOptions`, so a body key
-                        // (`options.where`, `options.multi`) can no longer ride
-                        // into the engine's delete options, and a top-level
-                        // `context` can no longer forge the caller's principal on
-                        // a route reachable without auth. The protocol layer
-                        // refuses the same shapes independently (defence in
-                        // depth) — this stops them one hop earlier, with a 400
-                        // the caller can act on.
-                        // [#3933] The PATH object is written LAST for the same
-                        // reason: `enforceApiAccess` gates on `req.params.object`,
-                        // so a body `object` would move the delete to an object
-                        // whose exposure policy was never checked.
-                        const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
-                        const deleteManyInput = { ...(req.body ?? {}), object: req.params.object };
-                        const parsed = DeleteManyDataRequestSchema.safeParse(deleteManyInput);
-                        if (!parsed.success) {
-                            res.status(400).json({
-                                error: 'Invalid deleteMany request',
-                                code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsed.error?.issues, deleteManyInput),
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
-                        // [#3939] The cap that matters most: since #3897 this
-                        // route deletes per id, so the list length IS the engine
-                        // round-trip count.
-                        if (this.enforceBatchSize(res, parsed.data.ids.length, maxBatch, req.params?.object)) return;
-                        const deleteManyRequest: ServerScopedDataRequest<DeleteManyDataRequest> = {
-                            ...parsed.data,
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.deleteManyData!(deleteManyRequest);
-                        res.json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error, req.params?.object);
-                    }
-                },
-                metadata: {
-                    summary: 'Delete multiple records',
-                    tags: ['data', 'batch'],
-                },
-            });
-        }
+        // [#23050 slice 2] The body moved to `batch-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `BatchRouteHost`, and that module's header for why
+        // `objectQLProvider` alone is a getter).
+        const readObjectQLProvider = () => this.objectQLProvider;
+        const host: BatchRouteHost = {
+            config: this.config,
+            routeManager: this.routeManager,
+            protocol: this.protocol,
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+            enforceBatchSize: (...a) => this.enforceBatchSize(...a),
+            loadObjectItems: (...a) => this.loadObjectItems(...a),
+        };
+        registerBatchEndpoints.call(host, basePath);
     }
 
     

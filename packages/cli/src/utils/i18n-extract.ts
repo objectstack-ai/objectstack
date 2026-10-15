@@ -965,7 +965,7 @@ function walkObjectSections(config: any, out: ExpectedEntry[]): void {
   // live inside the untyped `properties` bag at the positions spec's
   // `pageComponentSlotPositions()` derives (`page:tabs` →
   // `properties.items[].children`, `page:card` → `properties.footer`, every
-  // container → `properties.children`), and source-authored pages (`kind: 'html' | 'react' | 'jsx'`) hold only a
+  // container → `properties.children`), and source-authored pages (`kind: 'html' | 'react'`) hold only a
   // DERIVED region cache that the author never wrote — scaffolding translation
   // keys off that cache would invent an authoring surface.
   //
@@ -1152,7 +1152,7 @@ export function authorWarnedTranslationGroups(): ReadonlySet<string> {
  * derived slot list, and `page:card`'s `properties.body` / `.footer` were the
  * last positions lint walked and the resolver did not (`slots.<slot>` roots
  * and `properties.items[].children` closed at #16772) — but it is still
- * NARROWER in one way (it skips `kind: 'html' | 'react' | 'jsx'` pages, which
+ * NARROWER in one way (it skips `kind: 'html' | 'react'` pages, which
  * `translatePage` walks), and a mismatch in either direction is one half of
  * the failure pair `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
  */

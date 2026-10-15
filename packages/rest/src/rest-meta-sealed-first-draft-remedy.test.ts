@@ -1,30 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#23406] A first draft of a sealed, package-shipped item is an EDIT of that
- * item, so the refusal a client reads at `PUT /api/v1/meta/:type/:name?mode=draft`
- * names the edit remedy, whether or not the draft carries the first-write pin.
+ * [#23577] Every write over a sealed, package-held name reads ONE sentence at
+ * `PUT /api/v1/meta/:type/:name`, whatever the write meant to do. It replaces
+ * [#23406]'s pin of a draft/publish split (a first draft read the edit remedy,
+ * a publish-mode `If-None-Match: *` read the create remedy): the door cannot
+ * tell a create from an edit, so the sentence advises neither. It states what
+ * the door knows and where the names are listed: "'object/NAME' is provided by
+ * a managed package and is sealed: it cannot be written here. GET
+ * /api/v1/meta/object lists the names in use."
  *
- * The spec reads a present `null` parent (`If-None-Match: *` on this door) as
- * "no current row of THIS lifecycle" (`SaveMetaItemRequestSchema.parentVersion`).
- * On a draft save that lifecycle is the draft's: the pin says no draft is
- * pending, never that the name is free. Read as a create, it told the author
- * the name was taken and to choose another one, and a client following that
- * remedy authors a second object instead of editing the source artifact.
- *
- * Three requests onto one object a code package ships (`object` has no
+ * Four requests onto one object a code package ships (`object` has no
  * environment overlay, so it is sealed), on both kernel shapes:
  *
- *  - an unpinned draft save: the edit remedy, as before;
- *  - a first draft pinned `If-None-Match: *`: the edit remedy, the SAME sentence
- *    the unpinned draft reads (it named a free name before this change);
- *  - the control, a create: a publish-mode save pinned `If-None-Match: *`, which
- *    asserts the item has no live row, keeps the create remedy.
+ *  - an unpinned draft save;
+ *  - the console's generic create: a draft pinned `If-None-Match: *`;
+ *  - a publish-mode save pinned `If-None-Match: *`;
+ *  - an unpinned publish save.
  *
- * Every refusal is `403 NOT_OVERRIDABLE`: which requests are refused does not
- * move, only the remedy a refusal names. The remedy KIND is read off what the
- * sentence points at (the type's listing route for a create; the source and
- * redeploy remedy for an edit), never off its wording.
+ * Every refusal is `403 NOT_OVERRIDABLE` and reads the same ruled sentence.
  *
  * Same harness as `rest-meta-managed-seal-hatch.test.ts`: a REAL
  * `ObjectStackProtocolImplementation` over a REAL `SchemaRegistry`, the object
@@ -88,43 +82,29 @@ function boot(environmentId: string | undefined) {
     return { save };
 }
 
-type RemedyKind = 'new-name' | 'edit' | 'both' | 'none';
-
-/** The remedy KIND a sentence names — read off what it points at, not off its wording. */
-function remedyKind(message: string): RemedyKind {
-    const newName = message.includes('GET /api/v1/meta/object');
-    const edit = /\bredeploy\b/.test(message) || /\bsource\b/.test(message);
-    if (newName && edit) return 'both';
-    if (newName) return 'new-name';
-    return edit ? 'edit' : 'none';
-}
+/** The ruled sentence for a write over the held object. */
+const ONE_SENTENCE = `'object/${NAME}' is provided by a managed package and is sealed: it cannot be written here. `
+    + 'GET /api/v1/meta/object lists the names in use.';
 
 const DRAFT = { mode: 'draft' };
 const FIRST_WRITE = { 'if-none-match': '*' };
 
-describe('[#23406] a first draft of a sealed package-shipped item names the edit remedy at the REST door', () => {
+describe('[#23577] every write over a sealed package-shipped item reads one sentence at the REST door', () => {
     for (const environmentId of [undefined, 'env_1']) {
         const kernel = environmentId ? 'environment' : 'host-config';
 
-        it(`PUT ?mode=draft, unpinned and pinned If-None-Match: *, both read the edit remedy; a pinned create keeps the create remedy (${kernel} kernel)`, async () => {
+        it(`PUT draft and publish, unpinned and pinned If-None-Match: *, all read the one sentence (${kernel} kernel)`, async () => {
             const { save } = boot(environmentId);
-            const unpinned = await save(DRAFT, {});
-            const firstDraft = await save(DRAFT, FIRST_WRITE);
-            const create = await save({}, FIRST_WRITE);
-
-            // The verdict does not move: one code and one status for all three.
-            for (const r of [unpinned, firstDraft, create]) {
-                expect({ status: r.status, code: r.code }, r.message).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
+            const requests = {
+                unpinnedDraft: await save(DRAFT, {}),
+                consoleCreate: await save(DRAFT, FIRST_WRITE),
+                publishPin: await save({}, FIRST_WRITE),
+                unpinned: await save({}, {}),
+            };
+            for (const [request, r] of Object.entries(requests)) {
+                expect({ status: r.status, code: r.code }, `${request}: ${r.message}`).toEqual({ status: 403, code: 'NOT_OVERRIDABLE' });
+                expect(r.message, request).toBe(ONE_SENTENCE);
             }
-            expect({
-                unpinnedDraft: remedyKind(unpinned.message),
-                firstDraft: remedyKind(firstDraft.message),
-                create: remedyKind(create.message),
-            }).toEqual({ unpinnedDraft: 'edit', firstDraft: 'edit', create: 'new-name' });
-            // One edit sentence: the pin changes nothing about the remedy a draft reads.
-            expect(firstDraft.message).toBe(unpinned.message);
-            // Both name the item the client addressed.
-            for (const r of [firstDraft, create]) expect(r.message).toContain(`object/${NAME}`);
         });
     }
 });

@@ -532,7 +532,10 @@ export function packageScopedRowWhere(
  * `protocol.ts`), and [#23297] the draft save, whose address
  * {@link SysMetadataRepository.put} resolves (the inheritance in
  * `resolveWriteHead`). One sentence for the three, so the doors cannot answer
- * the same request in different words.
+ * the same request in different words. [#23495] And the per-item draft
+ * publish (`publish`) and the draft discard (`delete`) that name no package,
+ * whose draft address the protocol resolves as the draft save's
+ * (`ObjectStackProtocolImplementation.packagelessDraftAddress`).
  *
  * A `sys_metadata` row is keyed `(org, type, name, package_id)`, so such a
  * write has no one row to write or remove. Before this refusal the save wrote
@@ -559,7 +562,7 @@ export function packageScopedRowWhere(
  * predicate.
  */
 export function packagelessAddressAmbiguityRefusal(
-  verb: 'save' | 'delete',
+  verb: 'save' | 'delete' | 'publish',
   type: string,
   name: string,
   packageIds: readonly string[],
@@ -568,7 +571,9 @@ export function packagelessAddressAmbiguityRefusal(
   const more = packageIds.length > 5 ? ` and ${packageIds.length - 5} more` : '';
   const [nothing, single] = verb === 'save'
     ? ['Nothing was written.', 'no single row to write']
-    : ['Nothing was deleted.', 'no single row to remove'];
+    : verb === 'publish'
+      ? ['Nothing was published.', 'no single draft to promote']
+      : ['Nothing was deleted.', 'no single row to remove'];
   const err = new Error(
     `Name the package this ${verb} is for, then send it again: on the REST door add ?package= with the package id, `
     + `in process pass packageId. ${nothing} ${type} '${name}' belongs to ${packageIds.length} packages `
@@ -1278,6 +1283,25 @@ export class SysMetadataRepository implements MetadataRepository {
        */
       packageId?: string | null;
       /**
+       * [#23495, #11087] The package a package-UNBOUND draft is promoted
+       * into: the package its draft save naming no package would adopt it
+       * into (the orphan-draft adoption in {@link resolveWriteHead}, which
+       * stamps an unbound draft with the package of the item's active rows
+       * on its next write). Stated by the per-item publish that names no
+       * package, for an item whose active rows are bound to one package and
+       * whose only draft at that address is the unbound one: the read naming
+       * no package serves that draft, and the active row it becomes is that
+       * package's row, the one the read serves next. Promoted unbound, it
+       * landed in a package-less active row beside the package's, which no
+       * read naming no package serves.
+       *
+       * Only an unbound draft row is adopted: a draft row bound to a package
+       * is promoted under its own binding whatever this says, and the drain
+       * removes the draft row by its own key either way. Omitted → the draft
+       * row's own binding, as before.
+       */
+      adoptInto?: string;
+      /**
        * [#20312] The body the ACTIVE row stores, derived from the draft body
        * this promotion read — applied to the row actually promoted, inside the
        * same call, so the derivation and the write read one row rather than
@@ -1353,6 +1377,9 @@ export class SysMetadataRepository implements MetadataRepository {
       throw err;
     }
     const draftPackageId = (draftRow as { package_id?: string | null }).package_id ?? null;
+    // [#23495] The binding the ACTIVE row is written under: the draft row's
+    // own, else the package an unbound draft is adopted into (`adoptInto`).
+    const activePackageId: string | null = draftPackageId ?? opts.adoptInto ?? null;
     const draft = this.rowToItem(ref, draftRow);
     // [#21934] The draft the caller judged, and no other: a caller that read
     // the draft to judge it states that draft's hash, and the row read here
@@ -1363,7 +1390,9 @@ export class SysMetadataRepository implements MetadataRepository {
     // Read the active row through the SAME package scope we will write, so the
     // optimistic-lock `parentVersion` matches the exact row `put` upserts.
     // (Package-less drafts → packageId null → identical to the prior behaviour.)
-    const currentActive = await this.get(ref, { state: 'active', packageId: draftPackageId, member: opts.member });
+    // [#23495] The scope written is `activePackageId`: the draft's own binding,
+    // or the package an unbound draft is adopted into.
+    const currentActive = await this.get(ref, { state: 'active', packageId: activePackageId, member: opts.member });
     const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(draft.body) : draft.body;
     const result = await this.put(ref, activeBody, {
       parentVersion: currentActive?.hash ?? null,
@@ -1373,7 +1402,7 @@ export class SysMetadataRepository implements MetadataRepository {
       intent: opts.intent ?? 'override-artifact',
       state: 'active',
       opType: 'publish',
-      packageId: draftPackageId,
+      packageId: activePackageId,
     });
     // Drop the draft row — it has been promoted.
     //
@@ -1394,10 +1423,12 @@ export class SysMetadataRepository implements MetadataRepository {
     }
     // Surface the promoted draft's package binding so publish-time
     // materializers (ADR-0086 P2 — package-door permission sets) can stamp
-    // the data-plane row with the owning `package_id`.
+    // the data-plane row with the owning `package_id`. [#23495] The binding
+    // the active row was written under, which is the adopting package for an
+    // adopted unbound draft.
     return {
       ...result,
-      packageId: draftPackageId,
+      packageId: activePackageId,
       ...(draftDrainFailed ? { draftDrainFailed } : {}),
     };
   }

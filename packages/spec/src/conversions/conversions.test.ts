@@ -119,7 +119,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const plugin = { onEnable() {} }; // non-clonable value that must be preserved by reference
       const stack: Record<string, unknown> = {
         plugins: [plugin],
-        pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }],
+        flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request', config: { url: 'x' } }] }],
       };
       const out = applyConversions(stack);
       expect(out).not.toBe(stack);
@@ -404,7 +404,6 @@ describe('conversion layer (ADR-0087 D2)', () => {
         'flow-node-http-callout-rename',
         'flow-node-wait-event-config-lift',
         'page-component-visibility-to-visibleWhen',
-        'page-kind-jsx-to-html',
         'retry-policy-converged',
         'view-visibleOn-to-visibleWhen',
       ]);
@@ -418,6 +417,8 @@ describe('conversion layer (ADR-0087 D2)', () => {
         'sharing-rule-access-level-full-to-edit',
         // #23543 F1: retired once `mongo` itself was retired as a value.
         'datasource-driver-mongo-to-mongodb',
+        // #23543 F5-jsx: retired once `jsx` itself was retired as a page kind.
+        'page-kind-jsx-to-html',
       ]) {
         expect(ALL_CONVERSIONS.find((c) => c.id === id), id).toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
       }
@@ -615,17 +616,17 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('converts at load and surfaces notices through the sink', () => {
       const notices: ConversionNotice[] = [];
       const out = normalizeStackInput(
-        { pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }] },
+        { flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request' }] }] },
         { onConversionNotice: (n) => notices.push(n) },
       );
-      expect((out.pages as any[])[0].kind).toBe('html');
+      expect((out.flows as any[])[0].nodes[0].type).toBe('http');
       expect(notices).toHaveLength(1);
-      expect(notices[0]!.message).toContain("'jsx' → 'html'");
+      expect(notices[0]!.message).toContain("'http_request' → 'http'");
     });
 
     it('still converts silently when no sink is provided (zero consumer action)', () => {
-      const out = normalizeStackInput({ pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }] });
-      expect((out.pages as any[])[0].kind).toBe('html');
+      const out = normalizeStackInput({ flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request' }] }] });
+      expect((out.flows as any[])[0].nodes[0].type).toBe('http');
     });
 
     it('normalizes map collections and converts in one pass', () => {
@@ -1041,6 +1042,48 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(resolveDriverId('mongo')).toBe('mongodb');
       expect(getDriverConfigSchema('mongo')).toBe(getDriverConfigSchema('mongodb'));
       expect(validateDriverConfig('mongo', { url: 'mongodb://db/x' })).toEqual({ known: true, issues: [] });
+    });
+  });
+
+  // #23543 F5-jsx retired `jsx` as a page kind at 18. Three claims hold
+  // together: a STORED `jsx` page still converges to `html` and parses (the
+  // data-at-rest seams replay the retired entry), the authoring funnel no
+  // longer rewrites an authored `jsx`, and an authored `jsx` meets the
+  // prescription naming `html` instead.
+  describe('page-kind-jsx-to-html', () => {
+    const page = (kind: string) => ({ name: 'landing', label: 'Landing', kind, source: '<div>hi</div>' });
+
+    it('a stored `jsx` page row still converges to `html`, and the converted row parses', () => {
+      const out = applyConversionsToStoredItem('page', page('jsx')) as { kind: string };
+      expect(out.kind).toBe('html');
+      expect(PageSchema.safeParse(out).success).toBe(true);
+    });
+
+    it('is retired from the load path — the authoring funnel no longer rewrites an authored `jsx`', () => {
+      const before = { pages: [page('jsx')] };
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('an authored `jsx` reaches defineStack as written and is refused naming `html` and the release', () => {
+      let refusal: unknown;
+      try {
+        defineStack({ pages: [page('jsx')] } as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      // The kind is the ONE issue: the page is otherwise a complete html page.
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['pages.0.kind']);
+      expect(issues[0]!.message).toMatch(/^Page `kind: 'jsx'` was removed in @objectstack\/spec 18 \(ADR-0087 D2\)/);
+      expect(issues[0]!.message).toContain("Use `kind: 'html'`");
+      // The canonical kind is untouched, and so is a misspelling's own message.
+      expect(PageSchema.safeParse(page('html')).success).toBe(true);
+      const typo = PageSchema.safeParse(page('htm'));
+      expect(typo.success).toBe(false);
+      expect(typo.error!.issues[0]!.message).not.toContain('was removed');
     });
   });
 
@@ -1767,8 +1810,8 @@ describe('conversion layer (ADR-0087 D2)', () => {
 
     /**
      * ⭐ FIRING CONTROL for the refusal above — it excludes ONE id, not the
-     * window. `page-kind-jsx-to-html` (not retired) and the retired app entry
-     * are driven through the SAME call: the named one is refused, the other
+     * window. `page-kind-jsx-to-html` (retired too, at 18) and the retired app
+     * entry are driven through the SAME call: the named one is refused, the other
      * still fires.
      */
     it('refuses only the named id — the rest of the chain still runs', () => {

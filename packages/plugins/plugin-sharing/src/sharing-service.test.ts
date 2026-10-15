@@ -5,6 +5,8 @@ import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { SharingService, type SharingServiceOptions } from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
 import { bootRequestContext } from './exec-context-seam.testkit.js';
+import { SysRecordShare } from './objects/sys-record-share.object.js';
+import { SysSharingRule } from './objects/sys-sharing-rule.object.js';
 
 // ─────────────────────────────────────────────────────────────────────
 // In-memory fake engine
@@ -1111,8 +1113,8 @@ describe('[ADR-0111 D7] no inert grants', () => {
     // body) can still send it. The grant's one error channel is the message
     // prefix (`rest-server.ts`'s `respondSharingError` maps it to a 400); the
     // pin asserts that prefix, the prescription, and that nothing was written.
-    // A sharing rule cannot deliver a guest either, so the generic sentence
-    // ("delivered via sharing rules") would misdirect the caller.
+    // A sharing rule cannot deliver a guest either, so a remedy naming a rule
+    // route ("delivered via a sharing rule …") would misdirect the caller.
     const refusal = await svc.grant(
       { object: 'account', recordId: 'a1', recipientId: 'anyone', recipientType: 'guest' as never },
       { userId: 'alice' },
@@ -1122,8 +1124,80 @@ describe('[ADR-0111 D7] no inert grants', () => {
     expect(message.startsWith("VALIDATION_FAILED: recipientType 'guest' was removed (ADR-0138 D8)")).toBe(true);
     expect(message).toMatch(/guest access flows through the guest position and share links \(ADR-0090 D11\)/);
     expect(message).toMatch(/Expose the record through a public form or a share link instead\.$/);
-    expect(message).not.toMatch(/sharing rules/);
+    expect(message).not.toMatch(/sharing rule/);
     expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+  });
+
+  describe('[ADR-0111 D7] the refusal names the sharing-rule recipient that delivers each non-user value', () => {
+    /** A select field's option values, in declared order. */
+    const selectValues = (field: unknown): unknown[] =>
+      ((field as { options?: unknown[] }).options ?? [])
+        .map((o) => (typeof o === 'object' && o !== null ? (o as { value: unknown }).value : o));
+
+    // The pin the guest case above sets for its own value, for every value the
+    // generic refusal answers. A rule spells `group` as `team` (the ADR-0090 D3
+    // rename, recorded by the ADR-0087 entry `sharing-rule-recipient-reconcile`);
+    // the other two keep their own name.
+    const RULE_ROUTES = {
+      group: 'team',
+      position: 'position',
+      unit_and_subordinates: 'unit_and_subordinates',
+    } as const;
+
+    const refusalFor = async (recipientType: string): Promise<string> => {
+      const refusal = await svc.grant(
+        { object: 'account', recordId: 'a1', recipientId: 'g1', recipientType: recipientType as never },
+        { userId: 'alice' },
+      ).then(() => null, (e: unknown) => e);
+      expect(refusal, `${recipientType} was granted`).toBeInstanceOf(Error);
+      return (refusal as Error).message;
+    };
+
+    it('covers exactly the non-user values a record-share row declares, and routes each to a rule recipient', () => {
+      // Read from both selects, so neither vocabulary moves without this table.
+      expect(Object.keys(RULE_ROUTES)).toEqual(
+        selectValues(SysRecordShare.fields.recipient_type).filter((v) => v !== 'user'),
+      );
+      const ruleRecipients = selectValues(SysSharingRule.fields.recipient_type);
+      for (const rule of Object.values(RULE_ROUTES)) expect(ruleRecipients).toContain(rule);
+      // The record-share spelling `group` is no rule recipient: naming it would
+      // send the caller to a route that does not exist.
+      expect(ruleRecipients).not.toContain('group');
+    });
+
+    for (const [recipientType, rule] of Object.entries(RULE_ROUTES)) {
+      it(`${recipientType} → a sharing rule with recipient type '${rule}'`, async () => {
+        const message = await refusalFor(recipientType);
+        expect(message.startsWith(
+          `VALIDATION_FAILED: recipientType must be 'user' (received "${recipientType}") — `
+          + `a ${recipientType} recipient is delivered via a sharing rule with recipient type '${rule}'`,
+        )).toBe(true);
+        expect(message).toMatch(/\(ADR-0111 D7\)$/);
+        expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+      });
+    }
+
+    it("group's remedy cites the rename and never names a `group` rule recipient", async () => {
+      const message = await refusalFor('group');
+      expect(message).toMatch(/recipient type 'team', its name since the ADR-0090 D3 rename \(ADR-0111 D7\)$/);
+      expect(message).not.toMatch(/recipient type 'group'/);
+      // The two values whose rule spelling is their own carry no rename clause.
+      for (const unchanged of ['position', 'unit_and_subordinates']) {
+        expect(await refusalFor(unchanged)).not.toMatch(/rename/);
+      }
+    });
+
+    it('a value no record share declares is told so, and is named no route', async () => {
+      // `team` is a RULE recipient an untyped caller (a REST body) may send here.
+      // It is no record-share value, so no route is invented for it.
+      const message = await refusalFor('team');
+      expect(message).toBe(
+        `VALIDATION_FAILED: recipientType must be 'user' (received "team") — `
+        + '"team" is not a record-share recipient type (ADR-0111 D7)',
+      );
+      expect(message).not.toMatch(/delivered via/);
+      expect(engine._tables.sys_record_share ?? []).toHaveLength(0);
+    });
   });
 
   it('refuses a grant on a public object (no gate would ever consult it)', async () => {

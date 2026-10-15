@@ -21,6 +21,7 @@ import {
   ESCALATION_SCAN_INTERVAL_MS,
   type ApprovalEngine,
   type ApprovalMessagingSurface,
+  type ObjectReadAdmission,
 } from './approval-service.js';
 import {
   bindApprovalLockHook,
@@ -292,6 +293,19 @@ export class ApprovalsServicePlugin implements Plugin {
           : Promise.resolve(undefined);
       },
     });
+    // [#23637] The same service's object-level read admission (`canReadObject`),
+    // asked before a lookup target is read as the reader, so a target object
+    // the reader may not read at all is skipped without a logged denial
+    // (`ApprovalService.admittedTargetObjects`). Resolved on every read, as
+    // above; an absent service, or one without the member, leaves every
+    // target to the caller-scoped read.
+    this.service.attachObjectReadAdmission(() => {
+      try {
+        return ctx.getService<ObjectReadAdmission>('security');
+      } catch {
+        return undefined;
+      }
+    });
 
     // Record lock: block edits to a record while it has a pending request.
     // Record-delete cancel (#13568): void a record's pending requests when the
@@ -305,7 +319,9 @@ export class ApprovalsServicePlugin implements Plugin {
     if (!this.options.disableAutoHooks) {
       try {
         unbindAllHooks(engine);
-        bindApprovalLockHook(engine, ctx.logger);
+        // [#23618] The refusal's title is narrowed by the writer's served fields,
+        // through the same lazily-resolved authority the snapshot redaction reads.
+        bindApprovalLockHook(engine, ctx.logger, fieldVisibility);
         bindRecordDeleteCancelHook(engine, this.service, ctx.logger);
         bindDelegationWriteGuard(engine, ctx.logger);
         // [#10749] Generic-door snapshot redaction. Registered here so the

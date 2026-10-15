@@ -89,6 +89,7 @@ import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemales
 import { AdminScopeSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
+import { PageSchema } from '../ui/page.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
@@ -308,6 +309,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       "datasource driver 'mongo'",
       () => DatasourceSchema.safeParse({ name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' } }),
       'driver',
+    ),
+  ],
+  // #23543 F5-jsx: an enum member retired through `enumWithRetiredValues`; the
+  // page is otherwise a complete html page, so `kind` is the only issue.
+  'page-kind-jsx-to-html': [
+    refusal(
+      "page kind 'jsx'",
+      () => PageSchema.safeParse({ name: 'landing', label: 'Landing', kind: 'jsx', source: '<div>hi</div>' }),
+      'kind',
     ),
   ],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.

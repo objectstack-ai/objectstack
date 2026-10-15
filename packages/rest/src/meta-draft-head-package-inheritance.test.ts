@@ -171,7 +171,11 @@ async function boot(opts: { item?: { type: string; name: string }; permissions?:
     const remove = (query: Record<string, string> = {}, headers: Record<string, string> = {}) =>
         call('DELETE', `${META}/:type/:name`, { path, params: item, query, headers });
 
-    return { read, save, remove, stored, storedBodies, seed };
+    /** `POST /meta/view/case_grid/publish` (the per-item draft promotion). */
+    const publish = (query: Record<string, string> = {}) =>
+        call('POST', `${META}/:type/:name/publish`, { path: `${path}/publish`, params: item, query, body: {} });
+
+    return { read, save, remove, publish, stored, storedBodies, seed };
 }
 
 const ok = (res: any) => {
@@ -418,5 +422,105 @@ describe('[#23165] a save or a delete naming no package addresses the one packag
         expect(await h.stored('active')).toEqual([{ label: 'plain', packageId: null }]);
         expect(ok(await h.remove()).reset).toBe(true);
         expect(await h.stored('active')).toEqual([]);
+    }, 60_000);
+});
+
+/**
+ * [#23495, ADR-0048] The draft doors that name no package, on the real routes:
+ * the per-item publish (`POST …/publish`) and the draft discard
+ * (`DELETE …?state=draft`) act on the draft the draft save naming no package
+ * writes (`PUT …?mode=draft`), which the strict draft read serves. Measured on
+ * these routes before the fix: over an item bound to a package, the publish
+ * promoted the package-unbound draft beside the package's (the store returns
+ * it first) into a package-less active row, and with the only draft bound to
+ * another package the publish promoted it into a second package's active row
+ * and the discard removed it, while the read answered `404 NO_DRAFT`. The
+ * protocol suite (`protocol.packageless-save-address.test.ts` in
+ * metadata-protocol) holds the rest of the matrix, both storage orders
+ * included, over a stub engine.
+ */
+describe('[#23495] the draft doors naming no package act on the draft the draft save writes, on the real routes', () => {
+    const OTHER_PKG = 'com.probe.other';
+
+    /** Drafts `[package-unbound, PKG]` over an active row bound to `PKG`. */
+    const stateOne = async () => {
+        const h = await boot();
+        ok(await h.save(view('stale'), { mode: 'draft' }));
+        ok(await h.save(view('live'), { package: PKG }));
+        ok(await h.save(view('pending'), { mode: 'draft', package: PKG }));
+        return h;
+    };
+    /** The active row bound to `PKG`, the only draft bound to `OTHER_PKG`. */
+    const stateTwo = async () => {
+        const h = await boot();
+        ok(await h.save(view('live'), { package: PKG }));
+        ok(await h.save(view('other'), { mode: 'draft', package: OTHER_PKG }));
+        return h;
+    };
+
+    it('drafts [package-unbound, P] over P: the save, the read, the publish and the discard all address P\'s draft', async () => {
+        const s = await stateOne();
+        const saved = ok(await s.save(view('saved'), { mode: 'draft' }));
+        expect(saved.message).toContain(`package=${PKG}`);
+        expect(await s.stored('draft')).toEqual(expect.arrayContaining([{ label: 'saved', packageId: PKG }, { label: 'stale', packageId: null }]));
+
+        const r = await stateOne();
+        expect(ok(await r.read({ state: 'draft' })).item.label).toBe('pending');
+
+        const p = await stateOne();
+        ok(await p.publish());
+        expect(await p.stored('active')).toEqual([{ label: 'pending', packageId: PKG }]);
+        expect(await p.stored('draft')).toEqual([{ label: 'stale', packageId: null }]);
+        expect(ok(await p.read()).item.label).toBe('pending');
+
+        const d = await stateOne();
+        expect(ok(await d.remove({ state: 'draft' })).reset).toBe(true);
+        expect(await d.stored('draft')).toEqual([{ label: 'stale', packageId: null }]);
+    }, 60_000);
+
+    it('the only draft bound to another package: the publish answers 404 NO_DRAFT as the read does, the discard removes nothing, and ?package= reaches it', async () => {
+        const r = await stateTwo();
+        const read = await r.read({ state: 'draft' });
+        expect(read.statusCode).toBe(404);
+        expect(read.body.code).toBe('NO_DRAFT');
+
+        const p = await stateTwo();
+        const published = await p.publish();
+        expect(published.statusCode, JSON.stringify(published.body)).toBe(404);
+        expect(published.body.code).toBe('NO_DRAFT');
+        expect(published.body.error).toContain(OTHER_PKG);
+        expect(await p.stored('active')).toEqual([{ label: 'live', packageId: PKG }]);
+        expect(await p.stored('draft')).toEqual([{ label: 'other', packageId: OTHER_PKG }]);
+
+        const d = await stateTwo();
+        const discarded = ok(await d.remove({ state: 'draft' }));
+        expect(discarded.reset).toBe(false);
+        expect(discarded.message).toContain(OTHER_PKG);
+        expect(await d.stored('draft')).toEqual([{ label: 'other', packageId: OTHER_PKG }]);
+
+        const named = await stateTwo();
+        ok(await named.publish({ package: OTHER_PKG }));
+        expect(await named.stored('draft')).toEqual([]);
+        expect(await named.stored('active')).toEqual(expect.arrayContaining([{ label: 'other', packageId: OTHER_PKG }]));
+    }, 60_000);
+
+    it('active rows bound to two packages: the publish and the discard naming none are refused 409 RESOURCE_CONFLICT, as the draft save is', async () => {
+        const build = async () => {
+            const h = await boot();
+            ok(await h.save(view('A'), { package: PKG }));
+            ok(await h.save(view('B'), { package: OTHER_PKG }));
+            ok(await h.save(view('pending'), { mode: 'draft', package: PKG }));
+            return h;
+        };
+        for (const door of ['save', 'publish', 'discard'] as const) {
+            const h = await build();
+            const res = door === 'save'
+                ? await h.save(view('saved'), { mode: 'draft' })
+                : door === 'publish' ? await h.publish() : await h.remove({ state: 'draft' });
+            expect(res.statusCode, `${door}: ${JSON.stringify(res.body)}`).toBe(409);
+            expect(res.body.code, door).toBe('RESOURCE_CONFLICT');
+            expect(await h.stored('draft'), door).toEqual([{ label: 'pending', packageId: PKG }]);
+            expect(await h.stored('active'), door).toHaveLength(2);
+        }
     }, 60_000);
 });

@@ -163,6 +163,7 @@ export * from './utils/multi-value-storage-form.js';
 // evaluates itself — one set and one sentence, here for the reason the entry
 // above gives.
 export * from './utils/json-column-operator-refusal.js';
+export * from './utils/readable-ids-driver-refusal.js';
 
 // [#12350 / ADR-0126 §4] THE activation-ledger row contract, parameterized by
 // `metadata_type`. Same reason as the two entries above: its consumers —

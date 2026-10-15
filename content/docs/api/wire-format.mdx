@@ -487,9 +487,11 @@ release group); any code reading them directly should move to `error.code`.
 A host built with `@objectstack/hono`'s `createHonoApp`, and a route mounted on
 `@objectstack/plugin-hono-server`'s `HonoHttpServer`, answer a declared refusal that
 escapes the handler in the nested envelope above, without `httpStatus`. The extras the
-REST door's classification adds (`fields`, `currentVersion`, `dependentObject`, …) ride in
-`error.details`; `currentRecord`, and an `object` the flat body takes from the request's
-route, are not sent. The concurrent update above, on a `createHonoApp` host whose catch-all serves `/data`:
+REST door's classification adds (`fields`, `currentVersion`, `currentRecord`, `dependentObject`, …)
+ride in `error.details`; an `object` the flat body takes from the request's route is not
+sent. `currentRecord` is the row as the caller reads it, on either door: a field the caller's
+field-level rules hide is absent from it. The concurrent update above, on a `createHonoApp`
+host whose catch-all serves `/data`:
 
 ```json
 {
@@ -497,7 +499,14 @@ route, are not sent. The concurrent update above, on a `createHonoApp` host whos
   "error": {
     "code": "CONCURRENT_UPDATE",
     "message": "Record task/tsk_01HQ4A7B9D3F5G8J2K4L was modified by another user (current version 2025-01-20T14:15:00.000Z, expected 2025-01-20T14:10:00.000Z)",
-    "details": { "currentVersion": "2025-01-20T14:15:00.000Z" }
+    "details": {
+      "currentVersion": "2025-01-20T14:15:00.000Z",
+      "currentRecord": {
+        "id": "tsk_01HQ4A7B9D3F5G8J2K4L",
+        "title": "Implement login page",
+        "updated_at": "2025-01-20T14:15:00.000Z"
+      }
+    }
   }
 }
 ```

@@ -36,7 +36,7 @@
     },
     "@objectstack/docs#build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**", "public/llms-full.txt"],
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/content/**"]
     },
     "@objectstack/skills#build": {

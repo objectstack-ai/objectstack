@@ -288,7 +288,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 | 守卫 | 一句话 |
 |:--|:--|
-| `scripts/pm/check-skill-line-ratchet.mjs` | 本文件行数只降不升(`pnpm check:pm-skill-ratchet`);抬上限需维护者裁决引用在 PR 正文;⛔ re-wrap 不得用作筹行,新增以删减付账;不买内容的密度修复允许 |
+| `scripts/pm/check-skill-line-ratchet.mjs` | 本文件行数只降不升(`pnpm check:pm-skill-ratchet`);抬上限凭下令写入的裁决记录:其评论 id 与实测行数增量引在 PR 正文,同 PR 移上限行至多增量;无裁决 id 即红;⛔ re-wrap 不得用作筹行,新增以删减付账;不买内容的密度修复允许 |
 | `scripts/pm/check-skill-id-lint.mjs` | 本技能与 os-dev 定义的操作文本 ⛔ 不引用 issue 编号(`pnpm check:pm-skill-id-lint`) |
 | `scripts/pm/check-half-states.mjs` | label/assignee/PR 半状态的 report-only 巡查(含已复核就绪却无人落地的孤儿 PR 检测) |
 | `scripts/pm/check-governed-merges.mjs` | governed 面合并清单的 report-only 审计(事后防线;本地枚举零 API,仅归因走查询) |

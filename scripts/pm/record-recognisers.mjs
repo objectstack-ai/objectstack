@@ -7,6 +7,7 @@
  *
  *   node scripts/pm/record-recognisers.mjs --template   # the record, copyable; no network
  *   node scripts/pm/record-recognisers.mjs --brief-template   # the reviewer's brief, read-only shape built in; no network
+ *   node scripts/pm/record-recognisers.mjs --template --paths PATH-ONE PATH-TWO   # face and `Scope:` read off the PR's paths
  *   node scripts/pm/record-recognisers.mjs --self-test  # offline, no network
  *   node scripts/pm/record-recognisers.mjs --help       # this usage; no network
  *
@@ -22,6 +23,7 @@
  *   deliveredCardNumber      which card thread a pull request's record may sit on
  *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it — at the tier its face maps to
  *   reviewFace / REVIEW_FACES which face made the review owed, and the ONE tier NAME it stands at
+ *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
  *   readLocalRuns            the `Local-runs:` line, and `localRunsStand` on it — judged when present, absent not re-judged
  *   isModelIdentifierToken   the token a refusal must never quote back
  *   REVIEW_OF_RECORD_THREADS the ONE thread set, and REVIEW_OF_RECORD_LOCATION its words
@@ -151,7 +153,8 @@ export const REVIEW_TIER_NAMES = Object.freeze([...new Set(REVIEW_FACES.map((fac
  * ⭐ A mixed diff maps to `CONTRACT_REVIEW_TIER` on ONE hit: a schema or governed
  * path anywhere in the list decides it, the way one governed path governs the
  * whole pull request. `hits` names the paths that decided, so a reader can see
- * why.
+ * why — and, since ruling record 6184805932 on #23578 (letter C), it is also the
+ * SCOPE FLOOR of that review: `reviewScopeHits` below.
  *
  * `repo` selects the governed register's rows, as `governedPathsIn` requires;
  * this file runs in `objectstack-ai/objectstack`, so that is the default.
@@ -173,6 +176,31 @@ export function reviewFace(paths, repo = SELF_REPO_ID) {
 /** The face a `--face` argument names, or null — the CLI's half of the same table. */
 export function reviewFaceById(id) {
   return REVIEW_FACES.find((face) => face.id === id) ?? null;
+}
+
+/**
+ * The SCOPE FLOOR of the at-tier review: every path `reviewFace` returns as
+ * `hits`, schema hits first, each once. Pure over the path list.
+ *
+ * Ruling record 6184805932 on #23578 (letter C, maintainer 「同意」): the TIER
+ * stays the one the face maps to, but the at-tier review of a mixed diff covers
+ * these paths plus every file their hunks make a claim about (a rule and the
+ * gate that enforces it are one change, read as one); the rest is the lane
+ * seat's ACCEPT at `TIER_DEFAULT`, exactly as a standalone pull request of those
+ * files. The record's `Scope:` line lists both halves, and may widen, ⛔ never
+ * narrow below this list. Tier H approval and the queue guard stay whole-PR:
+ * nothing here is read by the guard.
+ *
+ * ⭐ Read off `reviewFace`, never a second classification: the same function the
+ * queue guard decides the face with, so the floor cannot name a path the face
+ * did not count, nor miss one it did. Empty exactly on the declaration face.
+ *
+ * @param {string[]} paths  the pull request's changed paths (its committed tree)
+ * @returns {string[]}
+ */
+export function reviewScopeHits(paths, repo = SELF_REPO_ID) {
+  const { hits } = reviewFace(paths, repo);
+  return [...new Set([...hits.schema, ...hits.rules])];
 }
 
 
@@ -715,6 +743,23 @@ export const RECORD_TEMPLATE_PLACEHOLDERS = Object.freeze({
 });
 
 /**
+ * The two slots of the at-tier record's `Scope:` line (ruling record 6184805932,
+ * letter C): the `hits` floor, which `--paths` fills from `reviewScopeHits`, and
+ * the files the reviewer read because those hunks make a claim about them,
+ * which only the reviewer can name (`none` when there are none).
+ *
+ * ⭐ Kept apart from the placeholders above on purpose: those PARSE through the
+ * readers that judge a record, and no reader reads `Scope:` — the queue guard is
+ * unchanged by the ruling, so this line is the reviewer's statement to the seats
+ * and the post-merge audit, never a landing fact. ⛔ No angle brackets, for the
+ * same sanitizer reason, and no path separator, so neither reads as a path.
+ */
+export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
+  hits: 'PATH-ONE, PATH-TWO',
+  cited: 'CITED-FILE',
+});
+
+/**
  * The record itself — the lines a seat copies, and nothing else.
  *
  * ⭐ Rendered from the same constants the readers compare against
@@ -734,7 +779,15 @@ export const RECORD_TEMPLATE_PLACEHOLDERS = Object.freeze({
  * REFUSED here rather than printed: the template cannot teach a spelling
  * `servedTierStands` refuses.
  *
- * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string}} values
+ * ⭐ The at-tier record carries `Scope:` (ruling record 6184805932, letter C):
+ * the `hits` floor, then `+` and the files read for those hunks' claims.
+ * `scopeHits` fills the floor (`reviewScopeHits`); left out, it is the
+ * placeholder. ⛔ Only at `CONTRACT_REVIEW_TIER`: the declaration face has no
+ * hits, its whole review is the lane seat's own, and so it has no scope to state.
+ * Plain text, ⛔ never a code span: a span is where `contractReviewHeadMatch`
+ * looks for the head, and a path must never be a candidate for it.
+ *
+ * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string, scopeHits?: string[]}} values
  * @returns {string[]}
  */
 export function contractReviewRecordLines(values = {}) {
@@ -743,12 +796,14 @@ export function contractReviewRecordLines(values = {}) {
   if (!REVIEW_TIER_NAMES.includes(tierName)) {
     throw new Error(`record-recognisers: no face maps to the tier name '${tierName}' — known: ${REVIEW_TIER_NAMES.join(', ')}`);
   }
+  const scopeHits = values.scopeHits === undefined ? RECORD_SCOPE_PLACEHOLDERS.hits : values.scopeHits.join(', ');
   return [
     '## Contract review',
     '',
     `Served-tier: \`${tierName}\``,
     `Head-sha: \`${headSha}\``,
     'Local-runs: none',
+    ...(tierName === CONTRACT_REVIEW_TIER_NAME ? [`Scope: ${scopeHits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}`] : []),
     '',
     '### ① Derived judgments',
     '',
@@ -764,7 +819,7 @@ export function contractReviewRecordLines(values = {}) {
 }
 
 /** Where the copyable region starts and ends, so "copy it" names a boundary. */
-export const RECORD_TEMPLATE_FENCE_START = '----- copy from here; replace the three placeholders -----';
+export const RECORD_TEMPLATE_FENCE_START = '----- copy from here; replace every placeholder -----';
 export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
 
 /**
@@ -898,15 +953,14 @@ export function deliveredCardNumber(pr) {
  * wrote a leading word anyway. A template shows it instead of saying it.
  */
 export function contractReviewTemplateLines(values = {}) {
-  const { face: faceId, ...recordValues } = values;
-  const face = faceId === undefined ? null : reviewFaceById(faceId);
-  if (faceId !== undefined && face === null) {
-    throw new Error(`record-recognisers: unknown face '${faceId}' — known: ${REVIEW_FACES.map((f) => f.id).join(', ')}`);
-  }
+  const { face: faceId, paths, ...recordValues } = values;
+  const { face, scopeHits } = templateFace({ face: faceId, paths });
   const tierName = face?.tierName ?? CONTRACT_REVIEW_TIER_NAME;
   const faceLine = face === null
     ? `                    No face asked: this is ${CONTRACT_REVIEW_TIER_NAME}, the tier of a schema or governed-path face.`
-    : `                    Asked for the ${face.id} face: ${tierName}.`;
+    : paths === undefined
+      ? `                    Asked for the ${face.id} face: ${tierName}.`
+      : `                    Read off --paths: the ${face.id} face, ${tierName}.`;
   return [
     'record-recognisers --template — the contract-review record of record, copyable. It is',
     `ONE comment on ${REVIEW_OF_RECORD_LOCATION}; the NEWEST one naming this head governs.`,
@@ -917,7 +971,7 @@ export function contractReviewTemplateLines(values = {}) {
     '   and stays silent, so writing one line badly is the only way to be refused.',
     '',
     RECORD_TEMPLATE_FENCE_START,
-    ...contractReviewRecordLines({ ...recordValues, tierName }),
+    ...contractReviewRecordLines({ ...recordValues, tierName, ...(scopeHits === undefined ? {} : { scopeHits }) }),
     RECORD_TEMPLATE_FENCE_END,
     '',
     "  · Served-tier     the NAME of the tier the review's FACE maps to, ⛔ never a model id, and EXACT:",
@@ -932,6 +986,12 @@ export function contractReviewTemplateLines(values = {}) {
     '                    nothing built, run or re-run locally); or `probe — REASON`, naming the ONE local run',
     '                    the rule was broken for. A record without the line predates it and is not re-judged;',
     '                    a line present that reads neither is refused before the write.',
+    `  · Scope           at ${CONTRACT_REVIEW_TIER_NAME} only: first the paths \`reviewFace\` returns as \`hits\` on`,
+    "                    the PR's file list (--paths PATH... prints them filled in), then `+` and every other",
+    '                    file those hunks make a claim about, read in the cited code (`+ none` if none); a rule',
+    '                    and the gate that enforces it are one change, read as one. Widen it freely, ⛔ never',
+    `                    below \`hits\`. The rest of a mixed diff is the lane seat's ACCEPT at ${TIER_DEFAULT_NAME},`,
+    '                    named there; Tier H approval and the queue guard stay whole-PR.',
     '  · Implemented-by  the identity that produced the diff, read off the implementation claim:',
     "                    a mode:subagent dev's BRANCH, a mode:remote dev's session id.",
     '  · Reviewed-by     the session that RENDERS or ADOPTS the verdict — a session only. Prose',
@@ -945,8 +1005,34 @@ export function contractReviewTemplateLines(values = {}) {
   ];
 }
 
+/**
+ * Which face a template is printed for — from `face` (a table id) or from `paths`
+ * (the pull request's file list, read through `reviewFace` and
+ * `reviewScopeHits`), ⛔ never both: two answers to one question would let a
+ * seat print one face's tier beside another face's scope. An empty list is no
+ * list, and is refused rather than read as the declaration face.
+ *
+ * @returns {{ face: object|null, scopeHits: string[]|undefined }}
+ */
+function templateFace({ face: faceId, paths }) {
+  if (faceId !== undefined && paths !== undefined) {
+    throw new Error('record-recognisers: `face` and `paths` both given — the face is read off the paths, pass one');
+  }
+  if (paths !== undefined) {
+    if (!Array.isArray(paths) || paths.length === 0) {
+      throw new Error('record-recognisers: `paths` names no path — the face and the scope are read off a non-empty file list');
+    }
+    return { face: reviewFaceById(reviewFace(paths).face), scopeHits: reviewScopeHits(paths) };
+  }
+  const face = faceId === undefined ? null : reviewFaceById(faceId);
+  if (faceId !== undefined && face === null) {
+    throw new Error(`record-recognisers: unknown face '${faceId}' — known: ${REVIEW_FACES.map((f) => f.id).join(', ')}`);
+  }
+  return { face, scopeHits: undefined };
+}
+
 /** Where the brief's copyable region starts and ends. */
-export const BRIEF_TEMPLATE_FENCE_START = '----- copy from here; replace the four placeholders -----';
+export const BRIEF_TEMPLATE_FENCE_START = '----- copy from here; replace every placeholder -----';
 export const BRIEF_TEMPLATE_FENCE_END = '----- to here -----';
 
 /** The placeholders the printed brief ships with — the four slots a seat fills. */
@@ -975,17 +1061,31 @@ export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
  * inputs are the card, the PR and the check-runs — ⛔ not the dispatch order and
  * ⛔ not the dispatching seat's conclusions. The record's own template is named
  * rather than restated, so the two cannot drift.
+ *
+ * ⭐ At `CONTRACT_REVIEW_TIER` the brief states the review's SCOPE (ruling record
+ * 6184805932, letter C): the `hits` floor — filled in when `paths` is given, and
+ * then the record command is `--template --paths` over those hits, which reads
+ * back the same face and the same floor — plus the files those hunks claim
+ * about; widen freely, ⛔ never below `hits`. The declaration face states none.
  */
 export function contractReviewBriefLines(values = {}) {
   const { pr, card, headSha, scratchpad } = { ...BRIEF_TEMPLATE_PLACEHOLDERS, ...values };
   // The brief names the tier its face maps to, and the record command that prints that face's
   // record — so a brief for a declaration-only review cannot hand its reviewer the other tier.
-  const face = values.face === undefined ? null : reviewFaceById(values.face);
-  if (values.face !== undefined && face === null) {
-    throw new Error(`record-recognisers: unknown face '${values.face}' — known: ${REVIEW_FACES.map((f) => f.id).join(', ')}`);
-  }
+  const { face, scopeHits } = templateFace({ face: values.face, paths: values.paths });
   const tierName = face?.tierName ?? CONTRACT_REVIEW_TIER_NAME;
-  const templateCommand = `node scripts/pm/record-recognisers.mjs --template${face === null ? '' : ` --face ${face.id}`}`;
+  const atTier = tierName === CONTRACT_REVIEW_TIER_NAME;
+  const templateArgs = scopeHits !== undefined && atTier
+    ? ` --paths ${scopeHits.join(' ')}`
+    : face === null ? '' : ` --face ${face.id}`;
+  const templateCommand = `node scripts/pm/record-recognisers.mjs --template${templateArgs}`;
+  const scopeLines = !atTier ? [] : [
+    `Scope — the paths \`reviewFace\` returns as \`hits\` on this PR's file list: ${scopeHits?.join(', ') ?? RECORD_SCOPE_PLACEHOLDERS.hits};`,
+    '  plus every file those hunks make a claim about, read in the cited code — a rule and the gate that enforces it',
+    "  are one change, read as one. Widen it freely, ⛔ never below `hits`; the record's `Scope:` line lists both.",
+    `  The rest of the diff is the lane seat's ACCEPT at \`${TIER_DEFAULT_NAME}\`, exactly as a standalone PR of those files.`,
+    '',
+  ];
   return [
     'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
     "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
@@ -1003,6 +1103,7 @@ export function contractReviewBriefLines(values = {}) {
     `  · the check-runs on \`${headSha}\`: their conclusions ARE the gate verdicts`,
     "⛔ Not the dispatch order, ⛔ not the dispatching seat's own conclusions — this brief is adversarial by design.",
     '',
+    ...scopeLines,
     '⛔ READ-ONLY. No worktree, no checkout, no build, no test run, no gate re-run, no ablation: the check-runs',
     '   on the head already answered every derived gate family, and a local run costs more than it returns.',
     "   If ONE probe is unavoidable, the record's `Local-runs:` line says `probe — REASON`; otherwise `none`.",
@@ -1162,12 +1263,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 10,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
+  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
 // Raised 8 → 10 with the two B′-with-C batteries (ruling record 6159870311): two batteries, two rows.
-const SELF_TEST_BATTERY_FLOOR = 10;
+// Raised 10 → 11 with the letter-C scope battery (ruling record 6184805932): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1366,6 +1469,38 @@ export async function selfTest() {
   t('⭐ `--template --face declaration` prints exactly that face\'s template and exits 0', (() => { const r = faceCli(['--template', '--face', 'declaration']); return r.status === 0 && r.stdout === `${DECL_TPL}\n`; })());
   t('⛔ `--face` naming no face is REFUSED with the usage, exit 1', (() => { const r = faceCli(['--template', '--face', 'lane']); return r.status === 1 && says(r.stderr, 'usage:'); })() && faceCli(['--template', '--face']).status === 1);
   t('`--brief-template --face declaration` prints exactly that face\'s brief', (() => { const r = faceCli(['--brief-template', '--face', 'declaration']); return r.status === 0 && r.stdout === `${contractReviewBriefLines({ face: 'declaration' }).join('\n')}\n`; })());
+
+  // -- letter C: the at-tier review of a mixed diff is SCOPED ----------------
+  //
+  // Ruling record 6184805932 on #23578. The TIER is untouched (the battery
+  // above); what moved is the SCOPE: `hits` plus the files their hunks claim
+  // about, stated on the record's `Scope:` line, the rest the lane seat's
+  // ACCEPT at the default tier. ⛔ No reader reads the line — the guard is
+  // unchanged — so these cases pin what is PRINTED, and the thread-set battery
+  // below drives the guard with the very record that carries it.
+  battery('⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line');
+  const MIXED = [...DECL_PATHS, RULES_PATH, SCHEMA_PATH, RULES_PATH];
+  const SCOPE_HEAD = 'c0ffee'.padEnd(40, '0');
+  const scopeLineOf = (text) => String(text).split('\n').filter((line) => line.startsWith('Scope:'));
+  const fenced = (lines) => lines.slice(lines.indexOf(RECORD_TEMPLATE_FENCE_START) + 1, lines.indexOf(RECORD_TEMPLATE_FENCE_END)).join('\n');
+  t('⭐ the floor of a mixed diff is exactly its `hits` — schema first, each once — and the remainder is not in it', reviewScopeHits(MIXED).join() === [SCHEMA_PATH, RULES_PATH].join() && DECL_PATHS.every((p) => !reviewScopeHits(MIXED).includes(p)));
+  t('…read off `reviewFace` itself, on every face — never a second classification', [MIXED, DECL_PATHS, [RULES_PATH], [SCHEMA_PATH, SCHEMA_TEST_PATH]].every((list) => { const { hits } = reviewFace(list); return reviewScopeHits(list).join() === [...new Set([...hits.schema, ...hits.rules])].join(); }));
+  t('⛔ the declaration face has NO floor — its whole review is the lane seat\'s own', reviewScopeHits(DECL_PATHS).length === 0 && reviewScopeHits([SCHEMA_TEST_PATH]).length === 0);
+  t('⭐ the at-tier record carries ONE `Scope:` line, right after `Local-runs:`, with both slots as placeholders', (() => { const rec = contractReviewRecordLines(); const i = rec.indexOf(`Scope: ${RECORD_SCOPE_PLACEHOLDERS.hits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}`); return i > 0 && rec[i - 1] === 'Local-runs: none' && scopeLineOf(rec.join('\n')).length === 1; })());
+  t('⛔ the declaration face\'s record carries none — no hits to floor, and no tier to scope', scopeLineOf(DECL_TPL).length === 0 && scopeLineOf(contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).join('\n')).length === 0);
+  t('⛔ the slots carry no angle bracket and no path separator, so a placeholder never reads as a path', Object.values(RECORD_SCOPE_PLACEHOLDERS).every((p) => !/[<>/]/.test(p)));
+  t('⛔ the line is plain text, never a code span — a span is where the head is looked for', scopeLineOf(contractReviewTemplateLines({ paths: MIXED }).join('\n')).every((line) => !line.includes('`')));
+  t('⭐ `paths` reads the face AND fills the floor: a mixed diff prints CONTRACT_REVIEW_TIER and its hits, not its remainder', (() => { const text = contractReviewTemplateLines({ paths: MIXED }).join('\n'); return readServedTier(text).value === CONTRACT_REVIEW_TIER_NAME && scopeLineOf(text).join() === `Scope: ${SCHEMA_PATH}, ${RULES_PATH} + ${RECORD_SCOPE_PLACEHOLDERS.cited}` && DECL_PATHS.every((p) => !text.includes(p)); })());
+  t('…and that record still round-trips: FOUND on its head, and its tier STANDS on the face its paths put it on', (() => { const body = fenced(contractReviewTemplateLines({ paths: MIXED, headSha: SCOPE_HEAD })); const r = locateReviewOfRecord(pairOf({ headSha: SCOPE_HEAD, prComments: [{ id: 3801, created_at: '2026-10-15T10:00:00Z', body }] })); return r.state === 'found' && servedTierStands(r.served, reviewFace(MIXED).tierName); })());
+  t('⭐ `paths` with no hit prints the declaration face\'s record, byte-identical to `--face declaration`\'s', fenced(contractReviewTemplateLines({ paths: DECL_PATHS })) === fenced(contractReviewTemplateLines({ face: 'declaration' })));
+  t('⛔ `face` and `paths` together are REFUSED, and so is an empty list — never a guess between two answers', (() => { for (const v of [{ face: 'rules', paths: [RULES_PATH] }, { paths: [] }]) { try { contractReviewTemplateLines(v); return false; } catch { /* refused */ } try { contractReviewBriefLines(v); return false; } catch { /* refused */ } } return true; })());
+  t('⭐ the at-tier brief states the scope: `hits`, the claimed files, widen-never-narrow, the remainder\'s ACCEPT tier', (() => { const b = contractReviewBriefLines().join('\n'); return says(b, '`reviewFace` returns as `hits`') && says(b, RECORD_SCOPE_PLACEHOLDERS.hits) && says(b, 'make a claim about') && says(b, 'never below `hits`') && says(b, '`Scope:` line lists both') && says(b, `ACCEPT at \`${TIER_DEFAULT_NAME}\``); })());
+  t('⛔ the declaration-face brief states none', !says(contractReviewBriefLines({ face: 'declaration' }).join('\n'), '`Scope:` line'));
+  t('⭐ the brief over `paths` names the hits and hands the reviewer `--template --paths` over THEM — which reads back the same face and floor', (() => { const b = contractReviewBriefLines({ paths: MIXED }).join('\n'); const hits = reviewScopeHits(MIXED); return says(b, `file list: ${hits.join(', ')};`) && says(b, `--template --paths ${hits.join(' ')}\``) && fenced(contractReviewTemplateLines({ paths: hits })) === fenced(contractReviewTemplateLines({ paths: MIXED })); })());
+  t('…and over a declaration-only list it hands `--face declaration`, as the face table would', says(contractReviewBriefLines({ paths: DECL_PATHS }).join('\n'), '--template --face declaration`') && contractReviewBriefLines({ paths: DECL_PATHS }).join('\n') === contractReviewBriefLines({ face: 'declaration' }).join('\n'));
+  t('⭐ `--template --paths` and `--brief-template --paths` print exactly the function output and exit 0', (() => { const a = faceCli(['--template', '--paths', ...MIXED]); const b = faceCli(['--brief-template', '--paths', ...MIXED]); return a.status === 0 && a.stdout === `${contractReviewTemplateLines({ paths: MIXED }).join('\n')}\n` && b.status === 0 && b.stdout === `${contractReviewBriefLines({ paths: MIXED }).join('\n')}\n`; })());
+  t('⛔ `--paths` naming no path, or beside `--face` in either order, is REFUSED with the usage, exit 1', [['--template', '--paths'], ['--template', '--paths', RULES_PATH, '--face', 'rules'], ['--brief-template', '--face', 'rules', '--paths', RULES_PATH], ['--template', '--paths', '']].every((args) => { const r = faceCli(args); return r.status === 1 && says(r.stderr, 'usage:'); }));
+  t('…and the usage names the flag, the face it reads and the line it fills', ['--paths PATH...', '`reviewFace`', '`Scope:`'].every((s) => usageLines().join('\n').includes(s)));
 
   // -- the 2026-09-20 ruling: a PURE REGENERATION keeps the record -----------
   battery('⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees');
@@ -1590,6 +1725,7 @@ export async function selfTest() {
   t('…and the guard fetched exactly ONE thread per entry in the set, no more and no fewer', pinRuns.every(([, r]) => r.threadsRead.join() === `${PIN_PR},${PIN_CARD}`), JSON.stringify(pinRuns.map(([, r]) => r.threadsRead)));
   t('⛔ CONTROL: with the record on NEITHER thread the same run is refused -- the pin can fail', await (async () => { const none = await pinRun('nowhere'); return none.verdict.exitCode !== GUARD.EXIT_CLEAR && none.record?.state === 'absent'; })());
   t('the guard prints the location in the WORDS this file owns, so a seat is told one thing', GUARD.REVIEW_OF_RECORD_LOCATION === REVIEW_OF_RECORD_LOCATION && TEMPLATE_TEXT.includes(`ONE comment on ${REVIEW_OF_RECORD_LOCATION}`));
+  t('⭐ the record the guard cleared carries the at-tier `Scope:` line — the guard reads past it, unchanged (ruling record 6184805932)', PIN_RECORD.body.includes(`\nScope: ${RECORD_SCOPE_PLACEHOLDERS.hits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}\n`) && readSet === THREAD_SET);
 
   // The reader itself is built FROM the set, so a thread added to it is a thread
   // searched -- the property the two consumers above rest on.
@@ -1664,7 +1800,8 @@ export async function selfTest() {
       + 'recognition dialects, the unsigned and newest-governs readings and the two gaps; the head sha in a span '
       + 'of its own; the `Served-tier:` reading — at tier, below, missing, unreadable, the identifier refused by '
       + 'value and by shape, the stamp control and the measured continuation spelling; the review tier read off '
-      + 'the face — schema, governed rules text, the declaration alone — exact in both directions; the pure-regeneration carry and the prose-only carry decided on committed trees in '
+      + 'the face — schema, governed rules text, the declaration alone — exact in both directions; the at-tier scope '
+      + 'floor read off `hits` onto the `Scope:` line and into the brief, `--paths` included; the pure-regeneration carry and the prose-only carry decided on committed trees in '
       + 'every direction; the copyable template, per face, driven back through the '
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; and the ONE '
@@ -1681,23 +1818,42 @@ export async function selfTest() {
 // ---------------------------------------------------------------------------
 
 /**
- * The usage text. Four flags and nothing else: this file judges no pull
- * request from the command line — the queue guard does that, in the merge group.
+ * The usage text. A closed set of flags and nothing else: this file judges no
+ * pull request from the command line — the queue guard does that, in the merge
+ * group. `--paths` only PRINTS: it reads the face and the scope floor off the
+ * list a seat hands it, through the function the guard uses.
  */
 export function usageLines() {
   return [
-    'usage: node scripts/pm/record-recognisers.mjs [--template [--face FACE]] [--brief-template [--face FACE]] [--self-test] [--help]',
+    'usage: node scripts/pm/record-recognisers.mjs [--template|--brief-template [--face FACE | --paths PATH...]] [--self-test] [--help]',
     '',
     '  --template   print the copyable contract-review record and exit 0 -- no board is read',
     "  --brief-template   print the copyable reviewer's brief, read-only shape built in, and exit 0 -- no board is read",
     `  --face FACE  the face that made the review owed, one of: ${REVIEW_FACES.map((f) => `${f.id} (${f.tierName})`).join(', ')};`,
     `               the record's \`Served-tier:\` names that tier. Without it: ${CONTRACT_REVIEW_TIER_NAME}.`,
+    "  --paths PATH...  the PR's changed paths, in place of --face: `reviewFace` reads the face off them, and the",
+    "               at-tier record's `Scope:` line and the brief print its `hits` filled in. Not with --face.",
     "  --self-test  run this file's own battery, offline -- no board is read",
     '  --help, -h   print this text and exit 0',
     '',
     `  The record lands a Tier S pull request: ONE comment on ${REVIEW_OF_RECORD_LOCATION}, naming the`,
     '  head it reviewed. `check-governed-queue-guard.mjs` reads it in the merge group.',
   ];
+}
+
+/**
+ * What follows `--template` / `--brief-template`: nothing, `--face FACE` naming
+ * a table id, or `--paths` and at least one path — or null, and the line is
+ * refused with the usage. ⛔ A flag-shaped or empty word among the paths is
+ * refused too, so `--paths a --face rules` can never print one face's tier
+ * beside another's scope.
+ */
+function templateArgsOf(rest) {
+  if (rest.length === 0) return {};
+  if (rest.length === 2 && rest[0] === '--face' && reviewFaceById(rest[1]) !== null) return { face: rest[1] };
+  const paths = rest.slice(1);
+  if (rest[0] === '--paths' && paths.length > 0 && paths.every((p) => p !== '' && !p.startsWith('-'))) return { paths };
+  return null;
 }
 
 if (isEntrypoint(import.meta.url)) {
@@ -1725,13 +1881,10 @@ if (isEntrypoint(import.meta.url)) {
         process.exit(1);
       },
     );
-  } else if (
-    (argv.length === 1 || (argv.length === 3 && argv[1] === '--face' && reviewFaceById(argv[2]) !== null)) &&
-    (argv[0] === '--template' || argv[0] === '--brief-template')
-  ) {
+  } else if ((argv[0] === '--template' || argv[0] === '--brief-template') && templateArgsOf(argv.slice(1)) !== null) {
     // ⛔ `--face` takes one of the table's ids or the whole line is refused below — a face this file does
     // not map would print a tier no reader accepts.
-    const asked = argv.length === 3 ? { face: argv[2] } : {};
+    const asked = templateArgsOf(argv.slice(1));
     const lines = argv[0] === '--template' ? contractReviewTemplateLines(asked) : contractReviewBriefLines(asked);
     for (const line of lines) console.log(line);
     process.exit(0);

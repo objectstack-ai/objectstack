@@ -107,16 +107,16 @@ describe('PUT / DELETE /api/v1/meta/flow/:name on a packaged flow — the refusa
         expectRegimeC(r.message);
     });
 
-    it('control: a packaged `page` (no declared regime) reads the managed seal (ADR-0131 D6)', async () => {
+    it('control: a packaged `page` (no declared regime) reads the one sealed-write sentence (ADR-0131 D6)', async () => {
         const { call } = boot('env_1');
         const r = await call('PUT', 'page', PACKAGED_PAGE, { name: PACKAGED_PAGE, label: 'Changed in place' });
         expect(r.status).toBe(403);
         expect(r.code).toBe('NOT_OVERRIDABLE');
+        // [#23577] What the door knows and where the names are listed — no
+        // create advice, no source-artifact advice.
         expect(r.message).toBe(
-            `Metadata item 'page/${PACKAGED_PAGE}' is provided by a managed package and is sealed against in-place edits: `
-            + 'its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not open '
-            + 'a managed item. Edit the source artifact and redeploy. '
-            + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.',
+            `'page/${PACKAGED_PAGE}' is provided by a managed package and is sealed: it cannot be written here. `
+            + 'GET /api/v1/meta/page lists the names in use.',
         );
     });
 });

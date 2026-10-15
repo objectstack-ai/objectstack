@@ -329,7 +329,17 @@ const MODULES = {
     // string `error` bodies of `registerDataActionEndpoints`' handlers left this
     // file with that body for `data-action-routes.ts`, which declares them
     // below at the count they had here; the sum is unchanged (26 + 13 = 39).
-    stringError: 26,
+    //
+    // 26 → 18 (#23050 slice 2): NOT progress — the same MOVE. The eight literal
+    // string `error` bodies of `registerBatchEndpoints`' handlers left this file
+    // with that body for `batch-routes.ts`, declared below at the count they had
+    // here; the sum is unchanged (18 + 13 + 8 = 39).
+    //
+    // 18 → 17 (#23050 slice 3): NOT progress — the same MOVE. The one literal
+    // string `error` body of `registerApprovalsEndpoints`' handlers left this
+    // file with that body for `approvals-routes.ts`, declared below at the count
+    // it had here; the sum is unchanged (17 + 13 + 8 + 1 = 39).
+    stringError: 17,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -371,7 +381,16 @@ const MODULES = {
     // 54 → 39 (#23050 slice 1): NOT progress — the same MOVE as `stringError`
     // above. Fifteen `{ code, error }` bodies left with the data-action body for
     // `data-action-routes.ts`, declared below; the sum is unchanged (39 + 15 = 54).
-    siblingCode: 39,
+    //
+    // 39 → 31 (#23050 slice 2): NOT progress — the same MOVE as `stringError`
+    // above. Eight `{ code, error }` bodies left with the batch body for
+    // `batch-routes.ts`, declared below; the sum is unchanged (31 + 15 + 8 = 54).
+    //
+    // 31 → 22 (#23050 slice 3): NOT progress — the same MOVE as `stringError`
+    // above. Nine `{ code, error }` bodies left with the approvals body for
+    // `approvals-routes.ts`, declared below; the sum is unchanged
+    // (22 + 15 + 8 + 9 = 54).
+    siblingCode: 22,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -426,6 +445,41 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 13,
     siblingCode: 15,
+  },
+
+  // [#23050 slice 2] `RestServer#registerBatchEndpoints`' body — the
+  // cross-object transactional batch and the four per-object bulk doors —
+  // moved out of `rest-server.ts` whole, on exactly slice 1's terms above: a
+  // MOVE, no wire answer changed, so it inherits `dialectOnly` and the two
+  // dialect facts, and no write-site count. Both counts were measured on the
+  // moved file and equal what left `rest-server.ts` in the same PR (stringError
+  // 26 → 18, siblingCode 39 → 31), so each sum is unchanged. Both only ever tick
+  // down. Discovered by the `*-routes.ts` convention and declared in the same PR
+  // that created the module, so the gap never exists.
+  'packages/rest/src/batch-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 2 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 8,
+    siblingCode: 8,
+  },
+
+  // [#23050 slice 3] `RestServer#registerApprovalsEndpoints`' body — the
+  // approval request list and read, the decisions, recall, the flow moves, the
+  // thread interactions and the audit trail — moved out of `rest-server.ts`
+  // whole, on exactly slice 1's terms above: a MOVE, no wire answer changed, so
+  // it inherits `dialectOnly` and the two dialect facts, and no write-site
+  // count. Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 18 → 17, siblingCode 31 → 22),
+  // so each sum is unchanged. Both only ever tick down. Discovered by the
+  // `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/approvals-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 3 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 1,
+    siblingCode: 9,
   },
 };
 

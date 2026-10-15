@@ -59,6 +59,11 @@ import {
   jsonMembershipPredicate,
   type JsonColumnFieldClass,
 } from '@objectstack/core';
+// [ADR-0139 D3] The walk that finds a `ReadableIds` leaf this compiler will not
+// evaluate and the one refusal every driver answers it with, shared with the
+// local face (`SqlDriver.applyFilters`), `driver-memory` and `driver-mongodb`.
+import { findMisplacedReadableIds, readableIdsDriverRefusal } from '@objectstack/core';
+import { isComposedReadableIds, type FilterCondition } from '@objectstack/spec/data';
 // [#8413] What a `unique: true` FIELD becomes, from the one place that decides
 // it. `uniqueIndexesFromFields`' own contract is that it is "the ONLY place
 // field-level uniqueness becomes an index, so the create-table, alter-table,
@@ -976,6 +981,41 @@ export interface RemoteTenantScope {
   readonly sql: string;
   /** The values for the fragment's placeholders, in order. */
   readonly args: readonly unknown[];
+}
+
+const REMOTE_READABLE_IDS_SEMI_JOIN: unique symbol = Symbol('objectstack.driver-turso.remoteReadableIdsSemiJoin');
+
+/**
+ * [ADR-0139 D3] A composed `ReadableIds` leaf, RESOLVED for this transport by
+ * `TursoDriver`: the parent's remote table and its tenant wall, compiled with
+ * the OUTER read's options by the local face's own chokepoint
+ * (`SqlDriver.applyTenantScope`, through `TursoDriver.remoteTenantScope`).
+ * This class compiles it — `field IN (SELECT "id" FROM P_TABLE WHERE SCOPE AND
+ * TENANT)` — and never decides the wall, as with {@link RemoteTenantScope}.
+ * Built only by {@link remoteReadableIdsSemiJoin}; branded, so no JSON can
+ * spell one.
+ */
+export interface RemoteReadableIdsSemiJoin {
+  /** The parent object `P`; its declared columns key the scope's compile. */
+  readonly object: string;
+  /** `P`'s remote table. */
+  readonly table: string;
+  /** The composed scope (`undefined` is no row restriction), compiled against `P`. */
+  readonly scope: FilterCondition | undefined;
+  /** `P`'s tenant wall under the outer read's options; absent means none applies. */
+  readonly tenant: RemoteTenantScope | undefined;
+}
+
+/** [ADR-0139 D3] Brand a resolved semi-join for {@link RemoteTransport}'s `$in` arm. */
+export function remoteReadableIdsSemiJoin(join: RemoteReadableIdsSemiJoin): RemoteReadableIdsSemiJoin {
+  const branded = { object: join.object, table: join.table, scope: join.scope, tenant: join.tenant };
+  Object.defineProperty(branded, REMOTE_READABLE_IDS_SEMI_JOIN, { value: true, enumerable: false });
+  return Object.freeze(branded);
+}
+
+function isRemoteReadableIdsSemiJoin(value: unknown): value is RemoteReadableIdsSemiJoin {
+  return value !== null && typeof value === 'object'
+    && (value as Record<symbol, unknown>)[REMOTE_READABLE_IDS_SEMI_JOIN] === true;
 }
 
 /**
@@ -2839,6 +2879,31 @@ export class RemoteTransport {
     };
   }
 
+  /**
+   * [ADR-0139 D3] `SELECT "id" FROM P_TABLE WHERE SCOPE AND TENANT` for a
+   * resolved semi-join — the local face's `SqlDriver.readableIdsSubquery`,
+   * compiled by this transport's own compiler. The scope is compiled against
+   * the PARENT object as a `where` of its own (its refusals resolve against
+   * the scope's own marks, `'policy'` as the engine composed it); the tenant
+   * wall is the fragment the driver handed over. It binds the scope's and the
+   * wall's own values only — no per-id parameter.
+   */
+  private readableIdsSubquerySQL(join: RemoteReadableIdsSemiJoin): { sql: string; args: any[] } {
+    const parts: string[] = [];
+    const args: any[] = [];
+    const scope = this.buildWhereSQL(join.object, join.scope);
+    if (scope.whereClauses) {
+      parts.push(`(${scope.whereClauses})`);
+      args.push(...scope.args);
+    }
+    if (join.tenant) {
+      parts.push(`(${join.tenant.sql})`);
+      args.push(...join.tenant.args);
+    }
+    const where = parts.length > 0 ? ` WHERE ${parts.join(' AND ')}` : '';
+    return { sql: `SELECT "id" FROM ${this.tableSql(join.table)}${where}`, args };
+  }
+
   private buildWhereSQL(
     object: string,
     filters: any,
@@ -2853,6 +2918,13 @@ export class RemoteTransport {
     // seam: 'author' swaps in the full text; 'policy', unmarked, unreachable
     // and ambiguous all keep the redaction.
     if (path === 'where') {
+      // [ADR-0139 D3] An UNCOMPOSED `ReadableIds` leaf anywhere, or a composed
+      // one outside a `$in` comparand, is refused before anything compiles:
+      // INTERNAL_ERROR / 500, ⛔ never evaluated as "no restriction".
+      // `TursoDriver` asks the same walk first, and logs; a resolved
+      // semi-join is not a leaf, so this answers `null` for every tree it hands over.
+      const misplaced = findMisplacedReadableIds(filters, true);
+      if (misplaced) throw readableIdsDriverRefusal('driver-turso', misplaced);
       try {
         return this.compileWhereSQL(object, filters, path);
       } catch (err) {
@@ -3210,6 +3282,24 @@ export class RemoteTransport {
             // degrades exactly like a scalar operator's object comparand did,
             // just one row of the IN list at a time.
             case '$in': {
+              // [ADR-0139 D3] The semi-join, ahead of the list arm (an object
+              // is no list). A composed leaf `TursoDriver` did not resolve —
+              // this class driven standalone — is refused: only the driver
+              // knows the parent's table and wall.
+              if (isRemoteReadableIdsSemiJoin(opValue)) {
+                const sub = this.readableIdsSubquerySQL(opValue);
+                clauses.push(`${column} IN (${sub.sql})`);
+                args.push(...sub.args);
+                break;
+              }
+              if (isComposedReadableIds(opValue)) {
+                throw readableIdsDriverRefusal(
+                  'driver-turso',
+                  { at: `${path}.${key}.$in`, object: opValue.object, kind: 'unsupported' },
+                  'the remote transport compiles it only as TursoDriver resolved it, with the parent\'s table '
+                    + 'and tenant wall; drive the read through TursoDriver',
+                );
+              }
               const inVals = opValue as any[];
               const binds = inVals.map((v: any, i: number) =>
                 this.serializeComparand(object, key, `${op}[${i}]`, v),
