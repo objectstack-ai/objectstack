@@ -26596,7 +26596,32 @@ export class ObjectStackProtocolImplementation implements
         // and `name` disagreed. `x_iojn_task` is another identifier, never the
         // object: `renameName` swaps the source prefix only at the START of a
         // name, and this rewrite now matches only a whole identifier too.
-        const olds = prefixed.filter((name) => renameMap.has(name)).sort((a, b) => b.length - a.length);
+        //
+        // ⭐ A PREFIXED NAME THAT IS ALSO A FIELD KEY IS NOT DISTINCTIVE. When a
+        // package object declares a field keyed like a prefixed package object
+        // (`fields.iojn_customer` beside the object `iojn_customer`), a free-text
+        // value spelled that way may name the field — a list view's `columns`,
+        // a form's `sections[].fields` — and the field keeps its key. Renaming
+        // it as the object copied a column or form field the copy does not
+        // have. Such a name is treated as a bare name is: rewritten only at an
+        // object-reference property (below), never in free text.
+        const fieldKeys = new Set<string>();
+        for (const row of rows) {
+            if (row?.type !== 'object') continue;
+            let body: any;
+            try {
+                body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+            } catch {
+                continue; // the copy loop reports an unparseable row at its own name
+            }
+            const fields = body?.fields;
+            if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+                for (const key of Object.keys(fields)) fieldKeys.add(key);
+            }
+        }
+        const olds = prefixed
+            .filter((name) => renameMap.has(name) && !fieldKeys.has(name))
+            .sort((a, b) => b.length - a.length);
         const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const re = olds.length
             ? new RegExp(`(?<![A-Za-z0-9_])(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g')
