@@ -54,7 +54,7 @@ async function confirm(question: string): Promise<boolean> {
  * withholds the hashes in those notes, in the same pass. Operators run it once
  * after upgrading, dry run first.
  *
- * Dry run by default (writes nothing), `--apply` to rewrite. Idempotent: a
+ * Dry run by default (writes no row), `--apply` to rewrite. Idempotent: a
  * second run finds nothing — a redacted copy has no credential and no hash
  * left — so re-running and reading a clean report is the verification. No
  * `sys_migration` flag is recorded: nothing gates irreversible behaviour on this

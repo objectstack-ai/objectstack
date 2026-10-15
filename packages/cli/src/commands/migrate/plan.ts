@@ -52,7 +52,7 @@ import {
  * boot-time create-table / add-column sync that used to run before this command
  * printed a single line is now REPORTED as pending work instead of performed.
  * A database another process is using is reported too — as a warning, not a
- * refusal, since a plan writes nothing either way.
+ * refusal, since a plan writes no row either way.
  *
  * Since #6743 the dry run also stops short of CREATING the database. The
  * deferral #3917 introduced covered the DDL and the seed but not the open
@@ -140,7 +140,7 @@ export default class MigratePlan extends Command {
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         deferSchemaDdl: true,
-        // A plan writes nothing — so it must not bring a database file into
+        // A plan writes no row — so it must not bring a database file into
         // existence either (#6743). On a never-started project the target is
         // opened as an empty in-memory database: the plan below is unchanged
         // (an empty database is an empty database), and no file, `-wal` or

@@ -331,7 +331,7 @@ export default class MigrateMultiValueColumns extends Command {
   static override description =
     'Migrate a stale varchar/text column to json where the field declares multiple: true; boot and ' +
     'os migrate plan only report such a column and never alter it unattended. ' +
-    'Dry-run by default: prints the exact statements and the database they would run against, and writes nothing.';
+    'Dry-run by default: prints the exact statements and the database they would run against, and writes no row or table.';
 
   static override examples = [
     '$ os migrate multi-value-columns',

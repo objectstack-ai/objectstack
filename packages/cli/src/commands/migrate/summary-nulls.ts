@@ -51,7 +51,7 @@ async function confirm(question: string): Promise<boolean> {
  * A freshly seeded database has no such rows; this command is for the other
  * kind, and is needed exactly once per deployment.
  *
- * Dry run by default (writes nothing at all), `--apply` to backfill. Each
+ * Dry run by default (writes no row at all), `--apply` to backfill. Each
  * `NULL` row is RECOMPUTED — a pre-upgrade parent that has children is `NULL`
  * too and its correct value is the real aggregate, so writing 0 everywhere
  * would swap a missing value for a wrong one. Idempotent: a second run finds

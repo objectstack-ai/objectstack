@@ -72,9 +72,9 @@ async function confirm(question: string): Promise<boolean> {
  * The boot is the family's read-only boot (`deferSchemaDdl` + `readOnlyProbe`:
  * no DDL, no seed, no database file brought into existence), and the plan
  * itself issues SELECT statements only (`../../utils/organization-ownership-plan.ts`).
- * The one thing it writes is the plan FILE, on the operator's disk, which the
- * ADR asks for: "the plan is written to a file the operator keeps". It never
- * overwrites one — a kept plan is evidence.
+ * It writes no row or table; the one thing it writes is the plan FILE, on the
+ * operator's disk, which the ADR asks for: "the plan is written to a file the
+ * operator keeps". It never overwrites one — a kept plan is evidence.
  *
  * ## Refusal
  *

@@ -95,7 +95,7 @@ async function confirm(question: string): Promise<boolean> {
  * platform version) is what later opens released-file collection (#3459) and
  * strict media value-shape enforcement (#3438) on this deployment.
  *
- * Dry run by default, and a dry run writes NOTHING — not conversions, not the
+ * Dry run by default, and a dry run writes NO ROW — not conversions, not the
  * flag. Not run / not passed → files keep being retained forever: storage
  * cost, zero data loss.
  *
@@ -188,7 +188,7 @@ export default class MigrateFilesToReferences extends Command {
       return;
     }
     if (occupancy.status === 'busy' && !flags.json) {
-      // A dry run writes nothing, so it only ever warns — but it warns, because
+      // A dry run writes no row, so it only ever warns — but it warns, because
       // the numbers it reports are a moving target while another process writes.
       printWarning(apply
         ? `--force: ${describeOccupancy(occupancy)} Converting anyway — the live process may write records mid-scan.`

@@ -1486,7 +1486,7 @@ export default class MigrateMeta extends Command {
       // takes. A plain boot runs schema sync and the artifact's inline seed
       // loader, and the seed upserts every seeded row of the app's tables
       // (`updated_at` bumped, `organization_id` stamped, relative-date values
-      // re-evaluated) before the report says "writes nothing". `deferSchemaDdl`
+      // re-evaluated) before the report says "writes no row". `deferSchemaDdl`
       // holds the DDL back and suppresses the seed; `readOnlyProbe` keeps a
       // missing sqlite file from being created. `--apply` keeps the plain boot:
       // it is the writing mode, and its behaviour is unchanged.
