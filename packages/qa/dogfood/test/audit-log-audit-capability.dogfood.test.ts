@@ -158,6 +158,8 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     const auth = await stack.kernel.getServiceAsync<any>('auth');
     const api = auth?.api ?? (typeof auth?.getApi === 'function' ? await auth.getApi() : undefined);
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers({ authorization: `Bearer ${token[who]}` }),
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

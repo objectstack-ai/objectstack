@@ -214,6 +214,8 @@ describe('[#11663 L2] acceptance criterion — the configured, VERIFIED account'
     declare('a@b.c');
     const ql = makeQl(configOnlyTables({ id: 'usr_1', email: 'a@b.c', email_verified: true }));
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers(),
       getSession: async () => ({ user: { id: 'usr_1', email: 'a@b.c' }, session: {} }),
@@ -311,6 +313,8 @@ describe('⭐ [#11663 L2 pin P1] the derivation reads the STORED row, never the 
     declare('a@b.c');
     const ql = makeQl(configOnlyTables({ id: 'usr_1', email: 'impostor@corp.example', email_verified: true }));
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers(),
       getSession: async () => ({ user: { id: 'usr_1', email: 'a@b.c' }, session: {} }),

@@ -1775,15 +1775,14 @@ describe('FormFieldSchema', () => {
    * The block above bounds the *bottom* of the range (#8321: a digit count is a
    * non-negative integer). The top was open: `scale: 101` parsed clean here
    * while every renderer that turns it into fraction digits throws. The route
-   * from this row to those renderers, measured at the `.objectui-sha` pin
-   * `53ded82bf7`: plugin-form copies the row's constraint keys onto the runtime
-   * field (`packages/plugin-form/src/sectionFields.ts:220`) and the number cell
-   * renderer passes that value into `Intl.NumberFormat`'s
-   * `maximumFractionDigits` (`packages/fields/src/index.tsx:661-667`). So a
+   * from this row to those renderers: plugin-form copies the row's constraint
+   * keys onto the runtime field and the number cell renderer passes that value
+   * into `Intl.NumberFormat`'s `maximumFractionDigits` (the read points are
+   * recorded in `packages/spec/liveness/field.json`, row `scale`). So a
    * spec-valid declaration published clean and arrived as a `RangeError` in
    * someone else's repository, with no signal to its author. ⛔ The spec-bridge
-   * half of the #12174 citation above is retired at that pin; the plugin-form
-   * leg carries the premise on its own.
+   * half of the #12174 citation above is retired; the plugin-form leg carries
+   * the premise on its own.
    *
    * The refusal is pinned on its SUBSTANCE, not just its code: it has to say
    * WHY (the renderer ceiling), because "too big" alone leaves an author
@@ -2422,7 +2421,7 @@ describe('ListMapConfigSchema — the eighth visualization block', () => {
   it('accepts `style` — the card repro that used to fail, and the key the renderer reads', () => {
     // #18406, director decision batch #153 item 4 letter 1. The card's repro
     // verbatim: `getMapConfig` reads `schema.mapStyle || schema.map?.style`
-    // (`ObjectMap.tsx:365` at the `.objectui-sha` pin `53ded82b`) and
+    // (recorded in `packages/spec/liveness/view.json`, row `list.map`) and
     // objectui's `ObjectMapConfigSchema` declares `style`, so this strict block
     // refusing it meant a map style could not be declared through the spec's
     // list-view face at all.
@@ -3932,7 +3931,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (every reade
 // 2026-08-12, option A). The spec published a bare format array while the only
 // renderer read `exportOptions.formats`, so no declaration was both type-legal
 // and functional. The object form declares exactly the five renderer-read keys
-// (measured objectui origin/main@878140b, ObjectGrid.tsx:1596–1642); the
+// (read points recorded in `liveness/view.json`, row `list.exportOptions`); the
 // legacy bare array stays accepted and lifts to `{ formats }` at parse.
 // `'pdf'` left the enum in the same change (#1301 NOT_PLANNED). The removal
 // stands under the 2026-10-08 ruling on #8346 (B′), which re-planned PDF

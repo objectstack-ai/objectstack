@@ -77,7 +77,7 @@ function fakeEngine(opts: FakeOptions = {}) {
 }
 
 const anonymous = (engine: unknown, extra: Record<string, unknown> = {}) =>
-  resolveAuthzContext({ ql: engine, headers: new Headers(), getSession: async () => undefined, ...extra });
+  resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: engine, headers: new Headers(), getSession: async () => undefined, ...extra });
 
 describe('ADR-0138 D3 — a bound set reaches the guest entry, in the derived organization', () => {
   it('carries the bound set and the one organization (D3 item 1, D4 item 1)', async () => {

@@ -212,8 +212,9 @@ export const fieldForm = defineForm({
         // already uses it one section down for `summaryOperations.filter`, the
         // sibling FilterConditionSchema key.
         //
-        // ⚠ What the hint renders as TODAY, measured at the pinned
-        // `.objectui-sha`, is the announced raw-JSON editor carrying the hint —
+        // ⚠ What the hint renders as TODAY (read points recorded in
+        // `liveness/field.json`, row `relatedListFilter`) is the announced
+        // raw-JSON editor carrying the hint —
         // ⛔ NOT a criteria builder. The renderer that consumes this registry is
         // the metadata-admin `SchemaForm`, whose own `WIDGETS` map registers no
         // `filter-condition` (the `FilterConditionField` of that name lives in

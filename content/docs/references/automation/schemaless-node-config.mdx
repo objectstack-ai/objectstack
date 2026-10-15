@@ -82,8 +82,10 @@ form authoring keys nothing reads).
 
 Undeclared aliases are NOT part of these contracts: `subflow`'s historical
 `flow` spelling graduated into the ADR-0087 D2 conversion
-`flow-node-subflow-flow-alias` (the `map.flow` path), so the executor only
-ever sees `flowName`.
+`flow-node-subflow-flow-alias` (the `map.flow` path), which left the load
+path at 18 (#23487) and rewrites only stored flows, so an authored `flow`
+meets `SUBFLOW_KEY_GUIDANCE` and the executor only ever sees
+`flowName`.
 
 ## Unknown keys — closed as of #4001 批 9, and this class had NO other door
 

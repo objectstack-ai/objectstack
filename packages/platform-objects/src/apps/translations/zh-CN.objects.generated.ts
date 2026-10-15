@@ -342,7 +342,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "撤销原因",
-        help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended 等）。"
+        help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended、admin_password_reset 等）。"
       },
       active_organization_id: {
         label: "当前组织"
@@ -1003,7 +1003,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       last_used_at: {
         label: "最近使用时间",
-        help: "每次 API 调用时自动更新"
+        help: "密钥被使用时记录，每小时至多一次。在不活动期限内（默认 90 天）没有使用记录的密钥会被拒绝，需更换新密钥"
       },
       revoked: {
         label: "已撤销"

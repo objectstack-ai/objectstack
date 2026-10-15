@@ -168,12 +168,15 @@ describe('[#22591] the sealed-item refusal names the remedy the caller\'s ACT ha
 /**
  * The `/meta` save door says which act a save is from the one fact its caller
  * sends about the name: a present `null` parent (`If-None-Match: *` on the REST
- * door) is the first-write pin — the caller holds no row under the name and is
- * writing one of its own, a create. Every other save is an edit, as before.
- * Pinned on a row-less type (`position`, the card's own) and on a Regime C type
- * (`flow`, which the flow authoring rule answers before the package door).
+ * door) is the first-write pin, which asserts "no current row of this
+ * lifecycle" (the spec's `SaveMetaItemRequestSchema.parentVersion`). On a
+ * publish save that lifecycle is the item's live row — the caller is bringing
+ * one into existence under the name, a create. Every other save is an edit, as
+ * before. Pinned on a row-less type (`position`, the card's own) and on a
+ * Regime C type (`flow`, which the flow authoring rule answers before the
+ * package door).
  */
-describe('[#22591] the /meta save door reads its first-write pin as a create', () => {
+describe('[#22591] the /meta save door reads its first-write pin on a publish save as a create', () => {
     const thrownBy = (run: Promise<unknown>) => run.then(() => undefined, (e: any) => e);
 
     for (const type of ['position', 'flow'] as const) {
@@ -191,5 +194,43 @@ describe('[#22591] the /meta save door reads its first-write pin as a create', (
             expect(first.message).toBe((p.packagedBaseRefusal({ type, name: HELD, operation: 'create' }) as any).message);
             expect(unpinned.message).toBe((p.packagedBaseRefusal({ type, name: HELD, operation: 'save' }) as any).message);
         });
+    }
+});
+
+/**
+ * [#23406] …and on a DRAFT save the pin's lifecycle is the draft's: it asserts
+ * that no draft is pending, never that the name is free. A first draft over a
+ * held name is a first draft of the item already there — an edit — so it names
+ * that item's own remedy, the sentence the unpinned draft reads. It used to be
+ * read as a create and told the author to choose a free name, which authors a
+ * second item instead of editing the source. Both kernel shapes; the verdict
+ * (code and status) is the same for all three requests, and a first write of
+ * the live row keeps the create remedy (the control).
+ */
+describe('[#23406] the /meta save door reads a first DRAFT over a held name as an edit', () => {
+    const thrownBy = (run: Promise<unknown>) => run.then(() => undefined, (e: any) => e);
+
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+        for (const type of ['object', 'position', 'flow'] as const) {
+            it(`\`${type}\`: a first draft pinned If-None-Match: * names the edit remedy, as the unpinned draft does; a first write of the live row keeps the create remedy (${kernel} kernel)`, async () => {
+                const p = protocolOn(environmentId);
+                const item = { name: HELD, label: 'Mine' };
+                const firstDraft: any = await thrownBy(p.saveMetaItem({ type, name: HELD, item, parentVersion: null, mode: 'draft' }));
+                const unpinnedDraft: any = await thrownBy(p.saveMetaItem({ type, name: HELD, item, mode: 'draft' }));
+                const create: any = await thrownBy(p.saveMetaItem({ type, name: HELD, item, parentVersion: null, mode: 'publish' }));
+                for (const refusal of [firstDraft, unpinnedDraft, create]) {
+                    expect(shape(refusal), String(refusal?.message)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+                }
+                expect({
+                    firstDraft: remedyKind(String(firstDraft.message), type),
+                    unpinnedDraft: remedyKind(String(unpinnedDraft.message), type),
+                    create: remedyKind(String(create.message), type),
+                }).toEqual({ firstDraft: 'edit', unpinnedDraft: 'edit', create: 'new-name' });
+                // One emitter: a first draft throws the verdict an edit is handed.
+                expect(firstDraft.message).toBe((p.packagedBaseRefusal({ type, name: HELD, operation: 'save' }) as any).message);
+                expect(firstDraft.message).toBe(unpinnedDraft.message);
+            });
+        }
     }
 });

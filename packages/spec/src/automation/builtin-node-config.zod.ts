@@ -130,18 +130,17 @@ const BUILTIN_NODE_CONFIG_HISTORY =
 /**
  * The two ADR-0087 D2 aliases every CRUD node shares.
  *
- * Both are retired SPELLINGS rather than typos, and both are rewritten at load
- * (`flow-node-crud-object-alias`, `flow-node-crud-filter-alias`). So each
- * prescription has to answer two different readers, and since #4923 the split
- * between them is exact:
+ * Both are retired SPELLINGS rather than typos. Their conversions
+ * (`flow-node-crud-object-alias`, `flow-node-crud-filter-alias`) left the load
+ * path at 18 (#23487), so each prescription is now the upgrade prescription,
+ * naming the release, and it still has to answer two different readers:
  *
- *  - whoever **parses this contract directly** (never went through the load
- *    path) wrote the retired spelling on its own → the fix is the rename;
- *  - whoever **came through the load path** still has the alias only because
- *    the conversion refused to resolve it, and it refuses in exactly one
- *    situation: the canonical key is ALSO present and carries a DIFFERENT
- *    value. An identical twin is deleted by the conversion now, so it can no
- *    longer reach this parse.
+ *  - an **author** (every door that judges a flow, since the retirement) wrote
+ *    the retired spelling on its own → the fix is the rename;
+ *  - a **stored flow** reaches this parse after the rehydration seam replayed
+ *    the retired conversion, and still has the alias only because the
+ *    conversion refused to resolve it, which it does in exactly one situation:
+ *    the canonical key is ALSO present and carries a DIFFERENT value (#4923).
  *
  * That second reader is why the prescription names BOTH keys and asks for a
  * decision rather than a deletion. Telling them "the canonical one already won,
@@ -155,16 +154,17 @@ const BUILTIN_NODE_CONFIG_HISTORY =
  */
 const CRUD_ALIAS_GUIDANCE = {
   object:
-    'The object slot is `objectName`. `object` was the last tenant of the `readAliasedConfig` executor shim; it '
-    + 'graduated into the ADR-0087 D2 conversion `flow-node-crud-object-alias`, which rewrites it at load. '
-    + 'If `objectName` is also present, this node names two different objects and the conversion left both keys '
-    + 'alone rather than picking for you — decide which object this node acts on, put it on `objectName`, '
-    + 'and delete `object`.',
+    'The CRUD node config key `object` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the last '
+    + 'tenant of the `readAliasedConfig` executor shim, which the loader rewrote to `objectName` until this '
+    + 'release. Use `objectName`. Rename the key; the value (the object name) is unchanged. If `objectName` is '
+    + 'also present, this node names two different objects — decide which object it acts on, put it on '
+    + '`objectName`, and delete `object`. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   filters:
-    'The match map is `filter` (singular). `filters` was a consumer-side executor fallback that graduated into the '
-    + 'ADR-0087 D2 conversion `flow-node-crud-filter-alias`, which rewrites it at load; delete it once `filter` '
-    + 'carries the pairs. If `filter` is also present, the two carry DIFFERENT match maps and the conversion kept '
-    + 'both rather than choosing — reconcile them onto `filter`. Beware the half-migrated shape: an empty '
+    'The CRUD node config key `filters` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was a '
+    + 'consumer-side executor fallback, which the loader rewrote to `filter` (singular) until this release. Use '
+    + '`filter`. Rename the key; the value (the match map) is unchanged. If `filter` is also present, the two '
+    + 'carry DIFFERENT match maps — reconcile them onto `filter`. Beware the half-migrated shape: an empty '
     + '`filter` next to a populated `filters` is what made this alias dangerous enough to declare — it is a '
     + 'match-everything write.',
 } as const;
@@ -1319,8 +1319,10 @@ export type EndConfigParsed = z.infer<typeof EndConfigSchema>;
  *
  * `flowName` and `collection` are execute-time required. The historical
  * undeclared `flow` alias is NOT part of this contract: the ADR-0087 D2
- * conversion `flow-node-map-flow-alias` rewrites it at load, so the executor
- * only ever sees `flowName` (#4045 — the `notify.source` graduation path).
+ * conversion `flow-node-map-flow-alias` rewrote it at load for protocol 17's
+ * window (#4045 — the `notify.source` graduation path); retired from the load
+ * path at 18 (#23487), it rewrites only stored flows, so an authored `flow`
+ * meets the prescription below and the executor only ever sees `flowName`.
  *
  * `collection` is a `value` slot whose literal is a list (#19939,
  * {@link FlowCollectionSlotSchema}), the same contract a `loop` with a `body`
@@ -1332,11 +1334,12 @@ export const MapConfigSchema = lazySchema(() => strictObject({
   history: BUILTIN_NODE_CONFIG_HISTORY,
   guidance: {
     flow:
-      'The per-item subflow is named by `flowName`. `flow` was an undeclared executor fallback no schema or form '
-      + 'described; it graduated into the ADR-0087 D2 conversion `flow-node-map-flow-alias`, which rewrites '
-      + 'it at load. If `flowName` is also present, the two name DIFFERENT subflows and the conversion kept both '
-      + 'rather than picking one to run per item — decide which flow this is, put it on `flowName`, and '
-      + 'delete `flow`.',
+      'The `map` node config key `flow` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was an undeclared '
+      + 'executor fallback no schema or form described, which the loader rewrote to `flowName` until this release. '
+      + 'Use `flowName`. Rename the key; the value (the per-item subflow\'s name) is unchanged. If `flowName` is '
+      + 'also present, the two name DIFFERENT subflows — decide which flow runs per item, put it on `flowName`, and '
+      + 'delete `flow`. '
+      + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   },
 }, {
   /**

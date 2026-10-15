@@ -292,7 +292,6 @@
     "check:dual-source-exports": "tsx scripts/check-dual-source-exports.ts --self-test && tsx scripts/check-dual-source-exports.ts",
     "check:entry-nameability": "tsx scripts/check-entry-nameability.ts",
     "check:browser-reachable-entries": "tsx scripts/check-browser-reachable-entries.ts --self-test && tsx scripts/check-browser-reachable-entries.ts",
-    "check:objectui-pin-citations": "tsx scripts/check-objectui-pin-citations.ts --self-test && tsx scripts/check-objectui-pin-citations.ts",
     "check:llms-txt": "tsx scripts/check-llms-txt.ts --self-test && tsx scripts/check-llms-txt.ts",
     "check:authorable-surface": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --check",
     "gen:migration-registry": "tsx scripts/build-migration-registry.ts",

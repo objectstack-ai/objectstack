@@ -30,6 +30,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+import { applyConversionsToFlow } from '../conversions/apply';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 import { ArtifactStagePackageBodySchema, ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
 import { builtinNodeConfigKeysJudged, flowNodeConfigRefusals, getBuiltinNodeConfigContracts } from './flow-node-config-refusals';
@@ -210,7 +211,7 @@ describe('the remainder: every other builtin, refused at save', () => {
     expect(flowNodeConfigRefusals('loop', { collection: 5 })).toEqual([]);
   });
 
-  it('a pre-conversion alias is converted first where the door converts, and refused at a direct parse', () => {
+  it('a retired alias is refused at a direct parse and at defineStack; only the rehydration seam converts it first', () => {
     const config = { objectName: 'task', filters: { id: { dialect: 'cel', source: 'recordId' } }, fields: { title: 'X' } };
     expect(issuesOf(flowWith('update_record', config)).map((i) => i.path)).toEqual(['nodes.1.config.filters']);
     const stack = {
@@ -218,7 +219,21 @@ describe('the remainder: every other builtin, refused at save', () => {
       objects: [{ name: 'als_task', label: 'Task', fields: { title: { type: 'text', label: 'Title' } } }],
       flows: [flowWith('update_record', { ...config, objectName: 'als_task' }, 'alias_flow')],
     };
-    expect(() => defineStack(stack as never)).not.toThrow();
+    // `flow-node-crud-filter-alias` left the load path at 18 (#23487), so the
+    // authoring funnel no longer converts first: the door refuses, at the key,
+    // with the upgrade prescription.
+    let refusal: unknown;
+    try {
+      defineStack(stack as never);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+    const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+    expect(issues.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.config.filters']);
+    expect(issues[0]!.message).toContain('`filters` was removed in @objectstack/spec 18');
+    // A stored flow is converted first, the full chain replayed, and parses clean.
+    expect(issuesOf(applyConversionsToFlow(flowWith('update_record', config), { includeRetired: true }))).toEqual([]);
   });
 });
 

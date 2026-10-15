@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { strictObject } from '../shared/strict-object';
+import { enumWithRetiredValues } from '../shared/retired-key';
 
 /**
  * Organization-Wide Defaults (OWD)
@@ -61,10 +62,22 @@ export const SharingRuleType = z.enum([
  * designing a capability mask AND-ed with object CRUD, not re-adding an enum
  * member (#3865).
  */
-export const SharingLevel = z.enum([
+export const SharingLevel = enumWithRetiredValues([
   'read',      // Read Only
   'edit',      // Read / Write
-]);
+], {
+  // The `sharing-rule-access-level-full-to-edit` conversion (ADR-0087 D2)
+  // rewrote `full` at load for protocol 17's window; retired from the load
+  // path at 18 (#23487), it rewrites only stored rows, so an authored `full`
+  // meets this prescription instead of zod's bare "expected one of".
+  full:
+    "Sharing-rule `accessLevel: 'full'` was removed in @objectstack/spec 18 (ADR-0087 D2) — it never granted "
+    + "more than `edit`: no code path gave transfer, re-share or delete because of it, and the loader rewrote it "
+    + "to `edit` until this release. Use `accessLevel: 'edit'`. Change the value; the access it grants is "
+    + 'unchanged. A sharing rule grants read or edit; delete and transfer come from object permissions and '
+    + 'ownership. '
+    + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+});
 
 /**
  * Recipient Type

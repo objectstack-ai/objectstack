@@ -35,6 +35,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { EngineAggregateOptions } from '@objectstack/spec/data';
+// [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
+// `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
+import { StandardErrorCode } from '@objectstack/spec/api';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -302,30 +305,95 @@ function errorResult(message: string) {
  * nobody and the agent is back to guessing the member's spelling from
  * documentation.
  *
- * Uncoded throws fall through to `errorResult` unchanged, so this widens what a
- * caller can read and narrows nothing.
+ * Uncoded throws fall through to `errorResult` unchanged.
+ *
+ * `run_action` and `resume_run` only. The other catches render through
+ * {@link errorResultWithCode}, which serves the same envelope WITHOUT `details`;
+ * that function says why.
+ *
+ * [#23529] ⛔ A `PERMISSION_DENIED` is the exception: it renders through
+ * {@link errorResultWithCode}, so its `details` are WITHHELD here too. The
+ * security gate puts the caller's `positions` and `permissionSets` in those
+ * `details`; the ruling on #7450 keeps them off the wire, and the runtime
+ * dispatcher and the REST actions door both drop them. These two tools are
+ * reachable by that refusal: a declarative update action writes as the caller,
+ * so a caller who may read the row but not update it meets the gate's
+ * write-side refusal, and a host script handler can rethrow one. The answer is
+ * a tool result inside a JSON-RPC 200, which the dispatcher's withholding never
+ * sees, so it is withheld at this renderer.
+ *
+ * The question is asked on the DECLARED code, spelled from the spec's standard
+ * catalogue rather than restated, and answered with the data tools' own
+ * function rather than a second filter of `details`. Every `PermissionDeniedError`
+ * declares this code (it is a class constant), and a throw with no code never
+ * reaches the `details` read at all. Every other coded refusal keeps its
+ * `details` as before, so #15942's confirmation contract and `resume_run`'s
+ * REST-built `details` are unchanged.
  */
 function errorResultFromThrown(err: unknown) {
-  const code = (err as { code?: unknown } | null | undefined)?.code;
-  if (typeof code !== 'string' || code.length === 0) return errorResult(messageOf(err));
+  const envelope = thrownRefusalEnvelope(err);
+  if (!envelope) return errorResult(messageOf(err));
+  if (envelope.code === StandardErrorCode.enum.PERMISSION_DENIED) return errorResultWithCode(err);
   const details = (err as { details?: unknown }).details;
-  const status = (err as { status?: unknown }).status;
+  return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
+}
+
+/**
+ * [#23509] The data tools' and `list_actions`' tool error: a thrown coded
+ * refusal renders its `code` and `status` beside the message, in
+ * {@link errorResultFromThrown}'s shape. A throw with no code renders as
+ * `errorResult(messageOf(err))`, byte-identical to what every one of these
+ * catches answered before.
+ *
+ * These catches used to answer the message alone, so a client never read the
+ * code it is meant to branch on. The affected refusals: a key whose owner is
+ * held (`MFA_REQUIRED`, which ruling C′ item 1 says is refused "with the same
+ * code" at every seam), `RECORD_NOT_FOUND`, the exposure and permission
+ * refusals, and `INVALID_FIELD`.
+ *
+ * ⛔ `details` is WITHHELD here, deliberately. What a refusal's `details` may
+ * disclose is decided per error class at the HTTP boundary, and this package
+ * holds no copy of that policy. Measured on `/mcp`: a `PERMISSION_DENIED`
+ * thrown by the security gate carries the caller's `positions` and
+ * `permissionSets` (and, on a cascade, an object the caller never addressed).
+ * The runtime dispatcher drops those `details` from the wire, so serving them
+ * here would disclose on MCP what REST withholds. `code`, `message` and
+ * `status` are what every boundary serves.
+ */
+function errorResultWithCode(err: unknown) {
+  const envelope = thrownRefusalEnvelope(err);
+  return envelope ? codedErrorResult({ ...envelope }) : errorResult(messageOf(err));
+}
+
+function codedErrorResult(error: ThrownRefusalEnvelope & { details?: unknown }) {
   return {
-    content: [
-      {
-        type: 'text' as const,
-        text: jsonText({
-          error: {
-            code,
-            message: messageOf(err),
-            ...(typeof status === 'number' ? { status } : {}),
-            ...(details !== undefined ? { details } : {}),
-          },
-        }),
-      },
-    ],
+    content: [{ type: 'text' as const, text: jsonText({ error }) }],
     isError: true as const,
   };
+}
+
+/** What {@link thrownRefusalEnvelope} reads off a thrown coded refusal. */
+export interface ThrownRefusalEnvelope {
+  code: string;
+  message: string;
+  status?: number;
+}
+
+/**
+ * Read the ADR-0112 `code`, message and `status` off a thrown value, or
+ * `undefined` when it carries no non-empty string `code`.
+ *
+ * The one reader both MCP surfaces use, so the tools and the record resource
+ * (`MCPServerRuntime.bridgeResources`) agree on what counts as a coded
+ * refusal. `undefined` tells the caller to keep its own message-only
+ * rendering: nothing is invented for a throw that never had a code. `details`
+ * is not read here; {@link errorResultWithCode} says why.
+ */
+export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  if (typeof code !== 'string' || code.length === 0) return undefined;
+  const status = (err as { status?: unknown }).status;
+  return { code, message: messageOf(err), ...(typeof status === 'number' ? { status } : {}) };
 }
 
 /**
@@ -602,7 +670,7 @@ export function registerObjectTools(
             status: 503,
           });
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultWithCode(err);
         }
       },
     );
@@ -626,7 +694,7 @@ export function registerObjectTools(
           if (!def) return errorResult(`Object "${objectName}" not found`);
           return textResult(def);
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultWithCode(err);
         }
       },
     );
@@ -701,7 +769,7 @@ export function registerObjectTools(
             },
           });
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultWithCode(err);
         }
       },
     );
@@ -781,7 +849,7 @@ export function registerObjectTools(
           if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
           return textResult(withDelegationNotice(result, diagnosed.statement));
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultWithCode(err);
         }
       },
     );
@@ -873,7 +941,7 @@ export function registerObjectTools(
               ...(truncated ? { truncated: true } : {}),
             });
           } catch (err) {
-            return errorResult(messageOf(err));
+            return errorResultWithCode(err);
           }
         },
       );
@@ -900,7 +968,7 @@ export function registerObjectTools(
           if (record == null) return errorResult(`Record "${recordId}" not found in "${objectName}"`);
           return textResult(record);
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultWithCode(err);
         }
       },
     );
@@ -929,7 +997,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultWithCode(err);
         }
       },
     );
@@ -963,7 +1031,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultWithCode(err);
         }
       },
     );
@@ -987,7 +1055,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return errorResult(messageOf(err));
+          return errorResultWithCode(err);
         }
       },
     );
@@ -1054,7 +1122,7 @@ export function registerActionTools(
           : actions.filter((a) => !a.objectName || !isSystemObject(a.objectName));
         return textResult({ actions: visible, totalCount: visible.length });
       } catch (err) {
-        return errorResult(messageOf(err));
+        return errorResultWithCode(err);
       }
     },
   );

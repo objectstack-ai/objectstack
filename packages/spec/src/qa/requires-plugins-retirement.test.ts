@@ -93,6 +93,9 @@ describe('tree-scoped absence: no scenario inside the declared radius still auth
   const EXCLUDED_PREFIXES = [
     // Release-owned prose records the removal; never edited by a code PR.
     'content/docs/releases/',
+    // GITIGNORED build output (`packages/spec/json-schema/`), reached only
+    // because this is a FILESYSTEM walk. Its source is `testing.zod.ts`.
+    'packages/spec/json-schema/',
   ];
   /** tsup's own bundle of `tsup.config.ts`, written and deleted mid-build. */
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;

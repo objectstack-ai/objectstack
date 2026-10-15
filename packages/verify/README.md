@@ -298,6 +298,14 @@ const run = await stack.flows.run('quote_generation', { recordId: deal.id }, { a
 expect(run.status).toBe('paused');
 await stack.flows.resume(run, { quoteName: 'Q-1', discount: 10 }, { as: rep });
 
+// A scheduled (or other self-triggered) flow declared `runAs: 'system'`: the
+// trigger route refuses it to every person, the admin included (403
+// PERMISSION_DENIED), so start it as its own trigger does, as the system
+// principal. The engine's result comes back unchanged: a run that did not
+// succeed resolves with `success: false`, so assert on it.
+const sweep = await stack.flows.run('case_sla_monitor', {}, { system: true });
+expect(sweep.success).toBe(true);
+
 // An action body, through the route that carries its param contract.
 const out = await stack.actions.run('crm_opportunity', 'apply_discount',
   { as: rep, recordId: deal.id, params: { discount: 10 } });
@@ -338,7 +346,10 @@ await stack.stop();
   a write passed `{ system: true }` (`hooks.run` on `insert`, `update` or
   `delete`, and `hooks.updateWhere`) run as the system principal, deliberately
   and by name. `seed` fires no record-change flow (it is end-state fixture
-  data); a `{ system: true }` write does.
+  data); a `{ system: true }` write does. `flows.run(name, params, { system:
+  true })` starts a flow as the system principal through the `automation`
+  service's own `execute`, the call the schedule trigger's tick makes, never
+  through the trigger route, and hands back the engine's result unchanged.
 - A refusal from `flows.*` / `actions.run` is the route's ADR-0112 envelope
   (`VerifyRefusal`: `code`, `status`, `details`; `isVerifyRefusal(e)`); a
   refusal from `hooks.run` / `hooks.updateWhere` / `validate` / `rows` /

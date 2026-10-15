@@ -113,6 +113,10 @@ export const esES: PlatformTranslationData = {
           title: 'Red',
           description: 'Restringe desde dónde pueden autenticarse los usuarios.',
         },
+        api_keys: {
+          title: 'Claves de API',
+          description: 'Cuánto duran las claves de API personales. Una clave que caduca, que pasa sin usarse el plazo de inactividad o que se revoca se rechaza con su propio código de error, y la solución es siempre crear una clave nueva.',
+        },
         social: {
           title: 'Inicio de sesión social',
           description:
@@ -211,6 +215,22 @@ export const esES: PlatformTranslationData = {
         allowed_ip_ranges: {
           label: 'Rangos de IP permitidos',
           help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se define, se rechaza el inicio de sesión desde fuera de estos rangos. Vacío = sin restricción. Requiere un proxy de confianza que defina X-Forwarded-For.',
+        },
+        api_key_default_expiry_days: {
+          label: 'Duración predeterminada de la clave (días)',
+          help: 'Una clave creada sin fecha de caducidad caduca este número de días después de crearse. Nunca supera la duración máxima de abajo.',
+        },
+        api_key_max_expiry_days: {
+          label: 'Duración máxima de la clave (días)',
+          help: 'La fecha de caducidad más lejana que puede pedir una clave nueva, contada desde su creación. Una más lejana se rechaza (API_KEY_EXPIRY_TOO_LONG); exactamente este número de días se acepta.',
+        },
+        api_key_inactivity_days: {
+          label: 'Caducidad por inactividad (días)',
+          help: 'Una clave sin uso registrado durante este número de días se rechaza (API_KEY_INACTIVE). No se revoca; cree una clave nueva. Una clave nunca usada cuenta desde su creación, o desde el inicio de la política de abajo si es anterior. 0 desactiva la caducidad por inactividad.',
+        },
+        api_key_policy_started_at: {
+          label: 'Inicio de la política de claves',
+          help: 'Se registra automáticamente (UTC, ISO 8601) la primera vez que el servidor se ejecuta con esta política. Las claves creadas antes sin fecha de caducidad caducan un año después; las claves sin uso registrado cuentan su inactividad desde aquí. Cambiarlo mueve ambas fechas de las claves que aún no tienen una.',
         },
         google_enabled: {
           label: 'Habilitar inicio de sesión con Google',

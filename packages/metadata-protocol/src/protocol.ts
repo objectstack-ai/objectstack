@@ -3247,6 +3247,22 @@ function isoFromValidDate(value: unknown): unknown {
     return value;
 }
 
+/**
+ * ADR-0087 conversions the save door's flow fallback verdict (#21982) does
+ * not replay, by id — the same DEFAULT-FLIP refusal the automation engine's
+ * canonicalizer makes (`CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION` in
+ * `service-automation/src/engine.ts`), because the fallback stands in for that
+ * canonicalizer and must reach the same verdict on the same body.
+ *
+ * - `flow-decision-mode-inclusive-explicit` (#15429) rewrites an omitted
+ *   decision `mode` into `'inclusive'`, which is sound only where "this body
+ *   predates the flip" is a fact; a save never knows that, exactly as the
+ *   engine's canonicalizer does not.
+ */
+const FLOW_FALLBACK_VERDICT_NOT_REPLAYED: readonly string[] = [
+    'flow-decision-mode-inclusive-explicit',
+];
+
 // Lifecycle columns the engine always owns; the clone path drops them by NAME
 // so the insert re-stamps fresh values instead of copying the source's. Mirrors
 // record-validator's SKIP_FIELDS (system-injected, never author-supplied).
@@ -5360,6 +5376,48 @@ function collectReferenceHits(
     };
 
     walk(item, '', 0);
+    return hits;
+}
+
+/**
+ * Every place a stored document names `targetName` as the HEAD of a composite
+ * record key, through a composite-key site of the derived index
+ * (`REFERENCE_SITES.compositeKeyByTarget`; the one site today is a permission
+ * set's `fields`, keyed `<object>.<field>`).
+ *
+ * A separate walk, not a branch inside {@link collectReferenceHits}: that walk
+ * matches a WHOLE value and serves every other site, so it stays as it is. This
+ * one reads only the record each site names, at the document ROOT where the
+ * site's premise is derived (`compositeKeySiteHolds`, `./reference-sites.ts`),
+ * and only its keys.
+ *
+ * A key names the target when the text before its FIRST separator equals the
+ * target's name — the split the security plugin makes for field rules
+ * (`key.startsWith(object + '.')`), exact because no object name contains a `.`.
+ * A key with no separator, or one at index 0 (`.full_name`), names no object.
+ * The field part is never read, so a key whose FIELD part spells the target
+ * (`invoice.customer`) is not a reference to it. One hit per site: the reported
+ * path (`fields{key}`) does not carry the key, so a second matching key is the
+ * same row.
+ */
+function collectCompositeKeyHeadHits(
+    item: unknown,
+    separators: ReadonlyMap<string, string>,
+    targetName: string,
+): Array<{ path: string; property: string }> {
+    const hits: Array<{ path: string; property: string }> = [];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return hits;
+    for (const [property, separator] of separators) {
+        const record = (item as Record<string, unknown>)[property];
+        if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
+        for (const key of Object.keys(record)) {
+            const at = key.indexOf(separator);
+            if (at > 0 && key.slice(0, at) === targetName) {
+                hits.push({ path: `${property}{key}`, property });
+                break;
+            }
+        }
+    }
     return hits;
 }
 
@@ -10788,6 +10846,29 @@ export class ObjectStackProtocolImplementation implements
         // is answered as a draft, as above.
         const storedRowDeclined = readState === 'active' && this.declinesStoredRow(request.type, request.name);
 
+        // [#23291, ADR-0048 §3.3, ADR-0070 TL;DR 1] The package whose stored
+        // content a read that names no package serves: the address a save or
+        // a delete naming none writes ({@link packagelessAddress}), read from
+        // the item's ACTIVE rows at both states, as the draft save inherits
+        // its package from them (#11087). For an item bound to exactly one
+        // package, the read then serves what the read naming that package
+        // serves (its own row, else the package-less one); otherwise any row,
+        // the best-effort first match ADR-0048 §3.3 states.
+        //
+        // Before, it took the first row of any package. A save naming the
+        // package beside the item's package-unbound row mints the package's
+        // row and leaves the unbound one stored first, so this read kept
+        // serving the unbound body while the package-less save wrote the
+        // package's row, the package-less delete removed it, the list served
+        // it, and this read's own `version` named it (#23165). The package-less
+        // row is not converted or removed: ADR-0070 keeps it as a read-side
+        // detail and a migration source, and it still stands in for every
+        // package with no row of its own (ADR-0048 prefer-local).
+        //
+        // Content only: the lock is selected from the item's rows at the
+        // address the `_lock` gate judges a package-less save at, below.
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name, member);
+
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
         // fall back to the active read below. This differs from the strict
@@ -10803,7 +10884,7 @@ export class ObjectStackProtocolImplementation implements
                     type: request.type,
                     name: request.name,
                     state: 'draft',
-                    ...(request.packageId ? { packageId: request.packageId } : {}),
+                    ...(contentPackageId ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
                 }))?.row;
                 if (draftRec) {
@@ -10849,7 +10930,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: readState,
-                ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...(contentPackageId ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             }))?.row;
             storedRowServed = record !== undefined && record !== null;
@@ -11398,6 +11479,14 @@ export class ObjectStackProtocolImplementation implements
         // strictest lock among the item's stored rows in scope, never only the
         // row this layer reports.
         let overlayLockLayer: unknown;
+        // [#23291] Naming no package, the overlay comes from the address
+        // {@link getMetaItem} serves its content from
+        // ({@link packagelessReadAddress}), so `effective` is what that read
+        // returns and `/published` serves the same document. Content only: the
+        // lock stays at the request's address, as the `_lock` gate judges it.
+        // Asked outside the `try` below: its own failed read already answers
+        // the #5532 envelope, with the driver's error as `cause`.
+        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name);
         try {
             // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
             // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
@@ -11405,7 +11494,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: 'active',
-                ...(request.packageId ? { packageId: request.packageId } : {}),
+                ...(contentPackageId ? { packageId: contentPackageId } : {}),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
@@ -17758,9 +17847,9 @@ export class ObjectStackProtocolImplementation implements
      * returns `null` and the caller proceeds exactly as before.
      *
      * [#22591] `operation: 'create'` says the write takes the name for a flow of
-     * the caller's own (the `/meta` door's first-write pin); rule 1's refusal
-     * then names the create remedy. The verdict is the same; absent, the write
-     * is an edit.
+     * the caller's own (the `/meta` door's first-write pin on a publish save —
+     * [#23406] a first draft is an edit); rule 1's refusal then names the
+     * create remedy. The verdict is the same; absent, the write is an edit.
      *
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
@@ -18879,6 +18968,19 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#23291, ADR-0048 §3.3] The package a by-name read that names no package
+     * takes its stored CONTENT from: the item's own package when its active
+     * rows are bound to exactly one ({@link packagelessAddress}, the address
+     * the save, the delete and the read's `version` resolve), else
+     * `undefined`, any row (the best-effort first match). {@link getMetaItem}
+     * and {@link getMetaItemLayered} both ask it, so the plain read, the
+     * layered read's `effective` and `/published` serve one row.
+     */
+    private async packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+        return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member)).packageId ?? undefined;
+    }
+
+    /**
      * [#23165, ADR-0048] THE package-less write address: which row of an item a
      * write that names no package addresses, read from the item's stored rows
      * at `state`. The item's own package when those rows are bound to exactly
@@ -18999,8 +19101,21 @@ export class ObjectStackProtocolImplementation implements
      * door it is the version the next item read at the same address serves
      * ({@link readVersionToken}), so a client re-pins from the refusal without
      * parsing prose. A head with no served form sets neither attribute.
+     *
+     * [#23406] `firstWritePin` — the lifecycle a save's first-write pin (a
+     * present `null` parent, `If-None-Match: *` on the REST door) asserted had
+     * no row. That caller loaded nothing, so "modified since you loaded it"
+     * and "Expected parent null" misstate what it did; when the repository
+     * judged that `null` parent, the sentence states the assertion and the row
+     * that contradicts it instead. The code, the status and every attribute
+     * are the same as for any other conflict.
      */
-    private async metadataConflictRefusal(err: ConflictError, subject: string, prefix: string): Promise<Error> {
+    private async metadataConflictRefusal(
+        err: ConflictError,
+        subject: string,
+        prefix: string,
+        firstWritePin?: 'draft' | 'active',
+    ): Promise<Error> {
         const conflict: any = new Error(subject);
         conflict.code = 'METADATA_CONFLICT';
         conflict.status = 409;
@@ -19017,7 +19132,11 @@ export class ObjectStackProtocolImplementation implements
         }
         const expected = await servedContentHash(err.expectedParent, digest);
         if (expected !== undefined) conflict.expectedParent = expected;
-        conflict.message = `${prefix} Expected parent ${show(expected)} but current is ${show(current)}.`;
+        conflict.message = firstWritePin !== undefined && expected === null
+            ? `${subject}: this save asserted that no ${firstWritePin} row exists (the first-write pin, `
+                + `If-None-Match: * on the REST door), but one does (current is ${show(current)}). Send that `
+                + `version as If-Match to save over it, or re-read the item to merge first.`
+            : `${prefix} Expected parent ${show(expected)} but current is ${show(current)}.`;
         return conflict;
     }
 
@@ -19219,6 +19338,31 @@ export class ObjectStackProtocolImplementation implements
      * | `P` empty / absent (the `'sys_metadata'` sentinel) | **accepted** — a package-less env-wide overlay is ADR-0005's platform-global shape. Before D9 this THREW `already owned by package "O"`, an artefact of the borrowed `own` slot rather than a decision (#6995, measured as P2). |
      * | `P == Q`, some other package | **mismatch** — refused loudly. |
      *
+     * ## [#23416] …and against a RUNTIME-authored owner's id `R`
+     *
+     * With no packaged owner, the object may still have an owner: the `own`
+     * contributor a package's `sys_metadata` row registered (the write-through
+     * or the boot hydration). That is the contributor `registerObject`'s
+     * single-owner rule compares an incoming `own` claim against, so a row
+     * bound to a different package was written and then refused by the
+     * registry into {@link applyObjectRegistryMutation}'s best-effort warn: the
+     * save answered `200` while `sys_metadata` held a row the registry could
+     * not hold, which is the disagreement {@link overlayPackageMismatchError}
+     * exists to prevent. So the same mismatch arm answers it, judged on the
+     * registry's own fact (`getObjectOwner`, keyed on the object name exactly as
+     * `registerObject` keys its contributors), never on a guess:
+     *
+     * | case | verdict |
+     * |:--|:--|
+     * | `P == R` | `own` — the owner's re-save, an ordinary re-registration. |
+     * | `P` empty / absent | `own`, unchanged — a direct save naming no package is addressed to `R`'s row before this runs ({@link packagelessAddress}). |
+     * | `P == Q`, some other package | **mismatch** — refused loudly, the code owner's refusal and prescription. |
+     *
+     * Only an owner bound to a real package is judged here. An owner keyed by
+     * the `'sys_metadata'` sentinel (a package-less runtime object) or by no
+     * package at all is left to today's `own` verdict: it names no package the
+     * prescription could direct a save to.
+     *
      * Falls back to `'own'` — today's behaviour — for a registry that does not
      * offer the discriminator, so a duck-typed engine double is never made to
      * fail by a question it cannot answer.
@@ -19238,6 +19382,20 @@ export class ObjectStackProtocolImplementation implements
             : undefined;
         const ownerPackageId: unknown = owner?.packageId;
         if (typeof ownerPackageId !== 'string' || ownerPackageId === '') {
+            // [#23416] No packaged owner: the runtime-authored one, if any.
+            const runtimeOwner = typeof registry?.getObjectOwner === 'function'
+                ? registry.getObjectOwner(name)
+                : undefined;
+            const runtimeOwnerPackageId: unknown = runtimeOwner?.packageId;
+            if (
+                binding !== ''
+                && typeof runtimeOwnerPackageId === 'string'
+                && runtimeOwnerPackageId !== ''
+                && runtimeOwnerPackageId !== 'sys_metadata'
+                && binding !== runtimeOwnerPackageId
+            ) {
+                return { kind: 'mismatch', packageId: binding, ownerPackageId: runtimeOwnerPackageId };
+            }
             return { kind: 'own', packageId: binding || 'sys_metadata' };
         }
         if (binding !== '' && binding !== ownerPackageId) {
@@ -21762,12 +21920,27 @@ export class ObjectStackProtocolImplementation implements
         // the silent strip it always had rather than failing the rewrite.
         //
         // [#22591] What this save does to the name, read for the sealed-item
-        // refusal's remedy and nothing else: a present `null` parent is the
-        // first-write pin (`If-None-Match: *` on the REST door) — the caller
-        // holds no row under the name and is writing one of its own, a create.
-        // Every other save is an edit. Read by the flow rule just below and by
-        // the package door further down.
-        const sealedWrite: 'save' | 'create' = request.parentVersion === null ? 'create' : 'save';
+        // refusal's remedy and nothing else. Read by the flow rule just below
+        // and by the package door further down, and each reads it only for a
+        // name a managed package (or the loader's set) already holds — so an
+        // item is under the name whenever it is read.
+        //
+        // [#23406] A present `null` parent is the first-write pin
+        // (`If-None-Match: *` on the REST door), and it asserts what the spec
+        // says it asserts — "no current row of THIS lifecycle"
+        // (`SaveMetaItemRequestSchema.parentVersion`) — and nothing more:
+        //  - on a publish save the lifecycle is the item's live row: the
+        //    caller asserts there is none and brings one into existence under
+        //    the name, a create;
+        //  - on a draft save the lifecycle is the draft's: the pin asserts that
+        //    no draft is pending, never that the name is free. Over a held
+        //    name it is a first draft of the item already there, an edit, and
+        //    its refusal names that item's own remedy, as the unpinned draft's
+        //    does. Read as a create, it named a free name, and a client that
+        //    followed it authored a second item instead of editing the source.
+        // Every other save is an edit.
+        const sealedWrite: 'save' | 'create' =
+            request.parentVersion === null && request.mode !== 'draft' ? 'create' : 'save';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
@@ -21936,8 +22109,9 @@ export class ObjectStackProtocolImplementation implements
         // repository has refused these writes on them all along; the door
         // only answers first.
         //
-        // [#22591] A first write (`sealedWrite`, above) reads the create
-        // remedy; the verdict is the same.
+        // [#22591] A first write of the live row (`sealedWrite`, above) reads
+        // the create remedy — [#23406] a first DRAFT is an edit and keeps the
+        // edit remedy; the verdict is the same.
         this.refusePackagedBaseOverride(request, sealedWrite);
 
         // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
@@ -22126,9 +22300,20 @@ export class ObjectStackProtocolImplementation implements
         // reachable type set and carries the measurements above.
         if (!request.force && singularType === 'object') {
             try {
+                // [#23291, ADR-0048] Judged against the row this save
+                // overwrites: the read at the save's own address. A
+                // package-less publish save has resolved `packageId` to the
+                // item's one package above (#23165); a save naming a package
+                // with no row of its own reads that package's address, the
+                // package-unbound stand-in it overlays. Before, the read named
+                // no package, so with a package-unbound row stored beside the
+                // package's it judged a row no package-less save writes, and a
+                // save naming a third package was judged against another
+                // package's row.
                 const existing = await this.getMetaItem({
                     type: request.type,
                     name: request.name,
+                    ...(request.packageId ? { packageId: request.packageId } : {}),
                 } as any);
                 const prev = (existing as any)?.item;
                 if (prev) {
@@ -22311,11 +22496,14 @@ export class ObjectStackProtocolImplementation implements
         // conversions applied (`applyConversionsToFlow`) — for the VERDICT
         // only: what is stored stays the raw request body, exactly as before.
         // The flow parse judges an undeclared config key on the builtin node
-        // types, so a D2 spelling the load path still rewrites (`filters`,
+        // types, so a D2 spelling the canonicalizer rewrites (`filters`,
         // script `functionName`, subflow `flow`, …) would otherwise be refused
-        // here and accepted at every converting door (`os validate`,
-        // `defineStack`, `registerFlow`): a verdict that depended on whether
-        // this host runs an automation service. No `reservedNodeTypes` (no
+        // here and accepted by `registerFlow`, which the canonicalizer is: a
+        // verdict that depended on whether this host runs an automation
+        // service. So the fallback replays the chain the canonicalizer replays
+        // — the FULL chain, retired entries included (#23487 retired those
+        // spellings from the authoring funnel, not from this seam), minus the
+        // same default flip ({@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}). No `reservedNodeTypes` (no
         // engine here): a node-type rename's conflict guard keeps its one home
         // in the engine's canonicalizer, and this converted body is never
         // persisted. A key no conversion rewrites is judged exactly as written.
@@ -22390,7 +22578,12 @@ export class ObjectStackProtocolImplementation implements
                     canonicalized = true;
                 }
             }
-            if (!canonicalized) flowGateVerdictBody = applyConversionsToFlow(request.item);
+            if (!canonicalized) {
+                flowGateVerdictBody = applyConversionsToFlow(request.item, {
+                    includeRetired: true,
+                    excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
+                });
+            }
         }
 
         // Spec-conformance check: if a Zod schema is registered for this
@@ -23009,16 +23202,20 @@ export class ObjectStackProtocolImplementation implements
      * One builder for both, so the two cannot answer in different words.
      * [#21207] The text and attributes carry keyed values or none
      * ({@link metadataConflictRefusal}); the audit row carries no hash at all.
+     * [#23406] A caller that sent the first-write pin (`parentVersion: null`)
+     * asserted that the lifecycle it writes had no row, and is told that, not
+     * that the item changed since it loaded it.
      */
     private async saveConflict(
         err: ConflictError,
-        request: { type: string; name: string; actor?: string },
+        request: { type: string; name: string; actor?: string; parentVersion?: string | null; mode?: 'draft' | 'publish' },
         writeSource: string,
     ): Promise<Error> {
         const conflict = await this.metadataConflictRefusal(
             err,
             `${request.type}/${request.name}`,
             `${request.type}/${request.name} has been modified since you loaded it.`,
+            request.parentVersion === null ? (request.mode === 'draft' ? 'draft' : 'active') : undefined,
         );
         await this.recordOptimisticConflictAudit({
             type: request.type,
@@ -26266,6 +26463,32 @@ export class ObjectStackProtocolImplementation implements
      * with the source — and rewriting every intra-package reference (lookup
      * `reference`, view `object`, expressions, etc.) to the new names. Per-item
      * best-effort; one failure never aborts the whole clone.
+     *
+     * Every copied object is named in the target namespace: `iojn_customer`
+     * becomes `iojn2_customer`, and an object whose name lacks the source
+     * prefix (`ticket`) becomes `iojn2_ticket` — the prefix rule's own rename
+     * (ADR-0129 D2). Such a name is rewritten where it is REFERENCED (an
+     * object-reference property, exact value), never inside free text; and
+     * when its target name is already claimed (the source also holds
+     * `iojn_ticket`) the object is refused in `failed[]`, before anything is
+     * written for it, with the source rename that clears it.
+     *
+     * A copied permission set's field rules follow too: in `fields`, keyed
+     * `<object>.<field>`, a key's object part takes the renamed object's name
+     * and its field part is left as stored.
+     *
+     * A rename at a reference site that meets a name the item already holds
+     * there (a permission set's or a translation's `objects` key, a hook's
+     * `object` entry) is never merged: the item is refused in `failed[]`,
+     * naming both, before anything is written for it.
+     *
+     * Every copied name stays in step with what it names. A view item's
+     * `<object>.<viewKey>` name takes its object's copy name and keeps its view
+     * key (`ticket.board` becomes `iojn2_ticket.board`), and a value that is
+     * that whole name follows it; an item of an object the copy does not rename
+     * keeps its name. A record entry's `name` that echoes its key (an object's
+     * field) follows the key, and free text renames an object's name only as a
+     * whole identifier, never inside a longer one (`x_iojn_customer` stays).
      */
     async duplicatePackage(request: {
         sourcePackageId: string;
@@ -26395,33 +26618,281 @@ export class ObjectStackProtocolImplementation implements
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
 
-        // Map only OBJECT names that carry the source namespace prefix; views/etc.
-        // are renamed by the same prefix swap and reference-rewritten via the map.
+        // Rows other than objects and qualified view items (each below) are
+        // renamed by the source-prefix swap alone; a name without the prefix
+        // keeps it (the docblock re-namespaces OBJECT names).
         const renameName = (name: string): string =>
             sourceNs && typeof name === 'string' && name.startsWith(`${sourceNs}_`)
                 ? `${targetNs}_${name.slice(sourceNs.length + 1)}`
                 : name;
+
+        // ⭐ EVERY OBJECT GETS A NAME IN THE TARGET NAMESPACE (ADR-0070 D4, read
+        // with ADR-0129 D2). An object name IS its table name and its registry
+        // key, so a copy that keeps the source's name is a second claim on the
+        // source's object: before PR #23510 it stored a target row the registry
+        // refused, over the source's table, and after it the copy failed with
+        // the ADR-0029 D9.9 ownership prescription, which names no way out for
+        // a duplicate. ADR-0129 D2 says what the name is: every object a
+        // package defines is `${namespace}_${shortName}`, and the prefix rule's
+        // own prescription for a name that lacks the prefix
+        // (`validateObjectNamespacePrefix`) is "rename it to
+        // `${namespace}_${name}`". The copy is a NEW object, so that rename
+        // costs nothing here — while renaming the SOURCE object would move its
+        // table. A prefixed name swaps the source prefix for the target's;
+        // a name WITHOUT the source prefix (a direct-publish save, which no
+        // prefix gate reads, or a package that had no namespace) takes the
+        // target prefix in front of its whole name.
+        //
+        // ⛔ REFUSED, NEVER RE-INVENTED: when that name is already claimed — by
+        // the copy of a prefixed sibling (`ticket` and `iojn_ticket` both name
+        // `iojn2_ticket`) or by an object the source package holds — the object
+        // is reported in `failed[]` before anything is written for it, at its
+        // own name, with the rename that clears it. A second invented name
+        // (a numeric suffix, a third prefix) would be a name nobody wrote.
+        const objectNames = new Set<string>(
+            rows.filter((row) => row?.type === 'object' && typeof row.name === 'string').map((row) => row.name as string),
+        );
         const renameMap = new Map<string, string>();
-        for (const row of rows) {
-            if (row?.type === 'object') {
-                const nn = renameName(row.name);
-                if (nn !== row.name) renameMap.set(row.name, nn);
-            }
+        const prefixed: string[] = [];
+        const unprefixed: string[] = [];
+        for (const name of objectNames) {
+            if (sourceNs && name.startsWith(`${sourceNs}_`)) prefixed.push(name);
+            else unprefixed.push(name);
         }
+        for (const name of prefixed) {
+            const nn = renameName(name);
+            if (nn !== name) renameMap.set(name, nn);
+        }
+        // Every name a prefixed object's copy takes (itself, when the target
+        // namespace IS the source's), and every name the source holds.
+        const claimedBy = new Map<string, string>(prefixed.map((name) => [renameName(name), name]));
+        const refusedObjects = new Map<string, string>();
+        for (const name of unprefixed) {
+            const nn = `${targetNs}_${name}`;
+            const holder = claimedBy.get(nn) ?? (objectNames.has(nn) ? nn : undefined);
+            if (holder !== undefined) {
+                const lacks = sourceNs
+                    ? `lacks the '${sourceNs}_' prefix of package '${request.sourcePackageId}' (ADR-0129 D2: `
+                        + 'every object a package defines carries its namespace as a name prefix)'
+                    : `carries no namespace prefix (package '${request.sourcePackageId}' declares no namespace)`;
+                const taken = holder === nn
+                    ? `'${nn}' is an object package '${request.sourcePackageId}' already holds`
+                    : `'${nn}' is already the copy name of object '${holder}'`;
+                refusedObjects.set(
+                    name,
+                    `Object '${name}' is not copied: its name ${lacks}, so its copy is named '${nn}' in `
+                        + `namespace '${targetNs}', and ${taken}. Rename '${name}' on the source to `
+                        + `${sourceNs ? `a '${sourceNs}_' name` : 'a name'} no other object in the package uses, `
+                        + 'then duplicate again.',
+                );
+                continue;
+            }
+            renameMap.set(name, nn);
+            claimedBy.set(nn, name);
+        }
+
         // Longest-first, identifier-boundary rewrite so `iojn_task` never corrupts
         // `iojn_task_log`, and `iojn_x` inside `record.iojn_x`/`iojn_x.view` matches.
-        const olds = [...renameMap.keys()].sort((a, b) => b.length - a.length);
+        // Prefixed names only: a prefixed name is distinctive enough to find in
+        // free text, a bare one is not (below).
+        //
+        // ⭐ THE BOUNDARY HOLDS ON BOTH SIDES. With the right side alone, a
+        // name that merely ENDS in an object's name was rewritten inside it:
+        // the field `x_iojn_task` came out `x_iojn2_task` — its `name` and every
+        // value naming it — while its `fields` key stayed, so the copy's key
+        // and `name` disagreed. `x_iojn_task` is another identifier, never the
+        // object: `renameName` swaps the source prefix only at the START of a
+        // name, and this rewrite now matches only a whole identifier too.
+        const olds = prefixed.filter((name) => renameMap.has(name)).sort((a, b) => b.length - a.length);
         const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const re = olds.length ? new RegExp(`(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g') : null;
-        const deepRewrite = (v: any): any => {
-            if (typeof v === 'string') return re ? v.replace(re, (m) => renameMap.get(m) ?? m) : v;
-            if (Array.isArray(v)) return v.map(deepRewrite);
+        const re = olds.length
+            ? new RegExp(`(?<![A-Za-z0-9_])(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g')
+            : null;
+        // ⭐ A VIEW ITEM'S NAME FOLLOWS ITS OBJECT. A view row's qualified name
+        // is `<object>.<viewKey>` (`ViewItemNameSchema`,
+        // `packages/spec/src/ui/view.zod.ts`: "the object can be recovered from
+        // the prefix, so the registry key never collides across objects"), so
+        // its object part takes exactly the rename its `object` property takes
+        // — `renameMap`, whole — and its view key is left as stored:
+        // `ticket.board` copies as `iojn2_ticket.board` beside the body's
+        // `object: 'iojn2_ticket'`. The source-prefix swap (`renameName`)
+        // reached a prefixed object's items only: a bare object's item kept
+        // `ticket.board`, a name the source's item still holds, so a by-name
+        // read naming no package served the source and the copy was shadowed.
+        // The swap also moved an item of an object OUTSIDE the package that
+        // carries the source prefix (`iojn_ext.board` → `iojn2_ext.board`)
+        // while its `object` stayed `iojn_ext`. An object this copy does not
+        // rename keeps its items' names.
+        //
+        // A value that IS such a name, whole, follows the item: a form action's
+        // `target` (`<object>.<viewKey>`) kept `ticket.entry`, so the copy's
+        // button opened the SOURCE's form, on the source's object. Whole values
+        // only, and only names of the view items this copy renames — a bare
+        // object's name is never rewritten inside free text (below).
+        const isQualifiedViewRow = (row: any): boolean =>
+            (PLURAL_TO_SINGULAR[String(row?.type)] ?? String(row?.type)) === 'view'
+            && typeof row?.name === 'string' && row.name.includes('.');
+        const viewItemRenames = new Map<string, string>();
+        for (const row of rows) {
+            if (!isQualifiedViewRow(row)) continue;
+            const dot = (row.name as string).indexOf('.');
+            const renamed = renameMap.get((row.name as string).slice(0, dot));
+            if (renamed !== undefined) viewItemRenames.set(row.name, `${renamed}${(row.name as string).slice(dot)}`);
+        }
+        // ⭐ AT AN OBJECT-REFERENCE PROPERTY, A NAME IS REWRITTEN WHOLE — the
+        // only place a BARE name is rewritten. Measured: putting `ticket` in the
+        // free-text rewrite above turns "A support ticket raised by a customer"
+        // into "A support iojn2_ticket raised …", and the same match renames the
+        // value of a lookup FIELD called `ticket` (`fields.ticket.name`). So a
+        // value is rewritten only where it sits under a property that names an
+        // object — the derived site index (`REFERENCE_SITES`, target `object`:
+        // `reference`, `object`, `objectName`, `objects`, …), read by property
+        // wherever it occurs in any item, because flow node configs (`config.
+        // objectName`) are declared by node descriptors the index does not
+        // walk — and only when it equals a renamed name exactly, in the four
+        // shapes a name arrives in there: a string, an array element, a record
+        // KEY (`permission.objects` is keyed by object name) or a `.name`. The
+        // record key holds for prefixed names too: a copied permission set
+        // otherwise kept `objects.<source object>`, a grant on the SOURCE.
+        //
+        // ⛔ REFUSED, NEVER MERGED: at a reference site, a renamed name can
+        // meet a name the item already holds there — the source also names
+        // the object the copy is about to be called (`dupdst_customer`, an
+        // object outside the package or not yet created) beside its own
+        // (`dupsrc_customer`). Two record KEYS that land on one key keep only
+        // the last entry: a permission set's `objects` dropped a grant (and
+        // the copied object could gain edit and delete its source never gave
+        // it), a translation's `objects` dropped a label. Two array ELEMENTS
+        // that land on one name bind it twice: a hook's handler ran twice per
+        // event on the copied object. So every such meeting is recorded in
+        // `collisions` — the path, the name that moved, the name it met — and
+        // the call site refuses the item in `failed[]` before anything is
+        // written for it. `renameMap` is one-to-one, so a meeting is always a
+        // renamed name and a name this copy does not rename; an element the
+        // source itself repeats is copied as stored.
+        const objectReferenceProperties = new Set(
+            (REFERENCE_SITES.byTarget.get('object') ?? []).map((site) => site.property),
+        );
+        type ReferenceCollision = { at: string; shape: 'key' | 'entry'; moved: string; met: string };
+        const deepRewrite = (v: any, collisions: ReferenceCollision[], atReference = false, at = ''): any => {
+            if (typeof v === 'string') {
+                const whole = atReference ? renameMap.get(v) : undefined;
+                if (whole !== undefined) return whole;
+                const viewItem = viewItemRenames.get(v);
+                if (viewItem !== undefined) return viewItem;
+                return re ? v.replace(re, (m) => renameMap.get(m) ?? m) : v;
+            }
+            if (Array.isArray(v)) {
+                const out = v.map((element, i) => deepRewrite(element, collisions, atReference, `${at}[${i}]`));
+                if (atReference) {
+                    const firstAt = new Map<string, number>();
+                    out.forEach((element, i) => {
+                        if (typeof element !== 'string') return;
+                        const j = firstAt.get(element);
+                        if (j === undefined) {
+                            firstAt.set(element, i);
+                        } else if (v[j] !== v[i]) {
+                            collisions.push({ at, shape: 'entry', moved: v[i] !== element ? v[i] : v[j], met: element });
+                        }
+                    });
+                }
+                return out;
+            }
             if (v && typeof v === 'object') {
                 const o: any = {};
-                for (const [k, val] of Object.entries(v)) o[k] = deepRewrite(val);
+                const from = new Map<string, string>();
+                for (const [k, val] of Object.entries(v)) {
+                    const key = atReference ? (renameMap.get(k) ?? k) : k;
+                    const other = from.get(key);
+                    if (other !== undefined) {
+                        collisions.push({ at, shape: 'key', moved: key === k ? other : k, met: key });
+                    }
+                    from.set(key, k);
+                    const entry = deepRewrite(
+                        val, collisions,
+                        objectReferenceProperties.has(k) || (atReference && k === 'name'),
+                        at ? `${at}.${k}` : k,
+                    );
+                    // ⭐ A RECORD ENTRY'S `name` FOLLOWS ITS KEY. An entry that
+                    // echoes its key in `name` (an object's field: `fields`
+                    // keyed by field name) is ONE identity spelled twice, so
+                    // the name takes the key's rename decision. Outside a
+                    // reference site a key is never renamed, while the
+                    // free-text rewrite above renamed a `name` equal to a
+                    // prefixed object's: the field `iojn_customer` was copied
+                    // as `fields.iojn_customer.name: 'iojn2_customer'`. The
+                    // data plane addresses the column by the key, the save
+                    // door's FLS lint reads the `name`, so a copied permission
+                    // set's rule on that field was refused at the copy.
+                    if (typeof (val as any)?.name === 'string' && (val as any).name === k
+                        && entry && typeof entry === 'object' && !Array.isArray(entry)) {
+                        entry.name = key;
+                    }
+                    o[key] = entry;
+                }
                 return o;
             }
             return v;
+        };
+        const describeCollision = (c: ReferenceCollision): string =>
+            `its \`${c.at}\` ${c.shape} '${c.moved}' follows the copied object to '${c.met}', `
+            + `${c.shape === 'key' ? 'a key' : 'an entry'} it already holds there, which this copy does not rename. `
+            + (c.shape === 'key'
+                ? 'A record keeps one entry per key, so the copy would drop one of the two. '
+                : `The copy would name '${c.met}' twice. `)
+            + `Remove '${c.moved}' or '${c.met}' on the source, then duplicate again.`;
+        // ⭐ A COPIED PERMISSION SET'S FIELD RULES FOLLOW THE RENAMED OBJECTS.
+        // `PermissionSetSchema.fields` is a record keyed `<entity_name>.<field_name>`
+        // (`packages/spec/src/security/permission.zod.ts`), and the security
+        // plugin reads a set's rules for an object by the key prefix
+        // `<object>.` (`PermissionEvaluator.getFieldPermissions`). Left as
+        // stored, the copy's rules govern the SOURCE's object and the
+        // duplicate's object gets none: a field the source set hides is
+        // readable on the copy for whoever holds the copied set.
+        //
+        // `deepRewrite` cannot carry it: the derived site index reads
+        // `permission.fields` as a site naming `field` items (its property
+        // spells that type), never an object, and has no arm for a composite
+        // key — and widening the index would also change the "Used by" answer
+        // it feeds (`findReferencesToMeta`). So this step is keyed on the
+        // declared shape — the `fields` record of a copied `permission` item —
+        // never on a property name, which would also catch an object's own
+        // `fields` (keyed by field name).
+        //
+        // The split: object and field names are both `^[a-z_][a-z0-9_]*$`, so
+        // a key's object part is everything before its FIRST `.`. It is
+        // rewritten only when it equals a renamed object name exactly, and the
+        // field part is never read — `dupsrc_customer.dupsrc_customer` becomes
+        // `dupdst_customer.dupsrc_customer`. A key naming an object outside the
+        // package keeps its name.
+        //
+        // ⛔ REFUSED, NEVER MERGED: when a renamed key equals a key the set
+        // already holds (the source also governs an object, outside the
+        // package, named like the copy), keeping either rule would silently
+        // drop the other, so the set is reported in `failed[]` with both keys.
+        // `Object.fromEntries` defines own properties, so no key can land on
+        // the prototype.
+        const rewriteFieldRuleKeys = (fields: Record<string, unknown>): { fields: Record<string, unknown> } | { collision: string } => {
+            const out = new Map<string, unknown>();
+            const from = new Map<string, string>();
+            for (const [key, rule] of Object.entries(fields)) {
+                const dot = key.indexOf('.');
+                const renamed = dot > 0 ? renameMap.get(key.slice(0, dot)) : undefined;
+                const next = renamed === undefined ? key : `${renamed}${key.slice(dot)}`;
+                const other = from.get(next);
+                if (other !== undefined) {
+                    const moved = next === key ? other : key;
+                    return {
+                        collision: `its field rule '${moved}' follows object '${moved.slice(0, moved.indexOf('.'))}' `
+                            + `to '${next}', a key the set already holds for object `
+                            + `'${next.slice(0, next.indexOf('.'))}', which this copy does not rename. `
+                            + `Remove '${moved}' or '${next}' on the source, then duplicate again.`,
+                    };
+                }
+                out.set(next, rule);
+                from.set(next, key);
+            }
+            return { fields: Object.fromEntries(out) };
         };
 
         if (srcPkg?.manifest && typeof registry?.installPackage === 'function') {
@@ -26454,7 +26925,16 @@ export class ObjectStackProtocolImplementation implements
         const canonicalizeFlow = this.resolveFlowCanonicalizer();
 
         for (const row of rows) {
-            const newName = renameName(row.name);
+            const refusal = row?.type === 'object' ? refusedObjects.get(row.name) : undefined;
+            if (refusal !== undefined) {
+                failed.push({ type: row.type, name: row.name, error: refusal });
+                continue;
+            }
+            const newName = row?.type === 'object'
+                ? (renameMap.get(row.name) ?? row.name)
+                : isQualifiedViewRow(row)
+                    ? (viewItemRenames.get(row.name) ?? row.name)
+                    : renameName(row.name);
             const rawType = String(row.type);
             const singular = PLURAL_TO_SINGULAR[rawType] ?? rawType;
             let body: unknown;
@@ -26533,7 +27013,21 @@ export class ObjectStackProtocolImplementation implements
                     continue;
                 }
             }
-            const rewritten = deepRewrite(item);
+            const collisions: ReferenceCollision[] = [];
+            const rewritten = deepRewrite(item, collisions);
+            if (collisions.length > 0) {
+                const noun = singular === 'permission'
+                    ? 'Permission set'
+                    : `${singular.charAt(0).toUpperCase()}${singular.slice(1)}`;
+                const more = collisions.length - 1;
+                failed.push({
+                    type: row.type,
+                    name: row.name,
+                    error: `${noun} '${row.name}' is not copied: ${describeCollision(collisions[0]!)}`
+                        + (more > 0 ? ` It has ${more} more such collision${more === 1 ? '' : 's'}.` : ''),
+                });
+                continue;
+            }
             if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) {
                 rewritten.name = newName;
                 // [ADR-0086 D3] A permission set that declares its SOURCE
@@ -26546,6 +27040,19 @@ export class ObjectStackProtocolImplementation implements
                 // binding is reported in `failed[]` with the door's remedy.
                 if (singular === 'permission' && rewritten.packageId === request.sourcePackageId) {
                     rewritten.packageId = request.targetPackageId;
+                }
+                if (singular === 'permission' && rewritten.fields
+                    && typeof rewritten.fields === 'object' && !Array.isArray(rewritten.fields)) {
+                    const result = rewriteFieldRuleKeys(rewritten.fields);
+                    if ('collision' in result) {
+                        failed.push({
+                            type: row.type,
+                            name: row.name,
+                            error: `Permission set '${row.name}' is not copied: ${result.collision}`,
+                        });
+                        continue;
+                    }
+                    rewritten.fields = result.fields;
                 }
             }
             try {
@@ -30009,8 +30516,17 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
 
-        const sites = REFERENCE_SITES.byTarget.get(singularTarget);
-        if (!sites || sites.length === 0) {
+        const sites = REFERENCE_SITES.byTarget.get(singularTarget) ?? [];
+        // [#23539] Sites that name the target in the HEAD of a composite record
+        // key — a permission set's `fields`, keyed `<object>.<field>`, for target
+        // `object` and nothing else. They live in their own map, never in
+        // `byTarget`, because `duplicatePackage` reads `byTarget.get('object')` as
+        // a flat set of object-naming property names (see
+        // COMPOSITE_KEY_REFERENCE_SITES in `./reference-sites.ts`). Without them a
+        // set whose only rule for an object was a field rule was missing here,
+        // and the "Used by" panel could clear that object for deletion.
+        const compositeSites = REFERENCE_SITES.compositeKeyByTarget.get(singularTarget) ?? [];
+        if (sites.length === 0 && compositeSites.length === 0) {
             return { references: [] };
         }
 
@@ -30026,7 +30542,23 @@ export class ObjectStackProtocolImplementation implements
             }
             properties.set(site.property, site.target);
         }
-        const matchers = [...propertiesByFromType].map(([fromType, properties]) => ({ fromType, properties }));
+        // Composite-key sites share that one read: property → separator, per
+        // source type, and a source type they alone name still gets its matcher.
+        const separatorsByFromType = new Map<string, Map<string, string>>();
+        for (const site of compositeSites) {
+            let separators = separatorsByFromType.get(site.fromType);
+            if (!separators) {
+                separators = new Map<string, string>();
+                separatorsByFromType.set(site.fromType, separators);
+            }
+            separators.set(site.property, site.separator);
+            if (!propertiesByFromType.has(site.fromType)) propertiesByFromType.set(site.fromType, new Map());
+        }
+        const matchers = [...propertiesByFromType].map(([fromType, properties]) => ({
+            fromType,
+            properties,
+            separators: separatorsByFromType.get(fromType),
+        }));
 
         const seen = new Set<string>(); // dedup key: `${fromType}|${itemName}|${path}`
         const out: Array<{ type: string; name: string; label?: string; path: string; kind: string }> = [];
@@ -30073,7 +30605,9 @@ export class ObjectStackProtocolImplementation implements
                     // Don't list an item as a reference to itself unless the
                     // self-reference is meaningful (e.g. object→field path).
                     const isSelfReference = matcher.fromType === singularTarget && sourceName === targetName;
-                    for (const { path, property } of collectReferenceHits(raw, matcher.properties, targetName)) {
+                    const hits = collectReferenceHits(raw, matcher.properties, targetName);
+                    if (matcher.separators) hits.push(...collectCompositeKeyHeadHits(raw, matcher.separators, targetName));
+                    for (const { path, property } of hits) {
                         // An item naming ITSELF through a scalar property is
                         // the item, not a dependent. Collection-valued paths
                         // are kept, because an item that lists itself among

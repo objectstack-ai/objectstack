@@ -342,7 +342,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "失効理由",
-        help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended など）。"
+        help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended、admin_password_reset など）。"
       },
       active_organization_id: {
         label: "アクティブ組織"
@@ -1003,7 +1003,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       last_used_at: {
         label: "最終使用日時",
-        help: "API 呼び出しのたびに自動更新されます"
+        help: "キーが使われたときに記録されます(最大 1 時間に 1 回)。非アクティブ期間(既定 90 日)内に使用記録のないキーは、新しいキーに置き換えるまで拒否されます"
       },
       revoked: {
         label: "失効済み"

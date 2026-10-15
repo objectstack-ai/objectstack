@@ -1272,9 +1272,9 @@ const appTranslationDataShape = () => ({
    * (`label`, `placeholder`, `inlineHelpText`). It reads `label` through
    * `translateFlow` to name the flow in its header and in the completion
    * toast, falling back to the label the engine serves as
-   * `AutomationResult.flowLabel` and then to the flow's API name. Both were
-   * measured at the `.objectui-sha` pin `0abd4f9f8`. See the `flows` rows in
-   * `liveness/translation.json`: the group and its children are `live`. A
+   * `AutomationResult.flowLabel` and then to the flow's API name. Both reads
+   * are recorded in the `flows` rows of `liveness/translation.json`: the group
+   * and its children are `live`. A
    * screen's `title` and `description` are the engine's to pick, not the
    * runner's (see "picked by the engine" below).
    *

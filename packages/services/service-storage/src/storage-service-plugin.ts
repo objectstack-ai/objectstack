@@ -20,6 +20,9 @@ import {
   // judges a key-admitted request by the KEY's answer.
   resolveApiKeyAdmission,
   userAuthGateSourceOf,
+  // [#23367] The API-key lifecycle policy source, and its branded refusal.
+  apiKeyLifecyclePolicySourceOf,
+  isApiKeyLifecycleRefusalError,
 } from '@objectstack/core';
 import type {
   IHttpServer,
@@ -28,6 +31,7 @@ import type {
   ISecurityService,
   IStorageService,
   IFileAccessDelegate,
+  ApiKeyLifecyclePolicy,
 } from '@objectstack/spec/contracts';
 import {
   OBSERVABILITY_METRICS_SERVICE,
@@ -1158,6 +1162,27 @@ function buildAuthSessionResolver(
   };
 }
 
+/** The slice of the kernel's `auth` service the storage family's two posture readers use. */
+type GateAuthService = {
+  isAuthGateActive?(): boolean;
+  resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
+  /** [#23367] The API-key lifecycle policy (`IAuthService.resolveApiKeyLifecyclePolicy`). */
+  resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy;
+};
+
+/**
+ * The kernel's `auth` service, or `undefined` when none is registered (a
+ * kernel composed without `plugin-auth`). One lookup for both posture readers:
+ * the family door's gate reader and the download authorizer's resolver.
+ */
+function resolveGateAuthService(registry: StorageGateRegistry): GateAuthService | undefined {
+  try {
+    return registry.getService<GateAuthService>('auth') ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * ADR-0069 — read a request's session user for the authentication-policy gate
  * the storage family's door asks (`registerStorageFamily`). `undefined` when
@@ -1190,16 +1215,7 @@ function buildAuthGateSessionReader(
   registry: StorageGateRegistry,
   engine: IDataEngine | null,
 ): StorageGatedSessionReader | undefined {
-  type GateAuthService = {
-    isAuthGateActive?(): boolean;
-    resolveUserAuthGates?(userId: string, options?: { organizationId?: string }): Promise<readonly unknown[]>;
-  };
-  let authService: GateAuthService | undefined;
-  try {
-    authService = registry.getService<GateAuthService>('auth');
-  } catch {
-    return undefined;
-  }
+  const authService = resolveGateAuthService(registry);
   if (!authService) return undefined;
   const getSession = buildGetSession(registry);
   if (!getSession) return undefined;
@@ -1223,6 +1239,10 @@ function buildAuthGateSessionReader(
         Date.now(),
         await resolveAdmissionTenancyPosture(registry),
         userAuthGateSourceOf(auth),
+        // [#23367] The API-key lifecycle policy, from the same service. A key
+        // its own lifecycle refuses (`lifecycle`) carries no posture and is
+        // left to the identity resolution below, which fails it closed.
+        apiKeyLifecyclePolicySourceOf(auth),
       );
       if (admission.outcome === 'held') return { authGate: admission.gate };
       if (admission.outcome !== 'none') return undefined;
@@ -1380,7 +1400,25 @@ function buildFileReadAuthorizer(
       // fix. Raised INSIDE this `try`, so an outage takes the relay (commit 6a180e42d) in
       // the `catch` below rather than a new net.
       const tenancyPosture = await resolveAdmissionTenancyPosture(registry);
-      const authz = await resolveAuthzContext({ ql: engine, headers, getSession, tenancyPosture });
+      // [#23455] The auth service's per-user posture computation, named here
+      // as every key-admitting seam names it. This authorizer is not a second
+      // ADR-0069 gate: every route that reaches it is mounted behind the
+      // family's door (`mountFamilyRoute` in `storage-routes.ts`), whose gate
+      // reader (`buildAuthGateSessionReader`) has already refused a held
+      // owner's key on this request with the posture's `403`, and both are
+      // bound by `composeStorageRoutes` from the same `auth` service. Passing
+      // the source keeps the resolved context truthful (a held key resolves
+      // as a held principal carrying `authGate`) instead of reading a held
+      // key as a plain admission here.
+      const authz = await resolveAuthzContext({
+        ql: engine,
+        headers,
+        getSession,
+        tenancyPosture,
+        userAuthGates: userAuthGateSourceOf(resolveGateAuthService(registry)),
+        // [#23367] The API-key lifecycle policy, from the same service.
+        apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(resolveGateAuthService(registry)),
+      });
       if (!authz.userId) return 'unauthenticated';
 
       // Uploader / owner may always download.
@@ -1435,6 +1473,12 @@ function buildFileReadAuthorizer(
       // the file-read door answers the 503 it is instead of a silent 'deny'
       // indistinguishable from a genuine refusal.
       if (isAuthzStoreUnavailableError(err)) throw err;
+      // [#23367] A key its own lifecycle refused (revoked, expired, inactive)
+      // is not a read verdict either: re-raised by brand for the download
+      // door, which relays it as its declared 403 and ledger code beside the
+      // store outage. Never a 'deny', which would answer it as a refusal on
+      // the record.
+      if (isApiKeyLifecycleRefusalError(err)) throw err;
       return 'deny'; // fail closed
     }
   };

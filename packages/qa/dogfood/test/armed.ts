@@ -79,7 +79,7 @@
 // disarm and #8049's `passwordHistoryCount: 0` disarm. A guard for vacuous
 // assertions that was never shown to fail would be the joke it exists to stop.
 
-import { resolveAuthzContext } from '@objectstack/core';
+import { apiKeyLifecyclePolicySourceOf, resolveAuthzContext, userAuthGateSourceOf } from '@objectstack/core';
 import type { VerifyStack } from '@objectstack/verify';
 
 /** The system read context every probe uses — probes observe, never mutate. */
@@ -216,6 +216,11 @@ export async function resolveAuthzFor(stack: VerifyStack, token: string): Promis
     ql,
     headers,
     getSession: async (h: any) => api?.getSession?.({ headers: h }),
+    // [#23455] The owner-posture source REST names, from the same `auth`
+    // service: the key-admission seam asks it for an API key's owner.
+    userAuthGates: userAuthGateSourceOf(authService),
+    // [#23367] And the lifecycle policy, from the same service, beside it.
+    apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
   });
   return {
     userId: ctx?.userId,

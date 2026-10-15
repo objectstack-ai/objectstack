@@ -14,10 +14,9 @@
  *
  * ## The defect this file closes
  *
- * Each member is read with one shape (measured at the `.objectui-sha` pin
- * `89cad75d55` for `aggregate` / `trend`, and at the `.objectui-sha` pin
- * `ab1879721595` for `drillDown` / `compareTo`; the read points are in the
- * schemas' docblocks), and the row declared them `z.unknown()`. So
+ * Each member is read with one shape (read points recorded in
+ * `liveness/page.json`, row `regions`), and the row declared them
+ * `z.unknown()`. So
  * `aggregate: 'count'`, a function the engine does not have, `groupby` for
  * `groupBy`, a bare `trend: 'up'`, a `trend` with no `value`, a drill `filter`
  * and a comparison `dimension` all passed the component-props gate, and the
@@ -101,8 +100,7 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     ['a trend with a locale-map caption', {
       trend: { value: 12, direction: 'up', label: { en: 'Revenue records', 'zh-CN': '收入记录' } },
     }],
-    // objectui's drill-down member pins (`plugin-dashboard/src/__tests__/objectMetricDrillDownMembers-8071.test.tsx`,
-    // `ObjectMetricWidget.drillRoutedToSharedDrawer-8970.test.tsx`) at the `.objectui-sha` pin `ab1879721595`.
+    // objectui's drill-down member pins (recorded in `liveness/page.json`, row `regions`).
     ['an empty drill-down block (on)', { drillDown: {} }],
     ['a drill-down switched off', { drillDown: { enabled: false } }],
     ['a drill-down with every list member', {

@@ -314,6 +314,64 @@ describe('[#23265] the two doors refuse a stale token and a repeated one with th
     }, 60_000);
 });
 
+// ── A token that can never carry a version ────────────────────────────────────
+
+/**
+ * [#23492] Both doors read `?expectedVersion ?? If-Match` and used to forward
+ * a token only when it was truthy, so `?expectedVersion=` (empty) hid a stale
+ * `If-Match` and the delete was APPLIED, `200`, on both doors (measured on
+ * this rig before the fix, the row read back gone). Now a token that can never
+ * carry a version is refused with the protocol's own answer to the
+ * quoted-empty tag `""`, `400 VALIDATION_FAILED`, before `deleteData` is
+ * asked; maintainer decision #20 ① rules that shape refused, neither read as
+ * "no token" nor answered `409`. `data-update-expected-version.test.ts` pins
+ * the body spellings on `PATCH`.
+ */
+const UNUSABLE: ReadonlyArray<readonly [string, DeleteOptions]> = [
+    ['an empty ?expectedVersion beside a stale If-Match', { query: { expectedVersion: '' }, headers: { 'If-Match': STALE } }],
+    ['an empty ?expectedVersion and no If-Match', { query: { expectedVersion: '' } }],
+    ['a blank ?expectedVersion beside a stale If-Match', { query: { expectedVersion: '  ' }, headers: { 'If-Match': STALE } }],
+    ['an empty If-Match and no ?expectedVersion', { headers: { 'If-Match': '' } }],
+];
+
+const refused = (a: Answer) =>
+    expect({ status: a.status, code: a.code }, JSON.stringify(a)).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+
+for (const [doorName, boot] of DOORS) {
+    describe(`[#23492] ${doorName}: DELETE /data/:object/:id refuses a token that can never carry a version`, () => {
+        for (const [shape, opts] of UNUSABLE) {
+            it(`${shape}: 400 VALIDATION_FAILED, deleteData never asked, the row kept`, async () => {
+                const door = await boot();
+                refused(await door.delete(opts));
+                expect(door.forwarded()).toEqual([]);
+                expect(await door.present()).toBe(true);
+            }, 60_000);
+        }
+
+        it('the refusal is the protocol\'s own answer to the quoted-empty tag: the same status and code', async () => {
+            const quoted = await boot();
+            const protocolAnswer = await quoted.delete({ query: { expectedVersion: '""' } });
+            // The protocol, not the door, refused this one: the token reached it.
+            expect(quoted.forwarded()).toEqual(['""']);
+            const empty = await boot();
+            const doorAnswer = await empty.delete({ query: { expectedVersion: '' } });
+            expect({ status: doorAnswer.status, code: doorAnswer.code })
+                .toEqual({ status: protocolAnswer.status, code: protocolAnswer.code });
+        }, 60_000);
+    });
+}
+
+describe('[#23492] the two doors refuse each token that can never carry a version alike', () => {
+    for (const [shape, opts] of UNUSABLE) {
+        it(`${shape}: the same status, code and sentence`, async () => {
+            const answers: Answer[] = [];
+            for (const [, boot] of DOORS) answers.push(await (await boot()).delete(opts));
+            const [rest, catchAllAnswer] = answers;
+            expect(catchAllAnswer).toEqual(rest);
+        }, 60_000);
+    }
+});
+
 // ── The dispatcher's fallback deleter ─────────────────────────────────────────
 
 /**

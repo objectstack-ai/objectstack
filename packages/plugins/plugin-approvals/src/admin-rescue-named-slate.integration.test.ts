@@ -31,6 +31,8 @@
  *   on the slate for being one; another organization's administrator is not
  *   on it;
  * - the request says why: a timeline note and `__resolvedFrom`;
+ * - [#23556] the log names the empty slot once and the routing once, and no
+ *   line says the request cannot advance;
  * - an administrator out of office is covered by their delegate;
  * - CONTROLS: a staffed slate is unchanged; `fallback`, `auto_approve` and
  *   `fail` are unchanged; an organization with no administrator still gets
@@ -258,6 +260,18 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
       'admin_rescue:abandoned': ['position:sales_manager'],
       'admin_rescue:reason': "position 'sales_manager' has no holder",
     });
+  });
+
+  it('[#23556] the log names the empty slot and the routing once — no line says the request cannot advance', async () => {
+    const before = warnings.length;
+    const row = await open('logged', UNSTAFFED);
+    expect([...row.pending_approvers].sort()).toEqual(['u_admin', 'u_owner']);
+    const lines = warnings.slice(before);
+    // The scene: the per-slot line and the node-level routing line both fired,
+    // so the absence below is not read off an opening that logged nothing.
+    expect(lines.filter((w) => w.includes("approver 'position:sales_manager' expanded to nobody"))).toHaveLength(1);
+    expect(lines.filter((w) => w.includes("opening on this organization's administrators"))).toHaveLength(1);
+    expect(lines.filter((w) => /cannot advance/.test(w))).toEqual([]);
   });
 
   it('a fallback that resolves to no one degrades to the administrators, and says so', async () => {

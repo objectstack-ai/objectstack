@@ -145,9 +145,9 @@ export function reportSelectionOrder(
 
 /**
  * The prescription a `joined` report's `chart` carries, at both of its
- * coordinates (#20161, ADR-0049 enforce-or-remove). Measured at this repo's
- * `.objectui-sha` pin `f8a9d0fb0596f4521076628e2bbfe27e6ce67d52`:
- * `DatasetReportRenderer`'s joined branch draws each block as a
+ * coordinates (#20161, ADR-0049 enforce-or-remove). Measured on the renderer
+ * (recorded in `packages/spec/liveness/report.json`, row `chart`): the report
+ * renderer's joined branch draws each block as a
  * `DatasetMatrixTable` / `DatasetReportTable` and returns before the one
  * `report.chart` read below it, and no renderer reads a block's `chart` at all
  * — so a chart on a joined report, container or block, parsed and plotted
@@ -186,9 +186,8 @@ const JOINED_CONTAINER_CHART_REFUSED =
  * `blocks[i].dataset` (#21702; ADR-0021 single-form, ADR-0049 enforce-or-remove,
  * the enforce arm). A block is an independent dataset query, and nothing else
  * feeds it: the container selects nothing (its `dataset` is refused below).
- * Measured at this repo's `.objectui-sha` pin
- * `ab187972159583b595facdcae3c73b50f6f312e9`: `DatasetReportRenderer`'s joined
- * branch hands each block's `dataset` to its table as
+ * Measured on the renderer (recorded in `packages/spec/liveness/report.json`,
+ * row `blocks`): the report renderer's joined branch hands each block's `dataset` to its table as
  * `String(block.dataset ?? '')`, and the table's query hook goes idle on an
  * empty name, so an unbound block draws an empty table and queries nothing; a
  * report whose blocks ALL lack one fails `isDatasetReport` and falls through to

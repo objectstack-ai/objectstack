@@ -15,13 +15,23 @@ import {
   // deliberately different shape, not a copy of that classification.
   classifyAdmissionTenancyPosture,
   effectiveTenancyPosture,
+  // [#23455 · ruling C′] The ADR-0069 gate's ONE decision, and the binding of
+  // the auth service's per-user posture computation the key-admission seam asks.
+  evaluateAuthGate,
+  userAuthGateSourceOf,
+  // [#23367, ruling A] The API-key lifecycle policy source, and its branded refusal.
+  apiKeyLifecyclePolicySourceOf,
+  isApiKeyLifecycleRefusalError,
+  type ApiKeyLifecyclePolicySource,
+  type AuthGate,
   type EntryLocalization,
   type TenancyPostureSource,
+  type UserAuthGateSource,
 } from '@objectstack/core';
 import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import type { IAIService, IAuthService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
@@ -125,9 +135,69 @@ async function resolveStdioTenancyPosture(ctx: PluginContext): Promise<TenancyPo
 }
 
 /**
+ * [#23455 · ruling C′ item 3] The auth service's per-user posture computation
+ * for the stdio door, bound for the shared key-admission seam — or `undefined`
+ * on a kernel with no `auth` service (composed without `plugin-auth`, so no
+ * policy can hold anyone).
+ *
+ * Read PER CALL, like {@link resolveStdioTenancyPosture} beside it: the lookup
+ * costs one registry read and no I/O, and the posture it binds is computed
+ * fresh by the auth service on every ask. That freshness is the ruling's item
+ * 4 on this door: a posture that appears mid-session refuses the next call, and
+ * a posture that clears serves the next one, with no restart either way.
+ */
+function resolveStdioUserAuthGates(ctx: PluginContext): UserAuthGateSource | undefined {
+  let authService: IAuthService | undefined;
+  try {
+    authService = ctx.getService<IAuthService>('auth');
+  } catch {
+    authService = undefined;
+  }
+  return userAuthGateSourceOf(authService);
+}
+
+/**
+ * [#23367, ruling A] The auth service's API-key lifecycle policy for the
+ * stdio door, beside {@link resolveStdioUserAuthGates} and read on the same
+ * schedule — per call — so a key that expires or idles mid-session is refused
+ * on its next call, and a policy change applies with no restart. `undefined`
+ * on a kernel with no `auth` service.
+ */
+function resolveStdioApiKeyLifecycle(ctx: PluginContext): ApiKeyLifecyclePolicySource | undefined {
+  let authService: IAuthService | undefined;
+  try {
+    authService = ctx.getService<IAuthService>('auth');
+  } catch {
+    authService = undefined;
+  }
+  return apiKeyLifecyclePolicySourceOf(authService);
+}
+
+/** The status the REST and dispatcher faces answer a held principal with. */
+const AUTH_GATE_REFUSAL_STATUS = 403;
+
+/**
+ * [#23455 · ruling C′ items 1 and 4] The refusal a stdio call gets when the
+ * key's OWNER holds an `account`-scope ADR-0069 posture: the envelope REST's
+ * `enforceAuth` and the dispatcher answer the same key with — `403`, the
+ * posture's `code` (`MFA_REQUIRED`) and the session's remediation `message` —
+ * as a thrown ADR-0112 envelope, the shape this door's other refusals take
+ * (`recordNotFoundError`).
+ *
+ * ⛔ Not a revocation: nothing is written, the key stays valid, and the next
+ * call after the owner remediates is served.
+ */
+function stdioAuthGateRefusal(gate: AuthGate): Error & { code: string; status: number } {
+  const err = new Error(gate.message) as Error & { code: string; status: number };
+  err.code = gate.code;
+  err.status = AUTH_GATE_REFUSAL_STATUS;
+  return err;
+}
+
+/**
  * Resolve `OS_MCP_STDIO_API_KEY` into an {@link ExecutionContext} through the
  * SAME `@objectstack/core` verify + authorization chain the HTTP and REST
- * surfaces use (`resolveApiKeyPrincipal` → `resolveAuthzContext`), so a stdio
+ * surfaces use (`resolveAuthzContext` → `resolveApiKeyAdmission`), so a stdio
  * call is scoped exactly like the same identity over REST (RLS / FLS / tenant).
  *
  * [#7279] Assembled by the SHARED `assembleExecutionContext` rather than by
@@ -137,8 +207,10 @@ async function resolveStdioTenancyPosture(ctx: PluginContext): Promise<TenancyPo
  * resolved no localization at all. The assembler's field set is CLOSED, so the
  * NEXT `ExecutionContext` field cannot miss this transport the way those did.
  *
- * Fail-closed: returns `undefined` for an unknown / revoked / expired /
- * owner-less key. That contract is not re-implemented here — it IS
+ * Fail-closed: returns `undefined` for an unknown / owner-less key; a key its
+ * own lifecycle refuses (revoked / expired / inactive, #23367) raises the
+ * branded `ApiKeyLifecycleRefusalError` — `403`, its code and located message,
+ * the thrown-envelope shape this door's refusals take. That contract is not re-implemented here — it IS
  * `assembleExecutionContext`'s default entry (`!authz.userId ⇒ undefined`),
  * which is why the explicit guard this function used to carry is gone rather
  * than merely moved. Re-run per read, so revocation of a key takes effect on
@@ -162,14 +234,31 @@ async function resolveStdioTenancyPosture(ctx: PluginContext): Promise<TenancyPo
  * reachable. `undefined` is a legitimate VALUE here (no `tenancy` service is
  * registered ⇒ no wall exists ⇒ no posture-conditional refusal), and it has to
  * be passed on purpose.
+ *
+ * @param userAuthGates [#23455] The owner-posture source, from
+ * {@link resolveStdioUserAuthGates}. REQUIRED for the reason `tenancyPosture`
+ * is: this door resolved the key with no posture source at all, so a key whose
+ * owner holds an `account`-scope posture was served here after ruling C′
+ * refused it at every other face. A held key resolves to a context CARRYING
+ * the posture (`authGate`), never to `undefined`: the key is a valid identity
+ * whose owner is held, and the per-call refusal (`resolvePrincipal` in
+ * `start()`) answers it with the posture's code until the owner remediates.
  */
 async function resolveStdioExecutionContext(
   ql: { find: (object: string, opts: unknown) => Promise<unknown> },
   apiKey: string,
   localization: EntryLocalization | undefined,
   tenancyPosture: TenancyPosture | undefined,
+  userAuthGates: UserAuthGateSource | undefined,
+  apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined,
 ): Promise<ExecutionContext | undefined> {
-  const authz = await resolveAuthzContext({ ql, headers: { 'x-api-key': apiKey }, tenancyPosture });
+  const authz = await resolveAuthzContext({
+    ql,
+    headers: { 'x-api-key': apiKey },
+    tenancyPosture,
+    userAuthGates,
+    apiKeyLifecycle,
+  });
   return assembleExecutionContext({
     authz,
     // OAuth access tokens are honoured on the `/mcp` HTTP door alone
@@ -199,11 +288,13 @@ async function resolveStdioExecutionContext(
     //     session token that surface was designed around is a product decision
     //     nobody has made — not a refactor.
     accessToken: undefined,
-    // [ADR-0069] No authentication-policy gate: that posture is resolved from a
-    // better-auth SESSION (expired password / enforced MFA), and this face has
-    // none. REST carries it because `enforceAuth` reads it off the envelope ten
-    // lines away; nothing on the stdio path reads it.
-    authGate: undefined,
+    // [ADR-0069 · #23455, ruling C′ item 3] The posture the shared resolver
+    // decided for this key: its OWNER's `account`-scope posture (enforced MFA
+    // not yet enrolled), or nothing. A `credential`-scope posture (password
+    // expiry, a forced reset) holds password sign-in alone and never appears
+    // here for a key. `resolvePrincipal` refuses a context carrying it on
+    // every call, exactly as REST's `enforceAuth` reads it off the envelope.
+    authGate: authz.authGate,
   });
 }
 
@@ -421,16 +512,43 @@ export class MCPServerPlugin implements Plugin {
       // below. A `tenancy` service that is REGISTERED AND BROKEN raises
       // `AuthzStoreUnavailableError` out of this line — loud, and it stops the
       // boot rather than starting a door whose admission was never decided.
+      // [#23455] …and so is the owner's posture: a key whose owner holds an
+      // `account`-scope posture resolves here as a HELD identity.
+      // [#23367] …and so is the key's own lifecycle: a revoked, expired or
+      // inactive key is no credential this transport can run under, so it
+      // takes the refusal-to-start, naming its code and date.
       const initial = await resolveStdioExecutionContext(
         ql,
         apiKey,
         undefined,
         await resolveStdioTenancyPosture(ctx),
-      );
+        resolveStdioUserAuthGates(ctx),
+        resolveStdioApiKeyLifecycle(ctx),
+      ).catch((err: unknown) => {
+        if (!isApiKeyLifecycleRefusalError(err)) throw err;
+        throw new Error(
+          `[MCP] OS_MCP_STDIO_API_KEY is refused (${err.code}): ${err.message} Refusing to start stdio (ADR-0101).`,
+        );
+      });
       if (!initial) {
         throw new Error(
           '[MCP] OS_MCP_STDIO_API_KEY did not resolve to a valid identity (unknown / revoked / expired / owner-less). ' +
             'Refusing to start stdio (ADR-0101).',
+        );
+      }
+      // [#23455 · ruling C′ item 4] A HELD identity still starts. The key is
+      // valid and nothing revokes it; what holds it is the owner's standing,
+      // which can clear at any moment, and the per-call refusal below is what
+      // serves the next call once it does. Refusing to start instead would turn
+      // the hold into an outage that outlives the remediation until someone
+      // restarts the process. Said once, at the start, naming the remedy.
+      const initialGate = evaluateAuthGate(initial, '');
+      if (initialGate) {
+        ctx.logger.warn(
+          `[MCP] The OS_MCP_STDIO_API_KEY identity ${initial.userId} is held by an authentication policy `
+            + `(${initialGate.code}): every data call on this stdio transport is refused with ${initialGate.code} `
+            + 'until the key\'s owner remediates, and served again on the next call after that, with no restart. '
+            + `Remedy: ${initialGate.message}`,
         );
       }
       const scopedQl = ql;
@@ -560,14 +678,29 @@ export class MCPServerPlugin implements Plugin {
       // host registers the provider after the kernel starts.
       const storedHashDigest = (): StoredHashDigest | undefined =>
         typeof scopedQl.getKeyedDigest === 'function' ? scopedQl.getKeyedDigest() : undefined;
+      // [#23455 · ruling C′ items 1 and 4] The owner's posture is asked on the
+      // same schedule, and a held owner's call is REFUSED here, before any read
+      // or write, with the envelope REST answers the same key with (`403`, the
+      // posture's code, the session's remediation message). Per call rather
+      // than once at start: a posture that appears mid-session refuses the
+      // next call, and one that clears serves the next call — the refusal is
+      // not a revocation, so nothing is written and nothing needs a restart.
       const resolvePrincipal = async (): Promise<ExecutionContext> => {
+        // [#23367] A key its own lifecycle refuses raises its branded
+        // `403` envelope out of this call, as the held refusal below does.
         const ec = await resolveStdioExecutionContext(
           scopedQl,
           apiKey,
           await localizationForRead(),
           await resolveStdioTenancyPosture(ctx),
+          resolveStdioUserAuthGates(ctx),
+          resolveStdioApiKeyLifecycle(ctx),
         );
         if (!ec) throw new Error('MCP stdio identity is no longer valid (key revoked or expired)');
+        // No request path: no stdio call is a remediation or bootstrap route,
+        // and an empty path earns no allow-list exemption (#7898).
+        const gate = evaluateAuthGate(ec, '');
+        if (gate) throw stdioAuthGateRefusal(gate);
         return ec;
       };
       if (metadataService) {

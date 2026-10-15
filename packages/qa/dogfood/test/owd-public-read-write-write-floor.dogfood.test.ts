@@ -188,6 +188,8 @@ describe('[#8023] a public_read_write OWD opens row-level writes (and nothing el
     if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
     const headers = new Headers({ authorization: `Bearer ${token}` });
     return resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers,
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

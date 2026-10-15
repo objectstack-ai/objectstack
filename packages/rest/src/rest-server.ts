@@ -20,6 +20,8 @@ import {
     // form doors' tenancy read (see `registerFormEndpoints`).
     isServiceNotRegisteredError,
     assembleExecutionContext, normalizeAuthGate, userAuthGateSourceOf, type AuthGate,
+    // [#23367] The API-key lifecycle policy source, and its branded refusal.
+    apiKeyLifecyclePolicySourceOf, isApiKeyLifecycleRefusalError, type ApiKeyLifecycleRefusalError,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
     // owner, shared with the runtime dispatcher's `/security` domain.
@@ -1734,6 +1736,67 @@ function sendMetaItemAbsent(res: any): void {
 }
 
 /**
+ * [#23492] What a `/data` write door does with the optimistic-concurrency
+ * token it read — the body's `expectedVersion` (`PATCH`) or `?expectedVersion`
+ * (`DELETE`), else `If-Match` — before the protocol is asked. One of three:
+ *
+ *  - ABSENT: the spelling consulted is `undefined` or `null`. The body key or
+ *    the query name falls through to `If-Match`, and no `If-Match` either is
+ *    the legal unguarded write.
+ *  - JUDGED: a string with something in it. The door forwards it, and the
+ *    protocol compares it (`409 CONCURRENT_UPDATE` on a mismatch; the
+ *    quoted-empty tag `""` is the protocol's own `400`,
+ *    `MalformedVersionTokenError`).
+ *  - REFUSED `400 VALIDATION_FAILED`: anything else the caller put in a token
+ *    position — an empty or blank string, a number, a boolean, an array, an
+ *    object. It can never carry a version, so it is the protocol's ruled
+ *    answer to `""` (maintainer decision #20 ①: a token shape that can never
+ *    carry a version is refused, neither read as "no token" nor answered
+ *    `409`), given here because the protocol never sees these: it reads a
+ *    blank string as no token.
+ *
+ * [#23517] A number is in the refused set, no longer judged as its string.
+ * `UpdateDataRequestSchema.expectedVersion` declares a string, and the door
+ * forwarded `String(5)`, so the request gate below only ever parsed the
+ * coerced copy and a token the contract never admits was answered `409` as if
+ * it were a stale version. Only a body token can be a number: `If-Match` and
+ * `?expectedVersion` are strings by transport, so the `DELETE` and every
+ * header token are unaffected.
+ *
+ * What it replaces is a truthiness test. The door forwarded a token only when
+ * it was truthy, and `bodyVersion ?? If-Match` reads `If-Match` only when the
+ * body key is nullish, so `expectedVersion: ''` or `false` — not nullish, not
+ * truthy — hid a stale `If-Match`, and the write ran unguarded with a `200`.
+ * `?expectedVersion=` did the same to a `DELETE`, and an empty `If-Match`
+ * alone, the caller asking for a guard and sending nothing to judge, ran
+ * unguarded too.
+ *
+ * Returns the refusal's sentence, or `undefined` when the token is absent or
+ * judged. Both doors build the refusal with the one constructor,
+ * `validationFailure(sentence, [])` (`@objectstack/types`), and render it with
+ * their own classifier: this file THROWS it into the route's catch
+ * (`mapDataError`, the envelope the protocol's `""` refusal gets here), and the
+ * dispatcher hands it to `deps.errorFromThrown` and RETURNS the answer (a throw
+ * out of `dispatch()` reaches a `createHonoApp` host's catch-all, which reads
+ * only `statusCode` and would answer `500`). The runtime dispatcher's `/data`
+ * domain carries this function statement for statement (`versionTokenRefusal`
+ * in `packages/runtime/src/domains/data.ts`), so the two doors answer every
+ * token alike; `data-update-expected-version.test.ts` and
+ * `data-delete-expected-version.test.ts` hold them to it.
+ */
+function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
+    if (token === undefined || token === null) return undefined;
+    if (typeof token === 'string' && token.trim() !== '') return undefined;
+    const shape = typeof token === 'string' ? 'empty'
+        : Array.isArray(token) ? 'an array'
+        : typeof token === 'object' ? 'an object'
+        : `the ${typeof token} \`${String(token)}\``;
+    return `${spelling} is ${shape}, which can never carry a version, so it is refused rather than read as `
+        + 'no token. Send the version you read as a string (the record\'s `updated_at`), or omit both '
+        + 'expectedVersion and If-Match to perform an unguarded write.';
+}
+
+/**
  * [#20338] May this caller read PENDING metadata — a `sys_metadata` row in
  * `state: 'draft'`, unpublished authoring work? THE question every door that
  * asks the protocol for draft content asks first.
@@ -2334,6 +2397,18 @@ export class RestServer {
     }
 
     /**
+     * [#23367, ruling A] The API-key lifecycle refusal a request's identity
+     * resolution raised (revoked, expired, inactive), kept beside the REQUEST
+     * by {@link computeExecCtx}'s catch so {@link enforceAuth} can answer it.
+     * The resolution itself still answers "no context", exactly as for any
+     * identity fault: every door that never reaches `enforceAuth` keeps the
+     * fail-closed answer it has always given a dead key, and the one that does
+     * now says which state and which date. Weak, so it lives no longer than
+     * the request object.
+     */
+    private readonly apiKeyLifecycleRefusals = new WeakMap<object, ApiKeyLifecycleRefusalError>();
+
+    /**
      * Reject anonymous requests with HTTP 401 — unconditionally (#3963: the
      * `api.requireAuth` opt-out is retired). Returns `true` if the response was
      * sent and the caller should stop
@@ -2342,6 +2417,10 @@ export class RestServer {
      * The check is intentionally narrow: only `context?.userId` counts as
      * "authenticated". `isSystem` flags are never set on inbound HTTP
      * requests (they're internal-only), so they cannot bypass this gate.
+     *
+     * [#23367] A request whose API key its own lifecycle refused resolves no
+     * context either, and is answered here with the refusal's `403`, code and
+     * located message instead of the generic 401.
      */
     private enforceAuth(req: any, res: any, context: any): boolean {
         // ADR-0069 — authentication-policy gate (password expiry, enforced MFA).
@@ -2382,6 +2461,11 @@ export class RestServer {
             isSystem: context?.isSystem,
             method: req?.method,
         })) {
+            const lifecycle = req && typeof req === 'object' ? this.apiKeyLifecycleRefusals.get(req) : undefined;
+            if (lifecycle) {
+                res.status(lifecycle.status).json({ error: { code: lifecycle.code, message: lifecycle.message } });
+                return true;
+            }
             res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY);
             return true;
         }
@@ -3209,6 +3293,8 @@ export class RestServer {
                 getSession,
                 tenancyPosture,
                 userAuthGates: userAuthGateSourceOf(authService),
+                // [#23367] The API-key lifecycle policy, from the same service.
+                apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
             });
             // [commit f586f1a89] The anonymous contract IS the shared assembler's default
             // entry: no resolved principal → no context → 401. Taken early here
@@ -3385,6 +3471,15 @@ export class RestServer {
             // (measured: with `tryFind` loud but this net untouched, the
             // package door answered 401, byte-identical to a genuine anonymous
             // caller). Every OTHER fault still fails closed exactly as before.
+            //
+            // [#23367, ruling A] A key its own lifecycle refused (revoked,
+            // expired, inactive) resolves no context too — so every door keeps
+            // its fail-closed answer — and is remembered beside the request
+            // for `enforceAuth`, which answers its `403` and code.
+            if (isApiKeyLifecycleRefusalError(err) && req && typeof req === 'object') {
+                this.apiKeyLifecycleRefusals.set(req, err);
+                return undefined;
+            }
             return rethrowAuthzStoreUnavailable(err);
         }
     }
@@ -9067,18 +9162,47 @@ export class RestServer {
                             const { expectedVersion: _drop, ...rest } = data as any;
                             data = rest;
                         }
+                        // [#23492] A token that can never carry a version is
+                        // refused here, before anything is asked, and every
+                        // other present token is forwarded below: no token the
+                        // caller sent is read as "no token". THROWN as
+                        // `validationFailure`, so this route's catch answers it
+                        // through `mapDataError`, in the envelope it already
+                        // gives the protocol's own refusal of `""`.
+                        const versionRefusal = versionTokenRefusal(
+                            expectedVersion,
+                            bodyVersion != null ? 'The body\'s `expectedVersion`' : 'The `If-Match` header',
+                        );
+                        if (versionRefusal) throw validationFailure(versionRefusal, []);
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'update')) return;
                         // [#3899] Same gate as create: the wire body is the bare
                         // field patch (`expectedVersion` already stripped above),
                         // validated as the assembled `UpdateDataRequestSchema`
                         // request so a non-record body 400s instead of reaching
                         // the engine.
+                        //
+                        // [#23491] …the patch AS THE CALLER SENT IT. It was
+                        // `data ?? {}`, so a JSON `null` body parsed as an empty
+                        // patch and answered `200`: an update that changed no
+                        // field and still moved the record's version. `null` is
+                        // not the record the contract declares, so it is refused
+                        // like an array, a string or a number, and the runtime
+                        // dispatcher's twin (`domains/data.ts`) asks this gate
+                        // over the same assembled request.
+                        //
+                        // [#23517] …and the token as the caller sent it, never
+                        // its `String()`: this gate parsed `String(5)`, so a
+                        // number `expectedVersion: z.string()` declares no room
+                        // for was forwarded and judged `409`.
+                        // `versionTokenRefusal` above already refuses it, so what
+                        // reaches this gate and the forward below is a non-blank
+                        // string.
                         const { UpdateDataRequestSchema } = await import('@objectstack/spec/api');
                         const updateInput = {
                             object: req.params.object,
                             id: req.params.id,
-                            data: data ?? {},
-                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                            data,
+                            ...(expectedVersion != null ? { expectedVersion } : {}),
                         };
                         const parsedUpdateOne = (UpdateDataRequestSchema as any).safeParse(updateInput);
                         if (!parsedUpdateOne.success) {
@@ -9093,8 +9217,8 @@ export class RestServer {
                         const updateRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
-                            data: data ?? {},
-                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                            data,
+                            ...(expectedVersion != null ? { expectedVersion } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
@@ -9142,11 +9266,19 @@ export class RestServer {
                             ? (req.query as any).expectedVersion
                             : undefined;
                         const expectedVersion = queryVersion ?? ifMatchHeader;
+                        // [#23492] The `PATCH` above's rule, thrown the same
+                        // way: a token that can never carry a version is
+                        // refused, every other present token is forwarded.
+                        const versionRefusal = versionTokenRefusal(
+                            expectedVersion,
+                            queryVersion != null ? 'The `expectedVersion` query parameter' : 'The `If-Match` header',
+                        );
+                        if (versionRefusal) throw validationFailure(versionRefusal, []);
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'delete')) return;
                         const deleteRequest: ServerScopedDataRequest<DeleteDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
-                            ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
+                            ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };

@@ -79,6 +79,8 @@ describe('[ADR-0123 D2 / #8208] a tenant-scoped write with no active organizatio
     adminToken = await stack.signIn();
 
     const adminCtx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers({ authorization: `Bearer ${adminToken}` }),
       getSession: async (h: unknown) => {

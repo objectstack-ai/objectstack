@@ -342,7 +342,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, …)."
       },
       active_organization_id: {
         label: "Active Organization"
@@ -1003,7 +1003,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       last_used_at: {
         label: "Last Used At",
-        help: "Automatically updated on each API call"
+        help: "Recorded when the key is used, at most once an hour. A key with no recorded use for the inactivity window (90 days by default) is refused until replaced"
       },
       revoked: {
         label: "Revoked"

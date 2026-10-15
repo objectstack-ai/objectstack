@@ -85,7 +85,7 @@ describe('resolveAuthzContext — single source of truth', () => {
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.positions).toContain('contributor');
   });
 
@@ -96,7 +96,7 @@ describe('resolveAuthzContext — single source of truth', () => {
       sys_user_position: [],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.positions).toContain('org_owner');
   });
 
@@ -110,7 +110,7 @@ describe('resolveAuthzContext — single source of truth', () => {
       sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
       sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', system_permissions: ['cap_x'] }],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).toContain('contributor_ps');
     expect(ctx.systemPermissions).toContain('cap_x');
   });
@@ -123,7 +123,7 @@ describe('resolveAuthzContext — single source of truth', () => {
       sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: null }],
       sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.positions).toContain('platform_admin');
   });
 
@@ -135,7 +135,7 @@ describe('resolveAuthzContext — single source of truth', () => {
       sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', permission_set: 'admin_full_access', organization_id: 'o1' }],
       sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.positions).not.toContain('platform_admin');
   });
 
@@ -146,12 +146,12 @@ describe('resolveAuthzContext — single source of truth', () => {
       sys_user_position: [],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).toContain('ai_seat');
   });
 
   it('anonymous (no session, no api key) → empty context', async () => {
-    const ctx = await resolveAuthzContext({ ql: makeQl({}), headers: H(), getSession: async () => undefined });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl({}), headers: H(), getSession: async () => undefined });
     expect(ctx.userId).toBeUndefined();
     expect(ctx.positions).toEqual([]);
     expect(ctx.permissions).toEqual([]);
@@ -193,7 +193,7 @@ describe('resolveAuthzContext — request-scoped read de-duplication (#2409)', (
       sys_user_position: [],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.email).toBe('ada@x.com');
     expect(ctx.permissions).toContain('ai_seat');
     expect(ql.counts.sys_user).toBe(1);
@@ -721,7 +721,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       ],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
     expect(ctx.positions).not.toContain('approver');
     expect(ctx.positions).toContain('contributor'); // null bounds = unbounded, unchanged
   });
@@ -733,7 +733,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: null, valid_from: FUTURE }],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
     expect(ctx.positions).not.toContain('approver');
   });
 
@@ -748,7 +748,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       ],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
     expect(ctx.positions).toContain('stand_in');
     expect(ctx.positions).not.toContain('boundary');
   });
@@ -763,7 +763,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       ],
       sys_permission_set: [{ id: 'psA', name: 'admin_full_access' }],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
     expect(ctx.permissions).not.toContain('admin_full_access');
     expect(ctx.positions).not.toContain('platform_admin');
   });
@@ -775,7 +775,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
       sys_user_position: [{ user_id: 'u1', position: 'approver', organization_id: null, valid_until: 'not-a-date' }],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1'), nowMs: NOW });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1'), nowMs: NOW });
     expect(ctx.positions).not.toContain('approver');
   });
 
@@ -806,7 +806,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
         sys_user_position: [],
         sys_user_permission_set: [],
       });
-      const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
+      const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
       // The half that was already correct.
       expect(ctx.accessible_org_ids).toEqual([]);
       // The half this card fixes — it used to carry `org_member`.
@@ -824,7 +824,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
         sys_user_position: [],
         sys_user_permission_set: [],
       });
-      const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
+      const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
       expect(ctx.positions).not.toContain('org_admin');
       expect(ctx.accessible_org_ids).toEqual([]);
     });
@@ -846,6 +846,8 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
         sys_user_permission_set: [],
       };
       const ctx = await resolveAuthzContext({
+        userAuthGates: undefined,
+        apiKeyLifecycle: undefined,
         ql: makeQl(tables), headers: H(), getSession: session('u1', { org: 'o2' }), nowMs: NOW,
       });
       expect(ctx.positions).toContain('org_member'); // the in-window row still grants
@@ -864,7 +866,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
         sys_user_position: [],
         sys_user_permission_set: [],
       });
-      const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
+      const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
       expect(ctx.positions).toContain('org_owner');
       expect(ctx.positions).toContain('org_member');
       expect(ctx.accessible_org_ids).toEqual(['o1']);
@@ -900,6 +902,8 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
 
     it('escalation, BEFORE: an ACTIVE owner membership still resolves TENANT_ADMIN', async () => {
       const ctx = await resolveAuthzContext({
+        userAuthGates: undefined,
+        apiKeyLifecycle: undefined,
         ql: makeQl(orgOwnerPositionTables({})), headers: H(),
         getSession: session('esc', { org: 'o1' }), nowMs: NOW,
       });
@@ -910,6 +914,8 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
 
     it('escalation, AFTER: a LAPSED owner membership resolves MEMBER, not TENANT_ADMIN', async () => {
       const ctx = await resolveAuthzContext({
+        userAuthGates: undefined,
+        apiKeyLifecycle: undefined,
         ql: makeQl(orgOwnerPositionTables({ valid_until: PAST })), headers: H(),
         getSession: session('esc', { org: 'o1' }), nowMs: NOW,
       });
@@ -934,7 +940,7 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
         sys_user_permission_set: [{ user_id: 'esc2', permission_set_id: 'psO', permission_set: 'organization_admin', organization_id: 'o1' }],
         sys_permission_set: [{ id: 'psO', name: 'organization_admin' }],
       });
-      const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('esc2', { org: 'o1' }), nowMs: NOW });
+      const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('esc2', { org: 'o1' }), nowMs: NOW });
       expect(ctx.positions).not.toContain('org_owner'); // the role projection is closed
       expect(ctx.permissions).toContain('organization_admin'); // the grant row is not
       expect(ctx.posture).toBe('TENANT_ADMIN');
@@ -949,7 +955,7 @@ describe('audience anchors in the resolver (ADR-0090 D5)', () => {
       sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1' }],
       sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     // holding an explicit position must NOT cost the baseline anchor
     expect(ctx.positions).toContain('contributor');
     expect(ctx.positions).toContain('everyone');
@@ -957,7 +963,7 @@ describe('audience anchors in the resolver (ADR-0090 D5)', () => {
 
   it('anonymous resolution never gains `everyone`', async () => {
     const ql = makeQl({});
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: async () => undefined });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: async () => undefined });
     expect(ctx.positions).not.toContain('everyone');
     expect(ctx.userId).toBeUndefined();
   });
@@ -1029,7 +1035,7 @@ describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
   it('resolves the principal × grants → posture matrix', async () => {
     const actual: Record<string, AuthzPosture | undefined> = {};
     for (const [name, fx] of Object.entries(FIXTURES)) {
-      const ctx = await resolveAuthzContext({ ql: fx.ql, headers: H(), getSession: fx.getSession });
+      const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: fx.ql, headers: H(), getSession: fx.getSession });
       actual[name] = ctx.posture;
     }
     expect(actual).toEqual(EXPECTED_POSTURE);
@@ -1038,7 +1044,7 @@ describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
   it('posture is strictly nested: PLATFORM_ADMIN > TENANT_ADMIN > MEMBER', async () => {
     const rank = async (name: string) => {
       const fx = FIXTURES[name];
-      const ctx = await resolveAuthzContext({ ql: fx.ql, headers: H(), getSession: fx.getSession });
+      const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: fx.ql, headers: H(), getSession: fx.getSession });
       return POSTURE_RANK[ctx.posture!];
     };
     expect(await rank('platform_admin')).toBeGreaterThan(await rank('tenant_admin'));
@@ -1062,12 +1068,12 @@ describe('resolveAuthzContext — posture ladder (ADR-0095 D2/D3)', () => {
         { id: 'psO', name: 'organization_admin' },
       ],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('both', { org: 'o1' }) });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('both', { org: 'o1' }) });
     expect(ctx.posture).toBe('PLATFORM_ADMIN');
   });
 
   it('anonymous principal carries no posture rung', async () => {
-    const ctx = await resolveAuthzContext({ ql: makeQl({}), headers: H(), getSession: async () => undefined });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl({}), headers: H(), getSession: async () => undefined });
     expect(ctx.posture).toBeUndefined();
   });
 });
@@ -1107,7 +1113,7 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
       sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
       sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', system_permissions: ['cap_x'] }],
     };
-    const viaHttp = await resolveAuthzContext({ ql: makeQl(tables), headers: H(), getSession: session('u1') });
+    const viaHttp = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl(tables), headers: H(), getSession: session('u1') });
     const viaUser = await resolveUserAuthzGrants(makeQl(tables), 'u1');
     expect([...viaUser.positions].sort()).toEqual([...viaHttp.positions].sort());
     expect([...viaUser.permissions].sort()).toEqual([...viaHttp.permissions].sort());
@@ -1188,7 +1194,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
 
   it('adopts the key organization as the request tenant when membership holds', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_a', role: 'member' }]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBe('u1');
     expect(ctx.tenantId).toBe('org_a');
     expect(apiKeyRefusalLines(warnSpy)).toHaveLength(0);
@@ -1206,7 +1212,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
    */
   it('refuses a key whose owner is no longer a member of its organization', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBeUndefined();
     expect(ctx.tenantId).toBeUndefined();
     expect(ctx.permissions).toEqual([]);
@@ -1217,14 +1223,14 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     const ql = makeQl(tables([
       { user_id: 'u1', organization_id: 'org_a', role: 'member', valid_until: '2000-01-01T00:00:00Z' },
     ]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBeUndefined();
     expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
   });
 
   it('the same key under `group` is refused too — the wall is membership-derived there as well', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'group' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'group' });
     expect(ctx.userId).toBeUndefined();
     expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
   });
@@ -1236,7 +1242,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
    */
   it('does NOT apply the membership check under `single`', async () => {
     const ql = makeQl(tables([]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'single' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'single' });
     expect(ctx.userId).toBe('u1');
     expect(apiKeyRefusalLines(warnSpy)).toHaveLength(0);
   });
@@ -1256,6 +1262,8 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
       sys_user_permission_set: [],
     });
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: keyHeaders(),
       getSession: session('u1', { org: 'org_a' }),
@@ -1280,7 +1288,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
    */
   it('[#14273] a post-grant refusal answers an envelope with no `authRefusal` — the reason is server-side only', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(ctx, 'authRefusal')).toBe(false);
     expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
@@ -1294,7 +1302,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
       sys_user_position: [],
       sys_user_permission_set: [],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(ctx, 'authRefusal')).toBe(false);
     expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_required']);
@@ -1309,7 +1317,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
         return inner.find(object, opts);
       },
     };
-    await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     // One read for `accessible_org_ids`, one for the fellow-org peer list that
     // an ACTIVE tenant already triggered before this change. The membership
     // assertion adds neither.
@@ -1360,6 +1368,8 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
 
   it('a DEACTIVATED position stops granting its permission sets', async () => {
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: makeQl(withActive(false)),
       headers: H(),
       getSession: session('u1'),
@@ -1373,6 +1383,8 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     // permission-set names (position names are commonly reused as set names),
     // so a name left standing would resolve the same grant one layer down.
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: makeQl(withActive(false)),
       headers: H(),
       getSession: session('u1'),
@@ -1384,6 +1396,8 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
 
   it('an ACTIVE position still grants (the flag is not a blanket revocation)', async () => {
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: makeQl(withActive(true)),
       headers: H(),
       getSession: session('u1'),
@@ -1395,6 +1409,8 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
 
   it('an ABSENT ledger row grants — deployed positions are not mass-revoked', async () => {
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: makeQl(withActive(undefined)),
       headers: H(),
       getSession: session('u1'),
@@ -1405,12 +1421,16 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
 
   it('the 0/1 storage shape deactivates too — what the primary driver returns', async () => {
     const off = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: makeQl(withActive(0)),
       headers: H(),
       getSession: session('u1'),
     });
     expect(off.permissions).not.toContain('contributor_ps');
     const on = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: makeQl(withActive(1)),
       headers: H(),
       getSession: session('u1'),
@@ -1428,7 +1448,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       // there is no flag to read, so nothing may be inferred from its absence.
       sys_metadata_activation: [off('position', 'something_else')],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
     expect(ctx.positions).toContain('org_owner');
   });
 
@@ -1455,7 +1475,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
         { id: 'ps2', name: 'reviewer_ps' },
       ],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).not.toContain('contributor_ps');
     expect(ctx.permissions).toContain('reviewer_ps');
     expect(ctx.positions).not.toContain('contributor');
@@ -1478,7 +1498,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       }],
       sys_metadata_activation: [off('permission', 'crm_full')],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).not.toContain('crm_full');
     expect(ctx.systemPermissions).not.toContain('cap_x');
     expect(ctx.tabPermissions?.crm).toBeUndefined();
@@ -1497,7 +1517,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       }],
       sys_metadata_activation: [off('permission', 'admin_full_access')],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     // Dropped BEFORE the derivation, so the posture cannot be read off a set
     // that no longer grants — the whole point of filtering at §6b rather than
     // after it.
@@ -1522,7 +1542,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       ],
       sys_metadata_activation: [off('permission', 'crm_full'), off('permission', 'crm_read', true)],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).not.toContain('crm_full');
     expect(ctx.permissions).toContain('crm_read');
   });
@@ -1540,7 +1560,7 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
       sys_permission_set: [{ id: 'ps1', name: 'crm_full' }],
       sys_metadata_activation: [off('position', 'contributor')],
     });
-    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1') });
     expect(ctx.permissions).toContain('crm_full');
     expect(ctx.positions).not.toContain('contributor');
   });
@@ -1579,6 +1599,8 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     // The rows' flags are carried into the ledger by the upgrade ceremony
     // (`convertDeactivatedCatalogRows`); the resolver never falls back to them.
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: makeQl({
         ...withActive(undefined),
         sys_position: [{ id: 'r1', name: 'contributor', active: false }],
@@ -1732,6 +1754,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('CONTROL · a BACKED claim is adopted untouched — the guard is not a blanket', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_beta'), tenancyPosture: 'isolated',
     });
     expect(ctx.userId).toBe('u_ex');
@@ -1742,6 +1766,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('THE SUBJECT: an UNBACKED claim resolves with NO active organization', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'isolated',
     });
     expect(ctx.tenantId).toBeUndefined();
@@ -1758,6 +1784,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('B, not A: the PRINCIPAL survives — still authenticated, still a member where it really is', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'isolated',
     });
     expect(ctx.userId).toBe('u_ex');
@@ -1778,6 +1806,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('the envelope carries no residue of the rejected claim — the fellow-org peer list is not the left org\'s', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'isolated',
     });
     expect(ctx.org_user_ids).toEqual(['u_ex']);
@@ -1787,6 +1817,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('the same claim under `group` is dropped too — the wall is membership-derived there as well', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'group',
     });
     expect(ctx.userId).toBe('u_ex');
@@ -1802,6 +1834,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('does NOT apply under `single` — no wall, nothing to justify a claim against', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'single',
     });
     expect(ctx.tenantId).toBe('org_alpha');
@@ -1816,6 +1850,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('does NOT apply when the transport supplies no posture', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'),
     });
     expect(ctx.tenantId).toBe('org_alpha');
@@ -1825,6 +1861,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('a session with NO claim at all is not a drop — nothing was claimed', async () => {
     const ql = makeQl(tables());
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', null), tenancyPosture: 'isolated',
     });
     expect(ctx.userId).toBe('u_ex');
@@ -1838,6 +1876,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
       sys_member: [{ user_id: 'u_ex', organization_id: 'org_alpha', role: 'member', valid_until: '2000-01-01T00:00:00Z' }],
     });
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'isolated',
     });
     expect(ctx.userId).toBe('u_ex');
@@ -1853,6 +1893,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
   it('says it OUT LOUD, once, naming session / principal / organization / reason — and ⛔ never the token', async () => {
     const ql = makeQl(tables());
     await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha', 'ses_victim'), tenancyPosture: 'isolated',
     });
     const lines = dropLines();
@@ -1878,6 +1920,8 @@ describe('[#15409] a session organization claim that no membership backs', () =>
       sys_api_key: [{ id: 'key_ex', key: hashApiKey(raw), revoked: false, user_id: 'u_ex', active_organization_id: 'org_alpha' }],
     });
     const ctx = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql, headers: { 'x-api-key': raw }, tenancyPosture: 'isolated',
     });
     expect(ctx.userId).toBeUndefined();
@@ -2087,6 +2131,8 @@ describe('[#20515] with no active organization, only global grants apply', () =>
     for (const userId of ['u_ex', 'u_gone']) {
       it(`${userId}: the claim is dropped AND the left organization's grant no longer applies`, async () => {
         const ctx = await resolveAuthzContext({
+          userAuthGates: undefined,
+          apiKeyLifecycle: undefined,
           ql: makeQl(tables()), headers: H(), getSession: namingAlpha(userId), tenancyPosture: 'isolated',
         });
         expect(ctx.userId).toBe(userId);
@@ -2098,6 +2144,8 @@ describe('[#20515] with no active organization, only global grants apply', () =>
 
     it('CONTROL · a current member with the same grant and that organization active keeps it', async () => {
       const ctx = await resolveAuthzContext({
+        userAuthGates: undefined,
+        apiKeyLifecycle: undefined,
         ql: makeQl(tables()), headers: H(), getSession: namingAlpha('u_member'), tenancyPosture: 'isolated',
       });
       expect(ctx.tenantId).toBe(ALPHA);
@@ -2107,6 +2155,8 @@ describe('[#20515] with no active organization, only global grants apply', () =>
 
     it('a GLOBAL grant is unchanged: the removed member still holds it with no active organization', async () => {
       const ctx = await resolveAuthzContext({
+        userAuthGates: undefined,
+        apiKeyLifecycle: undefined,
         ql: makeQl(tables()), headers: H(), getSession: namingAlpha('u_global_ex'), tenancyPosture: 'isolated',
       });
       expect(ctx.tenantId).toBeUndefined();

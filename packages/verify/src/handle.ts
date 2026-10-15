@@ -38,6 +38,16 @@
 //     exposes no lower in-process door with the same contract. The dispatcher
 //     is protocol-neutral by design (`HttpProtocolContext`), so driving it
 //     directly IS the REST path minus HTTP.
+//   flows.run(..., { system: true })     → the booted `automation` service's
+//     own `execute(name, context)`, the call a flow's own trigger makes when
+//     it fires (the schedule trigger's tick, the record-change trigger), with
+//     no caller in the context. [#23255] No HTTP door starts a flow as the
+//     system principal: the trigger route resolves its caller from the
+//     request, and a self-triggered `runAs: 'system'` flow refuses every
+//     caller there (`PERMISSION_DENIED` / `403`, the runtime's
+//     `flow-start-admission.ts`). So the system start is the service itself,
+//     resolved off the kernel at call time, and its result is handed back
+//     unchanged. `handle.flows-system-start.test.ts` pins it.
 //   the anonymous public-form door       → NOT a method here. [#22301] A
 //     public form's submission is `POST /api/v1/forms/:slug/submit`, a route
 //     with one owner (`@objectstack/rest`'s `registerFormEndpoints`) that
@@ -168,9 +178,10 @@ export interface AsUser {
  * and `seedReplay`, because a fixture is end-state data, not an event.)
  *
  * Accepted by the `hooks` write doors: `hooks.run` (`insert`, `update` and
- * `delete`) and `hooks.updateWhere`. Named, never defaulted: a write that
- * names no caller is refused, so a forgotten `as` can never become a system
- * write.
+ * `delete`) and `hooks.updateWhere`, and [#23255] by `flows.run`, where it
+ * starts the flow the way its own trigger does. Named, never defaulted: a
+ * call that names no caller is refused, so a forgotten `as` can never become
+ * a system write or a system start.
  */
 export interface AsSystem {
   system: true;
@@ -367,8 +378,45 @@ export interface VerifyHandle {
      * `automation` service registered at boot. Returns the engine's result;
      * a never-dispatched refusal (unknown flow, disabled, no start node) or a
      * run that failed rejects with the route's envelope (`VerifyRefusal`).
+     *
+     * A self-triggered flow declared `runAs: 'system'` (`type` `autolaunched`,
+     * `record_change` or `schedule`) is refused here for every caller, the
+     * platform admin included (`PERMISSION_DENIED` / `403`): it starts on its
+     * own trigger. To start one in a test, name the system principal (the
+     * next overload).
      */
     run(name: string, params: EngineRow | undefined, opts: AsUser): Promise<FlowRun>;
+    /**
+     * [#23255] Start a flow as the SYSTEM principal ({@link AsSystem}), the
+     * way its own trigger starts it when it fires: the booted `automation`
+     * service's `execute(name, { params, callerParamKeys: [] })`, in process,
+     * the call the schedule trigger's tick makes. No HTTP door is involved,
+     * so no caller is resolved and none is admitted or refused: this is how
+     * a test starts an app's own scheduled (or other self-triggered) flow
+     * declared `runAs: 'system'`, which the trigger door refuses to every
+     * caller. The engine applies the flow's own `runAs`, exactly as it does
+     * for a trigger-fired run.
+     *
+     * `params` are the trigger's seeds, not a caller's answers: like the
+     * tick, the context names no caller-supplied keys, so a `screen` node
+     * takes none of them as its submission. The context carries no `event`
+     * (the run history records the engine's default), no user and no
+     * organization: a schedule binding that declares an acting organization
+     * runs as it on a real tick, and this start does not read the binding.
+     *
+     * Resolves with the engine's result, unchanged, plus `flowName`: the
+     * same {@link FlowRun} the other overload returns, so a run that paused
+     * goes straight back to `flows.resume`. The engine answers a run that
+     * did not succeed with a result, not a throw (`success: false`; `code`
+     * names a never-dispatched refusal such as `FLOW_DISABLED`; `status:
+     * 'failed'` a run that failed; an unknown name answers `success: false`
+     * with no `code`), and this door hands that result back as the engine
+     * answered it, as the trigger's own callback receives it. So assert on
+     * `success` (and `status`) before asserting on the flow's side effects.
+     * A throw from the engine is rethrown unchanged; on a stack with no
+     * `automation` service it is the kernel's `SERVICE_NOT_REGISTERED`.
+     */
+    run(name: string, params: EngineRow | undefined, opts: AsSystem): Promise<FlowRun>;
     /**
      * Continue a parked run through `POST /automation/:name/runs/:runId/resume`
      * with `input` as the screen submission. The engine's resume gate (what the
@@ -784,8 +832,21 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
     },
 
     flows: {
-      async run(name, params, opts) {
-        const data = (await dispatch(opts.as, 'POST', `/automation/${encodeURIComponent(name)}/trigger`, {
+      // Parameters annotated because the member is overloaded (see `hooks.run`).
+      async run(name: string, params: EngineRow | undefined, opts: AsUser | AsSystem): Promise<FlowRun> {
+        if (namesSystem(opts, 'flows.run')) {
+          // [#23255] The call a flow's own trigger makes when it fires
+          // (`AutomationEngine.activateFlowTrigger` hands each trigger a callback
+          // that is `this.execute(flowName, ctx)`), with the context the
+          // schedule tick builds: the seeds as `params`, and no caller-supplied
+          // keys. Typed as the engine class, as `automation.evaluateCondition`
+          // below is; the async accessor answers an empty slot with the
+          // kernel's own `SERVICE_NOT_REGISTERED`.
+          const automation = await kernel.getServiceAsync<AutomationEngine>('automation');
+          const result = await automation.execute(name, { params: { ...(params ?? {}) }, callerParamKeys: [] });
+          return { ...result, flowName: name };
+        }
+        const data = (await dispatch((opts as AsUser).as, 'POST', `/automation/${encodeURIComponent(name)}/trigger`, {
           params: params ?? {},
         })) as AutomationResult;
         return { ...data, flowName: name };

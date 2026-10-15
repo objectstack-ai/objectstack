@@ -16,9 +16,9 @@
  * nothing in `current_user.positions` that any reader could act on. The holder
  * signed in to an app that reads nothing, and no layer said why. The measured
  * spelling is the position's record ID written where its NAME belongs — the
- * neighbouring `user_id` is an id, and the analogous
- * `sys_user_permission_set.permission_set_id` is genuinely id-typed, so the id
- * is what an author reaches for by analogy.
+ * neighbouring `user_id` is an id, and the analogous grant once carried a
+ * genuinely id-typed `sys_user_permission_set.permission_set_id` (retired,
+ * ADR-0131 D10), so the id is what an author reaches for by analogy.
  *
  * ## The predicate — exactly "the name resolves to no position"
  *

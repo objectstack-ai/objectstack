@@ -43,9 +43,15 @@ import type { IDataEngine } from '@objectstack/core';
 // `auth-manager` used to re-derive that standing itself, in two spellings
 // that had drifted from the declared authority and from each other; both
 // now ask the authority. Nothing in this file reads the grant tables.
-import { hasPlatformAdminStanding, resolveUserAuthzGrants } from '@objectstack/core';
+import {
+  API_KEY_DEFAULT_EXPIRY_DAYS,
+  API_KEY_INACTIVITY_DAYS,
+  API_KEY_MAX_EXPIRY_DAYS,
+  hasPlatformAdminStanding,
+  resolveUserAuthzGrants,
+} from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
-import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
+import type { ApiKeyLifecyclePolicy, IEmailService, ISmsService } from '@objectstack/spec/contracts';
 import {
   readEnvWithDeprecation,
   resolveTenancyPosture,
@@ -86,7 +92,9 @@ import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
 import {
   applyPlatformAdminImpersonation,
+  VENDOR_ROLE_SCALAR_ADMIN_PATHS,
 } from './admin-impersonate-endpoint.js';
+import { judgeHeldSession } from './platform-admin-gate.js';
 import {
   applyDeclaredInvitationVerificationToListing,
 } from './list-user-invitations-verification.js';
@@ -102,6 +110,7 @@ import {
   removalBlockedByOwnerTarget,
 } from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { readAccountInvitation } from './account-invitation-marker.js';
 import {
   REVOKE_SESSION_NOT_FOUND_CODE,
   REVOKE_SESSION_NOT_FOUND_MESSAGE,
@@ -946,6 +955,27 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   mfaGracePeriodDays?: number;
 
   /**
+   * [#23367, ruling A] The API-key lifecycle policy (`resolveApiKeyLifecyclePolicy`):
+   * the life of a key signed with no `expires_at` (default 90 days), the
+   * ceiling on a signed key's life (default 365), and the inactivity window
+   * after which an unused key is refused (default 90; 0 = off). Bound from the
+   * `auth` settings keys `api_key_*` by `bindAuthSettings`.
+   */
+  apiKeyDefaultExpiryDays?: number;
+  apiKeyMaxExpiryDays?: number;
+  apiKeyInactivityDays?: number;
+
+  /**
+   * [#23367] When this deployment started enforcing the API-key lifecycle
+   * policy (ISO 8601) — the anchor of the inactivity clock for keys with no
+   * recorded use, and of the one-year grace for keys signed with no expiry.
+   * Recorded ONCE, in the `auth` setting `api_key_policy_started_at`, by
+   * `bindAuthSettings` on the first boot that runs the policy, so it survives
+   * restarts and every node reads the same instant. ⛔ Never the process start.
+   */
+  apiKeyPolicyStartedAt?: string;
+
+  /**
    * ADR-0069 D4 — session controls. Enforced in `customSession` (idle/absolute)
    * and the sign-in hook (concurrent). 0 = off for each. A revoked session is
    * expired in place (`sys_session.expires_at` past + `revoked_at`/`revoke_reason`)
@@ -1751,36 +1781,71 @@ export class AuthManager {
               `Password-reset email could not be sent to ${user.email}: no email service is configured for this deployment.`,
             );
           }
-          const ttlSec = this.config.emailAndPassword?.resetPasswordTokenExpiresIn ?? 60 * 60;
+          // The lifetime the token in `url` really has: better-auth mints it
+          // with `resetPasswordTokenExpiresIn || 3600` seconds (installed
+          // 1.7.3 `routes/password.mjs`) — `||`, so a configured `0` is its
+          // default too, and the mail must not say "0 minutes" for it.
+          const ttlSec = this.config.emailAndPassword?.resetPasswordTokenExpiresIn || 60 * 60;
+          // [#23343] An account an administrator created (the identity
+          // import) is INVITED through this same reset mint, because
+          // better-auth hands the link to nobody but this callback. The import
+          // marks its own request; that one send names the new account and
+          // its inviter instead of a reset nobody asked for. Every other
+          // reset — above all a public `POST /request-password-reset`, which
+          // always carries its Request — reads no marker and sends
+          // `auth.password_reset` exactly as before. The marker's header
+          // (`account-invitation-marker.ts`) holds the four legs that keep it
+          // server-only, and why it rides better-auth's request state.
+          const invitation = await readAccountInvitation(user.email, request);
           // Surface both template-resolution throws and transport failures
           // (status:'failed'); resilience is preserved by better-auth's
           // background-task handling (see sendVerificationEmail) and the
           // forget-password route always returns {status:true}, so this never
           // leaks whether an address exists nor turns the request into a 500.
           // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
-          // admin-initiated reset (`admin-import-users.ts` calls
-          // `requestPasswordReset`) reaches this callback with the ADMIN's
-          // request, so without this rung the user's mail carries the admin's
-          // browser language. Best-effort; `undefined` leaves the #14319
-          // ladder exactly as it was.
+          // admin-initiated send (`admin-import-users.ts` calls
+          // `requestPasswordReset` server-side) reaches this callback with NO
+          // request at all (measured on 1.7.3, #23343), so without this rung
+          // the user's mail carries only the deployment default. Best-effort;
+          // `undefined` leaves the #14319 ladder exactly as it was.
           const storedLocale = await this.storedRecipientLocale({ id: user.id });
-          const result = await email.sendTemplate({
-            template: 'auth.password_reset',
-            to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-            ...this.emailLocaleArg(request, storedLocale),
-            data: {
-              user: { name: user.name || user.email, email: user.email, id: user.id },
-              resetUrl: url,
-              token,
-              expiresInMinutes: Math.round(ttlSec / 60),
-              appName: this.getAppName(),
-            },
-            relatedObject: 'sys_user',
-            relatedId: user.id,
-          });
+          const result = await email.sendTemplate(invitation
+            ? {
+              // Exactly the variables `auth.account_invitation` declares —
+              // what the import really holds, and nothing it does not (no
+              // organization, no role). No request rung on the locale: the
+              // marker is honoured only when there is no request, and the one
+              // that started the import is the ADMIN's anyway.
+              template: 'auth.account_invitation',
+              to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
+              ...this.emailLocaleArg(undefined, storedLocale),
+              data: {
+                user: { name: user.name || user.email, email: user.email },
+                inviter: { name: invitation.inviter.name, email: invitation.inviter.email },
+                setPasswordUrl: url,
+                expiresInMinutes: Math.round(ttlSec / 60),
+                appName: this.getAppName(),
+              },
+              relatedObject: 'sys_user',
+              relatedId: user.id,
+            }
+            : {
+              template: 'auth.password_reset',
+              to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
+              ...this.emailLocaleArg(request, storedLocale),
+              data: {
+                user: { name: user.name || user.email, email: user.email, id: user.id },
+                resetUrl: url,
+                token,
+                expiresInMinutes: Math.round(ttlSec / 60),
+                appName: this.getAppName(),
+              },
+              relatedObject: 'sys_user',
+              relatedId: user.id,
+            });
           if (result?.status === 'failed') {
             throw new Error(
-              `Password-reset email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
+              `${invitation ? 'Account-invitation' : 'Password-reset'} email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
             );
           }
         },
@@ -2101,6 +2166,27 @@ export class AuthManager {
             // fall through — the vendor still performs the revoke itself
           }
 
+          // ── ADR-0069 D3: the admin plugin's role-scalar actions refuse a ──
+          // caller the authentication policy holds. better-auth serves these
+          // itself and authorizes them on a session plus the legacy `role`
+          // scalar, so no ObjectStack judge runs and nothing on the path read
+          // the posture: measured on a real boot, a held caller carrying that
+          // scalar was admitted to every one of them, writes included. The
+          // refusal is the session gate's, asked of the session gate's own
+          // posture carrier (`assertActorNotHeld`), and it runs FIRST — before
+          // the vendor's authorization and before the record guard below — the
+          // order the session gate applies. No resolvable session falls through
+          // to the vendor's own 401. `VENDOR_ROLE_SCALAR_ADMIN_PATHS`
+          // (`admin-impersonate-endpoint.ts`) classifies every other path the
+          // plugin registers. With no gate feature active the posture holds no
+          // one, so the session read is skipped, as the transport seams skip it
+          // (`isAuthGateActive`, the same caches the computation reads).
+          if (VENDOR_ROLE_SCALAR_ADMIN_PATHS.has(ctx?.path) && this.isAuthGateActive()) {
+            const actor = await this.resolveActor(ctx);
+            if (actor?.userId) await this.assertActorNotHeld(actor);
+            // fall through — the vendor still authorizes everything it owns
+          }
+
           // ── #10069: the ADMIN revoke that identifies NO record must not ──
           // report success either. better-auth 1.7.1's `admin/revoke-user-
           // session` handler calls `deleteSession(ctx.body.sessionToken)`
@@ -2117,6 +2203,24 @@ export class AuthManager {
           if (ctx?.path === '/admin/revoke-user-session') {
             await this.assertAdminRevokeUserSessionIdentifiesRecord(ctx);
             // fall through — the vendor still performs the revoke itself
+          }
+
+          // ── ADR-0069 D3: nor may a held caller rewrite or delete one ──────
+          // `@better-auth/sso` lets a provider's OWNER (who, past the
+          // registration gate below, is a platform admin) update its issuer,
+          // endpoints and secrets or delete it, on a session alone. Measured on
+          // a real boot: a held platform admin who owned a provider rewrote its
+          // issuer to another host (200, landed) and deleted another (200, row
+          // gone) — login routing, rewritten by a caller the policy holds. The
+          // same refusal as registration, asked the same way; the vendor still
+          // decides who may manage the provider.
+          if (
+            (ctx?.path === '/sso/update-provider' || ctx?.path === '/sso/delete-provider') &&
+            this.isAuthGateActive()
+          ) {
+            const actor = await this.resolveActor(ctx);
+            if (actor?.userId) await this.assertActorNotHeld(actor);
+            // fall through — the vendor's own provider-access check still runs
           }
 
           // ── ADR-0135 D6 + ADR-0068 D4: registering an identity provider is ──
@@ -2147,9 +2251,17 @@ export class AuthManager {
           // `sessionMiddleware` (→ 401). Fail-CLOSED: an unverifiable actor is
           // denied. (D5.1's `/oauth2/authorize` gate is a different surface —
           // the OP issuing codes, not the env's RP config.)
+          //
+          // ADR-0069 D3: a caller the authentication policy holds is refused
+          // FIRST, with the session gate's refusal (`assertActorNotHeld`) —
+          // identity, then posture, then the platform-admin question, the order
+          // `judgePlatformAdmin` applies on the `/admin/sso/*` bridges. Measured
+          // on a real boot before this: a held platform admin's registration
+          // answered `200` and the provider row landed, in every held state.
           if (ctx?.path === '/sso/register') {
             const actor = await this.resolveActor(ctx);
             if (actor?.userId) {
+              await this.assertActorNotHeld(actor);
               const ok = await this.isPlatformAdminUserId(actor.userId);
               if (!ok) {
                 const { APIError } = await import('better-auth/api');
@@ -3607,10 +3719,18 @@ export class AuthManager {
         //
         // Every OTHER better-auth-native `/admin/*` route still gates on the
         // legacy scalar and still refuses platform admins — that is the parent
-        // card's remaining surface, deliberately untouched here.
+        // card's remaining surface, deliberately untouched here. (A caller the
+        // ADR-0069 policy holds is refused on those ahead of the vendor, by the
+        // global before-hook — `VENDOR_ROLE_SCALAR_ADMIN_PATHS`.)
+        //
+        // ADR-0069 D3 — the same endpoint refuses a caller the policy holds,
+        // asked of the session gate's own posture carrier (`computeAuthGate`,
+        // the first entry of `resolveUserAuthGates`); see the endpoint module.
         const rewired = await applyPlatformAdminImpersonation(
           adminPlugin,
           (userId: string) => this.isPlatformAdminUserId(userId),
+          (userId: string, organizationId: string | undefined) =>
+            this.computeAuthGate(userId, organizationId, false),
         );
         if (!rewired) {
           // The vendor renamed or dropped the endpoint. Say so loudly: the
@@ -7184,6 +7304,37 @@ export class AuthManager {
   }
 
   /**
+   * ADR-0069 D3 at a vendor-served platform-admin door (SSO-provider
+   * registration, update and delete; the `admin` plugin's role-scalar
+   * actions): refuse
+   * `actor` when the authentication policy holds them, with the refusal the
+   * session gate gives, and return otherwise.
+   *
+   * These doors are better-auth endpoints whose session `customSession` never
+   * decorates, so the posture is ASKED, never read off the request: the session
+   * gate's own carrier ({@link computeAuthGate} — the first entry of
+   * {@link resolveUserAuthGates}, the ONE per-user posture computation) for the
+   * organization the actor's session operates in, judged by `judgeHeldSession`
+   * (`platform-admin-gate.ts`), which is `judgePlatformAdmin`'s held refusal.
+   * No second computation and no second decision. It fails OPEN exactly where
+   * that computation does (an unreadable posture holds no one).
+   *
+   * Thrown as a better-auth `APIError` carrying the judge's ADR-0112 body, so
+   * the vendor endpoint answers `403` with the posture's own code and message.
+   */
+  private async assertActorNotHeld(actor: { userId: string; activeOrgId?: string }): Promise<void> {
+    const held = judgeHeldSession({
+      authGate: await this.computeAuthGate(actor.userId, actor.activeOrgId, false),
+    });
+    if (!held) return;
+    const { APIError } = await import('better-auth/api');
+    // The judge's own record: its object literal (`judgeHeldSession`) carries
+    // the posture `code`, from the closed `AuthGateCodeSchema` vocabulary.
+    const { body } = held;
+    throw new APIError('FORBIDDEN', body);
+  }
+
+  /**
    * [#8289] Answer `/organization/remove-member`'s PERMISSION denial with the
    * `403 YOU_ARE_NOT_ALLOWED_TO_*` envelope its siblings use, ahead of the
    * vendor handler that would answer it with the sole-owner invariant's `400`.
@@ -8104,6 +8255,33 @@ export class AuthManager {
    * error, answering `[]` — a transient hiccup must never lock a compliant user
    * out, through either credential.
    */
+  /**
+   * [#23367, ruling A] The API-key lifecycle policy in force
+   * (`IAuthService.resolveApiKeyLifecyclePolicy`), every number defaulted to
+   * the ruling's: 90-day default expiry, one-year ceiling, 90-day inactivity.
+   * Read by the signing door (`POST /keys`) and the key-admission seam
+   * (`resolveApiKeyAdmission`) alike, so the two can never disagree.
+   */
+  public resolveApiKeyLifecyclePolicy(): ApiKeyLifecyclePolicy {
+    const days = (value: unknown, fallback: number, min: number): number => {
+      const n = Math.floor(Number(value));
+      return Number.isFinite(n) && n >= min ? n : fallback;
+    };
+    const startedAt = typeof this.config.apiKeyPolicyStartedAt === 'string'
+      && !Number.isNaN(Date.parse(this.config.apiKeyPolicyStartedAt))
+      ? this.config.apiKeyPolicyStartedAt
+      : undefined;
+    const maxExpiryDays = days(this.config.apiKeyMaxExpiryDays, API_KEY_MAX_EXPIRY_DAYS, 1);
+    return {
+      // The ceiling rules the default too: a default longer than the ceiling
+      // would mint the very key the ceiling refuses to sign.
+      defaultExpiryDays: Math.min(maxExpiryDays, days(this.config.apiKeyDefaultExpiryDays, API_KEY_DEFAULT_EXPIRY_DAYS, 1)),
+      maxExpiryDays,
+      inactivityDays: days(this.config.apiKeyInactivityDays, API_KEY_INACTIVITY_DAYS, 0),
+      ...(startedAt ? { startedAt } : {}),
+    };
+  }
+
   public async resolveUserAuthGates(
     userId: string,
     options: { organizationId?: string } = {},

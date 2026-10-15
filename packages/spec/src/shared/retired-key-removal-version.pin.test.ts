@@ -79,6 +79,14 @@ import { ALL_CONVERSIONS } from '../conversions/registry';
 import { TimeUpdateInterval } from '../data/analytics.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema } from '../kernel/manifest.zod';
+import {
+  DeleteRecordConfigSchema,
+  GetRecordConfigSchema,
+  MapConfigSchema,
+} from '../automation/builtin-node-config.zod';
+import { NotifyConfigSchema } from '../automation/io-node-config.zod';
+import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemaless-node-config.zod';
+import { SharingLevel } from '../security/sharing.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
@@ -206,6 +214,9 @@ const ELEMENTS: readonly (readonly [unknown, string, readonly string[]])[] = [
   [ElementRepeaterPropsSchema, 'element:repeater', ['object', 'filter', 'sort', 'limit']],
 ];
 
+/** A notify config that is valid on its own, so a retired key is its only issue. */
+const NOTIFY_BASE = { recipients: ['u1'], title: 'Hi' };
+
 /** Retired conversion id → the prescriptions an author meets for its surface. */
 const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'element-flat-data-binding-to-data-source': ELEMENTS.flatMap(([schema, surface, keys]) =>
@@ -253,6 +264,36 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       () => ElementButtonPropsSchema.safeParse({ label: 'Go', action: { type: 'api', target: '/x', params: { a: 1 } } }),
       'action',
     ),
+  ],
+  // The family's closing members (#23487): six more entries whose windows had
+  // run (five `toMajor: 17`, one `toMajor: 11`), each refused by its surface's
+  // own contract once the loader stopped rewriting it. A node-config row
+  // carries the contract's required canonical keys beside the retired one, so
+  // the unrecognized-key refusal is the only issue the parse reports.
+  'flow-node-crud-object-alias': [
+    refusal("a CRUD node's config.object", () => GetRecordConfigSchema.safeParse({ objectName: 'lead', object: 'lead' })),
+  ],
+  'flow-node-crud-filter-alias': [
+    refusal("a CRUD node's config.filters", () => DeleteRecordConfigSchema.safeParse({ objectName: 'lead', filters: { status: 'stale' } })),
+  ],
+  'flow-node-notify-config-aliases': [
+    ...(['to', 'subject', 'body', 'url'] as const).map((key) =>
+      refusal(`a notify node's config.${key}`, () => NotifyConfigSchema.safeParse({ ...NOTIFY_BASE, [key]: 'x' })),
+    ),
+    refusal("a notify node's nested config.source", () => NotifyConfigSchema.safeParse({ ...NOTIFY_BASE, source: { object: 'lead', id: '1' } })),
+  ],
+  'flow-node-map-flow-alias': [
+    refusal("a map node's config.flow", () => MapConfigSchema.safeParse({ collection: [], flowName: 'f', flow: 'f' })),
+  ],
+  'flow-node-subflow-flow-alias': [
+    refusal("a subflow node's config.flow", () => SubflowConfigSchema.safeParse({ flowName: 'f', flow: 'f' })),
+  ],
+  'flow-node-script-config-aliases': [
+    refusal("a script node's config.functionName", () => ScriptConfigSchema.safeParse({ function: 'f', functionName: 'f' })),
+    refusal("a script node's config.input", () => ScriptConfigSchema.safeParse({ function: 'f', input: {} })),
+  ],
+  'sharing-rule-access-level-full-to-edit': [
+    refusal("sharing-rule accessLevel 'full'", () => SharingLevel.safeParse('full')),
   ],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.
   'page-header-breadcrumb-removed': [tombstone(PageHeaderProps, 'page:header', 'breadcrumb')],

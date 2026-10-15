@@ -235,7 +235,7 @@ async function bootFederation(
   const engine = {
     find: async (object: string, query: any) => {
       if (object === 'sys_api_key') {
-        return query?.where?.key === hashApiKey(API_KEY) && query?.where?.revoked === false
+        return query?.where?.key === hashApiKey(API_KEY)
           ? [{ id: 'key_1', key: hashApiKey(API_KEY), user_id: 'u_federation', revoked: false }]
           : [];
       }

@@ -19,6 +19,8 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { OCCUPANCY_STOP_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
+import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { resolvePlannedDriverExec } from '../../utils/unmanaged-tables.js';
 import {
   buildOrganizationOwnershipPlan,
@@ -33,13 +35,13 @@ import {
 import {
   applyOrganizationOwnership,
   checkpointFromDetails,
+  MetadataChoiceRefusal,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
   ReviewedPlanRefusal,
   reviewedPlanFromFile,
   TemplateChoiceRefusal,
   type ApplyExecutor,
   type CeremonyLedgerPort,
-  type ColumnDropOutcome,
   type OrganizationOwnershipApplyReport,
   type ReviewedPlan,
 } from '../../utils/organization-ownership-apply.js';
@@ -96,6 +98,7 @@ async function confirm(question: string): Promise<boolean> {
  * 2): `--backup-taken`, or a yes at the prompt; a non-interactive run without
  * the flag is refused before the boot. It then
  * performs the fates in order — attribution, the authored catalog conversion,
+ * the promotion of organization customizations and public-form withdrawals,
  * the template promotion, the settings global-rung move, the verified id→name
  * rewrite, mirror deletion, column drops — through `../../utils/organization-ownership-apply.ts`,
  * checkpointing each finished step in the deployment ledger (`sys_migration`,
@@ -144,7 +147,9 @@ export default class MigrateOrganizationOwnership extends Command {
     'The v18 organization-ownership ceremony (ADR-0131 D10). Without --apply, the read-only plan: per table, the fate, ' +
     'the row counts, the rows whose owner cannot be derived (by id), and which tables will receive NOT NULL, written ' +
     'to a file — never a row or a column changed; it refuses, naming it, any table it cannot enumerate. With --apply ' +
-    '(the reviewed plan file in --plan-file, and a backup), only that plan: attribution, the authored catalog conversion, the template promotion, the settings move, the ' +
+    '(the reviewed plan file in --plan-file, and a backup), only that plan: attribution, the authored catalog ' +
+    'conversion, the promotion of organization customizations and form withdrawals, the template promotion, the ' +
+    'settings move, the ' +
     'verified id-to-name rewrite, mirror deletion and column drops, in that order, ' +
     'resumable from a recorded checkpoint, then the post-check.';
 
@@ -191,6 +196,15 @@ export default class MigrateOrganizationOwnership extends Command {
         'With --apply: the sys_email_template row id the environment keeps for a listed template conflict ' +
         '(rows of one name and locale that differ). Repeat once per conflict; the other rows of that conflict are ' +
         'deleted only after the chosen body is promoted and verified',
+      multiple: true,
+    }),
+    'metadata-choice': Flags.string({
+      description:
+        'With --apply: the sys_metadata row id the environment keeps for a listed customization conflict (rows ' +
+        'of one type, name and package once the organization leaves the key). Repeat once per conflict. Under ' +
+        'single the key keeps one environment row defining the chosen body, and its organization rows are deleted ' +
+        'only after that row reads back; under a wall nothing is deleted, and a named organization row of a key it ' +
+        'alone holds is promoted knowingly',
       multiple: true,
     }),
     'fate-supplement': Flags.string({
@@ -249,12 +263,45 @@ export default class MigrateOrganizationOwnership extends Command {
       }
     }
 
+    // The occupancy gate, BEFORE either arm boots the stack — once it is up,
+    // its own pooled connections are what the probe finds (#3917). Both arms
+    // pass through here. The siblings' probe, and their fields inside this
+    // command's own envelope, with one difference: the ceremony takes no
+    // `--force` (no flag skips its reviewed plan or its backup either), so
+    // `--apply` beside a holder is refused outright and the refusal names the
+    // stop remedy alone. The plan writes nothing and warns, as every sibling's
+    // read-only arm does.
+    const occupancy = await probeMigrationTarget(flags['database-url']);
+    if (occupancy.status === 'busy' && flags.apply) {
+      await refuse(
+        {
+          reason: 'database-busy',
+          database: occupancy.filename,
+          signal: occupancy.signal,
+          detail: occupancy.detail,
+          hint: OCCUPANCY_STOP_HINT,
+        },
+        `${describeOccupancy(occupancy)} ${OCCUPANCY_STOP_HINT}`,
+      );
+      return;
+    }
+    if (occupancy.status === 'busy' && !json) {
+      printWarning(`${describeOccupancy(occupancy)} The plan below writes nothing, but --apply will refuse until the database is free.`);
+    }
+    if (occupancy.status === 'unknown' && !json) {
+      printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
+    }
+
     if (flags.apply) {
       await this.runApply(flags, posture, refuse, inventory);
       return;
     }
     if (flags['template-choice']?.length) {
       await refuse({ reason: 'flag-without-apply', detail: '--template-choice is only meaningful with --apply' }, '--template-choice is only meaningful with --apply.');
+      return;
+    }
+    if (flags['metadata-choice']?.length) {
+      await refuse({ reason: 'flag-without-apply', detail: '--metadata-choice is only meaningful with --apply' }, '--metadata-choice is only meaningful with --apply.');
       return;
     }
     if (flags['plan-file']) {
@@ -359,6 +406,13 @@ export default class MigrateOrganizationOwnership extends Command {
             ' differ. --apply blocks on it until one row is chosen with --template-choice ROW_ID.',
         );
       }
+      for (const conflict of table.metadataConflicts ?? []) {
+        printWarning(
+          `Customization conflict ${conflict.type} ${conflict.name}${conflict.packageId ? ` (package ${conflict.packageId})` : ''}: ` +
+            conflict.candidates.map((c) => `${c.id} (${c.organizationId ? `organization ${c.organizationId}` : 'environment'})`).join(', ') +
+            ' hold one key. --apply blocks on it until one row is chosen with --metadata-choice ROW_ID.',
+        );
+      }
     }
     console.log('');
     const { summary } = plan;
@@ -381,6 +435,7 @@ export default class MigrateOrganizationOwnership extends Command {
       json?: boolean;
       'backup-taken'?: boolean;
       'template-choice'?: string[];
+      'metadata-choice'?: string[];
       'plan-file'?: string;
     },
     posture: string,
@@ -469,7 +524,9 @@ export default class MigrateOrganizationOwnership extends Command {
       const engine = kernel.getService('objectql') as Parameters<typeof recordDataMigrationRun>[0] & { registry?: unknown };
       const protocol = kernel.getService('protocol') as {
         saveMetaItem?: (request: Record<string, unknown>) => Promise<unknown>;
+        getMetaItems?: (request: { type: string }) => Promise<{ items?: unknown[] } | unknown[]>;
         getMetaItemsForExecution?: (request: { type: string }) => Promise<{ items?: unknown[] }>;
+        getMetaItem?: (request: { type: string; name: string; packageId?: string }) => Promise<unknown>;
       } | undefined;
       const catalog = createSecurityCatalogReader({
         registry: engine.registry as never,
@@ -499,16 +556,54 @@ export default class MigrateOrganizationOwnership extends Command {
       const liveStack = stack;
       report = await applyOrganizationOwnership({
         executor,
+        // Whether this boot composed the security plugin: a shipped set or a
+        // built-in position it alone declares is reported with that cause.
+        securityPlugin: stack.composition.securityPlugin,
         ...(flags['template-choice']?.length ? { templateChoices: flags['template-choice'] } : {}),
+        ...(flags['metadata-choice']?.length ? { metadataChoices: flags['metadata-choice'] } : {}),
         posture,
         database: stack.dbLabel,
         catalog,
         door: {
-          save: async (type, name, body) => {
+          save: async (type, name, body, target) => {
             if (typeof protocol?.saveMetaItem !== 'function') {
               throw new Error('no metadata protocol is composed on this stack');
             }
-            await protocol.saveMetaItem({ type, name, item: body, actor: CEREMONY_ACTOR });
+            await protocol.saveMetaItem({
+              type,
+              name,
+              item: body,
+              actor: CEREMONY_ACTOR,
+              ...(target ? { packageId: target.packageId } : {}),
+            });
+          },
+        },
+        lock: {
+          // The save door's own verdict: the item read reports it as `editable`.
+          verdict: async (type, name, packageId) => {
+            if (typeof protocol?.getMetaItem !== 'function') {
+              throw new Error('no metadata protocol is composed on this stack');
+            }
+            const read = (await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) })) as
+              | { editable?: unknown; lock?: unknown; lockReason?: unknown }
+              | null
+              | undefined;
+            return {
+              editable: read?.editable !== false,
+              ...(typeof read?.lock === 'string' ? { lock: read.lock } : {}),
+              ...(typeof read?.lockReason === 'string' ? { lockReason: read.lockReason } : {}),
+            };
+          },
+        },
+        views: {
+          // The env-wide view list, exactly as the anonymous form doors read it.
+          list: async () => {
+            if (typeof protocol?.getMetaItems !== 'function') {
+              throw new Error('no metadata protocol is composed on this stack');
+            }
+            const result = await protocol.getMetaItems({ type: 'view' });
+            const items = Array.isArray(result) ? result : (result?.items ?? []);
+            return items.filter((i): i is Record<string, unknown> => !!i && typeof i === 'object');
           },
         },
         templates: {
@@ -535,43 +630,29 @@ export default class MigrateOrganizationOwnership extends Command {
           },
         },
         columnDrops: {
-          drop: async (tables) => {
-            const drift = await liveStack.detectManagedDrift();
-            const wanted = new Set(tables);
-            const entries = drift.filter((d) => {
-              const op = (d as { op?: { type?: string; column?: string } }).op;
-              return op?.type === 'drop_column' && op.column === 'organization_id' && wanted.has(String(d.table));
-            });
-            const outcomes: ColumnDropOutcome[] = [];
-            const proposed = new Set(entries.map((d) => String(d.table)));
+          drop: async (columns) => {
             // The tables this booted composition declares, keyed as the driver
             // keys its managed set. A table outside it can never be proposed,
             // whatever a release declares: `not-declared`, and `not-proposed`
             // only for a declared one. A rotation shard is judged by its base.
             const { StorageNameMapping } = await import('@objectstack/spec/system');
             const { rotationBaseOf } = await import('../../utils/unmanaged-tables.js');
+            const { buildIndexName } = await import('@objectstack/driver-sql');
+            const { dropColumnsThroughDrift } = await import('../../utils/organization-ownership-column-drops.js');
             const declared = new Set(
               (liveStack.allObjects() as Array<{ name?: unknown } | null>)
                 .map((o) => o?.name)
                 .filter((name): name is string => typeof name === 'string' && name.length > 0)
                 .map((name) => StorageNameMapping.resolveTableName({ name })),
             );
-            for (const table of tables) {
-              if (!proposed.has(table)) {
-                outcomes.push(
-                  declared.has(rotationBaseOf(table) ?? table)
-                    ? { table, outcome: 'not-proposed', detail: 'the drift differ proposed no drop for it' }
-                    : { table, outcome: 'not-declared' },
-                );
-              }
-            }
-            if (entries.length === 0) return outcomes;
-            const { applied, skipped } = await liveStack.applyMigrationEntries(entries, { allowDestructive: true });
-            for (const d of applied) outcomes.push({ table: String(d.table), outcome: 'dropped' });
-            for (const d of skipped) {
-              outcomes.push({ table: String(d.table), outcome: 'failed', detail: String((d as { message?: unknown }).message ?? 'skipped by the schema-drift ceremony') });
-            }
-            return outcomes;
+            return dropColumnsThroughDrift(
+              {
+                drift: liveStack,
+                isDeclared: (table) => declared.has(rotationBaseOf(table) ?? table),
+                indexName: (table, indexColumns, unique) => buildIndexName(table, [...indexColumns], unique),
+              },
+              columns,
+            );
           },
         },
         ledger,
@@ -583,6 +664,10 @@ export default class MigrateOrganizationOwnership extends Command {
       if (isExitSignal(error)) throw error;
       if (error instanceof ReviewedPlanRefusal) {
         await refuse({ reason: error.reason, ...error.detail, detail: error.message }, `Refused: ${error.message}`);
+        return;
+      }
+      if (error instanceof MetadataChoiceRefusal) {
+        await refuse({ reason: 'metadata-choice-refused', detail: error.message }, `Refused: ${error.message}`);
         return;
       }
       if (error instanceof TemplateChoiceRefusal) {

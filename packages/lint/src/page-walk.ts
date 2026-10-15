@@ -55,6 +55,17 @@ export interface WalkedComponent {
    * `undefined` when nothing in the chain names one.
    */
   objectName?: string;
+  /**
+   * The object this component INHERITS — its container's binding, else the
+   * page's `object` — before its own `dataSource.object` / `properties.object`
+   * override is applied. `undefined` when nothing above it names one.
+   *
+   * A rule needs it where one component carries two bindings: a
+   * `record:related_list`'s node-level `dataSource` is its CHILD rows, while
+   * its `relationshipValueField` names a field of the record it hangs off,
+   * which is this inherited object (`validate-page-field-bindings`).
+   */
+  inheritedObject?: string;
 }
 
 function isRec(v: unknown): v is AnyRec {
@@ -136,7 +147,7 @@ export function walkPageComponents(page: AnyRec, pagePath: string): WalkedCompon
     const objectName =
       strName(dataSource?.object) ?? strName(props?.object) ?? inheritedObject;
 
-    out.push({ component: node, path, objectName });
+    out.push({ component: node, path, objectName, inheritedObject });
 
     if (!props) return;
 

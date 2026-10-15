@@ -20,12 +20,16 @@
  *  - a posture computation that rejects is the branded outage, never an
  *    admission;
  *  - the tenancy refusal still answers first, as the generic 401;
- *  - the key's own organization is what the owner is asked about.
+ *  - the key's own organization is what the owner is asked about;
+ *  - [#23455] `resolveApiKeyPrincipal` never answers a held owner's key with
+ *    a principal;
+ *  - [#23455] the posture source is a REQUIRED input of all three entries, so
+ *    a seam that forgets it does not compile (compile-level pins below).
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { resolveAuthzContext } from './resolve-authz-context.js';
-import { hashApiKey, resolveApiKeyAdmission } from './api-key.js';
+import { hashApiKey, resolveApiKeyAdmission, resolveApiKeyPrincipal } from './api-key.js';
 import {
   accountScopeAuthGate,
   authGateScope,
@@ -132,7 +136,7 @@ describe('resolveApiKeyAdmission — the held arm (ruling C′ item 3)', () => {
   it('holds a key whose owner holds an account-scope posture, carrying the principal and the posture', async () => {
     const { ql } = makeQl();
     const { source } = postureSource({ [OWNER]: [MFA_REQUIRED] });
-    const admission = await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, source);
+    const admission = await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, source, undefined);
     expect(admission.outcome).toBe('held');
     if (admission.outcome !== 'held') return;
     expect(admission.principal.userId).toBe(OWNER);
@@ -142,21 +146,21 @@ describe('resolveApiKeyAdmission — the held arm (ruling C′ item 3)', () => {
   it('admits a key whose owner holds only credential-scope postures', async () => {
     const { ql } = makeQl();
     const { source } = postureSource({ [OWNER]: [PASSWORD_RESET_REQUIRED, PASSWORD_EXPIRED] });
-    const admission = await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, source);
+    const admission = await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, source, undefined);
     expect(admission.outcome).toBe('admitted');
   });
 
   it('asks the owner about the KEY\'s own organization', async () => {
     const { ql } = makeQl({ active_organization_id: 'org_key' });
     const { source, calls } = postureSource({});
-    await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, source);
+    await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, source, undefined);
     expect(calls).toEqual([{ userId: OWNER, organizationId: 'org_key' }]);
   });
 
   it('answers the tenancy refusal first, without asking the owner', async () => {
     const { ql } = makeQl();
     const { source, calls } = postureSource({ [OWNER]: [MFA_REQUIRED] });
-    const admission = await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), 'isolated', source);
+    const admission = await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), 'isolated', source, undefined);
     expect(admission.outcome).toBe('refused');
     expect(calls).toEqual([]);
   });
@@ -164,15 +168,62 @@ describe('resolveApiKeyAdmission — the held arm (ruling C′ item 3)', () => {
   it('a posture computation that rejects is the branded store outage, never an admission', async () => {
     const { ql } = makeQl();
     const source = async () => { throw new Error('auth service fault'); };
-    const err = await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, source).catch((e) => e);
+    const err = await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, source, undefined).catch((e) => e);
     expect(isAuthzStoreUnavailableError(err)).toBe(true);
     expect(err.status).toBe(503);
     expect(err.code).toBe('SERVICE_UNAVAILABLE');
   });
 
-  it('without a posture source the owner is not asked (an unwired caller keeps the old answer)', async () => {
+  it('an explicit `undefined` source (a kernel with no auth service) leaves the owner unasked', async () => {
     const { ql } = makeQl();
-    expect((await resolveApiKeyAdmission(ql, keyHeaders(), Date.now())).outcome).toBe('admitted');
+    expect((await resolveApiKeyAdmission(ql, keyHeaders(), Date.now(), undefined, undefined, undefined)).outcome).toBe('admitted');
+  });
+});
+
+describe('[#23455] resolveApiKeyPrincipal — never a principal for a held owner\'s key', () => {
+  it('collapses `held` to no principal, and still admits a key whose owner is not held', async () => {
+    const { ql } = makeQl();
+    const { table, source } = postureSource({ [OWNER]: [MFA_REQUIRED] });
+    expect(await resolveApiKeyPrincipal(ql, keyHeaders(), Date.now(), undefined, source, undefined)).toBeUndefined();
+    // A credential-scope posture holds password sign-in alone.
+    table[OWNER] = [PASSWORD_RESET_REQUIRED];
+    expect((await resolveApiKeyPrincipal(ql, keyHeaders(), Date.now(), undefined, source, undefined))?.userId).toBe(OWNER);
+    // Not a revocation: the posture clears and the same key answers again.
+    table[OWNER] = [];
+    expect((await resolveApiKeyPrincipal(ql, keyHeaders(), Date.now(), undefined, source, undefined))?.userId).toBe(OWNER);
+  });
+});
+
+describe('[#23455] the posture source is a REQUIRED input at every key-admitting entry', () => {
+  /**
+   * Compile-level pins. `compileOnly` is never invoked: its lines are read by
+   * the package's test tsc program (`check:test-typecheck`), where an
+   * `@ts-expect-error` that stops erroring is itself an error (TS2578). So a
+   * change that makes the input optional again turns that gate red here,
+   * naming this file — the omission compiling silently is the defect.
+   */
+  it('omitting it does not compile; an explicit `undefined` does', () => {
+    const compileOnly = (ql: unknown, headers: Headers): void => {
+      // @ts-expect-error — `userAuthGates` is a required key of `ResolveAuthzInput`.
+      void resolveAuthzContext({ ql, headers });
+      // @ts-expect-error — `tenancyPosture` and `userAuthGates` are required parameters.
+      void resolveApiKeyAdmission(ql, headers, Date.now());
+      // @ts-expect-error — `userAuthGates` is a required parameter.
+      void resolveApiKeyAdmission(ql, headers, Date.now(), undefined);
+      // @ts-expect-error — `userAuthGates` is a required parameter.
+      void resolveApiKeyPrincipal(ql, headers, Date.now(), undefined);
+      // [#23367] The lifecycle policy source is required beside it, the same way.
+      // @ts-expect-error — `apiKeyLifecycle` is a required key of `ResolveAuthzInput`.
+      void resolveAuthzContext({ ql, headers, userAuthGates: undefined });
+      // @ts-expect-error — `apiKeyLifecycle` is a required parameter.
+      void resolveApiKeyAdmission(ql, headers, Date.now(), undefined, undefined);
+      // @ts-expect-error — `apiKeyLifecycle` is a required parameter.
+      void resolveApiKeyPrincipal(ql, headers, Date.now(), undefined, undefined);
+      void resolveAuthzContext({ ql, headers, userAuthGates: undefined, apiKeyLifecycle: undefined });
+      void resolveApiKeyAdmission(ql, headers, Date.now(), undefined, undefined, undefined);
+      void resolveApiKeyPrincipal(ql, headers, Date.now(), undefined, undefined, undefined);
+    };
+    expect(typeof compileOnly).toBe('function');
   });
 });
 
@@ -180,7 +231,7 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
   it('resolves the owner, credential `api_key`, with the account posture the doors refuse on', async () => {
     const { ql } = makeQl();
     const { source } = postureSource({ [OWNER]: [PASSWORD_EXPIRED, MFA_REQUIRED] });
-    const authz = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source });
+    const authz = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source, apiKeyLifecycle: undefined });
     expect(authz.userId).toBe(OWNER);
     expect(authz.credential).toBe('api_key');
     // The account-scope posture answers, not the first (credential-scope) entry.
@@ -192,7 +243,7 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
   it('a credential-scope posture keeps the key working: no posture on the context', async () => {
     const { ql } = makeQl();
     const { source } = postureSource({ [OWNER]: [PASSWORD_RESET_REQUIRED] });
-    const authz = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source });
+    const authz = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source, apiKeyLifecycle: undefined });
     expect(authz.userId).toBe(OWNER);
     expect(authz.credential).toBe('api_key');
     expect(authz.authGate).toBeUndefined();
@@ -203,11 +254,11 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
     const { ql, tables } = makeQl();
     const keyRowBefore = JSON.stringify(tables.sys_api_key);
     const { table, source } = postureSource({ [OWNER]: [MFA_REQUIRED] });
-    const held = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source });
+    const held = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source, apiKeyLifecycle: undefined });
     expect(held.authGate).toEqual(MFA_REQUIRED);
     // The owner enrols; nothing about the key is rewritten or reissued.
     table[OWNER] = [];
-    const again = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source });
+    const again = await resolveAuthzContext({ ql, headers: keyHeaders(), userAuthGates: source, apiKeyLifecycle: undefined });
     expect(again.userId).toBe(OWNER);
     expect(again.authGate).toBeUndefined();
     expect(JSON.stringify(tables.sys_api_key)).toBe(keyRowBefore);
@@ -222,6 +273,7 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
       headers: new Headers({ 'x-api-key': KEY, cookie: 'session=held' }),
       getSession,
       userAuthGates: source,
+      apiKeyLifecycle: undefined,
     });
     expect(authz.userId).toBe(OWNER);
     expect(authz.credential).toBe('api_key');
@@ -234,7 +286,7 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
     const { source } = postureSource({ [OWNER]: [MFA_REQUIRED] });
     const getSession = vi.fn(async () => ({ user: { id: COOKIE_USER } }));
     const authz = await resolveAuthzContext({
-      ql, headers: new Headers({ 'x-api-key': KEY, cookie: 'session=ok' }), getSession, userAuthGates: source,
+      ql, headers: new Headers({ 'x-api-key': KEY, cookie: 'session=ok' }), getSession, userAuthGates: source, apiKeyLifecycle: undefined,
     });
     expect(authz.userId).toBe(OWNER);
     expect(authz.authGate).toEqual(MFA_REQUIRED);
@@ -244,6 +296,8 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
   it('the session arm carries the session\'s own posture, every scope included', async () => {
     const { ql } = makeQl();
     const authz = await resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers({ cookie: 'session=held' }),
       getSession: async () => ({ user: { id: COOKIE_USER, authGate: PASSWORD_EXPIRED } }),
@@ -255,7 +309,7 @@ describe('resolveAuthzContext — a held key is a held principal, judged by the 
   it('a posture computation that rejects leaves the resolver loud', async () => {
     const { ql } = makeQl();
     const err = await resolveAuthzContext({
-      ql, headers: keyHeaders(), userAuthGates: async () => { throw new Error('fault'); },
+      ql, headers: keyHeaders(), userAuthGates: async () => { throw new Error('fault'); }, apiKeyLifecycle: undefined,
     }).catch((e) => e);
     expect(isAuthzStoreUnavailableError(err)).toBe(true);
   });

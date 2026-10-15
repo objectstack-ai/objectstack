@@ -48,6 +48,7 @@ import {
   // [#23287, ruling C′ item 3] The auth service's per-user posture
   // computation, bound for the shared key-admission seam.
   userAuthGateSourceOf,
+  apiKeyLifecyclePolicySourceOf,
   type AuthGate,
 } from '@objectstack/core';
 
@@ -251,6 +252,11 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // sets bound to the `guest` anchor, in the organization D4 derives.
     guestEntry: true,
     userAuthGates: userAuthGateSourceOf(authServiceForGates as any),
+    // [#23367, ruling A] The API-key lifecycle policy, from the same service.
+    // A key its own lifecycle refuses raises the branded
+    // `ApiKeyLifecycleRefusalError` out of this call, and this door hands it
+    // up unchanged: whoever catches the resolution decides how loud it is.
+    apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authServiceForGates as any),
   });
   if (authz.userId && authz.credential) {
     opts.onAdmission?.({ credential: authz.credential, authGate: authz.authGate });

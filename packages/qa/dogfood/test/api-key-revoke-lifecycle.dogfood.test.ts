@@ -68,6 +68,15 @@ describe('#7727: sys_api_key revoke/restore through the declared product route',
   const keyStillAuthenticates = async (raw: string): Promise<boolean> => {
     const res = await stack.api('/data/sys_api_key', { headers: { 'x-api-key': raw } });
     if (res.status === 200) return true;
+    // [#23367, ruling A] A revoked key is refused with its own located code,
+    // `403 API_KEY_REVOKED`; an unrecognised one with the generic 401. A 403
+    // carrying any other code would be the key accepted and something later
+    // refused — a different fact, so the code is asserted, not the status.
+    if (res.status === 403) {
+      const body: any = await res.json();
+      expect(body?.error?.code).toBe('API_KEY_REVOKED');
+      return false;
+    }
     expect(res.status).toBe(401);
     return false;
   };

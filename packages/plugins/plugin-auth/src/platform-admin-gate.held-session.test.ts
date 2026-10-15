@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { judgePlatformAdmin } from './platform-admin-gate.js';
+import { judgeHeldSession, judgePlatformAdmin } from './platform-admin-gate.js';
 
 const ADMIN = { id: 'usr_admin', email: 'admin@example.com', isPlatformAdmin: true, role: 'user' };
 const MEMBER = { id: 'usr_member', positions: ['user'], role: 'user' };
@@ -64,5 +64,32 @@ describe('judgePlatformAdmin: a held session (ADR-0069 D3)', () => {
   it('reads a posture without a string code as no posture (control)', () => {
     // `normalizeAuthGate`: a gate naming no string `code` is not a gate.
     expect(judgePlatformAdmin({ user: { ...ADMIN, authGate: { code: 7 } } }).ok).toBe(true);
+  });
+});
+
+describe('judgeHeldSession: the refusal the vendor-served doors reuse (ADR-0069 D3)', () => {
+  const RESET_REQUIRED = { code: 'PASSWORD_RESET_REQUIRED', message: 'You must change your password.' };
+
+  for (const gate of [PASSWORD_EXPIRED, MFA_REQUIRED, RESET_REQUIRED]) {
+    it(`refuses the ${gate.code} posture whatever its scope, in the judge's envelope`, () => {
+      // A session IS the password sign-in, so a `credential`-scope posture holds
+      // it as an `account`-scope one does: the session gate's verdict.
+      expect(judgeHeldSession({ authGate: gate })).toEqual({
+        status: 403,
+        body: { success: false, error: { code: gate.code, message: gate.message } },
+      });
+      // Byte-identical to the judge's held refusal on the raw mounts.
+      const verdict = judgePlatformAdmin({ user: { ...ADMIN, authGate: gate } });
+      expect(!verdict.ok && verdict.refusal).toEqual(judgeHeldSession({ authGate: gate }));
+    });
+  }
+
+  it('holds no one without a posture (the computation answered no entry)', () => {
+    expect(judgeHeldSession({ authGate: undefined })).toBeNull();
+    expect(judgeHeldSession({})).toBeNull();
+  });
+
+  it('holds no one on a code outside the closed posture vocabulary', () => {
+    expect(judgeHeldSession({ authGate: { code: 'NOT_A_POSTURE', message: 'x' } })).toBeNull();
   });
 });

@@ -449,12 +449,6 @@ export function shouldReplayBootstrapFor(opCtx: {
  */
 const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
 
-/** Whether a grant still carries the legacy id a release before the name column wrote (ADR-0131 D10). */
-function hasLegacySetId(row: any): boolean {
-  const id = row?.permission_set_id;
-  return id !== undefined && id !== null && String(id) !== '';
-}
-
 /**
  * Who ALREADY holds the unscoped platform-admin grant (commit 1c83ca226) — the
  * one rule both {@link bootstrapPlatformAdmin}'s `already_have_admin` guard and
@@ -526,33 +520,29 @@ function hasLegacySetId(row: any): boolean {
  * (`sys_user_permission_set.permission_set`), not for grants carrying the set
  * row's id: a holder is a grant of the set by name.
  *
- * A grant written before that column existed carries no name until the
- * one-time backfill names it — and the backfill runs at `kernel:bootstrapped`,
- * AFTER the `kernel:ready` bootstrap that asks this question. On the first boot
- * of an upgraded deployment, then, its platform administrator's grant names
- * nothing yet, and a by-name scan alone would answer "nobody", promote the
- * oldest user and hand them the seeded records: the second grant this function
- * exists to refuse. So leg C, only when A and B found nobody, reaches the
- * unscoped human grants that name NOTHING and still carry a legacy
- * `permission_set_id`, and one comes back as `unnamedHolder`. It only ever
- * RESTRICTS: the bootstrap withholds the promotion on it, and it is never a
- * holder — never an `adminUserId`, never a claim target
- * ({@link findExistingPlatformAdmin}).
+ * A grant written before that column existed carries no name until the v18
+ * ceremony's verified rewrite names it (`os migrate organization-ownership
+ * --apply`, ADR-0131 D10). A by-name scan alone would answer "nobody" for such
+ * a grant, promote the oldest user and hand them the seeded records: the
+ * second grant this function exists to refuse. So leg C, only when A and B
+ * found nobody, reaches the unscoped human grants that name NOTHING, and one
+ * comes back as `unnamedHolder`. It only ever RESTRICTS: the bootstrap
+ * withholds the promotion on it, and it is never a holder — never an
+ * `adminUserId`, never a claim target ({@link findExistingPlatformAdmin}).
  *
- * [C3 stage 8] Leg C asks for ANY such grant, not for grants of the admin set's
- * row: the catalog row object is retired, so no read can say which set a legacy
- * id pointed at. An unnamed grant of another set therefore withholds the
- * promotion too, until the organization-ownership migration's verified
- * id-to-name rewrite (ADR-0131 D10) names it — the stricter reading, since the
- * one it cannot tell apart may be the administrator's. A database that holds no
- * unnamed grant (every fresh one) answers by name alone.
+ * Leg C asks for ANY such grant, not for grants of the admin set: no read can
+ * say which set an unnamed grant held (the legacy id column is retired, C7b).
+ * An unnamed grant of another set therefore withholds the promotion too — the
+ * stricter reading, since the one it cannot tell apart may be the
+ * administrator's. A database that holds no unnamed grant (every fresh one,
+ * and every one the ceremony has run on) answers by name alone.
  */
 async function findPlatformAdminGrantHolder(
   ql: any,
   reachUnnamed: boolean,
 ): Promise<{
   holder: any | undefined;
-  /** Leg C: an unscoped human grant that names no set yet and carries a legacy id (restricts only). */
+  /** Leg C: an unscoped human grant that names no set yet (restricts only). */
   unnamedHolder: any | undefined;
   adminGrantRowsExamined: number;
   truncated: boolean;
@@ -610,13 +600,13 @@ async function findPlatformAdminGrantHolder(
     holder = await scan({ [GRANT_SET_NAME_FIELD]: PLATFORM_ADMIN_PERMISSION_SET_NAME }, isUnscopedHumanHolder);
   }
 
-  // Leg C — the grants that name nothing yet and carry a legacy id; it
-  // restricts only (see the function note).
+  // Leg C — the grants that name nothing yet; it restricts only (see the
+  // function note).
   let unnamedHolder: any | undefined;
   if (!holder && reachUnnamed) {
     unnamedHolder = await scan(
       { [GRANT_SET_NAME_FIELD]: null },
-      (r) => grantSetNameOf(r) === undefined && hasLegacySetId(r) && isUnscopedHumanHolder(r),
+      (r) => grantSetNameOf(r) === undefined && isUnscopedHumanHolder(r),
     );
   }
 

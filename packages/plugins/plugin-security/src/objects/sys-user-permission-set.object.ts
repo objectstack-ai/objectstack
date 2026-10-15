@@ -14,9 +14,13 @@ import { F, P } from '@objectstack/spec';
  * table when building the per-request `ExecutionContext.permissions[]`.
  *
  * The same permission set can be granted independently in each org context
- * the user belongs to. The declared unique index still names
- * `permission_set_id`, the column ADR-0131 D10 drops with its data (C7b); a
- * grant written by name carries NULL there, which SQL keys apart.
+ * the user belongs to, and once in each: the declared unique index is
+ * (`user_id`, `permission_set`, `organization_id`), `unique: 'organization'`,
+ * so its organization key part is NULL-safe (ADR-0120 D3) and a second
+ * platform-wide grant (organization NULL) is refused too — by the index, for
+ * every writer and write path. [ADR-0131 D10, C7b] The legacy
+ * `permission_set_id` column is retired: the v18 ceremony's verified rewrite
+ * names every grant from it, then its column-drops step drops it.
  *
  * @namespace sys
  */
@@ -58,8 +62,8 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // neither is hidden, permission-guarded or masked on this object, so the
     // title carries nothing the declared read path withholds. Both are
     // required (the set by name, ADR-0131 D4), so the expression needs no null
-    // guard; a legacy grant the one-time backfill names at boot is the only
-    // row that ever stored the name NULL.
+    // guard; a legacy grant the v18 ceremony's rewrite names is the only row
+    // that ever stored the name NULL.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
@@ -73,29 +77,6 @@ export const SysUserPermissionSet = ObjectSchema.create({
       description: 'Foreign key to sys_user.',
     }),
 
-    // [ADR-0131 D10] The grant's former id reference to a catalog row. No
-    // writer fills it and no reader confers anything through it: a grant names
-    // its set by `permission_set` below. Optional, and kept only until D10
-    // drops the column with its data (C7b), whose verified rewrite reads it on
-    // grants written before the name column existed.
-    //
-    // [C3 stage 8] Plain text, no longer a lookup: the catalog row object it
-    // pointed at is retired. Same name, same stored ids, same two indexes
-    // below, and the same `varchar(255)` a lookup is stored in, so the column
-    // itself does not change.
-    permission_set_id: Field.text({
-      label: 'Permission Set (legacy id)',
-      required: false,
-      maxLength: 255,
-      // [#15204 B2] Off the forms: it grants nothing, so an editable id
-      // beside `permission_set` only invites a meaningless value. The column
-      // stays until its data is dropped (ADR-0131 D10).
-      hidden: true,
-      description:
-        '[ADR-0131 D10] Legacy id of a retired permission-set catalog row, dropped with its data by a later stage. ' +
-        'Not written and not read to grant anything: the grant names its set by permission_set.',
-    }),
-
     // [ADR-0131 D4] The permission set this grant holds, BY NAME — the grant's
     // one reference to its set. The set is the security catalog's definition
     // of that name (ADR-0131 D3), so no `sys_permission_set` row is needed to
@@ -104,7 +85,7 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // `grant-permission-set-name.ts`), as `sys_user_position.position` is.
     // Same width and shape as that sibling (a machine name, 100). Required on
     // every write; a grant written before this column existed carries NULL
-    // until the one-time backfill names it, and an update that leaves the
+    // until the v18 ceremony's rewrite names it, and an update that leaves the
     // column alone does not have to name it.
     permission_set: Field.text({
       label: 'Permission Set',
@@ -281,10 +262,11 @@ export const SysUserPermissionSet = ObjectSchema.create({
   ],
 
   indexes: [
-    { fields: ['user_id', 'permission_set_id', 'organization_id'], unique: 'global' },
+    // One grant of a set to a user per organization, platform-wide (NULL)
+    // included (the module note): a duplicate would keep a revoked grant in force.
+    { fields: ['user_id', 'permission_set', 'organization_id'], unique: 'organization' },
     { fields: ['user_id'] },
     { fields: ['organization_id'] },
-    { fields: ['permission_set_id'] },
   ],
 
   enable: {

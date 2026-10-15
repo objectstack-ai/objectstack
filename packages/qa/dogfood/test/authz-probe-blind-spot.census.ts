@@ -631,6 +631,20 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // carries the move — the host literal's forwarder (`enforceAuth: (...a) =>
     // this.enforceAuth(...a)`, two) and the host interface's member
     // (`enforceAuth: RestServer['enforceAuth']`, two). No call site was added.
+    // [commit 1d79556766] `enforceAuth` 61 -> 64, and nothing else on this row
+    // moved: 70 / 19 / 51 and every other control re-derived unchanged.
+    // ⛔ RE-ANCHORED, not relaxed: PR #23541 (#23367, the API-key lifecycle)
+    // added three PROSE mentions and no call site, and `occurrences` counts the
+    // bare term, comments included. At `fa6a6085c` they are
+    // `rest-server.ts:2395` and `:2397`, the docblock on
+    // `apiKeyLifecycleRefusals` ("so {@link enforceAuth} can answer it",
+    // "every door that never reaches `enforceAuth`"), and `:3471`, the inline
+    // comment in `computeExecCtx`'s outer `catch` ("for `enforceAuth`, which
+    // answers its `403` and code"). The same commit edited `enforceAuth`'s own
+    // body and docblock in lines that do not spell the term, removed no
+    // mention, and left `data-action-routes.ts` untouched. No call site was
+    // added. ⚠️ The dogfood shards skip on PRs and in the merge queue, so this
+    // move was seen only by the hourly full run on `main`.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
@@ -642,7 +656,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 61,
+      enforceAuth: 64,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +

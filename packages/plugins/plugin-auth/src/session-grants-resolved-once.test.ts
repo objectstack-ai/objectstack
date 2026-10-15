@@ -234,6 +234,8 @@ async function resolveRequest(a: Arranged, bearer: string | null, tenancyPosture
   const headers = new Headers(bearer ? { authorization: `Bearer ${bearer}` } : {});
   return a.probe.measure(() =>
     resolveAuthzContext({
+      userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql: a.engine,
       headers,
       getSession: (h: any) => auth.api.getSession({ headers: h }),

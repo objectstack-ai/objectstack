@@ -134,7 +134,7 @@ beforeAll(async () => {
     active: true, object_permissions: JSON.stringify({}), system_permissions: JSON.stringify([]),
   }, SYS);
   await e.insert('sys_user_permission_set', {
-    id: 'ups_pp_grace', user_id: GRACE, permission_set_id: 'ps_pp_directory', permission_set: DIRECTORY_SET.name,
+    id: 'ups_pp_grace', user_id: GRACE, permission_set: DIRECTORY_SET.name,
   }, SYS);
   // A position Lin holds because Grace delegated it, until a date far ahead.
   await e.insert('sys_user_position', {

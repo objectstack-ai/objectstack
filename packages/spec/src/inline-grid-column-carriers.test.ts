@@ -294,9 +294,9 @@ function typeConditionalRules(): { rules: TypeConditionalRule[]; unprobed: strin
 /**
  * A stack whose child object carries a field `probe` of `fieldType`, and an
  * identity-only `inlineColumns` entry over it. The field type is the column
- * type's own name: at the `.objectui-sha` pin `db11afd4967c`,
- * `fieldTypeToColumnType` maps each of the column schema's nine types' namesake
- * field type to that same column type.
+ * type's own name: the renderer's column-type derivation maps each of the
+ * column schema's nine types' namesake field type to that same column type
+ * (recorded in `packages/spec/liveness/field.json`, row `inlineColumns`).
  */
 const stackWithProbeField = (fieldType: string, column: Record<string, unknown>) => {
   const child = childObject([column]);
@@ -426,8 +426,8 @@ describe('the `field` → `name` respelling is a chain step on the form-view car
 const MASTER_DETAIL_PROPS = ComponentPropsMap['object-master-detail-form'];
 
 /**
- * Every key objectui's `MasterDetailForm` reads off a detail entry (the
- * `.objectui-sha` pin `31971ff1e28f`, re-read at `89cad75d5570`). `sortField`
+ * Every key objectui's `MasterDetailForm` reads off a detail entry (read
+ * points recorded in `liveness/page.json`, row `regions`). `sortField`
  * is not one of them: the renderer derives the line-position field from the
  * child object, and the key is a tombstone (#21589,
  * `ui/master-detail-detail-sort-field-retirement.test.ts`).
@@ -621,7 +621,7 @@ describe('defineStack judges an identity-only detail column by the type it rende
  */
 const LINE_ITEMS_PROPS = ComponentPropsMap['record:line_items'];
 
-/** Every key objectui's `LineItemsPanel` reads off its schema (the `.objectui-sha` pin `31971ff1e28f`). */
+/** Every key objectui's `LineItemsPanel` reads off its schema (read points recorded in `liveness/page.json`, row `regions`). */
 const FULL_LINE_ITEMS = {
   childObject: 'crm_invoice_line',
   relationshipField: 'invoice',

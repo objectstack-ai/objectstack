@@ -1289,6 +1289,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Add Record",
         helpText: "Add-record entry point"
       },
+      "interfaceConfig.emptyState": {
+        label: "Empty State",
+        helpText: "What the page shows when its list has no rows: a heading, a message, an icon and one link. Set here, it replaces the source view's empty state."
+      },
       "interfaceConfig.buttons": {
         label: "Buttons",
         helpText: "Toolbar buttons — pick from this object's actions"

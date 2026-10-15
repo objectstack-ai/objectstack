@@ -545,13 +545,29 @@ export function registerShareLinkRoutes(
   //
   // Other object kinds can register additional public endpoints
   // following the same pattern.
+  //
+  // [#23371] Step 1 hands `resolveToken` every audience input the resolve
+  // route above hands it, read from the same sources: the signed-in user from
+  // the context the family door already resolved (never a second read of the
+  // session), the recipient email from `?email=`. So this route opens for a
+  // caller exactly when resolve opens the same link for that caller. Without
+  // them it refused a signed-in recipient of a `signed_in` link, and an
+  // allowlisted recipient of an `email` link, that resolve serves. The
+  // dispatcher twin (`runtime/src/domains/share-links.ts`) forwards the same
+  // three, and `runtime/src/domains/share-links-messages-audience.test.ts`
+  // holds both mounts, and both routes, to one answer per audience.
   // ──────────────────────────────────────────────────────────────
   mountFamilyRoute('get', `${base}/:token/messages`, {
     publicRoute: true,
-    async serve(req, res) {
+    async serve(req, res, ctx) {
+      const q = req.query ?? {};
+      const signedInUserId = ctx.userId;
+      const recipientEmail = typeof q.email === 'string' ? q.email : undefined;
       const presented = presentedPassword(req);
       if (!presented.ok) return sendError(res, 400, 'VALIDATION_FAILED', presented.message);
       const resolved = await service.resolveToken(req.params.token, {
+        signedInUserId,
+        recipientEmail,
         providedPassword: presented.password,
       });
       if (!resolved) {

@@ -245,16 +245,12 @@ describe('SelectOptionSchema accepts `description` — declared because the look
  * The premise was measured for THIS surface — a FIELD option — rather than
  * inherited from #5016, which measured the ACTION-param path (objectui's
  * `SelectOptionMetadata` does declare `icon`, so the two faces had to be
- * measured apart). Measured at the `.objectui-sha` pin
- * `d8ec8d6d4f011b11c8eb1e6dbd364ef206711391` — the console this repo ships —
- * and again on that repo's `origin/main`, same answer both times, with a live
- * positive control: the select/multiselect cell renderer
- * (`packages/fields/src/index.tsx`, the `renderOne` badge/dot branch) reads
- * `option?.label` and `option?.color` off a `SelectOptionMetadata[]` and never
- * `option?.icon`, and no field-option render path in that tree reads the key at
- * all — the single `opt.icon` read there belongs to the config-panel
- * `ConfigField` vocabulary, whose `icon` is a `React.ReactNode` an authored
- * field option cannot reach. Declaring `icon` would be an accepted-set
+ * measured apart). Measured against the console renderer, on the pinned tree
+ * and on objectui's `main`, same answer both times, with a live positive
+ * control: the select/multiselect cell renderer reads `option?.label` and
+ * `option?.color` and never `option?.icon`, and no field-option render path
+ * reads the key at all (the read points are recorded in
+ * `packages/spec/liveness/field.json`, row `options`). Declaring `icon` would be an accepted-set
  * expansion needing a maintainer ruling; if that ruling ever comes, this
  * section INVERTS (offer restored, door widened, both halves moving together)
  * rather than being deleted.

@@ -1378,66 +1378,12 @@ const actionObject = () => strictObject({
    * `objects.<object>._actions.<action>.outcomeMessages.<outcome>`, and an
    * object-less action reads `globalActions.<action>.outcomeMessages.<outcome>`.
    *
-   * Liveness: the ledger row was `planned` until the console reader landed,
-   * and it is `live` from the pin this repo builds against (`.objectui-sha` =
-   * `b9814b334`, re-read there 2026-10-14:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
-   * `1fb1ced36`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * `ActionRunner.composeSuccessMessage`, in `core/src/actions/ActionRunner.ts`, is
-   * byte-identical in body to `9646e2ed2` and MOVED down by 11, `1498` -> `1509`
-   * (objectui#12191, objectui `334f0cff9`: the runner admits `mailto:` through one
-   * navigation-target answer, its eleven import lines added above it; every other
-   * hunk lies below the reader), and the four action renderers
-   * are byte-identical (`git diff --quiet`). At `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-   * `499799502`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `20c6d351a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `20c6d351a`, re-read there 2026-10-10:
-   * `core/src/actions/ActionRunner.ts` changed above the reader only (+29/-35,
-   * objectui#6349 batch 4, objectui `d32869883`: `ActionContext` and
-   * `ActionResult` declared once and `UndoableOperation` published, every hunk
-   * in the import block and those declarations at the top of the file), so
-   * `composeSuccessMessage` MOVED `1504` -> `1498` with its body byte-identical,
-   * and the four action renderers are byte-identical (`git diff --quiet`). At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
-   * `f0268ad78`, re-read there 2026-10-09:
-   * `core/src/actions/ActionRunner.ts` changed above the reader only (+7/-0,
-   * objectui#11695: the confirmation handler's `destructive` option and its
-   * docblock), so `composeSuccessMessage` MOVED `1497` -> `1504` with its body
-   * byte-identical. At `a58626c88`, re-read there 2026-10-06:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`, re-read 2026-10-05: `core/src/actions/ActionRunner.ts` is
-   * byte-identical to `2e818d0b5`, re-read there 2026-10-04, and to
-   * `ab1879721`, where it was read 2026-10-03, so the anchor below held
-   * unmoved). The reader is objectui#11344 (objectui
-   * `c476be0e0`): `ActionRunner.composeSuccessMessage`
-   * (`core/src/actions/ActionRunner.ts:1509`) picks `outcomeMessages[outcome]`
-   * off the handler's return value, falls back to `successMessage` and then to
-   * the runner's default text, and fills `${result.*}` in whichever it shows.
-   * The four action renderers forward the key to the runner (`action:bar`
-   * spreads a registered action onto `action:button` whole). At `89cad75d5570`
-   * no objectui source outside its types named the key.
+   * Liveness: the ledger row was `planned` until the console reader landed
+   * (objectui#11344) and is `live` now; the reader — the action runner picks
+   * `outcomeMessages[outcome]` off the handler's return value, falls back to
+   * `successMessage` and then to the runner's default text, and fills
+   * `${result.*}` in whichever it shows — is recorded by symbol in
+   * `packages/spec/liveness/action.json`, row `outcomeMessages`.
    */
   outcomeMessages: z.record(SnakeCaseIdentifierSchema, I18nLabelSchema).optional().describe("Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case `outcome` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message may interpolate ${result.*}, the scope `onSuccess.navigate` declares. An outcome with no entry here falls back to `successMessage`, then to the default text. Not allowed beside `resultDialog` (which suppresses the success toast) or `operation: 'update'` (no handler, so no outcome)."),
   // Runtime (ActionRunner) already honours this — declared here so authors can
@@ -1769,9 +1715,8 @@ const actionObject = () => strictObject({
    * surface and defaults `'self'`; the handler convention is a shipped surface
    * and keeps new-tab.
    *
-   * The console consumer is objectui's `ActionRunner` (`handlePostExecution`
-   * → `readOnSuccessNavigation` → `navigateOnSuccess`), read at the
-   * `.objectui-sha` pin `f8a9d0fb`. After an `api` or `script` action
+   * The console consumer is objectui's action runner (recorded by symbol in
+   * `packages/spec/liveness/action.json`, rows `onSuccess.*`). After an `api` or `script` action
    * succeeds, it interpolates `navigate` with the `${param.*}`, `${ctx.*}` and
    * `${result.*}` scopes and hands the URL to the console's router. It opens
    * a new tab only on `openIn: 'newTab'`. The liveness ledger's two
@@ -1819,9 +1764,9 @@ const actionObject = () => strictObject({
   // `aria` REMOVED (ADR-0049 enforce-or-remove; the triage record on the card,
   // comment 5860351140 on #20323, follows the `ChartConfig.aria` retirement
   // `2bf6ef18d`). The ledger graded this key `live` on an uncited "PARTIAL —
-  // honored by a few objectui renderers" note, and no reader stood behind it.
-  // Measured at this checkout's `.objectui-sha` pin `f8a9d0fb05`: none of the
-  // surfaces that render an action — `action:button`, `action:icon`,
+  // honored by a few objectui renderers" note, and no reader stood behind it
+  // (the measurement is recorded in `packages/spec/liveness/action.json`, row
+  // `aria`): none of the surfaces that render an action — `action:button`, `action:icon`,
   // `action:menu`, `action:group`, `action:bar`, the grid's row and bulk
   // action menus, `record:quick_actions`, the declared-actions bar — reads an
   // action's `aria`. The only `schema.aria` readers there are the PLACING

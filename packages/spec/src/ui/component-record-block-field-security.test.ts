@@ -11,7 +11,8 @@
 //
 // The card declared the field-security PAIR first and held the third key until
 // its semantics were ruled (#19186 ruling B: an ADR-0066 capability set) and the
-// renderers read it that way at the pin. Every pin below is an ACCEPT pin: a
+// renderers read it that way (read points recorded in `liveness/page.json`, row
+// `regions`). Every pin below is an ACCEPT pin: a
 // full `safeParse` success is the assertion (not merely "no
 // `unrecognized_keys`"), because the value arm is part of what is being
 // declared, and a key-only assertion would stay green over a declaration that
