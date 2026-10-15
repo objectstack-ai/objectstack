@@ -389,9 +389,20 @@ async function handleShareLinksRequestBody(
         // ── PUBLIC: ai_conversations messages for a resolved token ────
         if (parts.length === 2 && parts[1] === 'messages' && m === 'GET') {
             const token = decodeURIComponent(parts[0]);
+            // [#23371] Every audience input the resolve arm above passes, from
+            // the same sources: the signed-in user off the envelope the
+            // dispatcher already resolved, the recipient email off `?email=`.
+            // So this route opens for a caller exactly when resolve opens the
+            // same link for that caller. It passed no recipient email, and so
+            // refused an allowlisted recipient of an `email` link that resolve
+            // serves. The plugin-sharing twin forwards the same three, and
+            // `share-links-messages-audience.test.ts` beside this file holds
+            // both mounts, and both routes, to one answer per audience.
+            const signedInUserId = ec?.userId;
+            const recipientEmail = typeof query?.email === 'string' ? query.email : undefined;
             const presented = presentedPassword();
             if (!presented.ok) return sendErr(400, 'VALIDATION_FAILED', presented.message);
-            const resolved = await svc.resolveToken(token, { signedInUserId: ec?.userId, providedPassword: presented.password });
+            const resolved = await svc.resolveToken(token, { signedInUserId, recipientEmail, providedPassword: presented.password });
             if (!resolved) return sendErr(404, 'NOT_FOUND', 'Share link not found');
             if (resolved.link.object_name !== 'ai_conversations') {
                 return sendErr(400, 'UNSUPPORTED', 'This share link does not expose messages');
