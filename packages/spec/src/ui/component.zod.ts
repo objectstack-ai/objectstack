@@ -6226,14 +6226,13 @@ export type ObjectGridPropsParsed = z.infer<typeof ObjectGridPropsSchema>;
 
 /**
  * [#21464] The `object-metric` tile's `aggregate` — the query behind its one
- * number, as the tile reads it at the `.objectui-sha` pin `89cad75d55`
- * (`plugin-dashboard/src/ObjectMetricWidget.tsx`): `field` and `function`
- * build the request and name the result column (`:403-443`, `computeOne`),
- * `function` also decides whether the field's unit dresses the number (`:305`,
- * `answersInFieldUnit`) and the `min` / `max` width (`:344-353`), and
- * `groupBy` routes a structured date-bucket node to the spec-shape query
- * (`:405-423`, `objectAggregateSpecQuery`) and is floored at the one `'_all'`
- * bucket when absent (`:427`).
+ * number, as the tile reads it (read points recorded in `liveness/page.json`,
+ * row `regions`): `field` and `function` build the request and name the
+ * result column (`computeOne`), `function` also decides whether the field's
+ * unit dresses the number (`answersInFieldUnit`) and the `min` / `max` width,
+ * and `groupBy` routes a structured date-bucket node to the spec-shape query
+ * (`objectAggregateSpecQuery`) and is floored at the one `'_all'` bucket when
+ * absent.
  *
  * The vocabulary is declared elsewhere, by reference; the SHAPE is the tile's
  * own:
@@ -6243,15 +6242,14 @@ export type ObjectGridPropsParsed = z.infer<typeof ObjectGridPropsSchema>;
  *   verbatim (`<field>_<function>` on the analytics wire, which answers
  *   `_count_distinct`; the function itself on the spec-shape query), and
  *   objectui's own pin of the unit rule classifies one row per member of that
- *   enum and mounts each (`__tests__/ObjectMetricWidget.countNotCurrency-10356.test.tsx:102-124`),
- *   so a `count_distinct` tile is drawn. The chart's five-function subset
+ *   enum and mounts each, so a `count_distinct` tile is drawn. The chart's five-function subset
  *   (`ChartAggregateFunctionSchema`) is NOT this vocabulary: the chart leaves
  *   `count_distinct` out because the client-side fallback cannot compute it,
  *   and that fallback sums a `count_distinct` on the metric too — but the tile
  *   reads and draws it wherever the analytics service answers it, so the
  *   five would refuse a value the tile draws.
  * - `groupBy` is the chart's {@link ChartGroupBySchema} — the tile types it as
- *   `ChartAggregate['groupBy']` (`:150`) and routes its object arm the way the
+ *   `ChartAggregate['groupBy']` and routes its object arm the way the
  *   chart does. Optional here: the chart requires it because an ungrouped chart
  *   draws nothing, while a metric paints one number and floors an absent one —
  *   every authored `object-metric` in the showcase writes `{ field, function }`
@@ -6297,15 +6295,13 @@ const ObjectMetricAggregateSchema = lazySchema(() => strictObject({
 
 /**
  * [#21464] The `object-metric` tile's static `trend` badge, as `MetricWidget`
- * draws it at the `.objectui-sha` pin `89cad75d55`
- * (`plugin-dashboard/src/MetricWidget.tsx:437-450`): `value` painted as
- * `{value}%`, `direction` choosing the arrow (`up` / `down` / `neutral`, no
- * glyph when absent), and `label` the caption, resolved with `pickLocalized`
- * (`:332-337`). The widget's own declared type is exactly these three
- * (`MetricWidget.tsx:242-246`, mirrored at `ObjectMetricWidget.tsx:176-181`).
- * No spec schema declares a trend badge, so the shape is the read's own. A
- * `compareTo`-derived trend replaces this one outright (`ObjectMetricWidget.tsx:595`,
- * `derivedTrend ?? trend`).
+ * draws it (read points recorded in `liveness/page.json`, row `regions`):
+ * `value` painted as `{value}%`, `direction` choosing the arrow (`up` /
+ * `down` / `neutral`, no glyph when absent), and `label` the caption, resolved
+ * with `pickLocalized`. The widget's own declared type is exactly these three,
+ * mirrored on `ObjectMetricWidget`. No spec schema declares a trend badge, so
+ * the shape is the read's own. A `compareTo`-derived trend replaces this one
+ * outright (`derivedTrend ?? trend`).
  */
 const ObjectMetricTrendSchema = lazySchema(() => strictObject({
   surface: 'this `object-metric` trend badge',
@@ -6321,14 +6317,13 @@ const ObjectMetricTrendSchema = lazySchema(() => strictObject({
 
 /**
  * [#21464] The `object-metric` tile's `drillDown` — the click-through to the
- * records behind the number, as the tile reads it at the `.objectui-sha` pin
- * `ab1879721595` (`plugin-dashboard/src/ObjectMetricWidget.tsx`): `enabled`
- * decides whether the tile is clickable (`:696`, `isDrillEnabled` — a present
- * block is on unless `enabled: false`), `title` heads the panel (`:708`,
- * `resolveDrillTitle` against an EMPTY click event, falling back to the tile's
- * `title`, then its `label`), and `target`, `columns` and `maxRows` reach the
- * shared `DrillDownDrawer` the tile opens (`:732-744`; `maxRows` defaults to
- * the tile's page size of 25). The drilled list is scoped by the metric's own
+ * records behind the number, as the tile reads it (read points recorded in
+ * `liveness/page.json`, row `regions`): `enabled` decides whether the tile is
+ * clickable (`isDrillEnabled` — a present block is on unless
+ * `enabled: false`), `title` heads the panel (`resolveDrillTitle` against an
+ * EMPTY click event, falling back to the tile's `title`, then its `label`),
+ * and `target`, `columns` and `maxRows` reach the shared `DrillDownDrawer` the
+ * tile opens (`maxRows` defaults to the tile's page size of 25). The drilled list is scoped by the metric's own
  * resolved `filter`.
  *
  * Those five are the chart drill-down's own members, by reference
@@ -6339,8 +6334,8 @@ const ObjectMetricTrendSchema = lazySchema(() => strictObject({
  * not the chart's, in two places:
  *
  * - `filter` and `mode` are REFUSED BY NAME, with the prescriptions objectui's
- *   own type for this block carries (`ObjectMetricDrillDownConfig`,
- *   `types/src/data-display.ts:2628`): a drill `filter` is interpolated
+ *   own type for this block carries (`ObjectMetricDrillDownConfig`): a drill
+ *   `filter` is interpolated
  *   against a click event and the metric has none, and `mode` chooses
  *   drill-to-record for a clicked row and the metric has no row. The chart's
  *   drill-down declares `filter`, which is why the chart's shape is not taken
@@ -6393,18 +6388,14 @@ const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
    * `dataset`, a misspelled report key or a bare report name passed the
    * component-props gate, and the drawer quietly listed the records instead.
    *
-   * Read at the `.objectui-sha` pin `2e818d0b51ec` (both files byte-identical
-   * from `ab1879721595`, where the fork was measured, and at objectui `main`
-   * `2abec3a96`): the tile hands `report` to the shared drawer verbatim
-   * (`plugin-dashboard/src/ObjectMetricWidget.tsx:742`), and
-   * `DrillDownDrawer.tsx` draws it as a `report` node when
-   * `isDatasetBoundReport` holds (`:92`, used at `:115`) — a non-empty
-   * `dataset`, or a `joined` report with a block that binds one — joining the
-   * metric's filter into the report's own `runtimeFilter` (`:150-153`); any
-   * other value lists the records. objectui types the member as this package's
-   * `ReportSchema` author input (`types/src/data-display.ts`,
-   * `SpecReportInput`), so the reference is the declaration both sides already
-   * name.
+   * Read points recorded in `liveness/page.json`, row `regions`: the tile
+   * hands `report` to the shared drawer verbatim, and the drawer draws it as a
+   * `report` node when `isDatasetBoundReport` holds — a non-empty `dataset`, or
+   * a `joined` report with a block that binds one — joining the metric's filter
+   * into the report's own `runtimeFilter`; any other value lists the records.
+   * objectui types the member as this package's `ReportSchema` author input
+   * (`SpecReportInput`), so the reference is the declaration both sides
+   * already name.
    *
    * ## Admitted implies drawn
    *
@@ -6432,14 +6423,13 @@ const ObjectMetricDrillDownSchema = lazySchema(() => strictObject({
 
 /**
  * [#21464] The `object-metric` tile's `compareTo` — the period-over-period
- * comparison, as the tile reads it at the `.objectui-sha` pin `ab1879721595`:
- * `kind` ALONE. `ObjectMetricWidget.tsx` runs a second aggregate over
- * `shiftFilterByCompareTo(filter, compareTo)` (`:522-523`) and labels the
- * derived trend with `compareToTrendLabelKey(compareTo, filter)` (`:675`);
- * both (objectui `core/src/utils/compare-to.ts:99`, `:124`) dispatch on
- * `compareTo.kind === 'previousYear'` (`:104`, `:128`) and treat every other
- * value as `previousPeriod`. The same file's header records `dimension` as
- * "deliberately never read on this path" (`:28-33`): this inline tile shifts
+ * comparison, as the tile reads it (read points recorded in
+ * `liveness/page.json`, row `regions`): `kind` ALONE. `ObjectMetricWidget`
+ * runs a second aggregate over `shiftFilterByCompareTo(filter, compareTo)` and
+ * labels the derived trend with `compareToTrendLabelKey(compareTo, filter)`;
+ * both dispatch on `compareTo.kind === 'previousYear'` and treat every other
+ * value as `previousPeriod`. The same module's header records `dimension` as
+ * "deliberately never read on this path": this inline tile shifts
  * the date macros in its own `filter`, while a dashboard widget's dataset path
  * hands `dimension` to the analytics executor, which shifts that time
  * dimension's window.
@@ -6475,9 +6465,9 @@ const ObjectMetricCompareToSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * `object-metric` (objectui `plugin-dashboard/src/ObjectMetricWidget.tsx` @
- * `eb7f586b`). The widget destructures every prop it reads
- * (`ObjectMetricWidgetProps`, :40-110 — the complete read set), and the
+ * `object-metric` (objectui's `ObjectMetricWidget`; read points recorded in
+ * `liveness/page.json`, row `regions`). The widget destructures every prop it
+ * reads (`ObjectMetricWidgetProps` — the complete read set), and the
  * registry shell forwards the authored bag onto it. `columns`/`sort`/`limit`
  * are deliberately absent — a metric is one aggregated number; the registry's
  * own `ElementDataSourceMapping` comment records that they have no read site.
@@ -6502,146 +6492,22 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * scratch; #9881 / commit 60e0f900a recorded the accordion and tab items). This is the
    * same record for the metric tile.
    *
-   * The key is LIVE at objectui `b9814b334` (re-read there 2026-10-14:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
-   * `1fb1ced36`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-   * `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-   * `499799502`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `20c6d351a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `20c6d351a`, re-read there 2026-10-10:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
-   * `f0268ad78`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `a58626c88` (`git diff --quiet`), so every anchor held unmoved. At
-   * `a58626c88`, re-read there 2026-10-06:
-   * `plugin-dashboard/src/index.tsx`, `ObjectMetricWidget.tsx` and
-   * `lazy-icon.tsx` are byte-identical to `0abd4f9f8` (`git diff --quiet`), so
-   * their anchors hold unmoved; `MetricWidget.tsx` (+19/-7) and
-   * `MetricCard.tsx` (+13/-4) changed for objectui#4425 (the metric cards stop
-   * writing authored keys they do not read onto the page), no hunk naming
-   * `icon`, so the resolve MOVED `371-380` -> `383-392` and the draw `432-441`
-   * -> `444-453`, both byte-identical, and `MetricCard.tsx`'s `getLazyIcon`
-   * call MOVED `83` -> `92`.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`; re-derived at that pin 2026-10-05 —
-   * `ObjectMetricWidget.tsx`, `MetricWidget.tsx`, `MetricCard.tsx` and
-   * `lazy-icon.tsx` are byte-identical to `2e818d0b5` (`git diff --quiet`), so
-   * their anchors hold unmoved; `plugin-dashboard/src/index.tsx` (+37/-2)
-   * gained objectui#11605's `requiresObject` gate on `ObjectMetricBlock` (six
-   * lines above the `object-metric` registration) and turned the
-   * registration's `objectName` input from a one-line `required: true` entry
-   * into a commented, described, non-required one (twelve net lines above the
-   * icon input), so its start MOVED `256` -> `262` and the icon input `281`
-   * -> `299`, both byte-identical, still `{ name: 'icon', type: 'string' }`.
-   * At `2e818d0b5`, re-derived there 2026-10-04 —
-   * `ObjectMetricWidget.tsx`, `MetricWidget.tsx`, `MetricCard.tsx` and
-   * `lazy-icon.tsx` are byte-identical to `ab1879721` (`git diff --quiet`), so
-   * their anchors hold unmoved; `plugin-dashboard/src/index.tsx` (+13/-1)
-   * gained objectui#11466's `DashboardMetricNodeSchema` type export, its
-   * declared-node comment on the bare `metric` registration and a re-worded
-   * `ObjectMetricBlock` docblock sentence, all above the `object-metric`
-   * registration, so its start MOVED `244` -> `256` and the icon input `269`
-   * -> `281`, both byte-identical, still `{ name: 'icon', type: 'string' }`.
-   * At `ab1879721`, re-derived there 2026-10-03 —
-   * `MetricCard.tsx` and `lazy-icon.tsx` are byte-identical to `89cad75d5`,
-   * so their anchors hold unmoved and were re-read in place; the other three
-   * files changed and every one of their anchors MOVED with its cited text
-   * byte-identical, no hunk naming `icon`. `plugin-dashboard/src/index.tsx`
-   * (+55/-22) marked the `metric` / `metric-card` registrations above the
-   * `object-metric` one `skipFallback` (objectui#10859 batch 8 phase 2b,
-   * the bare keys retired), so that registration's start MOVED `227` ->
-   * `244` and the icon input `252` -> `269`, still `{ name: 'icon', type:
-   * 'string' }`; `ObjectMetricWidget.tsx` (+108/-14: objectui#11526's
-   * structured `groupBy` with a rule-list `filter`, objectui#11444's currency
-   * and objectui#11475's percent faces) MOVED the destructure `255` -> `304`
-   * and the forward `659` -> `753`; `MetricWidget.tsx` (+30/-10, the same
-   * currency and percent faces) MOVED the resolve `351-360` -> `371-380` and
-   * the draw `412-421` -> `432-441`. At `89cad75d5` (2026-10-02)
-   * `plugin-dashboard/src/index.tsx`, `MetricWidget.tsx`, `MetricCard.tsx`
-   * and `lazy-icon.tsx` are byte-identical to `31971ff1e`, so their anchors
-   * hold unmoved and were re-read in place; `ObjectMetricWidget.tsx` changed
-   * (+68/-4, objectui#11254: a `resolveFieldScale` import, the
-   * `widthPattern` / `ownFractionDigits` helpers and the field-width
-   * `inferredFormat` memo, none of it touching `icon`), and both its anchors
-   * MOVED with their cited text byte-identical: the destructure `230` ->
-   * `255`, the forward `595` -> `659`. At `31971ff1e` (2026-10-01)
-   * `plugin-dashboard/src/index.tsx`, `ObjectMetricWidget.tsx`,
-   * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` were all
-   * byte-identical to `e420df310`, so every anchor held unmoved and was
-   * re-read in place; they were byte-identical to `db11afd49` across the hop
-   * onto `e420df310` (2026-09-30) as well. At `db11afd49` (2026-09-29)
-   * `MetricWidget.tsx` and `lazy-icon.tsx` are byte-identical to `dd3f7e1be`;
-   * `ObjectMetricWidget.tsx` changed in one comment line (`:321`), so `:230` and
-   * `:595` did not move; `plugin-dashboard/src/index.tsx` gained the
-   * per-locale-map `label` / `description` / `title` input declarations
-   * (objectui#10993), all below the registration's start and above the icon
-   * input, so the registration start `:227` did not move and the icon input MOVED
-   * `:237` -> `:252` with its text byte-identical, still `{ name: 'icon', type:
-   * 'string' }`. At `dd3f7e1be` (2026-09-28)
-   * `MetricWidget.tsx` and `lazy-icon.tsx` are byte-identical to `f8a9d0fb0`
-   * (`git diff --quiet`); `plugin-dashboard/src/index.tsx` changed (+2/-2: a
-   * comment and the `drillDown` input's description, objectui `526fc1125`),
-   * neither near the icon, so `:227` and `:237` did not move and were re-read
-   * in place; `ObjectMetricWidget.tsx` changed (+84/-17: the currency count
-   * tile, objectui `6dc82a381`, the invalidation bus, objectui#10572, and the
-   * `drillDown` refusal, objectui `526fc1125`), and both its anchors MOVED
-   * with their cited text byte-identical: the destructure `181` -> `230`, the
-   * forward `528` -> `595`. On the hop onto `f8a9d0fb0`, `index.tsx`,
-   * `MetricWidget.tsx` and `lazy-icon.tsx` were byte-identical to `62597c588`
-   * and `87af769e9`, and `ObjectMetricWidget.tsx` changed (objectui
-   * `0651e7ab4`, the currency tile's decimals, objectui#10221), its two
-   * anchors MOVING with their cited text byte-identical: the destructure `174`
-   * -> `181`, the forward `483` -> `528`. On the hop onto
-   * `87af769e9` (re-derived 2026-09-20) EVERY file in the chain moved, so no
-   * anchor was carried there and each was re-READ: the `object-metric`
-   * registration now begins at `:227`
-   * and its icon input lands on `:237`. ⚠️ One thing the numbers do not
-   * carry: that input's `label: 'Icon (Lucide name)'` member is GONE — the
-   * whole registration dropped its per-input labels — so the key is still
-   * PUBLISHED to the designer, now as a bare
-   * `{ name: 'icon', type: 'string' }`. The four render-path anchors moved
-   * with their cited text byte-identical), and the chain
-   * runs three files:
-   * `plugin-dashboard/src/index.tsx:299` publishes it as a designer input
-   * on the registered `object-metric` block;
-   * `ObjectMetricWidget.tsx:304` destructures it and forwards it at `:753` to
-   * `MetricWidget`; `MetricWidget.tsx:383-392` resolves it via
+   * The key is LIVE (read points recorded in `liveness/page.json`, row
+   * `regions`), and the chain runs three files: the registration publishes it
+   * as a designer input on the registered `object-metric` block, a bare
+   * `{ name: 'icon', type: 'string' }`; `ObjectMetricWidget` destructures it
+   * and forwards it to `MetricWidget`; `MetricWidget` resolves it via
    * `getLazyIcon(icon)` — guarded on `typeof icon === 'string'`, because the
-   * React prop also accepts a ready-made node — and `:444-453` draws it in the
-   * tinted square whose colour comes from `colorVariant`.
+   * React prop also accepts a ready-made node — and draws it in the tinted
+   * square whose colour comes from `colorVariant`.
    *
-   * ⚠️ Do not re-anchor this to `MetricCard.tsx`. That sibling calls
-   * `getLazyIcon` on line 92 and reads like the same read point, but nothing
+   * ⚠️ Do not re-anchor this to `MetricCard`. That sibling calls `getLazyIcon`
+   * too and reads like the same read point, but nothing
    * on this key's path renders it (its heading key is `title`, this path's is
    * `label`), so a line cited from it describes a component this key never
    * reaches.
    *
-   * Vocabulary is Lucide via the `LazyIcon` module
-   * (`components/src/lib/lazy-icon.tsx:98-112`): kebab-case or PascalCase,
+   * Vocabulary is Lucide via the `LazyIcon` module: kebab-case or PascalCase,
    * normalised to kebab-case, degrading to the `Database` glyph when the name
    * is not a real Lucide icon — the same slot the container icons use, and the
    * opposite failure mode from `element:button`'s `icon`, which takes the older
@@ -6661,11 +6527,12 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * the family entry above on `object-grid` carries the ruling). This door was
    * the one the family had to be sequenced behind: with `aggregate` the widget
    * posts the filter as the `where` of `POST /analytics/query`, whose request
-   * schema takes only a `FilterCondition`, and at the pin `a472b07` the adapter
-   * posted an array verbatim — a 400 on every array form (#15828). At the pin
-   * this repo builds against (`53ded82b`, objectui#7754) the adapter lowers an
-   * authored array through `translateFilterArray` and the spec's own
-   * `parseFilterAST` sink before the wire (`lowerAnalyticsFilterForWire`), so
+   * schema takes only a `FilterCondition`, and the adapter once posted an
+   * array verbatim — a 400 on every array form (#15828). Since objectui#7754
+   * the adapter lowers an authored array through `translateFilterArray` and
+   * the spec's own `parseFilterAST` sink before the wire
+   * (`lowerAnalyticsFilterForWire`; read points recorded in
+   * `liveness/page.json`, row `regions`), so
    * the rule array reaches the analytics door as the condition it declares;
    * `resolveFilterPlaceholders` walks arrays and objects alike, so the date
    * macros and `{current_user_id}` still resolve. The record form is refused
