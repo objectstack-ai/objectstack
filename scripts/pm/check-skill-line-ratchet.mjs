@@ -1252,7 +1252,27 @@ export const CEILINGS = new Map([
   // the text needs, the ruling id and the delta quoted in the raising PR's body.
   // This file is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
   // applies. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 185],
+  // Raised 185 → 188 by the build-heavy routing ruling — an ORDINARY raise, ⛔
+  // not a cross-file move (card #23607). The text is three rule lines beside the
+  // `mode:cloud` line in 〈派发〉: a card whose declared file surface writes
+  // `packages/spec/src/**` and at least one other package is build-heavy and is
+  // dispatched `mode:cloud`, one container per such card; a container runs at
+  // most one build-heavy subagent at a time; the cloud session pulls the turbo
+  // remote cache for the closure, and the first such dispatch measures its fixed
+  // cost (install plus cache pull) and records it on its card. Ordered by ruling
+  // record 6184828752 on #23607 (letters F1 A · F2 A, item 2); maintainer,
+  // 2026-10-15, verbatim and untranslated: 「同意」. Three lines, measured: the
+  // tightest one-line spelling of the ruled content is 245 B against the
+  // 120-byte cap, and neither two-line split fits — the test with the
+  // per-container limit is 137 B at its tightest, the limit with the cache and
+  // fixed-cost parts 141 B; the three lines land at 112 B, 95 B and 79 B.
+  // Authorized under ruling record 6184799323 on #23606 (letter B, item 1;
+  // maintainer 「同意」), the ruling id and the delta quoted in the raising PR's
+  // body. The same ruling's F1 lines in `.claude/agents/os-dev.md` (+2) fit
+  // that file's standing headroom, so its row does not move. Not a
+  // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
+  // count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 188],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
