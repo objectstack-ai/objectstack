@@ -413,3 +413,67 @@ for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
         }, 60_000);
     });
 }
+
+/**
+ * [#23501] The other half of the recognition: the door rewrites a store refusal
+ * only when BOTH facts hold — the `RESOURCE_CONFLICT` / 409 envelope, and a
+ * served flow list showing the name held by two or more packages. Otherwise
+ * the store's refusal is relayed as it was thrown. A stub protocol here, so the
+ * store's answer and the list's can disagree on purpose.
+ */
+describe('[#23501] a store refusal the list read does not confirm is relayed as it was thrown', () => {
+    const THROWN = 'The store refused this write for its own reason.';
+
+    function stubDoor(thrown: { code: string; status: number }, getMetaItems: () => Promise<unknown>) {
+        const saveMetaItem = vi.fn(async () => { throw Object.assign(new Error(THROWN), thrown); });
+        const deleteMetaItem = vi.fn(async () => { throw Object.assign(new Error(THROWN), thrown); });
+        const listRead = vi.fn(getMetaItems);
+        const flows = new Map<string, unknown>([[SHARED, flowOf(SHARED, 'Held')]]);
+        const services: Record<string, unknown> = {
+            protocol: { saveMetaItem, deleteMetaItem, getMetaItems: listRead },
+            automation: {
+                handlerReady: true,
+                registerFlow: (name: string, definition: unknown) => { flows.set(name, definition); return definition; },
+                unregisterFlow: (name: string) => { flows.delete(name); },
+                getFlow: async (name: string) => flows.get(name) ?? null,
+            },
+        };
+        const get = (name: string) => services[name] ?? null;
+        const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (name: string) => get(name) };
+        const dispatcher = new HttpDispatcher(kernel);
+        (dispatcher as any).timedResolveExecutionContext = async () => ({ ...AUTHOR });
+        const send = async (method: string, path: string, body?: unknown): Promise<Refusal> => {
+            const res = await dispatcher.dispatch(method, path, body, {}, { request: { headers: {} } } as any);
+            const error = res.response?.body?.error;
+            return { status: res.response?.status, code: error?.code, message: String(error?.message) };
+        };
+        return { send, listRead };
+    }
+
+    const oneListed = async () => ({ type: 'flow', items: [{ name: SHARED, _packageId: ALPHA }, { name: 'other_flow', _packageId: BETA }] });
+
+    for (const [route, method, path, body] of [
+        ['PUT /:name', 'PUT', `/automation/${SHARED}`, flowOf(SHARED, 'Edited')],
+        ['DELETE /:name', 'DELETE', `/automation/${SHARED}`, undefined],
+    ] as const) {
+        it(`${route}: a 409 RESOURCE_CONFLICT whose name the list shows in one package only`, async () => {
+            const door = stubDoor({ code: 'RESOURCE_CONFLICT', status: 409 }, oneListed);
+
+            expect(await door.send(method, path, body)).toEqual({ status: 409, code: 'RESOURCE_CONFLICT', message: THROWN });
+            expect(door.listRead).toHaveBeenCalledTimes(1);
+        });
+
+        it(`${route}: a 409 RESOURCE_CONFLICT whose list read fails`, async () => {
+            const door = stubDoor({ code: 'RESOURCE_CONFLICT', status: 409 }, async () => { throw new Error('list read failed'); });
+
+            expect(await door.send(method, path, body)).toEqual({ status: 409, code: 'RESOURCE_CONFLICT', message: THROWN });
+        });
+
+        it(`${route}: another envelope is never looked up`, async () => {
+            const door = stubDoor({ code: 'METADATA_CONFLICT', status: 409 }, oneListed);
+
+            expect(await door.send(method, path, body)).toEqual({ status: 409, code: 'METADATA_CONFLICT', message: THROWN });
+            expect(door.listRead).not.toHaveBeenCalled();
+        });
+    }
+});
