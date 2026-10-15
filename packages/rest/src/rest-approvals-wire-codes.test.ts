@@ -9,7 +9,8 @@
  * family and all with the same cause: the approvals route factories spell the
  * terminal 500 catch's code as a TEMPLATE
  * (`` `APPROVAL_${action.toUpperCase()}_FAILED` `` — `decisionRoute`,
- * `flowMoveRoute`, `threadRoute` in `rest-server.ts`), so the literal-grep
+ * `flowMoveRoute`, `threadRoute`, then in `rest-server.ts` and since #23050
+ * slice 3 in `approvals-routes.ts`), so the literal-grep
  * pass that registered their literal-spelled siblings
  * (`APPROVAL_RECALL_FAILED`, `APPROVAL_ACTIONS_FAILED`, …) never saw them; the
  * ninth, `THROTTLED`, is a single-word code the multi-token sweep shape
