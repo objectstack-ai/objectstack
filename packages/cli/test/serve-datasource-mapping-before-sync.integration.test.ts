@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — spawns the real producer once per single-cause fixture: two production boots of the built CLI (a `default: true` mapping over a declared sqlite datasource, and the same config with no mapping), each fixture differing only in that rule; READING_PLACEHOLDER
+// test-budget: 30 — spawns the real producer once per single-cause fixture: two production boots of the built CLI (a `default: true` mapping over a declared sqlite datasource, and the same config with no mapping), each fixture differing only in that rule; 17.6 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
