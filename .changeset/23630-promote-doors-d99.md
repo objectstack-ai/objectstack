@@ -25,6 +25,7 @@ What changes for you, where package `P`'s runtime-authored row owns object `NAME
 
 - A promotion of `Q`'s draft of an object no other package's row holds, and the owner `P`'s promotion of its own draft.
 - A publish naming no package that promotes a package-unbound draft into the owner's package.
+- A code-packaged owner. An object a code package ships is sealed, so a promotion of another package's draft of it still answers `403 NOT_OVERRIDABLE` (the batch door: that code in `failed[]`), as the save door does, and never `OBJECT_OVERLAY_PACKAGE_MISMATCH`.
 - A package-less owner (the `sys_metadata` sentinel). Its rule is decided separately.
 - Every type except `object`. Two packages may still hold one name.
 - Rows stored before ADR-0029 D9.9 stay as they are. Nothing is rewritten on upgrade.
