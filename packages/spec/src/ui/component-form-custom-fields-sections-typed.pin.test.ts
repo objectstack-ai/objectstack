@@ -34,8 +34,8 @@
  *   one runtime field `customFields` takes.
  * - §4 THE REGISTRATION: the ADR-0087 D3 entries step 18 carries.
  * - §5 THE GRID WIDGET'S CAMELCASE KEYS (#21768): objectstack-ai/objectui#11610
- *   renamed the `grid` widget's eight field-level keys to camelCase, and the
- *   `.objectui-sha` pin `9dfaca654311` carries it, so the runtime field declares
+ *   renamed the `grid` widget's eight field-level keys to camelCase (read
+ *   points recorded in `liveness/page.json`, row `regions`), so the runtime field declares
  *   `minRows`, `maxRows`, `allowAdd`, `allowDelete`, `allowReorder`,
  *   `totalField`, `addLabel` and `sortField` with the widget's value types. The
  *   writer shape parses (§1); each snake_case spelling is refused by name with
@@ -212,9 +212,9 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
         { name: 'rest', label: 'Rest', columns: 1, pane: 'secondary', fields: ['note'] },
       ],
     }],
-    // §5 — objectui `examples/schema-catalog/src/schemas/fields-grid/line-items-grid.json` at the
-    // `.objectui-sha` pin `9dfaca654311`: the one `fields[]` entry, a `grid` field carrying all eight
-    // camelCase keys, the shape objectui's grid-field guide (`content/docs/fields/grid.mdx`) teaches.
+    // §5 — objectui's schema-catalog grid example (recorded in `liveness/page.json`, row `regions`):
+    // the one `fields[]` entry, a `grid` field carrying all eight camelCase keys, the shape objectui's
+    // grid-field guide (`content/docs/fields/grid.mdx`) teaches.
     ['the grid widget\'s camelCase keys on an inline grid field', 'object-form', {
       customFields: [{
         name: 'line_items', label: 'Line Items', type: 'grid',
@@ -249,8 +249,8 @@ describe('§1 each member accepts every shape a measured writer authors', () => 
     });
   }
 
-  // objectui `plugin-designer/src/ObjectManager.tsx` (about `:239`-`:247` at the `.objectui-sha` pin):
-  // the registered `object-manager` component's create / edit dialog, a `formType: 'modal'` block.
+  // objectui's registered `object-manager` component's create / edit dialog, a `formType: 'modal'`
+  // block (recorded in `liveness/page.json`, row `regions`).
   // Its two select members build their options from the file's own constants, each entry
   // `{ label: v, value: v }`; the labels it draws through `t(...)` are written out as strings here.
   it('object-form: parses the shipped object-manager dialog\'s inline fields byte-identical', () => {
@@ -494,8 +494,8 @@ describe('§4 each narrowing is registered as the ADR-0087 D3 entry step 18 carr
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('§5 the grid widget\'s eight field-level keys, camelCase since objectui renamed them', () => {
-  // The rename, as objectui's `GRID_FIELD_RETIRED_KEYS` pairs it (`types/src/field-types.ts:1159` at the
-  // `.objectui-sha` pin `9dfaca654311`), with each key's value type as `GridFieldMetadata` declares it.
+  // The rename, as objectui's `GRID_FIELD_RETIRED_KEYS` pairs it (read points recorded in
+  // `liveness/page.json`, row `regions`), with each key's value type as `GridFieldMetadata` declares it.
   const GRID_KEYS = [
     ['min_rows', 'minRows', 1, 'one'],
     ['max_rows', 'maxRows', 10, '10'],
@@ -556,7 +556,7 @@ describe('§5 the grid widget\'s eight field-level keys, camelCase since objectu
   // Two keys spelled alike across siblings with opposite meanings is how a writer goes wrong: the grid's
   // `totalField` names the CHILD column it sums, the child-collection blocks' names the PARENT field the
   // sum is saved to (their child column is `amountField`, which their renderers hand the grid AS its
-  // `totalField` — `LineItemsPanel.tsx:710`, `MasterDetailForm.tsx:876` at the pin).
+  // `totalField` — read points recorded in `liveness/page.json`, row `regions`).
   it('`totalField` on the inline grid field is the CHILD column summed, the opposite of the same spelling on the child-collection blocks', () => {
     const description = (schema: unknown) => (schema as { description?: string }).description ?? '';
     const grid = description(runtimeField().shape.totalField);

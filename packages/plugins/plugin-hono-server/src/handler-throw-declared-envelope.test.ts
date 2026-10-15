@@ -214,6 +214,105 @@ describe('an escaped throw carrying a declared ADR-0112 envelope is rendered as 
   });
 });
 
+/**
+ * [#23531] A stale `If-Match` on a direct-mount route: the `409
+ * CONCURRENT_UPDATE` carries the server's `currentVersion`, which `RestServer`'s
+ * `409` carries and objectui's conflict bar reads.
+ *
+ * `currentRecord` is asserted ABSENT. `RestServer` forwards it, but the
+ * protocol reads that row with a system context before the caller's write
+ * policy runs, so it is held at these doors until the producer answers #23586.
+ * The producer below states it, so the absence is the door's doing.
+ *
+ * The producer below is shaped exactly like `metadata-protocol`'s
+ * `ConcurrentUpdateError` (`name`, `code`, `status`, and the two own
+ * properties), because this package does not depend on that one. The routes
+ * judge the `If-Match` header against a stored version, as `updateData` /
+ * `deleteData` do. The composed-host twin, over the REAL protocol, is
+ * `hono-declared-envelope.conformance.test.ts` in `packages/qa/http-conformance`.
+ *
+ * On the wrapped envelope the field rides `error.details`: that is the
+ * envelope's declared context slot (`ApiErrorSchema.details`), and it is where
+ * `@objectstack/client` reads a wrapped body's context from
+ * (`errorBody.error.details`).
+ */
+describe('[#23531] a stale If-Match on a direct-mount route: the 409 carries currentVersion, and holds currentRecord (#23586)', () => {
+  class ConcurrentUpdateError extends Error {
+    readonly code = 'CONCURRENT_UPDATE';
+    readonly status = 409;
+    readonly currentVersion: string | null;
+    readonly currentRecord: unknown;
+    constructor(opts: { currentVersion: string | null; currentRecord: unknown; message: string }) {
+      super(opts.message);
+      this.name = 'ConcurrentUpdateError';
+      this.currentVersion = opts.currentVersion;
+      this.currentRecord = opts.currentRecord;
+    }
+  }
+
+  const STORED_VERSION = '2026-10-15T00:00:00.000Z';
+  const STALE_VERSION = '2001-01-01T00:00:00.000Z';
+  const STORED = { id: 'task_1', name: 'original', updated_at: STORED_VERSION };
+
+  /** A server whose PATCH and DELETE refuse a stale version, as the protocol does. */
+  function occServer(conflict: { currentVersion: string | null; currentRecord: unknown } = {
+    currentVersion: STORED_VERSION,
+    currentRecord: STORED,
+  }): HonoHttpServer {
+    const s = server();
+    const guard = (req: { params: Record<string, string>; headers: Record<string, unknown> }) => {
+      const sent = String(req.headers['if-match'] ?? '').replace(/^"|"$/g, '');
+      if (sent !== STORED_VERSION) {
+        throw new ConcurrentUpdateError({
+          ...conflict,
+          message: `Record task/${req.params.id} was modified by another user (current version ${STORED_VERSION}, expected ${sent})`,
+        });
+      }
+    };
+    s.patch('/api/v1/data/task/:id', async (req, res) => { guard(req as any); res.json({ updated: true }); });
+    s.delete('/api/v1/data/task/:id', async (req, res) => { guard(req as any); res.json({ deleted: true }); });
+    return s;
+  }
+
+  it.each(['PATCH', 'DELETE'])('%s: 409 CONCURRENT_UPDATE with currentVersion in `error.details`, and no currentRecord', async (method) => {
+    const res = await call(occServer(), '/api/v1/data/task/task_1', {
+      method,
+      headers: { 'If-Match': `"${STALE_VERSION}"`, ...(method === 'PATCH' ? { 'content-type': 'application/json' } : {}) },
+      ...(method === 'PATCH' ? { body: JSON.stringify({ name: 'lost update' }) } : {}),
+    });
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('CONCURRENT_UPDATE');
+    expect(body.error.details).toEqual({ currentVersion: STORED_VERSION });
+    // Held until #23586: the producer stated it, and the door does not forward it.
+    expect(body.error.details).not.toHaveProperty('currentRecord');
+    expect(JSON.stringify(body)).not.toContain('original');
+  });
+
+  it('control: the version the route stores is accepted, so the 409 rows are the guard and not the rig', async () => {
+    const res = await call(occServer(), '/api/v1/data/task/task_1', {
+      method: 'PATCH',
+      headers: { 'If-Match': `"${STORED_VERSION}"`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'kept' }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('a conflict that names no current state keeps the two-key envelope, as the REST door keeps its body', async () => {
+    // `RestServer`'s arm forwards each field only when the producer stated it,
+    // so a conflict carrying neither adds nothing to either door's answer.
+    const res = await call(occServer({ currentVersion: null, currentRecord: null }), '/api/v1/data/task/task_1', {
+      method: 'DELETE',
+      headers: { 'If-Match': `"${STALE_VERSION}"` },
+    });
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(Object.keys(body.error).sort()).toEqual(['code', 'message']);
+  });
+});
+
 describe('an escaped throw that is NOT such an envelope keeps today’s behaviour exactly', () => {
   it('a plain Error answers the byte-identical 500 with no cause in the body', async () => {
     const s = server();

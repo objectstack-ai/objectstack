@@ -155,7 +155,8 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * dialog opens, through the single-record dialog's own resolver (objectui
  * `29b99490`: plugin-grid's `resolvePromotedBulkParams` calls
  * `resolveActionParams` from `@object-ui/fields`, then renames the result onto
- * the bulk vocabulary). Measured on objectui `main` `dca25aff2`, that route
+ * the bulk vocabulary). Measured on objectui `main` (read points recorded in
+ * `liveness/view.json`, row `list.bulkActionDefs`), that route
  * carries the field's `type`, translated `label`, `options`, `required`,
  * `description` (as the help text), `placeholder`, `defaultValue`, `multiple`,
  * `accept` and `maxSize`, plus a reference-bearing field's `reference`,

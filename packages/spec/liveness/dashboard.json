@@ -221,7 +221,7 @@
           "status": "live",
           "verifiedAt": "2026-08-03",
           "evidence": "objectui @91757a7: packages/plugin-dashboard/src/DashboardRenderer.tsx:439 — spread into every component schema; objectui: packages/plugin-dashboard/src/DatasetWidget.tsx:190-191 — declared query keys lowered into the DatasetSelection",
-          "note": "the renderer-extras bag; its four DECLARED keys (dateGranularity / sortBy / sortOrder / limit, framework#3588) reach the analytics query, the rest pass through to the renderer."
+          "note": "the renderer-extras bag; its four DECLARED keys (dateGranularity / sortBy / sortOrder / limit, framework#3588) reach the analytics query, the rest pass through to the renderer. The #20960 census (packages/spec/src/ui/dashboard.zod.ts; moved out of spec source, #23434): on the dataset-bound path objectui main @5262f7dd packages/plugin-dashboard/src/DatasetWidget.tsx#DatasetWidget reads the declared query keys (`dateGranularity`, `sortBy`, `sortOrder`, `limit`) and the metric tile's `description` (#resolvedSubCaption) and nothing else of the bag; none of the keys this repo's examples wrote (`format`, `currency`, `color`, `suffix`, `showLegend`, `horizontal`, `showDataLabels`) is read there, only the legacy inline arm spreads the bag, and each was removed from its producer."
         },
         "filterBindings": {
           "status": "live",

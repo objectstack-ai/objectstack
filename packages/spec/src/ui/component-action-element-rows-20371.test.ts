@@ -8,9 +8,9 @@
 // (outside every namespace the enum populates) and the two `element:*` lists
 // were refused as `component-type-unknown` (inside the reserved `element:`
 // namespace with neither an enum member nor a row). Each row is strict from
-// birth, with its key set measured from the renderer's read points at the
-// `.objectui-sha` pin — the per-key citations live in `component.zod.ts`,
-// section 4b. The key sets are asserted WHOLE, as #18305's were: a row derived
+// birth, with its key set measured from the renderer's read points (recorded
+// in `liveness/page.json`, row `regions`; the rows sit in `component.zod.ts`
+// section 4b). The key sets are asserted WHOLE, as #18305's were: a row derived
 // from read points is a claim about a complete set, and only an equality holds
 // a later addition to having been measured too.
 

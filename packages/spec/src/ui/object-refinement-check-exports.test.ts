@@ -5,9 +5,10 @@
  * and each export IS the check its schema runs — the spec half of objectui#7715.
  *
  * Why: objectui derives its zod mirrors from a spec object's `.shape`
- * (`specFieldsExcept(SpecListViewSchema.shape, …)`, six sites at the pinned
- * `.objectui-sha`). `.shape` carries the FIELDS by reference and drops every
- * check attached to the OBJECT, so at 17.3.0 objectui's authoring door accepted
+ * (`specFieldsExcept(SpecListViewSchema.shape, …)`; read points recorded in
+ * `liveness/view.json`, row `list.appearance`). `.shape` carries the FIELDS by
+ * reference and drops every check attached to the OBJECT, so at 17.3.0
+ * objectui's authoring door accepted
  * `appearance.allowedVisualizations: ['calendar']` with no `calendar:` block
  * while the spec's publish door refused it. A mirror needs the rule as a
  * function it can attach, and that function must be the schema's own — never a
@@ -573,11 +574,10 @@ const MIRRORED: MirroredSchema[] = [
     cleanFixtures: [{ field: 'created_at', type: 'date' }],
   },
   // `dashboard.widgets[]` is mirrored the same way and for the same reason, so
-  // the ADR-0049 `stageOrder` type gate belongs in this catalogue: measured at
-  // the `.objectui-sha` pin `53ded82bf7a494f54e344e19099dbf00854b8694`,
-  // objectui's `packages/types/src/zod/complex.zod.ts` builds its own
-  // `DashboardWidgetSchema` from
-  // `specFieldsExcept(SpecDashboardWidgetSchema.shape, …)` — a `.shape` spread,
+  // the ADR-0049 `stageOrder` type gate belongs in this catalogue: objectui
+  // builds its own `DashboardWidgetSchema` from
+  // `specFieldsExcept(SpecDashboardWidgetSchema.shape, …)` (read point recorded
+  // in `liveness/dashboard.json`, row `widgets`) — a `.shape` spread,
   // which carries the FIELDS and drops every object-level check. That mirror
   // re-attaches none of these exports today, which is a live gap recorded on
   // the check's own docblock rather than a reason to leave the export

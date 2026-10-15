@@ -202,7 +202,7 @@ describe('the VIEW-level carrier is untouched', () => {
 describe('the `object-timeline` row judges the block in BOTH directions', () => {
   const TIMELINE = ComponentPropsMap['object-timeline'];
 
-  it('accepts the key set measured from the renderer at the `.objectui-sha` pin', () => {
+  it('accepts the key set measured from the renderer read points (`liveness/page.json`, row `regions`)', () => {
     const r = TIMELINE.safeParse({
       objectName: 'task',
       timeline: { startDateField: 'start_at', endDateField: 'end_at', titleField: 'subject', colorField: 'status' },
@@ -237,8 +237,8 @@ describe('the `object-timeline` row judges the block in BOTH directions', () => 
    * The contract review's BLOCKING finding, pinned so the row cannot lose the
    * key again.
    *
-   * `data` is read off REACT PROPS (`ObjectTimeline.tsx:171`, `:247`,
-   * `:256`), not off `schema`, and an authored `properties.data` reaches that
+   * `data` is read off REACT PROPS (read points recorded in
+   * `liveness/page.json`, row `regions`), not off `schema`, and an authored `properties.data` reaches that
    * channel through `SchemaRenderer`'s hoist-and-spread. The first cut of this
    * row measured `schema.*` read points only, so it declared fourteen keys and
    * refused this one BY NAME — reproducing this card's own defect sentence on

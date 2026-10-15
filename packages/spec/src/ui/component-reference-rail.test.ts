@@ -11,8 +11,8 @@
 // reproduced here as pins in both directions: the planted bogus key refused,
 // the real shape accepted byte-identically.
 //
-// The key set is measured from the renderer's read points at the
-// `.objectui-sha` pin (`record-reference-rail.tsx`), NOT from its TS interface
+// The key set is measured from the renderer's read points (recorded in
+// `liveness/page.json`, row `regions`), NOT from its TS interface
 // — `icon` is in the interface and emitted by the page synthesizer but read by
 // no render path, so it is a guidance refusal here, not a declared key.
 
