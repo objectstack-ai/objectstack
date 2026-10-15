@@ -115,7 +115,8 @@ export class WasmSqliteConnection {
    * public option type (adding it would widen a published surface); it is used
    * when the object happens to have one, which every real logger does.
    */
-  private logger: NonNullable<WasmConnectionOptions['logger']> & {
+  private logger: {
+    warn: (msg: string, meta?: unknown) => void;
     error?: (msg: string, meta?: unknown) => void;
   };
   /**
