@@ -2132,6 +2132,41 @@ type ViewContainerWrite =
     | { readonly container: string; readonly removed: 'every-row' };
 
 /**
+ * [#23514, ADR-0029 D9.9] The state a refusal of a package's object row beside
+ * a package-less owner (the `'sys_metadata'` sentinel) answers, which decides
+ * the way out its prescription names
+ * (`ObjectStackProtocolImplementation.unboundOwnerPackageRefusal`).
+ */
+interface UnboundOwnerRefusalState {
+    /** The save's mode; a draft save registers nothing. */
+    mode?: 'draft' | 'publish';
+    /**
+     * The packages whose ACTIVE rows of the object are stored beside the
+     * package-less one (none, the package the request names, or others):
+     * each must be deleted by naming its package, because a delete naming no
+     * package resolves to the one binding present, or is refused 409 over two
+     * ({@link ObjectStackProtocolImplementation.packagelessAddress}).
+     */
+    storedPackages?: readonly string[];
+    /** The caller named no package, and the save's address resolved to the package's row. */
+    namedNoPackage?: boolean;
+    /**
+     * A publish naming no package of a draft bound to NO package, which the
+     * draft doors' address adopts into the one package binding stored
+     * (`packagelessDraftAddress`: `key: null`, `into: P`). No publish moves that
+     * draft into `P`: with `P`'s row gone it promotes into the package-less
+     * definition, and one naming `P` finds no `P` draft (`NO_DRAFT`).
+     */
+    adoptedDraft?: boolean;
+    /**
+     * Where the refusal is raised: the save door (default), a draft promotion
+     * (the per-item publish and `publish-drafts`), or a registration of a
+     * stored row (boot, write-through).
+     */
+    at?: 'save' | 'promote' | 'registry';
+}
+
+/**
  * What a hydration of one stored row is told about it:
  * `ObjectStackProtocolImplementation.hydrateOverlayIntoRegistry` and the
  * expansion hydration it hands the row to.
@@ -19470,7 +19505,7 @@ export class ObjectStackProtocolImplementation implements
      * rather than reading it back from the caller. Same sentence the boot
      * re-hydration already writes for the same rows.
      */
-    private applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): void {
+    private async applyObjectRegistryMutation(request: { type: string; name: string; item?: any; packageId?: string | null }): Promise<void> {
         // [#8862] The `&& request.type !== 'objects'` limb that stood here is
         // GONE. It did not merely admit a plural, it registered under one —
         // `registerItem` below mints the entry under the spelling that arrived
@@ -19499,6 +19534,15 @@ export class ObjectStackProtocolImplementation implements
                 // back into the disagreement D9.9 exists to prevent.
                 throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
                     request.name, layer.packageId, layer.ownerPackageId,
+                    // [#23514] The row this registers is stored, and so is every
+                    // other package's row the way out deletes (the one read this
+                    // method awaits, on this refusal's branch only).
+                    {
+                        at: 'registry',
+                        storedPackages: layer.ownerPackageId === 'sys_metadata'
+                            ? (await this.packagelessAddress('object', request.name)).candidates
+                            : [],
+                    },
                 );
             }
             this.engine.registry.registerObject(
@@ -19565,10 +19609,26 @@ export class ObjectStackProtocolImplementation implements
      * | `P` empty / absent | `own`, unchanged — a direct save naming no package is addressed to `R`'s row before this runs ({@link packagelessAddress}). |
      * | `P == Q`, some other package | **mismatch** — refused loudly, the code owner's refusal and prescription. |
      *
-     * Only an owner bound to a real package is judged here. An owner keyed by
-     * the `'sys_metadata'` sentinel (a package-less runtime object) or by no
-     * package at all is left to today's `own` verdict: it names no package the
-     * prescription could direct a save to.
+     * ## [#23514] …and against an owner keyed by the `'sys_metadata'` sentinel
+     *
+     * A runtime object first saved naming no package is owned by that
+     * package-less row, keyed by the sentinel. A save naming package `Q` beside
+     * it was classified `own` and written, and the write-through's
+     * `registerObject(…, Q, …, 'own')` met the registry's single-owner rule and
+     * landed in the best-effort warn: the save answered `200`, the metadata
+     * read served `Q`'s row, and the registry and the data plane kept the
+     * package-less definition, before and after a boot. So the sentinel owner
+     * takes the same `mismatch` verdict, with the sentinel as `ownerPackageId`;
+     * {@link overlayPackageMismatchError} gives it its own prescription, since
+     * "bind it to `'sys_metadata'`" names no package (ADR-0070 TL;DR 1: the
+     * package-less state is no authoring destination).
+     *
+     * | case | verdict |
+     * |:--|:--|
+     * | `P` empty / absent | `own`, unchanged — the package-less row's own re-save. |
+     * | `P == Q`, any package | **mismatch** — refused loudly, with the move-into-a-package prescription. |
+     *
+     * An object with no owner at all is left to the `own` verdict.
      *
      * Falls back to `'own'` — today's behaviour — for a registry that does not
      * offer the discriminator, so a duck-typed engine double is never made to
@@ -19594,11 +19654,11 @@ export class ObjectStackProtocolImplementation implements
                 ? registry.getObjectOwner(name)
                 : undefined;
             const runtimeOwnerPackageId: unknown = runtimeOwner?.packageId;
+            // [#23514] The `'sys_metadata'` sentinel owner is judged too: see the header.
             if (
                 binding !== ''
                 && typeof runtimeOwnerPackageId === 'string'
                 && runtimeOwnerPackageId !== ''
-                && runtimeOwnerPackageId !== 'sys_metadata'
                 && binding !== runtimeOwnerPackageId
             ) {
                 return { kind: 'mismatch', packageId: binding, ownerPackageId: runtimeOwnerPackageId };
@@ -19626,7 +19686,14 @@ export class ObjectStackProtocolImplementation implements
      */
     private static overlayPackageMismatchError(
         name: string, rowPackageId: string, ownerPackageId: string,
+        /** [#23514] The state the refusal answers, for a `'sys_metadata'` sentinel owner only. */
+        unboundOwnerState: UnboundOwnerRefusalState = {},
     ): Error {
+        // [#23514] An owner keyed by the sentinel is owned by no package, so
+        // this prescription's "bind it to the owner" has nothing to name.
+        if (ownerPackageId === 'sys_metadata') {
+            return ObjectStackProtocolImplementation.unboundOwnerPackageRefusal(name, rowPackageId, unboundOwnerState);
+        }
         const err: any = new Error(
             `Cannot layer object '${name}': the overlay is bound to package `
             + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
@@ -19638,6 +19705,113 @@ export class ObjectStackProtocolImplementation implements
         err.status = 422;
         err.packageId = rowPackageId;
         err.ownerPackageId = ownerPackageId;
+        err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
+        return err;
+    }
+
+    /**
+     * [#23514, ADR-0029 D9.9, ADR-0070 TL;DR 1] The D9.9 refusal for an object
+     * whose owner is its package-less definition (the `'sys_metadata'`
+     * sentinel), so no package owns it: a definition bound to package `Q`
+     * beside it is one the one registry entry never serves.
+     *
+     * Its prescription names the way out that is true in the state it
+     * answers, each measured on a real kernel across a boot, with no table
+     * dropped and every record kept:
+     *
+     * | state | the way out |
+     * |:--|:--|
+     * | a publish save naming `Q`, no package's row stored | delete the package-less definition WITHOUT `dropStorage` (the delete door's default, which keeps the table), then send the save again: `Q`'s row is the owner at once and at every boot |
+     * | a DRAFT save naming `Q`, no package's row stored | the same delete, then a PUBLISH-mode save naming `Q` (it serves the object at once), then draft as before. A draft save registers nothing, so a draft sent right after the delete leaves the object unserved until it is published |
+     * | rows bound to packages (`Q` or any other) are already stored beside the package-less one (the rows the save door wrote before this refusal existed) | delete each of them by naming its package, then the package-less definition, then a publish-mode save naming `Q`. Each row is named because a delete naming no package resolves to the one binding present, or is refused `409` over two ({@link packagelessAddress}), never to the package-less definition |
+     * | one such row, a publish save naming NO package | it is addressed to that row ({@link packagelessAddress}); delete the row, then the same save edits the package-less definition. Over two bindings the save is refused `409` before this refusal |
+     * | a promotion of `Q`'s draft (the per-item publish, `publish-drafts`), a draft stored before the package-less row or by a draft save the door addressed to `Q` | the deletes above for the state, then the same publish: the draft stays stored, and its promotion registers it |
+     * | a publish naming no package of a draft bound to NO package, which the address adopts into the one stored binding `P` | no publish moves that draft into `P` (measured: with `P`'s row gone it promotes into the package-less definition; one naming `P` answers `NO_DRAFT`). Delete `P`'s row, publish again (it updates the package-less definition), then the package-less DELETE and a publish-mode save naming `P` move the object |
+     *
+     * The boot (`loadMetaFromDb`) and the write-through
+     * ({@link applyObjectRegistryMutation}) meet the third state: the row
+     * they register is stored, and each names every package's row.
+     *
+     * ADR-0070 D5's `POST /api/v1/packages/:id/adopt-orphans` also hands an
+     * adopted object's registry owner to `Q` in the same request, but it
+     * rebinds EVERY package-less row of the environment, not only this
+     * object, so no prescription names it: each names the narrowest way out.
+     *
+     * The code is D9.9's, not a new one: the ledger's meaning (a row bound to a
+     * package that does not own the object) holds, and the caller's branch is
+     * the same one; only the way out differs, and the message carries it. The
+     * prescription first: a 4xx message crosses the REST boundary bounded at
+     * 500 characters with its tail truncated.
+     */
+    private static unboundOwnerPackageRefusal(
+        name: string, rowPackageId: string, state: UnboundOwnerRefusalState = {},
+    ): Error {
+        const q = rowPackageId;
+        const path = `/api/v1/meta/object/${name}`;
+        const tail = state.at === 'registry'
+            ? ` The row bound to '${q}' is not registered.`
+            : ' Nothing was written.';
+        let message: string;
+        // [#23514] Every row bound to a package stored beside the package-less
+        // one is named by its own `?package=` delete, before the delete naming
+        // no package: over such a row that request removes it (one binding) or
+        // is refused 409 (two), never the package-less definition.
+        const rows = [...new Set(state.storedPackages ?? [])].sort();
+        const rowDeletes = rows.map((pkg, i) => (i === 0 ? `DELETE ${path}?package=${pkg}` : `?package=${pkg}`))
+            .join(', then ');
+        const rowsServed = rows.length === 1
+            ? `its definition bound to '${rows[0]}' is never served`
+            : `its definitions bound to ${rows.map((pkg) => `'${pkg}'`).join(', ')} are never served`;
+        if (rows.length > 0 && state.at === 'promote' && state.adoptedDraft) {
+            // Measured: the publish then lands the draft package-less, so the
+            // text says so, and names the move into the package as the next step.
+            message = `This draft of object '${name}' is bound to no package; a publish naming no package is `
+                + `addressed into '${q}', whose row is never served. DELETE ${path}?package=${q}, then publish again: `
+                + `the draft lands in the package-less definition. To move it into '${q}' then: the same DELETE with no `
+                + `package and no dropStorage (records stay), then save it naming '${q}' in publish mode.` + tail;
+        } else if (rows.length > 0 && state.namedNoPackage) {
+            // A save naming no package is addressed to the one binding present.
+            message = `A save naming no package of object '${name}' is addressed to its stored definition bound to `
+                + `'${q}', which is never served: the object is served by its definition bound to no package. `
+                + `Delete the '${q}' row first (REST: DELETE ${path}?package=${q}), then send this save again: it `
+                + 'then saves the package-less definition.' + tail;
+        } else if (rows.length > 0) {
+            // [#23514] A promotion's last step NAMES the draft's package: a
+            // publish naming none resolves by the rows the deletes leave, and
+            // can then address another draft (`packagelessDraftAddress`).
+            const finish = state.at === 'promote'
+                ? `POST ${path}/publish?package=${q}`
+                : `save it naming '${q}' in publish mode`;
+            // Every step is a request, in order, so the whole way out fits the
+            // REST message bound with two packages' rows and long names.
+            message = `Object '${name}' is served by its package-less definition; ${rowsServed}. To move it into `
+                + `'${q}': ${rowDeletes}, then the same DELETE with no package and no dropStorage (the table and `
+                + `records stay), then ${finish}.` + tail;
+        } else if (state.at === 'promote') {
+            // The draft is stored and stays stored: after the delete, its
+            // promotion is the save that moves the object (it registers).
+            message = `Move object '${name}' into package '${q}' first: delete its package-less definition without `
+                + `dropStorage, which keeps its table and records (REST: DELETE ${path} with no package `
+                + `parameter), then POST ${path}/publish?package=${q}: the draft then serves the object at once.` + tail;
+        } else if (state.mode === 'draft') {
+            message = `Move object '${name}' into package '${q}' first: delete its package-less definition without `
+                + `dropStorage, which keeps its table and records (REST: DELETE ${path} with no package parameter), `
+                + `then save it naming '${q}' in publish mode, which serves it at once, and draft after that. A draft `
+                + 'save registers nothing, so a draft sent first leaves the object unserved until it is published.'
+                + tail;
+        } else {
+            message = `Move object '${name}' into package '${q}' first: delete its package-less definition `
+                + 'without dropStorage, which keeps its table and records (REST: DELETE '
+                + `${path} with no package parameter; in process: deleteMetaItem without `
+                + 'packageId), then send this save again. Nothing was written: the object is held by a definition '
+                + `bound to no package, and an object has one registry entry, so a definition bound to `
+                + `'${q}' would never be served.`;
+        }
+        const err: any = new Error(message);
+        err.code = 'OBJECT_OVERLAY_PACKAGE_MISMATCH';
+        err.status = 422;
+        err.packageId = rowPackageId;
+        err.ownerPackageId = null;
         err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
         return err;
     }
@@ -20649,7 +20823,7 @@ export class ObjectStackProtocolImplementation implements
             // would make a runtime-created object unreachable for data CRUD
             // rather than merely un-listed. This branch has never carried the
             // kernel-scope gate below either, for the same reason.
-            this.applyObjectRegistryMutation(request);
+            await this.applyObjectRegistryMutation(request);
             return;
         }
         // [#23298] Whose registry this is — never `environmentId` alone.
@@ -22365,6 +22539,9 @@ export class ObjectStackProtocolImplementation implements
         //
         // Several bindings is a name more than one package holds, and a save
         // naming none of them is refused, not guessed.
+        // [#23514] Whether the CALLER named a package, read before the address
+        // below may name one for it: the D9.9 refusal's prescription differs.
+        const namedNoPackage = request.packageId == null;
         if (
             mode === 'publish'
             && request.packageId == null
@@ -22397,11 +22574,24 @@ export class ObjectStackProtocolImplementation implements
         // runtime had discarded (#6995, the silent write-side divergence).
         // The receipt and the registry now agree because the write never
         // happens: this precedes `ensureOverlayIndex` and every `put`.
+        //
+        // [#23514] The same holds for an object its package-less definition
+        // owns (the `'sys_metadata'` sentinel): a save naming a package beside
+        // it is refused here, with the move-into-a-package prescription
+        // ({@link unboundOwnerPackageRefusal}).
         if (singularType === 'object') {
             const layer = this.classifyObjectContribution(request.name, request.packageId);
             if (layer.kind === 'mismatch') {
+                // [#23514] For a sentinel owner the way out depends on the
+                // state: the mode, whether the caller named a package, and
+                // which packages' rows are already stored beside the
+                // package-less one (any package, not only the one named).
+                const storedPackages = layer.ownerPackageId === 'sys_metadata'
+                    ? (await this.packagelessAddress(singularType, request.name)).candidates
+                    : [];
                 throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
                     request.name, layer.packageId, layer.ownerPackageId,
+                    { mode, storedPackages, namedNoPackage },
                 );
             }
         }
@@ -24588,8 +24778,20 @@ export class ObjectStackProtocolImplementation implements
         if (draftForGate && singularType === 'object' && !this.isSealedManagedItem(singularType, request.name)) {
             const layer = this.classifyObjectContribution(request.name, promoteInto);
             if (layer.kind === 'mismatch') {
+                // [#23514] A package-less owner (the `'sys_metadata'` sentinel):
+                // the way out is a promotion, after a delete of each row bound to
+                // a package (any package) stored beside it.
+                const storedPackages = layer.ownerPackageId === 'sys_metadata'
+                    ? (await this.packagelessAddress(singularType, request.name)).candidates
+                    : [];
                 throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
                     request.name, layer.packageId, layer.ownerPackageId,
+                    {
+                        at: 'promote',
+                        storedPackages,
+                        // The package-unbound draft the address adopted into the one binding.
+                        adoptedDraft: !('packageId' in request) && draftKey === null && promoteInto !== null,
+                    },
                 );
             }
         }
@@ -30326,6 +30528,14 @@ export class ObjectStackProtocolImplementation implements
                         if (layer.kind === 'mismatch') {
                             throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
                                 String(record.name), layer.packageId, layer.ownerPackageId,
+                                // [#23514] The row this hydrates is stored, and so is
+                                // every other package's row the way out deletes.
+                                {
+                                    at: 'registry',
+                                    storedPackages: layer.ownerPackageId === 'sys_metadata'
+                                        ? (await this.packagelessAddress('object', String(record.name))).candidates
+                                        : [],
+                                },
                             );
                         }
                         this.engine.registry.registerObject(
