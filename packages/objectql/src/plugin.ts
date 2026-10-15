@@ -2,7 +2,7 @@
 
 import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
-import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
+import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
@@ -541,6 +541,10 @@ export class ObjectQLPlugin implements Plugin {
       const unsubscribe = (protocol as any).onMetadataMutation(
         (evt: { type: string; name: string; state: string }) => {
           if (evt?.state === 'draft') return;
+          // The metadata service's copy of a runtime-authored object follows
+          // the registry the moment the authoring door lands. See
+          // {@link followRuntimeObjectCopy}.
+          if (evt?.type === 'object') this.followRuntimeObjectCopy(ctx, evt);
           if (evt?.type === 'hook') {
             void this.resyncAuthoredHooks(ctx).catch((e: any) => {
               ctx.logger.warn('[ObjectQLPlugin] authored-hook rebind after mutation failed', {
@@ -2307,6 +2311,11 @@ export class ObjectQLPlugin implements Plugin {
    * carries no `_packageId` would have its true package provenance
    * overwritten with 'metadata-service'. Nothing is stale either: the
    * registry is the source here, and it already holds what we just copied.
+   *
+   * One-shot: what the registry holds AFTER this pass reaches the service
+   * through {@link followRuntimeObjectCopy} (a runtime-authored object saved or
+   * deleted through an authoring door) and
+   * {@link bridgeManifestObjectsToMetadataService} (a package registered late).
    */
   private async bridgeObjectsToMetadataService(ctx: PluginContext): Promise<void> {
     try {
@@ -2354,6 +2363,139 @@ export class ObjectQLPlugin implements Plugin {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+  }
+
+  /**
+   * Keep the metadata service's copy of a RUNTIME-AUTHORED object current after
+   * boot, and take it out when the object is deleted.
+   *
+   * {@link bridgeObjectsToMetadataService} copies each registry object into the
+   * `metadata` service once, at boot, and no authoring door writes to that
+   * service. So on a kernel where the bridge ran, the service's answer for a
+   * runtime-authored object was whatever the boot saw: an object created
+   * afterwards had NO copy, a re-saved one kept its boot body, a deleted one
+   * kept answering. The readers of `IMetadataService.getObject` / `listObjects`
+   * inherit that, and one of them decides exposure: the MCP stdio door gates
+   * every data verb on the copy's `enable.apiEnabled`, and an absent copy reads
+   * as "no declaration" (its gate falls open by design, parity with the HTTP
+   * gate), so an object whose API exposure was switched off after boot was
+   * still served, and a deleted one was still listed and described.
+   *
+   * The landing point is the copy's producer, on the seam every authoring door
+   * already funnels through (`onMetadataMutation`, which also replays on a
+   * cluster peer once its registry has converged), not the readers: the HTTP
+   * gate (`refuseUnexposedDataAction`), the AI tools and the MCP resources read
+   * the same service. A copy is refreshed IN PLACE, never dropped on save: an
+   * absent copy is the state that falls open.
+   *
+   * What it touches, and what it never does:
+   *
+   *  - Only a copy of a RUNTIME-AUTHORED object: the registry's owner row for
+   *    the name is tenant-authored (`isTenantAuthored`), or the copy already in
+   *    the service says it is. A code package's copy is the code layer the
+   *    protocol restores baselines from; it is sealed against runtime edits and
+   *    kept by {@link bridgeManifestObjectsToMetadataService}, so it is left
+   *    exactly as it is.
+   *  - A refresh goes through `registerInMemory` (synchronous, no persistence,
+   *    no announce), so it has landed before the authoring call returns and
+   *    never writes a row through a writable loader. A service without it gets
+   *    the bridge's own `register(..., { notify: false })`.
+   *  - The one removal the service has, `unregister`, also deletes through its
+   *    writable `datasource:` loaders, so it is called only when the mutation
+   *    says `deleted` (the stored row is already gone) AND the registry no
+   *    longer serves the name AND the copy is the runtime-authored one.
+   *    Afterwards the registry is asked again: a re-creation that landed while
+   *    the removal was awaiting its loaders has its copy put back.
+   *
+   * Armed on the kernel shape the bridge runs on (no `environmentId`): a
+   * project-scoped kernel's service is sourced from the artifact and holds no
+   * copy of the registry to keep current.
+   */
+  private followRuntimeObjectCopy(ctx: PluginContext, evt: { name: string; state: string }): void {
+    if (this.environmentId !== undefined) return;
+    if (typeof evt?.name !== 'string' || evt.name === '') return;
+    // An async function runs synchronously up to its first `await`: the
+    // refresh of a served runtime object is done before this call returns.
+    void this.settleRuntimeObjectCopy(ctx, evt.name, evt.state).catch((e: unknown) => {
+      // Registry and service now disagree about an object while everything
+      // looks normal, and the exposure an author set is what the disagreement
+      // is about: an `error`, with the consequence and the way out.
+      ctx.logger.error(
+        `[ObjectQLPlugin] the metadata service's copy of object '${evt.name}' could not be brought up to date after it was `
+        + 'saved or deleted: the registry, the data door and REST already serve the new definition, but readers of the '
+        + 'metadata service (the MCP stdio door\'s exposure gate and object listing among them) keep the previous one, '
+        + 'and nothing retries. Fix: restart this process (the boot bridge re-copies every object); if it recurs, '
+        + 'check that the metadata service accepts in-memory registration.',
+        e instanceof Error ? e : new Error(String(e)),
+        { object: evt.name },
+      );
+    });
+  }
+
+  /** @see followRuntimeObjectCopy */
+  private async settleRuntimeObjectCopy(ctx: PluginContext, name: string, state: string): Promise<void> {
+    if (!this.ql?.registry) return;
+    let metadataService: IMetadataService | undefined;
+    try {
+      metadataService = ctx.getService<IMetadataService>('metadata');
+    } catch {
+      return; // no metadata service on this kernel — there is no copy to keep
+    }
+    if (!metadataService) return;
+
+    // The registry serves a runtime-authored object under this name: the copy
+    // IS its current definition.
+    if (await this.mirrorRuntimeObject(metadataService, name)) return;
+
+    // It does not. Only a runtime-authored copy is this method's to change.
+    const existing = await metadataService.getObject(name);
+    if (!isTenantAuthored(existing)) return;
+    const served = this.currentObjectCopyBody(name);
+    if (served) {
+      // The registry now serves something else under the name (a code
+      // package's definition, once a runtime layer over it was removed): the
+      // copy follows what is served.
+      await this.putObjectCopy(metadataService, name, served);
+      return;
+    }
+    if (state !== 'deleted') return;
+    await metadataService.unregister('object', name, { notify: false });
+    await this.mirrorRuntimeObject(metadataService, name);
+  }
+
+  /**
+   * Put the registry's current definition of `name` into the service when the
+   * registry's owner row for it is tenant-authored. `false` = it is not (or the
+   * name is not registered), nothing was written.
+   */
+  private async mirrorRuntimeObject(metadataService: IMetadataService, name: string): Promise<boolean> {
+    const owner = this.ql?.registry.getObjectOwner(name);
+    if (!owner || !isTenantAuthored(owner.definition)) return false;
+    const body = this.currentObjectCopyBody(name);
+    if (!body) return false;
+    await this.putObjectCopy(metadataService, name, body);
+    return true;
+  }
+
+  /**
+   * The definition the registry serves for `name`, shaped as the boot bridge
+   * copies it: the merged object, tagged with its owner's package the way
+   * `SchemaRegistry.getAllObjects` tags it.
+   */
+  private currentObjectCopyBody(name: string): ServiceObject | undefined {
+    const registry = this.ql?.registry;
+    const current = registry?.getObject(name);
+    if (!registry || !current) return undefined;
+    const packageId = registry.getObjectOwner(name)?.packageId;
+    return { ...current, ...(packageId !== undefined ? { _packageId: packageId } : {}) } as ServiceObject;
+  }
+
+  private putObjectCopy(metadataService: IMetadataService, name: string, body: ServiceObject): void | Promise<void> {
+    if (typeof metadataService.registerInMemory === 'function') {
+      metadataService.registerInMemory('object', name, body);
+      return;
+    }
+    return metadataService.register('object', name, body, { notify: false });
   }
 
   /**

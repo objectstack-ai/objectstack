@@ -7,6 +7,7 @@ import type {
   ISharingService,
   IHierarchyScopeResolver,
   RecordShare,
+  RecordShareRecipientType,
   GrantShareInput,
   ShareAccessLevel,
   SharingWriteVerdict,
@@ -15,6 +16,7 @@ import {
   normalizeTenancyPosture,
   postureEnforcesWall,
   type ExplainDecision,
+  type ShareRecipientType,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 // [#7136] Every enforcement method below takes the FULL `resolveAuthzContext`
@@ -99,6 +101,50 @@ function retiredRecipientTypeRefusal(value: unknown): string | undefined {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(RETIRED_RECIPIENT_TYPE_REFUSALS, value)
     ? RETIRED_RECIPIENT_TYPE_REFUSALS[value]
     : undefined;
+}
+
+/**
+ * [ADR-0111 D7] The sharing-rule recipient that delivers each declared
+ * non-`user` record-share value: the route {@link SharingService.grant} names
+ * when it refuses one. Only a `user` row is ever written (ADR-0078), so a
+ * caller who meant a set of people is sent to the sharing rule that expands
+ * that set into per-user rows, spelled the way a rule spells it.
+ *
+ * Typed against both vocabularies, so neither can move away from it unnoticed.
+ * The keys are every non-`user` `RecordShareRecipientType` member: a member
+ * added there fails to compile here until it names its route. Each value is an
+ * authorable `ShareRecipientType` (`spec/security`), the list the
+ * `sys_sharing_rule.recipient_type` select is held equal to, so the refusal can
+ * never name a recipient a rule cannot be written with (the reserved `queue`
+ * included). A rule spells `group` as `team`: the ADR-0090 D3 rename, recorded
+ * by the ADR-0087 entry `sharing-rule-recipient-reconcile`.
+ */
+const RULE_ROUTE_BY_RECORD_SHARE_RECIPIENT: Readonly<Record<
+  Exclude<RecordShareRecipientType, 'user'>,
+  { readonly recipientType: ShareRecipientType; readonly renamedBy?: string }
+>> = {
+  group: { recipientType: 'team', renamedBy: 'ADR-0090 D3' },
+  position: { recipientType: 'position' },
+  unit_and_subordinates: { recipientType: 'unit_and_subordinates' },
+};
+
+/**
+ * The remedy `grant()` appends to its refusal of a non-`user` `recipientType`
+ * that is not retired: the sharing-rule recipient that delivers a declared
+ * value, or, for a value no record share declares, that it is not one. It
+ * never names a route for a value it does not know.
+ */
+function nonUserRecipientTypeRemedy(value: unknown): string {
+  const route = typeof value === 'string'
+    && Object.prototype.hasOwnProperty.call(RULE_ROUTE_BY_RECORD_SHARE_RECIPIENT, value)
+    ? RULE_ROUTE_BY_RECORD_SHARE_RECIPIENT[value as keyof typeof RULE_ROUTE_BY_RECORD_SHARE_RECIPIENT]
+    : undefined;
+  if (route === undefined) {
+    return `${JSON.stringify(value)} is not a record-share recipient type (ADR-0111 D7)`;
+  }
+  return `a ${value as string} recipient is delivered via a sharing rule with recipient type '${route.recipientType}'`
+    + (route.renamedBy !== undefined ? `, its name since the ${route.renamedBy} rename` : '')
+    + ' (ADR-0111 D7)';
 }
 
 /**
@@ -1383,8 +1429,11 @@ export class SharingService implements ISharingService {
     const recipientType = input.recipientType ?? 'user';
     // [ADR-0111 D7] Only `user` recipients are consulted by the read/write
     // gates; persisting any other type would be a silently inert grant
-    // (ADR-0078). Group / business-unit principals are delivered via sharing
-    // rules, whose evaluator expands them into per-user rows.
+    // (ADR-0078). Group / position / business-unit principals are delivered
+    // via sharing rules, whose evaluator expands them into per-user rows; the
+    // refusal names the rule recipient for each declared value
+    // (`RULE_ROUTE_BY_RECORD_SHARE_RECIPIENT`), because the rule vocabulary
+    // does not spell every one of them the same way (`group` is `team`).
     if (recipientType !== 'user') {
       // [ADR-0138 D8] A retired value no longer typechecks, yet still reaches
       // here untyped. It is told where guest access lives, never that a sharing
@@ -1394,7 +1443,7 @@ export class SharingService implements ISharingService {
         retired !== undefined
           ? `VALIDATION_FAILED: ${retired}`
           : `VALIDATION_FAILED: recipientType must be 'user' (received ${JSON.stringify(recipientType)}) — `
-            + `group/position recipients are delivered via sharing rules (ADR-0111 D7)`,
+            + nonUserRecipientTypeRemedy(recipientType),
       );
     }
     // Validate BEFORE any write. Previously anything at all was persisted
