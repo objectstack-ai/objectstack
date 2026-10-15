@@ -53,7 +53,7 @@ export async function makeDatabaseDirectory(dir: string): Promise<void> {
   for (;;) {
     try {
       if ((await stat(level)).isDirectory()) break;
-      throw Object.assign(new Error(`ENOTDIR: not a directory, mkdir '${level}'`), { code: 'ENOTDIR' });
+      throw Object.assign(new Error(`ENOTDIR: '${level}' exists and is not a directory`), { code: 'ENOTDIR' });
     } catch (e) {
       if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
       missing.push(level);
