@@ -400,7 +400,6 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('every entry whose window ran out before 18 is retired or kept by name', () => {
       const kept = ALL_CONVERSIONS.filter((c) => c.toMajor < 18 && !c.retiredFromLoadPath).map((c) => c.id).sort();
       expect(kept).toEqual([
-        'datasource-driver-mongo-to-mongodb',
         'flow-node-connector-config-lift',
         'flow-node-http-callout-rename',
         'flow-node-wait-event-config-lift',
@@ -417,6 +416,8 @@ describe('conversion layer (ADR-0087 D2)', () => {
         'flow-node-subflow-flow-alias',
         'flow-node-script-config-aliases',
         'sharing-rule-access-level-full-to-edit',
+        // #23543 F1: retired once `mongo` itself was retired as a value.
+        'datasource-driver-mongo-to-mongodb',
       ]) {
         expect(ALL_CONVERSIONS.find((c) => c.id === id), id).toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
       }
@@ -962,11 +963,12 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  // Commit e2798fab7 — the `mongo` → `mongodb` canonical-id rename. Two claims have to hold
-  // together, and only together: the stored value CONVERGES, and a deployment
-  // that never runs the conversion is NOT broken. Either alone would be the
-  // wrong shape — a rename that breaks old rows, or a rename that leaves one
-  // deployment holding two spellings of one driver forever.
+  // Commit e2798fab7 renamed the canonical id `mongo` → `mongodb`; #23543 F1
+  // retired `mongo` as a value at 18. Three claims hold together: the stored
+  // value still CONVERGES (the data-at-rest seams replay the retired entry), an
+  // AUTHORED `mongo` meets the prescription instead of a silent rewrite, and a
+  // stored row the chain has not reached keeps its contract — the half that
+  // keeps its credential redaction (`DriverVocabularyEntry.retiredAliases`).
   describe('datasource-driver-mongo-to-mongodb', () => {
     const convert = (datasources: unknown[]) =>
       collectConversionNotices({ datasources }, { includeRetired: true });
@@ -975,6 +977,8 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const row = { name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' }, origin: 'runtime' };
       const out = applyConversionsToStoredItem('datasource', row) as { driver: string };
       expect(out.driver).toBe('mongodb');
+      // …and the converted row parses: the refusal below is never what a stored row meets.
+      expect(DatasourceSchema.safeParse(out).success).toBe(true);
     });
 
     it('converts case- and whitespace-insensitively, exactly as the resolver reads it', () => {
@@ -997,23 +1001,46 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(notices.filter((n) => n.conversionId === 'datasource-driver-mongo-to-mongodb')).toHaveLength(0);
     });
 
-    // THE other half of the migration proof. A deployment that upgrades without
-    // replaying the chain still holds `driver: 'mongo'` rows, and they must keep
-    // working: `mongo` stays an accepted alias on purpose, so it resolves the
-    // same config contract and builds the same driver as before the rename.
-    // This is why the rename is a `minor` on `@objectstack/spec` and not a
-    // boot-breaking change — the conversion converges a spelling, it does not
-    // rescue one.
-    it('an UNCONVERTED `mongo` row is not left broken — same contract, same driver', () => {
+    it('is retired from the load path — the authoring funnel no longer rewrites an authored `mongo`', () => {
+      const before = { datasources: [{ name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' } }] };
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('an authored `mongo` reaches defineStack as written and is refused naming `mongodb` and the release', () => {
+      let refusal: unknown;
+      try {
+        defineStack({
+          datasources: [{ name: 'events', label: 'Events', driver: 'mongo', config: { url: 'mongodb://db/x' } }],
+        } as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      // The driver is the ONE issue: the config is a valid mongodb config, so
+      // the refusal is about the spelling alone.
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['datasources.0.driver']);
+      expect(issues[0]!.message).toMatch(/^Datasource `driver: 'mongo'` was removed in @objectstack\/spec 18 \(ADR-0087 D2\)/);
+      expect(issues[0]!.message).toContain("Use `driver: 'mongodb'`");
+      // Case and whitespace do not slip past it, and the canonical id is untouched.
+      for (const driver of ['Mongo', ' MONGO ']) {
+        const parsed = DatasourceSchema.safeParse({ name: 'events', driver, config: { url: 'mongodb://db/x' } });
+        expect(parsed.success, driver).toBe(false);
+        expect(parsed.error!.issues.map((i) => i.path.join('.')), driver).toEqual(['driver']);
+      }
+      expect(DatasourceSchema.safeParse({ name: 'events', driver: 'mongodb', config: { url: 'mongodb://db/x' } }).success).toBe(true);
+    });
+
+    // The other half of the migration proof. A stored row the chain has not
+    // reached (a raw body served by the read-path redactor, say) still resolves
+    // the mongodb contract: deleting the spelling outright was measured to
+    // serve every mongodb passthrough secret of such a row in cleartext.
+    it('an UNCONVERTED stored `mongo` row keeps its contract — same schema, same validation', () => {
       expect(resolveDriverId('mongo')).toBe('mongodb');
       expect(getDriverConfigSchema('mongo')).toBe(getDriverConfigSchema('mongodb'));
       expect(validateDriverConfig('mongo', { url: 'mongodb://db/x' })).toEqual({ known: true, issues: [] });
-      // And it still parses as a datasource — the authoring gate never stopped
-      // accepting the alias, which is the whole reason nothing breaks.
-      const parsed = DatasourceSchema.safeParse({
-        name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' },
-      });
-      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     });
   });
 

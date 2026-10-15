@@ -235,16 +235,18 @@ describe('DatasourceSchema', () => {
     expect(datasource.driver).toBe('mysql');
   });
 
+  // `mongodb`: the retired `mongo` spelling is refused by name since 18
+  // (`config-registry.test.ts`, the retired `mongo` describe).
   it('should accept MongoDB datasource', () => {
     const datasource = DatasourceSchema.parse({
       name: 'mongo_db',
-      driver: 'mongo',
+      driver: 'mongodb',
       config: {
         url: 'mongodb://localhost:27017/mydb',
       },
     });
 
-    expect(datasource.driver).toBe('mongo');
+    expect(datasource.driver).toBe('mongodb');
   });
 
   // This fixture used to spell the URI `connectionString`, a key the mongo
@@ -254,7 +256,7 @@ describe('DatasourceSchema', () => {
   it('rejects a mongo config that spells the URI `connectionString`', () => {
     const result = DatasourceSchema.safeParse({
       name: 'mongo_db',
-      driver: 'mongo',
+      driver: 'mongodb',
       config: { connectionString: 'mongodb://localhost:27017/mydb' },
     });
 

@@ -30,7 +30,8 @@ pnpm dev
 The ObjectStack CLI auto-registers this driver when `OS_DATABASE_URL` starts with
 `mongodb://` or `mongodb+srv://`. You do **not** need to set
 `OS_DATABASE_DRIVER` separately — the URL scheme is enough. Set it only as an
-explicit override (recognised values: `mongodb`, `mongo`).
+explicit override (recognised value: `mongodb`; the old `mongo` spelling was retired in
+`@objectstack/spec` 18 and is refused).
 
 ### Option B — Programmatic via `defineStack`
 

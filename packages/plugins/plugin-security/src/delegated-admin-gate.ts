@@ -210,8 +210,6 @@ export interface DelegableScopeReport {
     businessUnit: string;
     includeSubtree: boolean;
     manageAssignments: boolean;
-    manageBindings: boolean;
-    authorEnvironmentSets: boolean;
     assignablePermissionSets: string[];
     businessUnitIds: string[];
   }>;
@@ -408,8 +406,8 @@ export class DelegatedAdminGate {
    * the explain API: an administrator who can already manage a user's
    * assignments inside their delegation boundary may also read WHY that
    * user's access resolves the way it does — without tenant-level
-   * `manage_users`. Any scope kind qualifies (assignments, bindings,
-   * authoring): all of them administer capability inside the subtree, and
+   * `manage_users`. Any held scope qualifies, whether or not it grants
+   * `manageAssignments`: it administers capability inside the subtree, and
    * the report is read-only. Fail-closed: unresolvable scopes/memberships
    * cover nothing.
    *
@@ -516,14 +514,12 @@ export class DelegatedAdminGate {
       businessUnit: h.scope.businessUnit,
       includeSubtree: h.scope.includeSubtree,
       manageAssignments: h.scope.manageAssignments,
-      manageBindings: h.scope.manageBindings,
-      authorEnvironmentSets: h.scope.authorEnvironmentSets,
       assignablePermissionSets: [...h.scope.assignablePermissionSets],
       businessUnitIds: [...h.subtree],
     }));
 
-    // Placement needs `manageAssignments` — a bindings-only or authoring-only
-    // scope administers capability without placing people.
+    // Placement needs `manageAssignments` — a scope without it is an
+    // allowlist that places nobody.
     const placing = held.filter((h) => h.scope.manageAssignments);
     const placeableBusinessUnitIds = [...new Set(placing.flatMap((h) => [...h.subtree]))];
 
@@ -873,15 +869,22 @@ export class DelegatedAdminGate {
 
   /** Definition-level strict containment (no tree resolution): same-root-or-
    *  narrower BU (equal root only when outer includes subtree and inner is the
-   *  same or a descendant — without the tree we accept equal root + subtree,
-   *  or require the authoring path's resolved check), rights ⊇, allowlist ⊇,
-   *  and NOT identical. Conservative: unknown ⇒ not contained. */
+   *  same or a descendant — without the tree we accept equal root + subtree),
+   *  rights ⊇, allowlist ⊇, and NOT identical. Conservative: unknown ⇒ not
+   *  contained.
+   *
+   *  [#23488] The rights axis is `manageAssignments` alone. The retired
+   *  `manageBindings` / `authorEnvironmentSets` granted nothing (no door
+   *  honoured either), so they are not read on EITHER side: a stored scope
+   *  that still carries one — a row the D2 conversion has not yet rewritten —
+   *  neither out-reaches a delegate nor counts as the axis that makes an
+   *  otherwise equal scope "strictly smaller". The second was a live
+   *  loosening: an inert `true` on the delegate's side let it hand out a
+   *  scope equal to its own through the equal-scope refusal. */
   private definitionContainsStrictly(outer: HeldScope['scope'], inner: AdminScope): boolean {
     const innerFull = {
       includeSubtree: inner.includeSubtree !== false,
       manageAssignments: inner.manageAssignments === true,
-      manageBindings: inner.manageBindings === true,
-      authorEnvironmentSets: inner.authorEnvironmentSets === true,
       assignable: (inner.assignablePermissionSets ?? []) as string[],
     };
     // BU axis (definition level): identical root, and inner must not cover
@@ -890,17 +893,12 @@ export class DelegatedAdminGate {
     if (innerFull.includeSubtree && outer.includeSubtree === false) return false;
     // Rights axis: inner ⊆ outer.
     if (innerFull.manageAssignments && !outer.manageAssignments) return false;
-    if (innerFull.manageBindings && !outer.manageBindings) return false;
-    if (innerFull.authorEnvironmentSets && !outer.authorEnvironmentSets) return false;
     // Allowlist axis: inner ⊆ outer.
     for (const name of innerFull.assignable) {
       if (!outer.assignablePermissionSets.includes(name)) return false;
     }
     // Strictness: some axis must be strictly smaller.
-    const equalRights =
-      innerFull.manageAssignments === (outer.manageAssignments === true) &&
-      innerFull.manageBindings === (outer.manageBindings === true) &&
-      innerFull.authorEnvironmentSets === (outer.authorEnvironmentSets === true);
+    const equalRights = innerFull.manageAssignments === (outer.manageAssignments === true);
     const equalTree = innerFull.includeSubtree === (outer.includeSubtree !== false);
     const equalAllow =
       innerFull.assignable.length === outer.assignablePermissionSets.length &&
@@ -922,8 +920,6 @@ export class DelegatedAdminGate {
         businessUnit: raw.businessUnit,
         includeSubtree: raw.includeSubtree !== false,
         manageAssignments: raw.manageAssignments === true,
-        manageBindings: raw.manageBindings === true,
-        authorEnvironmentSets: raw.authorEnvironmentSets === true,
         assignablePermissionSets: Array.isArray(raw.assignablePermissionSets)
           ? raw.assignablePermissionSets.filter((n: unknown): n is string => typeof n === 'string')
           : [],

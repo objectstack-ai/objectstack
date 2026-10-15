@@ -1772,6 +1772,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-landed-ids.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-landed-ids.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-landed-ids.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-locale-scope.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3908,6 +3923,16 @@
     },
     {
       "file": "packages/runtime/src/api-key-lifecycle.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/app-plugin.seed-landed.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/app-plugin.seed-landed.test.ts",
       "verb": "update",
       "pinned": 1
     },

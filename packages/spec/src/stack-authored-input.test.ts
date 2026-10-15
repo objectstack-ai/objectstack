@@ -36,17 +36,27 @@ afterEach(() => {
 /** Spelled here, by its registry name, exactly as the CLI spells it: the key is not exported. */
 const AUTHORED_INPUT = Symbol.for('objectstack.stack.authoredInput');
 
-const MONGO = 'datasource-driver-mongo-to-mongodb';
+const RETRY = 'retry-policy-converged';
 
 /**
- * A stack the strict parse accepts, whose one non-canonical spelling is a
- * datasource driver id the load still converts.
+ * A stack the strict parse accepts, whose one non-canonical spelling is a key
+ * the load still converts: a flow-level retry policy's `retryDelayMs`, renamed
+ * `backoffMs` by `retry-policy-converged` while that entry is on the load path.
+ * (It was `datasources[].driver: 'mongo'` until that spelling was retired as a
+ * value at 18 and its conversion left the load path, #23543 F1.)
  */
 const service = () => ({
   manifest: { id: 'com.probe.svc', name: 'Probe Service', namespace: 'probe', version: '1.0.0', type: 'module' as const },
   objects: [{ name: 'probe_slot', label: 'Slot', fields: { name: { type: 'text' as const, label: 'Name' } } }],
-  datasources: [
-    { name: 'docs', label: 'Docs', driver: 'mongo', config: { url: 'mongodb://mongo.internal:27017/docs' } },
+  flows: [
+    {
+      name: 'probe_sync',
+      label: 'Sync',
+      type: 'autolaunched' as const,
+      errorHandling: { strategy: 'retry' as const, maxRetries: 3, retryDelayMs: 2000 },
+      nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+      edges: [{ id: 'e1', source: 'start', target: 'end' }],
+    },
   ],
 });
 
@@ -57,26 +67,37 @@ const app = () => ({
 
 const quiet = () => vi.spyOn(console, 'warn').mockImplementation(() => {});
 const ids = (value: unknown) => stackConversionsOf(value).map((n) => n.conversionId);
-const driverOf = (stack: unknown) => (stack as { datasources: Array<{ driver: string }> }).datasources[0]!.driver;
+const errorHandlingOf = (stack: unknown) =>
+  (stack as { flows: Array<{ errorHandling: Record<string, unknown> }> }).flows[0]!.errorHandling;
+/** The authored spelling: `retryDelayMs` kept, no `backoffMs` invented. */
+const asWritten = (stack: unknown) => {
+  expect(errorHandlingOf(stack)).toMatchObject({ retryDelayMs: 2000 });
+  expect(errorHandlingOf(stack)).not.toHaveProperty('backoffMs');
+};
+/** The converted spelling: `backoffMs` carries the value, `retryDelayMs` is gone. */
+const converted = (stack: unknown) => {
+  expect(errorHandlingOf(stack)).toMatchObject({ backoffMs: 2000 });
+  expect(errorHandlingOf(stack)).not.toHaveProperty('retryDelayMs');
+};
 
 describe('a non-strict call carrying the key returns its input as authored', () => {
   it('keeps the authored spelling, is marked, and records nothing; without the key it converts', () => {
     quiet();
     const authored = defineStack(service() as never, { strict: false, [AUTHORED_INPUT]: true } as never);
-    expect(driverOf(authored)).toBe('mongo');
+    asWritten(authored);
     expect(hasStackProvenance(authored)).toBe(true);
     expect(stackConversionsOf(authored)).toEqual([]);
 
-    const converted = defineStack(service() as never, { strict: false });
-    expect(driverOf(converted)).toBe('mongodb');
-    expect(ids(converted)).toEqual([MONGO]);
+    const plain = defineStack(service() as never, { strict: false });
+    converted(plain);
+    expect(ids(plain)).toEqual([RETRY]);
   });
 
   it('a strict call ignores the key: the pass runs and is recorded', () => {
     quiet();
     const strict = defineStack(service() as never, { [AUTHORED_INPUT]: true } as never);
-    expect(driverOf(strict)).toBe('mongodb');
-    expect(ids(strict)).toEqual([MONGO]);
+    converted(strict);
+    expect(ids(strict)).toEqual([RETRY]);
   });
 });
 
@@ -92,14 +113,14 @@ describe('composeStacks over inputs produced as authored', () => {
       { manifest: 'preserve' },
     );
     expect(hasStackProvenance(authored)).toBe(true);
-    expect(driverOf(body(authored, 0))).toBe('mongo');
+    asWritten(body(authored, 0));
     expect(stackConversionsOf(authored)).toEqual([]);
 
-    const converted = composeStacks(
+    const plain = composeStacks(
       [defineStack(service() as never, { strict: false }), defineStack(app() as never, { strict: false })],
       { manifest: 'preserve' },
     );
-    expect(driverOf(body(converted, 0))).toBe('mongodb');
-    expect(ids(converted)).toEqual([MONGO]);
+    converted(body(plain, 0));
+    expect(ids(plain)).toEqual([RETRY]);
   });
 });

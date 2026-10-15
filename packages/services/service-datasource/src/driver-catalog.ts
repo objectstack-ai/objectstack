@@ -83,8 +83,9 @@ const CURATED: ReadonlyArray<{
     // spelling both boot hosts and `@objectstack/driver-mongodb` already used.
     // This `id` is what Studio writes into `datasource.driver`, so rows written
     // before the rename carry `mongo`; the ADR-0087 conversion
-    // `datasource-driver-mongo-to-mongodb` converges them, and `mongo` remains
-    // an accepted alias so a deployment that skipped it still connects.
+    // `datasource-driver-mongo-to-mongodb` converges them at rehydration. Since
+    // 18 an authored `mongo` is refused; the spelling stays on the spec's
+    // contract face only, so a stored row keeps its contract and its redaction.
     id: 'mongodb',
     label: 'MongoDB',
     description: 'MongoDB connection via a connection URI.',

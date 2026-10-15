@@ -98,12 +98,43 @@ export interface SeedSettlementSnapshot {
  *
  * Deliberately read-only: declaring and settling sources is the seeding
  * host's own business, and a consumer that could mutate the tally could
- * certify itself. The surface is one method because one question is all the
- * ADR-0104 attestation needs.
+ * certify itself. {@link snapshot} answers the ADR-0104 attestation's one
+ * question; {@link seededRecordIds} answers the seed-ownership claim's.
  */
 export interface ISeedSettlementService {
   /** Read the live tally. Never cached by the caller — re-read per use. */
   snapshot(): SeedSettlementSnapshot;
+
+  /**
+   * "Which rows of `object` did this process's seed write?" — the ids of the
+   * stored rows the seed loader reported landing on (`SeedLoadResult.landedIds`):
+   * inserted, updated, or matched by key on a replay.
+   *
+   * ## Two readings, chosen by `organizationId`
+   *
+   *  - **absent** — every boot-time seed source of this process (the inline
+   *    seed `app:seeded` announces). A source publishes its rows before it
+   *    settles, so a consumer running inside `app:seeded` already sees them.
+   *    A later boot replays its seed and reports the rows an earlier boot
+   *    wrote, so the reading holds across boots.
+   *  - **present** — the per-organization replay of that organization (the
+   *    multi-tenant seed, run when the organization is inserted). The host keeps
+   *    the rows of the most recent per-organization replay only, so the
+   *    reading answers for that organization and is empty for every other one.
+   *    Bounded on purpose: an organization is replayed once, when it is created,
+   *    and a process that creates thousands must not hold every replay's rows.
+   *    Ask right after the replay you need — the default organization's
+   *    owner bind does, in the same call that created it.
+   *
+   * Empty when nothing seeded the object, and never a guess: a row this does
+   * not name may be a guest's, a public form's or a hook's, and ADR-0138 D1
+   * leaves its owner as its writer left it.
+   *
+   * Optional, because a host may publish the tally without the rows. A
+   * consumer that finds it absent has no reading of which rows the seed wrote,
+   * and treats every unowned row as one it cannot place.
+   */
+  seededRecordIds?(object: string, organizationId?: string): readonly string[];
 }
 
 /** Service-registry slot for {@link ISeedSettlementService}. */

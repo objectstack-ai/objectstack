@@ -216,7 +216,11 @@ describe('[#15598] block 5 — claim-seed-ownership idsFrom (the PAGING fallback
       },
     });
 
-    await claimSeedOwnership(io, ADMIN, {} as any);
+    // [#23354] The seed reports d1, so the NULL arm reaches it (and is the
+    // write refused once, above).
+    await claimSeedOwnership(io, ADMIN, {
+      seededRecordIds: (object: string) => (object === 'probe_deal' ? ['d1'] : []),
+    } as any);
 
     assertBareArrayPage(seen, 'claim-seed-ownership readPage');
     // Re-owned THROUGH the id page: an `idsFrom` that read nothing stops the

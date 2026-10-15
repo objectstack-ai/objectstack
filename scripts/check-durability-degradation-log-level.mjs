@@ -318,6 +318,14 @@ const READ_INVENTION_BASELINE_PATH = join(
  * choice is between paying for those 36 and giving this map a per-site scope
  * the way `FAILURE_PROPAGATION_SITES` already scopes the other vocabulary. That
  * is a design call, and it is deliberately not taken here.
+ *
+ * ## A second reader: the dispatch derivation (#23584)
+ *
+ * `scripts/pm/dispatch-gates.mjs` reads this table's KEYS, by its name, to tell
+ * a card whose file holds a catch and one of these callees to run this gate
+ * (`guardsADurabilityCriticalCall`). A key added here reaches that lead with
+ * nothing else to edit. Renaming the table, or spelling a key as anything but
+ * a quoted word, makes that tool refuse loudly until its reader moves too.
  */
 const DURABILITY_CRITICAL_CALLEES = new Map([
     [

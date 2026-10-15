@@ -1078,6 +1078,26 @@ function readSeedSettlementSnapshot(ctx: PluginContext): SeedSettlementSnapshot 
 }
 
 /**
+ * [#23354] "Which rows did this process's boot seed write?", through the same
+ * published contract as {@link readSeedSettlementSnapshot} — the seed loader's
+ * own report of the rows it landed on, so the seed-ownership claim hands over
+ * the seed's rows and leaves every other unowned row unowned (ADR-0138 D1).
+ * `undefined` when no host publishes it; the claim then re-owns no NULL-owner
+ * row and its pass report says so. Bound per pass; the tally is read per call.
+ */
+function readSeededRecordIds(ctx: PluginContext): ((objectName: string) => readonly string[]) | undefined {
+  try {
+    const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as
+      | ISeedSettlementService
+      | undefined;
+    if (!svc || typeof svc.seededRecordIds !== 'function') return undefined;
+    return (objectName: string) => svc.seededRecordIds!(objectName);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The identity objects this plugin's authorization store READS — declared here,
  * enforced at boot by {@link refuseMissingAuthzIdentityObjects}, and ⛔ never
  * registered by this plugin: they belong to `@objectstack/plugin-auth`.
@@ -1609,14 +1629,17 @@ export class SecurityPlugin implements Plugin {
    *
    * `app:seeded` fires once per app bundle, so the first fire is not
    * necessarily the last; the runtime settles the source BEFORE it triggers, so
-   * this handler sees its own signal already reflected in the tally. The claim
-   * is idempotent (only NULL / `usr_system`-owned rows match) and every pass
+   * this handler sees its own signal already reflected in the tally — and the
+   * rows that source landed on, which it publishes before it settles. The claim
+   * is idempotent (only seeded NULL-owned and `usr_system`-owned rows match) and every pass
    * reports whether its own reading was final, so running on each fire costs a
    * no-op walk and buys the guarantee.
    *
    * ⚠️ Scope: the predicates and the object filter are the promotion-time
    * pass's own, unchanged. A row a human already owns is not matched by either
-   * predicate and cannot be touched here.
+   * predicate and cannot be touched here. A NULL-owner row is matched only when
+   * the seed reported landing on it ({@link readSeededRecordIds}): a guest's or
+   * a public form's unowned row keeps no owner on every boot (ADR-0138 D1).
    */
   private async claimSeedOwnershipOnSettle(
     ctx: PluginContext,
@@ -1637,6 +1660,7 @@ export class SecurityPlugin implements Plugin {
       await claimSeedOwnership(ql, adminUserId, {
         logger: ctx.logger,
         seedSettlement: readSeedSettlementSnapshot(ctx),
+        seededRecordIds: readSeededRecordIds(ctx),
       });
     } catch (e) {
       // Best-effort, exactly like the promotion-time call: a failed claim
@@ -4327,6 +4351,7 @@ export class SecurityPlugin implements Plugin {
           // after a later sign-up see different tallies, and it is exactly the
           // difference that decides whether that pass's claim is the last word.
           seedSettlement: readSeedSettlement(),
+          seededRecordIds: readSeededRecordIds(ctx),
         });
         // Remember the claim's target for the `app:seeded` re-run
         // ({@link claimSeedOwnershipOnSettle}). Only ever overwritten with a
