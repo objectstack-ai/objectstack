@@ -1535,8 +1535,8 @@ export class ApprovalService implements IApprovalService {
 
   /**
    * [#10749 / #23594] The subject fields the READING caller may be served, per
-   * subject object of `rows`: {@link resolveReadableSnapshotFields}' answer
-   * (readable, and not masked for this caller), asked as the caller.
+   * subject object of `rows` — {@link ApprovalService.servedFields} for the
+   * rows' subject objects.
    *
    * It is the ONE answer both serve-time narrowings of a row read: the payload
    * snapshot ({@link ApprovalService.redactPayloads}) and the subject's title
@@ -1546,13 +1546,31 @@ export class ApprovalService implements IApprovalService {
    * pass-through, and it passes the title through exactly as it passes the
    * snapshot.
    */
-  private async servedSubjectFields(
+  private servedSubjectFields(
     rows: readonly ApprovalRequestRow[],
     context: ExecutionContext,
   ): Promise<Map<string, string[] | undefined>> {
-    const served = new Map<string, string[] | undefined>();
-    for (const r of rows) {
-      const object = String((r as any).object_name ?? '');
+    return this.servedFields(rows.map((r) => String((r as any).object_name ?? '')), context);
+  }
+
+  /**
+   * [#10749 / #23594 / #23618] The fields the READING caller may be served on
+   * each of `objects`: {@link resolveReadableSnapshotFields}' answer (readable,
+   * and not masked for this caller), asked as the caller — the one place a row
+   * read asks it.
+   *
+   * `served` holds the answers this read has already asked; an object in it is
+   * not asked again. So one read asks once per object, whether that object is a
+   * request's subject or the target of a lookup in a snapshot
+   * ({@link ApprovalService.enrichRows}), and a target that is also a subject
+   * object is narrowed by the same answer as the subject.
+   */
+  private async servedFields(
+    objects: Iterable<string>,
+    context: ExecutionContext,
+    served: Map<string, string[] | undefined> = new Map(),
+  ): Promise<Map<string, string[] | undefined>> {
+    for (const object of objects) {
       if (served.has(object)) continue;
       served.set(object, await resolveReadableSnapshotFields(
         this.fieldVisibility, object, context, this.logger,
@@ -6672,6 +6690,8 @@ export class ApprovalService implements IApprovalService {
    * (ADR-0049) for `get`, the read `GET /data/{target}/{id}` performs and the
    * operation the data door's `$expand` and the dataset door's labels ask of
    * the same target. It takes no caller: the read runs under a system context.
+   * [#23618] What is SERVED from that read is the reader's: the title is picked
+   * from the target as served to the reader ({@link titlesAsServed}).
    *
    * A refused target is not read, so its key gets no display value and the
    * snapshot's stored id stands, the answer a deleted target already gets. A
@@ -6745,21 +6765,46 @@ export class ApprovalService implements IApprovalService {
     for (const [object, idSet] of byObject) {
       const label = this.objectLabelOf(object);
       if (label) objectLabels.set(object, label);
-      const ids = Array.from(idSet);
-      const displayField = this.resolveDisplayField(object);
-      const readable = served.get(object);
       try {
-        const recs = await this.engine.find(object, {
-          where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX,
-        });
-        for (const rec of (recs ?? []) as any[]) {
-          const asServed = readable === undefined ? rec : redactSnapshot(rec, readable).payload;
-          const title = ApprovalService.pickTitle(asServed, displayField);
-          if (rec?.id && title) titles.set(`${object} ${rec.id}`, title);
-        }
+        await this.titlesAsServed(object, idSet, served.get(object), titles);
       } catch { /* object may be unregistered — the caller's fallback applies */ }
     }
     return { titles, objectLabels };
+  }
+
+  /**
+   * [#23594 / #23618] Title the `ids` of `object` into `into` (keyed
+   * `"<object> <id>"`), each picked from the record AS SERVED to the reader:
+   * `readable` is the reader's served fields for `object`
+   * ({@link ApprovalService.servedFields}), and `redactSnapshot` keeps exactly
+   * the fields the payload snapshot keeps, so a display field the reader may
+   * not read, or is served masked, gives no title, while a field the reader may
+   * be served still names the record. `undefined` is the seam's pass-through.
+   *
+   * The ONE spelling of how an approval read titles a record, shared by the
+   * subject's `record_title` ({@link ApprovalService.resolveSubjectDisplays})
+   * and the lookup targets' `payload_display` ({@link ApprovalService.enrichRows}).
+   * The records are read under the system context, so the read narrows nothing
+   * (#7497 ruling C: record access stays with object permissions, sharing and
+   * row-level rules); only what is served from it is narrowed. Throws what the
+   * read throws; each caller keeps its own best-effort catch.
+   */
+  private async titlesAsServed(
+    object: string,
+    ids: Iterable<string>,
+    readable: string[] | undefined,
+    into: Map<string, string>,
+  ): Promise<void> {
+    const list = Array.from(ids);
+    const displayField = this.resolveDisplayField(object);
+    const recs = await this.engine.find(object, {
+      where: { id: { $in: list } }, limit: list.length, context: SYSTEM_CTX,
+    });
+    for (const rec of (recs ?? []) as any[]) {
+      const asServed = readable === undefined ? rec : redactSnapshot(rec, readable).payload;
+      const title = ApprovalService.pickTitle(asServed, displayField);
+      if (rec?.id && title) into.set(`${object} ${rec.id}`, title);
+    }
   }
 
   /**
@@ -6787,7 +6832,8 @@ export class ApprovalService implements IApprovalService {
    * reader to narrow for.
    */
   private nameSubjectRecord(object: string, recordId: string): string {
-    // [#23594] The title would go here; withheld until resolveSubjectDisplays narrows it by each reader's FLS.
+    // [#23594 / #23556 ruling B] The inbox serves the title narrowed per reader (resolveSubjectDisplays); this body is
+    // written once at send time, with no per-recipient reader to narrow for, so it stays label-and-id.
     return `${this.objectLabelOf(object) ?? object} ${recordId}`;
   }
 
@@ -6804,10 +6850,20 @@ export class ApprovalService implements IApprovalService {
    * does not serve `get` is not read ({@link servesPayloadDisplayTarget}).
    * [#23594] `record_title` is narrowed by the reader's `served` fields, the
    * answer the payload was redacted by ({@link resolveSubjectDisplays}).
+   * [#23618] So is every `payload_display` title, by the reader's served fields
+   * on the TARGET object: the lookup keys come from the already-redacted
+   * snapshot, and the record a readable key points at is titled from the target
+   * as served to `context`'s caller ({@link titlesAsServed}). A target display
+   * field the reader may not be served gives that key no display value, so the
+   * snapshot's stored id stands — the answer a deleted or exposure-refused
+   * target gets. The targets' answers are asked through
+   * {@link servedFields} into `served`, once per object per read, so a target
+   * that is also a subject object reuses the subject's answer.
    */
   private async enrichRows(
     rows: ApprovalRequestRow[],
-    served: ReadonlyMap<string, string[] | undefined>,
+    served: Map<string, string[] | undefined>,
+    context: ExecutionContext,
   ): Promise<void> {
     if (!rows.length) return;
 
@@ -6845,18 +6901,11 @@ export class ApprovalService implements IApprovalService {
       }
     }
     const refTitles = new Map<string, string>();
-    for (const [object, idSet] of refIds) {
-      if (!this.servesPayloadDisplayTarget(object)) continue;
-      const ids = Array.from(idSet);
-      const displayField = this.resolveDisplayField(object);
+    const targets = Array.from(refIds.keys()).filter((object) => this.servesPayloadDisplayTarget(object));
+    await this.servedFields(targets, context, served);
+    for (const object of targets) {
       try {
-        const recs = await this.engine.find(object, {
-          where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX,
-        });
-        for (const rec of (recs ?? []) as any[]) {
-          const title = ApprovalService.pickTitle(rec, displayField);
-          if (rec?.id && title) refTitles.set(`${object} ${rec.id}`, title);
-        }
+        await this.titlesAsServed(object, refIds.get(object)!, served.get(object), refTitles);
       } catch { /* referenced object unreadable — leave unresolved */ }
     }
 
@@ -7527,10 +7576,11 @@ export class ApprovalService implements IApprovalService {
     const rows = await this.engine.find('sys_approval_request', findOpts);
     const list = Array.isArray(rows) ? rows.map(rowFromRequest) : [];
     // [#10749] Redact before enrichment — see `redactPayloads`. [#23594] The
-    // snapshot and the subject title are narrowed by ONE answer for the reader.
+    // snapshot and the subject title are narrowed by ONE answer for the reader;
+    // [#23618] the lookup targets' titles by the same reader's answers for them.
     const served = await this.servedSubjectFields(list, context);
     this.redactPayloads(list, served);
-    await this.enrichRows(list, served);
+    await this.enrichRows(list, served, context);
     this.attachViewers(list, context, caller);
     return list;
   }
@@ -7640,10 +7690,11 @@ export class ApprovalService implements IApprovalService {
     }
     const row = rowFromRequest(raw);
     // [#10749] Redact before enrichment — see `redactPayloads`. [#23594] The
-    // snapshot and the subject title are narrowed by ONE answer for the reader.
+    // snapshot and the subject title are narrowed by ONE answer for the reader;
+    // [#23618] the lookup targets' titles by the same reader's answers for them.
     const served = await this.servedSubjectFields([row], context);
     this.redactPayloads([row], served);
-    await this.enrichRows([row], served);
+    await this.enrichRows([row], served, context);
     await this.attachFlowSteps(row);
     await this.attachDecisionProgress(row, raw);
     this.attachViewers([row], context, caller);

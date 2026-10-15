@@ -305,7 +305,9 @@ export class ApprovalsServicePlugin implements Plugin {
     if (!this.options.disableAutoHooks) {
       try {
         unbindAllHooks(engine);
-        bindApprovalLockHook(engine, ctx.logger);
+        // [#23618] The refusal's title is narrowed by the writer's served fields,
+        // through the same lazily-resolved authority the snapshot redaction reads.
+        bindApprovalLockHook(engine, ctx.logger, fieldVisibility);
         bindRecordDeleteCancelHook(engine, this.service, ctx.logger);
         bindDelegationWriteGuard(engine, ctx.logger);
         // [#10749] Generic-door snapshot redaction. Registered here so the
