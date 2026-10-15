@@ -23,6 +23,27 @@ import {
 } from '../default-datasource-driver-factory.js';
 import { isUnbuiltWorkspaceFailure } from '../connect-failure-remedy.js';
 import { MissingDriverPackageError } from '../missing-driver-package-error.js';
+// [#23184] The drivers' first module load is paid HERE, at module load, and not
+// inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test; the clocked-window rule of
+// `check-test-source-alias`). The factory reaches every driver through a lazy
+// `await import()`, and each of these drivers imports `@objectstack/core`, which
+// this package's vitest config aliases to its SOURCE. So the first case to
+// build a real driver (the file-backed `sqlite-wasm` round trip) used to pay a
+// cold transform of core's whole module graph: 7-9 s of this file's ~9.5 s of
+// clocked wall on a 4 vCPU dev container, against about 0.1 s of round trip.
+// The list is every driver the construction suites build; the module cache
+// hands the factory these same instances, so nothing a case runs is different.
+// ⛔ `@objectstack/driver-turso` stays OUT of this list: the turso
+// missing-package case below stages its absence without `vi.resetModules()`,
+// so it needs the factory's own lazy import to be that package's first. The
+// `sqlite-wasm` and `mongodb` absence cases reset the module registry before
+// they mock, so loading their packages here first is the same condition the
+// construction suites already created for them.
+import '@objectstack/driver-sql';
+import '@objectstack/driver-sqlite-wasm';
+import '@objectstack/driver-memory';
+import '@objectstack/driver-mongodb';
 
 const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
 
