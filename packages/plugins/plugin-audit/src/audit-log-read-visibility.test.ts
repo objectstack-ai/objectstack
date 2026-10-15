@@ -16,6 +16,7 @@ import {
   isLedgerRowAboutNoRecord,
 } from './audit-log-read-visibility.js';
 import type { CommentAccessEngine, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
+import type { ParentObjectReadAdmissionSource } from './parent-record-read-gate.js';
 
 const DENY = { id: '__audit_log_parent_denied__' };
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
@@ -26,6 +27,8 @@ function install(opts: {
   /** parentObject -> readable ids (for any caller), or a thrower. */
   readable?: Record<string, string[] | (() => never)>;
   logger?: ReturnType<typeof silentLogger>;
+  /** The security service's object-level read admission the gate resolves per read; absent: none composed. */
+  admission?: ParentObjectReadAdmissionSource;
 }) {
   let mw!: Mw;
   const calls = { scans: [] as any[], probes: [] as Array<{ object: string; ids: string[] }> };
@@ -48,7 +51,7 @@ function install(opts: {
     },
     findOne: async () => null,
   };
-  installAuditLogReadVisibility(engine, opts.logger ?? silentLogger());
+  installAuditLogReadVisibility(engine, opts.logger ?? silentLogger(), opts.admission ?? (() => undefined));
   return { mw, calls };
 }
 
@@ -118,6 +121,44 @@ describe('installAuditLogReadVisibility', () => {
     });
     expect((await read(mw)).where).toEqual({ id: { $in: ['l2', 'l3'] } });
     expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+  });
+
+  it('asks the object-level read admission first: a refused object is never read, and the WHERE is unchanged', async () => {
+    const scan = () => [
+      { id: 'l1', action: 'create', object_name: 'crm_case', record_id: 'c1' },
+      { id: 'l2', action: 'update', object_name: 'sys_migration', record_id: 'm1' },
+      { id: 'l3', action: 'config_change', object_name: 'sys_setting', record_id: null },
+    ];
+    const readable = {
+      crm_case: ['c1'],
+      sys_migration: () => {
+        throw Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' });
+      },
+    };
+    const without = install({ scan, readable });
+    const before = (await read(without.mw)).where;
+    expect(without.calls.probes.map((p) => p.object).sort()).toEqual(['crm_case', 'sys_migration']);
+
+    const canReadObject = vi.fn(async (object: string) => object !== 'sys_migration');
+    const { mw, calls } = install({ scan, readable, admission: () => ({ canReadObject }) });
+    expect((await read(mw)).where).toEqual(before);
+    expect(before).toEqual({
+      $or: [{ object_name: 'crm_case', record_id: { $in: ['c1'] } }, { id: { $in: ['l3'] } }],
+    });
+    expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+    expect(canReadObject.mock.calls.map(([object]) => object).sort()).toEqual(['crm_case', 'sys_migration']);
+  });
+
+  it('a holder of the audit capability is exempt before the admission is asked', async () => {
+    const canReadObject = vi.fn(async () => true);
+    const { mw, calls } = install({
+      scan: () => [{ id: 'l1', action: 'create', object_name: 'crm_case', record_id: 'c1' }],
+      admission: () => ({ canReadObject }),
+    });
+    const { where } = await read(mw, { context: { userId: 'u1', systemPermissions: [LEDGER_AUDIT_CAPABILITY] } });
+    expect(where).toBeUndefined();
+    expect(calls.scans).toEqual([]);
+    expect(canReadObject).not.toHaveBeenCalled();
   });
 
   it('a record action that names no record is excluded, never kept as a row about none', async () => {
@@ -215,7 +256,7 @@ describe('installAuditLogReadVisibility', () => {
 
   it('is inert on an engine without the middleware seam', () => {
     const engine: CommentAccessEngine = { registerHook: () => {}, find: async () => [], findOne: async () => null };
-    expect(() => installAuditLogReadVisibility(engine, silentLogger())).not.toThrow();
+    expect(() => installAuditLogReadVisibility(engine, silentLogger(), () => undefined)).not.toThrow();
   });
 });
 
