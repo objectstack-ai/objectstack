@@ -3601,13 +3601,14 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
 };
 
 /**
- * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7).
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7;
+ * retired from the load path at 18, #23543 F1).
  *
  * ## Why a stored value has to move at all
  *
- * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
- * still are — this conversion does NOT rescue a broken boot, and a deployment
- * that never runs it keeps connecting exactly as before. What moved is the
+ * `mongo` and `mongodb` were both accepted spellings from #4410 through 17 —
+ * this conversion never rescued a broken boot, and a stored row it has not
+ * reached still resolves the same contract and builds the same driver. What moved is the
  * CANONICAL id: commit e2798fab7 landed the ruling that renamed it to `mongodb`, the spelling both boot
  * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
  * already used, so that the id which selects a driver and the id which selects
@@ -3635,26 +3636,35 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
  *
  * Losslessness decides only that the data repair is D2. It does not decide
  * whether the family ALSO owes a D3 entry — every retirement family does
- * (`SemanticMigration`, `migrations/types.ts`). This one converts into
- * protocol 17, whose step shipped before that rule and was not back-filled,
- * so it has none.
+ * (`SemanticMigration`, `migrations/types.ts`). The rename into protocol 17
+ * shipped before that rule and was not back-filled; the value's retirement at
+ * 18 is a family of its own, and its D3 entry is
+ * `datasource-driver-mongo-alias-retired`.
  *
- * ## Why it stays on the LIVE load path
+ * ## Retired from the load path at 18 (#23543, ruling F1 A)
  *
- * Unlike the key-alias conversion above, `mongo` is not a spelling the authoring
- * gate rejects — it is still a legal alias, deliberately, so that nothing breaks
- * for a deployment that skipped the migration. There is therefore no loud
- * rejection for a live-window entry to pre-empt, and every rehydration seam
- * converging on one spelling is the whole point.
- *
- * **A recorded verdict at 18 (#23487):** it stays. Retiring it needs a decision
- * first: retire `'mongo'` as a value, refused with a prescription naming
- * `mongodb`, or record this entry as permanent. While the value is legal there
- * is no refusal for a retirement to hand the author to.
+ * Through 17 it stayed live because `mongo` was still a legal alias, so there
+ * was no refusal for a retirement to hand the author to (the verdict #23487
+ * recorded). The ruling retired the value: `mongo` left the selection face, and
+ * `DriverType` refuses an authored `datasource.driver: 'mongo'` by name with
+ * the prescription naming `mongodb` (`DriverVocabularyEntry.retiredAliases`,
+ * `data/driver/config-registry.zod.ts`). So the authoring funnel no longer
+ * replays this entry, and an author is taught the canonical id instead of
+ * being rewritten. Stored rows are the `includeRetired` seams: stored-row
+ * rehydration (`applyConversionsToStoredItem`) and the artifact door still
+ * rewrite them, and `os migrate meta --from 16` lists the edit for existing
+ * sources, as step 17's mechanical member. The spelling keeps resolving the
+ * mongodb CONTRACT, which is what lets
+ * {@link datasourceConfigDriverKeyAliases} — ordered ahead of this entry —
+ * still reach a stored `driver: 'mongo'` row's legacy config keys. That D3
+ * entry names what the chain cannot reach: an environment variable, a REST
+ * caller, a script.
  */
 const datasourceDriverMongoToMongodb: MetadataConversion = {
   id: 'datasource-driver-mongo-to-mongodb',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'datasource.driver',
   summary:
     "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
@@ -11033,6 +11043,141 @@ const pageRequiresNonCompiledKindRemoved: MetadataConversion = {
 };
 
 /**
+ * The delegated-admin scope's `manageBindings` and `authorEnvironmentSets`
+ * removed (protocol 18, #23488 — ADR-0049 enforce-or-remove; ruling of record
+ * 6181988435, letter A).
+ *
+ * Both named a write door ADR-0131 D3 retired: `manageBindings` the
+ * `sys_position_permission_set` binding rows, `authorEnvironmentSets` the
+ * `sys_permission_set` rows. A position's sets are part of its definition and
+ * a permission set is a definition; both are written through the metadata
+ * door, which admits a `manage_metadata` holder and reads no `adminScope`. So
+ * neither right was honoured anywhere. The tombstones on `AdminScopeSchema`
+ * refuse both at parse (`ADMIN_SCOPE_MANAGE_BINDINGS_REMOVED` and
+ * `ADMIN_SCOPE_AUTHOR_ENVIRONMENT_SETS_REMOVED` in
+ * `security/permission.zod.ts`).
+ *
+ * ## Why a D2 strip
+ *
+ * Both keys carried a schema DEFAULT (`false`), so a 17.x parse wrote both
+ * into every `adminScope` it emitted, whether or not the author wrote them:
+ * a built artifact and a stored `permission` row that carry a scope carry
+ * both. Setup's nested `adminScope` form and Studio's two switches wrote them
+ * explicitly too. After the tombstones the boot door and the metadata save
+ * door refuse such a set, and only the D2 table is replayed at the
+ * rehydration seams (`applyArtifactForwardConversions`,
+ * `applyConversionsToStoredItem`), so a built artifact or a stored row loads
+ * only through this entry.
+ *
+ * Each key leaves whatever it holds, `true` included: the tombstone refuses
+ * every value, so a strip that kept one would leave a set that cannot load.
+ * The strip is lossless for every door that grants a right — nothing granted
+ * either. The one decision the keys moved was the delegated-admin gate's
+ * strict-containment comparison, which no longer reads them; that change is
+ * the D3 record, the semantic entry
+ * `permission-admin-scope-binding-authoring-retired`. The emitted path names
+ * the set, as `email-template-category-is-system-removed` names its template.
+ */
+const permissionAdminScopeBindingAuthoringRemoved: MetadataConversion = {
+  id: 'permission-admin-scope-binding-authoring-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'permission.adminScope.manageBindings / permission.adminScope.authorEnvironmentSets',
+  summary:
+    "delegated-admin scope keys 'manageBindings' and 'authorEnvironmentSets' removed (ADR-0049 "
+    + 'enforce-or-remove — no door honoured either: a position\'s sets and a permission set are '
+    + 'environment definitions written through the metadata door under manage_metadata, which reads '
+    + "no adminScope. Delete both keys; a delegate's scope is placement, assignment and the allowlist)",
+  apply(stack, emit) {
+    return mapCollection(stack, 'permissions', (ps, path) => {
+      const scope = (ps as { adminScope?: unknown }).adminScope;
+      if (!isDict(scope)) return ps;
+      // Name the set, not just its index: the notice is the only record an
+      // upgrading author gets of WHICH set lost the keys.
+      const where = typeof ps.name === 'string' ? `${path}(${ps.name}).adminScope` : `${path}.adminScope`;
+      const stripped = stripKeys(scope, ['manageBindings', 'authorEnvironmentSets'], emit, where);
+      if (stripped === scope) return ps;
+      return { ...ps, adminScope: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      permissions: [
+        {
+          // What Setup's nested form or Studio's switches wrote: both keys
+          // authored, one of them `true`.
+          name: 'east_admin',
+          label: 'East Admin',
+          adminScope: {
+            businessUnit: 'east',
+            manageAssignments: true,
+            manageBindings: true,
+            authorEnvironmentSets: false,
+            assignablePermissionSets: ['sales_user'],
+          },
+        },
+        {
+          // What a 17.x parse emitted for a scope whose author wrote neither
+          // key: both defaults, materialized.
+          name: 'west_admin',
+          label: 'West Admin',
+          adminScope: {
+            businessUnit: 'west',
+            includeSubtree: true,
+            manageAssignments: true,
+            manageBindings: false,
+            authorEnvironmentSets: false,
+            assignablePermissionSets: [],
+          },
+        },
+        {
+          // Already canonical, and a set with no scope at all — both ride
+          // through untouched. The fixture's own control: the strip dispatches
+          // on key presence, and copy-on-write keeps these references.
+          name: 'north_admin',
+          label: 'North Admin',
+          adminScope: { businessUnit: 'north', manageAssignments: true, assignablePermissionSets: ['sales_user'] },
+        },
+        { name: 'sales_user', label: 'Sales User' },
+      ],
+    },
+    after: {
+      permissions: [
+        {
+          name: 'east_admin',
+          label: 'East Admin',
+          adminScope: {
+            businessUnit: 'east',
+            manageAssignments: true,
+            assignablePermissionSets: ['sales_user'],
+          },
+        },
+        {
+          name: 'west_admin',
+          label: 'West Admin',
+          adminScope: {
+            businessUnit: 'west',
+            includeSubtree: true,
+            manageAssignments: true,
+            assignablePermissionSets: [],
+          },
+        },
+        {
+          name: 'north_admin',
+          label: 'North Admin',
+          adminScope: { businessUnit: 'north', manageAssignments: true, assignablePermissionSets: ['sales_user'] },
+        },
+        { name: 'sales_user', label: 'Sales User' },
+      ],
+    },
+    // Four notices, one per STRIPPED KEY: both keys on `east_admin` and on
+    // `west_admin`, none for `north_admin` or `sales_user`.
+    expectedNotices: 4,
+  },
+};
+
+/**
  * Object-permission lifecycle bits `allowRestore` / `allowPurge` removed
  * (protocol 18, #12497 — ADR-0049 enforce-or-remove, maintainer ruling
  * 2026-08-26 accepting #1883's recommendation B).
@@ -16466,6 +16611,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: pageComponentResponsiveRemoved, order: 13 },
   { conversion: pageHeaderBreadcrumbRemoved, order: 49 },
   { conversion: pageRequiresNonCompiledKindRemoved, order: 58 },
+  { conversion: permissionAdminScopeBindingAuthoringRemoved, order: 65 },
   { conversion: permissionAllowRestorePurgeRemoved, order: 16 },
   { conversion: permissionRlsTagsRemoved, order: 42 },
   { conversion: recordChatterPositionVocabulary, order: 2 },

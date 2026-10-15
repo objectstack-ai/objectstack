@@ -32,7 +32,9 @@
  *    empty string, JSON `null`, or text that does not parse answers the
  *    default;
  *  - `admin_scope` → `adminScope` (ADR-0090 D12), only when the column is
- *    truthy and reads to a truthy value.
+ *    truthy and reads to a truthy value, minus the scope's two RETIRED keys
+ *    (`manageBindings`, `authorEnvironmentSets` — see
+ *    {@link RETIRED_ADMIN_SCOPE_KEYS}).
  *
  * The body is built from those columns alone, so a row's state and provenance
  * columns (`active`, `managed_by`, `customized`, the timestamps) are not a
@@ -66,6 +68,36 @@ export interface PermissionSetRowForDefinition {
   readonly [column: string]: unknown;
 }
 
+/**
+ * [#23488] The `adminScope` keys `@objectstack/spec` 18 retired (ADR-0049
+ * enforce-or-remove): the binding and set rows they gated are the very
+ * `sys_position_permission_set` / `sys_permission_set` rows this ceremony
+ * converts, so a Setup-authored row's `admin_scope` can carry either — and
+ * every row the security plugin projected from a parsed 17.x definition
+ * carries both, as the materialized default `false`.
+ *
+ * Dropped here, whatever they hold, because the door the ceremony saves
+ * through replays no conversion: `saveMetaItem` validates the body against
+ * the current schema, whose tombstones refuse both keys (measured: such a
+ * body answers `422 INVALID_METADATA` at `adminScope.manageBindings`, and the
+ * same body without the keys saves). The drop is the spec's own D2 strip,
+ * `permission-admin-scope-binding-authoring-removed`, applied at the one seam
+ * that seam table does not reach — lossless, since neither key granted
+ * anything. Two names, written down rather than derived: the mapping is a
+ * fixed historical shape, and a key a future major retires is that
+ * retirement's to add.
+ */
+const RETIRED_ADMIN_SCOPE_KEYS: readonly string[] = ['manageBindings', 'authorEnvironmentSets'];
+
+/** The stored scope without {@link RETIRED_ADMIN_SCOPE_KEYS}; anything but a plain object is passed on as read. */
+const withoutRetiredAdminScopeKeys = (scope: unknown): unknown => {
+  if (typeof scope !== 'object' || scope === null || Array.isArray(scope)) return scope;
+  if (!RETIRED_ADMIN_SCOPE_KEYS.some((key) => Object.prototype.hasOwnProperty.call(scope, key))) return scope;
+  const next: Record<string, unknown> = { ...(scope as Record<string, unknown>) };
+  for (const key of RETIRED_ADMIN_SCOPE_KEYS) delete next[key];
+  return next;
+};
+
 /** A facet column as stored: JSON text is parsed, a parsed value is kept, anything unreadable is the default. */
 const parseMaybeJson = (value: unknown, fallback: unknown): unknown => {
   if (typeof value !== 'string') return value ?? fallback;
@@ -98,7 +130,9 @@ function permissionSpecBodyKeys(): ReadonlySet<string> {
 export function permissionSetDefinitionFromRow(
   row: PermissionSetRowForDefinition | null | undefined,
 ): Record<string, unknown> {
-  const adminScope = row?.admin_scope ? parseMaybeJson(row.admin_scope, undefined) : undefined;
+  const adminScope = row?.admin_scope
+    ? withoutRetiredAdminScopeKeys(parseMaybeJson(row.admin_scope, undefined))
+    : undefined;
   const candidate: Record<string, unknown> = {
     name: row?.name,
     label: row?.label ?? row?.name,

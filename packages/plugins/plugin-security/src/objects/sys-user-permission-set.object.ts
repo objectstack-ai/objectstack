@@ -31,8 +31,8 @@ export const SysUserPermissionSet = ObjectSchema.create({
   icon: 'user-check',
   isSystem: true,
   // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema:
-  // delegated `manageBindings` direct grants write this under the caller's
-  // context. The bucket default is full CRUD, so no `userActions` block is
+  // delegated direct grants (a scope's `manageAssignments`) write this under
+  // the caller's context. The bucket default is full CRUD, so no `userActions` block is
   // needed — the DelegatedAdminGate is the authz.
   managedBy: 'system-data',
   description: 'Direct assignment of a permission set to a user (optionally scoped to an organization).',

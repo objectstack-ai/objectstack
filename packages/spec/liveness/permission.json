@@ -35,9 +35,9 @@
     },
     "adminScope": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/plugins/plugin-security/src/delegated-admin-gate.ts — non-tenant-admin writes to sys_user_position / sys_position_permission_set / sys_user_permission_set / sys_permission_set require a covering adminScope (BU-subtree boundary + assignable-set allowlist + strict-containment for scope grants).",
-      "note": "ADR-0090 D12 — delegated administration; proven by packages/plugins/plugin-security/src/delegated-admin-gate.test.ts."
+      "verifiedAt": "2026-10-15",
+      "evidence": "packages/plugins/plugin-security/src/delegated-admin-gate.ts — non-tenant-admin writes to sys_user_position / sys_user_permission_set require a covering adminScope (BU-subtree boundary + manageAssignments + assignable-set allowlist + strict containment, over includeSubtree / manageAssignments / the allowlist, for a granted set that carries its own scope).",
+      "note": "ADR-0090 D12 — delegated administration; proven by packages/plugins/plugin-security/src/delegated-admin-gate.test.ts. RE-VERIFIED 2026-10-15 (#23488): the scope's manageBindings and authorEnvironmentSets were RETIRED (retiredKey tombstones, D2 conversion permission-admin-scope-binding-authoring-removed) — the binding and set rows they gated are retired (ADR-0131 D3), and the metadata door that writes a position's sets and a set's body reads no adminScope, so neither flag granted anything. The scope itself stays live on the two assignment doors."
     },
     "isDefault": {
       "status": "live",

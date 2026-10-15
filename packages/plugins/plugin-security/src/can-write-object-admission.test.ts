@@ -253,8 +253,6 @@ const EAST_SCOPE = {
   businessUnit: 'east',
   includeSubtree: true,
   manageAssignments: true,
-  manageBindings: true,
-  authorEnvironmentSets: true,
   assignablePermissionSets: ['sales_user', 'sub_admin'],
 };
 const DELEGATE_SET: PermissionSet = {

@@ -2527,6 +2527,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'record is the semantic entry `page-slots-details-beside-tabs-refused`.',
   },
   {
+    id: 'permission-admin-scope-binding-authoring-retired',
+    order: 97,
+    text:
+      'It also retires the delegated-admin scope\'s `manageBindings` and `authorEnvironmentSets` '
+      + '(ADR-0049 enforce-or-remove; ADR-0090 D12): the rights to bind sets to positions and to author '
+      + 'environment permission sets, whose binding and set rows ADR-0131 D3 retired. A position\'s sets '
+      + 'and a set\'s body are environment definitions written through the metadata door by a '
+      + '`manage_metadata` holder, and that door reads no adminScope, so neither flag granted anything. '
+      + 'Both are retiredKey tombstones; the D2 conversion `permission-admin-scope-binding-authoring-removed` '
+      + 'strips them from authored sets, stored rows and built artifacts, retired from the load path; and '
+      + 'the delegated-admin gate\'s strict-containment comparison stops reading them, so an inert `true` '
+      + 'no longer lets a delegate hand out a scope equal to its own. Its D3 record is the semantic entry '
+      + '`permission-admin-scope-binding-authoring-retired`.',
+  },
+  {
     id: 'permission-restore-purge-bits-retired',
     order: 18,
     text:
