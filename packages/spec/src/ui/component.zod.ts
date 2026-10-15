@@ -5366,9 +5366,9 @@ const GridPageSizeSchema = z.number().int().positive();
 
 /**
  * [#21445] One `object-grid` group-header aggregation — the shape the grid's
- * grouping hooks read (`useGroupedData` / `useServerGroupHeaders`, measured at
- * the `.objectui-sha` pin `89cad75d55`): `field` plus `type`, and nothing
- * else. Module-private: the member below is its only carrier, and no list-view
+ * grouping hooks read (`useGroupedData` / `useServerGroupHeaders`; read points
+ * recorded in `liveness/page.json`, row `regions`): `field` plus `type`, and
+ * nothing else. Module-private: the member below is its only carrier, and no list-view
  * schema declares an `aggregations` member to share it with.
  */
 const GridAggregationSchema = lazySchema(() => strictObject({
@@ -5383,7 +5383,7 @@ const GridAggregationSchema = lazySchema(() => strictObject({
 
 /**
  * [#21445] `object-grid`'s built-in affordance toggles — the four members a
- * read point names at the `.objectui-sha` pin `89cad75d55` (see the member).
+ * read point names (see the member).
  * Module-private for the same reason as {@link GridAggregationSchema}.
  *
  * `read` and `import` are `guidance`, not members: objectui's TypeScript
@@ -5412,143 +5412,65 @@ const GridOperationsSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * `object-grid` (objectui `plugin-grid/src/ObjectGrid.tsx` @ `eb7f586b`).
- * Read points per key: `objectName` (throughout), `columns`/`fields` (:714-715),
- * `filter` (:739, lowered via `toFilterNode` to `$filter`), `defaultFilters`
- * (:922 — the LEGACY fallback read only when `filter` is absent; RETIRED in
- * v18, #11509, tombstoned below — the plural `filters` never had a read point),
- * `sort` (:741) / `defaultSort` (:943 — RETIRED #11805, tombstoned below;
- * objectui#5861 retires the read), `pagination`/`pageSize`/`showPagination`
- * (:567, :752, :2475-2480), `searchableFields`/`showSearch` (:959, :2484-2486),
- * `rowHeight` (:549), `grouping`/`aggregations` (:1076, :1136), `rowColor`
- * (:1052), `conditionalFormatting` (:884, :1061), `selection`/`selectable`
- * (:2186-2190), `rowActions` (:1927), `batchActions`/`bulkActions` (:2150),
- * `bulkActionDefs` (:2165), `navigation` (:1032), `editable`/`singleClickEdit`
- * (:2597, :2632), `resizable`/`resizableColumns` (:2598), `reorderableColumns`
- * (:2599), `frozenColumns` (:2135), `showColumnTypeIcons` (:1296 …),
- * `exportOptions`/`operations` (:1697-1721), `label`/`title` (:1732, :2557),
- * `data`/`staticData` (:372, :386).
+ * `object-grid` (objectui's `ObjectGrid`; read points recorded in
+ * `liveness/page.json`, row `regions`). Read points per key: `objectName`
+ * (throughout), `columns`/`fields`, `filter` (lowered via `toFilterNode` to
+ * `$filter`), `defaultFilters` (the LEGACY fallback read only when `filter` is
+ * absent; RETIRED in v18, #11509, tombstoned below — the plural `filters` never
+ * had a read point), `sort` / `defaultSort` (RETIRED #11805, tombstoned below;
+ * objectui#5861 retires the read), `pagination`/`pageSize`/`showPagination`,
+ * `searchableFields`/`showSearch`, `rowHeight`, `grouping`/`aggregations`,
+ * `rowColor`, `conditionalFormatting`, `selection`/`selectable`,
+ * `rowActions`, `batchActions`/`bulkActions`, `bulkActionDefs`, `navigation`,
+ * `editable`/`singleClickEdit`, `resizable`/`resizableColumns`,
+ * `reorderableColumns`, `frozenColumns`, `showColumnTypeIcons`,
+ * `exportOptions`/`operations`, `label`/`title`, `data`/`staticData`.
  *
- * [#20694] Three keys measured later, at the `.objectui-sha` pin
- * `db11afd4967c` (objectui#11130's merge commit), in the same file:
- * `description` (:5677, `resolveInlineI18nLabel(schema.description,
- * displayLocale)`, drawn above the rows at :5784 / :6303 / :6342) and
- * `emptyState` (:6225, drawn through `DataEmptyState` at :6233). The third,
- * `keyboardNavigation`, had NO read point at that pin — zero hits under
- * objectui `packages/` and `apps/` outside tests, CHANGELOGs, READMEs and
+ * [#20694] Three keys measured later, in the same file: `description`
+ * (`resolveInlineI18nLabel(schema.description, displayLocale)`, drawn above
+ * the rows) and `emptyState` (drawn through `DataEmptyState`). The third,
+ * `keyboardNavigation`, had NO read point then — zero hits under objectui
+ * `packages/` and `apps/` outside tests, CHANGELOGs, READMEs and
  * `packages/types` (its type declaration and zod twin), against 3 hits for the
- * control `schema.editable` in `ObjectGrid.tsx`. It was declared ahead of its
- * reader on purpose (the BUILD objectui#11068 chose), and its describe carried
- * the `[EXPERIMENTAL — not enforced]` marker that said so. Re-measured at objectui `b9814b334` (re-read there 2026-10-14:
- * `ObjectGrid.tsx` changed across the hop from `1fb1ced36` (+327/-80:
- * objectui#12292, objectui#12303, objectui#12030 and objectui#12270) and
- * `data-table.tsx` changed too (+320/-90: objectui#12322, objectui#12310 and
- * objectui#12292, the inline-edit save path), neither on the read; the read
- * MOVED `5631` -> `5856` with its line byte-identical, and the same method
- * still finds 15 hit lines, now against 4 for the control: objectui#12292 added
- * a fourth `schema.editable` read (`carriesConcurrencyToken`,
- * `ObjectGrid.tsx:2067`). At `1fb1ced36`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
- * `7578323a5`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
- * `9646e2ed2`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
- * `088e0f705`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
- * `e5311165a`, re-read there 2026-10-12:
- * `ObjectGrid.tsx` changed across the hop from `499799502` (+27/-11:
- * objectui#12110, objectui `5330038f4`, and objectui#12143, objectui
- * `2381c07f3`) and `data-table.tsx` changed too (+12/-1: objectui#12124 and
- * objectui#12145, the pager's and the row menu's accessible names), neither
- * on the read; the read MOVED `5615` -> `5631` with its line byte-identical,
- * and the same method still finds 15 hit lines against 3 for the control. At
- * `499799502`, re-read there 2026-10-11:
- * `ObjectGrid.tsx` changed across the hop from `0df67f237` (+89/-44:
- * objectui#12081 item 3, objectui `69bca0af6`, and objectui#12082, objectui
- * `752504520`) and `data-table.tsx` is byte-identical (`git diff --quiet`); the
- * read MOVED `5570` -> `5615` with its line byte-identical, and the same method
- * still finds 15 hit lines against 3 for the control. At `0df67f237`, re-read
- * there 2026-10-11:
- * `ObjectGrid.tsx` changed across the hop from `20c6d351a` (+82/-32:
- * objectui#12082, objectui#12103 and objectui#12105) and `data-table.tsx` is
- * byte-identical (`git diff --quiet`); the read MOVED `5520` -> `5570` with its
- * line byte-identical, and the same method still finds 15 hit lines against 3
- * for the control. At `20c6d351a`, re-read there 2026-10-10:
- * every objectui file this record cites is byte-identical across the hop from
- * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved, and the same
- * method still finds 15 hit lines against 3 for the control. At `47b1f0bb7`,
- * re-read there 2026-10-09:
- * `ObjectGrid.tsx` changed across the hop from `f0268ad78` (+19/-11:
- * objectui#11865 slice m, objectui `2063f7a96`: one import line, and the
- * grouped pager's rows-per-page picker drawn with the shared `Select`) and
- * `data-table.tsx` is byte-identical (`git diff --quiet`); the read MOVED
- * `5519` -> `5520` with its line byte-identical, and the same method still
- * finds 15 hit lines against 3 for the control. At `f0268ad78`, re-read there
- * 2026-10-09:
- * `ObjectGrid.tsx` (+85/-27: objectui#11880 item 5, objectui#6152 rounds 7 and
- * 10, objectui#11817, objectui#11809, objectui#11689) and `data-table.tsx`
- * (+434/-30: objectui#11816, objectui#11690, objectui#11682) changed across the
- * hop from `a58626c88`; the read MOVED `5461` -> `5519` with its line
- * byte-identical, and the same method still finds 15 hit lines against 3 for the
- * control. At `a58626c88`, re-read there 2026-10-06:
- * `ObjectGrid.tsx` and `data-table.tsx` are byte-identical across the hop from
- * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved, and the same
- * method still finds 15 hit lines against 3 for the control.
- * At `0abd4f9f8`, re-read there 2026-10-05:
- * `ObjectGrid.tsx` and `data-table.tsx` are byte-identical across the hop from
- * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved, and the same
- * method still finds 15 hit lines against 3 for the control.
- * At `9dfaca654`, 2026-10-05;
- * `data-table.tsx` is byte-identical across the hop from `2e818d0b5` and
- * `ObjectGrid.tsx` changed there in three type docblocks only (+9/-6,
- * objectui#8347), above the read, which MOVED `5458` -> `5461` byte-identical;
- * at `2e818d0b5`, 2026-10-04, `ObjectGrid.tsx` and `data-table.tsx` were
- * byte-identical across the hop
- * from `ab1879721`, so every anchor below held unmoved, 2026-10-03 at
- * `ab1879721`): the BUILD landed — objectui `154075ab1` (objectui#11068), inside
- * `89cad75d5570..ab1879721595` — and the grid reads the key. The same method
- * finds 0 hit lines at `89cad75d5570` and 15 at `ab1879721595`, at `2e818d0b51ec` and at this pin, against 3 for the
- * control `schema.editable` in `ObjectGrid.tsx` at each but this pin, which reads 4: `ObjectGrid.tsx:5856`
- * hands `schema.keyboardNavigation ?? inlineEditable` to the `data-table` it
- * renders, and `components/src/renderers/complex/data-table.tsx` acts on it.
- * So the marker is gone, as the member's record prescribed; see the member.
+ * control `schema.editable` in the grid. It was declared ahead of its reader on
+ * purpose (the BUILD objectui#11068 chose), and its describe carried the
+ * `[EXPERIMENTAL — not enforced]` marker that said so. The BUILD landed —
+ * objectui `154075ab1` (objectui#11068) — and the grid reads the key: the same
+ * method finds 15 hit lines, against 4 for the control (objectui#12292 added a
+ * fourth `schema.editable` read, `carriesConcurrencyToken`); the grid hands
+ * `schema.keyboardNavigation ?? inlineEditable` to the `data-table` it renders,
+ * which acts on it. So the marker is gone, as the member's record prescribed;
+ * see the member.
  *
- * [#21445] Seven members re-measured at the `.objectui-sha` pin `89cad75d55`,
- * same file, and typed with the shape each read point takes — they were
- * `z.unknown()` (`bulkActionDefs` an array of it), so `rowHeight: 42` passed
- * every door and the grid substituted or dropped the value in silence:
- * `rowHeight` (`resolveRowHeightMode`, :1311, five values, else `compact`),
- * `rowColor` (`useRowColor`, :2955, `field` + `colors`), `conditionalFormatting`
- * (`resolveConditionalFormatting`, :2964), `navigation`
- * (`useNavigationOverlay`, :2894), `aggregations` (`useGroupedData` and
- * `useServerGroupHeaders`, :3095 / :3113, `{ field, type }` with the six query
- * aggregation functions), `bulkActionDefs` (`resolveBulkActions`, :4778) and
- * `operations` (`create` :5468, `update` / `delete` :1898-1899, `export`
- * :4088 / :5340 / :6141 — the four members any read point names). The first
- * four and `bulkActionDefs` take the list view's own schemas by reference;
- * `aggregations` and `operations` have no list-view counterpart and declare
- * the measured shape here. In the same change `resizableColumns` — read only
- * as `schema.resizable ?? schema.resizableColumns` (:5361) — retires to a
+ * [#21445] Seven members re-measured and typed with the shape each read point
+ * takes — they were `z.unknown()` (`bulkActionDefs` an array of it), so
+ * `rowHeight: 42` passed every door and the grid substituted or dropped the
+ * value in silence: `rowHeight` (`resolveRowHeightMode`, five values, else
+ * `compact`), `rowColor` (`useRowColor`, `field` + `colors`),
+ * `conditionalFormatting` (`resolveConditionalFormatting`), `navigation`
+ * (`useNavigationOverlay`), `aggregations` (`useGroupedData` and
+ * `useServerGroupHeaders`, `{ field, type }` with the six query aggregation
+ * functions), `bulkActionDefs` (`resolveBulkActions`) and `operations`
+ * (`create`, `update` / `delete`, `export` — the four members any read point
+ * names). The first four and `bulkActionDefs` take the list view's own schemas
+ * by reference; `aggregations` and `operations` have no list-view counterpart
+ * and declare the measured shape here. In the same change `resizableColumns` —
+ * read only as `schema.resizable ?? schema.resizableColumns` — retires to a
  * tombstone naming `resizable`.
  *
- * [#21464] Six list members, re-measured at the same pin `89cad75d55` and
- * typed the same way — each was `z.unknown()` (an array of it for the three
- * lists), so a value of the wrong shape passed the component-props gate and
- * the grid dropped or substituted it in silence: `fields` (:1946 — field
- * NAMES on the draw path, `objectSchema.fields[fieldName]` at :3969 / :4012),
- * `selection` (`.type`, :4799-4812), `selectable` (:4813-4815, handed to the
- * table's `selectable` at :5333), `rowActions` (`string[]`, :1834-1835) and
- * `bulkActions` / `batchActions` (`batchActions ?? bulkActions`, :4763, each
- * entry a NAME `resolveBulkActions` folds; a non-string entry is skipped). The
- * three a list view also declares take the list view's own members by
- * reference; `fields` and `selectable` have no list-view counterpart and
- * declare the measured shape here; `batchActions` takes `bulkActions`'s def.
- * `columns` was held at `z.unknown()` for a ruling, and takes the list view's
- * own member by reference since stage 5 — see the member.
+ * [#21464] Six list members, re-measured and typed the same way — each was
+ * `z.unknown()` (an array of it for the three lists), so a value of the wrong
+ * shape passed the component-props gate and the grid dropped or substituted it
+ * in silence: `fields` (field NAMES on the draw path,
+ * `objectSchema.fields[fieldName]`), `selection` (`.type`), `selectable`
+ * (handed to the table's `selectable`), `rowActions` (`string[]`) and
+ * `bulkActions` / `batchActions` (`batchActions ?? bulkActions`, each entry a
+ * NAME `resolveBulkActions` folds; a non-string entry is skipped). The three a
+ * list view also declares take the list view's own members by reference;
+ * `fields` and `selectable` have no list-view counterpart and declare the
+ * measured shape here; `batchActions` takes `bulkActions`'s def. `columns` was
+ * held at `z.unknown()` for a ruling, and takes the list view's own member by
+ * reference since stage 5 — see the member.
  */
 export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-grid`',
@@ -5562,9 +5484,9 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   title: I18nLabelSchema.optional().describe('Fallback for `label` (the renderer reads `label || title`)'),
   /**
    * [#20694] One line of help text above the grid's rows, in the treatment
-   * `ListView` gives a view's description. Read at the pin `db11afd4967c`
-   * (`ObjectGrid.tsx:5677`) through `resolveInlineI18nLabel` against the
-   * display locale, exactly as `label` is, so both `I18nLabel` forms draw; a
+   * `ListView` gives a view's description. Read (read points recorded in
+   * `liveness/page.json`, row `regions`) through `resolveInlineI18nLabel`
+   * against the display locale, exactly as `label` is, so both `I18nLabel` forms draw; a
    * locale map with no usable entry draws no strip. Drawn by every branch that
    * draws rows — the card view, the split pane and the table.
    */
@@ -5573,16 +5495,16 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * [#20694] What the grid draws INSTEAD of an empty table — the list view's
    * own {@link EmptyStateSchema}, by reference (triage's direction: ⛔ not a
-   * second shape). Read at the pin `db11afd4967c` (`ObjectGrid.tsx:6225`),
-   * drawn through the shared `DataEmptyState` and `resolveIcon` that `ListView`
+   * second shape). Read (read points recorded in `liveness/page.json`, row
+   * `regions`) and drawn through the shared `DataEmptyState` and `resolveIcon` that `ListView`
    * draws a list's empty state with, and only when the grid holds no row to
    * draw (no group, when grouped), nothing is loading, and the grid's own
    * search box is not what emptied it. A member left out keeps the grid's
    * default: the shared glyph, the table's "No results found" heading, no
    * message line.
    *
-   * ⚠️ Measured at that pin: `title` and `message` reach `DataEmptyState` as
-   * they are (`:6241-6242`), with no locale-map resolution, unlike
+   * ⚠️ Measured when the member was declared: `title` and `message` reached
+   * `DataEmptyState` as they were, with no locale-map resolution, unlike
    * `description` above. So of the two `I18nLabel` forms this shared shape
    * declares, the grid draws the plain string only — an inline locale map is
    * handed to React as a child, which throws (measured on react 19.2.8:
@@ -5590,79 +5512,16 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * objectui side, not a second shape here: the list view door declares the
    * same members, and objectui's grid follows this declaration.
    *
-   * ⚠️ That gap is closed at objectui `b9814b334` (re-read there 2026-10-14:
-   * `ObjectGrid.tsx` changed across the hop from `1fb1ced36` (+327/-80:
-   * objectui#12292, objectui#12303, objectui#12030 and objectui#12270);
-   * objectui#12270 re-worded the comment above the two reads and added the
-   * `link` hand-off (`action`) right below the second, neither inside a read,
-   * so both MOVED by 230 with their lines byte-identical: `6648-6649` ->
-   * `6878-6879`, `6665-6666` -> `6895-6896`. At `1fb1ced36`, re-read there
-   * 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-   * `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * `ObjectGrid.tsx` changed across the hop from `499799502` (+27/-11:
-   * objectui#12110 and objectui#12143), every hunk above both reads (the last
-   * at `:6592`, a pager button's name written in place), so both MOVED by 16
-   * with their lines byte-identical: `6632-6633` -> `6648-6649`, `6649-6650` ->
-   * `6665-6666`. At `499799502`, re-read there 2026-10-11:
-   * `ObjectGrid.tsx` changed across the hop from `0df67f237` (+89/-44:
-   * objectui#12081 item 3 and objectui#12082), every hunk above both reads
-   * (the last at `:5321-5343`), so both MOVED by 45 with their lines
-   * byte-identical: `6587-6588` -> `6632-6633`, `6604-6605` -> `6649-6650`. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * `ObjectGrid.tsx` changed across the hop from `20c6d351a` (+82/-32:
-   * objectui#12082, objectui#12103 and objectui#12105), every hunk above both
-   * reads (the last at `:5609`), so both MOVED by 50 with their lines
-   * byte-identical: `6537-6538` -> `6587-6588`, `6554-6555` -> `6604-6605`. At
-   * `20c6d351a`, re-read there 2026-10-10:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * `ObjectGrid.tsx` changed across the hop from `f0268ad78` (+19/-11:
-   * objectui#11865 slice m, objectui `2063f7a96`: one import line, and the
-   * grouped pager's rows-per-page picker drawn with the shared `Select`), every
-   * hunk above both reads (the last at `:6454-6465`), so both MOVED by 8 with
-   * their lines byte-identical: `6529-6530` -> `6537-6538`, `6546-6547` ->
-   * `6554-6555`. At `f0268ad78`, re-read there 2026-10-09:
-   * `ObjectGrid.tsx` changed across the hop from `a58626c88` (+85/-27:
-   * objectui#11880 item 5, objectui#6152 rounds 7 and 10, objectui#11817,
-   * objectui#11809, objectui#11689), every hunk above both reads (the last at
-   * `:5383`), so both MOVED by 58 with their lines byte-identical: `6471-6472`
-   * -> `6529-6530`, `6488-6489` -> `6546-6547`. At `a58626c88`, re-read there
-   * 2026-10-06:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`, re-measured 2026-10-05: `ObjectGrid.tsx` changed across the
-   * hop from `2e818d0b5` in three type docblocks only (+9/-6, objectui#8347),
-   * all above both reads, which MOVED by +3 byte-identical; at `2e818d0b5`,
-   * re-measured 2026-10-04, it was byte-identical
-   * across the hop from `ab1879721`, where it was measured 2026-10-03): objectui#11227 (carried by objectui
-   * `6158e4c93`) resolves both members against the display locale before they
-   * reach `DataEmptyState` —
+   * ⚠️ That gap is closed (read points recorded in `liveness/page.json`, row
+   * `regions`): objectui#11227 (carried by objectui `6158e4c93`) resolves both
+   * members against the display locale before they reach `DataEmptyState` —
    * `resolveInlineI18nLabel(authoredEmptyState?.title, displayLocale)` and the
-   * same for `message` (`ObjectGrid.tsx:6878-6879`, drawn at `:6895-6896`) — so
-   * both `I18nLabel` forms draw, and a locale map with no usable entry keeps
-   * that member's default. At `89cad75d5570` the two still reached
-   * `DataEmptyState` raw.
+   * same for `message` — so both `I18nLabel` forms draw, and a locale map with
+   * no usable entry keeps that member's default.
    *
    * [#23004] The fourth member, `link`, is drawn too since objectui#12270
-   * (objectui `b434f5f47`, inside the console pin from objectui `b9814b334`):
-   * `DataEmptyState`'s action slot holds the shared `EmptyStateLink`
-   * (`ObjectGrid.tsx:6897-6899`), the one `ListView`'s empty state draws it
-   * with.
+   * (objectui `b434f5f47`): `DataEmptyState`'s action slot holds the shared
+   * `EmptyStateLink`, the one `ListView`'s empty state draws it with.
    */
   emptyState: EmptyStateSchema.optional()
     .describe('What the grid draws instead of an empty table: `{ title, message, icon, link }` — the list view\'s own empty-state shape'),
@@ -5673,29 +5532,27 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * entries. Optional here, where the list view requires it: a grid with no
    * `columns` derives them from `fields` or the object.
    *
-   * Read at the `.objectui-sha` pin `ab1879721595`
-   * (`plugin-grid/src/ObjectGrid.tsx`): `normalizeColumns` (`:819`) decides
-   * between the two arms by the FIRST entry, and the draw path (`:3367`) keeps
-   * only an entry `resolvesToDataColumn` admits (`:3451` — a non-empty string
-   * `field`, not `hidden`), reading `ListColumn`'s own members off it. So a
+   * Read points recorded in `liveness/page.json`, row `regions`:
+   * `normalizeColumns` decides between the two arms by the FIRST entry, and the
+   * draw path keeps only an entry `resolvesToDataColumn` admits (a non-empty
+   * string `field`, not `hidden`), reading `ListColumn`'s own members off it. So a
    * mixed array, a column keyed `accessorKey` / `header` / `name`, or a key the
    * grid never reads off a column (`editable`, `reference`, `options`) drew no
    * column or was ignored, and passed the component-props gate.
    *
-   * Stage 2 HELD this member at `z.unknown()` on one read: at the pin
-   * `89cad75d55` the group-header formatter drew the header labels from
+   * Stage 2 HELD this member at `z.unknown()` on one read: the group-header
+   * formatter drew the header labels from
    * `colOverride?.options || objectDefField?.options`, the authored column's
    * list winning, and `ListColumn` declares no `options`. objectui `b0bf413`
-   * (objectstack-ai/objectui#11544) retired that read: at `ab1879721595`
-   * `groupValueFormatter` (`:2979`) looks the column up typed as `ListColumn`
-   * (`:3004-3007`) for its declared `type` alone, and takes the labels from
-   * `objectDefField?.options` only (`:3010`). The hold's exit condition is
+   * (objectstack-ai/objectui#11544) retired that read: `groupValueFormatter`
+   * now looks the column up typed as `ListColumn` for its declared `type`
+   * alone, and takes the labels from `objectDefField?.options` only. The hold's exit condition is
    * met, so the member takes the reference it was held from.
    *
-   * ⚠️ One read at that pin still takes keys `ListColumn` does not declare off
-   * an authored column: the footer summary formats a column's total with the
-   * column's `currency`, `defaultCurrency`, `precision` and `scale` ahead of
-   * the field's (`plugin-grid/src/useColumnSummary.ts:558-568`). No measured
+   * ⚠️ One read still took keys `ListColumn` does not declare off an authored
+   * column when this was measured: the footer summary formats a column's total
+   * with the column's `currency`, `defaultCurrency`, `precision` and `scale`
+   * ahead of the field's. No measured
    * writer authors one on an `object-grid` column, and a list view's columns —
    * the same entry — refuse all four, so this row refuses them too; the read
    * is reported to the objectui side, as the `options` read was.
@@ -5704,11 +5561,11 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Columns — all field-name strings, or all column entries `{ field, label?, width?, align?, hidden?, sortable?, … }`, the same union a list view\'s `columns` declares. One spelling per list: an array mixing strings and column objects is refused'),
   /**
    * [#21464] Field NAMES. No list-view schema declares this member, so the
-   * shape is the one the grid reads (`ObjectGrid.tsx:1946` at the pin
-   * `89cad75d55`): when `columns` is absent the draw path looks each entry up
-   * as `objectSchema.fields[fieldName]` (`:3969`, `:4012`), so an object
+   * shape is the one the grid reads (read points recorded in
+   * `liveness/page.json`, row `regions`): when `columns` is absent the draw
+   * path looks each entry up as `objectSchema.fields[fieldName]`, so an object
    * entry named no field and drew no column. The projection reads object
-   * entries too (`:2587`), but only for the host hand-off `ListView` makes,
+   * entries too, but only for the host hand-off `ListView` makes,
    * which is not authored here. Column decoration belongs on `columns`.
    */
   fields: z.array(z.string()).optional()
@@ -5723,9 +5580,9 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * days before that ruling (#7751), not an exception to it: it accepted the
    * MongoDB-style record, the AST tuple array and the rule array alike, so
    * an author following the showcase and an author following the manifest
-   * each got a silent success receipt for a different shape. Measured at the
-   * objectui pin `53ded82b` before the declaration moved: `ObjectGrid.tsx`
-   * lowers `schema.filter` through `toFilterNode`, whose rule-array arm maps
+   * each got a silent success receipt for a different shape. Measured before
+   * the declaration moved (read points recorded in `liveness/page.json`, row
+   * `regions`): the grid lowers `schema.filter` through `toFilterNode`, whose rule-array arm maps
    * each rule to an AST node before `$filter` — the door every saved view's
    * stored rules already take. The record and tuple forms are refused at
    * `filter`; the migration prescription is the
@@ -5784,22 +5641,22 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * The `z.unknown()` this door carried was a read-point record (#7751), the
    * same vintage as its `filter` neighbour above and not an exception to the
    * ruling: it receipted an array, a string and a bare NUMBER alike with
-   * `success: true`, while `plugin-grid/src/index.tsx:222` has published
+   * `success: true`, while the grid's registration has published
    * `type: 'array'` all along — so the html tier answered `type-mismatch` on a
    * value this schema had just accepted.
    *
-   * Sequenced measurement-first, as this family has to be. Measured at the
-   * objectui pin `53ded82b`: `ObjectGrid.tsx:1457` reads `schema.sort` and the
-   * fetch path at `:1844-1851` carries an explicit `typeof === 'string'` arm
-   * putting the clause on `$orderby` verbatim, beside the array arm that folds
-   * `[{ field, order }]` onto the same parameter. ⚠️ At THIS pin the string is
-   * therefore still lowered, and this door refuses a spelling the pinned
-   * renderer honours — the ruled sequence, not an oversight: objectui#8221's
-   * PR objectui#8758 (merged 2026-09-09, after this pin) drops the string arm from
-   * `convertSortToQueryParams`, and the next pin bump carries it in. The array
-   * is the spelling both ends already agree on today; the header-arrow read at
-   * `:3998` hands `schemaSort` to `parseSchemaSort` as `TableSortItem[]`, the
-   * array shape and not the string.
+   * Sequenced measurement-first, as this family has to be (read points
+   * recorded in `liveness/page.json`, row `regions`): the grid reads
+   * `schema.sort` and its fetch path carried an explicit `typeof === 'string'`
+   * arm putting the clause on `$orderby` verbatim, beside the array arm that
+   * folds `[{ field, order }]` onto the same parameter. ⚠️ When this was
+   * declared the string was therefore still lowered, and this door refused a
+   * spelling the renderer then honoured — the ruled sequence, not an
+   * oversight: objectui#8221's PR objectui#8758 (merged 2026-09-09) drops the
+   * string arm from `convertSortToQueryParams`. The array is the spelling both
+   * ends agree on; the header-arrow read hands `schemaSort` to
+   * `parseSchemaSort` as `TableSortItem[]`, the array shape and not the
+   * string.
    */
   sort: z.array(SortItemSchema).optional()
     .describe('Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
@@ -5810,10 +5667,10 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * consumer half).
    *
    * The legacy second spelling of `sort`: a SINGLE `{ field, order }` pair the
-   * renderer read only when `sort` was absent — measured at the `.objectui-sha`
-   * pin (`190fbd01d`), `plugin-grid/src/ObjectGrid.tsx:1244-1246` (fetch path,
-   * `$orderby` fallback) and `:2847` (header arrows, where it is wrapped
-   * `[schema.defaultSort]` — the exact array shape `sort` carries). One intent,
+   * renderer read only when `sort` was absent (read points recorded in
+   * `liveness/page.json`, row `regions`) — the fetch path's `$orderby`
+   * fallback and the header arrows, where it is wrapped `[schema.defaultSort]`
+   * — the exact array shape `sort` carries. One intent,
    * two spellings; only this repo's strictObject can refuse it (objectui's
    * mirror schema is parity-test-only and parses nothing at runtime), so the
    * retirement lands here and objectui#5861 retires the reads on its own
@@ -5862,14 +5719,13 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * shape, and `DashboardWidgetConfigSchema` for an open bag with declared
    * members.
    *
-   * Read points measured at objectui `d18322415`: `ObjectGrid.tsx:1209` and
-   * `:1628` read `(schema.pagination as any)?.pageSize ?? schema.pageSize`,
-   * `:4179` reads `schema.pagination?.pageSize` and `:4359`
-   * `schema.pagination?.pageSizeOptions` — those two are the only members any
-   * read point on this door names, and the objectui registry has published
-   * this input as `type: 'object'` all along (`plugin-grid/src/index.tsx:223`),
+   * Read points recorded in `liveness/page.json`, row `regions`: the grid
+   * reads `(schema.pagination as any)?.pageSize ?? schema.pageSize`,
+   * `schema.pagination?.pageSize` and `schema.pagination?.pageSizeOptions` —
+   * those two are the only members any read point on this door names, and the
+   * objectui registry has published this input as `type: 'object'` all along,
    * so a non-object value here was already answered `type-mismatch` one tier
-   * down while this schema accepted it. `:4175` reads presence only
+   * down while this schema accepted it. Paging itself reads presence only
    * (`schema.pagination !== undefined ? true : …`), which is why an authored
    * `pagination: false` used to mean paging ON.
    */
@@ -5886,8 +5742,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   showSearch: z.boolean().optional().describe('Show the search box (read only when `searchableFields` is absent)'),
   /**
    * [#21445] The list view's own {@link RowHeightSchema}, by reference.
-   * `resolveRowHeightMode` (`ObjectGrid.tsx:1311` at the pin `89cad75d55`)
-   * admits exactly these five values — it tests membership against a table
+   * `resolveRowHeightMode` (read points recorded in `liveness/page.json`, row `regions`) admits exactly these five values — it tests membership against a table
    * typed `Record<RowHeight, …>`, so the renderer's set and this one are the
    * same set — and answers `compact` for anything else, so `42` or `'huge'`
    * rendered as a compact grid with no report.
@@ -5908,8 +5763,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * [#21445] Per-group numbers in a grouped grid's group headers. No list-view
    * schema declares this member, so the shape is the one the grid reads:
-   * `useGroupedData` and `useServerGroupHeaders` (`ObjectGrid.tsx:3095` /
-   * `:3113` at the pin `89cad75d55`) take an array of `{ field, type }` and
+   * `useGroupedData` and `useServerGroupHeaders` (read points recorded in `liveness/page.json`, row `regions`) take an array of `{ field, type }` and
    * compute each `type` — `sum`, `count`, `avg`, `min`, `max`,
    * `count_distinct`, the query AST's own {@link AggregationFunction}
    * vocabulary, by reference. `count` is the group's row count whatever
@@ -5925,8 +5779,9 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * nowhere else): an ordered array of `{ condition, style }`, the first rule
    * whose CEL predicate holds styling the row. The grid evaluates its rules
    * through the same shared evaluator the list view uses
-   * (`resolveConditionalFormatting`, `ObjectGrid.tsx:2964` at the pin
-   * `89cad75d55`), so one declaration judges both doors. ⚠️ That evaluator
+   * (`resolveConditionalFormatting`; read points recorded in
+   * `liveness/page.json`, row `regions`), so one declaration judges both
+   * doors. ⚠️ That evaluator
    * also tolerates two objectui-native rule spellings (`{ field, operator,
    * value, backgroundColor, … }` and `{ expression, … }`); neither is declared
    * on the list view, and the grid does not open a second dialect the list
@@ -5936,15 +5791,15 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Conditional formatting rules — `[{ condition, style }]`, the same rules a list view declares: the first rule whose CEL `condition` holds applies its CSS `style` map to the row'),
   /**
    * [#21445] The list view's own {@link RowColorConfigSchema}, by reference:
-   * `useRowColor` (`ObjectGrid.tsx:2955` at the pin `89cad75d55`) reads
-   * exactly `field` and `colors`.
+   * `useRowColor` (read points recorded in `liveness/page.json`, row `regions`) reads exactly `field` and
+   * `colors`.
    */
   rowColor: RowColorConfigSchema.optional()
     .describe('Row colour by field value — `{ field, colors }`, the same block a list view\'s `rowColor` declares'),
   /**
    * [#21464] The list view's own `selection` member, by reference
-   * (`SelectionConfigSchema`): the grid reads `selection.type`
-   * (`ObjectGrid.tsx:4799-4812` at the pin `89cad75d55`) — `none` is off,
+   * (`SelectionConfigSchema`): the grid reads `selection.type` (read points
+   * recorded in `liveness/page.json`, row `regions`) — `none` is off,
    * `single` and `multiple` are the two modes. ⚠️ An object with no `type`
    * turns selection ON at that read (objectui#9837, ruling A-prime: presence
    * enables), while the shared schema's own `type` default is `none`; that
@@ -5955,10 +5810,9 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   selection: ListViewSchema.shape.selection
     .describe('Selection config `{ type }` — `none`, `single` or `multiple`, the same block a list view\'s `selection` declares'),
   /**
-   * [#21464] The legacy shorthand, read only when `selection` is absent
-   * (`ObjectGrid.tsx:4813-4815` at the pin `89cad75d55`) and handed on as the
-   * table's `selectable` (`:5333`), which `resolveSelectionMode`
-   * (`components/src/renderers/complex/data-table.tsx:644`) reads as
+   * [#21464] The legacy shorthand, read only when `selection` is absent and
+   * handed on as the table's `selectable`, which `resolveSelectionMode` reads
+   * as
    * `single`, off for a falsy value, and multiple for anything else — so the
    * shape is the read's own declaration, `boolean | 'single' | 'multiple'`.
    * Typed, not retired: retiring the second spelling is its own decision.
@@ -5967,8 +5821,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Legacy selection shorthand, read only when `selection` is absent — `true` (multiple), `false` (off), `\'single\'` or `\'multiple\'`. Prefer `selection`'),
   /**
    * [#21464] The list view's own `rowActions` member, by reference: action
-   * NAMES (`ObjectGrid.tsx:1834-1835` at the pin `89cad75d55` reads a
-   * `string[]`; `edit` and `delete` select the row menu's generic entries,
+   * NAMES (the grid reads a `string[]`; `edit` and `delete` select the row menu's generic entries,
    * any other name resolves against the object's actions).
    */
   rowActions: ListViewSchema.shape.rowActions
@@ -5976,7 +5829,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * [#21464] The list view's own `bulkActions` member, by reference: action
    * NAMES, which `resolveBulkActions` folds against the object's actions
-   * (`ObjectGrid.tsx:4763` at the pin `89cad75d55`). An object entry such as
+   * (read points recorded in `liveness/page.json`, row `regions`). An object entry such as
    * `{ name }` is the def vocabulary, which belongs on `bulkActionDefs`; the
    * fold skipped it in silence.
    */
@@ -5984,8 +5837,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Bulk action names shown on selection — the same list a list view\'s `bulkActions` declares; a full def goes on `bulkActionDefs`'),
   /**
    * [#21464] The alternate spelling of `bulkActions`, read FIRST
-   * (`batchActions ?? bulkActions`, `ObjectGrid.tsx:4763` at the pin
-   * `89cad75d55`), so it takes `bulkActions`'s def: one capability, one
+   * (`batchActions ?? bulkActions`), so it takes `bulkActions`'s def: one capability, one
    * accept set. The list view declares only `bulkActions`; this second
    * spelling is typed here, not retired — retiring it is its own decision.
    */
@@ -5994,8 +5846,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * [#21445] The list view's own bulk-action def, {@link BulkActionDefSchema},
    * by identity — the element `ListViewSchema.bulkActionDefs` declares. The
-   * grid folds these defs through `resolveBulkActions` (`ObjectGrid.tsx:4778`
-   * at the pin `89cad75d55`) exactly as a list view's are folded, so the
+   * grid folds these defs through `resolveBulkActions` exactly as a list view's are folded, so the
    * schema that refuses a no-op `custom` def there refuses it here.
    */
   bulkActionDefs: z.array(BulkActionDefSchema).optional()
@@ -6003,8 +5854,9 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * [#21445] The list view's own {@link NavigationConfigSchema}, by reference
    * — the same carrier `object-kanban`, `object-calendar` and
-   * `object-timeline` take. `useNavigationOverlay` (`ObjectGrid.tsx:2894` at
-   * the pin `89cad75d55`) types its own mode union as that schema's.
+   * `object-timeline` take. `useNavigationOverlay` types its own mode union as
+   * that schema's (read points recorded in `liveness/page.json`, row
+   * `regions`).
    */
   navigation: NavigationConfigSchema.optional()
     .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation })'),
@@ -6013,121 +5865,28 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * [#20694] Declared AHEAD of its reader, deliberately: objectui#11068 chose
    * to BUILD arrow-key cell navigation for the grid, and this row is the spec
-   * half triage folded in. At the pin `db11afd4967c` nothing read it (see the
-   * block docblock above for the measurement), so an authored value changed
-   * nothing then, and the describe carried the `[EXPERIMENTAL — not enforced]`
+   * half triage folded in. When it was declared nothing read it (see the block
+   * docblock above for the measurement), so an authored value changed nothing
+   * then, and the describe carried the `[EXPERIMENTAL — not enforced]`
    * marker — the liveness ledger's own spelling for a declared-but-not-enforced
    * key, and the record here because the `page/regions` container that holds
    * page components is undrilled in the ledger
    * (`undrilled-containers.baseline.json`), so no ledger row exists for any
    * `ComponentPropsMap` key. This record said to drop the marker in the change
-   * that lands the BUILD at the pin, and it is dropped here.
+   * that lands the BUILD, and it is dropped here.
    *
-   * Read at objectui `b9814b334` (re-read there 2026-10-14:
-   * `ObjectGrid.tsx` changed across the hop from `1fb1ced36` (+327/-80:
-   * objectui#12292, objectui#12303, objectui#12030 and objectui#12270) and
-   * `data-table.tsx` changed (+320/-90: objectui#12322, objectui#12310 and
-   * objectui#12292), no hunk on a cited line, so the five `data-table.tsx`
-   * anchors MOVED with their lines byte-identical — `1025` -> `1128`, `2614` ->
-   * `2839`, `3108` -> `3338`, `2264` -> `2489`, `2290` -> `2515` — and the two
-   * grid anchors MOVED with their lines byte-identical — `5631` -> `5856`,
-   * `1857` -> `1937`; no hunk lands between the viewer's write verdict
-   * `objectInlineEditable` and `:1937`, so `inlineEditable` is still the
-   * authored `editable` AND that verdict. The one hunk inside
-   * `handleCellKeyDown` is its Enter branch, which now starts the edit on the
-   * row's record rather than its index (objectui#12310); the arrow-key moves
-   * between `navigationTarget` and it are untouched. At `1fb1ced36`, re-read
-   * there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-   * `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * `ObjectGrid.tsx` changed across the hop from `499799502` (+27/-11:
-   * objectui#12110 and objectui#12143) and `data-table.tsx` changed (+12/-1:
-   * objectui#12124 and objectui#12145: seven lines of default translations
-   * above every cited read, one `aria-label` rewritten in place and four added
-   * below them), so the five `data-table.tsx` anchors MOVED by 7 with their
-   * lines byte-identical — `1018` -> `1025`, `2607` -> `2614`, `3101` -> `3108`,
-   * `2257` -> `2264`, `2283` -> `2290` — and the two grid anchors MOVED with
-   * their lines byte-identical — `5615` -> `5631`, `1851` -> `1857`; no hunk
-   * lands between the viewer's write verdict `objectInlineEditable` and `:1857`,
-   * nor in the arrow-key handling between `navigationTarget` and the end of
-   * `handleCellKeyDown`, so `inlineEditable` is still the authored `editable`
-   * AND that verdict. At `499799502`, re-read there 2026-10-11:
-   * `ObjectGrid.tsx` changed across the hop from `0df67f237` (+89/-44:
-   * objectui#12081 item 3 and objectui#12082) and `data-table.tsx` is
-   * byte-identical (`git diff --quiet`), so the five `data-table.tsx` anchors
-   * held unmoved and the two grid anchors MOVED with their lines
-   * byte-identical — `5570` -> `5615`, `1850` -> `1851`; no hunk lands between
-   * the viewer's write verdict `objectInlineEditable` and `:1851`, so
-   * `inlineEditable` is still the authored `editable` AND that verdict. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * `ObjectGrid.tsx` changed across the hop from `20c6d351a` (+82/-32:
-   * objectui#12082, objectui#12103 and objectui#12105) and `data-table.tsx` is
-   * byte-identical (`git diff --quiet`), so the five `data-table.tsx` anchors
-   * held unmoved and the two grid anchors MOVED with their lines
-   * byte-identical — `5520` -> `5570`, `1825` -> `1850`; the one hunk near them
-   * re-wrote the viewer's write verdict `objectInlineEditable` above `:1850` to
-   * read the affordance-to-grant map's `listInlineEdit` row (objectui#12082),
-   * which asks the object's edit policy (the managed-object policy against the
-   * effective API operations) and the update grant, so `inlineEditable` is
-   * still the authored `editable` AND the viewer's write verdict. At
-   * `20c6d351a`, re-read there 2026-10-10:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * `ObjectGrid.tsx` changed across the hop from `f0268ad78` (+19/-11:
-   * objectui#11865 slice m, objectui `2063f7a96`: one import line, and the
-   * grouped pager's rows-per-page picker drawn with the shared `Select`) and
-   * `data-table.tsx` is byte-identical (`git diff --quiet`), so the two grid
-   * anchors MOVED with their lines byte-identical — `5519` -> `5520`, `1824` ->
-   * `1825` — the five `data-table.tsx` anchors `1018`, `2607`, `3101`, `2257`
-   * and `2283` held unmoved, and no hunk lands in the arrow-key handling
-   * between `navigationTarget` and the end of `handleCellKeyDown`. At
-   * `f0268ad78`, re-read there 2026-10-09:
-   * `ObjectGrid.tsx` (+85/-27: objectui#11880 item 5, objectui#6152 rounds 7 and
-   * 10, objectui#11817, objectui#11809, objectui#11689) and `data-table.tsx`
-   * (+434/-30: objectui#11816, objectui#11690, objectui#11682) changed across
-   * the hop from `a58626c88` around the reads without touching one, so every
-   * anchor MOVED with its line byte-identical — `5461` -> `5519`, `1815` ->
-   * `1824`; `787` -> `1018`, `2235` -> `2607`, `2700` -> `3101`, `1964` ->
-   * `2257`, `1990` -> `2283` — and no hunk lands in the arrow-key handling
-   * between `navigationTarget` and the end of `handleCellKeyDown`. At
-   * `a58626c88`, re-read there 2026-10-06:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`,
-   * re-measured 2026-10-05: `data-table.tsx` is byte-identical across the hop
-   * from `2e818d0b5`, so its anchors held unmoved, and `ObjectGrid.tsx`
-   * changed there in three type docblocks only (+9/-6, objectui#8347), above
-   * both of its reads, which MOVED by +3 byte-identical — `5458` -> `5461` and
-   * `1812` -> `1815`; at `2e818d0b5`, re-measured 2026-10-04, `ObjectGrid.tsx`
-   * and `data-table.tsx` were
-   * byte-identical across the hop from `ab1879721`, where they were measured
-   * 2026-10-03; the BUILD is objectui `154075ab1`, objectui#11068):
-   * `plugin-grid/src/ObjectGrid.tsx:5856` hands the data table
+   * Read points recorded in `liveness/page.json`, row `regions` (the BUILD is
+   * objectui `154075ab1`, objectui#11068): the grid hands the data table
    * `keyboardNavigation: schema.keyboardNavigation ?? inlineEditable`, where
-   * `inlineEditable` (`:1937`) is the authored `editable` AND the viewer's
-   * write verdict — so an absent key follows whether the grid RENDERS
-   * editable, `true` turns the navigation on for a read-only grid, and `false`
-   * turns it off on an editable one. `components/src/renderers/complex/data-table.tsx`
-   * (`keyboardNavigation = false` by default, `:1128`) then gives the table
-   * `role="grid"` (`:2839`) and makes the data cells one roving Tab stop
-   * (`tabIndex` 0 on one cell and -1 on the rest, `:3338`) that the arrow
-   * keys, Home / End and Ctrl+Home / Ctrl+End move (`navigationTarget`,
-   * `:2489`; `handleCellKeyDown`, `:2515`). A widget a cell renders keeps its
-   * own Tab stop. Off, every data cell is its own Tab stop, as before.
+   * `inlineEditable` is the authored `editable` AND the viewer's write verdict
+   * — so an absent key follows whether the grid RENDERS editable, `true` turns
+   * the navigation on for a read-only grid, and `false` turns it off on an
+   * editable one. The data table (`keyboardNavigation = false` by default)
+   * then gives the table `role="grid"` and makes the data cells one roving
+   * Tab stop (`tabIndex` 0 on one cell and -1 on the rest) that the arrow
+   * keys, Home / End and Ctrl+Home / Ctrl+End move (`navigationTarget`;
+   * `handleCellKeyDown`). A widget a cell renders keeps its own Tab stop. Off,
+   * every data cell is its own Tab stop, as before.
    */
   keyboardNavigation: z.boolean().optional()
     .describe('Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Defaults to on when the grid renders editable — `editable` set and the viewer allowed to edit; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid'),
@@ -6135,8 +5894,8 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * REMOVED (#21445, ADR-0049 enforce-or-remove; objectui#6152 ruling A,
    * `resizable` is canonical). The legacy second spelling of `resizable`,
-   * read only as `schema.resizable ?? schema.resizableColumns` — measured at
-   * the `.objectui-sha` pin `89cad75d55`, `plugin-grid/src/ObjectGrid.tsx:5361`.
+   * read only as `schema.resizable ?? schema.resizableColumns` (read points
+   * recorded in `liveness/page.json`, row `regions`).
    * One switch, two spellings, and a grid authoring both silently ignored this
    * one. Zero writers in either repository, so there is no window. objectui#6152
    * retires the read on its own schedule, once a released spec carries this.
@@ -6181,11 +5940,11 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   /**
    * [#21445] The grid's built-in affordance toggles. No list-view schema
    * declares this member, so the shape is the one the grid reads: four
-   * booleans, each named by a read point at the pin `89cad75d55` — `create`
-   * (the add-row affordance, `ObjectGrid.tsx:5468`), `update` / `delete` (the
-   * row menu's generic Edit / Delete entries, `:1898-1899`) and `export`
-   * (`:4088`, `:5340`, `:6141`). A declared block REPLACES the grid's default
-   * rather than merging under it (`:1818-1822`), so a row affordance the block
+   * booleans, each named by a read point (recorded in `liveness/page.json`, row
+   * `regions`) — `create` (the add-row affordance), `update` / `delete` (the
+   * row menu's generic Edit / Delete entries) and `export` (the export menu
+   * and the table's `exportable`). A declared block REPLACES the grid's
+   * default rather than merging under it, so a row affordance the block
    * does not name is withheld. Nothing reads `read` or `import`, which
    * objectui's TypeScript twin declares; each is refused with that reason
    * rather than accepted as a toggle that toggles nothing.
@@ -6194,8 +5953,9 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
     .describe('Built-in affordance toggles `{ create?, update?, delete?, export? }` (booleans). A declared block replaces the grid\'s default: `update` / `delete` not named are withheld from the row menu, `create` enables the add-row affordance, and `export: false` hides the export menu'),
   /**
    * Data source binding — `ViewDataSchema`, the #5090-pinned authority the
-   * objectui registry declares against (`plugin-grid/src/index.tsx:225`
-   * `type: 'object'`, held by `gridDataInputContract.test.ts`). Until the
+   * objectui registry declares against (a `data` input of `type: 'object'`,
+   * held by objectui's own contract test; read points recorded in
+   * `liveness/page.json`, row `regions`). Until the
    * ui#6207 ruling (2026-08-25, Option A: 「同意」) this entry said
    * `z.array(z.unknown())` — the bare-array spelling of the deprecated
    * `staticData` shortcut — so the two spec authorities refused each other's
