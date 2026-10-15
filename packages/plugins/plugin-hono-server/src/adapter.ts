@@ -47,6 +47,7 @@ import {
     resolveThrownHttpError,
     looksLikeInternalErrorLeak,
     INTERNAL_ERROR_MESSAGE,
+    structuredCodeAnswer,
 } from '@objectstack/types';
 
 /**
@@ -291,6 +292,13 @@ function toLoggableError(thrown: unknown): Error {
  * is not restated there: a second recogniser is how the doors would start
  * disagreeing about what counts as declared. Each caller keeps its own
  * fallback arm for the `undefined` answer.
+ *
+ * ## A conflict's current state (#23531)
+ *
+ * A `409 CONCURRENT_UPDATE` also carries the server's `currentVersion` and
+ * `currentRecord` in `details`, read off `RestServer`'s classification by
+ * {@link declaredConflictContext}. Before this, both Hono doors answered that
+ * `409` with `code` and `message` only.
  */
 export function declaredEnvelopeForThrow(thrown: unknown): {
     status: number;
@@ -318,6 +326,11 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
         ? INTERNAL_ERROR_MESSAGE
         : resolved.message;
 
+    // [#23531] A conflict's current state joins the producer's own context in
+    // `details`. Absent unless the conflict stated it.
+    const conflict = declaredConflictContext(thrown, resolved);
+    const details = conflict ? { ...resolved.details, ...conflict } : resolved.details;
+
     return {
         status: resolved.status,
         body: {
@@ -330,11 +343,72 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
                 // forwards them. Both are absent unless the producer declared
                 // them, so a throw that carried neither renders the same two
                 // keys it always did.
-                ...(resolved.details ? { details: resolved.details } : {}),
+                ...(details ? { details } : {}),
                 ...(resolved.userMessage !== undefined ? { userMessage: resolved.userMessage } : {}),
             },
         },
     };
+}
+
+/**
+ * [#23531] The current state a `409 CONCURRENT_UPDATE` carries —
+ * `currentVersion` and `currentRecord` — or `undefined` for any other answer,
+ * and for a conflict that stated neither.
+ *
+ * ## Why
+ *
+ * `wire-format.mdx` ("Concurrent Update — 409 Conflict") and
+ * `ConcurrentUpdateError`'s docblock (`metadata-protocol`) say the conflict
+ * answer carries the server's current version and record, and objectui's
+ * conflict bar reads both. `RestServer` answers them. The two Hono doors did
+ * not: {@link declaredEnvelopeForThrow} forwards only the `details` that
+ * `resolveThrownHttpError` derives, and the two fields are own properties of
+ * the thrown error that resolver never reads.
+ *
+ * ## ONE classification, not a third spelling
+ *
+ * The fields are read off `structuredCodeAnswer` (`@objectstack/types`), the
+ * arm `RestServer`'s `mapDataError` answers this conflict through. So the
+ * Hono doors forward what the REST door forwards, under the same rule (each
+ * field only when the producer stated it), and an arm that grows a field grows
+ * it at every door. ⛔ Never list the fields here. Only the arm's own sentence
+ * and code are dropped: this envelope already carries both, as `message` and
+ * `code`.
+ *
+ * ## Where they land
+ *
+ * In `details`, the wrapped envelope's declared context slot
+ * (`ApiErrorSchema.details`). That is where `@objectstack/client` reads a
+ * wrapped body's context from (`errorBody.error.details`), and so where
+ * objectui's `normaliseClientError` finds them. The REST door's flat body has
+ * no envelope, so it carries them at the top level, beside its `code`.
+ *
+ * ## Only this code
+ *
+ * The card scoped the change to `CONCURRENT_UPDATE`. The classification has
+ * other structured arms (`DELETE_RESTRICTED`, `METADATA_CONFLICT`, …); this
+ * function does not take their fields. Both the status and the code must
+ * match the envelope already decided, so the arm can only add context to that
+ * envelope, never change it.
+ *
+ * ⚠️ `currentRecord` is forwarded as the protocol threw it, exactly as the
+ * REST door forwards it. The protocol reads it with a system context
+ * (`probeRecord`), so it is not narrowed to what the caller may read. That is
+ * a property of the producer and both doors, not of this one.
+ */
+function declaredConflictContext(
+    thrown: unknown,
+    resolved: { status: number; code: string },
+): Record<string, unknown> | undefined {
+    if (resolved.code !== 'CONCURRENT_UPDATE') return undefined;
+    const arm = structuredCodeAnswer(thrown);
+    if (arm === undefined || arm.status !== resolved.status || arm.body.code !== resolved.code) {
+        return undefined;
+    }
+    const context = Object.fromEntries(
+        Object.entries(arm.body).filter(([key]) => key !== 'error' && key !== 'code'),
+    );
+    return Object.keys(context).length > 0 ? context : undefined;
 }
 
 /**
