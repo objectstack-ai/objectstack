@@ -28,6 +28,7 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Config } from '@oclif/core';
 import Database from 'better-sqlite3';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,19 +45,27 @@ import '@objectstack/platform-objects/plugin';
 
 type Command = (typeof import('./orphans.js'))['default'];
 let SecretOrphans: Command;
-
-// The command's module graph is large, and oclif reads the package's config on
-// the first run: both are paid outside the case timeout.
-beforeAll(async () => {
-  ({ default: SecretOrphans } = await import('./orphans.js'));
-}, 60_000);
+let oclifConfig: Config;
 
 const CASE_TIMEOUT_MS = 60_000;
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
-/** Env that would point the boot elsewhere, or ask the driver for another journal mode. */
+// The command's module graph is large, and oclif reads the package's config
+// (its whole command table) on a first run: both are paid here, outside the
+// case, which then clocks the boot and the report alone.
+beforeAll(async () => {
+  ({ default: SecretOrphans } = await import('./orphans.js'));
+  oclifConfig = await Config.load({ root: CLI_ROOT });
+}, 60_000);
+
+/**
+ * Env that would point the boot elsewhere, ask the driver for another journal
+ * mode, or hand the settings service a key from this runner's own key home.
+ * `OS_HOME` is pointed at the case directory instead: an empty key home.
+ */
 const OVERRIDING_ENV = [
   'OS_DATABASE_URL', 'DATABASE_URL', 'TURSO_DATABASE_URL', 'OS_DATABASE_DRIVER', 'OS_DATABASE_SQLITE_JOURNAL_MODE',
+  'OS_SECRET_KEY', 'OS_DEV_CRYPTO_KEY', 'OBJECTSTACK_DEV_CRYPTO_KEY', 'OS_HOME', 'OBJECTSTACK_HOME', 'OS_CRYPTO_AUTOKEY',
 ] as const;
 
 let dir: string;
@@ -71,6 +80,7 @@ beforeEach(() => {
     delete process.env[key];
   }
   dir = mkdtempSync(join(tmpdir(), 'os-secret-orphans-journal-mode-'));
+  process.env.OS_HOME = dir;
   file = join(dir, 'fixture.db');
   const seed = new Database(file);
   seed.pragma('journal_mode = delete');
@@ -126,7 +136,7 @@ async function run(argv: string[]): Promise<{ lines: string; exitCode: number }>
   let thrownExit: number | undefined;
   try {
     try {
-      await SecretOrphans.run(argv, { root: CLI_ROOT });
+      await SecretOrphans.run(argv, oclifConfig);
     } catch (error) {
       if (!isExitSignal(error)) throw error;
       thrownExit = (error as { oclif?: { exit?: number } }).oclif?.exit;

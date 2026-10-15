@@ -18,7 +18,8 @@
  * against it.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Config } from '@oclif/core';
 import { fileURLToPath } from 'node:url';
 import MigrateResume from './resume.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
@@ -42,6 +43,14 @@ vi.mock('node:readline', async (importOriginal) => {
 });
 
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+
+// oclif reads the package's config (its whole command table) on a first run;
+// it is paid here, outside the cases.
+let oclifConfig: Config;
+beforeAll(async () => {
+  oclifConfig = await Config.load({ root: CLI_ROOT });
+}, 60_000);
+
 const SQLITE_CONFIG = { client: 'better-sqlite3', connection: { filename: '/srv/app/.objectstack/data/objectstack.db' } };
 const POSTGRES_CONFIG = { client: 'pg', connection: 'postgres://db.example.com:5432/app' };
 
@@ -81,7 +90,7 @@ async function runHuman(argv: string[]): Promise<string[]> {
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
   const savedExitCode = process.exitCode;
   try {
-    await MigrateResume.run(argv, { root: CLI_ROOT });
+    await MigrateResume.run(argv, oclifConfig);
     return log.mock.calls.map((c) => c.map(String).join(' '));
   } finally {
     process.exitCode = savedExitCode;

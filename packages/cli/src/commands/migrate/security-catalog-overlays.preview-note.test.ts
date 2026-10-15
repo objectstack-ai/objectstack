@@ -17,7 +17,8 @@
  * boot is replaced by one that refuses: the case reads what was printed first.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { Config } from '@oclif/core';
 import { fileURLToPath } from 'node:url';
 import { isExitSignal } from '../../utils/format.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
@@ -35,6 +36,14 @@ vi.mock('../../utils/schema-migrate.js', async (importOriginal) => ({
 }));
 
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+
+// oclif reads the package's config (its whole command table) on a first run;
+// it is paid here, outside the cases.
+let oclifConfig: Config;
+beforeAll(async () => {
+  oclifConfig = await Config.load({ root: CLI_ROOT });
+}, 60_000);
+
 const FILE = '/srv/app/.objectstack/data/objectstack.db';
 
 afterEach(() => {
@@ -51,7 +60,7 @@ async function run(argv: string[]): Promise<{ lines: string[]; exitCode: number 
   let exitCode: number | undefined;
   try {
     try {
-      await MigrateSecurityCatalogOverlays.run(argv, { root: CLI_ROOT });
+      await MigrateSecurityCatalogOverlays.run(argv, oclifConfig);
     } catch (thrown) {
       if (!isExitSignal(thrown)) throw thrown;
       exitCode = (thrown as { oclif?: { exit?: number } }).oclif?.exit;

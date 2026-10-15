@@ -16,7 +16,8 @@
  * target, and only there. The boot is replaced by a stack over a fake engine.
  */
 
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
+import { Config } from '@oclif/core';
 import { fileURLToPath } from 'node:url';
 import MigrateRecordedBy from './recorded-by.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
@@ -69,6 +70,14 @@ describe('os migrate recorded-by', () => {
 });
 
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+
+// oclif reads the package's config (its whole command table) on a first run;
+// it is paid here, outside the cases.
+let oclifConfig: Config;
+beforeAll(async () => {
+  oclifConfig = await Config.load({ root: CLI_ROOT });
+}, 60_000);
+
 const SQLITE_CONFIG = { client: 'better-sqlite3', connection: { filename: '/srv/app/.objectstack/data/objectstack.db' } };
 const POSTGRES_CONFIG = { client: 'pg', connection: 'postgres://db.example.com:5432/app' };
 
@@ -98,7 +107,7 @@ async function runHuman(argv: string[]): Promise<string[]> {
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
   const savedExitCode = process.exitCode;
   try {
-    await MigrateRecordedBy.run(argv, { root: CLI_ROOT });
+    await MigrateRecordedBy.run(argv, oclifConfig);
     return log.mock.calls.map((c) => c.map(String).join(' '));
   } finally {
     process.exitCode = savedExitCode;
