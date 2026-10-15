@@ -109,7 +109,18 @@ export interface ObjectKernelConfig {
     /** Graceful shutdown timeout in milliseconds */
     shutdownTimeout?: number;
     
-    /** Whether to rollback on startup failure */
+    /**
+     * Whether a failed boot destroys the plugins that started, in reverse start
+     * order. Default `true`: a `start()` that throws or times out, the
+     * system-requirement check, and a `kernel:ready`, `kernel:bootstrapped` or
+     * `kernel:listening` handler that throws each fail the boot after that
+     * rollback. A failing `start()` rejects with an error naming the plugin
+     * (its `cause` is the original); the other failures reject with their own
+     * error, unwrapped. `false`: a failing `start()` is logged and the boot
+     * goes on without that plugin; any later failure rejects the boot with the
+     * started plugins left started (the kernel is `stopped` and `shutdown()` on
+     * it is a no-op), so the host owns whatever they hold.
+     */
     rollbackOnFailure?: boolean;
     
     /** Whether to skip strict system requirement validation (Critical for testing) */

@@ -10,8 +10,8 @@ Clause-②: no
 
 - **What changes.** A boot that fails after the last `start()` now destroys the plugins that started, in reverse start order, through the same rollback a failing `start()` already ran. One teardown answers a failed boot at whatever phase it fails. A kernel built with `rollbackOnFailure: false` keeps opting out of both.
 - **What does not change.**
-  - The rejection is still the original error, unwrapped.
-  - A `destroy()` that throws during the rollback is logged at `error` and does not replace it; the plugins started before it are still destroyed.
+  - A readiness or hook failure still rejects with its own error, unwrapped; a failing `start()` still rejects with the error naming the plugin.
+  - A `destroy()` that throws during the rollback is logged at `error` and does not replace the boot error; the plugins started before it are still destroyed.
   - A plugin whose `start()` failed or never ran is not destroyed.
   - A failed `start()` still rolls back exactly once.
   - `shutdown()` after any failed boot is still a no-op, so nothing is destroyed twice.
