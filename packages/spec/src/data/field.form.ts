@@ -131,6 +131,22 @@ export const fieldForm = defineForm({
         { field: 'language', visibleWhen: "data.type == 'code'", helpText: 'Editor language for syntax highlighting (e.g. javascript, python, sql).' },
         { field: 'autonumberFormat', visibleWhen: "data.type == 'autonumber'", helpText: 'Literal text plus a {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens in the business time zone, and {field_name} interpolation. The counter resets per rendered prefix. Omitted on an autonumber field it defaults to {0000}.' },
         { field: 'referenceVia', visibleWhen: "data.type == 'text'", helpText: 'Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`.' },
+        // objectui#12489 ruling 6203737086, letter A — the platform-deleted
+        // predicate that rides beside `referenceVia`. A strict two-key object,
+        // so it takes the `currencyConfig` composite face (declared sub-rows
+        // reach the translation catalogs). Gated like `referenceVia`; the parse
+        // refuses it without one, and refuses a sibling that is not a declared
+        // single-value `select` or a value that is not one of its options.
+        {
+          field: 'referenceDeletedWhen',
+          type: 'composite',
+          visibleWhen: "data.type == 'text'",
+          helpText: 'Only beside referenceVia: on rows where a sibling select field holds one of its options, the record this pointer names was deleted by the platform, and the pointer is shown as a tombstone labelled by that option. Unset: no row is marked deleted.',
+          fields: [
+            { field: 'field', type: 'text', helpText: 'The sibling select field on this object (snake_case), e.g. cancel_reason. It must be a single-value select declaring inline options.' },
+            { field: 'value', type: 'text', helpText: 'The option value of that select field meaning the target was deleted, e.g. record_deleted. It must be one of its declared option values.' },
+          ],
+        },
         // #22870 (ruling 6116489638, Q1 → A) — inbound mail association. A
         // PARSE gate like the deadline pair below: `FieldSchema` refuses the
         // key on every type but `email`, so the row shows exactly where it

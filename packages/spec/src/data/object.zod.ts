@@ -1824,6 +1824,116 @@ function refuseNonPictureImageField(
 }
 
 /**
+ * [objectui#12489 ruling 6203737086, letter A] A field's
+ * `referenceDeletedWhen: { field, value }` names a SIBLING `select` field on
+ * this object and one of that field's declared option values — the row state
+ * in which the record the field's `referenceVia` pointer names was deleted by
+ * the platform. A renderer draws the tombstone from that option's own label,
+ * so a predicate that names a missing field, a non-`select` field, or a value
+ * the field cannot hold would parse and never mark anything (ADR-0049
+ * declared = enforced).
+ *
+ * Refused, one located issue per offending field at
+ * `['fields', <field>, 'referenceDeletedWhen', 'field' | 'value']`, when:
+ *
+ *  - `field` names the declaring field itself, or no declared field;
+ *  - the sibling is not a `select`, or is a `multiple: true` select (its row
+ *    value is an array, so "holds that value" has no single reading);
+ *  - the sibling declares no inline `options` (a `picklist`-backed select's
+ *    values live outside this object, so the option cannot be checked here);
+ *  - `value` is not one of the sibling's option values.
+ *
+ * Judged here, in the object's `superRefine` beside
+ * {@link refuseNonPictureImageField}: `FieldSchema` sees one field at a time
+ * and refuses only the half it can see (the predicate without a
+ * `referenceVia`). Judged at parse, not only in `create()`, so every door —
+ * `defineStack`, a raw `.parse()`, the save door — refuses it; the key is new,
+ * so no metadata at rest carries it. Judged against the AUTHORED field map.
+ */
+function refuseDishonestReferenceDeletedWhen(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const fieldMap = fields as Record<string, unknown>;
+  for (const [fieldName, fieldDef] of Object.entries(fieldMap)) {
+    const predicate = (fieldDef as { referenceDeletedWhen?: unknown } | null)?.referenceDeletedWhen as
+      | { field?: unknown; value?: unknown }
+      | undefined;
+    if (predicate === null || typeof predicate !== 'object') continue;
+    const sibling = predicate.field;
+    const value = predicate.value;
+    if (typeof sibling !== 'string' || typeof value !== 'string') continue;
+    const at = (leaf: 'field' | 'value') => ['fields', fieldName, 'referenceDeletedWhen', leaf];
+    const prescription =
+      '`referenceDeletedWhen.field` must name a single-value `select` field of this object that declares '
+      + 'inline `options`, and `referenceDeletedWhen.value` one of its option values (e.g. `{ field: '
+      + "'cancel_reason', value: 'record_deleted' }`).";
+    if (sibling === fieldName) {
+      ctx.addIssue({
+        code: 'custom',
+        path: at('field'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.field: `
+          + `'${sibling}'\` — itself. The predicate reads a SIBLING \`select\` field. ${prescription}`,
+      });
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(fieldMap, sibling)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: at('field'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.field: `
+          + `'${sibling}'\`, but the object declares no field \`${sibling}\`. ${prescription}`,
+      });
+      continue;
+    }
+    const siblingDef = fieldMap[sibling] as
+      | { type?: unknown; multiple?: unknown; options?: unknown }
+      | null
+      | undefined;
+    const siblingType = siblingDef?.type;
+    if (siblingType !== 'select' || siblingDef?.multiple === true) {
+      const what = siblingType === 'select' ? 'a `multiple: true` `select`' : `a \`${String(siblingType)}\` field`;
+      ctx.addIssue({
+        code: 'custom',
+        path: at('field'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.field: `
+          + `'${sibling}'\`, which is ${what}, not a single-value \`select\`. ${prescription}`,
+      });
+      continue;
+    }
+    const options = Array.isArray(siblingDef?.options) ? (siblingDef.options as Array<{ value?: unknown }>) : [];
+    if (options.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: at('field'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.field: `
+          + `'${sibling}'\`, a \`select\` that declares no inline \`options\` (a \`picklist\`-backed select's `
+          + `values are not declared on this object, so \`'${value}'\` cannot be checked). ${prescription}`,
+      });
+      continue;
+    }
+    const declared = options.map((o) => o?.value).filter((v): v is string => typeof v === 'string');
+    if (!declared.includes(value)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: at('value'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.value: `
+          + `'${value}'\`, but \`select\` field \`${sibling}\` declares no option \`${value}\`. Its option `
+          + `values: ${declared.map((v) => `\`${v}\``).join(', ')}. ${prescription}`,
+      });
+    }
+  }
+}
+
+/**
  * The machine-name grammar an attached block and its leaves share with field
  * names — they are keys on the same served row (`record.<block>.<leaf>`).
  */
@@ -2930,6 +3040,10 @@ const ObjectSchemaBase = strictObject(
   // object — the same door, for the same reason: only the object holds the
   // field map the pointer resolves against.
   refuseNonPictureImageField(object.name, object.imageField, object.fields, ctx);
+  // [objectui#12489 ruling 6203737086, letter A] A `referenceDeletedWhen`
+  // predicate names a declared single-value `select` sibling and one of its
+  // options — the same door: only the object holds the sibling map.
+  refuseDishonestReferenceDeletedWhen(object.name, object.fields, ctx);
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
