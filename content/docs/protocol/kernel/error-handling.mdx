@@ -72,14 +72,16 @@ universal one.
 
 Two corollaries, and both of them bite:
 
-- **A refusal a writer *builds* always carries that writer's envelope.** `UNIQUE_VIOLATION`,
-  `DELETE_RESTRICTED` and `INVALID_FIELD` are built by the `/data` door's classification
-  arms, so they are **always flat**. `RATE_LIMIT_EXCEEDED` is built by the inbound rate
-  limiter, so it is **always nested**.
+- **A refusal a writer *builds* always carries that writer's envelope.** `UNIQUE_VIOLATION`
+  is built by the `/data` door's classification arms, so it is **always flat**.
+  `RATE_LIMIT_EXCEEDED` is built by the inbound rate limiter, so it is **always nested**.
 - **A refusal that is *thrown* and classified at the boundary carries the envelope of
   whichever door caught it.** `PERMISSION_DENIED`, `RESOURCE_NOT_FOUND`,
   `SERVICE_UNAVAILABLE` and `INTERNAL_ERROR` are all thrown by shared guards and reach
-  clients in **either** envelope depending on the route.
+  clients in **either** envelope depending on the route. So are `DELETE_RESTRICTED`,
+  `INVALID_FIELD` and `OBJECT_NOT_FOUND`, which the engine and the protocol throw: the
+  `@objectstack/rest` `/data` door answers them flat, and a [Hono door](#hono-doors)
+  answers them nested, with their structured fields under `error.details`.
 
 So do not derive the envelope from the code. Derive it from the body you are holding:
 
@@ -102,12 +104,14 @@ mistake on this page — `body.error.code` is `undefined` against a flat body, a
 ### Nested envelope — `{ success, error: { … } }`
 
 The envelope [`BaseResponseSchema`](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/api/contract.zod.ts)
-declares. Written by two writers:
+declares. Written by three writers:
 
 - `sendOk` / `sendError` in `packages/types/src/response-envelope.ts` — the shared pair
   every converted route module writes through.
 - `buildApiError` / `apiErrorResponse` in `packages/runtime/src/error-envelope.ts` — the
   runtime HTTP dispatcher's door, and the inbound rate limiter.
+- `declaredEnvelopeForThrow` in `@objectstack/plugin-hono-server` — the
+  [Hono doors](#hono-doors)' renderer for a declared refusal that escapes a handler.
 
 ```json
 {
@@ -126,10 +130,11 @@ declares. Written by two writers:
 - `error.message` — the human-readable message.
 - `error.httpStatus` — the status, repeated in the body. Written by the **dispatcher**
   writer on every body it builds; no `sendError` call site passes one today, so it is
-  absent from the route-module bodies.
-- `error.details` — optional structured context, present only where the emitting route
-  passes one. Not a general-purpose bag: it appears on a handful of refusals
-  (rate limiting, settings validation, partial-delete reports) and nowhere else.
+  absent from the route-module bodies, and the Hono doors' renderer never writes it.
+- `error.details` — optional structured context, present only where the writer has
+  some. The route modules pass one on a handful of refusals (rate limiting, settings
+  validation, partial-delete reports). The [Hono doors](#hono-doors) put there the
+  per-condition siblings their table lists.
 - `error.declaredCode` — optional. An author's own `code` when it is **not** a member of
   the closed vocabulary, demoted to this sibling rather than overwriting `code`.
 - `error.userMessage` — optional. Text a producer marked, at throw time, as addressed to
@@ -175,7 +180,7 @@ none of them.
 
 | Route family | Envelope | Writer |
 |---|---|---|
-| `{base}/data/*` — CRUD, `query`, `batch`, `createMany` / `updateMany` / `deleteMany`, `clone`, import / export, reports, approvals, sharing rules | **flat** | `packages/rest/src/error-response.ts` |
+| `{base}/data/*` on the `@objectstack/rest` door — CRUD, `query`, `batch`, `createMany` / `updateMany` / `deleteMany`, `clone`, import / export, reports, approvals, sharing rules | **flat** | `packages/rest/src/error-response.ts` |
 | `{base}/meta/*`, `{base}/ui/*`, discovery and search on the `@objectstack/rest` door, for anything **thrown** out of a handler | **flat** | the same door, via `handleRouteError` |
 | `/api/v1/storage/*` | nested | `storage-routes.ts` → `sendError` |
 | `/api/settings/*` | nested | `settings-routes.ts` → `sendError` |
@@ -185,6 +190,7 @@ none of them.
 | `/api/v1/i18n/*` | nested | `i18n-service-plugin.ts` → `sendError` |
 | every route on a host served by the **runtime HTTP dispatcher** (`/meta`, `/auth`, `/ai`, `/automation`, `/packages`, `/ui`, `/security`, `/notifications`, `/analytics`, `/mcp`, `/keys`, `/actions`, `/share-links`, `/i18n`) | nested | `buildApiError` / `apiErrorResponse` |
 | the inbound rate limiter, ahead of every route | nested | `inbound-rate-limit.ts` |
+| a declared refusal thrown out of the dispatcher on a `createHonoApp` host (`/data` included), or out of any route mounted on `HonoHttpServer` | nested | `declaredEnvelopeForThrow` — see [Hono doors](#hono-doors) |
 
 <Callout type="warn">
 **The `/meta` family is split by door, not by path.** A host that serves `/meta` through
@@ -202,6 +208,47 @@ shrink-only: `pnpm check:route-envelope` is the authority on which files carry i
 much is left. Write clients against the discriminator above, which is correct for the
 conforming bodies and fails loudly rather than silently on the rest.
 </Callout>
+
+### Hono doors
+
+Two hosts render a refusal that escapes the handler themselves:
+`@objectstack/hono`'s `createHonoApp`, for a throw that leaves the runtime dispatcher (the
+`/data` routes' refusals do), and `@objectstack/plugin-hono-server`'s `HonoHttpServer`, for
+a throw that escapes a route mounted on it. When the throw declares an ADR-0112 status and
+a registered code, both answer it in the **nested** envelope, written by
+`declaredEnvelopeForThrow`. The per-condition siblings the flat `/data` door carries for
+the codes below ride in `error.details` instead.
+
+**Example** — `DELETE /api/v1/data/account/acc_123` on a `createHonoApp` host:
+```json
+{
+  "success": false,
+  "error": {
+    "code": "DELETE_RESTRICTED",
+    "message": "This Account is still referenced by 1 Contact record(s) through “Account”. Delete or reassign them first.",
+    "details": {
+      "developerMessage": "Cannot delete account (acc_123): 1 dependent contact record(s) reference it via account. Delete or reassign them first, or set deleteBehavior:'cascade' on contact.account.",
+      "dependentObject": "contact",
+      "dependentCount": 1
+    }
+  }
+}
+```
+
+| Code | In `error.details` on a Hono door |
+|---|---|
+| `DELETE_RESTRICTED` | `developerMessage`, `dependentObject`, and `dependentCount` when the flat door would send it |
+| `CONCURRENT_UPDATE` | `currentVersion` |
+| `INVALID_FIELD` | `field`, `object` |
+| `OBJECT_NOT_FOUND` | `object` |
+| `VALIDATION_FAILED` | `fields` |
+| `FEEDS_DISABLED`, `FILES_DISABLED`, `ATTACHMENT_PARENT_ACCESS`, `ATTACHMENT_DELETE_DENIED`, `RECORD_NOT_ACCESSIBLE` | `object` |
+
+⛔ What a Hono door never sends: `httpStatus`; `CONCURRENT_UPDATE`'s `currentRecord`,
+which the flat door sends; and an `object` the flat door takes from the request's route
+(on `DELETE_RESTRICTED`, `CONCURRENT_UPDATE` and `VALIDATION_FAILED`). The `message` is the
+thrown one and can differ from the flat door's `error`: an unregistered object reads
+`Object 'ghost' not found` here and `Object 'ghost' is not registered` there.
 
 ## HTTP Status Codes
 
@@ -347,10 +394,11 @@ which grant would have worked is the disclosure the
 #### `VALIDATION_FAILED`
 **HTTP Status:** 400  
 **Meaning:** Per-field record validation failed on a write  
-**Envelope:** flat — built by the `/data` door's validation arm, so it is never nested
+**Envelope:** flat on the `@objectstack/rest` `/data` door, built by its validation arm;
+nested on a [Hono door](#hono-doors)
 
-This is the code that carries **per-field** detail. The `fields` array is a **top-level
-sibling** of `code`, not a `details.fields` bag.
+This is the code that carries **per-field** detail. On the flat door the `fields` array is
+a **top-level sibling** of `code`; on a Hono door the same array is `error.details.fields`.
 
 **Example** — `POST /api/v1/data/account` with a bad email and an out-of-range number:
 ```json
@@ -538,8 +586,9 @@ than deriving it from this page.
 resolves to nothing, not a value of the wrong type. On a list read it also covers an
 unreserved query parameter, which `GET /data/:object` reads as a field filter.
 
-**Envelope:** flat — built by the `/data` door's `INVALID_FIELD` arm, so it is never
-nested. `field` and `object` are **top-level siblings**, not a `details` bag.
+**Envelope:** flat on the `@objectstack/rest` `/data` door, built by its `INVALID_FIELD`
+arm, with `field` and `object` as **top-level siblings**. On a [Hono door](#hono-doors) it
+is nested, and the same two fields are `error.details.field` and `error.details.object`.
 
 **Example:**
 ```json
@@ -594,7 +643,8 @@ resource is named in `message`.
 }
 ```
 
-A *registered object* that does not exist is `OBJECT_NOT_FOUND`, also flat. Branch on all
+A *registered object* that does not exist is `OBJECT_NOT_FOUND`, also flat on this door; a
+[Hono door](#hono-doors) answers it nested, with `object` in `error.details`. Branch on all
 three if you handle both families.
 </Callout>
 
@@ -633,8 +683,9 @@ never crosses HTTP. The refusal is emitted as the flat body shown above, and
 #### `DELETE_RESTRICTED`
 **HTTP Status:** 409  
 **Meaning:** The record is still referenced by dependent records that cannot be cleared  
-**Envelope:** flat — built by the `/data` door's `DELETE_RESTRICTED` arm, so it is never
-nested
+**Envelope:** flat on the `@objectstack/rest` `/data` door, built by its `DELETE_RESTRICTED`
+arm. On a [Hono door](#hono-doors) it is nested: `developerMessage`, `dependentObject` and
+`dependentCount` ride in `error.details`, and there is no `object`
 
 **Example** — `DELETE /api/v1/data/account/acc_123`:
 ```json
@@ -989,8 +1040,9 @@ function readError(body) {
     message: nested ? err.message : (typeof body?.error === 'string' ? body.error : undefined),
     // Marked by the producer as addressed to the end user; render verbatim.
     userMessage: nested ? err.userMessage : body?.userMessage,
-    // Per-field detail: `fields` is a top-level sibling on the flat door.
-    fields: nested ? undefined : body?.fields,
+    // Per-field detail: a top-level sibling on the flat door, `error.details.fields`
+    // on a Hono door.
+    fields: nested ? err.details?.fields : body?.fields,
     nested,
   };
 }
@@ -1039,8 +1091,9 @@ showToast(userMessage ?? generic[code] ?? message ?? 'An error occurred');
 
 ### ✅ Handle Field-Specific Validation Errors
 
-Per-field detail comes from the flat `/data` door as `VALIDATION_FAILED`, with `fields` as
-a **top-level sibling**. ⛔ There is no `details.fields` bag on either envelope.
+Per-field detail comes as `VALIDATION_FAILED`: from the flat `/data` door with `fields` as
+a **top-level sibling**, and from a [Hono door](#hono-doors) as `error.details.fields`.
+`readError` above reads both.
 
 **Good:**
 ```javascript
