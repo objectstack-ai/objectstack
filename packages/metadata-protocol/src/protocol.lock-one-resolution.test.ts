@@ -112,7 +112,7 @@
  *
  * ## [#23182] What the table costs, and what it shares
  *
- * The table is 15 936 rows, 28 848 runs of (reads, then a door) once each row's
+ * The table is 16 320 rows, 28 848 runs of (reads, then a door) once each row's
  * two store orders and two registration orders are counted, so the file's wall
  * is the protocol's own cost times that count. The two reads take no
  * organization and no verb, so the rows that differ only in those two (four of
