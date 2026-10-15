@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: the end-to-end cases run the real build-api-surface.ts in a sandbox tree holding one dist state each (both modes on the missing-dist one), and the rest are in-process; slowest CI reading 24.2 s (hourly run 38798542648) x 1.25, rounded up
 //
 // Pins the precondition `gen:api-surface` / `check:api-surface` now enforce
 // (#7122), and the ORDER in which it is enforced.
