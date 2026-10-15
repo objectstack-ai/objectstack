@@ -21,9 +21,11 @@
  *
  * Mechanism: for one read, pre-scan the parent pairs the query would touch
  * under SYSTEM context (bounded, in the caller's own order), ask which of those
- * parents the caller can read (one read per parent object, never one per row),
- * and return one branch per parent object for the gate to AND into
- * `ctx.ast.where`:
+ * parent OBJECTS the caller may read at all (the security service's
+ * object-level read admission — see "A skipped object is not an access
+ * attempt" below), ask which of those parents the caller can read (one read
+ * per admitted parent object, never one per row), and return one branch per
+ * parent object for the gate to AND into `ctx.ast.where`:
  *
  *     { $or: [ { object_name: OBJECT, record_id: { $in: READABLE_IDS } }, ... ] }
  *
@@ -34,7 +36,8 @@
  *  - a parent record that no longer exists: the parent read finds nothing, so
  *    there is nothing to judge readability on;
  *  - a parent object the caller cannot read, or that the engine does not know:
- *    that parent read refuses or throws;
+ *    the object-level read admission refuses it, or that parent read refuses
+ *    or throws;
  *  - a row naming the gated object itself: probing it would re-enter the gate.
  *
  * The one declared exception is a gate's {@link ParentRecordGate.outsideClass}:
@@ -51,14 +54,60 @@
  * capability set the request's authorization resolver stamps on the execution
  * context and every other capability check reads. A gate that declares none
  * (the activity stream) exempts no caller.
+ *
+ * ## A skipped object is not an access attempt
+ *
+ * The streams name many parent objects — every platform object the CRUD
+ * mirror writes — and a caller typically holds no object-level read on most of
+ * them. Read as the caller, each such object is refused by plugin-security's
+ * middleware, which logs every refusal at WARN: one line per object per read,
+ * twice for a list (its rows and its `total`), on every page that shows the
+ * activity feed. Those lines are not access attempts — the gate excluding
+ * those rows is the expected answer — and they buried the real denials.
+ *
+ * So before any parent object is read as the caller, the gate asks the
+ * security service's `canReadObject` (`ISecurityService`, `@objectstack/spec`)
+ * — the middleware's own object-level read gate, arm for arm (its capability
+ * AND-gate, its CRUD grant, its fail-closed posture and principal arms), which
+ * answers without logging or throwing — and reads only the objects it admits.
+ * An object it refuses contributes no readable id, exactly as its refused
+ * engine read did, so the emitted WHERE and the rows served are unchanged; it
+ * is just never read. ⛔ It is asked with the caller's own envelope (minus the
+ * operation-private keys, as {@link resolveReadableParentIds} sends it): no
+ * second derivation of authority, and no muting of the middleware's log — a
+ * caller's own read of that object still logs its denial once.
+ *
+ * The admission only ever NARROWS what is read: an admitted object is still
+ * read as the caller, and that read still decides row scope, sharing, RLS and
+ * every gate the middleware runs after its object-level arms. Fails CLOSED:
+ * an admission that throws, or answers anything but `true`, refuses that
+ * object. With no security service composed, or one whose contract omits the
+ * optional `canReadObject`, there is no admission to ask, and every parent
+ * object is read as the caller: the engine's middleware still decides, so the
+ * absence can leave the answer only as it is, never widen it.
  */
 
-import { resolveReadableParentIds } from '@objectstack/core';
+import { resolveReadableParentIds, withoutOperationPrivateKeys } from '@objectstack/core';
+import type { ISecurityService, SecurityContext } from '@objectstack/spec/contracts';
 import {
   type CommentAccessEngine,
   type CommentAccessLogger,
   type CommentReadMiddlewareCtx,
 } from './comment-access-hooks.js';
+
+/**
+ * The single member of the security service's contract the gate consults: the
+ * object-level read admission. OPTIONAL on the contract, so the gate handles
+ * its absence by construction (see the module header).
+ */
+export type ParentObjectReadAdmission = Pick<ISecurityService, 'canReadObject'>;
+
+/**
+ * Resolves the security service on every read: the security plugin may
+ * register after this one, and a resolver captured at install time would pin
+ * "no service" for the life of the process.
+ */
+export type ParentObjectReadAdmissionSource = () => ParentObjectReadAdmission | null | undefined;
 
 /** The engine reads a parent-record read gate answers for. */
 export const PARENT_GATE_READ_OPS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
@@ -151,6 +200,49 @@ export function parseParentRecord(
   return { object, recordId: String(recordId) };
 }
 
+/**
+ * The parent objects of `objects` the caller may read at all, by the security
+ * service's object-level read admission — or `null` when none is composed (no
+ * service, or one without the optional `canReadObject`), in which case every
+ * object is left to the caller-scoped read. Asked once per object, before any
+ * of them is read as the caller; see the module header.
+ */
+async function admittedParentObjects(
+  objects: Iterable<string>,
+  callerEnvelope: Record<string, unknown>,
+  getAdmission: ParentObjectReadAdmissionSource,
+  logger: CommentAccessLogger,
+  gate: ParentRecordGate,
+): Promise<Set<string> | null> {
+  let admission: ParentObjectReadAdmission | null | undefined;
+  try {
+    admission = getAdmission();
+  } catch {
+    // `getService` throws on an empty slot: no security service is composed.
+    admission = undefined;
+  }
+  const canReadObject = admission?.canReadObject;
+  if (typeof canReadObject !== 'function') return null;
+
+  const admitted = new Set<string>();
+  for (const object of objects) {
+    try {
+      // `=== true`: an answer that is not a plain yes refuses (fail closed).
+      if ((await canReadObject.call(admission, object, { ...callerEnvelope } as SecurityContext)) === true) {
+        admitted.add(object);
+      }
+    } catch (err) {
+      // The contract: a throw is a refusal. It is a fault, not a denial, so it
+      // is said — and this object's rows are excluded, never read unjudged.
+      logger.warn(
+        `[audit] ${gate.seam}: the object-level read admission for '${object}' failed — its rows are ` +
+          `excluded from this read (fail-closed) (${(err as Error)?.message ?? err})`,
+      );
+    }
+  }
+  return admitted;
+}
+
 /** AND `filter` into the read's WHERE, never replacing the caller's own. */
 export function andIntoWhere(ctx: CommentReadMiddlewareCtx, filter: unknown): void {
   if (!ctx.ast) return;
@@ -162,12 +254,17 @@ export function andIntoWhere(ctx: CommentReadMiddlewareCtx, filter: unknown): vo
  * caller holds the gate's exempt capability or the query matches no rows
  * (nothing to narrow), one `$in` branch per parent object holding the readable
  * ids (plus the outside-class rows' ids), or the gate's deny-all sentinel.
+ *
+ * `getAdmission` resolves the security service whose object-level read
+ * admission is asked before any parent object is read as the caller (module
+ * header, "A skipped object is not an access attempt").
  */
 export async function computeParentRecordFilter(
   engine: CommentAccessEngine,
   ctx: CommentReadMiddlewareCtx,
   logger: CommentAccessLogger,
   gate: ParentRecordGate,
+  getAdmission: ParentObjectReadAdmissionSource,
 ): Promise<unknown | null> {
   // 0. The gate's declared exemption, decided before anything is scanned, so a
   //    holder's broad read never meets the pre-scan bound.
@@ -223,12 +320,20 @@ export async function computeParentRecordFilter(
   }
   if (byObject.size === 0 && outside.length === 0) return gate.denyAll;
 
-  // 2. The one readability answer — one caller-scoped read per parent object.
+  // 2. The one readability answer — one caller-scoped read per parent object
+  //    the caller may read at all. An object the object-level admission
+  //    refuses is not read: it contributes no readable id, as its refused read
+  //    did, and it logs no denial for a skip the caller never asked for.
   const branches: Array<Record<string, unknown>> = [];
   if (byObject.size > 0) {
+    const callerEnvelope = withoutOperationPrivateKeys((ctx.context ?? {}) as Record<string, unknown>);
+    const admitted = await admittedParentObjects(byObject.keys(), callerEnvelope, getAdmission, logger, gate);
     const idSets = new Map<string, Set<string>>();
-    for (const [object, ids] of byObject) idSets.set(object, new Set(ids.keys()));
-    const readable = await resolveReadableParentIds(engine, ctx.context, idSets);
+    for (const [object, ids] of byObject) {
+      if (admitted && !admitted.has(object)) continue;
+      idSets.set(object, new Set(ids.keys()));
+    }
+    const readable = idSets.size > 0 ? await resolveReadableParentIds(engine, ctx.context, idSets) : new Map<string, Set<string>>();
 
     // 3. One branch per parent object that kept at least one readable record.
     for (const [object, ids] of byObject) {

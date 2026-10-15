@@ -117,6 +117,21 @@ const CONTACT = {
     },
 };
 
+/**
+ * [#23531] An object whose `secret` a caller's read masks (see the
+ * `[#23531]` block). The stored row keeps it; only a read issued with a
+ * caller's context loses it.
+ */
+const LEDGER = {
+    name: 'ledger',
+    label: 'Ledger',
+    fields: {
+        name: { name: 'name', type: 'text' as const, label: 'Name' },
+        secret: { name: 'secret', type: 'text' as const, label: 'Secret' },
+    },
+};
+const SECRET_TEXT = 'ledger-secret-the-caller-may-not-read';
+
 const liveKernels: LiteKernel[] = [];
 afterEach(async () => {
     vi.restoreAllMocks();
@@ -153,7 +168,7 @@ async function boot(auth?: Record<string, unknown>) {
     await kernel.bootstrap();
 
     const ql = kernel.getService<ObjectQL>('objectql');
-    for (const object of [TASK, ACCOUNT, CONTACT]) {
+    for (const object of [TASK, ACCOUNT, CONTACT, LEDGER]) {
         ql.registerObject(object as any);
         await ql.syncObjectSchema(object.name);
     }
@@ -265,34 +280,69 @@ describe('[#23365] a real createHonoApp host: the dispatch() catch-all renders a
 
 /**
  * [#23531] The stale-`If-Match` `409` above carries the server's
- * `currentVersion`, as `RestServer`'s does. The wire contract and
- * `ConcurrentUpdateError`'s docblock name it, and objectui's conflict bar reads
- * it. Before this card the body was `code` and `message` only.
+ * `currentVersion` and `currentRecord`, as `RestServer`'s does. The wire
+ * contract and `ConcurrentUpdateError`'s docblock name both, and objectui's
+ * conflict bar reads both. Before this card the body was `code` and `message`
+ * only.
  *
- * The field rides `error.details`, the wrapped envelope's declared context
+ * The fields ride `error.details`, the wrapped envelope's declared context
  * slot, which is where `@objectstack/client` reads a wrapped body's context
  * from. `currentVersion` is proved by USE, not by spelling: echoed back as the
  * next `If-Match`, it is accepted ("Overwrite anyway" in the conflict bar), so
- * it is the record's real version token.
+ * it is the record's real version token. `error.details` is compared with the
+ * throw the real protocol raised, read off the protocol call, so the door is
+ * shown to relay the producer's two fields rather than to build its own.
  *
- * `currentRecord` is asserted ABSENT. The real protocol below states it (the
- * system-context row its `probeRecord` read, thrown before the caller's write
- * policy runs), and `RestServer` forwards it. These doors hold it until the
- * producer answers #23586, so the absence is the door's doing, not the
- * producer's.
+ * ## The record is the caller's read
+ *
+ * On a version mismatch the protocol re-reads the row under the caller's own
+ * context (#23586, PR #23628), so a field the caller's read masks is absent
+ * from `currentRecord` on this door, while the store still holds it. The mask
+ * here is an engine middleware that rewrites a read issued with a caller's
+ * context after `next()`: the seam `@objectstack/plugin-security`'s
+ * field-level rules rewrite a read at. The security plugin itself is not
+ * booted, because this package does not depend on it. Its real field- and
+ * row-level rules are pinned at the producer, on `RestServer` and on the
+ * dispatcher, by `packages/runtime`'s `data-conflict-caller-visibility.test.ts`.
  */
-describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries currentVersion, and holds currentRecord (#23586)', () => {
-    it('PATCH with a stale If-Match: currentVersion in `error.details` and accepted when echoed; no currentRecord', async () => {
+describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries currentVersion and currentRecord', () => {
+    type ProtocolWrite = 'updateData' | 'deleteData';
+    const protocolWrite = (method: string): ProtocolWrite => (method === 'PATCH' ? 'updateData' : 'deleteData');
+
+    /** Each throw the real protocol raises from `write`, read off the call and rethrown. */
+    const captureThrows = (protocol: any, write: ProtocolWrite): any[] => {
+        const produced: any[] = [];
+        const real = protocol[write].bind(protocol);
+        vi.spyOn(protocol, write).mockImplementation(async (...args: any[]) => {
+            try {
+                return await real(...args);
+            } catch (thrown) {
+                produced.push(thrown);
+                throw thrown;
+            }
+        });
+        return produced;
+    };
+    /** A thrown value as the wire carries it. */
+    const asWire = (value: unknown) => JSON.parse(JSON.stringify(value));
+
+    it('PATCH with a stale If-Match: currentVersion and currentRecord in `error.details` as the protocol threw them, and the version accepted when echoed', async () => {
         const host = await boot();
         const id = await host.seed('original');
+        const produced = captureThrows(host.protocol, 'updateData');
         const answer = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': STALE_VERSION }, body: { name: 'lost update' } });
         expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
 
+        // The real producer stated both; without this the equality below
+        // could hold between two absences.
+        expect(produced).toHaveLength(1);
+        expect(produced[0].currentRecord, JSON.stringify(produced[0])).toMatchObject({ id, name: 'original' });
         const details = answer.body.error.details;
-        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
-        // Held until #23586: the protocol stated it, and the door does not forward it.
-        expect(details, JSON.stringify(answer.body)).not.toHaveProperty('currentRecord');
-        expect(JSON.stringify(answer.body)).not.toContain('original');
+        expect(details, JSON.stringify(answer.body)).toEqual({
+            currentVersion: produced[0].currentVersion,
+            currentRecord: asWire(produced[0].currentRecord),
+        });
+        expect(typeof details.currentVersion).toBe('string');
         expect(await host.stored(id)).toBe('original');
 
         const overwrite = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` }, body: { name: 'overwritten' } });
@@ -300,22 +350,61 @@ describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries 
         expect(await host.stored(id)).toBe('overwritten');
     }, 60_000);
 
-    it('DELETE with a stale If-Match: currentVersion in `error.details` and accepted when echoed; no currentRecord', async () => {
+    it('DELETE with a stale If-Match: currentVersion and currentRecord in `error.details` as the protocol threw them, and the version accepted when echoed', async () => {
         const host = await boot();
         const id = await host.seed('kept');
+        const produced = captureThrows(host.protocol, 'deleteData');
         const answer = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': STALE_VERSION } });
         expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
 
+        expect(produced).toHaveLength(1);
+        expect(produced[0].currentRecord, JSON.stringify(produced[0])).toMatchObject({ id, name: 'kept' });
         const details = answer.body.error.details;
-        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
-        // Held until #23586: the protocol stated it, and the door does not forward it.
-        expect(details, JSON.stringify(answer.body)).not.toHaveProperty('currentRecord');
-        expect(JSON.stringify(answer.body)).not.toContain('kept');
+        expect(details, JSON.stringify(answer.body)).toEqual({
+            currentVersion: produced[0].currentVersion,
+            currentRecord: asWire(produced[0].currentRecord),
+        });
+        expect(typeof details.currentVersion).toBe('string');
         expect(await host.stored(id)).toBe('kept');
 
         const overwrite = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` } });
         expect(overwrite.status, JSON.stringify(overwrite.body)).toBe(200);
         expect(await host.stored(id)).toBeUndefined();
+    }, 60_000);
+
+    it.each(['PATCH', 'DELETE'])('%s with a stale If-Match on a row whose field the caller\'s read masks: currentRecord is the caller\'s read, without that field', async (method) => {
+        const host = await boot();
+        host.ql.registerMiddleware(async (op: any, next: () => Promise<void>) => {
+            await next();
+            if (op.object !== 'ledger' || (op.operation !== 'find' && op.operation !== 'findOne')) return;
+            if (!op.context || op.context.isSystem === true) return;
+            const rows = Array.isArray(op.result) ? op.result : op.result ? [op.result] : [];
+            for (const row of rows) delete row.secret;
+        });
+        const created: any = await host.ql.insert('ledger', { name: 'visible', secret: SECRET_TEXT });
+        const id = String(created.id);
+        const produced = captureThrows(host.protocol, protocolWrite(method));
+
+        const answer = await host.send(method, `/data/ledger/${id}`, {
+            headers: { 'If-Match': STALE_VERSION },
+            ...(method === 'PATCH' ? { body: { name: 'lost update' } } : {}),
+        });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
+
+        const record = answer.body.error.details?.currentRecord;
+        expect(record, JSON.stringify(answer.body)).toMatchObject({ id, name: 'visible' });
+        expect(record).not.toHaveProperty('secret');
+        expect(JSON.stringify(answer.body)).not.toContain(SECRET_TEXT);
+        // It is the caller's own read of the row, and the record the protocol threw.
+        const callerRead = await host.ql.findOne('ledger', { where: { id }, context: { ...MEMBER } });
+        expect(callerRead).not.toHaveProperty('secret');
+        expect(record).toEqual(asWire(callerRead));
+        expect(produced).toHaveLength(1);
+        expect(record).toEqual(asWire(produced[0].currentRecord));
+        // The store still holds the field and the row, so the absence is the
+        // caller's mask, not the row's content.
+        const systemRead: any = await host.ql.findOne('ledger', { where: { id } });
+        expect(systemRead).toMatchObject({ name: 'visible', secret: SECRET_TEXT });
     }, 60_000);
 });
 

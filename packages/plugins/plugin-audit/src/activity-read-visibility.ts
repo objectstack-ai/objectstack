@@ -63,6 +63,7 @@ import {
   PARENT_GATE_READ_OPS,
   andIntoWhere,
   computeParentRecordFilter,
+  type ParentObjectReadAdmissionSource,
   parseParentObject,
   parseParentRecord,
   type ParentRecord,
@@ -117,11 +118,15 @@ export function parseActivityParent(row: Record<string, unknown> | null | undefi
  * Install the `sys_activity` read-visibility middleware.
  *
  * Inert on an engine without the middleware seam; `AuditPlugin` says so out
- * loud when that happens.
+ * loud when that happens. `getAdmission` resolves, on every read, the security
+ * service whose object-level read admission is asked before a parent object is
+ * read as the caller (`parent-record-read-gate.ts`, "A skipped object is not
+ * an access attempt").
  */
 export function installActivityReadVisibility(
   engine: CommentAccessEngine,
   logger: CommentAccessLogger,
+  getAdmission: ParentObjectReadAdmissionSource,
 ): void {
   if (typeof engine.registerMiddleware !== 'function') return;
 
@@ -133,7 +138,7 @@ export function installActivityReadVisibility(
         return next();
       }
       try {
-        const filter = await computeParentRecordFilter(engine, ctx, logger, ACTIVITY_GATE);
+        const filter = await computeParentRecordFilter(engine, ctx, logger, ACTIVITY_GATE, getAdmission);
         if (filter) andIntoWhere(ctx, filter);
       } catch (err) {
         // A filter-compute failure must never fall open into a leak.
