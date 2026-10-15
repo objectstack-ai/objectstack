@@ -266,10 +266,10 @@ describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries 
         expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
 
         const details = answer.body.error.details;
+        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
         // Held until #23586: the protocol stated it, and the door does not forward it.
         expect(details, JSON.stringify(answer.body)).not.toHaveProperty('currentRecord');
         expect(JSON.stringify(answer.body)).not.toContain('original');
-        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
         expect(await host.stored(id)).toBe('original');
 
         const overwrite = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` }, body: { name: 'overwritten' } });
@@ -284,10 +284,10 @@ describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries 
         expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
 
         const details = answer.body.error.details;
+        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
         // Held until #23586: the protocol stated it, and the door does not forward it.
         expect(details, JSON.stringify(answer.body)).not.toHaveProperty('currentRecord');
         expect(JSON.stringify(answer.body)).not.toContain('kept');
-        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
         expect(await host.stored(id)).toBe('kept');
 
         const overwrite = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` } });
