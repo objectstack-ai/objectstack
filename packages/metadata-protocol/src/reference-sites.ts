@@ -132,10 +132,27 @@ export interface ReferenceSite {
     readonly target: string;
 }
 
+/**
+ * A site whose record KEYS name the target only in their HEAD: each key is the
+ * target's name, then `separator`, then a part this index does not read. See
+ * {@link COMPOSITE_KEY_REFERENCE_SITES}.
+ */
+export interface CompositeKeyReferenceSite extends ReferenceSite {
+    /** Ends the target's name inside a key; the name is the text before its FIRST occurrence. */
+    readonly separator: string;
+}
+
 /** The derived index, plus the honest record of what could not be derived. */
 export interface ReferenceSiteIndex {
     /** Target metadata type → every site that may point at it. */
     readonly byTarget: ReadonlyMap<string, readonly ReferenceSite[]>;
+    /**
+     * Target metadata type → every site that names it as the HEAD of a
+     * composite record key. Deliberately a SEPARATE map rather than more rows
+     * in {@link byTarget}: read {@link COMPOSITE_KEY_REFERENCE_SITES} on why
+     * those rows there would corrupt `duplicatePackage`.
+     */
+    readonly compositeKeyByTarget: ReadonlyMap<string, readonly CompositeKeyReferenceSite[]>;
     /**
      * Declared types whose shape could NOT be read, so their references are
      * genuinely not computable rather than absent. Pinned by a test — see the
@@ -262,27 +279,127 @@ const COMPOSITE_KEYED_TARGET_TYPES: readonly {
  *    answerable. Refusing those would be this card's harm inverted.
  */
 function nameVocabularyRejectsKey(type: DeclaredMetadataType, separator: string): boolean {
+    const verdict = nameVocabularyVerdict(type, separator);
+    return verdict === 'unreadable' || verdict === 'rejects';
+}
+
+/** A declared type's JSON Schema, or `undefined` when it resolves no schema or cannot be converted. */
+function metadataTypeJsonSchema(type: string): JsonSchemaNode | undefined {
     const schema = getMetadataTypeSchema(type);
-    if (!schema) return true;
-    let json: JsonSchemaNode;
+    if (!schema) return undefined;
     try {
-        json = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as JsonSchemaNode;
+        return z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as JsonSchemaNode;
     } catch {
-        return true;
+        return undefined;
     }
+}
+
+/**
+ * What `type`'s declared `name` vocabulary says about `separator`:
+ * `'rejects'` (a readable pattern no name containing it can match), `'admits'`
+ * (a readable pattern some such name matches), `'unconstrained'` (no pattern,
+ * or one that does not compile) or `'unreadable'` (no schema to read). The two
+ * callers read the unknowns in OPPOSITE directions, each toward its own safe
+ * side, so the four answers stay distinct here.
+ */
+function nameVocabularyVerdict(
+    type: string,
+    separator: string,
+): 'rejects' | 'admits' | 'unconstrained' | 'unreadable' {
+    const json = metadataTypeJsonSchema(type);
+    if (!json) return 'unreadable';
     const nameNode = (json.properties as Record<string, JsonSchemaNode> | undefined)?.name;
     const pattern = nameNode?.pattern;
-    if (typeof pattern !== 'string') return false;
+    if (typeof pattern !== 'string') return 'unconstrained';
     let compiled: RegExp;
     try {
         compiled = new RegExp(pattern);
     } catch {
-        return false;
+        return 'unconstrained';
     }
     // A two-segment probe is enough: if the declared vocabulary admits the
     // separator at all, some composite key is representable and the type is
     // not unanswerable BY KEY FORM.
-    return !compiled.test(`a${separator}b`);
+    return compiled.test(`a${separator}b`) ? 'admits' : 'rejects';
+}
+
+/**
+ * Sites whose record KEYS are COMPOSITE and name the target in their HEAD —
+ * today exactly one: `PermissionSetSchema.fields`, keyed `<object>.<field>`.
+ *
+ * ## The miss this closes
+ *
+ * The naming rule reads `permission.fields` as a site for `field` items (its
+ * property spells that type's plural) and never for an object. Every key of it
+ * names an object too: the security plugin reads a set's rules for an object
+ * by the key prefix `<object>.` (`PermissionEvaluator.getFieldPermissions`). So
+ * a set whose ONLY rule for an object was a field rule was missing from that
+ * object's answer, and the "Used by" panel could clear the object as "Safe to
+ * delete." while the set still masked its fields — the harm this module's
+ * header names.
+ *
+ * ## Why a seed, and why NOT more rows in `byTarget`
+ *
+ * The key form is stated in prose only — `fields` is `z.record(z.string(), …)`
+ * with the `<entity_name>.<field_name>` shape in its TSDoc, and its JSON Schema
+ * is indistinguishable from `object.fields`, which is keyed by the BARE field
+ * name. That is the {@link COMPOSITE_KEYED_TARGET_TYPES} class (a protocol fact
+ * no machine can read), and it gets the same treatment: a seed small enough to
+ * argue, with its premises DERIVED (see {@link compositeKeySiteHolds}).
+ *
+ * It is kept out of {@link ReferenceSiteIndex.byTarget} on purpose, measured
+ * both ways with a plain `{ permission, fields, object }` row there:
+ *
+ *  - the answer did not change: the walk compares a WHOLE value with the
+ *    target's name, and `refsrc_customer.full_name` is never `refsrc_customer`;
+ *  - `duplicatePackage` broke: it reads `byTarget.get('object')` as a flat set of
+ *    property NAMES that name an object anywhere in any item, so `fields` joined
+ *    it and every copied object's own `fields` record — keyed by bare field
+ *    name — had a key renamed after a renamed object. That copy rewrites a
+ *    permission set's `fields` keys through its own shape-keyed step instead.
+ *
+ * ⛔ Do NOT grow this to "improve coverage", and do not move it into
+ * `byTarget`. The durable close is an annotation on the producer's record key
+ * in `packages/spec`, which derivation would then read like any other schema
+ * fact.
+ *
+ * The target is typed `'object'` alone: the walk splits a key on its FIRST
+ * separator, which is exact only because no object name can contain one — a
+ * premise argued for the object type, not for every type.
+ */
+const COMPOSITE_KEY_REFERENCE_SITES: readonly {
+    readonly fromType: DeclaredMetadataType;
+    readonly property: string;
+    readonly target: 'object';
+    readonly separator: string;
+}[] = [
+    { fromType: 'permission', property: 'fields', target: 'object', separator: '.' },
+];
+
+/**
+ * Do a composite-key seed's two premises still hold in the declared schemas?
+ *
+ *  1. the source type still declares `property` at its ROOT as a record — the
+ *     keys are what is read, so a renamed or reshaped property must not keep a
+ *     site that reads nothing, or reads something else;
+ *  2. the target's `name` vocabulary provably REJECTS the separator, so the
+ *     text before a key's first separator is the whole target name and never a
+ *     prefix of one (`ObjectSchema.name` is `^[a-z_][a-z0-9_]*$`).
+ *
+ * Both fail CLOSED, the opposite direction from {@link nameVocabularyRejectsKey}:
+ * an unreadable or unconstrained shape drops the site, because a split that
+ * cannot be proven exact would attribute a key to the wrong object. A seed that
+ * drops out turns the derivation pin red rather than shortening answers quietly.
+ */
+function compositeKeySiteHolds(site: (typeof COMPOSITE_KEY_REFERENCE_SITES)[number]): boolean {
+    if (nameVocabularyVerdict(site.target, site.separator) !== 'rejects') return false;
+    const json = metadataTypeJsonSchema(site.fromType);
+    if (!json) return false;
+    const defs = (json.$defs as Record<string, JsonSchemaNode> | undefined) ?? {};
+    const node = (json.properties as Record<string, JsonSchemaNode> | undefined)?.[site.property];
+    return alternatives(node, defs, new Set(), 0).some(
+        (alt) => alt.type === 'object' && !!alt.additionalProperties && typeof alt.additionalProperties === 'object',
+    );
 }
 
 /** `external_catalog` → `externalCatalog`. Identity for a type with no underscore. */
@@ -515,7 +632,22 @@ export function deriveReferenceSites(): ReferenceSiteIndex {
         .map(({ type }) => type)
         .sort();
 
-    return { byTarget, unwalkableSourceTypes: unwalkable.sort(), unanswerableTargetTypes: unanswerableTargets };
+    // Composite-key sites, filtered the same way: both ends declared, and both
+    // premises still true of the schemas. See COMPOSITE_KEY_REFERENCE_SITES.
+    const compositeKeyByTarget = new Map<string, CompositeKeyReferenceSite[]>();
+    for (const site of COMPOSITE_KEY_REFERENCE_SITES) {
+        if (!declared.has(site.fromType) || !declared.has(site.target) || !compositeKeySiteHolds(site)) continue;
+        const bucket = compositeKeyByTarget.get(site.target);
+        if (bucket) bucket.push({ ...site });
+        else compositeKeyByTarget.set(site.target, [{ ...site }]);
+    }
+
+    return {
+        byTarget,
+        compositeKeyByTarget,
+        unwalkableSourceTypes: unwalkable.sort(),
+        unanswerableTargetTypes: unanswerableTargets,
+    };
 }
 
 /**
