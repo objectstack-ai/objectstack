@@ -418,6 +418,137 @@ export const AUTH_INVITATION_TEMPLATES: EmailTemplate[] = [
   AUTH_INVITATION_TEMPLATE_ES_ES,
 ];
 
+/**
+ * An account an administrator created for someone — today the identity
+ * import (Setup › Users › Import) — and the link that sets its first password.
+ *
+ * Not `auth.invitation`: that one invites an EXISTING person into an
+ * organization, as a role, through an accept page, and an imported user on an
+ * invite-only or walled deployment has no organization and no role to name
+ * (the engine has no conditionals to drop the clause). Not
+ * `auth.password_reset` either: nobody asked for a reset, so "if you didn't
+ * request this, ignore this email" is exactly wrong here.
+ *
+ * Its variables are what the import really holds. The link is a better-auth
+ * reset token, so it expires — 60 minutes by default — and the copy says so.
+ * The footer is the template's own: "if this wasn't you" fits no invitation.
+ */
+const ACCOUNT_INVITATION_VARIABLES: EmailTemplate['variables'] = [
+  { name: 'user.name', type: 'string', required: false, description: 'Recipient display name' },
+  { name: 'user.email', type: 'string', required: true, description: 'The new account\'s email address' },
+  { name: 'inviter.name', type: 'string', required: true, description: 'The administrator who created the account' },
+  { name: 'inviter.email', type: 'string', required: true, description: 'That administrator\'s email address' },
+  { name: 'setPasswordUrl', type: 'url', required: true, description: 'Link that sets the account\'s first password' },
+  { name: 'expiresInMinutes', type: 'number', required: true, description: 'Link TTL in minutes' },
+  { name: 'appName', type: 'string', required: false, description: 'Product/app name (brand override)' },
+];
+
+export const AUTH_ACCOUNT_INVITATION_TEMPLATE: EmailTemplate = {
+  name: 'auth.account_invitation',
+  label: 'Account Invitation',
+  locale: 'en-US',
+  subject: '{{inviter.name}} invited you to {{appName}}',
+  bodyHtml: wrap('Set your password', `
+<p>Hi {{user.name}},</p>
+<p><strong>{{inviter.name}}</strong> ({{inviter.email}}) has created a {{appName}} account for you, with the email address <strong>{{user.email}}</strong>.</p>
+<p>Set your password to start using it. This link expires in {{expiresInMinutes}} minutes.</p>
+<p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">Set your password</a></p>
+<p style="font-size:13px;color:#6b7280">Or copy and paste this URL into your browser:<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
+<p>If the link has expired, contact {{inviter.name}}.</p>
+`, 'You received this email because {{inviter.name}} created a {{appName}} account for this address.'),
+  bodyText: `Hi {{user.name}},
+
+{{inviter.name}} ({{inviter.email}}) has created a {{appName}} account for you, with the email address {{user.email}}.
+
+Set your password (link expires in {{expiresInMinutes}} minutes):
+{{setPasswordUrl}}
+
+If the link has expired, contact {{inviter.name}}.`,
+  variables: ACCOUNT_INVITATION_VARIABLES,
+  active: true,
+  description: 'Sent when an administrator creates an account for someone (the identity import), with the link that sets its first password.',
+};
+
+export const AUTH_ACCOUNT_INVITATION_TEMPLATE_ZH_CN: EmailTemplate = {
+  ...AUTH_ACCOUNT_INVITATION_TEMPLATE,
+  locale: 'zh-CN',
+  label: '账号邀请',
+  subject: '{{inviter.name}} 邀请您使用 {{appName}}',
+  bodyHtml: wrap('设置您的密码', `
+<p>{{user.name}} 您好：</p>
+<p><strong>{{inviter.name}}</strong>（{{inviter.email}}）已为您创建了 {{appName}} 账号，账号邮箱为 <strong>{{user.email}}</strong>。</p>
+<p>请设置密码后开始使用。该链接将在 {{expiresInMinutes}} 分钟后失效。</p>
+<p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">设置密码</a></p>
+<p style="font-size:13px;color:#6b7280">或将以下链接复制到浏览器中打开：<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
+<p>如果链接已失效，请联系 {{inviter.name}}。</p>
+`, '您收到本邮件，是因为 {{inviter.name}} 为此邮箱地址创建了 {{appName}} 账号。'),
+  bodyText: `{{user.name}} 您好：
+
+{{inviter.name}}（{{inviter.email}}）已为您创建了 {{appName}} 账号，账号邮箱为 {{user.email}}。
+
+请通过以下链接设置密码（{{expiresInMinutes}} 分钟内有效）：
+{{setPasswordUrl}}
+
+如果链接已失效，请联系 {{inviter.name}}。`,
+  description: '当管理员为他人创建账号（身份导入）时发送，附带设置初始密码的链接。',
+};
+
+export const AUTH_ACCOUNT_INVITATION_TEMPLATE_JA_JP: EmailTemplate = {
+  ...AUTH_ACCOUNT_INVITATION_TEMPLATE,
+  locale: 'ja-JP',
+  label: 'アカウントへの招待',
+  subject: '{{inviter.name}} さんから {{appName}} への招待が届いています',
+  bodyHtml: wrap('パスワードを設定してください', `
+<p>{{user.name}} 様</p>
+<p><strong>{{inviter.name}}</strong>（{{inviter.email}}）さんが、メールアドレス <strong>{{user.email}}</strong> で {{appName}} のアカウントを作成しました。</p>
+<p>パスワードを設定して、ご利用を開始してください。このリンクは {{expiresInMinutes}} 分後に無効になります。</p>
+<p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">パスワードを設定</a></p>
+<p style="font-size:13px;color:#6b7280">または、次の URL をブラウザーに貼り付けてください：<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
+<p>リンクの有効期限が切れた場合は、{{inviter.name}} さんにお問い合わせください。</p>
+`, '{{inviter.name}} さんがこのメールアドレスで {{appName}} のアカウントを作成したため、本メールをお送りしています。'),
+  bodyText: `{{user.name}} 様
+
+{{inviter.name}}（{{inviter.email}}）さんが、メールアドレス {{user.email}} で {{appName}} のアカウントを作成しました。
+
+次のリンクからパスワードを設定してください（有効期限 {{expiresInMinutes}} 分）:
+{{setPasswordUrl}}
+
+リンクの有効期限が切れた場合は、{{inviter.name}} さんにお問い合わせください。`,
+  description: '管理者が他のユーザーのアカウントを作成したとき（ID インポート）に、初回パスワードを設定するリンクとともに送信されます。',
+};
+
+export const AUTH_ACCOUNT_INVITATION_TEMPLATE_ES_ES: EmailTemplate = {
+  ...AUTH_ACCOUNT_INVITATION_TEMPLATE,
+  locale: 'es-ES',
+  label: 'Invitación a tu cuenta',
+  subject: '{{inviter.name}} te ha invitado a {{appName}}',
+  bodyHtml: wrap('Establece tu contraseña', `
+<p>Hola {{user.name}}:</p>
+<p><strong>{{inviter.name}}</strong> ({{inviter.email}}) ha creado una cuenta de {{appName}} para ti, con la dirección de correo <strong>{{user.email}}</strong>.</p>
+<p>Establece tu contraseña para empezar a usarla. Este enlace caduca en {{expiresInMinutes}} minutos.</p>
+<p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">Establecer contraseña</a></p>
+<p style="font-size:13px;color:#6b7280">O copia y pega esta URL en tu navegador:<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
+<p>Si el enlace ha caducado, ponte en contacto con {{inviter.name}}.</p>
+`, 'Recibes este correo porque {{inviter.name}} ha creado una cuenta de {{appName}} para esta dirección.'),
+  bodyText: `Hola {{user.name}}:
+
+{{inviter.name}} ({{inviter.email}}) ha creado una cuenta de {{appName}} para ti, con la dirección de correo {{user.email}}.
+
+Establece tu contraseña con este enlace (caduca en {{expiresInMinutes}} minutos):
+{{setPasswordUrl}}
+
+Si el enlace ha caducado, ponte en contacto con {{inviter.name}}.`,
+  description: 'Se envía cuando un administrador crea una cuenta para otra persona (la importación de identidades), con el enlace para establecer su primera contraseña.',
+};
+
+/** Every locale row of the account-invitation template, in one enumerable list. */
+export const AUTH_ACCOUNT_INVITATION_TEMPLATES: EmailTemplate[] = [
+  AUTH_ACCOUNT_INVITATION_TEMPLATE,
+  AUTH_ACCOUNT_INVITATION_TEMPLATE_ZH_CN,
+  AUTH_ACCOUNT_INVITATION_TEMPLATE_JA_JP,
+  AUTH_ACCOUNT_INVITATION_TEMPLATE_ES_ES,
+];
+
 export const AUTH_TWO_FACTOR_OTP_TEMPLATE: EmailTemplate = {
   name: 'auth.two_factor_otp',
   label: 'Two-Factor Verification Code',
@@ -675,6 +806,7 @@ export const BUILTIN_AUTH_TEMPLATES: EmailTemplate[] = [
   ...AUTH_VERIFY_EMAIL_TEMPLATES,
   ...AUTH_MAGIC_LINK_TEMPLATES,
   ...AUTH_INVITATION_TEMPLATES,
+  ...AUTH_ACCOUNT_INVITATION_TEMPLATES,
   ...AUTH_TWO_FACTOR_OTP_TEMPLATES,
   ...AUTH_EMAIL_CHANGE_NOTICE_TEMPLATES,
 ];

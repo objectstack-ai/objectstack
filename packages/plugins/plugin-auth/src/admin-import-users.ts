@@ -109,6 +109,7 @@ import { prepareImportRequest, runImport } from '@objectstack/rest';
 import { generatePlaceholderEmail, isPlaceholderEmail } from './placeholder-email.js';
 import { generateTemporaryPassword, normalizePhoneNumber, isLikelyEmail, type AdminActor, type EndpointResult } from './admin-user-endpoints.js';
 import { SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
+import { runAsAccountInvitation, type AccountInvitationMarker } from './account-invitation-marker.js';
 import {
   applyUserManagerLink,
   type SetUserManagerDeps,
@@ -411,6 +412,38 @@ function resolveManagerKey(
   return { key: identityKey(undefined, phone), phone };
 }
 
+/**
+ * [#23343] The inviter an email invitation names: the administrator running
+ * the import, as their own `sys_user` row spells them (the gate's actor carries
+ * an id and an email, never a name). The name falls back to the address, so
+ * both fields are non-empty — `auth.account_invitation` declares both
+ * required. `undefined` only when no address is known at all; the caller then
+ * sends the reset copy rather than an invitation with a hole in it.
+ */
+async function resolveImportInviter(
+  engine: IdentityImportEngine,
+  actor: AdminActor,
+  logger: IdentityImportDeps['logger'],
+): Promise<AccountInvitationMarker['inviter'] | undefined> {
+  let row: Record<string, unknown> | undefined;
+  try {
+    const found = await engine.find('sys_user', {
+      where: { id: actor.id }, fields: ['name', 'email'], limit: 1, context: SYSTEM_CTX,
+    });
+    row = Array.isArray(found) ? found[0] : undefined;
+  } catch (e) {
+    logger?.warn(
+      `[AuthPlugin] import-users: the sys_user lookup for the importing administrator ${actor.id} FAILED, `
+        + 'so invitations name them by the session address alone. '
+        + `Cause: ${(e as Error)?.message ?? e}`,
+    );
+  }
+  const email = (typeof row?.email === 'string' && row.email.trim()) || actor.email?.trim() || '';
+  if (!email) return undefined;
+  const name = (typeof row?.name === 'string' && row.name.trim()) || email;
+  return { name, email };
+}
+
 export async function runAdminImportUsers(
   deps: IdentityImportDeps,
   request: Request,
@@ -684,6 +717,8 @@ export async function runAdminImportUsers(
   // as it does on a real one.
   const managerLinks = { linked: 0, unresolved: 0, refused: 0 };
   if (!prepared.dryRun) {
+    // [#23343] Resolved once, on the first email invitation, for the whole batch.
+    let inviter: AccountInvitationMarker['inviter'] | undefined | null = null;
     // One pass over every created row — each is in exactly one of the two
     // maps (or neither, for `none` and updated rows). This single loop serves
     // every policy AND `auto`, where invite and temporary rows interleave in
@@ -714,11 +749,28 @@ export async function runAdminImportUsers(
           try {
             // [#23152] The link lands on the Console's set-password page only
             // when the request names it; see `consoleResetPasswordUrl`.
-            await authApi.requestPasswordReset({
+            const requestReset = () => authApi.requestPasswordReset({
               body: deps.consoleResetPasswordUrl
                 ? { email: invite.email, redirectTo: deps.consoleResetPasswordUrl() }
                 : { email: invite.email },
             });
+            // [#23343] better-auth hands the link only to `sendResetPassword`,
+            // so the invitation copy is chosen THERE; this marks the one reset
+            // this row asks for as an account invitation from this admin. See
+            // `account-invitation-marker.ts` for why nothing else can.
+            if (inviter === null) {
+              inviter = await resolveImportInviter(engine, actor, deps.logger);
+              if (!inviter) {
+                deps.logger?.warn(
+                  `[AuthPlugin] import-users: the importing administrator ${actor.id} has no email address, `
+                    + 'so this batch\'s invited rows receive the password-reset email instead of the '
+                    + 'account invitation (which names its inviter).',
+                );
+              }
+            }
+            await (inviter
+              ? runAsAccountInvitation({ email: invite.email, inviter }, requestReset)
+              : requestReset());
           } catch (e) {
             // The account exists; only the email failed. Not a rollback —
             // remediation is re-sending or an admin set-user-password.
