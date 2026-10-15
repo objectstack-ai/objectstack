@@ -13,7 +13,7 @@ import type { SemanticMigration } from '../../types.js';
 // open). The drill `report` is held open, not typed: the tile draws a
 // dataset-bound report, but the spec declares no drill report yet. D3 only:
 // page-component `properties` is not parsed on the metadata save or load path, so
-// a stored page is never refused; a drill `filter` has no rewrite that keeps the
+// a stored page is never refused at load; a drill `filter` has no rewrite that keeps the
 // scope the author meant; and the authored census found no authored value to
 // respell — the two refused values are fixtures probing the refusal.
 export const entry: SemanticMigration = {
@@ -35,8 +35,8 @@ export const entry: SemanticMigration = {
     + 'dataset-bound report through the shared drawer, but no spec drill shape declares a `report` member yet. '
     + 'It is read where every page component\'s props are: the component-props gate reports a refused value as '
     + 'a `component-props-invalid` / `component-props-unknown-key` error on `objectstack validate`, '
-    + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a page '
-    + 'component\'s `properties` is not parsed on the metadata save or load path. No conversion is registered: '
+    + '`objectstack build` and `objectstack lint`, and a stored page still loads, because a page '
+    + 'component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is registered: '
     + 'nothing on the load path refuses the shape, and a drill `filter` has no rewrite that keeps the scope the '
     + 'author meant — which is the judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',
   acceptanceCriteria: 'Every `object-metric` node validates: `objectstack validate` reports no '

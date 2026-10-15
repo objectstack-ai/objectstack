@@ -8,7 +8,7 @@ import type { SemanticMigration } from '../../types.js';
 // snake_case. The maintainer ruled on #21704 (fork 2, letter B) that the spec
 // declares a closed runtime form field of the members the form draws, in
 // camelCase, keyed by `name`. D3 only: page-component `properties` is not
-// parsed on the metadata save or load path, so a stored page is never refused;
+// parsed on the metadata save or load path, so a stored page is never refused at load;
 // and the authored census, with every inline option list evaluated, found no
 // working member to respell — the refused values are a type-level test's
 // `visibleOn` and a fixture pinning that an inline `defaultValue` seeds
@@ -36,9 +36,7 @@ export const entry: SemanticMigration = {
     + 'no object column, so a stored field\'s lowercase identifier rule does not apply to it. It is read where '
     + 'every page component\'s props are: the component-props gate '
     + 'reports a refused value as a `component-props-invalid` / `component-props-unknown-key` '
-    + 'error on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
-    + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save or load '
-    + 'path. No conversion is registered: nothing on the load path refuses the shape, and the authored census, '
+    + 'error on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still loads, because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is registered: nothing on the load path refuses the shape, and the authored census, '
     + 'with every inline option list evaluated, found no working member to respell. Deployed metadata NOT '
     + 'MEASURED.',
   acceptanceCriteria: 'Every `object-form` node validates: `objectstack validate` reports no '
