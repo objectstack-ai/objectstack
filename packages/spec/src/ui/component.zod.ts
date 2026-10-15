@@ -6721,17 +6721,16 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
 
 /**
  * [#21464] One `object-kanban` swimlane — the members the board reads off a
- * lane at the `.objectui-sha` pin `89cad75d55`, and nothing else. No list-view
- * schema declares a lane, so the shape is the read's own:
+ * lane, and nothing else (read points recorded in `liveness/page.json`, row
+ * `regions`). No list-view schema declares a lane, so the shape is the read's
+ * own:
  *
  * - `id` (string) — the bucketing key: a record whose `groupBy` value equals
- *   it lands in this lane (`plugin-kanban/src/index.tsx:129-149`,
- *   `bucketCardsIntoColumns`); `title` (string) — the heading, localized
- *   against the `groupBy` picklist (`ObjectKanban.tsx:1168-1188`);
- * - `cards` — a STATIC board's own cards, kept ahead of the bucketed records
- *   (`index.tsx:152-158`); `limit` — the WIP count at which the lane warns
- *   (`KanbanImpl.tsx:540`, `:591`); `className` — the lane's styling channel
- *   (`:568`); `collapsed` — the lane's initial collapsed state (`:742`).
+ *   it lands in this lane (`bucketCardsIntoColumns`); `title` (string) — the
+ *   heading, localized against the `groupBy` picklist;
+ * - `cards` — a STATIC board's own cards, kept ahead of the bucketed records;
+ *   `limit` — the WIP count at which the lane warns; `className` — the lane's
+ *   styling channel; `collapsed` — the lane's initial collapsed state.
  *
  * A card is a record row: `id` and `title` are typed (the two members the
  * board identifies and heads a card by), and the rest of the card is that
@@ -6765,108 +6764,26 @@ const ObjectKanbanLaneSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * `object-kanban` (objectui `plugin-kanban/src/ObjectKanban.tsx` +
- * `KanbanRenderer` in `plugin-kanban/src/index.tsx` @ `eb7f586b` — the board
- * forwards the authored bag on). Read points: `objectName`/`groupBy`
- * (throughout), `columns` (:474 — SWIMLANES, `{ id, title }` per `groupBy`
- * value or bare strings, NOT a field projection), `filter` (:198, the
- * `$filter` handoff), `data` (:217-224), `cardTitle`/`titleField` (:233),
- * `cardFields` (:322), `swimlaneField`/`grouping` (:518-519), and via the
- * forwarded schema `coverImageField`/`conditionalFormatting` (`KanbanRenderer`,
- * index.tsx — `ObjectKanban.tsx:1563` spreads the authored bag into it).
- * `quickAdd` sat on that forwarded list and is RETIRED (#17260, tombstoned
- * below): the sentence was true about the FORWARD and false about the READ,
- * which is how the key kept re-authorizing itself. `groupField` is the
- * DESIGNER's spelling with
- * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
- * `limit` (#16503) was measured later, at objectui `b9814b334` (re-read there 2026-10-14:
- * `ObjectKanban.tsx` is byte-identical across the hop from `1fb1ced36` (`git
- * diff --quiet`), so the anchor did not move and was re-read in place. At
- * `1fb1ced36`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
- * `7578323a5`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
- * `9646e2ed2`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
- * `088e0f705`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
- * `e5311165a`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
- * `499799502`, re-read there 2026-10-11:
- * every objectui file this record cites is byte-identical across the hop from
- * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
- * `0df67f237`, re-read there 2026-10-11:
- * `ObjectKanban.tsx` changed across the hop from `20c6d351a`, +21/-1
- * (objectui#12082, objectui `5af42dbbd`: the card move reads the
- * affordance-to-grant map), two import lines above the anchor and every other
- * hunk below it, so the anchor was re-READ and MOVED `762` -> `764` with its
- * text byte-identical. At `20c6d351a`, re-read there 2026-10-10:
- * every objectui file this record cites is byte-identical across the hop from
- * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
- * `47b1f0bb7`, re-read there 2026-10-09:
- * every objectui file this record cites is byte-identical across the hop from
- * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
- * `f0268ad78`, re-read there 2026-10-09:
- * `ObjectKanban.tsx` is byte-identical across the hop from `a58626c88`
- * (`git diff --quiet`), so the anchor did not move and was re-read in place. At
- * `a58626c88`, re-read there 2026-10-06:
- * `ObjectKanban.tsx` changed across the hop from `0abd4f9f8`, +65/-2
- * (objectui#11629: each column header totals the view's `summarizeField`), so
- * the anchor was re-READ and MOVED `752` -> `762` with its text byte-identical.
- * At `0abd4f9f8`, re-read there 2026-10-05:
- * every objectui file this record cites is byte-identical across the hop from
- * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
- * At `9dfaca654`; re-measured there 2026-10-05 —
- * `ObjectKanban.tsx` changed across the hop from `2e818d0b5`, +35/-5
- * (objectui#8347: a type import edited in place, and a private
- * `GateBoundKanbanSchema` read type, a re-worded docblock and a widened
- * `schema` binding above the fetch), so the anchor was re-READ and MOVED
- * `722` -> `752` with its text byte-identical. At `2e818d0b5` (2026-10-04)
- * `ObjectKanban.tsx` was byte-identical across the hop from `ab1879721`
- * (`git diff --quiet`), so the anchor did not move. At `ab1879721`
- * (2026-10-03) `ObjectKanban.tsx` was byte-identical across the hop from
- * `89cad75d5` (`git diff --quiet`), so the anchor did not move and was
- * re-read in place.
- * At `89cad75d5` (2026-10-02) `ObjectKanban.tsx` was byte-identical across
- * the hop from `31971ff1e` (`git diff --quiet`), so the anchor did not move
- * and was re-read in place. At `31971ff1e` (2026-10-01)
- * `ObjectKanban.tsx` changed on that hop only in the comment above its
- * `navigation` read (+12/-14, objectui#8652: the key is now declared on
- * `ObjectKanbanSchema`), far below the anchor, which did not move and was
- * re-read in place. At `e420df310` (2026-09-30)
- * `ObjectKanban.tsx` changed on this hop, +40/-13: objectui#9853 renamed the
- * default `DEFAULT_KANBAN_LIMIT` to `DEFAULT_KANBAN_FETCH_BATCH_SIZE`, still
- * 100, on the anchor line itself, and objectui#11234 mounts an internal
- * `KanbanBoardCore` board. So the anchor was re-READ and MOVED `712` -> `722`,
- * now `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE)`:
- * the same lowering under a renamed default. At `db11afd49` (2026-09-29)
- * `ObjectKanban.tsx` changed in one comment line only (`:1367`), so the anchor
- * did not move and was re-read in place. At `dd3f7e1be` (2026-09-28)
- * `ObjectKanban.tsx` changed on this hop, +44/-8 (objectui#10572's
- * invalidation bus, objectui#10663's error reset, objectui#10666, which
- * resolves the filter's context tokens before `$filter` — the member one line
- * above this anchor — and a line-neutral comment sweep, objectui
- * `1dae95a41`), so the anchor was re-READ and MOVED `687` -> `712` with
- * its text byte-identical. On the hop onto `f8a9d0fb0` the file changed
- * +16/-1 (objectui#10068 added the binding's `sort` as the query's
- * `$orderby`) and the anchor MOVED `676` -> `687` with its text
- * byte-identical; the file was
- * byte-identical across the hop onto `62597c588`, and was re-READ at
- * `87af769e9` 2026-09-20: it moved hard on that hop, +708/-79 against `53ded82bf`,
- * and this anchor is one the
- * numbers alone would have mis-carried: the read was a bare
- * `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT` at `:264` and is now
- * `$top: resolveRowLimit(schema.limit, DEFAULT_KANBAN_LIMIT)`, objectui#9925
- * having put a refusal in front of it — a contract-refused row cap is dropped
- * and reported at `:554` instead of being sent. The pinned fact is unchanged:
- * `schema.limit` still lowers into the query's top-level `$top`):
- * `ObjectKanban.tsx:764`, the `$top` of the
- * board's one query — its docblock below carries the four-face record.
+ * `object-kanban` (objectui's `ObjectKanban` renderer plus the
+ * `KanbanRenderer` its registry shell exports — the board forwards the
+ * authored bag on; read points recorded in `liveness/page.json`, row
+ * `regions`). Read points: `objectName`/`groupBy` (throughout), `columns`
+ * (SWIMLANES, `{ id, title }` per `groupBy` value or bare strings, NOT a field
+ * projection), `filter` (the `$filter` handoff), `data`,
+ * `cardTitle`/`titleField`, `cardFields`, `swimlaneField`/`grouping`, and via
+ * the forwarded schema `coverImageField`/`conditionalFormatting` (the board
+ * spreads the authored bag into `KanbanRenderer`). `quickAdd` sat on that
+ * forwarded list and is RETIRED (#17260, tombstoned below): the sentence was
+ * true about the FORWARD and false about the READ, which is how the key kept
+ * re-authorizing itself. `groupField` is the DESIGNER's spelling with zero
+ * read points (#7973 class) — aliased to the `groupBy` the board reads.
+ * `limit` (#16503) was measured later: a bare `$top: schema.limit ??
+ * DEFAULT_KANBAN_LIMIT` became `$top: resolveRowLimit(schema.limit,
+ * DEFAULT_KANBAN_FETCH_BATCH_SIZE)` (objectui#9925 put a refusal in front of
+ * it — a contract-refused row cap is dropped and reported instead of being
+ * sent; objectui#9853 renamed the default, still 100). The pinned fact is
+ * unchanged: `schema.limit` lowers into the `$top` of the board's one query —
+ * its docblock below carries the four-face record.
  */
 export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   surface: 'this `object-kanban`',
@@ -6885,11 +6802,11 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   /**
    * [#21464] Swimlanes: all bare value strings, or all lane objects
    * ({@link ObjectKanbanLaneSchema}) — two array shapes, not one array of
-   * either, because the board dispatches on the FIRST entry
-   * (`ObjectKanban.tsx:1177-1188` at the pin `89cad75d55`): an object-first
-   * mix sends each string down the object branch, a string-first mix is
-   * ignored whole. The string arm draws only on a board with no `groupBy`
-   * (`:1179-1186`), each value titling its own lane.
+   * either, because the board dispatches on the FIRST entry (read points
+   * recorded in `liveness/page.json`, row `regions`): an object-first mix
+   * sends each string down the object branch, a string-first mix is ignored
+   * whole. The string arm draws only on a board with no `groupBy`, each value
+   * titling its own lane.
    */
   columns: z.union([
     z.array(z.string()),
@@ -6899,9 +6816,10 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
    * orthography every `filter` door in this map shares (#15449; the family
-   * entry on `object-grid` carries the ruling). Measured at the objectui pin
-   * `53ded82b` before the declaration moved: `ObjectKanban.tsx` hands
-   * `schema.filter` verbatim to `$filter`, and `ObjectStackAdapter.convertQueryParams`
+   * entry on `object-grid` carries the ruling). Measured before the
+   * declaration moved (read points recorded in `liveness/page.json`, row
+   * `regions`): the board handed `schema.filter` verbatim to `$filter`, and
+   * `ObjectStackAdapter.convertQueryParams`
    * lowers a rule array through `translateFilterArray` — the same door every
    * list view's stored rule array takes. The record form is refused at
    * `filter`; see migration
@@ -6917,241 +6835,22 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   /**
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
-   * ships, is documented and is in use). Measured at objectui `b9814b334` (re-read there 2026-10-14:
-   * `plugin-kanban/src/types.ts` (still no row-cap member), `ObjectKanban.tsx`,
-   * `element-data-source.ts`, `ElementDataSourceGate.tsx` and
-   * `plugin-kanban.mdx` are byte-identical across the hop from `1fb1ced36`
-   * (`git diff --quiet`), so the query `757-767`, the default `:100`, the
-   * `queryFilter` resolution `:626-627`, the import `:10`, `:268-272`,
-   * `:218-220` and `:437-456` did not move, and the `limit` row and the `limit:
-   * 250` snippet did not change; `plugin-kanban/src/index.tsx` changed only
-   * below the mapping (+2/-2, objectui#12030, objectui `c5406c201`: a comment
-   * re-cited to `18.0.0-next.0`), which did not move from `488-492`; and
-   * `objectql.ts` (+15/-27, the same commit) changed only above the member,
-   * which MOVED `4838` -> `4826` byte-identical, still inside
-   * `ObjectKanbanSchema`. At `1fb1ced36`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved;
-   * `ListView.tsx` and `ObjectView.tsx`, named below only as an earlier
-   * re-read's record and no longer anchors here, are not among them
-   * (`ListView.tsx` and app-shell's `ObjectView.tsx` changed on this hop). At
-   * `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved;
-   * `ListView.tsx` and `ObjectView.tsx`, named below only as an earlier
-   * re-read's record and no longer anchors here, are not among them
-   * (`ListView.tsx` changed on this hop). At `088e0f705`, re-read there
-   * 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-   * `499799502`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * `plugin-kanban/src/types.ts` (still no row-cap member),
-   * `plugin-kanban/src/index.tsx`, `element-data-source.ts`,
-   * `ElementDataSourceGate.tsx` and `objectql.ts` are byte-identical across the
-   * hop from `20c6d351a` (`git diff --quiet`), so `488-492`, `:268-272`,
-   * `:218-220`, `:437-456` and `4838` did not move; `plugin-kanban.mdx` changed
-   * in its drag-and-drop feature bullet only (+5/-1), above the `limit` row and
-   * the `limit: 250` snippet, neither of which changed; and `ObjectKanban.tsx`
-   * changed (+21/-1, objectui#12082, objectui `5af42dbbd`: the card move reads
-   * the affordance-to-grant map), so the type import `:10` did not move and the
-   * default `:98` -> `:100`, the query `755-765` -> `757-767` and the
-   * `queryFilter` resolution `:624-625` -> `:626-627` MOVED byte-identical. At
-   * `20c6d351a`, re-read there 2026-10-10:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `47b1f0bb7` (`git diff --quiet`) except `objectql.ts` (+14/-13, comments
-   * only: objectui#12063, objectui `c7b30bd66`, and objectui#6152 round 15,
-   * objectui `025341692`, re-word the `object-chart` legacy-axis docblocks),
-   * whose every hunk is below the member, at `:5441` or later, so the member
-   * `4838` did not move and is byte-identical, still inside
-   * `ObjectKanbanSchema`; every other anchor held unmoved, and
-   * `plugin-kanban/src/types.ts` still declares no row-cap member. At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved, and
-   * `plugin-kanban/src/types.ts` still declares no row-cap member. At
-   * `f0268ad78`, re-read there 2026-10-09:
-   * `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no row-cap member),
-   * `element-data-source.ts`, `ElementDataSourceGate.tsx` and
-   * `plugin-kanban.mdx` are byte-identical to `a58626c88` (`git diff --quiet`),
-   * so the query `755-765`, the default `:98`, the `queryFilter` resolution
-   * `:624-625`, the import `:10`, `:268-272`, `:218-220` and `:437-456` did not
-   * move, and the `limit` row and the `limit: 250` snippet did not change;
-   * `plugin-kanban/src/index.tsx` changed only below the mapping (+3/-3: a
-   * comment re-cited to 17.7.0, and objectui#6152 round 8's `filter` input
-   * description), which did not move from `488-492`; and `objectql.ts`
-   * (+218/-125: objectui#6152 rounds 7 to 12, objectui#11880 item 5 and the
-   * 17.7.0 moves) MOVED the member `4754` -> `4838` byte-identical, still
-   * inside `ObjectKanbanSchema`.
-   * At `a58626c88`, re-read there 2026-10-06:
-   * `plugin-kanban/src/types.ts` (still no row-cap member),
-   * `plugin-kanban/src/index.tsx`, `element-data-source.ts`,
-   * `ElementDataSourceGate.tsx` and `objectql.ts` are byte-identical to
-   * `0abd4f9f8` (`git diff --quiet`), so `:268-272`, `488-492`, `:218-220`,
-   * `:437-456` and `4754` did not move; `plugin-kanban.mdx` gained one feature
-   * bullet (objectui#11629's column totals) above the `limit` row and the
-   * `limit: 250` snippet, neither of which changed; `ObjectKanban.tsx` changed
-   * (+65/-2, objectui#11629), so the type import `:10` did not move and the
-   * default `:97` -> `:98`, the query `745-755` -> `755-765` and the
-   * `queryFilter` resolution `:614-615` -> `:624-625` MOVED byte-identical.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`; re-measured there
-   * 2026-10-05 — `plugin-kanban/src/types.ts` (still no row-cap member),
-   * `element-data-source.ts` and `plugin-kanban.mdx` are byte-identical to
-   * `2e818d0b5`, so `:268-272` did not move and the `limit` row and the
-   * `limit: 250` snippet did not change; `ElementDataSourceGate.tsx` changed
-   * only below `:600` (+75/-0, objectui#11605's `requiresObject` prop and its
-   * "no object named" hint), so `:218-220` and `:437-456` did not move;
-   * `ObjectKanban.tsx` changed (+35/-5, objectui#8347): the type import at
-   * `:10` was edited in place and still imports `ObjectKanbanSchema` (beside
-   * a new `SortConfig`), and above the query the component now reads
-   * `schema` through a private `GateBoundKanbanSchema` — `ObjectKanbanSchema`
-   * plus the gate-written `sort`, so `limit` is still `ObjectKanbanSchema`'s
-   * member — so the default `:97` did not move and the query `715-725` ->
-   * `745-755` and the `queryFilter` resolution `:584-585` -> `:614-615`
-   * MOVED byte-identical; `plugin-kanban/src/index.tsx` (+34/-3) gained one
-   * docblock line above the mapping (objectui#8347), which MOVED
-   * byte-identical `487-491` -> `488-492`, and objectui#11605's
-   * `requiresObject` gate and non-required `objectName` input below it; and
-   * `objectql.ts` (+85/-45: objectui#11615, objectui#11266 and objectui#8347)
-   * MOVED the member `4720` -> `4754` byte-identical, still inside
-   * `ObjectKanbanSchema`. At `2e818d0b5`, re-measured there
-   * 2026-10-04 — `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no
-   * row-cap member), `plugin-kanban/src/index.tsx`, `ElementDataSourceGate.tsx`
-   * and `element-data-source.ts` are byte-identical to `ab1879721`, so every
-   * anchor in them held unmoved; `plugin-kanban.mdx` gained a `grouping`
-   * Properties row below the `limit` row (objectui#11216), which, with the
-   * `limit: 250` snippet, did not change; and `objectql.ts` changed only below
-   * the member (objectui#11216's `grouping` declaration on
-   * `ObjectKanbanSchema`), so `:4720` did not move. At `ab1879721`,
-   * re-measured there 2026-10-03 — `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no
-   * row-cap member), `ElementDataSourceGate.tsx`, `element-data-source.ts`
-   * and `plugin-kanban.mdx` are byte-identical to `89cad75d5`, so the query
-   * `715-725`, the default `:97`, the `queryFilter` resolution `:584-585`,
-   * the import `:10`, `:218-220`, `:437-456` and `:268-272` did not move and
-   * were re-read in place, and the `limit` row and the `limit: 250` snippet
-   * did not change; `plugin-kanban/src/index.tsx` changed only below the
-   * mapping (+3/-2: objectui#11438's 17.6.0 re-citation in the
-   * `ObjectKanbanRenderer` docblock and objectui#11522's `{ condition, style }`
-   * description on the `conditionalFormatting` input), which did not move
-   * from `487-491`; and `objectql.ts` MOVED the member `4661` -> `4720`
-   * byte-identical, still inside `ObjectKanbanSchema`. At `89cad75d5`,
-   * re-measured there 2026-10-02 — `ObjectKanban.tsx`, `plugin-kanban/src/types.ts` (still no
-   * row-cap member), `ElementDataSourceGate.tsx` and `element-data-source.ts`
-   * are byte-identical to `31971ff1e`, so the query `715-725`, the default
-   * `:97`, the `queryFilter` resolution `:584-585`, the import `:10`,
-   * `:218-220`, `:437-456` and `:268-272` did not move and were re-read in
-   * place; `plugin-kanban/src/index.tsx` changed only in the registration's
-   * `navigation` docblock and input description (+7/-5, objectui#11293:
-   * `page` now opens the record through the host's record navigator), far
-   * below the mapping, which did not move from `487-491`; `objectql.ts`
-   * MOVED the member `4588` -> `4661` byte-identical, still inside
-   * `ObjectKanbanSchema`; and `plugin-kanban.mdx` rewrote its `navigation`
-   * Properties row (objectui#11293) and gained a `swimlaneField` row
-   * (objectui#11355), both below the `limit` row, which, with the
-   * `limit: 250` snippet, did not change. At `31971ff1e`, re-measured there
-   * 2026-10-01 — `plugin-kanban/src/types.ts` (still no row-cap member) and
-   * `ElementDataSourceGate.tsx` are byte-identical to `e420df310`, so
-   * `:218-220` and `:437-456` did not move; `ObjectKanban.tsx` changed only in
-   * the comment above its `navigation` read (objectui#8652), below every
-   * anchor here, so the query `715-725`, the default `:97`, the `queryFilter`
-   * resolution `:584-585` and the import `:10` did not move;
-   * `plugin-kanban/src/index.tsx` changed below the mapping (objectui#8652's
-   * `navigation` input), which did not move from `487-491`;
-   * `element-data-source.ts` changed above `savedViewRawLimit` (+33/-6,
-   * objectui#8945's re-stated `dataSource.filter` note), which MOVED byte-identical `241-245` -> `268-272`;
-   * `objectql.ts` MOVED the member `4430` -> `4588` byte-identical, still
-   * inside `ObjectKanbanSchema`; and `plugin-kanban.mdx` gained a `navigation`
-   * Properties row below the `limit` row, which, with the `limit: 250`
-   * snippet, did not change. At `e420df310`, re-measured there
-   * 2026-09-30 — `plugin-kanban/src/types.ts` (still no row-cap member),
-   * `ElementDataSourceGate.tsx` and `element-data-source.ts` are
-   * byte-identical to `db11afd49`, so `:218-220`, `:437-456` and `:241-245` did
-   * not move; `ObjectKanban.tsx` changed (+40/-13) and its query CHANGED ONE
-   * MEMBER: objectui#9853 renamed the default `DEFAULT_KANBAN_LIMIT` to
-   * `DEFAULT_KANBAN_FETCH_BATCH_SIZE` (still `100`, now documented as the
-   * board's fetch batch, not a page size), so `$top` reads
-   * `resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE)`, and the
-   * query MOVED `705-715` -> `715-725`, the default `:88` -> `:97` and the
-   * `queryFilter` resolution `:574-575` -> `:584-585`, while the import at
-   * `:10` did not move; `plugin-kanban/src/index.tsx` lost the Quick Add
-   * plumbing above the mapping (objectui#8285, objectui#11234), which MOVED
-   * byte-identical `506-510` -> `487-491`; `objectql.ts` MOVED the member
-   * `4302` -> `4430` byte-identical, still inside `ObjectKanbanSchema`; and
-   * `plugin-kanban.mdx` changed around, not in, the `limit: 250` snippet and
-   * its Properties row. At `db11afd49`, re-measured there 2026-09-29 —
-   * `plugin-kanban.mdx`, `plugin-kanban/src/types.ts` and
-   * `ElementDataSourceGate.tsx` are byte-identical to `dd3f7e1be`,
-   * `plugin-kanban/src/index.tsx` too, `ObjectKanban.tsx` and
-   * `element-data-source.ts` changed in comment lines only and none of their
-   * cited lines, so those anchors did not move; `packages/types/src/objectql.ts`
-   * gained declarations above the member, which is still inside
-   * `ObjectKanbanSchema`, and MOVED `4139` -> `4302` with its text
-   * byte-identical. At `dd3f7e1be`, re-measured there
-   * 2026-09-28 — `plugin-kanban.mdx` is byte-identical to `f8a9d0fb0`; every
-   * other file this block cites changed on this hop, and each anchor was
-   * re-READ. Two changed CONTENT and say so where they are cited: the board's
-   * query now sends `$filter: queryFilter`, the node's `filter` with its
-   * context tokens resolved (objectui#10666), and the gate's limit branch now
-   * asks whether the binding's cap is USABLE rather than present
-   * (objectui#10016). `plugin-kanban/src/types.ts` changed only to stop
-   * re-exporting `ColumnWidthConfig` (objectui#10582) and still declares no
-   * row-cap member. Every other anchor MOVED with its cited text
-   * byte-identical — the query `680-690` -> `705-715` apart from that one
-   * member, `:85` -> `:88`, `index.tsx:507-511` -> `:506-510`,
-   * `objectql.ts:3832` -> `:4139`, `ElementDataSourceGate.tsx:200-202` ->
-   * `:218-220`, `element-data-source.ts:237-241` -> `:241-245` — and
-   * `ObjectKanban.tsx:10` did not move. On the hop onto `f8a9d0fb0`,
-   * `element-data-source.ts`, `plugin-kanban/src/types.ts` and
-   * `plugin-kanban.mdx` were byte-identical to `62597c588`; every other file
-   * this block cites changed on that hop, and each anchor was re-READ: the
-   * board's query GAINED a member (objectui#10068's `$orderby` from the
-   * binding's `sort`, between `$filter` and `$top`, `674-679` -> `680-690`)
-   * and the data-source mapping gained `sort: true` (`447-450` -> `507-511`);
-   * every other anchor MOVED with its cited text byte-identical — `:84` ->
-   * `:85`, `:553` -> `:554`, `:559` -> `:565`, `:676` -> `:687`,
-   * `objectql.ts:3735` -> `:3832`, `ElementDataSourceGate.tsx:316-331` ->
-   * `:373-388` and `:192-194` -> `:200-202`, `ListView.tsx:2979` -> `:3067` and
-   * `:2952` -> `:3040`, `ObjectView.tsx:1638` -> `:1666` and `:1579` ->
-   * `:1607` — and `ObjectKanban.tsx:10` did not move. (`:554`, `:565`, `:687`
-   * and the `ListView.tsx` / `ObjectView.tsx` pairs are that re-read's record
-   * only: they anchored the view-face `kanban.limit` spread, a key #19228
-   * retired before any release carried it, so this block no longer cites
-   * them.) Every file here was
-   * byte-identical across the hop onto `62597c588`. All four
-   * anchors were re-READ at `87af769e9` 2026-09-20 — the hop that moved every
-   * one of them, and RENAMED one face rather than shifting it), four
-   * faces agree
-   * while this map refused the key by name: the board's one query is
+   * ships, is documented and is in use). Read points recorded in
+   * `liveness/page.json`, row `regions` — four faces agree while this map
+   * refused the key by name: the board's one query is
    * `dataSource.find(objectName, { $filter: queryFilter, $orderby: …, $top:
-   * resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE) })`
-   * (`plugin-kanban/src/ObjectKanban.tsx:757-767`, where `queryFilter` is
-   * `schema.filter` with its context tokens resolved at `:626-627` —
-   * objectui#10666; at `f8a9d0fb0` the member read `schema.filter` verbatim —
-   * the default `100` at `:100`, named `DEFAULT_KANBAN_LIMIT` until
-   * objectui#9853 — a REAL top-level `$top` since objectui#4025;
-   * before that the cap sat under a `options` key no adapter read, and the
-   * bare `??` became `resolveRowLimit` in objectui#9925, which drops and
-   * reports a cap the contract refuses instead of sending it),
-   * `OBJECT_KANBAN_DATA_SOURCE` maps `limit: 'limit'`
-   * (`plugin-kanban/src/index.tsx:488-492`), the type the board reads `schema`
-   * through is `ObjectKanbanSchema` — ⚠️ `KanbanSchema` was RETIRED on this hop
-   * (maintainer ruling 2026-09-09) and `plugin-kanban/src/types.ts` no longer
-   * declares the member at all — imported at `ObjectKanban.tsx:10` and
-   * declaring `limit?: number` at `packages/types/src/objectql.ts:4826`,
-   * and `content/docs/plugins/plugin-kanban.mdx`
-   * teaches it with a typed snippet (`limit: 250`) plus a Properties row. So
-   * an author following the published docs wrote a node the save gate
+   * resolveRowLimit(schema.limit, DEFAULT_KANBAN_FETCH_BATCH_SIZE) })`, where
+   * `queryFilter` is `schema.filter` with its context tokens resolved
+   * (objectui#10666) and the default is `100` (named `DEFAULT_KANBAN_LIMIT`
+   * until objectui#9853) — a REAL top-level `$top` since objectui#4025; before
+   * that the cap sat under an `options` key no adapter read, and the bare `??`
+   * became `resolveRowLimit` in objectui#9925, which drops and reports a cap
+   * the contract refuses instead of sending it; the registration's data-source
+   * mapping lowers `limit: 'limit'`; the type the board reads `schema` through
+   * is `ObjectKanbanSchema`, which declares `limit?: number` (`KanbanSchema`
+   * was RETIRED, maintainer ruling 2026-09-09); and objectui's own plugin
+   * guide teaches it with a typed snippet (`limit: 250`) plus a Properties
+   * row. So an author following the published docs wrote a node the save gate
    * refused, with the same `unrecognized_keys` verdict a typo gets.
    *
    * Why the carrier is `limit` and not the bound view's `pagination.pageSize`
@@ -7159,11 +6858,10 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * table, not this key's. The component-level `dataSource.limit` overrides
    * this key unconditionally; a bound named view's `pagination.pageSize` is
    * LOWERED INTO it through the `limit: 'limit'` mapping only when this key is
-   * unset (`react/src/element-data-source/ElementDataSourceGate.tsx:437-456`,
-   * `readLimit`/`writeLimit` keyed by `ElementDataSourceLimitKey`; the branch
-   * gained objectui#9899's presence-is-not-authorship test and a
-   * `describeDisplacedRowLimit` report on the hop onto `f8a9d0fb0`). ⚠️ At
-   * this pin the branch's `fromView` is
+   * unset (the gate's `readLimit`/`writeLimit` keyed by
+   * `ElementDataSourceLimitKey`; the branch gained objectui#9899's
+   * presence-is-not-authorship test and a `describeDisplacedRowLimit` report).
+   * ⚠️ The branch's `fromView` is
    * `!isUsableRowLimit(binding.config?.limit)` rather than
    * `binding.config?.limit === undefined` (objectui#10016): a binding cap the
    * contract REFUSES is not authored and yields to the view's cap. Every cap
@@ -7175,8 +6873,8 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * EXACTLY right on this face — a correction to a correction, measured
    * 2026-09-21T10:20Z. The branch is
    * `if (!fromView || !isUsableRowLimit(authored))`, and
-   * `isUsableRowLimit` is `typeof v === 'number' && Number.isInteger(v) && v > 0`
-   * (`ElementDataSourceGate.tsx:218-220`), and this key's accept set
+   * `isUsableRowLimit` is `typeof v === 'number' && Number.isInteger(v) && v > 0`,
+   * and this key's accept set
    * (`z.number().int().positive()`) is a SUBSET of it — ⛔ not the same set,
    * and the difference is reachable: `2^53 + 2` is refused here (zod 4's
    * `.int()` is safe-integer, `too_big`) and `Number.isInteger` calls it
@@ -7190,8 +6888,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * beside the parse pins in `component.test.ts` rather than as prose.
    *
    * ⚠️ And the view half is `pagination.pageSize` ALONE on this face.
-   * `savedViewLimit` does fall back to a flat `view.limit`
-   * (`core/src/data-scope/element-data-source.ts:268-272`), but that names a
+   * `savedViewLimit` does fall back to a flat `view.limit`, but that names a
    * THIRD face — a saved-view RECORD as the adapter's `listViews()` returns it
    * — not an authored view document. Measured on this tree: `ListViewSchema`
    * REFUSES a flat `limit` with `unrecognized_keys: ["limit"]`, the same
@@ -7225,8 +6922,8 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   /**
    * [#20831] The list view's own `GroupingConfigSchema`, by reference — ⛔ not
    * a copy of its shape. The board reads ONE position of it:
-   * `effectiveSwimlaneField = swimlaneField || grouping.fields[0].field`
-   * (`ObjectKanban.tsx`), and looks that raw name up on every card. Until
+   * `effectiveSwimlaneField = swimlaneField || grouping.fields[0].field`, and
+   * looks that raw name up on every card. Until
    * #20831 it was `z.unknown()`, so a padded name (`'  business_unit  '`,
    * refused on `list-view` since #17360) or a wrong-shaped value validated
    * green here and collapsed every card into one lane with no error. Kept,
@@ -7242,169 +6939,21 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * since retired that block (objectui#8257), so `object-kanban` offers no
    * quick-add control and no block a document can name offers one either).
    *
-   * Measured at objectui `b9814b334` (re-read there 2026-10-14:
-   * `plugin-kanban/src/index.tsx` changed only below the pass-through (+2/-2,
-   * objectui#12030, objectui `c5406c201`: a comment re-cited to `18.0.0-next.0`
-   * at `:551-552`), which did not move from `345-346`; `KanbanBoardCore.tsx`,
-   * `ObjectKanban.tsx` and `KanbanImpl.tsx` are byte-identical across the hop
-   * from `1fb1ced36` (`git diff --quiet`), so `:85`, `:688` and `:701` did not
-   * move; `ObjectKanban.tsx` still names `quickAdd` and `onQuickAdd` 2 times
-   * each against 11 for `onCardClick`, and objectui still registers no
-   * `kanban-ui` block. At `1fb1ced36`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-   * `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-   * `499799502`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved;
-   * `ObjectKanban.tsx` still names `quickAdd` and `onQuickAdd` 2 times each
-   * against 11 for `onCardClick`, and objectui still registers no `kanban-ui`
-   * block. At `0df67f237`, re-read there 2026-10-11:
-   * `plugin-kanban/src/index.tsx` is byte-identical across the hop from
-   * `20c6d351a` (`git diff --quiet`), so `345-346` did not move;
-   * `KanbanBoardCore.tsx` (+9/-0), `ObjectKanban.tsx` (+21/-1) and
-   * `KanbanImpl.tsx` (+30/-7) changed for objectui#12082 (objectui `5af42dbbd`:
-   * a card is draggable only for a caller the affordance-to-grant map's
-   * `kanbanCardMove` row allows), no hunk on a cited line, so `:78` MOVED to
-   * `:85` and the gate `:671` / `:684` to `:688` / `:701`, every line
-   * byte-identical; `ObjectKanban.tsx` still names `quickAdd` and `onQuickAdd`
-   * 2 times each against 11 for `onCardClick`, and objectui still registers no
-   * `kanban-ui` block. At `20c6d351a`, re-read there 2026-10-10:
-   * `KanbanBoardCore.tsx`, `ObjectKanban.tsx` and `plugin-kanban/src/index.tsx`
-   * are byte-identical across the hop from `47b1f0bb7` (`git diff --quiet`), so
-   * `:78` and `345-346` did not move; `KanbanImpl.tsx` changed (+9/-6,
-   * objectui#6349 batch 7, objectui `c0c0a0d56`: its rule type spelled
-   * `KanbanConditionalFormattingRule` by that name, three comment lines added
-   * above the props), so the gate MOVED `:668` / `:681` -> `:671` / `:684`,
-   * both lines byte-identical; `ObjectKanban.tsx` still names `quickAdd` and
-   * `onQuickAdd` 2 times each against 11 for `onCardClick`, and objectui still
-   * registers no `kanban-ui` block. At `47b1f0bb7`, re-read there 2026-10-09:
-   * `KanbanBoardCore.tsx`, `ObjectKanban.tsx`, `KanbanImpl.tsx` and
-   * `plugin-kanban/src/index.tsx` are byte-identical across the hop from
-   * `f0268ad78` (`git diff --quiet`), so `:78`, `:668`, `:681` and `345-346`
-   * did not move; `ObjectKanban.tsx` still names `quickAdd` and `onQuickAdd` 2
-   * times each against 11 for `onCardClick`, and objectui still registers no
-   * `kanban-ui` block. At `f0268ad78`, re-read there 2026-10-09:
-   * `KanbanBoardCore.tsx`, `ObjectKanban.tsx` and `KanbanImpl.tsx` are
-   * byte-identical across the hop from `a58626c88` (`git diff --quiet`), so
-   * `:78`, `:668` and `:681` did not move; `plugin-kanban/src/index.tsx` changed
-   * only at `:552` and below (+3/-3: a comment re-cited to 17.7.0, and
-   * objectui#6152 round 8's `filter` input description), so the pass-through did
-   * not move from `345-346`; `ObjectKanban.tsx` still names `quickAdd` and
-   * `onQuickAdd` 2 times each against 11 for `onCardClick`, and objectui still
-   * registers no `kanban-ui` block. At `a58626c88`, re-read there 2026-10-06:
-   * `KanbanBoardCore.tsx` and `plugin-kanban/src/index.tsx` are byte-identical
-   * across the hop from `0abd4f9f8` (`git diff --quiet`), so `:345-346` did not
-   * move; `ObjectKanban.tsx` (+65/-2) and `KanbanImpl.tsx` (+48/-1) changed for
-   * objectui#11629 (each column header totals the view's `summarizeField`), and
-   * the gate MOVED with its lines byte-identical, `624` -> `668` and `637` ->
-   * `681`; `ObjectKanban.tsx` still names `quickAdd` and `onQuickAdd` 2 times
-   * each against 11 for `onCardClick`, and objectui still registers no
-   * `kanban-ui` block.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved, and
-   * `ObjectKanban.tsx` still names `quickAdd` and `onQuickAdd` 2 times each
-   * against 11 for `onCardClick`.
-   * At `9dfaca654`; re-measured there 2026-10-05 —
-   * `KanbanImpl.tsx` and `KanbanBoardCore.tsx` are byte-identical to
-   * `2e818d0b5` (`git diff --quiet`), so `:624`, `:637` and `:78` did not
-   * move; `ObjectKanban.tsx` changed above its spread (+35/-5, objectui#8347's
-   * private `GateBoundKanbanSchema` read type and widened `schema` binding),
-   * which MOVED `1639` -> `1669` byte-identical; `plugin-kanban/src/index.tsx`
-   * changed only below the pass-through (+34/-3: one objectui#8347 docblock
-   * line at `:368`, objectui#11605's `requiresObject` gate and non-required
-   * `objectName` input), which did not move from `345-346`; and the counts
-   * re-read the same, 2 / 2 / 11. At `2e818d0b5`, re-measured there
-   * 2026-10-04 — every
-   * objectui file this record cites is byte-identical across the hop from
-   * `ab1879721` (`git diff --quiet`), so every anchor held unmoved. At
-   * `ab1879721`, re-measured there 2026-10-03 —
-   * `KanbanBoardCore.tsx` and `ObjectKanban.tsx` are byte-identical to
-   * `89cad75d5`, so `:78` and `:1639` did not move and were re-read in place;
-   * `KanbanImpl.tsx` changed only in two comments above the gate
-   * (objectui#11522: card formatting is the spec `{ condition, style }` rule
-   * alone, +8/-5), so both gate lines MOVED by 3 byte-identical, `621` ->
-   * `624` and `634` -> `637`; `plugin-kanban/src/index.tsx` changed only at
-   * `:532` and below (+3/-2, objectui#11438's 17.6.0 re-citation and
-   * objectui#11522's `conditionalFormatting` input description), so the
-   * pass-through did not move from `345-346` and was re-read in place. At
-   * `89cad75d5` (2026-10-02) —
-   * `KanbanImpl.tsx`, `KanbanBoardCore.tsx` and `ObjectKanban.tsx` are
-   * byte-identical to `31971ff1e`, so `:621`, `:634`, `:78` and `:1639` did
-   * not move and were re-read in place; `plugin-kanban/src/index.tsx` changed
-   * (+7/-5, objectui#11293: the `navigation` input's description and the
-   * comment above it now say a `page` click goes to the host's record
-   * navigator), every hunk at `:626` or below, so the pass-through did not
-   * move from `345-346` and was re-read in place, and the exported
-   * `KanbanRenderer` still forwards both keys to `KanbanBoardCore`, which
-   * `ObjectKanban` does not mount for them. At `31971ff1e` (2026-10-01)
-   * `KanbanImpl.tsx` and `KanbanBoardCore.tsx` were byte-identical to
-   * `e420df310`, so `:621`, `:634` and `:78` did not move and were re-read in
-   * place; `ObjectKanban.tsx` changed only in the comment above its
-   * `navigation` read (objectui#8652), above the spread, which MOVED `1641` ->
-   * `1639` with its line byte-identical; and `plugin-kanban/src/index.tsx`
-   * changed below the exported `KanbanRenderer` (objectui#8652's `navigation`
-   * input), whose pass-through did not move from `345-346`. At `e420df310`
-   * (2026-09-30) `KanbanImpl.tsx` was byte-identical to `db11afd49`, so `:621` and `:634` did
-   * not move and were re-read in place. objectui's own half of this retirement
-   * landed on this hop and changed the PATH, not the verdict: objectui#8285
-   * stopped forwarding `quickAdd`, and objectui#11234 retired
+   * Measured on the renderer (read points recorded in `liveness/page.json`,
+   * row `regions`): the board once forwarded the key — its spread handed the
+   * authored bag to `KanbanRenderer`, which passes `quickAdd={schema.quickAdd}`
+   * and `onQuickAdd={schema.onQuickAdd}` — but the affordance is gated on BOTH,
+   * and `onQuickAdd` is a host-supplied FUNCTION that JSON cannot carry and no
+   * producer puts on an `object-kanban` node. objectui's own half of this
+   * retirement changed the PATH, not the verdict: objectui#8285 stopped
+   * forwarding `quickAdd`, and objectui#11234 retired
    * `ObjectKanbanSchema.onQuickAdd` and has `ObjectKanban` render an internal
-   * `KanbanBoardCore` that reads neither key off `schema`
-   * (`KanbanBoardCore.tsx:78`). So the spread MOVED `1614` -> `1641` with its
-   * line byte-identical but now feeds `KanbanBoardCore`, and the pass-through
-   * below sits only in the exported `KanbanRenderer`, MOVED `357-358` ->
-   * `345-346`, which `ObjectKanban` no longer mounts. At `db11afd49`
-   * (2026-09-29) `KanbanImpl.tsx` and `plugin-kanban/src/index.tsx` are
-   * byte-identical to
-   * `dd3f7e1be` and `ObjectKanban.tsx` changed in one comment line (`:1367`), so
-   * `:1614`, `:357-358`, `:621` and `:634` did not move and were re-read in
-   * place. At `dd3f7e1be` (2026-09-28)
-   * `KanbanImpl.tsx` changed only in three comment lines (+3/-3, objectui
-   * `1dae95a41` re-spelling an issue citation as a commit), so `:621` and
-   * `:634` did not move and were re-read in place; `ObjectKanban.tsx`
-   * (+44/-8: objectui#10572's invalidation bus, objectui#10663,
-   * objectui#10666's resolved filter, that comment sweep) and `index.tsx`
-   * (+45/-46: the retired column-width hook and `ColumnWidthConfig`,
-   * objectui#8522 / objectui#10582, the deleted `KanbanEnhanced`,
-   * objectui#8932, that comment sweep) changed, and both of their anchors
-   * MOVED with the cited text byte-identical: `1578` -> `1614`, `363` -> `357`. On the hop onto `f8a9d0fb0`,
-   * `KanbanImpl.tsx` was byte-identical to `62597c588`, while
-   * `ObjectKanban.tsx` (objectui#10068's `$orderby`) and `index.tsx`
-   * (objectui#10069's lane matching, the `sort` mapping) changed, and both
-   * anchors MOVED with the cited text byte-identical: `1563` -> `1578`,
-   * `313` -> `363`. All
-   * three files were byte-identical across the hop onto `62597c588`, and all
-   * four anchors were re-READ at `87af769e9` 2026-09-20, where each MOVED with
-   * its cited text byte-identical): through `db11afd49` the board
-   * forwarded the key —
-   * `ObjectKanban.tsx:1614` there spread the authored bag into `KanbanRenderer`,
-   * which passes
-   * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
-   * (`plugin-kanban/src/index.tsx:357-358` there, `:345-346` at this pin) — but the affordance is gated on
-   * BOTH (`KanbanImpl.tsx:688` and `:701`), and `onQuickAdd` is a
-   * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
-   * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
-   * in code (0 occurrences each, against 11 for the sibling `onCardClick` in the same
-   * file — re-counted at `db11afd49`, at `f8a9d0fb0` and at `62597c588`; at
-   * `e420df310`, at `31971ff1e`, at `89cad75d5`, at `2e818d0b5` and again at this pin 2 each, all four inside the two
-   * objectui#11234 comments that record the cut, and still 11 for
-   * `onCardClick`; this record said 6, which the identical
-   * file at `87af769e9` does not reproduce either, so the control was
-   * miscounted rather than moved, and the verdict rests on the 0). So the gate was permanently false and authoring the key was a
-   * parse-clean no-op — the accepted-and-dropped class.
+   * `KanbanBoardCore` that reads neither key off `schema`. `ObjectKanban` names
+   * neither half of the pair in code (2 occurrences each, both inside the two
+   * objectui#11234 comments that record the cut, against 11 for the sibling
+   * `onCardClick` in the same file — the method: occurrences in that one file).
+   * So the gate was permanently false and authoring the key was a parse-clean
+   * no-op — the accepted-and-dropped class.
    *
    * ⛔ Not a silent one, which is why the retirement is worth more than a
    * tidy-up: objectui's registry↔spec ledger records the key verbatim as
@@ -7416,12 +6965,10 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    *
    * The control is not withdrawn from objectui's React layer, but no metadata
    * node reaches it. The ruling kept it on `kanban-ui`, the block a React host
-   * renders directly and can hand the runtime function to. ⚠️ Re-read at
-   * `e420df310`: objectui retired the schema-only `kanban-ui` registration
-   * long before this pin (objectui#8257; 0 registrations at `dd3f7e1be`,
-   * `db11afd49`, `e420df310`, `31971ff1e`, `89cad75d5` and this pin), and the pair now lives on the
-   * exported `KanbanRenderer` React component a host mounts directly
-   * (`plugin-kanban/src/index.tsx:345-346`), not on any block a document can
+   * renders directly and can hand the runtime function to. ⚠️ objectui has
+   * since retired the schema-only `kanban-ui` registration (objectui#8257; 0
+   * registrations), and the pair now lives on the exported `KanbanRenderer`
+   * React component a host mounts directly, not on any block a document can
    * name. ⛔ So the tombstone below prescribes "delete the key" and names no
    * block: this spec declares no `kanban-ui` component type, so a node an
    * author wrote there would save clean (the type is an unregistered custom
@@ -7446,33 +6993,27 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * stage it was `z.unknown()`, so `42`, a bare string or a rule with no
    * `style` passed the component-props gate and the board painted nothing.
    *
-   * Read at the `.objectui-sha` pin `ab1879721595` (`KanbanBoardCore.tsx`,
-   * `KanbanImpl.tsx`, `listConditional.ts` and `ObjectGrid.tsx` are
-   * byte-identical at objectui `main` `2e818d0b51`, where the two
-   * `@object-ui/types` files cited below changed only around `grouping`):
-   * `KanbanBoardCore.tsx:114` hands
-   * `schema.conditionalFormatting` to the board, whose `getCardStyles`
-   * (`KanbanImpl.tsx:182`) evaluates it through the shared
-   * `resolveConditionalFormatting` (`core/src/evaluator/listConditional.ts:532`)
-   * — the evaluator the grid's rows use (`ObjectGrid.tsx:2970`), so one
+   * Read points recorded in `liveness/page.json`, row `regions`: the board
+   * core hands `schema.conditionalFormatting` to the board, whose
+   * `getCardStyles` evaluates it through the shared
+   * `resolveConditionalFormatting` — the evaluator the grid's rows use, so one
    * declaration judges both doors. objectui's own authoring declaration is this
-   * rule, by reference, since objectui#11522 (landed by objectui#11532,
-   * `c73cdb5695`, an ancestor of the pin): `KanbanConditionalFormattingRuleSchema`
-   * extends the list view's rule element (`types/src/zod/objectql.zod.ts:3074`)
-   * and refuses the native `{ field, operator, value, … }` and top-level colour
-   * keys by name, and its TS twin extends `SpecConditionalFormattingRule`
-   * (`types/src/objectql.ts:5166`).
+   * rule, by reference, since objectui#11522 (landed by objectui#11532):
+   * `KanbanConditionalFormattingRuleSchema` extends the list view's rule
+   * element and refuses the native `{ field, operator, value, … }` and
+   * top-level colour keys by name, and its TS twin extends
+   * `SpecConditionalFormattingRule`.
    *
    * ⚠️ Two differences, neither a working rule. The shared evaluator still reads
    * the native, `expression` and top-level colour arms for a rule a relay hands
-   * the board in a stored dialect (`KanbanImpl.tsx:160-166`), as on the grid; no
-   * authored `object-kanban` writer uses them (census below). And objectui's
-   * `condition` takes a blank string, which the evaluator answers with its
-   * no-match fallback (`listConditional.ts:252-260`, `fallback: false` at
-   * `:546`); the list view's member refuses it, as it does on the grid.
+   * the board in a stored dialect, as on the grid; no authored `object-kanban`
+   * writer uses them (census below). And objectui's `condition` takes a blank
+   * string, which the evaluator answers with its no-match fallback
+   * (`fallback: false`); the list view's member refuses it, as it does on the
+   * grid.
    *
    * Census of authored `object-kanban` writers (objectstack `16d241a6af`,
-   * objectui at the pin and at `main`, hotcrm `4054ec2680`, cloud
+   * objectui (recorded in the ledger row above), hotcrm `4054ec2680`, cloud
    * `2205b53010`): every working writer is a `{ condition, style }` rule and
    * parses here. The refused values are objectui's own refusal probes and one
    * no-predicate fixture in this package (`{ field, value }` with no
@@ -7486,130 +7027,15 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * maintainer ruling, verbatim `B`: declare `navigation` on the platform
    * element schemas).
    *
-   * Measured at objectui `b9814b334` (re-read there 2026-10-14:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
-   * `1fb1ced36`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-   * `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-   * `499799502`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * `useNavigationOverlay.ts` is byte-identical to `20c6d351a` (`git diff
-   * --quiet`), and `ObjectKanban.tsx` changed above and between the anchors
-   * here (+21/-1, objectui#12082, objectui `5af42dbbd`: the card move reads the
-   * affordance-to-grant map) without touching one, so each MOVED with its cited
-   * text byte-identical: the read `1368` -> `1370`, the hand-off `1376-1377` ->
-   * `1378-1379`, the overlay render `1626` -> `1642` and its
-   * `NavigationOverlay` `1642-1655` -> `1658-1671`, and the card click `1755`
-   * -> `1775`. At `20c6d351a`, re-read there 2026-10-10:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
-   * `f0268ad78`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `a58626c88` (`git diff --quiet`), so every anchor held unmoved. At
-   * `a58626c88`, re-read there 2026-10-06:
-   * `useNavigationOverlay.ts` is byte-identical to `0abd4f9f8` (`git diff
-   * --quiet`), and `ObjectKanban.tsx` changed above and between the anchors
-   * here (+65/-2, objectui#11629: each column header totals the view's
-   * `summarizeField`) without touching one, so each MOVED with its cited text
-   * byte-identical: the read `1310` -> `1368`, the hand-off `1318-1319` ->
-   * `1376-1377`, the overlay render `1568` -> `1626` and its
-   * `NavigationOverlay` `1584-1597` -> `1642-1655`, and the card click `1693`
-   * -> `1755`.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`; re-measured there 2026-10-05 — `useNavigationOverlay.ts` is
-   * byte-identical to `2e818d0b5` (`git diff --quiet`), and `ObjectKanban.tsx`
-   * changed above every anchor here (+35/-5, objectui#8347: a type import
-   * edited in place, a private `GateBoundKanbanSchema` read type — still
-   * `ObjectKanbanSchema`, with its declared `navigation`, plus the
-   * gate-written `sort` — a re-worded docblock and a widened `schema`
-   * binding), so each MOVED by 30 with its cited text byte-identical: the
-   * read `1280` -> `1310`, the hand-off `1288-1289` -> `1318-1319`, the
-   * overlay render `1538` -> `1568` and its `NavigationOverlay` `1554-1567`
-   * -> `1584-1597`, and the card click `1663` -> `1693`. At `2e818d0b5`,
-   * re-measured there 2026-10-04 — `ObjectKanban.tsx` and
-   * `useNavigationOverlay.ts` are byte-identical to `ab1879721`
-   * (`git diff --quiet`), so every anchor held unmoved. At `ab1879721`,
-   * re-measured there 2026-10-03 — both are byte-identical to `89cad75d5`
-   * (`git diff --quiet`), so every anchor held unmoved and was re-read in
-   * place: the read `1280`, the hand-off `1288-1289`, the overlay render
-   * `1538` and its `NavigationOverlay` `1554-1567`, and the card click
-   * `1663`. At `89cad75d5` (2026-10-02) `ObjectKanban.tsx` was
-   * byte-identical to `31971ff1e` (`git diff --quiet`), so every anchor held
-   * unmoved and was re-read in place: the read `1280`, the hand-off
-   * `1288-1289`, the overlay render `1538` and its `NavigationOverlay`
-   * `1554-1567`, and the card click `1663`. What did change on this hop is
-   * downstream of the read, not the read: objectui#11293 has the shared
-   * `useNavigationOverlay` hand a `page` click with no `onNavigate` to the
-   * record navigator the host publishes, so the `page` mode this key accepts
-   * now opens the record page on a standalone board under such a host. At
-   * `31971ff1e` (2026-10-01) `ObjectKanban.tsx` changed on
-   * this hop in one place, the comment above the `navigation` read (+12/-14,
-   * objectui#8652, the objectui half of the same ruling: the key is now
-   * declared on `ObjectKanbanSchema`), so the read itself did not change and
-   * every anchor MOVED up by 2 with its cited text byte-identical: the read
-   * `1282` -> `1280`, the hand-off `1290-1291` -> `1288-1289`, the overlay
-   * render `1540` -> `1538` and its `NavigationOverlay` `1556-1569` ->
-   * `1554-1567`, and the card click `1665` -> `1663`. At `e420df310`
-   * (2026-09-30) `ObjectKanban.tsx` changed on
-   * this hop, +40/-13: objectui#9853's renamed fetch-batch default, and
-   * objectui#11234's internal `KanbanBoardCore` with the comments that record
-   * the Quick Add cut, all of it re-mapped through the diff. Every anchor MOVED
-   * with its cited text byte-identical and none of the edits touches the
-   * `navigation` read or where it lands: the read `1261` -> `1282`, the
-   * hand-off `1269-1270` -> `1290-1291`, the overlay render `1519` -> `1540`
-   * and its `NavigationOverlay` `1535-1548` -> `1556-1569` by 21, and the card
-   * click `1638` -> `1665` by 27, the six extra lines being the
-   * `KanbanBoardCore` comment above the board it now clicks through. At
-   * `db11afd49` (2026-09-29) `ObjectKanban.tsx` changed in one
-   * comment line only (`:1367`, a line-neutral comment re-spelling that no anchor
-   * below cites), so every anchor below held unmoved and was re-read in place. At
-   * `dd3f7e1be` (2026-09-28) `ObjectKanban.tsx` changed on
-   * this hop, +44/-8 (objectui#10572's invalidation bus, objectui#10663,
-   * objectui#10666's resolved filter, and objectui `1dae95a41`'s comment
-   * sweep), every line it added or removed above these anchors — the one
-   * comment it re-spelled below them, at `:1615`, is line-neutral — so each
-   * MOVED by 36 with its cited text byte-identical and is cited below at its
-   * new number. On the hop onto `f8a9d0fb0` the file changed +16/-1
-   * (objectui#10068's `$orderby`), also all above them, and each MOVED by 15
-   * with its text byte-identical; the file was byte-identical across the hop
-   * onto `62597c588`. They were
-   * re-READ at `87af769e9` 2026-09-22 — every anchor re-derived from that
-   * tree rather than carried, none of them at its `53ded82bf` number and one
-   * of them no longer spelled the way this record quoted it):
-   * `ObjectKanban.tsx:1370`
+   * Read points recorded in `liveness/page.json`, row `regions`: the renderer
    * reads `schema.navigation ?? { mode: 'drawer' }` and hands it to
-   * `useNavigationOverlay` (`:1378-1379`), whose result drives the card click
-   * (`:1775`) and the detail overlay (`:1642`, whose `NavigationOverlay` is
-   * `:1658-1671`) — on a STANDALONE board, with no enclosing view to resolve
-   * a mode from. ⚠️ The `(schema as any)` cast this record used to quote is
-   * GONE at this pin: the read is spelled `schema.navigation`, and it now
-   * compiles through a DECLARED `ObjectKanbanSchema.navigation` member
-   * (objectui#8652, the mirror of this row), where through `e420df310` it
-   * compiled through `BaseSchema`'s index signature, as the comment above it
-   * then recorded (objectui#9726). The READ is unchanged — only its spelling is —
-   * so nothing this record says about the key moves. Until this key the same
-   * document ran correctly in the renderer and was refused BY NAME at the
-   * authoring door, through the generic `unrecognized_keys` rule a typo gets.
+   * `useNavigationOverlay`, whose result drives the card click and the detail
+   * overlay (its `NavigationOverlay`) — on a STANDALONE board, with no
+   * enclosing view to resolve a mode from. The read compiles through a
+   * DECLARED `ObjectKanbanSchema.navigation` member (objectui#8652, the mirror
+   * of this row). Until this key the same document ran correctly in the
+   * renderer and was refused BY NAME at the authoring door, through the
+   * generic `unrecognized_keys` rule a typo gets.
    *
    * The value is {@link NavigationConfigSchema} BY REFERENCE — the one def
    * `ListViewSchema.navigation` declares — because the ruling's point is that
