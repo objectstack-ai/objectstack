@@ -1657,8 +1657,11 @@ describe('HttpDispatcher', () => {
                 AUTHED_CALLER()
             );
 
+            // [#23574] The request `RestServer`'s twin assembles, and the one
+            // `FindDataRequestSchema` gates: the body is the query, the path
+            // object written into it last.
             expect(mockProtocol.findData).toHaveBeenCalledWith(
-                { object: 'task', query: { filter: { status: 'active' }, populate: ['assignee'] }, context: AUTHED_CALLER().executionContext }
+                { object: 'task', query: { filter: { status: 'active' }, populate: ['assignee'], object: 'task' }, context: AUTHED_CALLER().executionContext }
             );
         });
     });
