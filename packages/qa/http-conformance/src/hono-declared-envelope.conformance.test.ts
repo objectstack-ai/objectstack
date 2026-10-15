@@ -240,6 +240,52 @@ describe('[#23365] a real createHonoApp host: the dispatch() catch-all renders a
     }, 60_000);
 });
 
+/**
+ * [#23531] The stale-`If-Match` `409` above carries the server's current state,
+ * as `RestServer`'s does: `currentVersion` and `currentRecord`, which the wire
+ * contract and `ConcurrentUpdateError`'s docblock name and objectui's conflict
+ * bar reads. Before this card the body was `code` and `message` only.
+ *
+ * The fields ride `error.details`, the wrapped envelope's declared context
+ * slot, which is where `@objectstack/client` reads a wrapped body's context
+ * from. `currentVersion` is proved by USE, not by spelling: echoed back as the
+ * next `If-Match`, it is accepted ("Overwrite anyway" in the conflict bar), so
+ * it is the record's real version token.
+ */
+describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries currentVersion and currentRecord', () => {
+    it('PATCH with a stale If-Match: both fields in `error.details`, and the version it names is accepted', async () => {
+        const host = await boot();
+        const id = await host.seed('original');
+        const answer = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': STALE_VERSION }, body: { name: 'lost update' } });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
+
+        const details = answer.body.error.details;
+        expect(details?.currentRecord, JSON.stringify(answer.body)).toMatchObject({ id, name: 'original' });
+        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
+        expect(await host.stored(id)).toBe('original');
+
+        const overwrite = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` }, body: { name: 'overwritten' } });
+        expect(overwrite.status, JSON.stringify(overwrite.body)).toBe(200);
+        expect(await host.stored(id)).toBe('overwritten');
+    }, 60_000);
+
+    it('DELETE with a stale If-Match: both fields in `error.details`, and the version it names is accepted', async () => {
+        const host = await boot();
+        const id = await host.seed('kept');
+        const answer = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': STALE_VERSION } });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
+
+        const details = answer.body.error.details;
+        expect(details?.currentRecord, JSON.stringify(answer.body)).toMatchObject({ id, name: 'kept' });
+        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
+        expect(await host.stored(id)).toBe('kept');
+
+        const overwrite = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` } });
+        expect(overwrite.status, JSON.stringify(overwrite.body)).toBe(200);
+        expect(await host.stored(id)).toBeUndefined();
+    }, 60_000);
+});
+
 describe('[#23365] a real createHonoApp host: the auth-mount arm renders a declared envelope', () => {
     it('an auth service that throws a declared envelope: that envelope, with no cause in the body', async () => {
         const host = await boot({
