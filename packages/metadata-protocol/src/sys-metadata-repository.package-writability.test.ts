@@ -1320,11 +1320,10 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     // sentence the protocol's package door throws for the same item.
     const err = await putWith(repo, { type: 'object', name: 'showcase_task', intent: 'override-artifact' }) as any;
     expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    // [#23577] The one sentence every write over a sealed, package-held name reads.
     expect(String(err.message)).toBe(
-      "Metadata item 'object/showcase_task' is provided by a managed package and is sealed against in-place edits: "
-      + 'its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not open '
-      + 'a managed item. Edit the source artifact and redeploy. '
-      + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.',
+      "'object/showcase_task' is provided by a managed package and is sealed: it cannot be written here. "
+      + 'GET /api/v1/meta/object lists the names in use.',
     );
   });
 
