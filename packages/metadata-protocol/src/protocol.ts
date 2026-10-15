@@ -24492,7 +24492,17 @@ export class ObjectStackProtocolImplementation implements
         // before `repo.promoteDraft` writes, so a batch publish aborts on it
         // as on the refusals below (ADR-0067 D2). Both doors reach it: the
         // per-item publish and `publishPackageDrafts` promote through here.
-        if (draftForGate && singularType === 'object') {
+        //
+        // ⛔ Not asked of SEALED managed content ({@link isSealedManagedItem}):
+        // an object a code package ships. The save door answers that row's
+        // package door first ({@link refusePackagedBaseOverride},
+        // `NOT_OVERRIDABLE` / 403, ahead of its D9.9 call), and the promotion
+        // reaches the same refusal at the store (`repo.promoteDraft` →
+        // `assertAllowed`). Asking `classifyObjectContribution` there would
+        // answer its packaged `mismatch` arm instead — a second dialect for
+        // one row, whose prescription ("bind to the owner") the sealed rule
+        // refuses. One row, one refusal: the save door's.
+        if (draftForGate && singularType === 'object' && !this.isSealedManagedItem(singularType, request.name)) {
             const layer = this.classifyObjectContribution(request.name, promoteInto);
             if (layer.kind === 'mismatch') {
                 throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
