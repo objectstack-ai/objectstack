@@ -287,8 +287,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   "Calendar configuration required" refusal screen, which names
  *   `startDateField` as the key to declare (objectui#8170 corrected that
  *   screen's second clause: `titleField` is NOT required). ⚠️ The screen's
- *   copy is LOCALISED at the pin: objectui#10101 (objectui `afb228418`), which
- *   the pin now contains, routes it through `tt('calendar.configRequired', …)`
+ *   copy is LOCALISED: objectui#10101 (objectui `afb228418`), which the
+ *   console this repo ships contains, routes it through `tt('calendar.configRequired', …)`
  *   (in `ObjectCalendar`), whose default and the `en` pack both
  *   read "Calendar configuration required. Please specify startDateField, …",
  *   while a non-English locale renders its own pack's words for the same
@@ -307,8 +307,8 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   `case 'gantt'` spreads `startDateField` / `endDateField` / `titleField`
  *   only when the view DECLARED them — the `'start_date'` / `'end_date'`
  *   floors were deleted by objectui#7070 (landing commit objectui
- *   `5f4514f7b`, which the arm's comment cites in the issue's place at this
- *   pin: objectui `fec3b1a8b` re-cited objectui#7070 because it answers
+ *   `5f4514f7b`, which the arm's comment cites in the issue's place on that
+ *   console: objectui `fec3b1a8b` re-cited objectui#7070 because it answers
  *   404), and the `'progress'` /
  *   `'dependencies'` floors by objectui#7499 (OMITTED, not refused: an absent
  *   progress or dependency binding is a legitimate state). ② `ObjectGantt`'s
@@ -324,7 +324,7 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   through `resolveTimelineDateBinding` and spreads it only when one was
  *   declared — the `startDateField || 'created_at'` floor was deleted by
  *   objectui#7070 step ③ (landing commit objectui `04a67b9dc`, which the
- *   arm's comment cites in the issue's place at this pin), on the ruling
+ *   arm's comment cites in the issue's place on that console), on the ruling
  *   日期轴永不虚构 (a date axis is never
  *   fabricated) — while its `titleField: dateBinding.titleField || 'name'`
  *   line is kept on purpose (a title is not an axis). ② `ObjectTimeline`'s

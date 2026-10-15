@@ -430,8 +430,8 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
   type: z.literal('object'),
   objectName: z.string().describe('Target object name'),
   /**
-   * The rule this sentence states is the console's, read at the objectui commit
-   * `.objectui-sha` pins: an entry with no `viewName` links to the bare object
+   * The rule this sentence states is the console's (read points recorded in
+   * `liveness/app.json`, row `navigation.viewName`): an entry with no `viewName` links to the bare object
    * route, where `ObjectView` opens `defaultViewId || views[0]` — the view
    * `buildViewTabs` marks `isDefault` (the default `list`), else the first
    * declared list view. Its `all` tab is the fallback `buildViewTabs` adds only
