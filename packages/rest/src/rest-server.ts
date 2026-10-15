@@ -858,7 +858,8 @@ export function readDeclaredQueryNumber(
  *
  * `/discovery` states the same fact twice -- `routes.X` (the flat convenience
  * map) and `services.Y.route` (the per-slot entry) -- and the discovery handler
- * below rewrites only the first half to the paths this server actually mounts.
+ * (in `discovery-routes.ts` since #23050 slice 7, which imports this table)
+ * rewrites only the first half to the paths this server actually mounts.
  * Measured on this file's own composition harness with
  * `crud: { dataPrefix: '/objects' }`: `routes.data` answered `/api/v1/objects`
  * while `services.data.route` still answered `/api/v1/data`, a path with
