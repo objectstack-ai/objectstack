@@ -317,8 +317,9 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
  * which that classifier admits for a NAVIGATION, is refused HERE on a
  * measurement of the renderer, not by analogy: a read is a `fetch`, and the
  * `apiBase` promotion the console applies to a `url` action
- * (`ActionRunner.navigateTo`, measured at objectui `7578323a544e`) prefixes a
- * root-relative `/api/…` path only — a `./` path would resolve against the
+ * (`ActionRunner.navigateTo`; read points recorded in `liveness/page.json`,
+ * row `regions`) prefixes a root-relative `/api/…` path only — a `./` path
+ * would resolve against the
  * console route the page is mounted on, on the SPA host, and read the wrong
  * thing in the silent direction.
  *
@@ -421,7 +422,7 @@ const ELEMENT_API_NO_CREDENTIALS =
  * refused with {@link ELEMENT_API_NO_CREDENTIALS}. There is no `write` block:
  * a page element READS.
  *
- * `method` admits `GET` alone. Measured at objectui `7578323a544e`: the adapter
+ * `method` admits `GET` alone. Measured on the renderer: the adapter
  * the ruling names, `@object-ui/core`'s `ApiDataSource`, issues every read —
  * `find`, `findOne`, `aggregate` — with an explicit `method: 'GET'` that
  * overrides the request config's own, so any other value here would declare a
@@ -429,7 +430,7 @@ const ELEMENT_API_NO_CREDENTIALS =
  *
  * ## Planned, not yet rendered
  *
- * At objectui `7578323a544e` no renderer reads this binding: the page-element
+ * No renderer reads this binding yet: the page-element
  * data-source hook (`useElementDataSource`, `@object-ui/react`) admits only a
  * binding with a string `object` (`isElementDataSourceConfig`), so an `api`
  * binding reaches no block yet. The generic blocks that read it — stat, usage
@@ -642,21 +643,18 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * unavailable — they are NOT promises, and widening the contract to cover
    * them is an open question, deliberately not decided here.
    *
-   * Measured at the `.objectui-sha` pin `1fb1ced36243` (the four files below
-   * are identical at objectui `origin/main` `f228d710`):
-   * `app-shell/src/providers/ExpressionProvider.tsx:181-190`
-   * (`buildExpressionScope`) builds the ambient scope — `current_user`,
-   * `user`, `ctx.user`, `os.user`, `features`, and nothing else;
-   * `react/src/SchemaRenderer.tsx:665-676` (`configEvaluationScope`) composes
-   * this surface's evaluator from it, adding `record` (only when the page has
-   * a row) and `page`.
+   * Measured on the renderer (read points recorded in `liveness/page.json`,
+   * row `regions`): `buildExpressionScope` builds the ambient scope —
+   * `current_user`, `user`, `ctx.user`, `os.user`, `features`, and nothing
+   * else; `configEvaluationScope` composes this surface's evaluator from it,
+   * adding `record` (only when the page has a row) and `page`.
    *
    * ## No `data` root on this surface
    *
    * The shipping renderer mounts NO `data` root here. objectui#9308 (ruling
    * B, 2026-09-13) removed `data` as a runtime expression root:
    * `SchemaRenderer` stopped publishing its injected data source under that
-   * name (`SchemaRenderer.tsx:1194`), and a data scope reaches a predicate
+   * name, and a data scope reaches a predicate
    * only through the predicate-scope channel (`PredicateScopeProvider`),
    * whose one shipping feeder, `ExpressionProvider`, publishes no `data`. So a
    * `data.*` read here faults, and a faulting `visibleWhen` renders the
@@ -672,7 +670,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * ## ⚠️ A `page:tabs` item is a different evaluator
    *
    * On a `page:tabs` **item-level** `visibleWhen`, a separate evaluator
-   * (`components/src/renderers/layout/containers.tsx:642-649`) binds `data` to
+   * (recorded in the same evidence list) binds `data` to
    * the record **ROW** and spreads the row's bare fields as well — a binding
    * this surface does not have. See that key's own describe in
    * `component.zod.ts` rather than assuming either environment carries over.
@@ -925,10 +923,11 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
    *
    * It was declared ahead of its renderer, with the planned marker on its
    * describe. The renderer half, objectstack-ai/objectui#12270 (objectui
-   * `b434f5f47`), is inside the console pin from objectui `b9814b334`, so the
-   * marker is dropped. Measured there: `InterfaceListPage` hands `ListView`
-   * `emptyState: cfg.emptyState ?? view.emptyState` (`InterfaceListPage.tsx:509`),
-   * so the page's own empty state wins over its source view's, whole, and the
+   * `b434f5f47`), is inside the console's objectui pin, so the marker is
+   * dropped. Measured there (read point recorded in `liveness/page.json`, row
+   * `interfaceConfig`): `InterfaceListPage` hands `ListView` `emptyState:
+   * cfg.emptyState ?? view.emptyState`, so the page's own empty state wins
+   * over its source view's, whole, and the
    * source view's stays the fallback. Where `ListView` draws an empty state at
    * all (the `grid` and `gallery` visualizations), that is the one it draws,
    * `link` included.

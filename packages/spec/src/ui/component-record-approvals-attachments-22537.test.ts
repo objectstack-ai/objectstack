@@ -10,7 +10,8 @@
  * `enable.files` object.
  *
  * Both are declared now, each with a strict row measured from its renderer's
- * read points at the `.objectui-sha` pin. Both rows accept no key:
+ * read points (recorded in `liveness/page.json`, row `regions`). Both rows
+ * accept no key:
  * `record:attachments` reads no props at all, and `record:approvals` reads
  * only the host's runtime channel (`approvals`, `currentUserId`), which the row
  * refuses with a prescription instead of declaring. The authoring rule ids

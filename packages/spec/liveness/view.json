@@ -215,7 +215,7 @@
         },
         "appearance": {
           "status": "live",
-          "note": "objectui: allowedVisualizations gates the view-type switcher (audit L15); showDescription gates ListView.tsx:1728."
+          "note": "objectui: allowedVisualizations gates the view-type switcher (audit L15); showDescription gates ListView.tsx:1728. objectui's authoring mirror runs none of the spec's object-level checks on this block (packages/spec/src/ui/object-refinement-check-exports.test.ts; moved out of spec source, #23434): objectui @a472b07167a3 packages/types/src/zod/objectql.zod.ts#ListViewSchema extends `specFieldsExcept(SpecListViewSchema.shape, …)`, which carries the fields and drops every check attached to the object (the source counted six such sites at that pin); unchanged at objectui @53ded82bf7a4."
         },
         "tabs": {
           "status": "dead",

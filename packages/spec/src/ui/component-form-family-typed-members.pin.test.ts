@@ -16,8 +16,8 @@
  *
  * ## The defect this file closes
  *
- * Each of the four is read with one shape (measured at the `.objectui-sha` pin
- * `89cad75d55`; the read points are in the members' docblocks), and the row
+ * Each of the four is read with one shape (read points recorded in
+ * `liveness/page.json`, row `regions`), and the row
  * declared them `z.unknown()`. So a `submitBehavior` whose `kind` the form does
  * not know, a `contentLayout: 'tabs'`, a numeric `navigateOnSuccess` and a
  * misspelled `mobile` member all passed the component-props gate, and the form

@@ -426,8 +426,8 @@ describe('the `field` → `name` respelling is a chain step on the form-view car
 const MASTER_DETAIL_PROPS = ComponentPropsMap['object-master-detail-form'];
 
 /**
- * Every key objectui's `MasterDetailForm` reads off a detail entry (the
- * `.objectui-sha` pin `31971ff1e28f`, re-read at `89cad75d5570`). `sortField`
+ * Every key objectui's `MasterDetailForm` reads off a detail entry (read
+ * points recorded in `liveness/page.json`, row `regions`). `sortField`
  * is not one of them: the renderer derives the line-position field from the
  * child object, and the key is a tombstone (#21589,
  * `ui/master-detail-detail-sort-field-retirement.test.ts`).
@@ -621,7 +621,7 @@ describe('defineStack judges an identity-only detail column by the type it rende
  */
 const LINE_ITEMS_PROPS = ComponentPropsMap['record:line_items'];
 
-/** Every key objectui's `LineItemsPanel` reads off its schema (the `.objectui-sha` pin `31971ff1e28f`). */
+/** Every key objectui's `LineItemsPanel` reads off its schema (read points recorded in `liveness/page.json`, row `regions`). */
 const FULL_LINE_ITEMS = {
   childObject: 'crm_invoice_line',
   relationshipField: 'invoice',
