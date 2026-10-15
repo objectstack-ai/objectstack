@@ -619,8 +619,8 @@ export const PageHeaderProps = strictObject({
    * Page title (#7702, maintainer ruling 2026-08-11 「接受你的建议,开始加速处理」
    * on the lane's A/B recommendation). OPTIONAL, not required: the platform's
    * own synthesizer (objectui `buildDefaultHeader`) emits every seeded
-   * `page:header` with no `title` at all — `PageHeaderRenderer`
-   * (`containers.tsx:1013`) reads `schema?.title ?? schema?.properties?.title`
+   * `page:header` with no `title` at all — `PageHeaderRenderer` (read points recorded in `liveness/page.json`, row `regions`)
+   * reads `schema?.title ?? schema?.properties?.title`
    * and, finding neither, falls through to the record chip's own
    * record-derived heading. A required `title` would reject the platform's
    * own canonical output. Sanctioned spelling: title omitted ⇒ the renderer
@@ -636,8 +636,8 @@ export const PageHeaderProps = strictObject({
    * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,
    * route (c) — retire upstream).
    *
-   * A header icon nothing has ever drawn. `PageHeaderRenderer`
-   * (`containers.tsx`) resolves `icon` only per header ACTION (`action.icon`,
+   * A header icon nothing has ever drawn. `PageHeaderRenderer` resolves `icon`
+   * only per header ACTION (`action.icon`,
    * inside the action pipeline) and never off the header's own props bag;
    * `@object-ui/layout`'s `<PageHeader>` accepts an `icon` REACT prop from a
    * host but — unlike `actions`, whose `schema?.actions ??
@@ -664,8 +664,8 @@ export const PageHeaderProps = strictObject({
    * REMOVED (#20758, ADR-0049 enforce-or-remove through the ADR-0087 D2 route,
    * the way `icon` above left this row; the spec half of objectui#11166).
    *
-   * A trail switch with no trail behind it. `PageHeaderRenderer`
-   * (`containers.tsx`) reads the key and, when it is not `false`, draws an
+   * A trail switch with no trail behind it. `PageHeaderRenderer` reads the key
+   * and, when it is not `false`, draws an
    * EMPTY `div[data-page-breadcrumb-slot]` in both layouts; nothing fills it.
    * The console's navigation trail is drawn once, by the shell (`AppHeader`
    * inside `/apps/:appName/*`), so a page-level renderer would duplicate it
@@ -690,8 +690,8 @@ export const PageHeaderProps = strictObject({
    *
    * An authored list is the WHOLE set, not a filter laid over the actions that
    * declare a header placement. objectui's `PageHeaderRenderer`
-   * (`containers.tsx`, `resolvedHeaderActions` then `headerActionPlan`)
-   * resolves each id against the actions declared on the bound object, keeps
+   * (`resolvedHeaderActions` then `headerActionPlan`; read points recorded in
+   * `liveness/page.json`, row `regions`) resolves each id against the actions declared on the bound object, keeps
    * those whose `locations` include `record_header` or `record_more`, and draws
    * no other action of the object:
    *
@@ -721,9 +721,9 @@ export const PageHeaderProps = strictObject({
    * since there is no record for the chip to describe.
    *
    * Declared here because the renderer has always read it and the schema had
-   * not caught up: `containers.tsx:979` resolves
+   * not caught up: the header renderer (read points recorded in `liveness/page.json`, row `regions`) resolves
    * `schema?.recordChrome === false || schema?.properties?.recordChrome === false`
-   * and `:1453` branches the whole header on it, while objectui's own console
+   * and branches the whole header on it, while objectui's own console
    * preview sample authors `recordChrome: false` on a non-record page. Until
    * this declaration that page was legal per objectui's published manifest and
    * `warning: undeclared` per `validateComponentProps` (#5068) — two platform
@@ -735,15 +735,16 @@ export const PageHeaderProps = strictObject({
   /**
    * Follow (favourite) star beside the record title — `RecordTitleChip
    * showStar` (#6776). Part of the record chrome, so it has no effect when
-   * `recordChrome` is false. Read at `containers.tsx:980`, consumed at `:1531`.
+   * `recordChrome` is false. Read by the header renderer and consumed by the
+   * record chip (read points recorded in `liveness/page.json`, row `regions`).
    */
   showStar: z.boolean().default(true).describe(
     'Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
   ),
   /**
    * Copy-record-id button beside the record title — `RecordTitleChip
-   * showCopyId` (#6776). Same record-chrome scoping as `showStar`. Read at
-   * `containers.tsx:981`, consumed at `:1532`.
+   * showCopyId` (#6776). Same record-chrome scoping as `showStar`. Read by the
+   * header renderer and consumed by the record chip (read points recorded in `liveness/page.json`, row `regions`).
    */
   showCopyId: z.boolean().default(true).describe(
     'Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
@@ -754,7 +755,7 @@ export const PageHeaderProps = strictObject({
    *
    * Declared on the #5611 / #5775 / commit 78f0be872 rule, for the same reason and by the same
    * evidence: the renderer has always read them and the schema had not caught
-   * up. `containers.tsx:1358` resolves
+   * up. The header renderer (read points recorded in `liveness/page.json`, row `regions`) resolves
    * `schema?.maxVisible ?? schema?.properties?.maxVisible` (and the `mobile*`
    * twin), the `?? 3` / `?? 1` are its own fallbacks, and its comment says out
    * loud that both are "overridable on the page:header". Closing this shape
@@ -800,7 +801,7 @@ export const PageTabsProps = strictObject({
    *     so `type` is the tag name and this prop has no spelling left.
    *
    * `tabStyle` is what objectui's registry publishes and what the renderer
-   * reads in every carrier (`containers.tsx:381`), so the contract converges on
+   * reads in every carrier (read points recorded in `liveness/page.json`, row `regions`), so the contract converges on
    * the spelling that works rather than the one that reads well — the #5775
    * `displayField` → `labelField` shape, and one spelling rather than two
    * (Prime Directive #12).
@@ -826,8 +827,9 @@ export const PageTabsProps = strictObject({
    * The renderer hides a one-tab strip by default — "a single pill labelled
    * 'Details' is visual clutter rather than an affordance" — and its own
    * comment invites the override: *"Authors who want the strip even at length 1
-   * can pass `properties.alwaysShowStrip: true`"* (`containers.tsx:637`, read as
-   * `schema?.properties?.alwaysShowStrip === true`). Declared on the same
+   * can pass `properties.alwaysShowStrip: true`"* (read as
+   * `schema?.properties?.alwaysShowStrip === true`; read points recorded in
+   * `liveness/page.json`, row `regions`). Declared on the same
    * #5611 / #5775 / commit 78f0be872 rule as `page:header`'s action budget: the delivered,
    * invited shape is the contract, and a closed schema that rejected it would
    * be the declaration disagreeing with the renderer in the direction that
@@ -846,9 +848,9 @@ export const PageTabsProps = strictObject({
        * describes: a different WORD for the same intent, correct on a
        * neighbouring surface. Measured producers, both live: objectui's Studio
        * block designer publishes `key` as the tab item's text input
-       * (`previews/block-config.ts`, `page:tabs.items.itemFields`), and #5776
-       * recorded the showcase authoring the same spelling. The renderer reads
-       * neither — `containers.tsx:566` takes `it.value` and falls back to
+       * (`page:tabs.items.itemFields`), and #5776 recorded the showcase
+       * authoring the same spelling. The renderer reads neither — it takes
+       * `it.value` (read points recorded in `liveness/page.json`, row `regions`) and falls back to
        * `tab-${idx}` — so an authored `key` silently yields index-derived tab
        * tokens that move the moment the item list changes.
        */
@@ -885,112 +887,17 @@ export const PageTabsProps = strictObject({
      * same record for the tab item, so the sweep cannot re-derive the same
      * false candidate a component over).
      *
-     * The key is LIVE at objectui `b9814b334` (re-read there 2026-10-14:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
-     * `1fb1ced36`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-     * `7578323a5`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-     * `9646e2ed2`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-     * `088e0f705`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-     * `e5311165a`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-     * `499799502`, re-read there 2026-10-11:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-     * `0df67f237`, re-read there 2026-10-11:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `20c6d351a` (`git diff --quiet`), so every anchor held unmoved. At
-     * `20c6d351a`, re-read there 2026-10-10:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
-     * `47b1f0bb7`, re-read there 2026-10-09:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
-     * `f0268ad78`, re-read there 2026-10-09:
-     * `containers.tsx` changed across the hop from `a58626c88` (+92/-6,
-     * objectui#11811: a record action disabled by its predicate says why, in the
-     * `page:header` renderer), every hunk at `:1512` or below, so both anchors
-     * were re-READ in place and NEITHER moved, each byte-identical;
-     * `lib/lazy-icon.tsx` is byte-identical (`git diff --quiet`). At `a58626c88`,
-     * re-read there 2026-10-06:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
-     * At `0abd4f9f8`, re-read there 2026-10-05:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-     * At `9dfaca654`; re-derived at that pin 2026-10-05 —
-     * `containers.tsx` changed across the hop from `2e818d0b5` (89 insertions,
-     * 0 deletions: objectui#11619's record picture in the record chrome — three
-     * import lines at the top of the file, and the `recordPictureUrl` helpers
-     * and the `page:header` picture read below both anchors), so both anchors
-     * were re-READ rather than carried, and BOTH MOVED down three lines with
-     * their text byte-identical: the icon block `945-951` -> `948-954` and the input
-     * `1004` -> `1007`; `lib/lazy-icon.tsx` is byte-identical. At `2e818d0b5`,
-     * re-derived there 2026-10-04 —
-     * every objectui file this record cites is byte-identical across the hop
-     * from `ab1879721` (`git diff --quiet`), so both anchors held unmoved. At
-     * `ab1879721`, re-derived there 2026-10-03, `containers.tsx` changed
-     * across the hop from `89cad75d5` (23 insertions,
-     * 27 deletions: objectui#11445's i18next count family, which rewrote the
-     * tab-count translation table above both anchors and the count badge's
-     * `aria-label` between them, and objectui#11438 dropping the `page:header`
-     * registration's inert `breadcrumb` input below them), so both anchors were
-     * re-READ rather than carried, and BOTH MOVED up one line with their text
-     * byte-identical: `946-952` -> `945-951`, `1005` -> `1004`. At `89cad75d5`
-     * (2026-10-02) `containers.tsx` was byte-identical across the hop from
-     * `31971ff1e` (`git diff --quiet`), so both anchors were re-READ in place,
-     * each still the read point this record names: `946-952` and `1005`. At `31971ff1e`
-     * (2026-10-01) `containers.tsx` was byte-identical across the hop from
-     * `e420df310` (`git diff --quiet`), so both anchors were re-READ in place,
-     * each still the read point this record names: `946-952` and `1005`. At `e420df310`
-     * (2026-09-30) `containers.tsx` changed again across the hop from
-     * `db11afd49` (40
-     * insertions, 26 deletions: objectui#11166's `page:header` breadcrumb slot
-     * and objectui#11212's fail-closed permission gates), every hunk at `:1286`
-     * or below, so both anchors were re-READ in place and NEITHER moved, each
-     * byte-identical: `946-952` and `1005`. At `db11afd49` (2026-09-29)
-     * `containers.tsx` changed again across the hop from `dd3f7e1be` (46
-     * insertions, 6 deletions: objectui `0ecaa7dbb`'s block-level nested `aria`
-     * bags and comment re-citations), so both anchors were re-READ rather than
-     * carried, and BOTH MOVED by 23 with their text byte-identical, the net +23
-     * all landing above them: `923-929` -> `946-952`, `982` -> `1005`. At
-     * `dd3f7e1be` (2026-09-28)
-     * `containers.tsx` changed across the hop from `f8a9d0fb0` (120
-     * insertions, 63 deletions, objectui `3261e6479`, `f5178a272`,
-     * `e32dae160` and `1dae95a41`: the shared title interpolator, spec action
-     * params and two comment sweeps), so both anchors were re-READ rather than carried, and
-     * BOTH MOVED by 70 with their text byte-identical, the net +70 all landing
-     * above them: `853-859` -> `923-929`, `912` -> `982`. On the hop onto
-     * `f8a9d0fb0` (36 insertions, 7 deletions, objectui `ba0b61a60`: one
-     * import line and the `page:header` title) both were re-READ and NEITHER
-     * moved: `853-859` and `912` were byte-identical to their `62597c588` and
-     * `87af769e9` text. The same held on the hop onto
-     * `62597c588` (74 insertions, 16 deletions, objectui `4c6f549ef`). The hop before, off
-     * `53ded82bf`, moved the icon block `730-736` -> `853-859` with its seven
-     * lines byte-identical and the registration input `789` -> `912` with its
-     * LINE rewritten — it declares `of: 'object'` and carries a longer
-     * description — while the member list this record cites stayed
-     * unchanged): `containers.tsx:948-954`
-     * renders
-     * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
-     * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
-     * opacity-70`, `aria-hidden`), and the renderer's registration publishes
-     * the key to the Studio block designer at `:1007` (the `items` input,
-     * documented as `[{ label, value?, icon?, count?, visibleWhen?, children
-     * }]`).
+     * The key is LIVE (read points recorded in `liveness/page.json`, row
+     * `regions`): the tabs renderer draws `{item.icon && <LazyIcon
+     * name={item.icon} …/>}` inside the `TabsTrigger`, left of the label span
+     * (`mr-1.5 h-3.5 w-3.5 shrink-0 opacity-70`, `aria-hidden`), and its
+     * registration publishes the key to the Studio block designer (the `items`
+     * input, documented as `[{ label, value?, icon?, count?, visibleWhen?,
+     * children }]`).
      *
-     * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
-     * (`lib/lazy-icon.tsx` — kebab-case or PascalCase, normalised to
-     * kebab-case, with a fallback when the name is not a real Lucide icon), the
+     * Vocabulary is Lucide, resolved through objectui's `LazyIcon` (kebab-case
+     * or PascalCase, normalised to kebab-case, with a fallback when the name is
+     * not a real Lucide icon), the
      * same slot every other authorable icon on this surface uses. Contrast the
      * item `key` prescribed against above: that spelling reaches no read point
      * at all, and a read point is precisely what separates the two verdicts.
@@ -1025,8 +932,8 @@ export const PageTabsProps = strictObject({
      * `features` / `os.user` roots, which no ADR rules for a UI predicate
      * (ADR-0068's Non-goals: "only the user object is in scope here").
      *
-     * Measured at the `.objectui-sha` pin `1fb1ced36243`:
-     * `components/src/renderers/layout/containers.tsx:642-649`.
+     * Measured on the renderer (read points recorded in `liveness/page.json`,
+     * row `regions`).
      *
      * Canonical `*When` name per ADR-0089 — this key is new, so the deprecated
      * `visibility` / `visibleOn` aliases are NOT ACCEPTED on tab items: unlike
@@ -1145,173 +1052,37 @@ export const PageCardProps = strictObject({
  * on all four; `component-record-block-field-security.test.ts` holds the four
  * declarations identical.
  *
- * Each clause is read off objectui `b9814b334` (re-read there 2026-10-14:
- * across the hop from `1fb1ced36` `record-related-list.tsx` and the three
- * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor in
- * those four moved; `record-details.tsx` (+92/-8: objectui#12294, objectui
- * `82e5f5348`; objectui#12307, objectui `28ebfb5f8`; objectui#12192, objectui
- * `c08c9332a`), `record-highlights.tsx` (+14/-1) and `record-quick-actions.tsx`
- * (+22/-2, both objectui#12294) changed above and below the gate without
- * touching a cited line, so every anchor in those three MOVED with its cited
- * text byte-identical, by 45, by 1 and by 8 — `347` -> `392`, `336` -> `381`,
- * `347-355` -> `392-400`, `291` -> `336`; `102` -> `103`, `81` -> `82`,
- * `160-173` -> `161-174`, `155-158` -> `156-159`; `282` -> `290`, `271` ->
- * `279`, `282-290` -> `290-298` — and each is cited below at this pin.
- * objectui#12294 also exports each of those three renderers wrapped in
- * `recordBindingBlock` (`recordBinding.tsx`): an UNBOUND block renders its body
- * as before, so every clause below holds for it; a block carrying a per-element
- * `dataSource` binding first passes the element data-source gate, whose panels
- * and loading state also withhold the content before the capability gate runs,
- * which is one more reason the text says "wherever it would otherwise render".
- * At `1fb1ced36`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
- * `7578323a5`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
- * `9646e2ed2`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
- * `088e0f705`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `e5311165a8d6` (`git diff --quiet`), so every anchor held unmoved. At
- * `e5311165a8d6`, re-read there 2026-10-12:
- * across the hop from `4997995022f8` `record-details.tsx`,
- * `record-highlights.tsx`, `record-quick-actions.tsx` and the three
- * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor in
- * those six moved; `record-related-list.tsx` changed (+22/-3, objectui#12082,
- * objectui `158c75d90`: the list's fallback remove reads the
- * affordance-to-grant map's `relatedRowDelete` row) in one import line and
- * above and below the gate without touching a cited line, so every anchor in
- * it MOVED by 17 with its cited text byte-identical — `361` -> `378`, `379` ->
- * `396`, `415` -> `432`, `428` -> `445`, `428-436` -> `445-453` — and each is
- * cited below at this pin. At `4997995022f8`, re-read there 2026-10-11:
- * every objectui file this record cites is byte-identical across the hop from
- * `0df67f237c5a` (`git diff --quiet`), so every anchor held unmoved. At
- * `0df67f237c5a`, re-read there 2026-10-11:
- * across the hop from `20c6d351ad74` `record-highlights.tsx`,
- * `record-related-list.tsx`, `record-quick-actions.tsx` and `usePermissions.ts`
- * are byte-identical (`git diff --quiet`), so NO anchor in those four moved;
- * `record-details.tsx` (+13/-7) and `PermissionProvider.tsx` (+6/-1) changed
- * for objectui#12082 (objectui `023f00d46`: the record body's in-place edit
- * reads the affordance-to-grant map) in a same-length import edit and below
- * every cited line, so NO anchor in those two moved either; and
- * `MePermissionsProvider.tsx` (+36/-5, objectui#12082 and objectui#12103's
- * owner-field transfer grant) changed above `hasCapabilities` without touching
- * it, so its anchors MOVED by 31 with their cited text byte-identical — `414`
- * -> `445`, `416` -> `447` — and each is cited below at this pin. At
- * `20c6d351ad74`, re-read there 2026-10-10:
- * every objectui file this record cites is byte-identical across the hop from
- * `47b1f0bb7174` (`git diff --quiet`), so every anchor held unmoved. At
- * `47b1f0bb7174`, re-read there 2026-10-09:
- * every objectui file this record cites is byte-identical across the hop from
- * `f0268ad78485` (`git diff --quiet`), so every anchor held unmoved. At
- * `f0268ad78485`, re-read there 2026-10-09:
- * across the hop from `a58626c88dc8` `record-details.tsx`,
- * `record-highlights.tsx` and the three `permissions` files are byte-identical
- * (`git diff --quiet`), so NO anchor in those five moved;
- * `record-related-list.tsx` (+62/-4: objectui#11768's author-facing
- * action-refusal notice and objectui#11733's plural titles) and
- * `record-quick-actions.tsx` (+55/-3: objectui#11811's disabled-reason text)
- * changed above and below the gate without touching a cited line, so every anchor
- * in those two MOVED with its cited text byte-identical, by 35 and by 9 — `393`
- * -> `428`, `380` -> `415`, `326` -> `361`, `344` -> `379`, `393-401` ->
- * `428-436`; `273` -> `282`, `262` -> `271`, `273-281` -> `282-290` — and each is
- * cited below at this pin. At `a58626c88dc8`, re-read there 2026-10-06:
- * across the hop from `0abd4f9f8769` `record-highlights.tsx`,
- * `record-related-list.tsx`, `record-quick-actions.tsx` and the three
- * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor in
- * those six moved; `record-details.tsx` changed (+145/-16, objectui#11630: a
- * field group's `visibleWhen` gates its section on the record detail page)
- * above every cited line, so each of its anchors MOVED by 103 with its cited
- * text byte-identical — `244` -> `347`, `233` -> `336`, `244-252` -> `347-355`,
- * `188` -> `291` — and each is cited below at this pin.
- * At `0abd4f9f8769`, re-read there 2026-10-05:
- * every objectui file this record cites is byte-identical across the hop from
- * `9dfaca654311` (`git diff --quiet`), so every anchor held unmoved.
- * At `9dfaca654311`, re-read there 2026-10-05: across the hop
- * from `2e818d0b51ec` all four `record-*.tsx` renderers and the three
- * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor
- * below moved. At `2e818d0b51ec`, re-read there 2026-10-04: across the hop
- * from `ab1879721595` all four `record-*.tsx` renderers and the three
- * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor
- * below moved. At `ab1879721595`, re-read there 2026-10-03: across the hop
- * from `89cad75d5570` all four `record-*.tsx` renderers and the three
- * `permissions` files are byte-identical (`git diff --quiet`), so NO anchor
- * below moved, and each was re-read in place. At `89cad75d5570`, 2026-10-02: across the hop
- * from `31971ff1e28f` `record-details.tsx`, `record-highlights.tsx`,
- * `record-quick-actions.tsx` and the three `permissions` files are
- * byte-identical, so NO anchor in those six moved; `record-related-list.tsx`
- * gained the `localizeColumnLabels` helper above every cited line and a
- * comment at its `columns` hand-off below them (objectui#10993 batch 4,
- * +32/-1), so every anchor in it MOVED by 28 with its cited text
- * byte-identical: `298` -> `326`, `316` -> `344`, `352` -> `380`, `365-373`
- * -> `393-401`. At `31971ff1e28f`, 2026-10-01: across the hop
- * from `e420df310f5b` `record-details.tsx`, `record-highlights.tsx` and the
- * three `permissions` files are byte-identical, so NO anchor in those five
- * moved; `record-related-list.tsx` changed one docblock line above the gate
- * (objectui#11270's `record_related` row actions, +3/-2) and
- * `record-quick-actions.tsx` rewrote its fail-closed docblock to say the bar
- * is replaced by the notice rather than hidden (objectui#10224, +8/-2), so
- * every anchor in those two MOVED with its cited text byte-identical, by 1
- * and by 6. At `e420df310f5b`, 2026-09-30: across the hop
- * from `db11afd4967c` `record-quick-actions.tsx` and `usePermissions.ts` are
- * byte-identical, `MePermissionsProvider.tsx` and `PermissionProvider.tsx` each
- * gained one `effectiveObjects` member below every cited line (objectui#4421),
- * so NO anchor in those four moved, and `record-details.tsx`,
- * `record-highlights.tsx` and `record-related-list.tsx` changed around the gate
- * without touching it — objectui#8649 reads `requiredPermissions` UN-CAST
- * (output-identical), their docblocks now say the notice replaces the content
- * rather than hiding the block, and objectui#11163 placed the related list's
- * authored `actions` above its gate — so every anchor in those three MOVED with
- * its cited text byte-identical, and each is cited below at this pin. At
- * `db11afd4967c`, 2026-09-29: across the hop
- * from `dd3f7e1be356` `record-highlights.tsx`, `record-quick-actions.tsx` and
- * `usePermissions.ts` are byte-identical, and `record-details.tsx`,
- * `record-related-list.tsx`, `MePermissionsProvider.tsx` and
- * `PermissionProvider.tsx` changed only in comment lines that re-qualify an
- * objectstack card number, one line for one and none of them a cited line, so NO
- * anchor below moved. At `dd3f7e1be356`, 2026-09-28, the same files read as
- * follows), under `packages/plugin-detail/src/renderers/`
- * and `packages/permissions/src/`. `record-highlights.tsx`,
- * `record-related-list.tsx` and the three `permissions` files are
- * byte-identical to `f8a9d0fb0596` (`git diff --quiet`); `record-details.tsx`
- * (+70/-17: the title-dedupe ladder, objectui#10360 / objectui#10434, and a
- * re-spelled comment citation) and
- * `record-quick-actions.tsx` (+14/-10: the retired `aria.label` fold,
- * objectui#9945) changed away from the gate, and every anchor in them MOVED
- * with its cited text byte-identical, by 1 and by 4 respectively:
+ * Each clause is read off objectui's record renderers and permission
+ * providers (read points recorded in `liveness/page.json`, row `regions`).
+ * objectui#12294 also exports the details, highlights and quick-actions
+ * renderers wrapped in `recordBindingBlock`: an UNBOUND block renders its body
+ * as before, so every clause below holds for it; a block carrying a
+ * per-element `dataSource` binding first passes the element data-source gate,
+ * whose panels and loading state also withhold the content before the
+ * capability gate runs, which is one more reason the text says "wherever it
+ * would otherwise render".
  *
  * 1. CAPABILITIES, NOT OBJECT ACTIONS. Every block gates through
- *    `perms.hasCapabilities(required)` — `record-details.tsx:392`,
- *    `record-highlights.tsx:103`, `record-related-list.tsx:445`,
- *    `record-quick-actions.tsx:290` — and never `perms.can(objectName, …)`;
- *    each renderer's docblock states the capability "is not object-scoped"
- *    (`record-details.tsx:381`, `record-highlights.tsx:82`,
- *    `record-related-list.tsx:432`, `record-quick-actions.tsx:279`). `read`
- *    is looked up in the capability set like any other name.
- * 2. ALL OF THEM. `MePermissionsProvider.tsx:447` is
+ *    `perms.hasCapabilities(required)` — and never `perms.can(objectName, …)`;
+ *    each renderer's docblock states the capability "is not object-scoped".
+ *    `read` is looked up in the capability set like any other name.
+ * 2. ALL OF THEM. The capability check is
  *    `required.every((p) => held.has(p))`.
  * 3. THE OUTCOME. Each block returns a `role="status"` "Insufficient
- *    permissions to view …" notice instead of its content —
- *    `record-details.tsx:392-400`, `record-highlights.tsx:161-174`,
- *    `record-related-list.tsx:445-453`, `record-quick-actions.tsx:290-298`.
- *    Checks that already withhold the content run first on two of them (no
- *    record bound, `record-details.tsx:336`; no object,
- *    `record-related-list.tsx:378`; the related object's read gate,
- *    `record-related-list.tsx:396`), which is why the text says "wherever it
- *    would otherwise render" rather than promising the notice unconditionally.
+ *    permissions to view …" notice instead of its content. Checks that
+ *    already withhold the content run first on two of them (no record bound,
+ *    on `record:details`; no object, and the related object's read gate, on
+ *    `record:related_list`), which is why the text says "wherever it would
+ *    otherwise render" rather than promising the notice unconditionally.
  * 4. PRESENTATION ONLY. The gate is renderer code: nothing in this repo's
  *    server packages reads a page component's `requiredPermissions`. The data
- *    stays in reach — a gated `record:highlights` registers no field names
- *    (`record-highlights.tsx:156-159`), so `record:details` no longer
- *    de-duplicates those fields out of its body. To keep a value from a
- *    user, gate the object, the field or the action.
+ *    stays in reach — a gated `record:highlights` registers no field names, so
+ *    `record:details` no longer de-duplicates those fields out of its body. To
+ *    keep a value from a user, gate the object, the field or the action.
  * 5. UNRESOLVED CAPABILITIES FAIL OPEN. `hasCapabilities` answers `true` when
- *    `systemPermissions` was never reported (`MePermissionsProvider.tsx:445`),
- *    under the role-based provider (`PermissionProvider.tsx:77`) and with no
- *    provider mounted (`usePermissions.ts:45`); a REPORTED empty array reaches
- *    the `every` at `:447` and gates.
+ *    `systemPermissions` was never reported, under the role-based provider and
+ *    with no provider mounted; a REPORTED empty array reaches the `every` and
+ *    gates.
  *
  * Unlike the field's own `requiredPermissions` (ADR-0066 D3, enforced by the
  * server before the payload leaves it), this key authorises
@@ -1580,10 +1351,9 @@ export const RecordDetailsProps = strictObject({
      * All three are optional with NO schema default, for the `maxVisible`
      * reason (see `inlineEdit` below): the fallbacks are the RENDERER'S, and
      * a schema default would turn "the author said nothing" into "the author
-     * asked for the default". Defaults in the describe() texts are MEASURED
-     * at the `.objectui-sha` pin (objectui `plugin-detail/src/renderers/
-     * record-details.tsx` + `DetailSection.tsx`), not transcribed from a TS
-     * interface.
+     * asked for the default". Defaults in the describe() texts are MEASURED on
+     * the renderer (read points recorded in `liveness/page.json`, row
+     * `regions`), not transcribed from a TS interface.
      */
     hideEmpty: z.boolean().optional().describe('Hide this section\'s empty fields (renderer default: on — and a section whose fields are ALL empty then renders nothing at all: no heading, no skeleton). Set `false` to render empty rows, keeping the section\'s label skeleton on an all-empty record (e.g. a brand-new one).'),
     /** Collapsible card. Initial state is expanded; the toggle is the heading. */
@@ -1595,9 +1365,9 @@ export const RecordDetailsProps = strictObject({
      * same defect class as #11289, inheriting its 2026-08-23 ruling WITH its
      * reason: declare what the renderer honours; the renderer is unchanged).
      * Optional with NO schema default, for the same `maxVisible` reason as the
-     * #11289 trio above; the defaults in the describe() texts are MEASURED at
-     * the `.objectui-sha` pin (`190fbd01`, objectui `plugin-detail/src/
-     * renderers/record-details.tsx` + `plugin-detail/src/DetailSection.tsx`).
+     * #11289 trio above; the defaults in the describe() texts are MEASURED on
+     * the renderer (read points recorded in `liveness/page.json`, row
+     * `regions`).
      *
      * One key the same measurement found is deliberately NOT declared here
      * (#11661 holds its fork):
@@ -1613,8 +1383,8 @@ export const RecordDetailsProps = strictObject({
      * generates no CSS under the v4 source scan — declaring it would have
      * advertised a capability the renderer did not deliver). objectui#6294
      * (merged 2026-08-25) replaced the interpolation with a lookup of
-     * complete class literals in `plugin-detail/src/headerColor.ts`, so the
-     * renderer now delivers the key because the module declares it; the
+     * complete class literals in a module of its own (read points recorded in
+     * `liveness/page.json`, row `regions`), so the renderer now delivers the key because the module declares it; the
      * refusal outlived its recorded reason and #12126 (maintainer ruling A,
      * 2026-08-26) declares the key below as a closed enum.
      */
@@ -1624,8 +1394,8 @@ export const RecordDetailsProps = strictObject({
     /**
      * Section-header background tint (#12126, maintainer ruling A 2026-08-26:
      * declare as a CLOSED enum — declared = enforced). The vocabulary is
-     * exactly the six complete class literals objectui's
-     * `plugin-detail/src/headerColor.ts` lookup ships (objectui#6294): those
+     * exactly the six complete class literals objectui's `headerColor` lookup
+     * module ships (objectui#6294): those
      * literals live in a file every consuming app's Tailwind scan covers, so
      * each enum value is guaranteed to be in the compiled stylesheet. Tints
      * only, by the renderer module's own reasoning: `CardHeader` sets no
@@ -1680,17 +1450,16 @@ export const RecordDetailsProps = strictObject({
      * number.
      *
      * DECLARED AHEAD OF ITS READER, and read since objectui `c08c9332a`
-     * (objectui#12192), which the console pin carries from objectui
-     * `b9814b334`: `RecordDetailsRenderer` fills every `{{ count }}` hole of
-     * the translated heading (`plugin-detail/src/renderers/record-details.tsx:904-906`)
-     * through a global copy of {@link SECTION_HEADING_COUNT_HOLE}, counting
-     * an absent or empty value 0. Until then the describe carried the
+     * (objectui#12192): `RecordDetailsRenderer` fills every `{{ count }}` hole
+     * of the translated heading (read points recorded in `liveness/page.json`,
+     * row `regions`) through a global copy of {@link SECTION_HEADING_COUNT_HOLE},
+     * counting an absent or empty value 0. Until then the describe carried the
      * `[EXPERIMENTAL — not enforced]` marker, the liveness ledger's own
      * spelling, recorded here because page components sit in the undrilled
      * `page/regions` container and no ledger row exists for any
      * `ComponentPropsMap` key (the `editable`-navigation precedent in this
      * file). This record said to drop the marker in the change that moves the
-     * `.objectui-sha` pin past the renderer, and it is dropped here.
+     * console past the renderer, and it is dropped here.
      */
     count: strictObject({
       surface: 'this `record:details` section `count`',
@@ -1865,10 +1634,10 @@ export const RecordRelatedListProps = strictObject({
    * `SchemaRenderer` hoists `properties` onto the node, so the reader sees the
    * key on `schema` as it sees every other prop.
    *
-   * THE NAME, measured on objectui `main` at `f0532d8a` and this repo at
-   * `e540e7ffb`: the three sibling record blocks read their one binding as
-   * `dataSource` (`plugin-detail/src/renderers/recordBinding.tsx`, through
-   * `isElementDataSourceConfig(schema.dataSource)`), and the one other block
+   * THE NAME, measured on objectui (read points recorded in
+   * `liveness/page.json`, row `regions`) and on this repo at `e540e7ffb`: the
+   * three sibling record blocks read their one binding as `dataSource`
+   * (through `isElementDataSourceConfig(schema.dataSource)`), and the one other block
    * with a parent half, `record:line_items` above, spells that half `parent*`
    * (`parentObject`, `parentId`). `parentDataSource` is both — the `dataSource`
    * stem, so the two bindings read as one family, and the `parent` prefix, so
@@ -1877,7 +1646,8 @@ export const RecordRelatedListProps = strictObject({
    * ⛔ No `os validate` consistency finding against a sibling `record:details`
    * binding: the ruling's own exclusion (a new gate defaults to no).
    *
-   * PLANNED, not yet read: at objectui `f0532d8a` no renderer reads this key.
+   * PLANNED, not yet read: no renderer reads this key (measured on objectui;
+   * recorded in the `liveness/page.json` `_note`).
    * Its reader is the related-list leg of objectui#12294, which lands once a
    * spec release carrying the key is installable. The liveness record is the
    * `liveness/page.json` `_note` (a component-level key carries no ledger row:
@@ -2122,9 +1892,8 @@ export const RecordActivityProps = strictObject({
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
   /**
    * The host feed slot, NAMED rather than declared — `RecordHistoryProps`'
-   * `entries` / `loading` pair, on this block. Measured at the `.objectui-sha`
-   * pin `89cad75d5570` (objectui `plugin-detail/src/renderers/
-   * record-activity.tsx:161-166`, `:265-266`): the renderer takes `items` and
+   * `entries` / `loading` pair, on this block. Measured on the renderer (read
+   * points recorded in `liveness/page.json`, row `regions`): it takes `items` and
    * `loading` off the node or out of this bag as a feed a host composing the
    * block in code already owns, and the host flag wins over every other
    * loading source. Neither is authorable: an authored feed is a snapshot that
@@ -2135,8 +1904,7 @@ export const RecordActivityProps = strictObject({
    * The same object is `record:chatter` / `record:discussion`'s `feed`, so the
    * entries answer there too. That renderer reads its rows and its loading
    * flag off the host's discussion context, reads neither `feed.items` nor
-   * `feed.loading`, and never self-fetches (`renderers/record-chatter.tsx`,
-   * same pin). `guidance` is one flat table keyed by key name — it cannot be
+   * `feed.loading`, and never self-fetches. `guidance` is one flat table keyed by key name — it cannot be
    * scoped to a mount — so each entry says who reads the key on EACH mount,
    * and every clause is true wherever the refusal is raised.
    */
@@ -2232,12 +2000,11 @@ const CHATTER_POSITION_RETIRED: ReadonlyMap<string, string> = new Map([
  * `position` speaks the RENDERER'S vocabulary — `bottom` / `right` / `left` —
  * since #8762 (maintainer ruling 2026-08-15: one vocabulary, no mapping
  * layer). The schema's original `sidebar` / `inline` / `drawer` set was
- * declared-≠-enforced in the worst direction: `RecordChatterPanel`
- * (objectui `plugin-detail/src/RecordChatterPanel.tsx:87-96`, measured at pin
- * `665661ab0932`) branches on exactly `right`/`left` (docked side panel) vs
- * `bottom` (in-flow), the designer registration (`CHATTER_INPUTS`) publishes
- * `['bottom', 'right', 'left']`, and the renderer merge
- * (`renderers/record-chatter.tsx`) falls back to `bottom` — so the schema's
+ * declared-≠-enforced in the worst direction: `RecordChatterPanel` (read
+ * points recorded in `liveness/page.json`, row `regions`) branches on exactly
+ * `right`/`left` (docked side panel) vs `bottom` (in-flow), the designer
+ * registration (`CHATTER_INPUTS`) publishes `['bottom', 'right', 'left']`, and
+ * the renderer merge falls back to `bottom` — so the schema's
  * own default (`sidebar`) rendered in-flow as a silent no-op while the value
  * that actually docks the panel (`right`) was refused at publish. The three
  * old spellings are rewritten by the ADR-0087 conversion
@@ -2320,13 +2087,12 @@ export type RecordPathProps = z.input<typeof RecordPathProps>;
  * keys in the same file. This row is what makes the #5068 gate's dispatch
  * reach the rail.
  *
- * Key set measured from the renderer's ACTUAL read points at the
- * `.objectui-sha` pin (objectui `plugin-detail/src/renderers/
- * record-reference-rail.tsx`), not transcribed from its TS interface — the
- * two disagree, and the disagreement is load-bearing:
+ * Key set measured from the renderer's ACTUAL read points (recorded in
+ * `liveness/page.json`, row `regions`), not transcribed from its TS interface
+ * — the two disagree, and the disagreement is load-bearing:
  *
  * - The interface declares an entry `icon` and the page synthesizer
- *   (`buildDefaultPageSchema.ts`) emits it, but NO render path reads it — the
+ *   (`buildDefaultPageSchema`) emits it, but NO render path reads it — the
  *   rail card has no icon slot at all. Declaring it here would be the same
  *   defect this row exists to close, one direction over (declared ≠ enforced,
  *   Prime Directive #10). It is a `guidance` entry instead: refused, with the
@@ -2411,9 +2177,8 @@ export type RecordReferenceRailProps = z.input<typeof RecordReferenceRailProps>;
  * them as unregistered and a typo'd `severty` (or any other undeclared key)
  * parsed, typechecked, validated, built, shipped, and did nothing.
  *
- * Key sets measured from the renderers' ACTUAL read points at the
- * `.objectui-sha` pin (`record-alert.tsx`, `record-quick-actions.tsx`,
- * `record-history.tsx` + `HistoryTimeline.tsx`), not transcribed from the
+ * Key sets measured from the renderers' ACTUAL read points (recorded in
+ * `liveness/page.json`, row `regions`), not transcribed from the
  * registrations' declared-input lists — which are wrong in both directions
  * here, exactly as #8691 found with the rail's `icon`:
  *
@@ -3687,14 +3452,11 @@ const ACTION_NODE_ALIASES = {
  * console's action runner dispatches on, which is not always the executor key.
  *
  * `ActionRunner.execute` resolves `action.type || action.actionType ||
- * action.name` (`core/src/actions/ActionRunner.ts:1265` at the `.objectui-sha`
- * pin `1fb1ced36243`, and unchanged at objectui `main` `866763bd`). Every row
- * forwards its executor key as the runner's `type` — a node `type:
- * schema.actionType` (`action-button.tsx:286`, `action-icon.tsx:167`), a
- * member `type: action.type` (`action-group.tsx:350`, `action-menu.tsx:274`)
- * — and its `name` beside it. So a row with no executor key runs the handler
- * its `name` names: the runner's name leg, which `action-button.tsx:283-285`
- * documents. The registrations' `defaultProps` (`actionType: 'script'`) are
+ * action.name` (read points recorded in `liveness/page.json`, row `regions`). Every row forwards its
+ * executor key as the runner's `type` — a node `type: schema.actionType`, a
+ * member `type: action.type` — and its `name` beside it. So a row with no
+ * executor key runs the handler its `name` names: the runner's name leg, which
+ * the button renderer documents. The registrations' `defaultProps` (`actionType: 'script'`) are
  * read by the designer palette only, never at render, so an omitted key stays
  * omitted.
  *
@@ -3717,11 +3479,9 @@ function effectiveRowExecutor(
  * The executors the runner sends to its url navigator, `navigateTo`: the
  * built-in `url` (`executeUrl`, reading `target || redirect`) and its local
  * alias `navigation` (`executeNavigation`, reading `to || target || redirect`),
- * the two `builtinExecutors` rows that call it (`ActionRunner.ts:1145`,
- * `:1150` at the pin). A host handler is dispatched before the built-ins, and
- * the console registers none under either name (`ConsoleShell.tsx:97`,
- * `useConsoleActionRuntime.tsx:803`, `AppContent.tsx`, `useObjectActions.ts`
- * at the pin).
+ * the two `builtinExecutors` rows that call it. A host handler is dispatched
+ * before the built-ins, and the console registers none under either name
+ * (read points recorded in `liveness/page.json`, row `regions`).
  */
 const ROW_URL_NAVIGATOR_EXECUTORS: ReadonlySet<string> = new Set(['url', 'navigation']);
 
@@ -3782,7 +3542,7 @@ function refuseUnopenableRowUrlTarget(executorKey: 'actionType' | 'type', owner:
  * runner keeps `'navigation'` as a local alias of `'url'`: its built-in table
  * sends the alias to `executeNavigation`, which reads `to || target ||
  * redirect` and hands off to `navigateTo`, the navigator `executeUrl` calls
- * with `target || redirect` (`core/src/actions/ActionRunner.ts` at the pin).
+ * with `target || redirect` (read points recorded in `liveness/page.json`, row `regions`).
  * On a row the two are the same navigation: the alias's own keys (`to`,
  * `redirect`, `external`, `newTab`, `replace`) are not row keys, so the strict
  * row refuses them, and both read the row's `target` and `openIn`. But
@@ -3830,8 +3590,8 @@ function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: 
  * `FormFieldSchema`'s). ⛔ No second shape and no second URL grammar.
  *
  * Every row forwards `onSuccess` to the console's action runner whole
- * (`action-button.tsx`, `action-icon.tsx`, `action-group.tsx` and
- * `action-menu.tsx` at the pin), and the runner reads exactly this block:
+ * (read points recorded in `liveness/page.json`, row `regions`), and the runner reads exactly this
+ * block:
  * `handlePostExecution` → `readOnSuccessNavigation` (a non-array object with a
  * non-empty string `navigate`, and nothing else gets a reading) →
  * `navigateOnSuccess` (interpolates `navigate`, classifies the result with
@@ -3861,10 +3621,9 @@ const actionOnSuccessBlock = () => ActionSchema.in.shape.onSuccess.unwrap();
  * and `'delete'` / `'custom'` get the action's own "bulk-def operation with no
  * row-level form" refusal.
  *
- * Every row forwards `operation` to the runner beside `type`
- * (`action-button.tsx:322` at the pin; `action-icon.tsx`, `action-group.tsx`
- * and `action-menu.tsx` forward it too), and the runner reads it BEFORE any
- * executor (`ActionRunner.ts:1384-1388`): `isUpdateOperationAction` tests
+ * Every row forwards `operation` to the runner beside `type`, and the runner
+ * reads it BEFORE any executor (read points recorded in `liveness/page.json`, row `regions`):
+ * `isUpdateOperationAction` tests
  * `operation === 'update'`, so any other value fell through to the executor
  * and did nothing. Until this, the rows declared `z.unknown()`, and such a
  * value parsed clean.
@@ -3881,8 +3640,8 @@ const actionOperation = () => ActionSchema.in.shape.operation.unwrap();
  * {@link actionOperation} reads `operation`. ⛔ No second shape.
  *
  * Every row forwards `patch` to the runner beside `operation`, and the runner's
- * update merges it only when it is a plain object (`executeUpdateOperation`,
- * `ActionRunner.ts` at the pin: anything else becomes `{}`), as the platform
+ * update merges it only when it is a plain object (`executeUpdateOperation`:
+ * anything else becomes `{}`), as the platform
  * route's write bag does (`declarativeUpdateWrite`). Until this, the rows
  * declared `z.unknown()`, so a string, array or number `patch` parsed clean and
  * was dropped before the write; and the declarative-update judge reads a
@@ -3894,9 +3653,8 @@ const actionPatch = () => ActionSchema.in.shape.patch.unwrap();
  * The console runner's built-in executors: `ActionType`'s six, the members its
  * `builtinExecutors` table is typed by (`Record<RunnableActionType, …>`, so the
  * table and the enum cannot drift), and its one local alias `navigation`
- * (`core/src/actions/ActionRunner.ts:1140-1152` at the `.objectui-sha` pin
- * `1fb1ced36243`, byte-identical at objectui `main` `72594f29`). Every other
- * name is a handler a host registers.
+ * (read points recorded in `liveness/page.json`, row `regions`). Every other name is a handler a
+ * host registers.
  */
 const ROW_BUILTIN_EXECUTORS: ReadonlySet<string> = new Set([...ActionType.options, ...ROW_URL_NAVIGATOR_EXECUTORS]);
 
@@ -7302,11 +7060,11 @@ function masterDetailDetailEntry() {
 }
 
 /**
- * `object-master-detail-form` (objectui `plugin-form/src/MasterDetailForm.tsx`
- * @ `eb7f586b`). Parent + child line items entered together (ADR-0001). The
- * child collections come from `details` — the FK and editable-grid columns
- * are auto-derived from the child object's metadata (`deriveMasterDetail.ts`),
- * so `details[].columns` is an override, not a requirement. Each entry is the
+ * `object-master-detail-form` (objectui's `MasterDetailForm`; read points
+ * recorded in `liveness/page.json`, row `regions`). Parent + child line items
+ * entered together (ADR-0001). The child collections come from `details` —
+ * the FK and editable-grid columns are auto-derived from the child object's
+ * metadata, so `details[].columns` is an override, not a requirement. Each entry is the
  * strict {@link masterDetailDetailEntry} since #20928.
  *
  * `formType` speaks the MEASURED vocabulary — `simple` / `tabbed` — since
@@ -7930,9 +7688,9 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
    * — the carrier `object-grid`, `object-kanban`, `object-calendar` and
    * `object-timeline` already take, and the type objectui's own
    * `ObjectTreeSchema.navigation` mirrors (objectui#11168 slice 3).
-   * `ObjectTree.tsx:1054` (at the pin `89cad75d55`) hands `schema.navigation`
-   * to `useNavigationOverlay` (`:1046`), which reads `navigation?.mode ??
-   * 'page'` and types its mode union as that schema's. Until #21464 this
+   * The renderer hands `schema.navigation` to `useNavigationOverlay`, which
+   * reads `navigation?.mode ?? 'page'` and types its mode union as that
+   * schema's (read points recorded in `liveness/page.json`, row `regions`). Until #21464 this
    * member was `z.unknown()`, so `navigation: 42` and a bare mode string such
    * as `'drawer'` passed every door and opened the record page, whatever they
    * named.
@@ -7954,9 +7712,8 @@ export type ObjectTreePropsParsed = z.infer<typeof ObjectTreePropsSchema>;
 
 /**
  * The flat `TimelineConfig` spellings `ObjectTimeline` keeps reading as a
- * backward-compat fallback (`ObjectTimeline.tsx:263-293`) and that `ListView`
- * EMITS on its runtime handoff (`plugin-list/src/ListView.tsx:2489-2525`,
- * `case 'timeline'`: the product carries `startDateField` / `titleField` /
+ * backward-compat fallback and that `ListView` EMITS on its runtime handoff
+ * (read points recorded in `liveness/page.json`, row `regions`; `case 'timeline'`: the product carries `startDateField` / `titleField` /
  * `endDateField` / `groupByField` / `colorField` / `scale` beside the
  * nested `timeline` block it writes in the same object). Read, but NOT
  * authorable — one composition key per concept (Prime Directive #12), the same
@@ -7964,7 +7721,7 @@ export type ObjectTreePropsParsed = z.infer<typeof ObjectTreePropsSchema>;
  *
  * `dateField` is in the set although {@link TimelineConfigSchema} declares no
  * key of that name: it is the pre-#2231 alias of `startDateField`, read at the
- * flat rung (`:288`). So the prescription names the block key it RESOLVES TO
+ * flat rung. So the prescription names the block key it RESOLVES TO
  * and never the alias — a prescription naming a key the target schema refuses
  * is the #17054 trap this file has already paid for once
  * (`calendar-config-allday-prescription-17054.test.ts`).
@@ -7986,18 +7743,16 @@ const OBJECT_TIMELINE_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 
 /**
  * [#21464] The `object-timeline` block's `mapping` — the record-to-entry
- * binding record, as the rail reads it at the `.objectui-sha` pin
- * `ab1879721595` (unchanged at objectui `main` `94985a92ba`), in
- * `ObjectTimeline.tsx`: `title` (`:551`) and `date` (`:576`) are each read
- * BETWEEN the `timeline` block's member and the flat fallback, `description`
- * (`:578`) ahead of the flat `descriptionField`, and `variant` (`:579`, default
- * `'variant'`) is the field whose value picks each entry's marker colour — the
+ * binding record, as the rail reads it (read points recorded in `liveness/page.json`, row `regions`):
+ * `title` and `date` are each read BETWEEN the `timeline` block's member and
+ * the flat fallback, `description` ahead of the flat `descriptionField`, and
+ * `variant` (default `'variant'`) is the field whose value picks each entry's marker colour — the
  * one binding with no other spelling. Each is a FIELD NAME: the rail looks the
  * record value up by it.
  *
  * The contract is objectui's own declaration, taken as it stands: the
- * component's `mapping` prop (`:254-259`) and the `TimelineMappingSchema` it
- * checks the node against (`:144-149`) both declare four optional strings. That
+ * component's `mapping` prop and the `TimelineMappingSchema` it checks the
+ * node against both declare four optional strings. That
  * check only warns, and its object is not strict, so a misspelled member
  * (`titleField` inside `mapping`, say) bound nothing and drew the default; it is
  * closed here, as every element shape on this map is.
@@ -8031,15 +7786,14 @@ const ObjectTimelineMappingSchema = lazySchema(() => strictObject({
 // 5979239990): both arms closed, as objectui#6356 ruled them
 // (`TimelineFeedItem`, `TimelineGanttItem`); a feed entry's `content` an
 // opaque member; a row refinement pairing each entry with the arm the row's
-// `variant` selects; a gantt bar's dates a string or a number. Read at the
-// `.objectui-sha` pin `2e818d0b51ec`; the arm declarations and every cited
-// reader are unchanged at objectui `main` `2abec3a96` (comments only).
+// `variant` selects; a gantt bar's dates a string or a number. Read points
+// are recorded in `liveness/page.json`, row `regions`.
 // ---------------------------------------------------------------------------
 
 /**
  * The five colours an authored timeline element names — a feed entry's marker
- * or a gantt bar: objectui's `TimelineItemVariant`
- * (`types/src/data-display.ts`), the "Marker Variants" its timeline guide
+ * or a gantt bar: objectui's `TimelineItemVariant`, the "Marker Variants" its
+ * timeline guide
  * documents. The marker primitive paints three more (`todo`, `in-progress`,
  * `done`), reached only by the entries the object-bound rail composes from
  * records — not an authoring vocabulary, and no gantt bar paints them.
@@ -8053,9 +7807,9 @@ const OBJECT_TIMELINE_ITEM_HISTORY =
 
 /**
  * [#21464] One bar of a gantt row — objectui's `TimelineGanttItemBar`, closed.
- * The gantt branch reads `startDate` / `endDate` (`renderer.tsx:1909`, the axis
- * reduce at `:651` and `:686-688`), `variant` (`:1916`, default `default`) and
- * `title` (`:1918`, `:1921`, inside the bar and in its tooltip). Every member
+ * The gantt branch (read points recorded in `liveness/page.json`, row `regions`) reads `startDate` /
+ * `endDate` (the bar and the axis reduce), `variant` (default `default`) and
+ * `title` (inside the bar and in its tooltip). Every member
  * is optional, as objectui#6356 left them: a bar with no usable dates is not an
  * authoring error but the renderer's `timeline.gantt.unusableRange` diagnostic.
  * A date is a string or a FINITE number (epoch milliseconds — `z.number()`
@@ -8080,11 +7834,9 @@ function buildObjectTimelineGanttBar() {
 /**
  * The FEED arm's members (`variant` absent, `vertical` or `horizontal`) —
  * objectui's `TimelineFeedItem`, the seven keys objectui#6356 declared, with
- * `title` the arm's required key. Both feed branches read them: `time`
- * (`renderer.tsx:1612-1614`, `:1703-1705`), `title` (`:1642`, `:1708`),
- * `description` (`:1650`, `:1709`), `variant` (`:1627`, `:1699`), `icon`
- * (`:1630`, `:1700`), `content` (`renderChildren`, `:1659`, `:1716`) and
- * `className` (`:1623`, `:1697`).
+ * `title` the arm's required key. Both feed branches read them (read points recorded in `liveness/page.json`, row `regions`):
+ * `time`, `title`, `description`, `variant`, `icon`, `content`
+ * (`renderChildren`) and `className`.
  *
  * `content` is held OPAQUE (`z.unknown()`), by the ruling: it is child schema
  * nodes the entry draws below its description (`SchemaNode | SchemaNode[]`),
@@ -8105,9 +7857,9 @@ const objectTimelineFeedItemShape = () => ({
 
 /**
  * The GANTT arm's members (`variant: 'gantt'`) — objectui's
- * `TimelineGanttItem`: `label` (`renderer.tsx:1899-1900`, the row-label
+ * `TimelineGanttItem` (read points recorded in `liveness/page.json`, row `regions`): `label` (the row-label
  * gutter), the arm's required key, and `items`, the row's bars
- * (`classifyGanttRows`, `:617-621`; drawn at `:1908`), optional because a row
+ * (`classifyGanttRows`), optional because a row
  * with no bars yet is an ordinary empty state.
  */
 const objectTimelineGanttRowShape = () => ({
@@ -8119,7 +7871,7 @@ const objectTimelineGanttRowShape = () => ({
 /**
  * [#21464] One authored `object-timeline` entry: every member of BOTH arms,
  * each optional, closed against anything else — objectui's own element shape
- * (`types/src/zod/data-display.zod.ts`, `TimelineItemSchema`). Which arm an
+ * (`TimelineItemSchema`). Which arm an
  * entry must be is decided by the ROW's `variant`, so it is judged where the
  * row is visible: {@link objectTimelineItemsFitVariant}. Not a union of the two
  * arms, for the reason objectui gives: when neither arm accepts an entry, a
@@ -8169,8 +7921,7 @@ const objectTimelineItem = () => (objectTimelineItemOnce ??= buildObjectTimeline
 /**
  * [#21464] The row refinement that pairs each `items` entry with the arm the
  * row's `variant` selects (absent ⇒ `vertical`) — objectui's node-level
- * refinement (`timelineItemsFitVariant`, `types/src/zod/data-display.zod.ts`),
- * restated for this row: each branch of the renderer reads only its own arm's
+ * refinement (`timelineItemsFitVariant`), restated for this row: each branch of the renderer reads only its own arm's
  * keys, so a gantt row on a feed timeline, or a feed entry on a gantt one, drew
  * an empty, unlabelled entry.
  *
@@ -8363,10 +8114,10 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   /**
    * Entry-click navigation (commit e233db9db — the spec half of the objectui#8652
    * maintainer ruling, verbatim `B`), the same carrier and the same def as
-   * `object-kanban`'s and `object-calendar`'s above. Measured at the pin:
-   * `ObjectTimeline.tsx:462-466` hands `(schema as any).navigation` to
-   * `useNavigationOverlay`, `:597` fires it on an entry click and `:652`
-   * renders the overlay — standalone, with no enclosing view.
+   * `object-kanban`'s and `object-calendar`'s above (read points recorded in `liveness/page.json`, row `regions`):
+   * the renderer hands `schema.navigation` to `useNavigationOverlay`, fires it
+   * on an entry click and renders the overlay — standalone, with no enclosing
+   * view.
    */
   navigation: NavigationConfigSchema.optional()
     .describe("Entry-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation })"),
