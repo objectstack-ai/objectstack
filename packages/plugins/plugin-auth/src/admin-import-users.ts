@@ -31,7 +31,8 @@
  *  - `invite`     — force the invite path for EVERY row: better-auth's
  *                   reset-password mints the credential account on first set, so
  *                   creation stays credential-less, and a "set your password"
- *                   invitation goes out — a reset-password email for rows with a
+ *                   invitation goes out — the `auth.account_invitation` email,
+ *                   carrying a better-auth reset link, for rows with a
  *                   REAL email (requires a wired EmailService), or — #2780 — an
  *                   invitation SMS for phone-only rows (requires a wired,
  *                   deliverable SmsService + the phoneNumber plugin; the user
@@ -722,8 +723,9 @@ export async function runAdminImportUsers(
     // One pass over every created row — each is in exactly one of the two
     // maps (or neither, for `none` and updated rows). This single loop serves
     // every policy AND `auto`, where invite and temporary rows interleave in
-    // one batch (#3236). Invited rows get a set-your-password message — a
-    // reset-password email for real-email rows, an invitation SMS for
+    // one batch (#3236). Invited rows get a set-your-password message — the
+    // `auth.account_invitation` email for real-email rows (#23343: a
+    // better-auth reset link, sent under this import's marker), an invitation SMS for
     // phone-only rows (#2780; the SMS carries no credential — the user
     // requests their own OTP at first sign-in). Temporary rows get the
     // generated password attached to the response body ONLY.
