@@ -79,14 +79,16 @@ const accountInvitationState = defineRequestState<AccountInvitationMarker | null
  * request-state store that carries `marker`. The store lives exactly as long
  * as that one call: a second row opens its own.
  */
-export function runAsAccountInvitation<T>(
+export async function runAsAccountInvitation<T>(
   marker: AccountInvitationMarker,
   fn: () => Promise<T>,
 ): Promise<T> {
   const store = new WeakMap<object, unknown>([
     [accountInvitationState.ref, { email: marker.email.trim().toLowerCase(), inviter: { ...marker.inviter } }],
   ]);
-  return runWithRequestState(store, fn);
+  // `await`, not a bare return: `runWithRequestState` is generic over its
+  // callback, so the composed call is typed `Promise<Promise<T>>`.
+  return await runWithRequestState(store, fn);
 }
 
 /**
