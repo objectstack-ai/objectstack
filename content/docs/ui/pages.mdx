@@ -61,22 +61,29 @@ const homePage = {
 | `description` | `string` | optional | Page description |
 | `type` | `enum` | optional | Page type (see below; default `'record'`) |
 | `object` | `string` | optional | Associated object (for `record` type) |
-| `template` | `string` | optional | Layout template name (default: `'default'`) |
+| `template` | `enum` | optional | Layout template: `'default'` (the default), `'header-sidebar-main'`, `'three-column'` or `'dashboard'` — see [Templates](#templates). Any other name is refused |
 | `kind` | `enum` | optional | Page override mode (default `'full'`). `full` \| `slotted` = structured authoring; `html` = author-written constrained JSX/HTML compiled (parsed, never executed) to the tree (ADR-0080; ADR-0081 named it `html`); `react` = real-React source executed at render by the runtime (ADR-0081) — it runs author JS, so it is gated by a host capability that defaults ON and is disabled server-side via `OS_PAGE_REACT=off`. See [Authoring modes](#authoring-modes) |
 | `regions` | `PageRegion[]` | optional | Layout regions with components (default `[]` — `list` pages render via `interfaceConfig`, and an empty `record`/`home`/`app` page falls back to the synthesized default layout) |
 | `source` | `string` | optional | Page source text — required (and authoritative over `regions`) when `kind` is `'html'` or `'react'`. For `kind: 'html'` it is constrained JSX/HTML compiled to the tree by `@objectstack/sdui-parser` at save time (parse, never execute). For `kind: 'react'` it is real React/JSX executed at render by `@object-ui/react-runtime` (trusted tier). See [React Pages](/docs/ui/react-pages) |
 | `variables` | `PageVariable[]` | optional | Local state variables |
-| `isDefault` | `boolean` | optional | The default record page of its `object` — the page that object's record view opens. At most one `isDefault: true` record page per object per deployment: a second is refused by `defineStack` / `os validate`, at package registration and at metadata save, naming both pages. Saving a page under the existing default's own name is that page, not a second default. Outside the rule on a page that is not a record page bound to an object |
+| `isDefault` | `boolean` | optional | The default record page of its `object` — the page that object's record view opens. At most one `isDefault: true` record page per object per deployment: a second is refused by `defineStack` / `os validate`, at package registration and at metadata save, naming both pages. Saving a page under the existing default's own name is that page, not a second default. **Refused on any other page** (a `home`, `app`, `utility` or `list` page, or a record page with no `object`): nothing reads it there. A page does not choose where an app opens — see [Page Types](#page-types) |
 
 ### Page Types
 
 | Type | Description | Use Case |
 | :--- | :--- | :--- |
 | `record` | Tied to a specific object record | Custom detail pages |
-| `home` | Landing/home page | App entry points |
-| `app` | General application page | Custom layouts |
-| `utility` | Utility/helper panel | Tools, settings, wizards |
+| `home` | Region page at the widest content width | Overviews and start pages |
+| `app` | Region page at app content width | Custom layouts |
+| `utility` | Region page at the narrowest content width, inline in the main column | Tools, settings, wizards |
 | `list` | Record list/interface surface | Data-driven interface pages |
+
+`home`, `app` and `utility` render the same way — the page's regions, laid out by its
+`template` — and differ only in how wide the content runs. **A `home` page is not a landing
+declaration:** an app opens on its **first navigation item** (by `order`), so to make a page
+the one an app opens, put its navigation entry first; the root landing follows the app's own
+`isDefault`. A `utility` page is an ordinary inline page — there is no floating panel or
+utility bar that hosts it — and it cannot be a print page.
 
 Earlier roadmap types (`dashboard`, `form`, `record_detail`, `record_review`, `overview`, `blank`) were **removed from the schema** because they never shipped a renderer (ADR-0049 enforce-or-remove); only the five types above are valid.
 
@@ -120,7 +127,8 @@ by `os validate`, `os lint` and `os build` alike. See
 
 ## Regions
 
-Regions define layout zones on the page. Each region contains components.
+Regions define layout zones on the page. Each region contains components, and its `name`
+is the slot of the page's `template` it fills.
 
 {/* os:check */}
 ```typescript
@@ -131,7 +139,7 @@ regions: [
     components: [/* ... */],
   },
   {
-    name: 'content',
+    name: 'main',
     width: 'large',
     components: [/* ... */],
   },
@@ -140,9 +148,29 @@ regions: [
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `name` | `string` | ✅ | Region identifier |
+| `name` | `string` | ✅ | The template slot the region fills (see [Templates](#templates)); a name the template does not place is refused |
 | `width` | `enum` | optional | `'small'`, `'medium'`, `'large'`, `'full'` |
 | `components` | `PageComponent[]` | ✅ | Components in this region |
+
+### Templates
+
+A page's `template` decides where each region is drawn. Each template places a fixed set of
+region names (`PAGE_TEMPLATE_SLOTS` in `@objectstack/spec/ui`); names match
+case-insensitively.
+
+| Template | Regions it places |
+| :--- | :--- |
+| `default` | `header`, `sidebar`, `main`, `aside`, `footer` — `sidebar` and `aside` beside `main`, `header` and `footer` spanning it |
+| `header-sidebar-main` | `header`, `sidebar`, `main` |
+| `three-column` | `header`, `sidebar`, `main`, `aside`, `footer` |
+| `dashboard` | `header`, `footer`, and **any other name** — every other region is a grid cell |
+
+On a `kind: 'full'` page, a region its template does not place — `left_sidebar`,
+`right_sidebar`, `content` — is refused by `os validate`, `os build` and the metadata save door,
+naming the template's slots: the console would stack it under `main` at full width and ignore
+its `width`. Use `sidebar` for the left column and `aside` for the right. `full-width` is no
+longer a template name: it was a second name for `default`, and is refused with that
+replacement.
 
 ## Components
 

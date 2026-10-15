@@ -64,6 +64,8 @@ import {
   checkPagePrintComposition,
   checkPageSlotPair,
   checkPageComponentViewData,
+  checkPageDefaultPlacement,
+  checkPageRegionPlacement,
 } from './page.zod';
 import {
   GlobalFilterSchema,
@@ -346,6 +348,37 @@ const pageComponentViewDataFixtures: Fixture[] = [
   },
 ];
 
+// [#23610] `isDefault: true` off a record page bound to an object, and a
+// region the page's template does not place. No fixture here carries `print`,
+// `source`, `requires`, a `details` + `tabs` pair or a component `data`, so the
+// siblings stay silent and each row exercises ONE check alone. `kind` and
+// `template` are left out on the default rows on purpose: a direct call sees
+// neither while the parse sees the applied `full` / `default` defaults.
+const pageDefaultPlacementFixtures: Fixture[] = [
+  { label: '`isDefault: true` on a `home` page', value: { ...PAGE_BASE, isDefault: true }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a `list` page', value: { ...PAGE_BASE, type: 'list', isDefault: true }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a record page bound to no object', value: { ...PAGE_BASE, type: 'record', isDefault: true }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a page with no `type` (the `record` default) and no object', value: { name: 'untyped_page', label: 'Untyped', isDefault: true }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a record page bound to an object', value: { ...PAGE_BASE, type: 'record', object: 'account', isDefault: true }, refusesAt: [] },
+  { label: '`isDefault: false` on a `home` page', value: { ...PAGE_BASE, isDefault: false }, refusesAt: [] },
+  { label: 'a `home` page with no `isDefault`', value: { ...PAGE_BASE }, refusesAt: [] },
+];
+
+const region = (name: string, width?: string) => ({ name, ...(width ? { width } : {}), components: [] });
+const pageRegionPlacementFixtures: Fixture[] = [
+  {
+    label: '`left_sidebar` and `right_sidebar` on `three-column`',
+    value: { ...PAGE_BASE, template: 'three-column', regions: [region('header'), region('left_sidebar', 'small'), region('main'), region('right_sidebar', 'medium')] },
+    refusesAt: ['regions.1.name', 'regions.3.name'],
+  },
+  { label: '`content` on a page with no `template` (the `default` default)', value: { ...PAGE_BASE, regions: [region('content')] }, refusesAt: ['regions.0.name'] },
+  { label: '`aside` on `header-sidebar-main`', value: { ...PAGE_BASE, template: 'header-sidebar-main', regions: [region('main'), region('aside')] }, refusesAt: ['regions.1.name'] },
+  { label: 'the five slots on `default`', value: { ...PAGE_BASE, template: 'default', regions: ['header', 'sidebar', 'main', 'aside', 'footer'].map((n) => region(n)) }, refusesAt: [] },
+  { label: 'a slot name in another case (`Main`) — the renderer matches case-insensitively', value: { ...PAGE_BASE, regions: [region('Main')] }, refusesAt: [] },
+  { label: 'any name on `dashboard` — its open grid', value: { ...PAGE_BASE, template: 'dashboard', regions: [region('header'), region('kpis'), region('pipeline')] }, refusesAt: [] },
+  { label: 'an unplaced name on a `slotted` page — it renders its slots, not its regions', value: { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted', regions: [region('left_sidebar')] }, refusesAt: [] },
+];
+
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
 
 const dateDefaultFixtures: Fixture[] = [
@@ -562,6 +595,8 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPagePrintComposition', check: checkPagePrintComposition, fixtures: pagePrintFixtures },
       { name: 'checkPageSlotPair', check: checkPageSlotPair, fixtures: pageSlotPairFixtures },
       { name: 'checkPageComponentViewData', check: checkPageComponentViewData, fixtures: pageComponentViewDataFixtures },
+      { name: 'checkPageDefaultPlacement', check: checkPageDefaultPlacement, fixtures: pageDefaultPlacementFixtures },
+      { name: 'checkPageRegionPlacement', check: checkPageRegionPlacement, fixtures: pageRegionPlacementFixtures },
     ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
@@ -716,9 +751,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all five exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all seven exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageComponentViewData']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageComponentViewData', 'checkPageDefaultPlacement', 'checkPageRegionPlacement']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
@@ -754,6 +789,8 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkPagePrintComposition', checkPagePrintComposition],
     ['checkPageSlotPair', checkPageSlotPair],
     ['checkPageComponentViewData', checkPageComponentViewData],
+    ['checkPageDefaultPlacement', checkPageDefaultPlacement],
+    ['checkPageRegionPlacement', checkPageRegionPlacement],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);
