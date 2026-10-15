@@ -54,7 +54,7 @@
         {
           "name": "data",
           "type": "object",
-          "description": "Data source configuration — a `ViewData` object discriminated by `provider`: `{ provider: \"object\", object }` (what an omitted `data` falls back to, using `objectName`), `{ provider: \"api\", read, write }`, `{ provider: \"value\", items: [...] }` for inline rows that bypass the object query, or `{ provider: \"schema\", schemaId }`. The canonical spelling — the deprecated `staticData` is the array-only shortcut for the `value` provider, so inline rows go under `items` here rather than in a bare array."
+          "description": "Data source configuration — a `ViewData` object discriminated by `provider`: `{ provider: \"object\", object }` (what an omitted `data` falls back to, using `objectName`), `{ provider: \"value\", items: [...] }` for inline rows that bypass the object query, or `{ provider: \"schema\", schemaId }`. The canonical spelling — the deprecated `staticData` is the array-only shortcut for the `value` provider, so inline rows go under `items` here rather than in a bare array."
         },
         {
           "name": "rowHeight",
@@ -1005,7 +1005,7 @@
         {
           "name": "data",
           "type": "object",
-          "description": "A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a map carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` plots those rows and `{ provider: 'object', object }` queries that object, both narrowed by `filter` and ordered by `sort`. The `api` provider is not implemented on the map and plots no markers. A bare array is not this key’s shape and is not a record source: the map falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`."
+          "description": "A `{ provider, … }` data-source configuration, read FIRST on the record-source ladder: a map carrying one never reaches `staticData` and never queries `objectName`. `{ provider: 'value', items }` plots those rows and `{ provider: 'object', object }` queries that object, both narrowed by `filter` and ordered by `sort`. A bare array is not this key’s shape and is not a record source: the map falls through to `staticData`, then `objectName`, so inline rows belong under `staticData`."
         },
         {
           "name": "staticData",
@@ -1515,6 +1515,11 @@
           "name": "relationshipValueField",
           "type": "string",
           "description": "Which field OF THIS PARENT record `relationshipField` stores. Defaults to \"id\"; set it to the field a name-keyed junction points at (e.g. \"name\" when sys_user_position.position holds sys_position.name). The resolved value drives three things at once — the list filter, the Add-picker link value, and the pre-filled create form — so they cannot drift apart. While the parent record is still loading, a non-\"id\" field resolves to null and the list holds its fetch rather than querying on an empty value."
+        },
+        {
+          "name": "parentDataSource",
+          "type": "object",
+          "description": "The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. The FIRST row of the bound set by its `sort` is the parent (declare `limit: 1`; `objectui validate` warns without it), and `relationshipValueField` is read on that row. When no row answers, the list draws a notice saying so in its place, never an empty list. Without this key, the parent is the record page's record. The node-level `dataSource` on this block is the CHILD rows the list draws, and it is never read as the parent."
         },
         {
           "name": "columns",
