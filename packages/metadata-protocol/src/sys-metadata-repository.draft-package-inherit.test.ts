@@ -354,7 +354,8 @@ describe('[#23657] SysMetadataRepository draft address of an item never publishe
     const head = await repo.headAt(REF, { state: 'draft', packageId: null });
     expect(head.packageId).toBe('app.q');
     expect(head.head?.hash).toBe('sha-q');
-    await repo.put(REF, { label: 'edited' }, { parentVersion: null, actor: 't', state: 'draft' as const });
+    // The parent the head named is the one put's lock accepts.
+    await repo.put(REF, { label: 'edited' }, { parentVersion: head.head!.hash, actor: 't', state: 'draft' as const });
     const drafts = engine.rows.filter((r) => r.state === 'draft');
     expect(drafts.map((r) => r.package_id)).toEqual(['app.q']);
     expect(JSON.parse(String(drafts[0]!.metadata)).label).toBe('edited');
@@ -381,8 +382,10 @@ describe('[#23657] SysMetadataRepository draft address of an item never publishe
   it('control: a package-unbound draft beside packages\' drafts keeps the address', async () => {
     const engine = makeFakeEngine([draftRow('app.q', 'sha-q'), draftRow(null, 'sha-u'), draftRow('app.r', 'sha-r')]);
     const repo = makeRepo(engine);
-    expect((await repo.headAt(REF, { state: 'draft', packageId: null })).packageId).toBeNull();
-    await repo.put(REF, { label: 'edited' }, { parentVersion: null, actor: 't', state: 'draft' as const });
+    const head = await repo.headAt(REF, { state: 'draft', packageId: null });
+    expect(head.packageId).toBeNull();
+    expect(head.head?.hash).toBe('sha-u');
+    await repo.put(REF, { label: 'edited' }, { parentVersion: 'sha-u', actor: 't', state: 'draft' as const });
     const unbound = engine.rows.filter((r) => r.state === 'draft' && (r.package_id ?? null) === null);
     expect(unbound).toHaveLength(1);
     expect(JSON.parse(String(unbound[0]!.metadata)).label).toBe('edited');
