@@ -40,6 +40,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { EngineCountOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 function makeStubDriver() {
@@ -60,7 +61,10 @@ function makeStubDriver() {
     const driver: any = {
         name: 'memory', version: '0.0.0', supports: {},
         async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-        async find(o: string, ast: any) { return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)); },
+        async find(o: string, ast: any) {
+            const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+            return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+        },
         async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
         async create(o: string, data: Record<string, unknown>) {
             nextId += 1; const id = (data.id as string) ?? `r_${nextId}`; const row = { ...data, id }; storeFor(o).set(id, row); return row;
@@ -123,12 +127,13 @@ describe('rows 4-5 — the set_null cleanup is an UPDATE under the caller\'s con
         refuse = false;
         engine.on('beforeUpdate', 'lead', async (ctx: any) => {
             const ref = storeFor('lead').get(ctx.input?.id)?.duplicate_of;
+            const byRef: EngineCountOptions = { where: { id: ref } };
             seen.push({
                 data: { ...(ctx.input?.data ?? {}) },
                 sessionUserId: ctx.session?.userId,
                 sessionIsSystem: ctx.session?.isSystem,
                 marker: ctx.referentialFieldClear,
-                referencedStillReadable: ref ? await engine.count('contact', { where: { id: ref } } as any) : 0,
+                referencedStillReadable: ref ? await engine.count('contact', byRef) : 0,
             });
             if (refuse) throw new Error('settled record: the link may not change');
         });

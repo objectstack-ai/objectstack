@@ -60,7 +60,10 @@ function makeStubDriver() {
     const driver: any = {
         name: 'memory', version: '0.0.0', supports: {},
         async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-        async find(o: string, ast: any) { return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)); },
+        async find(o: string, ast: any) {
+            const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+            return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+        },
         async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
         async create(o: string, data: Record<string, unknown>) {
             nextId += 1; const id = (data.id as string) ?? `r_${nextId}`; const row = { ...data, id }; storeFor(o).set(id, row); return row;

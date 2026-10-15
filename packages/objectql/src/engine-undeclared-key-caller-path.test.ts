@@ -31,12 +31,18 @@ function makeRecordingDriver() {
     const storeFor = (o: string) => { let s = stores.get(o); if (!s) { s = new Map(); stores.set(o, s); } return s; };
     const writes: string[] = [];
     const matches = (row: any, where: any): boolean =>
-        !where || typeof where !== 'object' || Object.entries(where).every(([k, v]) => row?.[k] === v);
+        !where || typeof where !== 'object' || Object.entries(where).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            return row?.[k] === v;
+        });
     let n = 0;
     const driver: any = {
         name: 'memory', version: '0.0.0', supports: {},
         async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-        async find(o: string, ast: any) { return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)); },
+        async find(o: string, ast: any) {
+            const rows = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+            return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+        },
         async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
         async create(o: string, data: Record<string, unknown>) {
             writes.push(`create ${o}`);
