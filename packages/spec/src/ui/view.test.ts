@@ -3931,7 +3931,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (every reade
 // 2026-08-12, option A). The spec published a bare format array while the only
 // renderer read `exportOptions.formats`, so no declaration was both type-legal
 // and functional. The object form declares exactly the five renderer-read keys
-// (measured objectui origin/main@878140b, ObjectGrid.tsx:1596–1642); the
+// (read points recorded in `liveness/view.json`, row `list.exportOptions`); the
 // legacy bare array stays accepted and lifts to `{ formats }` at parse.
 // `'pdf'` left the enum in the same change (#1301 NOT_PLANNED). The removal
 // stands under the 2026-10-08 ruling on #8346 (B′), which re-planned PDF

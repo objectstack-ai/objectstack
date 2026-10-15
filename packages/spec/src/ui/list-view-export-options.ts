@@ -116,8 +116,8 @@ const exportOptionsUnknownKeyError = strictObjectError({
 /**
  * Object form of `view.exportOptions` (#8010, maintainer ruling 2026-08-12 —
  * option A). The declared key set is exactly what the only renderer reads,
- * measured on objectui `origin/main@878140b` (`ObjectGrid.tsx:1596–1642`):
- * `formats`, `maxRecords`, `includeHeaders`, `fileNamePrefix`, and the
+ * measured on objectui (read points recorded in `liveness/view.json`, row
+ * `list.exportOptions`): `formats`, `maxRecords`, `includeHeaders`, `fileNamePrefix`, and the
  * previously UNDECLARED `streaming` opt-out — declared here so no
  * undeclared-but-read key survives the fix. Declaring anything more would be
  * capability surface with no reader; declaring less recreates the defect.
