@@ -31,6 +31,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createSecurityCatalogReader } from '@objectstack/core';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { isExitSignal } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
@@ -322,7 +323,6 @@ describe('[ADR-0131 D6/D7] the ceremony boot\'s readers ignore a legacy organiza
     process.env.OS_AUTH_SECRET = 'm23429-secret-'.padEnd(40, 'x');
     try {
       const { orgEntry, envEntry } = await onCeremonyBoot(db, async (kernel) => {
-        const { createSecurityCatalogReader } = await import('@objectstack/core');
         const catalog = createSecurityCatalogReader({
           registry: kernel.getService('objectql').registry,
           metadata: kernel.getService('metadata'),
