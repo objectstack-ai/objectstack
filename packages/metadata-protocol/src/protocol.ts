@@ -20511,7 +20511,8 @@ export class ObjectStackProtocolImplementation implements
      * the members it dropped ({@link reconcileViewExpansions}) before the
      * write answers, so the reads that follow it serve the published set.
      * The orphan adoption ({@link reassignOrphanedMetadata}) calls it for each
-     * view row it rebinds, with `reboundFrom`.
+     * view row it rebinds, with `reboundFrom`, and [#23646] for each object
+     * row, once {@link releaseAdoptedObjectOwner} has handed it the name.
      */
     private async applyRegistryWriteThrough(request: {
         type: string;
@@ -27567,7 +27568,25 @@ export class ObjectStackProtocolImplementation implements
      * binding it left ({@link applyRegistryWriteThrough}, `reboundFrom`), so
      * the registry follows the row at once: a view container's expansions are
      * reconciled for the new binding, and the record of the old one moves
-     * with it ({@link reconcileViewExpansions}). Rows of other types are
+     * with it ({@link reconcileViewExpansions}).
+     *
+     * ## [#23646] …and so does each object row it rebinds
+     *
+     * An object row used to be rebound in storage only. The registry kept the
+     * owner the package-less row had registered (the `'sys_metadata'`
+     * sentinel) and the pre-adoption definition until the next restart, and
+     * every save of the object naming the target package answered success
+     * without going live: the write-through's `own` claim under the target met
+     * the registry's single-owner rule (ADR-0029 D3) and landed in
+     * {@link applyObjectRegistryMutation}'s best-effort warn. Measured over
+     * `POST /api/v1/packages/:id/adopt-orphans` on a booted CRM example: the
+     * data plane refused the saved object's new field with `400 INVALID_FIELD`.
+     * So the sentinel's contribution leaves the registry first
+     * ({@link releaseAdoptedObjectOwner}), and the row registers at its new
+     * binding through the same write-through, in the same request; the next
+     * boot registers the same owner. Only an ACTIVE object row is registered,
+     * the rows the boot registers: an adopted draft is rebound in storage
+     * only, because a draft never reaches the runtime. Rows of other types are
      * rebound in storage only, as before.
      */
     async reassignOrphanedMetadata(request: {
@@ -27641,9 +27660,9 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
             // [#23198] The registry follows the rebound row now, not at the
-            // next restart; see the header. ⛔ Views only.
+            // next restart; see the header. [#23646] A view, and an object.
             const type = canonicalMetaType(String(row.type));
-            if (type !== 'view') continue;
+            if (type !== 'view' && type !== 'object') continue;
             let rebound: { name: string; data: unknown };
             try {
                 // The row as the list read hydrates it, at its new binding.
@@ -27652,6 +27671,16 @@ export class ObjectStackProtocolImplementation implements
                 // Best-effort, as the write-through's own failure is: the row
                 // is rebound, and the next list read hydrates it.
                 console.warn(`[Protocol] registry write-through failed for ${type}/${row.name}: ${err?.message ?? err}`);
+                continue;
+            }
+            // [#23646] An object's one registry owner moves with its row. Only
+            // an active row's: the boot registers no other ({@link
+            // loadMetaFromDb}), and a draft never reaches the runtime.
+            if (
+                type === 'object'
+                && (row.state !== 'active'
+                    || !this.releaseAdoptedObjectOwner(rebound.name, rebound.data, request.targetPackageId))
+            ) {
                 continue;
             }
             await this.applyRegistryWriteThrough({
@@ -27692,6 +27721,67 @@ export class ObjectStackProtocolImplementation implements
             reassigned,
             targetPackageId: request.targetPackageId,
         };
+    }
+
+    /**
+     * [#23646, ADR-0070 D5] Hand an adopted object's registry name over to its
+     * rebound row: answers whether {@link reassignOrphanedMetadata} registers
+     * the row at its new binding through {@link applyRegistryWriteThrough}.
+     *
+     * An object has ONE owner per name in the registry (ADR-0029 D3), and a
+     * package-less row registers as its owner under the `'sys_metadata'`
+     * sentinel (the save's write-through and the boot's hydration both key a
+     * package-less row so). A registration at the new binding while that owner
+     * stands is a second package's `own` claim, which `registerObject` refuses.
+     * So the sentinel's contribution leaves first, through
+     * `SchemaRegistry.unregisterObject` — the verb
+     * {@link restoreArtifactRegistryView} already hands an object's name to a
+     * remaining row with — and the write-through then registers the row as a
+     * save of it does. Both run before the adoption answers, with no `await`
+     * between them, so no request sees the name unowned. No new registry verb
+     * exists for this, and none is needed.
+     *
+     * | the name's registered owner | answer |
+     * |:--|:--|
+     * | the sentinel (the adopted row's own registration) | unregistered; `true` |
+     * | none | `true`: the row registers as the next boot would register it |
+     * | another package's row | `false`: the adopted row never held the name; the registry keeps that owner, as before, and the next boot judges both rows |
+     *
+     * A code-shipped object is never adopted ({@link isArtifactBacked} filters
+     * it out first), so a packaged owner does not reach this table.
+     *
+     * `unregisterObject` refuses an object another package extends (its
+     * ADR-0029 guard). The registry then keeps the sentinel's owner and the
+     * pre-adoption definition until the next restart while storage says
+     * otherwise, which is why that refusal is logged at `error`, once per
+     * object, with the consequence and the remedy.
+     *
+     * `false` for a registry with no object half (a metadata-only double) and
+     * for a body with no name, which register nothing.
+     */
+    private releaseAdoptedObjectOwner(name: string, item: unknown, targetPackageId: string): boolean {
+        const registry: any = (this.engine as any)?.registry;
+        if (typeof registry?.registerObject !== 'function') return false;
+        if (!item || typeof item !== 'object' || typeof (item as { name?: unknown }).name !== 'string') return false;
+        const owner: { packageId?: unknown } | undefined = typeof registry.getObjectOwner === 'function'
+            ? registry.getObjectOwner(name)
+            : undefined;
+        if (owner === undefined) return true;
+        if (owner.packageId !== 'sys_metadata' || typeof registry.unregisterObject !== 'function') return false;
+        try {
+            registry.unregisterObject(name);
+            return true;
+        } catch (err: any) {
+            console.error(
+                `[Protocol] reassignOrphanedMetadata: object '${name}' was adopted into package `
+                + `'${targetPackageId}' in sys_metadata, but the registry keeps its package-less definition `
+                + `(owner 'sys_metadata') until the next restart: ${err?.message ?? err}. Until then the data `
+                + `plane serves the pre-adoption definition, and a save of the object naming '${targetPackageId}' `
+                + 'answers success without going live. Fix: restart the server; the boot registers the object '
+                + `under '${targetPackageId}'.`,
+            );
+            return false;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
