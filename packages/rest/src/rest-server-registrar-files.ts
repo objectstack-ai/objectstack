@@ -37,6 +37,8 @@ export const REST_SERVER_REGISTRAR_FILES = [
     'approvals-routes.ts',
     // [#23050 slice 4] `registerSharingEndpoints`' and `registerSharingRuleEndpoints`' bodies.
     'sharing-routes.ts',
+    // [#23050 slice 5] `registerAnalyticsEndpoints`' body.
+    'analytics-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
