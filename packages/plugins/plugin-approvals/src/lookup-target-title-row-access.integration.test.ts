@@ -45,13 +45,25 @@
  *  (c) one row-access ask per target object per read, naming every id of that
  *      object the read titles, on the single read and on a multi-row list;
  *  (d) the subject is untouched: a reader who may read no subject row is
- *      served the subject's title, label and snapshot exactly as the control.
+ *      served the subject's title, label and snapshot exactly as the control;
+ *  (e) with the security service's object-level read admission attached
+ *      (`canReadObject`, standing in from the same table), an object the reader
+ *      may not read at all is not read as the reader — so the security
+ *      middleware has no denial to log — and the answer is unchanged; an
+ *      admitted object is still narrowed by row; the admission is asked once
+ *      per target object per read, without the operation-private keys;
+ *  (e-closed) an admission that throws, or answers anything but `true`,
+ *      refuses that object (the throw said once at `warn`); a service without
+ *      the member leaves every target to the caller-scoped read;
+ *  (f) composed: the real `ApprovalsServicePlugin.start()` hands its service
+ *      the registered `security` service's admission, so the wiring a
+ *      deployment runs is the one (e) measures.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { ApprovalService } from './approval-service.js';
+import { ApprovalService, type ObjectReadAdmission } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
@@ -119,6 +131,10 @@ const READABLE: Record<string, Record<string, ReadonlySet<string> | 'all'>> = {
   crm_deal: { [RESTRICTED]: new Set<string>(), [READER]: 'all' },
 };
 
+/** The object-level half of the same table: a user absent for an object may not read it. */
+const mayReadObject = (object: string, context: any): boolean =>
+  !!context?.isSystem || READABLE[object]?.[String(context?.userId ?? '')] !== undefined;
+
 /** A caller-scoped read of a business object, as the stand-in saw it. */
 interface CallerRead { object: string; userId: string; ids: string[] }
 
@@ -161,51 +177,69 @@ async function packageObjects(): Promise<any[]> {
   return manifest.objects;
 }
 
+const hidden = { account: 'A1', vendor: 'V1', parent: 'D_PARENT' };
+
+/** A real engine over sqlite with the three business objects, seeded, behind the stand-in. */
+async function bootEngine(reads: CallerRead[]): Promise<ObjectQL> {
+  const engine = new ObjectQL();
+  engine.registerDriver(new SqlDriver({
+    client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true,
+  }), true);
+  await engine.init();
+  for (const def of [sysUser, account, vendor, deal, ...(await packageObjects())]) {
+    engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
+  }
+  await engine.syncSchemas();
+  guardReads(engine, reads);
+  for (const id of [RESTRICTED, READER, SUBMITTER]) {
+    await engine.insert('sys_user', { id, name: id, email: `${id}@example.com` }, { context: SYSTEM } as any);
+  }
+  await engine.insert('crm_account', { id: 'A1', name: ACCOUNT_TITLE }, { context: SYSTEM } as any);
+  await engine.insert('crm_account', { id: 'A_MINE', name: MINE_TITLE }, { context: SYSTEM } as any);
+  await engine.insert('crm_vendor', { id: 'V1', name: VENDOR_TITLE }, { context: SYSTEM } as any);
+  await engine.insert('crm_deal', { id: 'D_PARENT', name: PARENT_TITLE, amount: 1 }, { context: SYSTEM } as any);
+  return engine;
+}
+
+/** One pending request on a new deal `recordId` whose snapshot points at `targets`. */
+async function openDealOn(
+  engine: ObjectQL,
+  svc: ApprovalService,
+  recordId: string,
+  n: number,
+  targets: { account: string; vendor: string; parent: string },
+) {
+  const record = { id: recordId, name: `Deal ${n}`, amount: 100 * n, ...targets };
+  await engine.insert('crm_deal', record, { context: SYSTEM } as any);
+  const row: any = await svc.openNodeRequest({
+    object: 'crm_deal', recordId, runId: `run_${recordId}`, nodeId: 'review', flowName: 'deal_review',
+    config: {
+      approvers: [RESTRICTED, READER].map((value) => ({ type: 'user', value })),
+      behavior: 'first_response',
+    } as any,
+    submitterId: SUBMITTER, record,
+  }, asUser(SUBMITTER));
+  return { requestId: String(row.id), recordId, record };
+}
+
 describe('[#23637] a lookup target\'s title is served only for a target record its reader may read', () => {
   let engine: ObjectQL;
   let svc: ApprovalService;
   const reads: CallerRead[] = [];
+  const warns: string[] = [];
   let n = 0;
 
   /** One pending request on a fresh deal whose snapshot points at the given targets. */
   const openDeal = async (targets: { account: string; vendor: string; parent: string }) => {
     n += 1;
-    const recordId = `D${n}`;
-    const record = { id: recordId, name: `Deal ${n}`, amount: 100 * n, ...targets };
-    await engine.insert('crm_deal', record, { context: SYSTEM } as any);
-    const row: any = await svc.openNodeRequest({
-      object: 'crm_deal', recordId, runId: `run_${n}`, nodeId: 'review', flowName: 'deal_review',
-      config: {
-        approvers: [RESTRICTED, READER].map((value) => ({ type: 'user', value })),
-        behavior: 'first_response',
-      } as any,
-      submitterId: SUBMITTER, record,
-    }, asUser(SUBMITTER));
-    return { requestId: String(row.id), recordId, record };
+    return openDealOn(engine, svc, `D${n}`, n, targets);
   };
-  const hidden = { account: 'A1', vendor: 'V1', parent: 'D_PARENT' };
 
   beforeAll(async () => {
-    engine = new ObjectQL();
-    engine.registerDriver(new SqlDriver({
-      client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true,
-    }), true);
-    await engine.init();
-    for (const def of [sysUser, account, vendor, deal, ...(await packageObjects())]) {
-      engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
-    }
-    await engine.syncSchemas();
-    guardReads(engine, reads);
-    for (const id of [RESTRICTED, READER, SUBMITTER]) {
-      await engine.insert('sys_user', { id, name: id, email: `${id}@example.com` }, { context: SYSTEM } as any);
-    }
-    await engine.insert('crm_account', { id: 'A1', name: ACCOUNT_TITLE }, { context: SYSTEM } as any);
-    await engine.insert('crm_account', { id: 'A_MINE', name: MINE_TITLE }, { context: SYSTEM } as any);
-    await engine.insert('crm_vendor', { id: 'V1', name: VENDOR_TITLE }, { context: SYSTEM } as any);
-    await engine.insert('crm_deal', { id: 'D_PARENT', name: PARENT_TITLE, amount: 1 }, { context: SYSTEM } as any);
+    engine = await bootEngine(reads);
     svc = new ApprovalService({
       engine: engine as any,
-      logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
+      logger: { warn: (msg: string) => { warns.push(String(msg)); }, info: () => {}, error: () => {}, debug: () => {} } as any,
     });
   });
 
@@ -288,5 +322,116 @@ describe('[#23637] a lookup target\'s title is served only for a target record i
       expect(restricted.payload, door).toMatchObject(record);
       expect(restricted.record_title, door).toBe(control.record_title);
     }
+  });
+
+  it('(e) an object the reader may not read at all is not read as the reader; the answer is unchanged', async () => {
+    const asked: Array<{ object: string; userId: string; keys: string[] }> = [];
+    const admission: ObjectReadAdmission = {
+      async canReadObject(object: string, context?: any) {
+        asked.push({ object, userId: String(context?.userId ?? ''), keys: Object.keys(context ?? {}).sort() });
+        return mayReadObject(object, context);
+      },
+    };
+    svc.attachObjectReadAdmission(() => admission);
+    try {
+      const mine = await openDeal({ account: 'A_MINE', vendor: 'V1', parent: 'D_PARENT' });
+      const theirs = await openDeal(hidden);
+
+      reads.length = 0;
+      const one: any = await svc.getRequest(theirs.requestId, { ...asUser(RESTRICTED), __readScope: 'org' });
+      expect(reads.map((r) => r.object)).toEqual(['crm_account', 'crm_deal']);
+      expect(asked).toEqual(['crm_account', 'crm_vendor', 'crm_deal'].map((object) => ({
+        object, userId: RESTRICTED, keys: ['permissions', 'positions', 'userId'],
+      })));
+      expect(one.payload_display).toBeUndefined();
+      expect(one.payload).toMatchObject(hidden);
+
+      reads.length = 0;
+      asked.length = 0;
+      const rows: any[] = await svc.listRequests({ object: 'crm_deal', approverId: RESTRICTED }, asUser(RESTRICTED));
+      expect(reads.map((r) => r.object)).toEqual(['crm_account', 'crm_deal']);
+      expect(asked.map((a) => a.object)).toEqual(['crm_account', 'crm_vendor', 'crm_deal']);
+      const byRecord = new Map(rows.map((r) => [r.record_id, r]));
+      // Admitted is not unrestricted: the row scope still decides.
+      expect(byRecord.get(mine.recordId)?.payload_display).toEqual({ account: MINE_TITLE });
+      expect(byRecord.get(theirs.recordId)?.payload_display).toBeUndefined();
+      for (const title of [ACCOUNT_TITLE, VENDOR_TITLE, PARENT_TITLE]) expect(JSON.stringify(rows)).not.toContain(title);
+
+      // The control is admitted everywhere and keeps every title.
+      const control: any = await svc.getRequest(theirs.requestId, asUser(READER));
+      expect(control.payload_display).toEqual({ account: ACCOUNT_TITLE, vendor: VENDOR_TITLE, parent: PARENT_TITLE });
+    } finally {
+      svc.attachObjectReadAdmission(undefined);
+    }
+  });
+
+  it('(e-closed) an admission that throws or does not answer true refuses; one without the member reads as before', async () => {
+    const { requestId } = await openDeal(hidden);
+    svc.attachObjectReadAdmission(() => ({
+      async canReadObject(object: string) {
+        if (object === 'crm_deal') throw new Error('permission resolution failed');
+        return (object === 'crm_vendor' ? 'yes' : true) as unknown as boolean;
+      },
+    }));
+    try {
+      warns.length = 0;
+      reads.length = 0;
+      const row: any = await svc.getRequest(requestId, asUser(READER));
+      expect(row.payload_display).toEqual({ account: ACCOUNT_TITLE });
+      expect(reads.map((r) => r.object)).toEqual(['crm_account']);
+      expect(warns.filter((w) => w.includes('object-level read admission for "crm_deal"'))).toHaveLength(1);
+
+      svc.attachObjectReadAdmission(() => ({}) as ObjectReadAdmission);
+      reads.length = 0;
+      const before: any = await svc.getRequest(requestId, asUser(READER));
+      expect(before.payload_display).toEqual({ account: ACCOUNT_TITLE, vendor: VENDOR_TITLE, parent: PARENT_TITLE });
+      expect(reads.map((r) => r.object)).toEqual(['crm_account', 'crm_vendor', 'crm_deal']);
+    } finally {
+      svc.attachObjectReadAdmission(undefined);
+    }
+  });
+});
+
+describe('[#23637] (f) composed: the plugin hands its service the registered security service\'s admission', () => {
+  let engine: ObjectQL | undefined;
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  it('a target object the security service refuses is not read as the reader', async () => {
+    const reads: CallerRead[] = [];
+    engine = await bootEngine(reads);
+    const asked: string[] = [];
+    const services: Record<string, unknown> = {
+      objectql: engine,
+      // No field-level answer (pass-through), and the object-level admission.
+      security: {
+        getReadableFields: async () => undefined,
+        getQueryableFields: async () => undefined,
+        async canReadObject(object: string, context?: any) {
+          asked.push(object);
+          return mayReadObject(object, context);
+        },
+      },
+    };
+    const ctx: any = {
+      getService: (name: string) => {
+        if (!(name in services)) throw new Error(`[Kernel] Service '${name}' not found`);
+        return services[name];
+      },
+      registerService: (name: string, svc: unknown) => { services[name] = svc; },
+      hook: () => {},
+      logger: { info: () => {}, debug: () => {}, warn: () => {}, error: () => {} },
+    };
+    await new ApprovalsServicePlugin().start(ctx);
+    const svc = services.approvals as ApprovalService;
+    const { requestId } = await openDealOn(engine, svc, 'D_COMPOSED', 1, hidden);
+
+    reads.length = 0;
+    const row: any = await svc.getRequest(requestId, asUser(RESTRICTED));
+    expect(asked).toEqual(['crm_account', 'crm_vendor', 'crm_deal']);
+    expect(reads.map((r) => r.object)).toEqual(['crm_account', 'crm_deal']);
+    expect(row.payload_display).toBeUndefined();
+    expect(row.payload).toMatchObject(hidden);
   });
 });
