@@ -367,6 +367,43 @@ describe('collectUnmanagedTables — every no-answer path is unreadable, not emp
 });
 
 /**
+ * The dialect comes from the one resolver the organization-ownership ceremony
+ * shares (`@objectstack/metadata-core`'s `dialectOfDriver`): `dialectName`
+ * first, then a recognised client string. The shapes are the drivers' own,
+ * measured: `SqliteWasmDriver`'s knex `client` is a dialect CLASS and its
+ * `dialectName` is `'sqlite'`; `SqlDriver` answers `'unknown'` for a client
+ * class it does not recognise.
+ */
+describe('collectUnmanagedTables — the dialect is read through dialectName first', () => {
+  const statements: string[] = [];
+  const driverOf = (shape: { dialectName?: string; client: unknown }) => ({
+    managedObjectFields: new Map(),
+    ...(shape.dialectName !== undefined ? { dialectName: shape.dialectName } : {}),
+    config: { client: shape.client },
+    execute: async (sql: string) => {
+      statements.push(sql);
+      return rows('sys_user');
+    },
+  });
+  const run = (driver: unknown) =>
+    collectUnmanagedTables({ drivers: [driver], declaredObjects: [], composition: MIRRORED, normalize });
+
+  it('reads SqliteWasmDriver (a client class, dialectName sqlite) with the SQLite catalog statement', async () => {
+    statements.length = 0;
+    const report = await run(driverOf({ dialectName: 'sqlite', client: class Client_WasmSqlite {} }));
+    expect(report).toMatchObject({ status: 'read', physicalTables: 1 });
+    expect(statements).toEqual([physicalTableListSql('sqlite')]);
+  });
+
+  it('a client class whose dialectName is unknown stays unreadable, and nothing is run', async () => {
+    statements.length = 0;
+    const report = await run(driverOf({ dialectName: 'unknown', client: class Client_PG {} }));
+    expect(report.status).toBe('unreadable');
+    expect(statements).toEqual([]);
+  });
+});
+
+/**
  * [#22580] Every database the plan covers. The plan diffs the primary and,
  * where the serving boot keeps one, the `telemetry` sibling; a `read` answer
  * over the primary alone was a claim about a database never looked at.

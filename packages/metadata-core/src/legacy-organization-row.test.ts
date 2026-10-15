@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { LegacyOrganizationRowsUnreadable, readLegacyOrganizationRows } from './legacy-organization-row.js';
+import { dialectOfDriver, LegacyOrganizationRowsUnreadable, readLegacyOrganizationRows } from './legacy-organization-row.js';
 
 /** A SQL driver double: the column list and the legacy select, by statement. */
 function sqlDriver(opts: {
@@ -149,5 +149,21 @@ describe('readLegacyOrganizationRows — the presence check is the driver\'s cat
   it('a column list that is not a list, or is empty, is refused', async () => {
     await expect(readLegacyOrganizationRows(catalogDriver(null))).rejects.toThrow(/not a list/);
     await expect(readLegacyOrganizationRows(catalogDriver([]))).rejects.toThrow(/column list came back empty/);
+  });
+});
+
+describe('dialectOfDriver — the one driver-dialect resolver, shared with the organization-ownership ceremony', () => {
+  it.each([
+    ['dialectName first: SqliteWasmDriver\'s client is a dialect class', { dialectName: 'sqlite', config: { client: class Client_WasmSqlite {} } }, 'sqlite'],
+    ['dialectName postgres', { dialectName: 'postgres', config: { client: 'pg' } }, 'postgres'],
+    ['dialectName mysql', { dialectName: 'mysql', config: { client: 'mysql2' } }, 'mysql'],
+    ['no dialectName: a recognised client string', { config: { client: 'postgresql' } }, 'postgres'],
+    ['dialectName is the whole answer: unknown beside a recognised client', { dialectName: 'unknown', config: { client: 'pg' } }, 'unresolved'],
+    ['a client class with no dialectName', { config: { client: class Client_PG {} } }, 'unresolved'],
+    ['an unrecognised client string', { config: { client: 'oracledb' } }, 'unresolved'],
+    ['no dialectName and no client (memory, MongoDB)', {}, 'none'],
+    ['no driver', null, 'none'],
+  ])('%s', (_label, driver, expected) => {
+    expect(dialectOfDriver(driver)).toBe(expected);
   });
 });

@@ -57,6 +57,7 @@ let writes: string[];
 function executor(opts: { failOnceOn?: RegExp } = {}): ApplyExecutor {
   let failed = false;
   return {
+    dialect: 'sqlite',
     client: 'better-sqlite3',
     async query(sql, params = []) {
       return db.prepare(sql).all(...(params as unknown[])) as Record<string, unknown>[];
