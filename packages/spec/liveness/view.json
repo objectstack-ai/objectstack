@@ -92,7 +92,7 @@
         },
         "kanban": {
           "status": "live",
-          "note": "objectui: KanbanImpl.tsx:682 — field-by-field wired (audit L16)."
+          "note": "objectui: KanbanImpl.tsx:682 — field-by-field wired (audit L16). What `groupByField` names, on kanban, gantt and timeline alike (packages/spec/src/ui/view.zod.ts, the padded-spelling refusal; moved out of spec source, #23434): a lookup BY THAT NAME on data the server answers under the unpadded name, at objectui @dda8f3815 packages/plugin-list/src/ListView.tsx#laneField (`groupByField || groupField || detectStatusField(objectDef)`, inside #viewComponentSchema; cards bucketed by `card[laneField]`), objectui @dda8f3815 packages/plugin-gantt/src/ObjectGantt.tsx#groupByAccessor (splits on `.` and walks the record) and objectui @dda8f3815 packages/plugin-timeline/src/ObjectTimeline.tsx#effectiveItems (`item[groupByField]`)."
         },
         "calendar": {
           "status": "live",
@@ -186,7 +186,7 @@
         "bulkActionDefs": {
           "status": "live",
           "evidence": "packages/spec/src/ui/bulk-action.zod.ts",
-          "note": "objectui: ListView.tsx:1343 forwards rich defs to ObjectGrid (BulkActionDialog). Dispatch: useBulkExecutor.ts run() — per-record fan-out by default; execution:'aggregate' defs go through the ONE-call bulkCall branch injecting params._selectedIds (ObjectGrid.runBulkActionAggregate, objectui#3139). Verified objectui@4bf612c. #4457 gave the def a SHAPE (it was z.record(z.any())): the entry schema is BulkActionDefSchema, strict, and it refuses the combinations that parse but the executor never reads — so this row's liveness now covers the keys inside a def, not just the array."
+          "note": "objectui: ListView.tsx:1343 forwards rich defs to ObjectGrid (BulkActionDialog). Dispatch: useBulkExecutor.ts run() — per-record fan-out by default; execution:'aggregate' defs go through the ONE-call bulkCall branch injecting params._selectedIds (ObjectGrid.runBulkActionAggregate, objectui#3139). Verified objectui@4bf612c. #4457 gave the def a SHAPE (it was z.record(z.any())): the entry schema is BulkActionDefSchema, strict, and it refuses the combinations that parse but the executor never reads — so this row's liveness now covers the keys inside a def, not just the array. A PROMOTED def's field-backed params (packages/spec/src/ui/bulk-action.zod.ts; moved out of spec source, #23434): resolved when the dialog opens by objectui main @dca25aff2 packages/plugin-grid/src/resolveBulkActions.ts#resolvePromotedBulkParams through `resolveActionParams` (objectui 29b99490), then renamed onto the bulk vocabulary by the same file's #toBulkParam, which carries the field's type, translated label, options, required, description, placeholder, defaultValue, multiple, `dependsOn`, `accept` and `maxSize` (plus a reference-bearing field's reference and display field) and drops the lookup settings."
         },
         "virtualScroll": {
           "status": "dead",
@@ -215,7 +215,7 @@
         },
         "appearance": {
           "status": "live",
-          "note": "objectui: allowedVisualizations gates the view-type switcher (audit L15); showDescription gates ListView.tsx:1728."
+          "note": "objectui: allowedVisualizations gates the view-type switcher (audit L15); showDescription gates ListView.tsx:1728. objectui's authoring mirror runs none of the spec's object-level checks on this block (packages/spec/src/ui/object-refinement-check-exports.test.ts; moved out of spec source, #23434): objectui @a472b07167a3 packages/types/src/zod/objectql.zod.ts#ListViewSchema extends `specFieldsExcept(SpecListViewSchema.shape, …)`, which carries the fields and drops every check attached to the object (the source counted six such sites at that pin); unchanged at objectui @53ded82bf7a4."
         },
         "tabs": {
           "status": "dead",
@@ -238,7 +238,7 @@
         "emptyState": {
           "status": "live",
           "evidence": "packages/cli/src/utils/i18n-extract.ts",
-          "note": "objectui: ListView empty-state panel (audit L15); CLI i18n extract emits _views.<view>.emptyState keys (spec CHANGELOG). [#23004] This blanket `live` verdict covers `emptyState.link` too. It was declared ahead of its renderer, contract first, with the `[PLANNED — not yet rendered]` marker on its describe; the renderer half, objectstack-ai/objectui#12270 (objectui b434f5f47), is inside the console pin from objectui b9814b334, and the marker is dropped. Measured there: ListView hands ListEmptyState the `link` (ListView.tsx:5716), drawn through the shared EmptyStateLink in the grid and gallery empty branch, and ObjectGrid draws it in its authored empty state (ObjectGrid.tsx:6897-6899). `view/list.emptyState` is a recorded undrilled container (undrilled-containers.baseline.json), so the walk reads no row for the member."
+          "note": "objectui: ListView empty-state panel (audit L15); CLI i18n extract emits _views.<view>.emptyState keys (spec CHANGELOG). [#23004] This blanket `live` verdict covers `emptyState.link` too. It was declared ahead of its renderer, contract first, with the `[PLANNED — not yet rendered]` marker on its describe; the renderer half, objectstack-ai/objectui#12270 (objectui b434f5f47), is inside the console pin from objectui b9814b334, and the marker is dropped. Measured there: ListView hands ListEmptyState the `link` (ListView.tsx:5716), drawn through the shared EmptyStateLink in the grid and gallery empty branch, and ObjectGrid draws it in its authored empty state (ObjectGrid.tsx:6897-6899). `view/list.emptyState` is a recorded undrilled container (undrilled-containers.baseline.json), so the walk reads no row for the member. The `link`'s draw site beside the add-record action (packages/spec/src/ui/view.zod.ts, EmptyStateSchema; moved out of spec source, #23434): objectui @b9814b334 packages/plugin-list/src/ListEmptyState.tsx#addRecordAction, inside #ListEmptyState."
         },
         "aria": {
           "status": "live",

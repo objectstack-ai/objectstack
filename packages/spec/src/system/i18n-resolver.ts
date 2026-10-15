@@ -4281,8 +4281,9 @@ function lookupFlowScreenFieldCopy(
  * client-side route always had. Under maintainer ruling A on #22507 a client
  * overlay never touches a server-rendered slot. Its one caller, objectui's
  * `FlowRunner` `localizeScreen`, stops overlaying the heading in that ruling's
- * consumer half, and this function retires once the `.objectui-sha` pin
- * carries that change (the pinned console still imports it).
+ * consumer half, and this function retires once the console this repo ships
+ * carries that change (it still imports it: read point recorded in
+ * `liveness/translation.json`, row `flows.screens`).
  */
 export function resolveFlowScreenTitle(
   bundle: TranslationBundle | undefined,

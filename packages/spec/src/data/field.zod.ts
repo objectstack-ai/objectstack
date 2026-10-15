@@ -453,11 +453,11 @@ const CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS =
  * #19910 — 「a currency's decimal places are the currency's, not a setting」):
  * `precision` was a declared, validated key that no renderer or runtime ever
  * read. objectui's `CurrencyField` derives the width from the currency's ISO
- * 4217 minor unit (`currencyFractionDigits(currency)`, the same line at the
- * `.objectui-sha` pin and at objectui `main`), and no code read the key at all —
- * measured with a lit control (`currencyConfig.currencyMode` IS read) over
- * objectstack `packages/**` + `examples/**`, objectui at the pin and at `main`,
- * and cloud `main`. Its only reader was
+ * 4217 minor unit (read points recorded in `liveness/field.json`, row
+ * `currencyConfig`), and no code read the key at all — measured with a lit
+ * control (`currencyConfig.currencyMode` IS read) over objectstack
+ * `packages/**` + `examples/**`, objectui (the console's tree and `main`) and
+ * cloud `main`. Its only reader was
  * its own ISO 4217 contradiction check (#7918), which policed a width nothing
  * applied; that check, the `.overwrite()` that baked a default `2` into parse
  * output (#11423), and the `decimals` / `scale` → `precision` aliases all left
@@ -1710,9 +1710,9 @@ export const FieldSchema = lazySchema(() => {
    * this schema declares — the camelCase key is the authored one in every
    * case.
    *
-   * Claim dated to objectui ed971e8, re-measured 2026-09-09. It is a reading
-   * of a pinned foreign tree and no gate here re-checks it: when the console
-   * pin moves, this paragraph is what goes stale.
+   * The read points, dated, are recorded in `liveness/field.json`, row
+   * `lookupColumns`. It is a reading of a foreign tree and no gate here
+   * re-checks it.
    */
   displayField: z.string().optional().describe("Field shown as each candidate's label in the picker/popover (defaults to the referenced object's name/title)."),
   descriptionField: z.string().optional().describe('Secondary field shown under the label in the quick-select popover.'),

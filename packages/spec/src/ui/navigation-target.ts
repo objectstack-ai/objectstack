@@ -25,9 +25,9 @@
  *
  * ## Why the door answers exactly what the runner answers
  *
- * The runner's half is objectui's `classifyNavigationTarget`
- * (`packages/core/src/actions/navigationTarget.ts`, read at objectui
- * `7578323`), which both the action runner and the entitlement CTA call. For a
+ * The runner's half is objectui's `classifyNavigationTarget` (read point
+ * recorded in `liveness/action.json`, row `target`), which both the action
+ * runner and the entitlement CTA call. For a
  * literal target this function admits exactly what that classifier admits and
  * refuses exactly what it refuses. A door wider than the runner is the trap the
  * set exists to close: the target publishes clean and fails at click. A door

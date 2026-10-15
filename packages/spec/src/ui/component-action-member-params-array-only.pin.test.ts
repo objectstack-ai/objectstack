@@ -11,9 +11,10 @@
  * The member declared `params` as `z.unknown()`. Both containers forward an
  * array as the input list, forward any other value only for a `type: 'api'`
  * member (its request payload), and drop it for every other `type`, with a
- * development-build warning only (objectui `static-params.ts:172-182` at the
- * `.objectui-sha` pin `0abd4f9f8`). So an object `params` on a `navigate_edit`
- * member passed the component-props gate and then reached no action.
+ * development-build warning only (read points recorded in
+ * `liveness/page.json`, row `regions`). So an object `params` on a
+ * `navigate_edit` member passed the component-props gate and then reached no
+ * action.
  *
  * ## What is pinned, and why each half
  *

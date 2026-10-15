@@ -160,7 +160,7 @@
           "status": "live",
           "verifiedAt": "2026-08-01",
           "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:294-296, :418",
-          "note": "target precedence recordId → filters → viewName; also keys the view-label i18n lookup."
+          "note": "target precedence recordId → filters → viewName; also keys the view-label i18n lookup. With no `viewName` (packages/spec/src/ui/app.zod.ts, ObjectNavItemSchema; moved out of spec source, #23434): the entry links to the bare object route, where objectui @b9814b334 packages/app-shell/src/views/ObjectView.tsx#activeViewId opens `defaultViewId || views[0]`, the view objectui @b9814b334 packages/app-shell/src/views/ObjectView.tsx#buildViewTabs marks default, and the `all` tab that function adds only for an object with no list view (#21973); first read at objectui @0abd4f9f8769 (the same two symbols), re-read 2026-10-15."
         },
         "recordId": {
           "status": "live",

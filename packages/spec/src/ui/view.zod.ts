@@ -1307,8 +1307,8 @@ function checkGroupingFieldName(raw: string): string | undefined {
  *      about `grouping.fields[].field` and explicitly not about this axis, so
  *      quoting its date here would attribute a decision that was never made.
  *
- * What the name is used for, measured in the consumer (objectui `dda8f3815`):
- * the kanban board resolves its lane as
+ * What the name is used for, measured in the consumer (read points recorded in
+ * `liveness/view.json`, row `list.kanban`): the kanban board resolves its lane as
  * `laneField = groupByField || groupField || detectStatusField(objectDef)`
  * and buckets cards by `card[laneField]`; `ObjectGantt`'s `groupByAccessor`
  * splits the name on `.` and walks the backing record
@@ -1894,14 +1894,14 @@ const emptyStateLinkSchema = () => strictObject({
  * reaches, the `object-grid` page block's, and a list page's own
  * `interfaceConfig.emptyState` (`page.zod.ts`, #23005). It was declared ahead
  * of its renderer, with the planned marker on its describe. The renderer half,
- * objectstack-ai/objectui#12270 (objectui `b434f5f47`), is inside the console
- * pin from objectui `b9814b334`, so the marker is dropped. Measured there:
- * `ListView` hands `ListEmptyState` the `link` (`ListView.tsx:5716`), which
- * draws it beside the add-record action (`ListEmptyState.tsx:153`) in the
- * empty branch of the `grid` and `gallery` visualizations; `ObjectGrid` draws
- * it in `DataEmptyState`'s action slot (`ObjectGrid.tsx:6897-6899`); and
- * `InterfaceListPage` hands `ListView` the page's own `emptyState` ahead of
- * the source view's (`InterfaceListPage.tsx:509`). Each draws it through the
+ * objectstack-ai/objectui#12270 (objectui `b434f5f47`), is inside the console's
+ * objectui pin, so the marker is dropped. Measured there (read points recorded
+ * in `liveness/view.json`, row `list.emptyState`, and `liveness/page.json`,
+ * row `interfaceConfig`): `ListView` hands `ListEmptyState` the `link`, which
+ * draws it beside the add-record action in the empty branch of the `grid` and
+ * `gallery` visualizations; `ObjectGrid` draws it in `DataEmptyState`'s action
+ * slot; and `InterfaceListPage` hands `ListView` the page's own `emptyState`
+ * ahead of the source view's. Each draws it through the
  * one shared `EmptyStateLink` (`@object-ui/components`), which follows it as a
  * `type: 'url'` action through the action runner, so a click opens what the
  * runner opens for that target.
@@ -2629,10 +2629,10 @@ const LIST_CHART_BINDING_KEYS = ['dataset', 'values'] as const;
  * - A declared `chart` block ⇒ nothing here: its own strict schema already
  *   requires both keys, at `chart.dataset` / `chart.values`.
  *
- * What such a view renders is a dead screen either way: at the pin the
- * renderer fabricates a binding nobody wrote (an aggregate over `'name'` /
- * `'value'`); from objectui#6152 round 15 (objectui `0253416`) that floor is
- * retired and `ObjectChart` refuses on screen (`chart-missing-category-axis`).
+ * What such a view renders is a dead screen either way: before objectui#6152
+ * round 15 (objectui `0253416`) the renderer fabricated a binding nobody wrote
+ * (an aggregate over `'name'` / `'value'`); since then that floor is retired
+ * and `ObjectChart` refuses on screen (`chart-missing-category-axis`).
  * ⛔ Never fabricate a default here either — only the author knows the dataset.
  *
  * Reads `type` as the door hands it: the authoring shapes apply the `grid`
@@ -4241,8 +4241,8 @@ function refineFormFieldFeaturesRoot(
 // enum-VALUE narrowing: the enum's own error map carries the prescription,
 // keyed on `issue.input`, so only a value which used to be legal gets the "was
 // removed" message. The twin of `OBJECT_FORM_LAYOUT_RETIRED`
-// (component.zod.ts), which carries the renderer measurement at the
-// `.objectui-sha` pin: every form presentation folds 'grid' and 'inline' to
+// (component.zod.ts), whose renderer measurement is recorded in
+// `liveness/page.json`, row `regions`: every form presentation folds 'grid' and 'inline' to
 // 'vertical', and multi-column is `columns`, honoured under every arm. The
 // ADR-0087 conversion `form-layout-inline-grid-to-vertical` rewrites both to
 // 'vertical' in every form payload a view carries (`form`, `formViews.*`, a

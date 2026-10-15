@@ -46,16 +46,15 @@
  * ## Why these rows (measured, not inferred)
  *
  * Rows are a RECORD of what each component renderer already reads back from
- * the node's top level, measured at the `.objectui-sha` pin `82a9417`
- * (re-verified identical at objectui `origin/main` `6c68b13` on
- * 2026-08-18) — declaring a key a renderer does not read back would recreate
+ * the node's top level (read points recorded in `liveness/page.json`, row
+ * `regions`) — declaring a key a renderer does not read back would recreate
  * the evaluated-but-blank half of the objectui#4795 table:
  *
- *   | type        | renderer read points (top level, within the closed set) |
- *   |-------------|----------------------------------------------------------|
- *   | `statistic` | `schema.label`, `schema.value`, `schema.description` (`data-display/statistic.tsx`) |
- *   | `card`      | `schema.title`, `schema.description` (`layout/card.tsx`) |
- *   | `button`    | `schema.label` (`form/button.tsx`) |
+ *   | type        | renderer reads (top level, within the closed set) |
+ *   |-------------|---------------------------------------------------|
+ *   | `statistic` | `schema.label`, `schema.value`, `schema.description` |
+ *   | `card`      | `schema.title`, `schema.description` |
+ *   | `button`    | `schema.label` |
  *
  * These are the measured motivating cases from objectui#4795 (dashboard
  * workhorses). Other registered renderers also read keys from this closed set
@@ -64,7 +63,7 @@
  * declared yet: form-control `value` is interactive state rather than display
  * text, and each row is an accept-surface widening that should arrive with its
  * own measurement, not ride this one (startup scope discipline). `text` reads
- * back `schema.content || schema.value` (`basic/text.tsx`) — unlike the rows
+ * back `schema.content || schema.value` (the same ledger entry) — unlike the rows
  * above, its omission is not merely unmeasured: `value` there is a fallback
  * spelling for the same slot `content` already evaluates (see `content` NOT a
  * member, above), not a second read point, so a `text: ['value']` row would
