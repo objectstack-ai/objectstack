@@ -638,6 +638,42 @@ async function envelope(
     return { ...pick(byName), byName, layered };
 }
 
+/**
+ * [#23182] One protocol instance per distinct READ REQUEST, its reads taken
+ * once. `envelope` takes no organization and no verb, so the table's rows that
+ * differ only in `requestScope` and `operation` (four of them, everywhere the
+ * table varies both) ask the same two reads of the same data: those reads ran
+ * four times each, 28 848 times in all against 7 212 distinct requests. The
+ * key is the request's real inputs (the instance's environment, its stored
+ * rows and artifacts in the order the store and the registry return them, the
+ * type spelling and the package the request names), never a description of a
+ * row, so two rows share an instance only when every input the reads take is
+ * byte-equal.
+ *
+ * The instance each row's door then runs on is the one its reads ran on (the
+ * header's "ONE protocol instance": a read must not poison the gate that
+ * answers after it). Every row still asserts, for itself, that those reads
+ * equal the declared rule's lock and that its own door answers the rule.
+ */
+interface ReadScenario {
+    protocol: ObjectStackProtocolImplementation;
+    read: Awaited<ReturnType<typeof envelope>>;
+}
+const readScenarios = new Map<string, Promise<ReadScenario>>();
+function readScenario(
+    environmentId: string | undefined, rows: StoredRow[], artifacts: Array<Record<string, unknown>>,
+    type: string, packageId: string | undefined,
+): Promise<ReadScenario> {
+    const key = JSON.stringify([environmentId ?? null, rows, artifacts, type, packageId ?? null]);
+    let scenario = readScenarios.get(key);
+    if (scenario === undefined) {
+        const protocol = harness(environmentId, rows, artifacts);
+        scenario = envelope(protocol, type, undefined, NAME, packageId).then((read) => ({ protocol, read }));
+        readScenarios.set(key, scenario);
+    }
+    return scenario;
+}
+
 /** The envelope's flags for a lock, read off the lock algebra itself. */
 const flagsOf = (lock: Lock) => ({
     lock,
@@ -755,8 +791,9 @@ describe('[#21738, #21803] pin 1 — the family\'s enumeration, generated from t
             for (const [order, rows] of rowOrdersFor(row).entries()) {
                 for (const [registration, artifacts] of registrationOrdersFor(row).entries()) {
                     const at = `${title} (row order ${order + 1}, registration order ${registration + 1})`;
-                    const protocol = harness(row.topology.environmentId, rows, artifacts);
-                    const read = await envelope(protocol, row.requestSpelling, row.requestScope, NAME, row.requestPackage);
+                    const { protocol, read } = await readScenario(
+                        row.topology.environmentId, rows, artifacts, row.requestSpelling, row.requestPackage,
+                    );
                     // Both reads report the declared rule's lock.
                     expect({ lock: read.lock, editable: read.editable, deletable: read.deletable }, `${at}: the reads`)
                         .toEqual(flagsOf(expectedLock(row, 'reads')));
