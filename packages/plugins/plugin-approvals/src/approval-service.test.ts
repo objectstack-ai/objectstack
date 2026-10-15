@@ -3508,7 +3508,12 @@ describe('ApprovalService — a graph approver that expands to nobody warns (#38
     expect(req.pending_approvers).toEqual([`${type}:${value}`]);
     const hit = warnings.find(([msg]) => String(msg).includes('expanded to nobody'));
     expect(hit, `no warning for ${type}`).toBeTruthy();
-    expect(String(hit[0])).toContain('cannot advance until someone is added or the approver is re-pointed');
+    // [#23556] The line names the slot and points at the node's policy; the
+    // request's fate is the node-level line's to state, so this one never says
+    // the request "cannot advance" — false on the default admin_rescue path.
+    expect(String(hit[0])).toContain(`'${type}:${value}'`);
+    expect(String(hit[0])).toContain('onEmptyApprovers');
+    expect(String(hit[0])).not.toMatch(/cannot advance/);
     expect(hit[1]).toMatchObject({ type, value, organizationId: 't1' });
   });
 

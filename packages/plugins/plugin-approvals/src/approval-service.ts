@@ -2212,9 +2212,20 @@ export class ApprovalService implements IApprovalService {
       // permanently stuck approval (#3424). The fallback itself stays (a
       // literal keeps 15.x slots and substring fixtures working); it just
       // stops being invisible.
+      //
+      // [#23556] The line states the SLOT, never the request's fate. This
+      // resolver sees one approver entry, not the slate: whether the request
+      // opens on the slate's other people, or the slate names no one and the
+      // node's `onEmptyApprovers` decides (by default `admin_rescue`, which
+      // opens on the organization's administrators, #22824), is only known
+      // to `openNodeRequest`, which logs that decision itself on the line that
+      // follows. The old ending ("the request cannot advance until someone is
+      // added") restated a fate this resolver cannot know, and was false on
+      // the default path.
       this.logger?.warn?.(
-        `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot routes to no one `
-        + `and the request cannot advance until someone is added or the approver is re-pointed`,
+        `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot names no one, so no one is `
+        + `asked through it. Staff it or re-point the approver; a slate left naming no one is decided by the `
+        + `node's onEmptyApprovers.`,
         { type, value: a.value, organizationId: organizationId ?? null },
       );
     }
@@ -3583,8 +3594,14 @@ export class ApprovalService implements IApprovalService {
     //    `approval.ooo_substituted` — one message per approver, not two.
     // No one-tap decision links: ADR-0043 mints those on `remind()` only, and
     // minting bearer tokens on every opening is a decision this does not make.
+    //
+    // [#23556] The body names the record the way the approvals list does —
+    // `Deal "Acme renewal"`, never `crm_deal/<id>` — so a grouped bell entry
+    // tells its reader which record is waiting. One name for every recipient,
+    // read once, and only when someone is told.
     const toldByOoo = new Set(substitutions.map((sub) => sub.to));
     const openedOn = new Set(approvers.filter((a) => a && !a.includes(':') && !toldByOoo.has(a)));
+    const subject = openedOn.size ? await this.nameSubjectRecord(input.object, input.recordId) : '';
     for (const approver of openedOn) {
       await this.notify({
         topic: 'approval.requested',
@@ -3595,7 +3612,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-requested-${id}-${approver}`,
         payload: {
           title: 'Approval requested',
-          body: `A decision on ${input.object}/${input.recordId} is waiting on you.`,
+          body: `A decision on ${subject} is waiting on you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -6681,6 +6698,65 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * The subject records' titles and their objects' labels, keyed
+   * `"<object> <id>"` and by object name: the LIVE half of how the approvals
+   * list names a request's record ({@link ApprovalService.enrichRows} sets
+   * `record_title` and `object_label` from it, then falls back to the reader's
+   * redacted payload snapshot for a title this read did not find).
+   *
+   * [#23556] One resolution with two readers: the list, and the
+   * `approval.requested` body ({@link ApprovalService.nameSubjectRecord}), so
+   * the notification names the record by the same live title and label its
+   * recipient's inbox row shows. Batched: one read per object. Best-effort —
+   * an unregistered object or a failed read leaves its entries unset.
+   */
+  private async resolveSubjectDisplays(
+    byObject: ReadonlyMap<string, ReadonlySet<string>>,
+  ): Promise<{ titles: Map<string, string>; objectLabels: Map<string, string> }> {
+    const titles = new Map<string, string>();
+    const objectLabels = new Map<string, string>();
+    for (const [object, idSet] of byObject) {
+      try {
+        const schema: any = (this.engine as any).getSchema?.(object);
+        if (schema?.label) objectLabels.set(object, String(schema.label));
+      } catch { /* label optional */ }
+      const ids = Array.from(idSet);
+      const displayField = this.resolveDisplayField(object);
+      try {
+        const recs = await this.engine.find(object, {
+          where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX,
+        });
+        for (const rec of (recs ?? []) as any[]) {
+          const title = ApprovalService.pickTitle(rec, displayField);
+          if (rec?.id && title) titles.set(`${object} ${rec.id}`, title);
+        }
+      } catch { /* object may be unregistered — the caller's fallback applies */ }
+    }
+    return { titles, objectLabels };
+  }
+
+  /**
+   * [#23556] The record an approval notification is about, named the way the
+   * approvals list names it: the object's label (its API name only when the
+   * schema has none, as the list falls back), then the record's title in
+   * quotes — `Deal "Acme renewal"` — from {@link ApprovalService.resolveSubjectDisplays}.
+   *
+   * With no title from that read, the record id stands in for it
+   * (`Deal D_123`), which is what the body carried before. ⛔ The payload
+   * snapshot is NOT consulted for a title here, unlike the list's fallback:
+   * the list reads the snapshot only after redacting it for the READER's
+   * field-level security (#10749), and stored notification text has no
+   * reader to redact for, so an unredacted snapshot title could name a field
+   * a recipient's inbox row would withhold.
+   */
+  private async nameSubjectRecord(object: string, recordId: string): Promise<string> {
+    const { titles, objectLabels } = await this.resolveSubjectDisplays(new Map([[object, new Set([recordId])]]));
+    const label = objectLabels.get(object) ?? object;
+    const title = titles.get(`${object} ${recordId}`);
+    return title ? `${label} "${title}"` : `${label} ${recordId}`;
+  }
+
+  /**
    * Attach inbox display fields to rows so clients never render a raw
    * identifier: `record_title`, `submitter_name`, `object_label`,
    * `pending_approver_names` (user-id approvers), `payload_display`
@@ -6703,25 +6779,7 @@ export class ApprovalService implements IApprovalService {
       if (!set) { set = new Set(); byObject.set(r.object_name, set); }
       set.add(r.record_id);
     }
-    const titles = new Map<string, string>();
-    const objectLabels = new Map<string, string>();
-    for (const [object, idSet] of byObject) {
-      try {
-        const schema: any = (this.engine as any).getSchema?.(object);
-        if (schema?.label) objectLabels.set(object, String(schema.label));
-      } catch { /* label optional */ }
-      const ids = Array.from(idSet);
-      const displayField = this.resolveDisplayField(object);
-      try {
-        const recs = await this.engine.find(object, {
-          where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX,
-        });
-        for (const rec of (recs ?? []) as any[]) {
-          const title = ApprovalService.pickTitle(rec, displayField);
-          if (rec?.id && title) titles.set(`${object} ${rec.id}`, title);
-        }
-      } catch { /* object may be unregistered — payload fallback below */ }
-    }
+    const { titles, objectLabels } = await this.resolveSubjectDisplays(byObject);
 
     // Lookup foreign keys inside payload snapshots → referenced record titles.
     const lookupFieldsByObject = new Map<string, Array<{ key: string; reference: string }>>();

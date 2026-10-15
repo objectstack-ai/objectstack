@@ -21,6 +21,10 @@
  *   approver on the slate it opened on — a named user and every holder of a
  *   staffed position alike — through the same `notify()` ingress and payload
  *   shape as `approval.reminder`;
+ * - [#23556] the body names the record the way the approvals inbox row does —
+ *   the object's label and the record's title, from the same resolution — and
+ *   a record with no title is named by label and id, never by the unredacted
+ *   submit snapshot;
  * - a person the slate lists twice is one person, and a `type:value` slot
  *   literal (an unstaffed position) names no one;
  * - the control: a step whose approvers resolve to nobody notifies no one,
@@ -185,18 +189,46 @@ describe('opening an approval step tells each resolved approver, once (approval.
 
     // One message per person, each addressed to that person alone, in the
     // reminder's shape: the request as its source, the inbox deep-linked to
-    // it, the submitter as the actor.
+    // it, the submitter as the actor. [#23556] The body names the record by
+    // its object's label and its title, never `crm_deal/D_ladder`.
     for (const e of requested(row.id)) {
       expect(e.audience).toHaveLength(1);
       expect(e.payload).toEqual({
         title: 'Approval requested',
-        body: `A decision on crm_deal/D_ladder is waiting on you.`,
+        body: `A decision on Deal "ladder" is waiting on you.`,
         actionUrl: `/system/approvals?request=${encodeURIComponent(row.id)}`,
       });
       expect(e.source).toEqual({ object: 'sys_approval_request', id: row.id });
       expect(e.actorId).toBe('u_sub');
     }
     expect(new Set(requested(row.id).map((e) => e.dedupKey)).size).toBe(3);
+
+    // [#23556] ...and by the very name the recipient's own inbox row shows.
+    const [listed] = await svc.listRequests({ approverId: 'u_alice', recordId: 'D_ladder' }, asUser('u_alice'));
+    expect([listed?.object_label, listed?.record_title]).toEqual(['Deal', 'ladder']);
+    expect(requested(row.id)[0]?.payload?.body)
+      .toBe(`A decision on ${listed!.object_label} "${listed!.record_title}" is waiting on you.`);
+  });
+
+  it('[#23556] a record with no title is named by its object label and id — never by the unredacted submit snapshot', async () => {
+    // The live record has no title; the trigger snapshot the flow handed over
+    // still carries one. The inbox reads that snapshot only after redacting it
+    // for its reader's field-level security, and stored notification text has
+    // no reader to redact for — so the body names what it named before: the id.
+    const SNAPSHOT_TITLE = 'Snapshot-only title';
+    await engine.insert('crm_deal', { id: 'D_untitled', title: null }, { context: SYSTEM } as any);
+    const row: any = await svc.openNodeRequest({
+      object: 'crm_deal', recordId: 'D_untitled', runId: 'run_untitled', nodeId: 'review', flowName: 'deal_review',
+      config: { approvers: [{ type: 'user', value: 'u_alice' }], behavior: 'first_response' } as any,
+      submitterId: 'u_sub', record: { id: 'D_untitled', title: SNAPSHOT_TITLE },
+    }, asUser('u_sub'));
+    // The scene: the snapshot really does carry the title the body must not use.
+    expect(row.payload).toMatchObject({ title: SNAPSHOT_TITLE });
+
+    const [message] = requested(row.id);
+    expect(message?.audience).toEqual(['u_alice']);
+    expect(message?.payload?.body).toBe('A decision on Deal D_untitled is waiting on you.');
+    expect(String(message?.payload?.body)).not.toContain(SNAPSHOT_TITLE);
   });
 
   it('a person the slate lists under two groups is told once', async () => {
