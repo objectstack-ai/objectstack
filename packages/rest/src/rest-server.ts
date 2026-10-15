@@ -9173,11 +9173,20 @@ export class RestServer {
                         // validated as the assembled `UpdateDataRequestSchema`
                         // request so a non-record body 400s instead of reaching
                         // the engine.
+                        //
+                        // [#23491] …the patch AS THE CALLER SENT IT. It was
+                        // `data ?? {}`, so a JSON `null` body parsed as an empty
+                        // patch and answered `200`: an update that changed no
+                        // field and still moved the record's version. `null` is
+                        // not the record the contract declares, so it is refused
+                        // like an array, a string or a number, and the runtime
+                        // dispatcher's twin (`domains/data.ts`) asks this gate
+                        // over the same assembled request.
                         const { UpdateDataRequestSchema } = await import('@objectstack/spec/api');
                         const updateInput = {
                             object: req.params.object,
                             id: req.params.id,
-                            data: data ?? {},
+                            data,
                             ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
                         };
                         const parsedUpdateOne = (UpdateDataRequestSchema as any).safeParse(updateInput);
@@ -9193,7 +9202,7 @@ export class RestServer {
                         const updateRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
-                            data: data ?? {},
+                            data,
                             ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
