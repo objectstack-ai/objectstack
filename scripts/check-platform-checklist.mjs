@@ -134,8 +134,8 @@
 //     set.
 //   - Exit codes: 0 when nothing judged was lost, or nothing was judged; 1 when
 //     an anchor was lost; 2 when the run was refused (the request, the change
-//     set, or a working tree the sweep cannot read, such as a file deleted from
-//     disk but not from the index).
+//     set, or a file deleted from disk but not from the index, which the
+//     shared sweep cannot read).
 //   - Cost: the same wall time as the full gate, one whole-corpus sweep plus
 //     the inline batteries, because the filter sits on the verdict and not on
 //     the resolution. Resolving only the judged anchors would need a
@@ -1135,12 +1135,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // exclusion in both directions, and every re-judged #16898 case, which
   // ⛔ survives the transplant unchanged in verdict.
   //
-  // 42 → 64 at #23653: the scoped mode's 22 cases. S1 to S9 drive the
-  // verdict's filter, C1 to C6 the change set through a fake `git`, Q1 to Q5
+  // 42 → 65 at #23653: the scoped mode's 23 cases. S1 to S9 drive the
+  // verdict's filter, C1 to C7 the change set through a fake `git`, Q1 to Q5
   // the request on argv, and L4/L5 the live population and the real runner.
   // They live in this battery rather than one of their own because the mode
   // is a filter on this limb's verdict, with no resolution of its own.
-  [BATTERY_SYMBOL_ANCHORS]: 64,
+  [BATTERY_SYMBOL_ANCHORS]: 65,
   // New with the `planned` status. Set at its landed count (headroom 0, the
   // convention every entry above uses). The load-bearing third of it is the
   // coverage direction: no coverage.json entry maps a planned item today, so
@@ -2245,8 +2245,21 @@ function changedFilesSince(ref, git) {
   // one.
   const tracked = listed(['diff', '--name-only', '--no-renames', '-z', mergeBase]);
   const untracked = listed(['ls-files', '--others', '--exclude-standard', '-z']);
-  if (tracked === null || untracked === null) {
-    return { refusal: `git could not list ${tracked === null ? 'the changes since' : 'the untracked files beside'} merge base ${mergeBase.slice(0, 9)}.` };
+  const unstagedDeletions = listed(['ls-files', '--deleted', '-z']);
+  if (tracked === null || untracked === null || unstagedDeletions === null) {
+    return { refusal: `git could not list the change set against merge base ${mergeBase.slice(0, 9)}.` };
+  }
+  // The shared sweep takes its file list from the INDEX and reads each file
+  // from disk. A file deleted from disk but not from the index therefore
+  // throws inside the sweep, in the inline batteries, before any verdict.
+  // Measured on this branch: the full gate dies there with ENOENT and exit 1,
+  // and exit 1 means "an anchor was lost" in this mode. So the mode refuses
+  // first, naming the files.
+  if (unstagedDeletions.length) {
+    return {
+      refusal: `${unstagedDeletions.length} file(s) are deleted from the working tree but not from the index (${unstagedDeletions.slice(0, 5).join(', ')}${unstagedDeletions.length > 5 ? ', …' : ''}).`
+        + ' The shared sweep reads the index\'s file list from disk, so it cannot judge an unstaged deletion: stage it (`git rm`) or restore the file, then re-run.',
+    };
   }
   return {
     files: [...new Set([...tracked, ...untracked])].sort(),
@@ -2637,7 +2650,7 @@ function selfTestSymbolAnchors() {
   // names the rename's old path only under `--no-renames`, and adds a file that
   // landed on REF after the branch was cut unless it is diffed from the merge
   // base. Each leg reds if the call it pins changes.
-  const fakeGit = ({ resolves = true, mergeBase = 'mb0', shallow = false, diffFails = false } = {}) => (args) => {
+  const fakeGit = ({ resolves = true, mergeBase = 'mb0', shallow = false, diffFails = false, deleted = '' } = {}) => (args) => {
     const ok = (stdout) => ({ status: 0, stdout, stderr: '' });
     const no = { status: 1, stdout: '', stderr: 'fatal: fixture' };
     if (args[0] === 'rev-parse' && args.includes('--verify')) return resolves ? ok('c0ffee\n') : no;
@@ -2650,7 +2663,8 @@ function selfTestSymbolAnchors() {
       if (!args.includes(mergeBase)) names.push('src/landed-on-ref.ts');
       return ok(names.map((n) => `${n}\0`).join(''));
     }
-    if (args[0] === 'ls-files') return ok('src/untracked.ts\0src/edited.ts\0');
+    if (args[0] === 'ls-files' && args.includes('--deleted')) return ok(deleted);
+    if (args[0] === 'ls-files' && args.includes('--others')) return ok('src/untracked.ts\0src/edited.ts\0');
     return no;
   };
   const c1 = changedFilesSince('REF', fakeGit());
@@ -2668,6 +2682,8 @@ function selfTestSymbolAnchors() {
       && Boolean(changedFilesSince('REF', fakeGit({ mergeBase: null })).refusal));
   t('C6 a git listing that fails is REFUSED, never read as "nothing changed"',
     Boolean(changedFilesSince('REF', fakeGit({ diffFails: true })).refusal));
+  t('C7 a file deleted from disk but not from the index is REFUSED before the sweep, which would otherwise die on it with an exit code that reads as a loss',
+    Boolean(changedFilesSince('REF', fakeGit({ deleted: 'src/gone.ts\0' })).refusal) && !c1.refusal);
 
   // The request on argv.
   t('Q1 no `--changed-from` is the full gate, untouched — the census flag included',
@@ -2991,7 +3007,7 @@ if (process.argv.slice(2).includes('--self-test')) {
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
         ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it;' +
-        ` and the scoped mode (\`${SCOPED_FLAG} REF\`) is driven on fixtures: a changed file that lost an anchor reds, one that kept its anchors stays green, an anchor broken outside the change set is not reported, a deleted target is a loss while the residual, a bare citation and a cross-repo citation are not, an empty intersection prints the nothing-judged line, the change set is diffed from the merge base with renames off, and a REF, a merge base or a listing that cannot be read is refused;` +
+        ` and the scoped mode (\`${SCOPED_FLAG} REF\`) is driven on fixtures: a changed file that lost an anchor reds, one that kept its anchors stays green, an anchor broken outside the change set is not reported, a deleted target is a loss while the residual, a bare citation and a cross-repo citation are not, an empty intersection prints the nothing-judged line, the change set is diffed from the merge base with renames off, and a REF, a merge base or a listing that cannot be read is refused, as is a deletion the index has not seen;` +
         ` and the \`planned\` status is driven on fixtures — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read over comment-MASKED source driven ON and OFF, because severing either one — by deletion OR by commenting it out in place — left this very self-test green; \u26d4 that pin is a TEXT pin and G12 records the three semantic severings it cannot see;` +
         ' and the `retired` status is judged by its own rule, driven both ways \u2014 a non-empty `retiredReason`, `since` null or release-shaped, steps unjudged \u2014 so a planned item retired before it was implemented is legal, an item retired after it shipped stays legal, and a retired item with no reason or a non-release `since` is refused.',
     );
@@ -3114,17 +3130,7 @@ if (inlineRosterFailures.length) {
 // The ledger walk, coverage, traps, the floor and the residual's own upkeep are
 // the full gate's and are not judged (see the header).
 if (scopedRequest) {
-  // The shared sweep lists files from the INDEX and reads them from the
-  // working tree, so a file deleted from disk but not from the index throws
-  // ENOENT. Measured on this branch: the full gate crashes on it with exit 1.
-  // Here exit 1 means "an anchor was lost", so a sweep that cannot read the
-  // tree is a refusal with its remedy, and never a red or a green.
-  let scopedSweep;
-  try {
-    scopedSweep = sweepCorpus(CORPUS, ROOT);
-  } catch (e) {
-    refuseScoped(`the sweep could not read the tree (${e.message}). A file deleted from the working tree but still in the index is the usual cause: stage the deletion or restore the file, then re-run.`);
-  }
+  const scopedSweep = sweepCorpus(CORPUS, ROOT);
   const { targets, disagreements } = corpusAnchorTargets(scopedSweep);
   if (disagreements.length) {
     refuseScoped(`the anchor population read for this mode disagrees with the sweep's own (${disagreements.join('; ')}), so the count of judged anchors would be wrong.`);
