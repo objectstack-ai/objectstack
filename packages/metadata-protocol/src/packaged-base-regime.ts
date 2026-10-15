@@ -93,10 +93,10 @@
  * D6] Managed content is sealed: the hatch opens no write onto, and no removal
  * of, an item a managed package ships, on any door, so a sentence that named it
  * as a remedy would send the operator to a door that does not open. The one
- * sentence that names it at all is {@link managedItemSealedSentence}'s, for a
- * type with no regime row, and it names it to say it does not apply: an operator
- * who set it and read a refusal that never mentioned it would conclude it was
- * ignored and set it again. ⛔ Nor does a Regime C sentence prescribe editing the
+ * sentence that names it at all is {@link managedItemSealedSentence}'s REMOVAL
+ * sentence, for a type with no regime row, and it names it to say it does not
+ * apply: an operator who set it and read a refusal that never mentioned it would
+ * conclude it was ignored and set it again. ⛔ Nor does a Regime C sentence prescribe editing the
  * source and redeploying: the administrator of an installed package cannot do
  * that, and a Regime C type has a runtime route instead. The origin-gated row
  * has none, so the source is the only remedy there is to name.
@@ -110,24 +110,24 @@
  * sentence here names it so: the install mode is what the refusal is about, not
  * the fact that the item happens to be code.
  *
- * ## The remedy follows what the caller DID: an edit, or a create
+ * ## A write over a sealed name states what the door knows, and nothing it guesses
  *
- * [#22591] One sealed item is refused for two different acts, and each has its
- * own remedy. A save that changes the item under the name (an EDIT) is told
- * where that item can change: its row's sanctioned path, or its source. A save
- * that brings an item of the caller's own into existence under a name a package
- * or a built-in already holds (a CREATE, or a rename into that name) is told the
- * one thing it can do instead: choose another name. "Edit the source artifact"
- * sends that author to an artifact they did not write and cannot edit, and a
- * Regime C path customizes the package's item, which is not what they asked for.
+ * [#23577] A write over a sealed name, on a type with no regime row, reads ONE
+ * sentence, whatever the write meant to do: the name is provided by a managed
+ * package, it is sealed, it cannot be written here, and the type's own `/meta`
+ * listing is where the names in use are read. The door cannot tell a create
+ * from an edit — no request it serves declares which it is, and the one fact it
+ * used to read as a create, the first-write pin (`If-None-Match: *`), is also
+ * what a first draft of the item already under the name sends — so a sentence
+ * that advised either act was wrong for the other caller: "choose another name"
+ * made an editor author a second item, and "edit the source artifact and
+ * redeploy" sent a creator, and every administrator of an installed package, to
+ * an artifact they cannot edit. So the sentence advises neither.
  *
- * The create sentence is ONE sentence for every type ({@link heldNameSentence}),
- * never a row: the remedy does not depend on the type, so a type added later
- * gets it without a row, and a row added later cannot take it away. Only the
- * opener and the citation are the row's, as in the edit sentences. The act is
- * the caller's fact, never inferred here: a door that knows it is taking a name
- * says so with the `create` operation ({@link SealedItemOperation}), and every
- * other save keeps the edit remedy, byte for byte.
+ * It names the holding package only where the door already has that package at
+ * hand. Neither door that builds it does (the protocol's package door asks a
+ * yes/no predicate, and the repository's type door is told the write intent),
+ * so it names none, and no lookup is added to find one.
  */
 
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
@@ -330,47 +330,11 @@ export function packagedBaseRegimeSentence(
 const MANAGED_SEAL_ADR = 'docs/adr/0131-total-organization-ownership-no-null-organization-id.md';
 
 /**
- * [#22591] What a refused write did to the item's name — the fact the remedy
- * follows (module header, "The remedy follows what the caller DID"):
- *
- *  - `save` — a change to the item already under the name: an edit. The
- *    default for every save whose caller declares nothing else, so a door
- *    that cannot tell keeps the remedy it always gave;
- *  - `create` — a save that brings an item of the caller's own into existence
- *    under the name: a create, or a rename into the name. Refused on exactly
- *    the ground, with exactly the code and status, a `save` is;
- *  - `delete` — a removal.
+ * What a refused request does to a sealed item: `save` — any write under its
+ * name (module header, "A write over a sealed name states what the door
+ * knows"); `delete` — a removal.
  */
-export type SealedItemOperation = 'save' | 'create' | 'delete';
-
-/**
- * [#22591] The sentence for a CREATE under a name a managed package or a
- * built-in holds, or a rename into it — ONE sentence for every type (module
- * header): who holds the name, the one remedy a create has (choose a name no
- * package or built-in holds), where the names in use are listed, and the type's
- * own decision record. The opener and the citation are the row's, as in the edit
- * sentences — an origin-gated type's item is code-defined, not shipped by a
- * managed package; a Regime C type's record is the one whose §2 makes a new
- * machine name mandatory for an item authored beside a packaged one.
- *
- * ⛔ It names neither the source artifact, nor a row's sanctioned path, nor the
- * `OS_METADATA_WRITABLE` hatch: all three act on the item that holds the name,
- * and the caller asked for an item of their own. The listing route is the
- * type's own `/meta` list, which answers the names the type serves.
- *
- * Kept under the REST door's 500-character client-message bound: outside the
- * item's name and its type's three mentions it is 255 characters at most
- * (measured; pinned with an 88-character name on the longest type).
- */
-function heldNameSentence(singular: string, name: string): string {
-    const row = packagedBaseRegimeRow(singular);
-    const holder = row?.regime === 'origin-gated'
-        ? `${row.noun} '${name}' is code-defined`
-        : `Metadata item '${singular}/${name}' is provided by a managed package`;
-    const docs = row === undefined ? MANAGED_SEAL_ADR : row.regime === 'C' ? REGIME_C_ADR : row.docs;
-    return `${holder}, so its name is taken. To author your own ${singular}, choose a name no package or `
-        + `built-in holds (GET /api/v1/meta/${singular} lists the names in use). See ${docs}.`;
-}
+export type SealedItemOperation = 'save' | 'delete';
 
 /**
  * [ADR-0131 D6] THE refusal sentence for a write onto, or a removal of, an item a
@@ -381,31 +345,34 @@ function heldNameSentence(singular: string, name: string): string {
  * the same condition one layer down for the writes that reach it without passing
  * a package door (draft promotion, restore, revert).
  *
- * [#22591] A `create` — a save that takes the name for an item of the caller's
- * own — reads {@link heldNameSentence} whatever the type. An edit (`save`) and a
- * removal read on:
- *
  * A type with a regime row speaks for its regime ({@link packagedBaseRegimeSentence}:
- * the sanctioned path, never the hatch). Every other type reads the managed seal
- * itself: the item is sealed, its type takes no environment overlay, the
- * `OS_METADATA_WRITABLE` hatch does not open it, and the one remedy that exists —
- * changing the definition where it is declared. The hatch is named to say it
+ * the sanctioned path, never the hatch), on a write and on a removal.
+ *
+ * [#23577] Every other type's WRITE reads the one sentence (module header, "A
+ * write over a sealed name states what the door knows"): the item is provided by
+ * a managed package and sealed, it cannot be written here, and the type's
+ * listing route names the names in use. No create advice and no source-artifact
+ * advice: the door cannot tell which act the write was.
+ *
+ * Every other type's REMOVAL reads the managed seal itself: the item is sealed
+ * against removal, its type takes no environment overlay, and the
+ * `OS_METADATA_WRITABLE` hatch does not open it. The hatch is named to say it
  * does not apply (see the module header for why it is named at all), and the
  * registry flag that produced the verdict is named so the reader can tell this
  * refusal from the regime-O overlay it is not.
  *
  * Kept under the REST door's 500-character client-message bound: the sentence
- * outside the item's type and name is 321 / 275 characters, save / removal (measured).
+ * outside the item's type and name is 113 / 275 characters, write / removal (measured).
  */
 export function managedItemSealedSentence(type: string, name: string, operation: SealedItemOperation): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    if (operation === 'create') return heldNameSentence(singular, name);
     const regime = packagedBaseRegimeSentence(singular, name, operation);
     if (regime !== undefined) return regime;
-    return `Metadata item '${singular}/${name}' is provided by a managed package and is sealed `
-        + (operation === 'delete' ? 'against removal' : 'against in-place edits')
-        + `: its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not `
-        + `open a managed item. `
-        + (operation === 'delete' ? '' : 'Edit the source artifact and redeploy. ')
-        + `See ${MANAGED_SEAL_ADR}.`;
+    if (operation === 'save') {
+        return `'${singular}/${name}' is provided by a managed package and is sealed: it cannot be written here. `
+            + `GET /api/v1/meta/${singular} lists the names in use.`;
+    }
+    return `Metadata item '${singular}/${name}' is provided by a managed package and is sealed against removal: `
+        + `its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not `
+        + `open a managed item. See ${MANAGED_SEAL_ADR}.`;
 }

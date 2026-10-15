@@ -21,6 +21,7 @@ import {
   ESCALATION_SCAN_INTERVAL_MS,
   type ApprovalEngine,
   type ApprovalMessagingSurface,
+  type ObjectReadAdmission,
 } from './approval-service.js';
 import {
   bindApprovalLockHook,
@@ -291,6 +292,19 @@ export class ApprovalsServicePlugin implements Plugin {
           ? sec.getQueryableFields(object, context)
           : Promise.resolve(undefined);
       },
+    });
+    // [#23637] The same service's object-level read admission (`canReadObject`),
+    // asked before a lookup target is read as the reader, so a target object
+    // the reader may not read at all is skipped without a logged denial
+    // (`ApprovalService.admittedTargetObjects`). Resolved on every read, as
+    // above; an absent service, or one without the member, leaves every
+    // target to the caller-scoped read.
+    this.service.attachObjectReadAdmission(() => {
+      try {
+        return ctx.getService<ObjectReadAdmission>('security');
+      } catch {
+        return undefined;
+      }
     });
 
     // Record lock: block edits to a record while it has a pending request.

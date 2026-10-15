@@ -47,6 +47,8 @@ import type {
   ApprovalStatus,
   ApprovalCancelReason,
   ResumeFailureReport,
+  ISecurityService,
+  SecurityContext,
 } from '@objectstack/spec/contracts';
 // [#7135] The full `resolveAuthzContext` envelope — what `IApprovalService`
 // declares for every one of these context parameters since commit aa4b90d9a (the
@@ -64,7 +66,13 @@ import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/dat
 // mechanism for a second producer, and commit aa5994e17 landed this service's key
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
-import { isGrantActive, omitInternalFieldsFromWriteResponse, resolveUserAuthzGrants } from '@objectstack/core';
+import {
+  isGrantActive,
+  omitInternalFieldsFromWriteResponse,
+  resolveReadableParentIds,
+  resolveUserAuthzGrants,
+  withoutOperationPrivateKeys,
+} from '@objectstack/core';
 import {
   filterApproversWhoCanRead,
   resolveApproverDirectoryOrg,
@@ -122,6 +130,22 @@ export interface ApprovalEngine {
    */
   getSchema?(objectName: string): unknown;
 }
+
+/**
+ * [#23637] The single member of the security service's contract a lookup
+ * target's title consults before the target is read as the reader: the
+ * OBJECT-level read admission (`ISecurityService.canReadObject`, the engine
+ * middleware's own object-level read gate, arm for arm). Optional on the
+ * contract, so its absence is handled by construction.
+ */
+export type ObjectReadAdmission = Pick<ISecurityService, 'canReadObject'>;
+
+/**
+ * [#23637] Resolves the security service on every read: the security plugin
+ * may register after the approvals plugin, and a resolver captured once would
+ * pin "no service" for the life of the process.
+ */
+export type ObjectReadAdmissionSource = () => ObjectReadAdmission | null | undefined;
 
 export interface ApprovalClock { now(): Date }
 
@@ -1439,6 +1463,8 @@ export class ApprovalService implements IApprovalService {
   private publicBaseUrl: string;
   private tenancyPosture?: () => string | undefined;
   private fieldVisibility?: FieldVisibilitySource;
+  /** [#23637] Lazily-resolved object-level read admission ({@link attachObjectReadAdmission}). */
+  private objectReadAdmission?: ObjectReadAdmissionSource;
   /** [#11993] Lazily-resolved deployment i18n lookup for refusal copy. */
   private messageTranslator?: () => ValidationMessageTranslator | undefined;
   /**
@@ -1531,6 +1557,17 @@ export class ApprovalService implements IApprovalService {
    */
   attachFieldVisibility(source: FieldVisibilitySource | undefined): void {
     this.fieldVisibility = source;
+  }
+
+  /**
+   * [#23637] Attach (or replace) the resolver of the security service whose
+   * object-level read admission (`canReadObject`) is asked before a lookup
+   * target is read as the reader ({@link ApprovalService.admittedTargetObjects}).
+   * Resolved on every read, as {@link attachFieldVisibility}'s source is: the
+   * security plugin may register after this one.
+   */
+  attachObjectReadAdmission(source: ObjectReadAdmissionSource | undefined): void {
+    this.objectReadAdmission = source;
   }
 
   /**
@@ -6692,6 +6729,8 @@ export class ApprovalService implements IApprovalService {
    * the same target. It takes no caller: the read runs under a system context.
    * [#23618] What is SERVED from that read is the reader's: the title is picked
    * from the target as served to the reader ({@link titlesAsServed}).
+   * [#23637] And only for a target record the reader may read, asked as the
+   * reader after this gate ({@link ApprovalService.enrichRows}).
    *
    * A refused target is not read, so its key gets no display value and the
    * snapshot's stored id stands, the answer a deleted target already gets. A
@@ -6709,6 +6748,54 @@ export class ApprovalService implements IApprovalService {
       return false;
     }
     return canServeApiOperation(enable, 'get');
+  }
+
+  /**
+   * [#23637] The lookup-target objects of `objects` the reader may read at all,
+   * by the security service's object-level read admission, asked once per
+   * object before any of them is read as the reader
+   * ({@link ApprovalService.enrichRows}).
+   *
+   * A refused object is not read as the reader: its keys get no display value,
+   * exactly as its refused caller-scoped read would answer, and it logs no
+   * denial for a read the reader never asked for. ⛔ It is asked with the
+   * reader's own envelope (minus the operation-private keys, as
+   * `resolveReadableParentIds` sends it): no second derivation of authority,
+   * and no muting of the middleware's log.
+   *
+   * It only ever NARROWS what is read: an admitted object is still read as the
+   * reader, and that read still decides sharing, row-level rules and every gate
+   * after the object-level arms. Fails CLOSED: an admission that throws (said
+   * at `warn`, a fault rather than a denial), or answers anything but `true`,
+   * refuses that object. With no security service composed, or one without the
+   * optional `canReadObject`, every object is left to the caller-scoped read,
+   * which still decides, so the absence can never widen the answer.
+   */
+  private async admittedTargetObjects(objects: readonly string[], context: ExecutionContext): Promise<string[]> {
+    let admission: ObjectReadAdmission | null | undefined;
+    try {
+      admission = this.objectReadAdmission?.();
+    } catch {
+      admission = undefined;
+    }
+    const canReadObject = admission?.canReadObject;
+    if (typeof canReadObject !== 'function') return [...objects];
+    const envelope = withoutOperationPrivateKeys((context ?? {}) as Record<string, unknown>);
+    const admitted: string[] = [];
+    for (const object of objects) {
+      try {
+        // `=== true`: an answer that is not a plain yes refuses (fail closed).
+        if ((await canReadObject.call(admission, object, { ...envelope } as SecurityContext)) === true) {
+          admitted.push(object);
+        }
+      } catch (err: any) {
+        this.logger?.warn?.(
+          `[approvals] ApprovalService.enrichRows: the object-level read admission for "${object}" failed, `
+          + `so its titles are not resolved and the stored ids stand (fail-closed): ${err?.message ?? err}`,
+        );
+      }
+    }
+    return admitted;
   }
 
   /**
@@ -6786,8 +6873,10 @@ export class ApprovalService implements IApprovalService {
    * and the lookup targets' `payload_display` ({@link ApprovalService.enrichRows}).
    * The records are read under the system context, so the read narrows nothing
    * (#7497 ruling C: record access stays with object permissions, sharing and
-   * row-level rules); only what is served from it is narrowed. Throws what the
-   * read throws; each caller keeps its own best-effort catch.
+   * row-level rules); only what is served from it is narrowed. Which `ids` are
+   * read is the caller's: the subject's are every request's record, the
+   * targets' only those the reader may read ([#23637], {@link enrichRows}).
+   * Throws what the read throws; each caller keeps its own best-effort catch.
    */
   private async titlesAsServed(
     object: string,
@@ -6859,6 +6948,18 @@ export class ApprovalService implements IApprovalService {
    * target gets. The targets' answers are asked through
    * {@link servedFields} into `served`, once per object per read, so a target
    * that is also a subject object reuses the subject's answer.
+   * [#23637] And only a target RECORD the reader may read is titled at all:
+   * the readable ids come from `resolveReadableParentIds` (`@objectstack/core`),
+   * the one caller-scoped "which of these records may this caller read" answer
+   * the parent-derived read gates ask, so the target object's object-level
+   * read, sharing and row-level rules decide, as they do for the data door's
+   * `$expand`. One ask per target object per read, of the objects the
+   * security service's object-level read admission admits
+   * ({@link ApprovalService.admittedTargetObjects}), so an object the reader may
+   * not read at all is not read as the reader. An unreadable target gets
+   * no display value and its stored id stands, as a deleted one does. The
+   * SUBJECT is not asked: its title and snapshot are served whatever the
+   * reader's access to the subject record (#7497 ruling C, #10749).
    */
   private async enrichRows(
     rows: ApprovalRequestRow[],
@@ -6901,11 +7002,24 @@ export class ApprovalService implements IApprovalService {
       }
     }
     const refTitles = new Map<string, string>();
-    const targets = Array.from(refIds.keys()).filter((object) => this.servesPayloadDisplayTarget(object));
+    const exposed = Array.from(refIds.keys()).filter((object) => this.servesPayloadDisplayTarget(object));
+    // [#23637] Only the target RECORDS the reader may read are titled: the
+    // platform's one caller-scoped row-access answer, one ask per target object
+    // per read, of the objects the reader may read at all. An object the reader
+    // may not read, a row its sharing or row-level rules hide, and a deleted
+    // record all come back absent, so that key gets no display value and the
+    // snapshot's stored id stands.
+    const admitted = await this.admittedTargetObjects(exposed, context);
+    const readableIds = await resolveReadableParentIds(
+      this.engine,
+      context,
+      new Map(admitted.map((object) => [object, refIds.get(object)!])),
+    );
+    const targets = admitted.filter((object) => (readableIds.get(object)?.size ?? 0) > 0);
     await this.servedFields(targets, context, served);
     for (const object of targets) {
       try {
-        await this.titlesAsServed(object, refIds.get(object)!, served.get(object), refTitles);
+        await this.titlesAsServed(object, readableIds.get(object)!, served.get(object), refTitles);
       } catch { /* referenced object unreadable — leave unresolved */ }
     }
 

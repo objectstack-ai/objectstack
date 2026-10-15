@@ -40,7 +40,10 @@ import { StandardErrorCode } from '@objectstack/spec/api';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
-import { RemoteTransport, type RemoteTenantScope } from './remote-transport.js';
+import { RemoteTransport, remoteReadableIdsSemiJoin, type RemoteTenantScope } from './remote-transport.js';
+// [ADR-0139 D3] The walk, the rewrite and the refusal for a `ReadableIds` leaf —
+// shared with the local face this class inherits, `driver-memory` and `driver-mongodb`.
+import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
 import {
   backfillRemoteCanonicalColumns,
   type RemoteBackfillClient,
@@ -1590,6 +1593,8 @@ export class TursoDriver extends SqlDriver {
   // IDataDriver metadata
   public override readonly name: string = 'com.objectstack.driver.turso';
   public override readonly version: string = '1.0.0';
+  /** [ADR-0139 D3] The inherited `ReadableIds` compile and refusal name this package. */
+  protected override readonly readableIdsDriverName: string = 'driver-turso';
 
   public override get supports() {
     // Inherit the SqlDriver capability baseline (incl. autonumber via the
@@ -2156,7 +2161,7 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'find');
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'find');
-      const remoteQuery = this.toRemoteReadQuery(object, query);
+      const remoteQuery = this.toRemoteReadQuery(object, query, undefined, options);
       // [#21226] The caller's tenant scope, as the local face scopes `findRows`.
       const scope = this.remoteTenantScope(object, options);
       return this.formatRemoteRows(
@@ -2179,7 +2184,7 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'findOne');
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'findOne');
-      const remoteQuery = this.toRemoteReadQuery(object, query, { singleRowLookup: true });
+      const remoteQuery = this.toRemoteReadQuery(object, query, { singleRowLookup: true }, options);
       const scope = this.remoteTenantScope(object, options);
       return this.formatRemoteRow(
         object,
@@ -2868,7 +2873,7 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'count');
     if (this.isRemote) {
       const table = this.remoteTableFor(object, 'count');
-      const remoteQuery = this.toRemoteQuery(object, query);
+      const remoteQuery = this.toRemoteQuery(object, query, options);
       const scope = this.remoteTenantScope(object, options);
       return this.remoteReadExit(object, { where: query?.where }, () =>
         this.remoteTransport!.count(object, remoteQuery, table, scope),
@@ -2911,7 +2916,7 @@ export class TursoDriver extends SqlDriver {
       // are grouped, as `SqlDriver.aggregate` scopes its builder.
       const scope = this.remoteTenantScope(object, options);
       return this.remoteReadExit(object, query, () =>
-        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query), table, scope),
+        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query, options), table, scope),
       );
     }
     return super.aggregate(object, query, options);
@@ -3088,10 +3093,33 @@ export class TursoDriver extends SqlDriver {
     return out;
   }
 
-  /** A query with its `where` compiled through {@link toRemoteFilter}. */
-  private toRemoteQuery(object: string, query?: DriverQuery): any {
+  /** A query with its `where` compiled through {@link toRemoteWhere}. */
+  private toRemoteQuery(object: string, query?: DriverQuery, options?: DriverOptions): any {
     if (!query || typeof query !== 'object' || query.where == null) return query;
-    return { ...query, where: this.toRemoteFilter(object, query.where) };
+    return { ...query, where: this.toRemoteWhere(object, query.where, options) };
+  }
+
+  /**
+   * [ADR-0139 D3] A caller's `where` as the remote transport receives it: every
+   * composed `ReadableIds` leaf RESOLVED into the transport's semi-join — the
+   * parent's remote table, its scope in storage form, and its tenant wall
+   * compiled with the OUTER read's options by the chokepoint the local face
+   * uses ({@link remoteTenantScope}) — then {@link toRemoteFilter}. The
+   * transport compiles `field IN (SELECT "id" FROM P_TABLE WHERE SCOPE AND
+   * TENANT)` and decides nothing about the wall, so the two faces answer one
+   * row set. An uncomposed leaf, or a composed one outside a `$in`, is refused
+   * first — INTERNAL_ERROR / 500, logged at `error` once per driver.
+   */
+  private toRemoteWhere(object: string, where: unknown, options: DriverOptions | undefined): unknown {
+    const misplaced = findMisplacedReadableIds(where, true);
+    if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
+    const resolved = replaceComposedReadableIds(where, (leaf) => remoteReadableIdsSemiJoin({
+      object: leaf.object,
+      table: this.remoteTableFor(leaf.object, 'ReadableIds'),
+      scope: leaf.scope === undefined ? undefined : (this.toRemoteFilter(leaf.object, leaf.scope) as FilterCondition),
+      tenant: this.remoteTenantScope(leaf.object, options),
+    }));
+    return this.toRemoteFilter(object, resolved);
   }
 
   /**
@@ -3131,13 +3159,14 @@ export class TursoDriver extends SqlDriver {
     object: string,
     query: DriverQuery,
     opts?: { singleRowLookup?: boolean },
+    options?: DriverOptions,
   ): any {
     if (!query || typeof query !== 'object') return query;
     const orderBy = this.orderKeysFor(object, query, opts).map((key) => ({
       field: key.field,
       order: key.direction,
     }));
-    return this.toRemoteQuery(object, { ...query, orderBy });
+    return this.toRemoteQuery(object, { ...query, orderBy }, options);
   }
 
   /**
@@ -3490,7 +3519,7 @@ export class TursoDriver extends SqlDriver {
       // [#21226] The caller's filter AND tenant scope, as `SqlDriver.updateMany`.
       return this.remoteTransport!.updateMany(
         object,
-        this.toRemoteQuery(object, query),
+        this.toRemoteQuery(object, query, options),
         this.toRemoteWriteForms(object, data),
         table,
         this.remoteTenantScope(object, options),
@@ -3506,7 +3535,7 @@ export class TursoDriver extends SqlDriver {
       // [#21226] The caller's filter AND tenant scope, as `SqlDriver.deleteMany`.
       return this.remoteTransport!.deleteMany(
         object,
-        this.toRemoteQuery(object, query),
+        this.toRemoteQuery(object, query, options),
         table,
         this.remoteTenantScope(object, options),
       );
@@ -3816,7 +3845,7 @@ export class TursoDriver extends SqlDriver {
     }
     // Compiled outside the classifier, so a filter refusal keeps its envelope.
     const table = this.remoteTableFor(object, 'distinct');
-    const { sql, args } = this.remoteTransport!.compileDistinct(object, field, this.toRemoteFilter(object, filters), table);
+    const { sql, args } = this.remoteTransport!.compileDistinct(object, field, this.toRemoteWhere(object, filters, options), table);
     let rows: unknown;
     try {
       rows = await this.remoteTransport!.execute(sql, args);

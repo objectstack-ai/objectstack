@@ -85,6 +85,7 @@ import {
   PARENT_GATE_READ_OPS,
   andIntoWhere,
   computeParentRecordFilter,
+  type ParentObjectReadAdmissionSource,
   type ParentRecordGate,
 } from './parent-record-read-gate.js';
 
@@ -133,11 +134,15 @@ const LEDGER_GATE: ParentRecordGate = {
  * Install the `sys_audit_log` read-visibility middleware.
  *
  * Inert on an engine without the middleware seam; `AuditPlugin` says so out
- * loud when that happens.
+ * loud when that happens. `getAdmission` resolves, on every read, the security
+ * service whose object-level read admission is asked before a parent object is
+ * read as the caller (`parent-record-read-gate.ts`, "A skipped object is not
+ * an access attempt").
  */
 export function installAuditLogReadVisibility(
   engine: CommentAccessEngine,
   logger: CommentAccessLogger,
+  getAdmission: ParentObjectReadAdmissionSource,
 ): void {
   if (typeof engine.registerMiddleware !== 'function') return;
 
@@ -149,7 +154,7 @@ export function installAuditLogReadVisibility(
         return next();
       }
       try {
-        const filter = await computeParentRecordFilter(engine, ctx, logger, LEDGER_GATE);
+        const filter = await computeParentRecordFilter(engine, ctx, logger, LEDGER_GATE, getAdmission);
         if (filter) andIntoWhere(ctx, filter);
       } catch (err) {
         // A filter-compute failure must never fall open into a leak.

@@ -23,6 +23,7 @@ import { installAuditLogFieldRedaction } from './audit-log-field-redaction.js';
 import { installAuditLogReadVisibility } from './audit-log-read-visibility.js';
 import type { FieldVisibilitySource } from './served-fields.js';
 import { installParentFieldQueryGuards } from './parent-field-query-guard.js';
+import type { ParentObjectReadAdmission } from './parent-record-read-gate.js';
 
 /**
  * [#8992] Read/view audit configuration — the per-object opt-in, closed.
@@ -492,7 +493,18 @@ export class AuditPlugin implements Plugin {
           },
           ctx.logger,
         );
-        installActivityReadVisibility(engine as any, ctx.logger);
+        // The parent-record gates ask the security service's object-level read
+        // admission before they read a parent object as the caller, so an
+        // object the caller cannot read is skipped without a logged denial
+        // (`parent-record-read-gate.ts`). Resolved on every read, as below.
+        const getReadAdmission = (): ParentObjectReadAdmission | undefined => {
+          try {
+            return ctx.getService<ParentObjectReadAdmission>('security');
+          } catch {
+            return undefined;
+          }
+        };
+        installActivityReadVisibility(engine as any, ctx.logger, getReadAdmission);
         ctx.logger.info('AuditPlugin: sys_activity parent-record read visibility installed');
         // [#21081] …and of each row it keeps, the value-bearing columns serve a
         // parent field only to a reader the security service serves that field
@@ -524,7 +536,7 @@ export class AuditPlugin implements Plugin {
         // query guard above judges a query first (a refused query never pays
         // this gate's pre-scan), and the field redaction narrows only the rows
         // this gate keeps.
-        installAuditLogReadVisibility(engine as any, ctx.logger);
+        installAuditLogReadVisibility(engine as any, ctx.logger, getReadAdmission);
         ctx.logger.info('AuditPlugin: sys_audit_log parent-record read visibility installed');
       } else {
         ctx.logger.warn(

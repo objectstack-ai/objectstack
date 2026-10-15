@@ -113,6 +113,7 @@
  * byte-identical to a reader.
  */
 
+import { dialectOfDriver } from '@objectstack/metadata-core';
 import { PLATFORM_OBJECT_PREFIXES, StorageNameMapping, hasPlatformObjectPrefix } from '@objectstack/spec/system';
 // The result-set/no-answer predicate `os migrate duplicates` already publishes
 // (#10677). Imported rather than re-spelled: a second copy would drift, and the
@@ -370,12 +371,19 @@ async function readPhysicalTableNames(
     return { detail: 'the planned driver exposes no raw SQL seam, so its table catalog could not be read' };
   }
 
-  const client = (driver as { config?: { client?: unknown } } | null | undefined)?.config?.client;
-  const clientName = typeof client === 'string' ? client : '';
-  const sql = physicalTableListSql(clientName);
+  // [#23648] The dialect through the one shared resolver, `dialectName` first:
+  // `SqliteWasmDriver`'s `config.client` is a knex client CLASS, which names no
+  // spelling, while its `dialectName` says `sqlite`. Read as a client string
+  // alone, every `wasm-sqlite://` plan reported this section unreadable.
+  const d = driver as { dialectName?: unknown; config?: { client?: unknown } } | null | undefined;
+  const dialect = dialectOfDriver(d);
+  const sql = dialect === 'none' || dialect === 'unresolved' ? null : physicalTableListSql(dialect);
   if (sql === null) {
+    const named = typeof d?.dialectName === 'string'
+      ? d.dialectName
+      : typeof d?.config?.client === 'string' ? d.config.client : '';
     return {
-      detail: `the connected dialect (${clientName || 'unnamed client'}) is not one this sweep enumerates tables on `
+      detail: `the connected dialect (${named || 'unnamed client'}) is not one this sweep enumerates tables on `
         + '(sqlite / postgres / mysql)',
     };
   }

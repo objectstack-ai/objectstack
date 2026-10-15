@@ -296,12 +296,13 @@ function toLoggableError(thrown: unknown): Error {
  * ## A structured refusal's context (#23531, #23587)
  *
  * A refusal `RestServer`'s classification answers with structured fields
- * (`409 CONCURRENT_UPDATE`'s `currentVersion`, `409 DELETE_RESTRICTED`'s
- * `developerMessage` / `dependentObject` / `dependentCount`, …) also carries
- * them here, in `details`, read off that classification by
- * {@link declaredArmContext}. Before this, both Hono doors answered those
- * refusals with `code` and `message` only. `currentRecord` is held back for
- * now (#23586); that helper's docblock says why.
+ * (`409 CONCURRENT_UPDATE`'s `currentVersion` and `currentRecord`, `409
+ * DELETE_RESTRICTED`'s `developerMessage` / `dependentObject` /
+ * `dependentCount`, …) also carries them here, in `details`, read off that
+ * classification by {@link declaredArmContext}. Before this, both Hono doors
+ * answered those refusals with `code` and `message` only. `currentRecord` is
+ * forwarded because the producer reads it under the caller's own context
+ * (#23586, PR #23628); that helper's docblock says why that matters.
  */
 export function declaredEnvelopeForThrow(thrown: unknown): {
     status: number;
@@ -378,9 +379,8 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
  * under the same rule (each field only when the producer stated it), and an
  * arm that grows a field grows it at every door. ⛔ Never list the fields or
  * the codes here. The arm's own sentence and code are dropped because this
- * envelope already carries both, as `message` and `code`. `currentRecord` is
- * the ONE field named here, and it is named only to hold it back (the ⚠️
- * paragraph below says why).
+ * envelope already carries both, as `message` and `code`. No field is held
+ * back by name (the ⚠️ paragraph below says what that rests on).
  *
  * ## The arm must agree with the envelope
  *
@@ -412,18 +412,19 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
  * `object` (`INVALID_FIELD`, `OBJECT_NOT_FOUND`, the 403 access arms) carry it
  * here as they do there.
  *
- * ⚠️ `currentRecord` is HELD here: these doors do not forward it, though the
- * REST door does. The protocol reads that row with a system context
- * (`probeRecord`), and the OCC check throws it before the caller's write
- * policy runs, so it is not narrowed to what the caller may read. It may carry
- * a row, or fields, that row- or field-level security hides from the caller.
- * Forwarding it would widen that possible disclosure to two more doors. The
- * record waits for the producer's answer (#23586), and the exclusion is lifted
- * when that lands. Every other field an arm carries today is a version token,
+ * ⚠️ Row data rides here only because its producer reads it as the caller.
+ * `CONCURRENT_UPDATE`'s `currentRecord` is a row: on a version mismatch the
+ * protocol re-reads it under the caller's own `context`, so every row- and
+ * field-level rule of the read door applies (#23586, PR #23628). A row the
+ * caller cannot read answers `404 RECORD_NOT_FOUND` with neither field, and a
+ * readable row's `currentRecord` is that field-masked read, which these doors
+ * forward as the REST door does. It was held here until that landed, while
+ * the record was the row the existence probe (`probeRecord`) reads with a
+ * system context. Every other field an arm carries today is a version token,
  * an API name, the caller's own input, or a count the producer has already
  * narrowed to what the caller may read (`dependentCountIsDisclosable` in
- * `@objectstack/objectql`); none is row data read with a system context. An
- * arm that grows such a field must be held here by name, as this one is.
+ * `@objectstack/objectql`). An arm that grows a field read with a system
+ * context must be held here by name until its producer reads it as the caller.
  */
 function declaredArmContext(
     thrown: unknown,
@@ -434,10 +435,7 @@ function declaredArmContext(
         return undefined;
     }
     const context = Object.fromEntries(
-        Object.entries(arm.body).filter(([key]) => key !== 'error'
-            && key !== 'code'
-            // Held: a system-context row the caller may not be allowed to read (#23586).
-            && key !== 'currentRecord'),
+        Object.entries(arm.body).filter(([key]) => key !== 'error' && key !== 'code'),
     );
     return Object.keys(context).length > 0 ? context : undefined;
 }

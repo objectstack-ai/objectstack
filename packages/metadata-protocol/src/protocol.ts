@@ -9463,6 +9463,37 @@ export class ObjectStackProtocolImplementation implements
      * `degraded` must be the verdict of the WHOLE lookup: a first read that
      * failed is not made trustworthy by an alternate spelling that cleanly
      * missed.
+     *
+     * ## [#23645] A tenant-authored OBJECT body is not a code layer
+     *
+     * Every caller reads this as the CODE layer: the delete heal's baseline
+     * ({@link restoreArtifactRegistryView}, tier 2), the by-name read's step 2,
+     * the layered read's `code` layer and the carry-forward's code layer. For
+     * an `object` the service can also hold a copy of a stored row. On a kernel
+     * with no `environmentId`, ObjectQL's boot bridge
+     * (`bridgeObjectsToMetadataService`) copies every object the registry holds
+     * into the service, so every runtime object hydrated from `sys_metadata`
+     * lands there too, stamped `_provenance: 'org'`. Nothing removes that copy
+     * when the row is deleted. Measured on a real `ObjectKernel` with
+     * `MetadataPlugin` and `ObjectQLPlugin`: after `DELETE` of a boot-hydrated
+     * runtime object answered "it no longer exists", tier 2 found the copy,
+     * re-registered it and returned before tier 3's `unregisterObject`. The
+     * owner, the data plane and `getMetaItem` (step 2, the same copy) all kept
+     * serving the deleted definition until a restart. An object saved in the
+     * same process was never copied, so its delete worked.
+     *
+     * So an `object` body stamped tenant-authored answers here as a clean miss.
+     * This is the discriminator {@link getMetaItemLayered} already applies to
+     * the registry's plain key ([#21059]): the ADR-0010 marker the hydrator
+     * writes, read through `isTenantAuthored`. ⛔ No new marker. A stored row is
+     * read from the store, never from this code-layer read. A miss here is not
+     * degraded, because the service answered.
+     *
+     * ⛔ `object` only. The security catalog's echo (`plugin-security`)
+     * registers stored `permission` and `position` rows in the service on
+     * purpose, stamped the same way. It keeps them current on every mutation,
+     * and this read serves them as the code layer by design: its own pins read
+     * the layered `code` layer as the echo.
      */
     private async readItemFromMetadataService(
         type: string,
@@ -9479,15 +9510,21 @@ export class ObjectStackProtocolImplementation implements
         // occupant of the `metadata` slot makes of a third argument today is
         // unchanged by which of the two methods answers.
         const read = async (t: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }> => {
+            let answer: { data: unknown; degraded: boolean; errors: string[] };
             if (typeof metadataService.getDiagnosed === 'function') {
                 const diagnosed = await metadataService.getDiagnosed(t, name, packageId);
-                return {
+                answer = {
                     data: diagnosed?.data,
                     degraded: diagnosed?.degraded === true,
                     errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
                 };
+            } else {
+                answer = { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
             }
-            return { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
+            // [#23645] A stored object row's copy is not a code layer. See the header.
+            return canonicalMetaType(t) === 'object' && isTenantAuthored(answer.data)
+                ? { ...answer, data: undefined }
+                : answer;
         };
 
         const primary = await read(type);
@@ -10013,6 +10050,14 @@ export class ObjectStackProtocolImplementation implements
             const metadataService = services?.get('metadata');
             if (metadataService && typeof metadataService.list === 'function') {
                 let runtimeItems = await metadataService.list(request.type);
+                // [#23645] The service's copy of a stored object row is not the
+                // base this merge lays the stored rows over: the rows above
+                // already serve every live one, and a copy of a deleted one
+                // would list it until a restart. `object` only, as in
+                // {@link readItemFromMetadataService}.
+                if (request.type === 'object' && Array.isArray(runtimeItems)) {
+                    runtimeItems = runtimeItems.filter((item: unknown) => !isTenantAuthored(item));
+                }
                 // When filtering by packageId, only include runtime items that
                 // belong to the requested package. MetadataService.list() returns
                 // items from ALL packages, so we must filter here to respect the
@@ -17462,21 +17507,16 @@ export class ObjectStackProtocolImplementation implements
      *    package door gives (`ITEM_LOCKED` on a read-only base), so asking
      *    here never moves that door's vocabulary.
      *
-     * ## `create` — a save that TAKES the name
+     * ## One `save`, whatever the write meant
      *
-     * [#22591] A door that knows its write brings an item of the caller's own
-     * into existence under `name` — a create, or a rename into the name — asks
-     * with `operation: 'create'` (Setup's position write-through does). The
-     * verdict is the `save` verdict: the same predicate, code and status, so
-     * no write moves. Only the sentence follows the act: it names the remedy a
-     * create has, a name no package or built-in holds, never the edit remedy
-     * (`managedItemSealedSentence` in `./packaged-base-regime.ts`). A door that
-     * cannot tell an edit from a create asks `save`, and keeps the edit remedy.
+     * [#23577] `save` is every write under the name: a door cannot tell a
+     * create from an edit, so the refusal advises neither and states what it
+     * knows (`managedItemSealedSentence` in `./packaged-base-regime.ts`).
      *
      * @returns the refusal to relay, or `null` when the `/meta` door would not
      *          refuse this write or removal on the locked-base ground.
      */
-    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'create' | 'delete'; packageId?: string | null }): Error | null {
+    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null }): Error | null {
         // [#9009] Folded HERE, at the producer of the verdict, so a caller that
         // arrives with a plural spelling cannot address around the lock.
         const folded = canonicalizeMetaRequestType(request);
@@ -17487,7 +17527,7 @@ export class ObjectStackProtocolImplementation implements
                     type: folded.type,
                     name: folded.name,
                     ...(folded.packageId ? { packageId: folded.packageId } : {}),
-                }, folded.operation);
+                });
             }
         } catch (err) {
             if (ObjectStackProtocolImplementation.isPackagedBaseRefusal(err)) return err;
@@ -17868,15 +17908,10 @@ export class ObjectStackProtocolImplementation implements
      * `/meta`'s handling of every OTHER type is unchanged, so for those this
      * returns `null` and the caller proceeds exactly as before.
      *
-     * [#22591] `operation: 'create'` says the write takes the name for a flow of
-     * the caller's own (the `/meta` door's first-write pin on a publish save —
-     * [#23406] a first draft is an edit); rule 1's refusal then names the
-     * create remedy. The verdict is the same; absent, the write is an edit.
-     *
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
      */
-    async tenantAuthoredWriteRefusal(request: { type: string; name: string; item: unknown; packageId?: string | null; operation?: 'save' | 'create' }): Promise<Error | null> {
+    async tenantAuthoredWriteRefusal(request: { type: string; name: string; item: unknown; packageId?: string | null }): Promise<Error | null> {
         const folded = canonicalizeMetaRequestType(request);
         const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
         if (singular !== 'flow') return null;
@@ -17885,7 +17920,7 @@ export class ObjectStackProtocolImplementation implements
             const locked = this.packagedBaseRefusal({
                 type: folded.type,
                 name: folded.name,
-                operation: folded.operation ?? 'save',
+                operation: 'save',
                 ...(folded.packageId ? { packageId: folded.packageId } : {}),
             });
             if (locked) return locked;
@@ -18003,15 +18038,9 @@ export class ObjectStackProtocolImplementation implements
      * sentence names the managed package ({@link managedItemSealedSentence}, the
      * one builder the repository's type door reads too); the code and the status
      * are unchanged.
-     *
-     * [#22591] `operation` is what the save does to the name — `create` when the
-     * caller takes it for an item of its own, `save` (an edit) otherwise — and
-     * only the sentence reads it: the remedy follows the act. The predicate, the
-     * limbs, the code and the status are the same for both.
      */
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
-        operation: 'save' | 'create' = 'save',
     ): void {
         if (this.isSealedManagedItem(request.type, request.name)) {
             // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
@@ -18078,9 +18107,9 @@ export class ObjectStackProtocolImplementation implements
             }
             // [#20819, ADR-0131 D6] The SENTENCE is chosen per ADR-0126 regime,
             // and names the managed package for every other type; the code and
-            // the status are unchanged. [#22591] A create reads the held-name
-            // remedy instead, whatever the type.
-            const err = new Error(managedItemSealedSentence(request.type, request.name, operation));
+            // the status are unchanged. [#23577] Every write reads it, whatever
+            // the write meant to do: the door cannot tell a create from an edit.
+            const err = new Error(managedItemSealedSentence(request.type, request.name, 'save'));
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
             throw err;
@@ -20574,6 +20603,12 @@ export class ObjectStackProtocolImplementation implements
      *     MetadataService baseline (FilesystemLoader-sourced types) and
      *     re-register it, preserving the historical refresh behaviour
      *     for items the SchemaRegistry never held as artifacts.
+     *     [#23645] A tenant-authored object body is no baseline: on a kernel
+     *     with no `environmentId` the service holds a copy of every object
+     *     hydrated at boot, which is the deleted row itself. The read
+     *     answers it as a miss ({@link readItemFromMetadataService}), so the
+     *     walk reaches step 3 for a runtime object, as for one saved in the
+     *     same process.
      *     [#22057] Tier 1 also declines when there is no plain-key entry,
      *     which is what a VIEW row bound to one package leaves under a name
      *     another package ships ({@link hydrateOverlayIntoRegistry}). So a
@@ -22012,36 +22047,12 @@ export class ObjectStackProtocolImplementation implements
         // are no caller's claim about anything: a row stored before the
         // #16702 strip may still carry stale stamps, and rewriting it keeps
         // the silent strip it always had rather than failing the rewrite.
-        //
-        // [#22591] What this save does to the name, read for the sealed-item
-        // refusal's remedy and nothing else. Read by the flow rule just below
-        // and by the package door further down, and each reads it only for a
-        // name a managed package (or the loader's set) already holds — so an
-        // item is under the name whenever it is read.
-        //
-        // [#23406] A present `null` parent is the first-write pin
-        // (`If-None-Match: *` on the REST door), and it asserts what the spec
-        // says it asserts — "no current row of THIS lifecycle"
-        // (`SaveMetaItemRequestSchema.parentVersion`) — and nothing more:
-        //  - on a publish save the lifecycle is the item's live row: the
-        //    caller asserts there is none and brings one into existence under
-        //    the name, a create;
-        //  - on a draft save the lifecycle is the draft's: the pin asserts that
-        //    no draft is pending, never that the name is free. Over a held
-        //    name it is a first draft of the item already there, an edit, and
-        //    its refusal names that item's own remedy, as the unpinned draft's
-        //    does. Read as a create, it named a free name, and a client that
-        //    followed it authored a second item instead of editing the source.
-        // Every other save is an edit.
-        const sealedWrite: 'save' | 'create' =
-            request.parentVersion === null && request.mode !== 'draft' ? 'create' : 'save';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
                 name: request.name,
                 item: request.item,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
-                ...(sealedWrite === 'create' ? { operation: sealedWrite } : {}),
             });
             if (authored) throw authored;
         }
@@ -22203,10 +22214,10 @@ export class ObjectStackProtocolImplementation implements
         // repository has refused these writes on them all along; the door
         // only answers first.
         //
-        // [#22591] A first write of the live row (`sealedWrite`, above) reads
-        // the create remedy — [#23406] a first DRAFT is an edit and keeps the
-        // edit remedy; the verdict is the same.
-        this.refusePackagedBaseOverride(request, sealedWrite);
+        // [#23577] Every write over a sealed name reads one sentence: the
+        // first-write pin (`If-None-Match: *`) declares no create, so the door
+        // advises neither a create nor an edit.
+        this.refusePackagedBaseOverride(request);
 
         // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
         // overlay `_lock`) blocks save independent of the L1 type-level

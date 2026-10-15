@@ -19,6 +19,10 @@ import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/
 import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, compensatedSum } from '@objectstack/core';
+// [ADR-0139 D3] The walk, the rewrite and the refusal for a `ReadableIds` leaf —
+// one source for every driver.
+import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
+import type { ComposedReadableIds } from '@objectstack/spec/data';
 import { Query, Aggregator } from 'mingo';
 import {
   assertSingleTenantPosture,
@@ -496,6 +500,8 @@ export class InMemoryDriver implements IDataDriver {
   readonly version = '1.0.0';
   private config: InMemoryDriverConfig;
   private logger: Logger;
+  /** [ADR-0139 D3] Whether this instance has logged its `ReadableIds` refusal (once per driver). */
+  private readonly readableIdsRefusalLog = { logged: false };
   private idCounters: Map<string, number> = new Map();
 
   /**
@@ -1449,15 +1455,39 @@ export class InMemoryDriver implements IDataDriver {
       // [#21066] With the object's declarations, so a scalar comparison on a
       // declared JSON-stored field is refused there too, before mingo answers
       // it per element.
-      assertFilterConditionShape(filters, 'filter', DRIVER_FILTER_CAPABILITIES, this.filterFieldDeclarations(object));
+      // [ADR-0139 D3] A composed `ReadableIds` leaf is evaluated in process —
+      // read the parent under the composed scope, then member-test — BEFORE the
+      // shape gate, which then sees an ordinary `$in` list. An uncomposed leaf,
+      // or a composed one outside a `$in`, is refused first: INTERNAL_ERROR /
+      // 500, logged at `error` once per driver, ⛔ never read as no restriction.
+      const misplaced = findMisplacedReadableIds(filters, true);
+      if (misplaced) throw refuseReadableIdsOnce('driver-memory', misplaced, this.logger, this.readableIdsRefusalLog);
+      const resolved = replaceComposedReadableIds(filters, (leaf) => this.readableParentIds(leaf));
+      assertFilterConditionShape(resolved, 'filter', DRIVER_FILTER_CAPABILITIES, this.filterFieldDeclarations(object));
       // Translate non-standard operators ($contains, $notContains, etc.) to Mingo-compatible format
-      return this.normalizeFilterCondition(filters, object);
+      return this.normalizeFilterCondition(resolved, object);
     }
 
     // A truthy non-object, non-array `where` emits no predicate. Pre-existing
     // behaviour on a shape only a cast can produce; untouched by #5158, which
     // is about the array dialect.
     return {};
+  }
+
+  /**
+   * [ADR-0139 D3] The ids of the parent's rows the composed scope admits
+   * (`undefined`: every row that exists) — the semi-join's subquery, run in
+   * process through this driver's own filter path, so the scope meets the same
+   * gate and translation a direct read of the parent does. Unbounded: there is
+   * no parameter ceiling in process. No tenant wall is owed: this driver
+   * refuses a tenant-scoped call and a multi-tenant boot
+   * (`memory-tenancy-guard.ts`), so a read that reaches here has none.
+   */
+  private readableParentIds(leaf: ComposedReadableIds): unknown[] {
+    let rows: Record<string, any>[] = this.getTable(leaf.object);
+    const mongoQuery = this.convertToMongoQuery(leaf.scope, leaf.object);
+    if (mongoQuery && Object.keys(mongoQuery).length > 0) rows = new Query(mongoQuery).find(rows).all() as Record<string, any>[];
+    return rows.map((row) => row.id);
   }
 
   /**

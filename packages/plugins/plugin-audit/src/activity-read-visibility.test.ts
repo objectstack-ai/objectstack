@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { installActivityReadVisibility, parseActivityParent } from './activity-read-visibility.js';
 import { LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
 import type { CommentAccessEngine, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
+import type { ParentObjectReadAdmissionSource } from './parent-record-read-gate.js';
 
 const DENY = { id: '__activity_parent_denied__' };
 const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
@@ -21,6 +22,8 @@ function install(opts: {
   /** parentObject -> readable ids (for any caller), or a thrower. */
   readable?: Record<string, string[] | (() => never)>;
   logger?: ReturnType<typeof silentLogger>;
+  /** The security service's object-level read admission the gate resolves per read; absent: none composed. */
+  admission?: ParentObjectReadAdmissionSource;
 }) {
   let mw!: Mw;
   const calls = { scans: [] as any[], probes: [] as Array<{ object: string; ids: string[]; context: any }> };
@@ -43,7 +46,7 @@ function install(opts: {
     },
     findOne: async () => null,
   };
-  installActivityReadVisibility(engine, opts.logger ?? silentLogger());
+  installActivityReadVisibility(engine, opts.logger ?? silentLogger(), opts.admission ?? (() => undefined));
   return { mw, calls };
 }
 
@@ -209,8 +212,120 @@ describe('installActivityReadVisibility', () => {
     }
   });
 
+  describe('the object-level read admission: a skipped object is not read as the caller', () => {
+    /** Two parent objects; the caller-scoped read refuses `crm_secret` (the middleware's denial). */
+    const scan = () => [
+      { object_name: 'crm_case', record_id: 'c1' },
+      { object_name: 'crm_case', record_id: 'c2' },
+      { object_name: 'crm_secret', record_id: 's1' },
+    ];
+    const readable = {
+      crm_case: ['c1'],
+      crm_secret: () => {
+        throw Object.assign(new Error('denied'), { code: 'PERMISSION_DENIED' });
+      },
+    };
+    const admissionOf = (answer: (object: string) => unknown) => {
+      const canReadObject = vi.fn(async (object: string) => answer(object) as boolean);
+      return { canReadObject, source: () => ({ canReadObject }) };
+    };
+    const CASE_ONLY = { object_name: 'crm_case', record_id: { $in: ['c1'] } };
+
+    it('an object the admission refuses is never read, and the WHERE is the one its refused read gave', async () => {
+      const without = install({ scan, readable });
+      const before = (await read(without.mw)).where;
+      expect(before).toEqual(CASE_ONLY);
+      expect(without.calls.probes.map((p) => p.object).sort()).toEqual(['crm_case', 'crm_secret']);
+
+      const { canReadObject, source } = admissionOf((object) => object !== 'crm_secret');
+      const { mw, calls } = install({ scan, readable, admission: source });
+      expect((await read(mw)).where).toEqual(before);
+      expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+      expect(canReadObject.mock.calls.map(([object]) => object).sort()).toEqual(['crm_case', 'crm_secret']);
+    });
+
+    it('an admitted object is still read as the caller, and that read decides its rows', async () => {
+      const { source } = admissionOf(() => true);
+      const { mw, calls } = install({ scan, readable: { crm_case: ['c1'], crm_secret: [] }, admission: source });
+      expect((await read(mw)).where).toEqual(CASE_ONLY);
+      expect(calls.probes.find((p) => p.object === 'crm_case')?.ids.sort()).toEqual(['c1', 'c2']);
+      expect(calls.probes.map((p) => p.object).sort()).toEqual(['crm_case', 'crm_secret']);
+    });
+
+    it('asks with the caller envelope, minus the operation-private keys — the envelope the parent read gets', async () => {
+      const { canReadObject, source } = admissionOf(() => true);
+      const { mw, calls } = install({ scan, readable: { crm_case: ['c1'], crm_secret: [] }, admission: source });
+      await read(mw, {
+        context: { userId: 'u1', positions: ['org_member'], __readScope: 'org', __expandRead: true } as any,
+      });
+      for (const [, context] of canReadObject.mock.calls as unknown as Array<[string, Record<string, unknown>]>) {
+        expect(context).toEqual(calls.probes[0].context);
+        expect(context).toMatchObject({ userId: 'u1', positions: ['org_member'] });
+        expect(context).not.toHaveProperty('__readScope');
+        expect(context).not.toHaveProperty('__expandRead');
+      }
+    });
+
+    it('every parent object refused: the deny-all sentinel, and no parent read at all', async () => {
+      const { source } = admissionOf(() => false);
+      const { mw, calls } = install({ scan, readable, admission: source });
+      expect((await read(mw)).where).toEqual(DENY);
+      expect(calls.probes).toEqual([]);
+    });
+
+    it('fails closed: an admission that throws refuses that object, says so, and never widens', async () => {
+      const logger = silentLogger();
+      // The caller-scoped read WOULD serve crm_secret's record here — the
+      // admission's failure must not fall open into it.
+      const { source } = admissionOf((object) => {
+        if (object === 'crm_secret') throw new Error('admission store unreachable');
+        return true;
+      });
+      const { mw, calls } = install({ scan, readable: { crm_case: ['c1'], crm_secret: ['s1'] }, admission: source, logger });
+      expect((await read(mw)).where).toEqual(CASE_ONLY);
+      expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("read admission for 'crm_secret' failed"));
+    });
+
+    it('fails closed: an answer that is not a plain true refuses', async () => {
+      for (const answer of [undefined, null, 'true', 1, {}]) {
+        const { source } = admissionOf((object) => (object === 'crm_secret' ? answer : true));
+        const { mw, calls } = install({ scan, readable: { crm_case: ['c1'], crm_secret: ['s1'] }, admission: source });
+        expect((await read(mw)).where).toEqual(CASE_ONLY);
+        expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+      }
+    });
+
+    it('no admission composed — no service, a throwing resolver, or no canReadObject — reads every parent as before', async () => {
+      const sources: Array<ParentObjectReadAdmissionSource> = [
+        () => undefined,
+        () => null,
+        () => {
+          throw new Error("service 'security' not registered");
+        },
+        () => ({}),
+      ];
+      for (const admission of sources) {
+        const { mw, calls } = install({ scan, readable, admission });
+        expect((await read(mw)).where).toEqual(CASE_ONLY);
+        expect(calls.probes.map((p) => p.object).sort()).toEqual(['crm_case', 'crm_secret']);
+      }
+    });
+
+    it('resolves the service on every read, so one that registers after install is asked', async () => {
+      let registered: { canReadObject?: (object: string) => Promise<boolean> } | undefined;
+      const { mw, calls } = install({ scan, readable, admission: () => registered });
+      await read(mw);
+      expect(calls.probes.map((p) => p.object).sort()).toEqual(['crm_case', 'crm_secret']);
+      registered = { canReadObject: async (object: string) => object !== 'crm_secret' };
+      calls.probes.length = 0;
+      expect((await read(mw)).where).toEqual(CASE_ONLY);
+      expect(calls.probes.map((p) => p.object)).toEqual(['crm_case']);
+    });
+  });
+
   it('is inert on an engine without the middleware seam', () => {
     const engine: CommentAccessEngine = { registerHook: () => {}, find: async () => [], findOne: async () => null };
-    expect(() => installActivityReadVisibility(engine, silentLogger())).not.toThrow();
+    expect(() => installActivityReadVisibility(engine, silentLogger(), () => undefined)).not.toThrow();
   });
 });
