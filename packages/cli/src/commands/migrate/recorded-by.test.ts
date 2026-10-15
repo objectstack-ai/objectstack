@@ -81,16 +81,18 @@ beforeAll(async () => {
 const SQLITE_CONFIG = { client: 'better-sqlite3', connection: { filename: '/srv/app/.objectstack/data/objectstack.db' } };
 const POSTGRES_CONFIG = { client: 'pg', connection: 'postgres://db.example.com:5432/app' };
 
-/** A booted stack over one history row holding the sentinel; `writes` records every write the engine took. */
-function stackOver(config: Record<string, unknown>): { writes: string[] } {
-  const writes: string[] = [];
+/**
+ * A booted stack over one history row holding the sentinel. The engine can
+ * only read: a write the command attempted would throw, and the run with it.
+ */
+function stackOver(config: Record<string, unknown>): void {
   const rows = [{ id: 'h_sentinel', recorded_by: RECORDED_BY_SENTINEL }];
   const engine = {
-    find: async (_object: string, query: { where?: { recorded_by?: unknown } }) =>
-      rows.filter((r) => r.recorded_by === query.where?.recorded_by).map((r) => ({ id: r.id })),
-    insert: async () => { writes.push('insert'); return {}; },
-    update: async () => { writes.push('update'); return {}; },
-    delete: async () => { writes.push('delete'); return true; },
+    find: async (_object: string, query: { where?: Record<string, unknown>; limit?: number }) => {
+      const matched = rows.filter((row) =>
+        Object.entries(query.where ?? {}).every(([key, value]) => (row as Record<string, unknown>)[key] === value));
+      return typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
+    },
   };
   boot.mockResolvedValue({
     driver: { config },
@@ -98,7 +100,6 @@ function stackOver(config: Record<string, unknown>): { writes: string[] } {
     tableAbsent: () => false,
     shutdown: async () => {},
   });
-  return { writes };
 }
 
 async function runHuman(argv: string[]): Promise<string[]> {
@@ -128,9 +129,8 @@ describe('os migrate recorded-by — the human face names no change it cannot vo
   });
 
   it('the dry run claims no row or table, and names the journal-mode switch on a SQLite file', async () => {
-    const { writes } = stackOver(SQLITE_CONFIG);
+    stackOver(SQLITE_CONFIG);
     const lines = await runHuman([]);
-    expect(writes).toEqual([]);
     expect(boot).toHaveBeenCalledWith(expect.objectContaining({ deferSchemaDdl: true, readOnlyProbe: true }));
     const closing = lines.find((line) => line.includes('Re-run with --apply'));
     expect(closing, lines.join('\n')).toContain(
@@ -150,9 +150,8 @@ describe('os migrate recorded-by — the human face names no change it cannot vo
   it('an --apply declined at the prompt claims no row changed, and names the switch on a SQLite file', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
     prompt.answer = 'n';
-    const { writes } = stackOver(SQLITE_CONFIG);
+    stackOver(SQLITE_CONFIG);
     const lines = await runHuman(['--apply']);
-    expect(writes).toEqual([]);
     const aborted = lines.find((line) => line.includes('Aborted'));
     expect(aborted, lines.join('\n')).toContain(`Aborted — no row was changed. ${JOURNAL_MODE_SWITCH_NOTE}`);
   }, 60_000);
