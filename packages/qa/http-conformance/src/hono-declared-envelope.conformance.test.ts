@@ -28,7 +28,11 @@
  *  - `If-Match: ""` — the protocol's `MalformedVersionTokenError` (400);
  *  - an authorization-store outage — `AuthzStoreUnavailableError` (503),
  *    raised by the dispatcher's own ADR-0069 gate when an active gate's session
- *    read fails (`enforceAuthGate`, which sits above `dispatch()`'s `try`).
+ *    read fails (`enforceAuthGate`, which sits above `dispatch()`'s `try`);
+ *  - a restricted delete — the engine's referential `restrict` (409
+ *    `DELETE_RESTRICTED`), and an unknown field filter or an unregistered
+ *    object — the protocol's list normalizer (400 `INVALID_FIELD`) and its
+ *    registry gate (404 `OBJECT_NOT_FOUND`).
  *
  * Each row reads the answer on the wire (status, `success`, nested
  * `error.code`), and the write rows also read the STORE afterwards.
@@ -96,6 +100,23 @@ const TASK = {
     },
 };
 
+/** [#23587] A parent whose delete a child's `restrict` lookup refuses. */
+const ACCOUNT = {
+    name: 'account',
+    label: 'Account',
+    fields: {
+        name: { name: 'name', type: 'text' as const, label: 'Name' },
+    },
+};
+const CONTACT = {
+    name: 'contact',
+    label: 'Contact',
+    fields: {
+        name: { name: 'name', type: 'text' as const, label: 'Name' },
+        account: { name: 'account', type: 'lookup' as const, reference: 'account', label: 'Account', deleteBehavior: 'restrict' as const },
+    },
+};
+
 const liveKernels: LiteKernel[] = [];
 afterEach(async () => {
     vi.restoreAllMocks();
@@ -132,8 +153,10 @@ async function boot(auth?: Record<string, unknown>) {
     await kernel.bootstrap();
 
     const ql = kernel.getService<ObjectQL>('objectql');
-    ql.registerObject(TASK as any);
-    await ql.syncObjectSchema('task');
+    for (const object of [TASK, ACCOUNT, CONTACT]) {
+        ql.registerObject(object as any);
+        await ql.syncObjectSchema(object.name);
+    }
 
     vi.spyOn(HttpDispatcher.prototype as any, 'timedResolveExecutionContext')
         .mockImplementation(async () => ({ ...MEMBER }));
@@ -161,7 +184,7 @@ async function boot(auth?: Record<string, unknown>) {
         return rows[0]?.name;
     };
 
-    return { send, seed, stored, protocol: kernel.getService<any>('protocol') };
+    return { ql, send, seed, stored, protocol: kernel.getService<any>('protocol') };
 }
 
 /** The ADR-0112 envelope's three load-bearing slots. */
@@ -293,6 +316,73 @@ describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries 
         const overwrite = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` } });
         expect(overwrite.status, JSON.stringify(overwrite.body)).toBe(200);
         expect(await host.stored(id)).toBeUndefined();
+    }, 60_000);
+});
+
+/**
+ * [#23587] The other structured refusals the real engine and protocol raise on
+ * this host carry `RestServer`'s fields in `error.details`, as the `409
+ * CONCURRENT_UPDATE` above carries `currentVersion`. Before this card each
+ * answered `code` and `message` only. Measured on this host at `16abea884`:
+ *
+ *     DELETE /api/v1/data/account/ID   (a contact's `restrict` lookup names it)
+ *       409 {"success":false,"error":{"code":"DELETE_RESTRICTED",
+ *            "message":"This Account is still referenced by 1 Contact record(s) through …"}}
+ *
+ * while `RestServer`'s `mapDataError` answers the same throw with
+ * `developerMessage`, `dependentObject` and `dependentCount` beside its code.
+ * The `DELETE_RESTRICTED` row compares each field with the throw the engine
+ * really raised, read off the protocol call, so the door is shown to relay the
+ * producer's values rather than to spell its own. `object` is not among them:
+ * that arm adds the ROUTE's object, and this recogniser has no route.
+ */
+describe('[#23587] a real createHonoApp host: a structured refusal carries RestServer’s fields in `error.details`', () => {
+    it('DELETE of a restricted parent: 409 DELETE_RESTRICTED with the engine’s developerMessage, dependentObject and dependentCount; the row is kept', async () => {
+        const host = await boot();
+        const account: any = await host.ql.insert('account', { name: 'acme' });
+        await host.ql.insert('contact', { name: 'ada', account: account.id });
+
+        const produced: any[] = [];
+        const deleteData = host.protocol.deleteData.bind(host.protocol);
+        vi.spyOn(host.protocol, 'deleteData').mockImplementation(async (...args: any[]) => {
+            try {
+                return await deleteData(...args);
+            } catch (thrown) {
+                produced.push(thrown);
+                throw thrown;
+            }
+        });
+
+        const answer = await host.send('DELETE', `/data/account/${account.id}`);
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'DELETE_RESTRICTED' });
+
+        // The real producer stated all three; without this the equality below
+        // could hold between two absences.
+        expect(produced).toHaveLength(1);
+        expect(typeof produced[0].developerMessage, JSON.stringify(produced[0])).toBe('string');
+        expect(answer.body.error.details, JSON.stringify(answer.body)).toEqual({
+            developerMessage: produced[0].developerMessage,
+            dependentObject: 'contact',
+            dependentCount: 1,
+        });
+        expect(answer.body.error.message).toBe(produced[0].message);
+
+        const kept: any[] = await host.ql.find('account', { where: { id: account.id } }) ?? [];
+        expect(kept).toHaveLength(1);
+    }, 60_000);
+
+    it('GET with an unknown field filter: 400 INVALID_FIELD with the field and the object it names', async () => {
+        const host = await boot();
+        const answer = await host.send('GET', '/data/task?nosuchfield=1');
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 400, success: false, code: 'INVALID_FIELD' });
+        expect(answer.body.error.details, JSON.stringify(answer.body)).toEqual({ field: 'nosuchfield', object: 'task' });
+    }, 60_000);
+
+    it('GET of an unregistered object: 404 OBJECT_NOT_FOUND with the object it names', async () => {
+        const host = await boot();
+        const answer = await host.send('GET', '/data/ghost');
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 404, success: false, code: 'OBJECT_NOT_FOUND' });
+        expect(answer.body.error.details, JSON.stringify(answer.body)).toEqual({ object: 'ghost' });
     }, 60_000);
 });
 

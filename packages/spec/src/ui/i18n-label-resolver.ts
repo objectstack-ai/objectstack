@@ -132,9 +132,9 @@
  * translation *bundle*, addressed by convention
  * (`objects.<object>._views.<view>.label`). This module resolves form **2**, the
  * map the author inlined. They compose in that order at objectui's own call
- * sites (`translateLabel(pickLocalized(label, language), language)` —
- * `packages/components/src/renderers/layout/containers.tsx:530-532`): resolve
- * the inline map first, then look the resulting string up in the bundle.
+ * sites (`translateLabel(pickLocalized(label, language), …)`; read points
+ * recorded in `liveness/page.json`, row `regions`): resolve the inline map
+ * first, then look the resulting string up in the bundle.
  */
 
 import type { I18nLabel } from './i18n.zod';

@@ -452,12 +452,11 @@ export function normalizeFilterOperator(op: unknown): string {
 // console's row builders create the same problem from the other side, and this
 // is that function's write-path twin.
 //
-// The producer is a React list key, not a protocol decision: the filter builder
-// (`components/src/custom/filter-builder.tsx:228`, re-stamped on read-back at
-// `plugin-view/src/config/view-config-utils.ts:146`/`:160`) and the sort builder
-// (`components/src/custom/sort-builder.tsx:68`/`:94`) both stamp
-// `id: crypto.randomUUID()` on every row they render, so those ids reach the
-// wire. [#20051] They no longer reach the store: `saveMetaItem` stores the
+// The producer is a React list key, not a protocol decision: the console's
+// filter builder and sort builder both stamp `id: crypto.randomUUID()` on every
+// row they render, and again on a stored row read back into them (read points
+// recorded in `liveness/view.json`, rows `list.filter` and `list.sort`), so
+// those ids reach the wire. [#20051] They no longer reach the store: `saveMetaItem` stores the
 // parsed value of every key a body carries, and the ids are removed before the
 // parse.
 //
@@ -961,10 +960,9 @@ function foldAuthoredViewFilterOperator(op: ViewFilterOperator): string {
  * this split; that hotfix is now retired rather than left standing.
  *
  * **Why the reopen was needed, and why it no longer is.** The filter builder
- * objectui renders stamps `id: crypto.randomUUID()` on every row it creates
- * (`components/src/custom/filter-builder.tsx:228`; stamped again when a stored
- * filter is read back into the builder —
- * `plugin-view/src/config/view-config-utils.ts:146`/`:160`). `saveMetaItem`
+ * objectui renders stamps `id: crypto.randomUUID()` on every row it creates,
+ * and again when a stored filter is read back into the builder (read points
+ * recorded in `liveness/view.json`, row `list.filter`). `saveMetaItem`
  * validated the PUT body and then persisted the AUTHORED body verbatim (until
  * #20051), so that `id` was on the wire and in the store. Closed *without* a wire route, this
  * shape turned every filter write carrying one into a 422 — measured on all
@@ -1698,8 +1696,8 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * ## Why it could not just be closed (the 批 18 blocker)
  *
  * objectui's renderer reads `config.allowAddTab` and renders an "add tab"
- * affordance from it (`packages/plugin-list/src/UserFilters.tsx:182` and
- * `:742`); its own `UserFiltersSchema` declared the key. The spec's did not —
+ * affordance from it (read points recorded in `liveness/view.json`, row
+ * `list.userFilters`); its own `UserFiltersSchema` declared the key. The spec's did not —
  * and the difference between the two shapes was *exactly* that one key.
  *
  * That gap was not inert, because the metadata write path did NOT persist
@@ -2799,9 +2797,9 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    * What made the first attempt a regression: `view-metadata-schema.test.ts`
    * pins `sort: [{ id, field, order }]` as *"the exact shape
    * normalizeViewMetadata persists on a console column-sort PUT"*, and `id` is
-   * a UI row identity objectui stamps per row
-   * (`components/src/custom/sort-builder.tsx:68`, `:94` —
-   * `crypto.randomUUID()`), persisted verbatim because `saveMetaItem` stored the
+   * a UI row identity objectui's sort builder stamps per row
+   * (`crypto.randomUUID()`; read points recorded in `liveness/view.json`, row
+   * `list.sort`), persisted verbatim because `saveMetaItem` stored the
    * original body (until #20051). **`.strip()` on a wire member could not rescue it** — it
    * re-opens the TOP level only, and this is a nested block reached through that
    * member. See {@link stripViewConsoleDecorations}, which removes the

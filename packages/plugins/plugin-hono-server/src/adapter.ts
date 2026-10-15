@@ -293,13 +293,15 @@ function toLoggableError(thrown: unknown): Error {
  * disagreeing about what counts as declared. Each caller keeps its own
  * fallback arm for the `undefined` answer.
  *
- * ## A conflict's current state (#23531)
+ * ## A structured refusal's context (#23531, #23587)
  *
- * A `409 CONCURRENT_UPDATE` also carries the server's `currentVersion` in
- * `details`, read off `RestServer`'s classification by
- * {@link declaredConflictContext}. Before this, both Hono doors answered that
- * `409` with `code` and `message` only. `currentRecord` is held back for now
- * (#23586); that helper's docblock says why.
+ * A refusal `RestServer`'s classification answers with structured fields
+ * (`409 CONCURRENT_UPDATE`'s `currentVersion`, `409 DELETE_RESTRICTED`'s
+ * `developerMessage` / `dependentObject` / `dependentCount`, …) also carries
+ * them here, in `details`, read off that classification by
+ * {@link declaredArmContext}. Before this, both Hono doors answered those
+ * refusals with `code` and `message` only. `currentRecord` is held back for
+ * now (#23586); that helper's docblock says why.
  */
 export function declaredEnvelopeForThrow(thrown: unknown): {
     status: number;
@@ -327,10 +329,11 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
         ? INTERNAL_ERROR_MESSAGE
         : resolved.message;
 
-    // [#23531] A conflict's current state joins the producer's own context in
-    // `details`. Absent unless the conflict stated it.
-    const conflict = declaredConflictContext(thrown, resolved);
-    const details = conflict ? { ...resolved.details, ...conflict } : resolved.details;
+    // [#23531, #23587] The structured context `RestServer`'s classification
+    // states for this refusal joins the producer's own context in `details`.
+    // Absent unless the producer stated it.
+    const armContext = declaredArmContext(thrown, resolved);
+    const details = armContext ? { ...resolved.details, ...armContext } : resolved.details;
 
     return {
         status: resolved.status,
@@ -352,30 +355,40 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
 }
 
 /**
- * [#23531] The current state a `409 CONCURRENT_UPDATE` carries —
- * `currentVersion` — or `undefined` for any other answer, and for a conflict
- * that stated none.
+ * [#23531, #23587] The structured context `RestServer`'s classification states
+ * for this refusal, or `undefined` when no arm of it answers the envelope
+ * already decided, and when the arm states none.
  *
  * ## Why
  *
- * `wire-format.mdx` ("Concurrent Update — 409 Conflict") and
- * `ConcurrentUpdateError`'s docblock (`metadata-protocol`) say the conflict
- * answer carries the server's current version and record, and objectui's
- * conflict bar reads both. `RestServer` answers them. The two Hono doors did
- * not: {@link declaredEnvelopeForThrow} forwards only the `details` that
- * `resolveThrownHttpError` derives, and the two fields are own properties of
- * the thrown error that resolver never reads.
+ * `structuredCodeAnswer` (`@objectstack/types`) is the classification BOTH
+ * REST doors ask first, so that a refusal's structured fields survive their
+ * generic catch-alls: a `409 CONCURRENT_UPDATE` carries the server's
+ * `currentVersion`, a `409 DELETE_RESTRICTED` the engine's `developerMessage`,
+ * `dependentObject` and `dependentCount`, a `400 INVALID_FIELD` the `field`
+ * and `object` it names, and so on. The two Hono doors answered those refusals
+ * with `code` and `message` only: {@link declaredEnvelopeForThrow} forwards
+ * only the `details` that `resolveThrownHttpError` derives, and these fields
+ * are own properties of the thrown error that resolver never reads.
  *
  * ## ONE classification, not a third spelling
  *
- * The fields are read off `structuredCodeAnswer` (`@objectstack/types`), the
- * arm `RestServer`'s `mapDataError` answers this conflict through. So the
- * Hono doors forward what the REST door forwards, under the same rule (each
- * field only when the producer stated it), and an arm that grows a field grows
- * it at every door. ⛔ Never list the fields here. The arm's own sentence and
- * code are dropped because this envelope already carries both, as `message`
- * and `code`. `currentRecord` is the ONE field named here, and it is named
- * only to hold it back (the ⚠️ paragraph below says why).
+ * The fields are read off the arm `RestServer`'s `mapDataError` answers the
+ * same throw through. So the Hono doors forward what the REST door forwards,
+ * under the same rule (each field only when the producer stated it), and an
+ * arm that grows a field grows it at every door. ⛔ Never list the fields or
+ * the codes here. The arm's own sentence and code are dropped because this
+ * envelope already carries both, as `message` and `code`. `currentRecord` is
+ * the ONE field named here, and it is named only to hold it back (the ⚠️
+ * paragraph below says why).
+ *
+ * ## The arm must agree with the envelope
+ *
+ * Both the status and the code must match the envelope already decided, so
+ * an arm can only add context to that envelope, never change it. An arm that
+ * answers a different code is not consulted: `DuplicateRecordError`'s arm
+ * answers `UNIQUE_VIOLATION` where this door answers the producer's own
+ * registered `DUPLICATE_RECORD`, so none of that arm's fields ride here.
  *
  * ## Where they land
  *
@@ -383,31 +396,39 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
  * (`ApiErrorSchema.details`). That is where `@objectstack/client` reads a
  * wrapped body's context from (`errorBody.error.details`), and so where
  * objectui's `normaliseClientError` finds them. The REST door's flat body has
- * no envelope, so it carries them at the top level, beside its `code`.
+ * no envelope, so it carries them at the top level, beside its `code`. A
+ * validation failure's `fields` is the one key both halves state, and it is
+ * the same array (`validationFailureDetails` and the arm read it alike).
  *
- * ## Only this code
+ * ## What this function cannot add: the ROUTE's object
  *
- * The card scoped the change to `CONCURRENT_UPDATE`. The classification has
- * other structured arms (`DELETE_RESTRICTED`, `METADATA_CONFLICT`, …); this
- * function does not take their fields. Both the status and the code must
- * match the envelope already decided, so the arm can only add context to that
- * envelope, never change it.
+ * Several arms add `object` only from the object the ROUTE named
+ * (`DELETE_RESTRICTED`, `CONCURRENT_UPDATE`, `METADATA_CONFLICT`). This
+ * function has no route, so the arm is asked without one, and those answers
+ * carry no `object`; the caller named that object in its own URL. ⛔ It is not
+ * substituted from the error's own `object`: a cascade's restrict names the
+ * child it was deleting, not the object the route addressed, so that would be
+ * a different answer from the REST door's. Arms that take the error's own
+ * `object` (`INVALID_FIELD`, `OBJECT_NOT_FOUND`, the 403 access arms) carry it
+ * here as they do there.
  *
  * ⚠️ `currentRecord` is HELD here: these doors do not forward it, though the
  * REST door does. The protocol reads that row with a system context
  * (`probeRecord`), and the OCC check throws it before the caller's write
  * policy runs, so it is not narrowed to what the caller may read. It may carry
  * a row, or fields, that row- or field-level security hides from the caller.
- * Forwarding it would widen that possible disclosure to two more doors. A
- * version token carries no row data, so `currentVersion` is forwarded. The
+ * Forwarding it would widen that possible disclosure to two more doors. The
  * record waits for the producer's answer (#23586), and the exclusion is lifted
- * when that lands.
+ * when that lands. Every other field an arm carries today is a version token,
+ * an API name, the caller's own input, or a count the producer has already
+ * narrowed to what the caller may read (`dependentCountIsDisclosable` in
+ * `@objectstack/objectql`); none is row data read with a system context. An
+ * arm that grows such a field must be held here by name, as this one is.
  */
-function declaredConflictContext(
+function declaredArmContext(
     thrown: unknown,
     resolved: { status: number; code: string },
 ): Record<string, unknown> | undefined {
-    if (resolved.code !== 'CONCURRENT_UPDATE') return undefined;
     const arm = structuredCodeAnswer(thrown);
     if (arm === undefined || arm.status !== resolved.status || arm.body.code !== resolved.code) {
         return undefined;
