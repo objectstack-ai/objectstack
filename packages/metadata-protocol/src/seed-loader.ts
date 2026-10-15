@@ -1835,6 +1835,19 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (internalId) entry.internalId = internalId;
     }
 
+    // [#23354] The same map, published: the rows this dataset landed on. Every
+    // write site records through `noteLanded` — an insert, an update, and a key
+    // matched on a replay and skipped — so a replay reports the rows an earlier
+    // load wrote, and the seed-ownership claim (ADR-0138 D1) can hand over
+    // exactly the seed's rows without a second copy of the key and reference
+    // rules above. Record order, each id once: two records can resolve to one
+    // row. A dry run never calls `noteLanded`, so it reports none.
+    const landedIds = [...new Set(
+      [...internalIdByRecordIndex.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, id]) => id),
+    )];
+
     return {
       object: objectName,
       mode,
@@ -1847,6 +1860,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       referencesDeferred,
       referencesDropped,
       summariesStale: this.summariesStale - summariesStaleAtStart,
+      landedIds,
       errors,
     };
   }

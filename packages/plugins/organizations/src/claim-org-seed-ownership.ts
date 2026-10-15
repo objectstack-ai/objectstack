@@ -20,6 +20,25 @@
  * touches another tenant's rows. Idempotent: only NULL-owned rows are updated.
  * `managedBy` and `sys_*` tables are skipped.
  *
+ * ## [#23354] Only the rows the org's seed replay wrote (ADR-0138 D1)
+ *
+ * A NULL owner is not a seed row's mark: a guest-written row and a public
+ * form's intake keep no owner on purpose (ADR-0138 D1 item 5), and no stored
+ * column tells them apart. So this re-owns a NULL-owner row only when the
+ * organization's per-org seed replay reported landing on it — the
+ * `seed-settlement` contract's `seededRecordIds(object, organizationId)`, bound
+ * by the caller ({@link ClaimOwnershipOptions.seededRecordIds}): the predicate
+ * is `organization_id = org AND owner_id IS NULL AND id IN (seeded ids)`, one
+ * per chunk of {@link CLAIM_PAGE_ROWS} ids. It is the selector its single-tenant
+ * twin `claimSeedOwnership` takes. Without a reading it re-owns nothing.
+ *
+ * The reading covers the replay that ran in THIS process, and the host keeps
+ * only the most recent one. That is the shape of the call: the owner bind runs
+ * in the same call that created the organization, right after its replay. An
+ * organization that existed before this process (a bind retried on a later
+ * boot) has no reading, and its NULL-owner rows keep no owner — the record's
+ * empty state, never a guest's row handed over.
+ *
  * ## [#23008] The claim dispatches no automation
  *
  * Re-owning a seed row is attribution, the step that completes the seed, not a
@@ -52,11 +71,12 @@
  * `skipAutomations` onto every per-row context of a predicate write):
  *
  *  - **One predicate write for the whole set.** `owner_id = ownerUserId` where
- *    `{ organization_id: organizationId, owner_id: null }`, as `multi: true`.
- *    The predicate is the claim's whole selection rule, so the write matches
- *    exactly the rows the old read selected, without the read and without a
- *    cap. That is the path every organization small enough for it takes, and
- *    it issues no read at all.
+ *    `{ organization_id: organizationId, owner_id: null, id: { $in: chunk } }`,
+ *    as `multi: true` — one write per chunk of {@link CLAIM_PAGE_ROWS} seeded
+ *    ids (#23354; see "Only the rows the org's seed replay wrote" above). The
+ *    predicate is the claim's whole selection rule, so the write matches
+ *    exactly the rows it selects, without a read and without a cap. That is the
+ *    path every organization takes in practice, and it issues no read at all.
  *  - **A page off the top when the engine refuses that write.** A predicate
  *    write fires `beforeUpdate`/`afterUpdate` per matched row (ADR-0058,
  *    bulk-write addendum D6), and above {@link MAX_BULK_PER_ROW_HOOK_ROWS}
@@ -68,8 +88,9 @@
  *    ({@link CLAIM_PAGE_ROWS}) and re-owning that page, then trying the whole
  *    set again; each page shrinks what is left until one write carries it.
  *
- * The page write keeps the whole predicate and ANDs `id IN (page)` onto it,
- * rather than writing the page by id alone as the twin does: between the page
+ * The page write keeps the whole predicate and narrows its `id IN` to the page
+ * (a subset of the chunk the page was read under), rather than writing the
+ * page by id alone as the twin does: between the page
  * read and its write a row can be claimed by someone else, and this function's
  * two promises are "only owner-less rows" and "only this organization's rows".
  * A page write narrowed to nothing by that race re-owns 0 rows, which stops the
@@ -94,6 +115,14 @@ interface ClaimOwnershipOptions {
     info: (message: string, meta?: Record<string, any>) => void;
     warn: (message: string, meta?: Record<string, any>) => void;
   };
+  /**
+   * [#23354] The ids of the rows this organization's seed replay landed on,
+   * per object — the `seed-settlement` contract's `seededRecordIds`, already
+   * bound to the organization by the caller. It is this claim's whole
+   * selection: a NULL-owner row it does not name keeps no owner (ADR-0138 D1).
+   * `undefined` means no host publishes a reading, and nothing is re-owned.
+   */
+  seededRecordIds?: ((objectName: string) => readonly string[]) | undefined;
 }
 
 /**
@@ -194,8 +223,8 @@ function idsFrom(rows: unknown): string[] {
 interface ObjectClaimIo {
   /** Re-own every row `where` matches, under {@link CLAIM_WRITE_CTX}; resolves the affected-row count. */
   reown: (where: Record<string, unknown>) => Promise<unknown>;
-  /** At most one page of ids the claim's predicate still matches. */
-  readPage: () => Promise<unknown>;
+  /** At most one page of ids the claim's predicate `where` still matches. */
+  readPage: (where: Record<string, unknown>) => Promise<unknown>;
 }
 
 /**
@@ -234,7 +263,7 @@ async function claimUnowned(
       }
 
       // Refused whole: more rows than one write may fan per-row hooks over.
-      const ids = idsFrom(await io.readPage());
+      const ids = idsFrom(await io.readPage(unowned));
       if (ids.length === 0) {
         logger?.warn?.(
           `[org-scoping] claimOrgSeedOwnership could not page ${objectName} in org ${organizationId}: the write ` +
@@ -296,9 +325,10 @@ function hasField(schema: ServiceObject, field: string): boolean {
  *   (a) are not `managedBy` (skip sys_/auth/platform tables),
  *   (b) are not `sys_*`-namespaced,
  *   (c) declare BOTH `owner_id` and `organization_id`,
- * and re-owns the org's unowned rows as `isSystem` with `skipAutomations`, in
- * one predicate write per object, paging that write only when the engine
- * refuses it for its per-row hook budget, until no owner-less row is left.
+ *   (d) have rows the org's seed replay landed on ({@link ClaimOwnershipOptions.seededRecordIds}),
+ * and re-owns the org's unowned seeded rows as `isSystem` with
+ * `skipAutomations`, in one predicate write per chunk of seeded ids, paging
+ * that write only when the engine refuses it for its per-row hook budget.
  * Returns a per-object summary whose `count` is the sum of every write's
  * affected-row count.
  */
@@ -319,6 +349,18 @@ export async function claimOrgSeedOwnership(
 
   const schemas: ServiceObject[] = registry.getAllObjects();
   const results: { object: string; count: number }[] = [];
+  const seededRecordIds = options.seededRecordIds;
+  if (typeof seededRecordIds !== 'function') {
+    // Said once, because "handed 0" and "could not name the seed's rows" are
+    // different facts and only the first is silent.
+    logger?.info?.(
+      `[org-scoping] claimOrgSeedOwnership handed no row of org ${organizationId} to owner ${ownerUserId}: ` +
+        'no seed host on this kernel publishes the rows its replay landed on, and an unowned row this ' +
+        'claim cannot name as seeded keeps no owner (ADR-0138 D1)',
+      { organizationId },
+    );
+    return results;
+  }
 
   for (const schema of schemas) {
     if (!schema?.name) continue;
@@ -326,24 +368,33 @@ export async function claimOrgSeedOwnership(
     if (schema.name.startsWith('sys_')) continue;
     // Both columns are required: owner_id to assign, organization_id to scope.
     if (!hasField(schema, 'owner_id') || !hasField(schema, 'organization_id')) continue;
+    const seededIds = seededRecordIds(schema.name);
+    if (seededIds.length === 0) continue;
 
     // Bound HERE, where `schema.name` is a literal argument at the call site;
     // see {@link ObjectClaimIo}.
-    const unowned = { organization_id: organizationId, owner_id: null };
     const io: ObjectClaimIo = {
       reown: (where) => ql.update(
         schema.name,
         { owner_id: ownerUserId },
         { where, multi: true, context: CLAIM_WRITE_CTX },
       ),
-      readPage: () => ql.find(
+      readPage: (where) => ql.find(
         schema.name,
-        { where: unowned, limit: CLAIM_PAGE_ROWS, fields: ['id'] },
+        { where, limit: CLAIM_PAGE_ROWS, fields: ['id'] },
         { context: SYSTEM_CTX },
       ),
     };
 
-    const updated = await claimUnowned(io, schema.name, organizationId, unowned, logger);
+    let updated = 0;
+    for (let at = 0; at < seededIds.length; at += CLAIM_PAGE_ROWS) {
+      const unowned = {
+        organization_id: organizationId,
+        owner_id: null,
+        id: { $in: seededIds.slice(at, at + CLAIM_PAGE_ROWS) },
+      };
+      updated += await claimUnowned(io, schema.name, organizationId, unowned, logger);
+    }
     if (updated > 0) results.push({ object: schema.name, count: updated });
   }
 

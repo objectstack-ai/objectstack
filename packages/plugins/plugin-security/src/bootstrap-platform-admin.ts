@@ -234,6 +234,16 @@ interface BootstrapOptions {
    * which the claim reports as `unattested` rather than guessing.
    */
   seedSettlement?: SeedSettlementSnapshot | undefined;
+  /**
+   * [#23354] The rows this process's boot seed landed on, per object — the
+   * `seed-settlement` contract's `seededRecordIds`, bound by the caller.
+   *
+   * Handed straight to {@link claimSeedOwnership} and used for nothing else: it
+   * is the claim's NULL-arm selection, so the promotion hands over the seed's
+   * unowned rows and leaves a guest's or a form's as their writer left them
+   * (ADR-0138 D1). Absent, the claim re-owns no NULL-owner row and says so.
+   */
+  seededRecordIds?: ((objectName: string) => readonly string[]) | undefined;
 }
 
 const SYSTEM_CTX = { isSystem: true };
@@ -1031,8 +1041,9 @@ export async function bootstrapPlatformAdmin(
       { basis: audit.basis, candidatePoolSize: audit.candidatePoolSize, userId: String(chosen.id) },
     );
 
-    // Hand seeded business records (owner_id NULL / usr_system) to the freshly
-    // promoted admin so owner-keyed UX works out of the box. Best-effort and
+    // Hand seeded business records (the seed's NULL-owner rows, and usr_system
+    // rows) to the freshly promoted admin so owner-keyed UX works out of the
+    // box — and no other unowned row (ADR-0138 D1). Best-effort and
     // idempotent — failures here must not undo the promotion above.
     //
     // ⚠️ This pass is NOT the last word, and does not pretend to be. The
@@ -1046,6 +1057,7 @@ export async function bootstrapPlatformAdmin(
       const claims = await claimSeedOwnership(ql, chosen.id, {
         logger,
         seedSettlement: options.seedSettlement,
+        seededRecordIds: options.seededRecordIds,
       });
       ownershipClaimed = claims.reduce((sum, c) => sum + c.count, 0);
     } catch (e) {
