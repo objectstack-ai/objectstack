@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — spawns the real producer once per single-cause fixture: five production boots of the built CLI (refusal, line, a driver-providing plugin, OS_DATABASE_URL, --dev), each fixture differing only in the input under test; 23.6 s measured locally on a shared container x 1.25, no CI reading yet
+// test-budget: 40 — spawns the real producer once per single-cause fixture: five production boots of the built CLI (refusal, line, a driver-providing plugin, OS_DATABASE_URL, --dev), each fixture differing only in the input under test; 24.4 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
