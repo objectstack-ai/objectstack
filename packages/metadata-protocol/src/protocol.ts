@@ -19312,10 +19312,26 @@ export class ObjectStackProtocolImplementation implements
      * | `P` empty / absent | `own`, unchanged — a direct save naming no package is addressed to `R`'s row before this runs ({@link packagelessAddress}). |
      * | `P == Q`, some other package | **mismatch** — refused loudly, the code owner's refusal and prescription. |
      *
-     * Only an owner bound to a real package is judged here. An owner keyed by
-     * the `'sys_metadata'` sentinel (a package-less runtime object) or by no
-     * package at all is left to today's `own` verdict: it names no package the
-     * prescription could direct a save to.
+     * ## [#23514] …and against an owner keyed by the `'sys_metadata'` sentinel
+     *
+     * A runtime object first saved naming no package is owned by that
+     * package-less row, keyed by the sentinel. A save naming package `Q` beside
+     * it was classified `own` and written, and the write-through's
+     * `registerObject(…, Q, …, 'own')` met the registry's single-owner rule and
+     * landed in the best-effort warn: the save answered `200`, the metadata
+     * read served `Q`'s row, and the registry and the data plane kept the
+     * package-less definition, before and after a boot. So the sentinel owner
+     * takes the same `mismatch` verdict, with the sentinel as `ownerPackageId`;
+     * {@link overlayPackageMismatchError} gives it its own prescription, since
+     * "bind it to `'sys_metadata'`" names no package (ADR-0070 TL;DR 1: the
+     * package-less state is no authoring destination).
+     *
+     * | case | verdict |
+     * |:--|:--|
+     * | `P` empty / absent | `own`, unchanged — the package-less row's own re-save. |
+     * | `P == Q`, any package | **mismatch** — refused loudly, with the move-into-a-package prescription. |
+     *
+     * An object with no owner at all is left to the `own` verdict.
      *
      * Falls back to `'own'` — today's behaviour — for a registry that does not
      * offer the discriminator, so a duck-typed engine double is never made to
@@ -19341,11 +19357,11 @@ export class ObjectStackProtocolImplementation implements
                 ? registry.getObjectOwner(name)
                 : undefined;
             const runtimeOwnerPackageId: unknown = runtimeOwner?.packageId;
+            // [#23514] The `'sys_metadata'` sentinel owner is judged too: see the header.
             if (
                 binding !== ''
                 && typeof runtimeOwnerPackageId === 'string'
                 && runtimeOwnerPackageId !== ''
-                && runtimeOwnerPackageId !== 'sys_metadata'
                 && binding !== runtimeOwnerPackageId
             ) {
                 return { kind: 'mismatch', packageId: binding, ownerPackageId: runtimeOwnerPackageId };
@@ -19374,6 +19390,11 @@ export class ObjectStackProtocolImplementation implements
     private static overlayPackageMismatchError(
         name: string, rowPackageId: string, ownerPackageId: string,
     ): Error {
+        // [#23514] An owner keyed by the sentinel is owned by no package, so
+        // this prescription's "bind it to the owner" has nothing to name.
+        if (ownerPackageId === 'sys_metadata') {
+            return ObjectStackProtocolImplementation.unboundOwnerPackageRefusal(name, rowPackageId);
+        }
         const err: any = new Error(
             `Cannot layer object '${name}': the overlay is bound to package `
             + `'${rowPackageId}', but the object is owned by package '${ownerPackageId}'. `
@@ -19385,6 +19406,46 @@ export class ObjectStackProtocolImplementation implements
         err.status = 422;
         err.packageId = rowPackageId;
         err.ownerPackageId = ownerPackageId;
+        err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
+        return err;
+    }
+
+    /**
+     * [#23514, ADR-0029 D9.9, ADR-0070 TL;DR 1] The D9.9 refusal for an object
+     * whose owner is its package-less definition (the `'sys_metadata'`
+     * sentinel), so no package owns it: a save naming package `Q` would store a
+     * second definition the one registry entry never serves.
+     *
+     * The prescription names the measured way out, which moves the object into
+     * `Q` and keeps its table and records: delete the package-less definition
+     * WITHOUT `dropStorage` (the delete door's default, which keeps the table),
+     * then save naming `Q`. That save registers `Q`'s row as the owner, and a
+     * boot hydrates it as the owner. Walked on a real kernel and through
+     * `RestServer`'s `DELETE` and `PUT` doors on a SQLite store, across a boot,
+     * with no table dropped and every record served. ⛔ Not ADR-0070 D5's
+     * `POST /api/v1/packages/:id/adopt-orphans`: it rebinds an object's row in
+     * storage only, so the registry keeps the sentinel owner until the next
+     * boot and a save naming `Q` in between meets this refusal again.
+     *
+     * The code is D9.9's, not a new one: the ledger's meaning (a row bound to a
+     * package that does not own the object) holds, and the caller's branch is
+     * the same one; only the way out differs, and the message carries it. The
+     * prescription first: a 4xx message crosses the REST boundary bounded at
+     * 500 characters with its tail truncated.
+     */
+    private static unboundOwnerPackageRefusal(name: string, rowPackageId: string): Error {
+        const err: any = new Error(
+            `Move object '${name}' into package '${rowPackageId}' first: delete its package-less definition `
+            + 'without dropStorage, which keeps its table and records (REST: DELETE '
+            + `/api/v1/meta/object/${name} with no package parameter; in process: deleteMetaItem without `
+            + 'packageId), then send this save again. Nothing was written: the object is held by a definition '
+            + `bound to no package, and an object has one registry entry, so a definition bound to `
+            + `'${rowPackageId}' would never be served.`,
+        );
+        err.code = 'OBJECT_OVERLAY_PACKAGE_MISMATCH';
+        err.status = 422;
+        err.packageId = rowPackageId;
+        err.ownerPackageId = null;
         err.docs = 'docs/adr/0029-kernel-object-ownership-and-platform-objects-decomposition.md';
         return err;
     }
@@ -22161,6 +22222,11 @@ export class ObjectStackProtocolImplementation implements
         // runtime had discarded (#6995, the silent write-side divergence).
         // The receipt and the registry now agree because the write never
         // happens: this precedes `ensureOverlayIndex` and every `put`.
+        //
+        // [#23514] The same holds for an object its package-less definition
+        // owns (the `'sys_metadata'` sentinel): a save naming a package beside
+        // it is refused here, with the move-into-a-package prescription
+        // ({@link unboundOwnerPackageRefusal}).
         if (singularType === 'object') {
             const layer = this.classifyObjectContribution(request.name, request.packageId);
             if (layer.kind === 'mismatch') {
