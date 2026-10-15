@@ -67,6 +67,8 @@ export interface SqliteWasmDriverConfig {
 export class SqliteWasmDriver extends SqlDriver {
   public override readonly name: string = 'com.objectstack.driver.sqlite-wasm';
   public override readonly version: string = '1.0.0';
+  /** [ADR-0139 D3] The inherited `ReadableIds` compile and refusal name this package. */
+  protected override readonly readableIdsDriverName: string = 'driver-sqlite-wasm';
 
   /**
    * Force the SQLite branch in {@link SqlDriver}. The base class detects

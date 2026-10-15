@@ -5706,6 +5706,12 @@ export class SqlDriver implements IDataDriver {
   protected tenantAuditWarned: Set<string> = new Set();
   /** [ADR-0139 D3] Whether this instance has logged its `ReadableIds` refusal (once per driver). */
   protected readonly readableIdsRefusalLog = { logged: false };
+  /**
+   * [ADR-0139 D3] The driver its `ReadableIds` refusal names — the package a
+   * subclass that inherits this compiler ships in (`driver-sqlite-wasm`,
+   * `driver-turso`), so the operator reading the line looks in the right place.
+   */
+  protected readonly readableIdsDriverName: string = 'driver-sql';
 
   /**
    * Optional logger sink for security-audit warnings. Tests inject a spy;
@@ -16725,7 +16731,7 @@ export class SqlDriver implements IDataDriver {
     // refused before anything compiles: INTERNAL_ERROR / 500, logged at
     // `error` once per driver. ⛔ Never evaluated as "no restriction".
     const misplaced = findMisplacedReadableIds(filters, true);
-    if (misplaced) throw refuseReadableIdsOnce('driver-sql', misplaced, this.logger, this.readableIdsRefusalLog);
+    if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
     try {
       this.compileFilters(builder, filters, options);
     } catch (err) {

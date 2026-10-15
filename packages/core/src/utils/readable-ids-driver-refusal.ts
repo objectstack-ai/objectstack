@@ -37,7 +37,13 @@
  * so there is nothing for the engine to read.
  */
 
-import { isComposedReadableIds, isReadableIds } from '@objectstack/spec/data';
+import {
+  filterSubtreeProvenanceOf,
+  isComposedReadableIds,
+  isReadableIds,
+  markFilterSubtreeProvenance,
+  type ComposedReadableIds,
+} from '@objectstack/spec/data';
 
 /** Where a leaf a driver will not evaluate sits, and which one it is. */
 export interface MisplacedReadableIds {
@@ -107,6 +113,55 @@ export function findMisplacedReadableIds(
   return visit(where, path, false);
 }
 
+/**
+ * `where` with the comparand of every composed `$in` leaf replaced by
+ * `answer(leaf)`, copy-on-write: a subtree holding no leaf is returned by
+ * reference, the caller's tree is never edited (the leaf is frozen, and the
+ * hooks' AST is the caller's), and a rewritten node carries the
+ * filter-subtree provenance mark of the node it replaces, so a refusal raised
+ * inside it resolves to the same author / policy attribution it did before.
+ *
+ * Asked only after {@link findMisplacedReadableIds} answered `null` for the
+ * same `where`, so every composed leaf the walk meets sits in a `$in`.
+ * For a driver that evaluates the leaf by rewriting it — `driver-memory`
+ * into the readable id list, Turso's remote face into its resolved semi-join.
+ */
+export function replaceComposedReadableIds<T>(where: T, answer: (leaf: ComposedReadableIds) => unknown): T {
+  const onPath = new Set<object>();
+  const rewrite = (value: unknown): unknown => {
+    if (value === null || typeof value !== 'object' || isComposedReadableIds(value)) return value;
+    if (onPath.has(value)) return value;
+    const isArray = Array.isArray(value);
+    if (!isArray) {
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) return value;
+    }
+    onPath.add(value);
+    try {
+      if (isArray) {
+        let out: unknown[] | undefined;
+        (value as unknown[]).forEach((item, i) => {
+          const next = rewrite(item);
+          if (next !== item) (out ??= [...(value as unknown[])])[i] = next;
+        });
+        return out ?? value;
+      }
+      let out: Record<string, unknown> | undefined;
+      for (const key of Object.keys(value)) {
+        const item = (value as Record<string, unknown>)[key];
+        const next = key === '$in' && isComposedReadableIds(item) ? answer(item) : rewrite(item);
+        if (next !== item) (out ??= { ...(value as Record<string, unknown>) })[key] = next;
+      }
+      if (out === undefined) return value;
+      const mark = filterSubtreeProvenanceOf(value);
+      return mark === null ? out : markFilterSubtreeProvenance(out, mark);
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  return rewrite(where) as T;
+}
+
 /** The ADR-0112 envelope of the refusal: a composition fault, never `INVALID_FILTER`. */
 export type ReadableIdsDriverRefusalError = Error & {
   code: 'INTERNAL_ERROR';
@@ -119,7 +174,12 @@ export type ReadableIdsDriverRefusalError = Error & {
  * `driver-sql`). The message names the driver, the leaf and the remedy; the
  * read was not run.
  */
-export function readableIdsDriverRefusal(driver: string, site: MisplacedReadableIds): ReadableIdsDriverRefusalError {
+export function readableIdsDriverRefusal(
+  driver: string,
+  site: MisplacedReadableIds,
+  // Why this driver does not compile the composed leaf — read for `unsupported` only.
+  unsupportedReason = 'no pipeline form of the tenant-walled semi-join is measured for this driver yet',
+): ReadableIdsDriverRefusalError {
   const leaf = `${site.at} holds a ReadableIds leaf, "the ids of '${site.object}' this caller may read"`;
   let message: string;
   switch (site.kind) {
@@ -138,8 +198,8 @@ export function readableIdsDriverRefusal(driver: string, site: MisplacedReadable
       break;
     case 'unsupported':
       message =
-        `[${driver}] ${leaf}, composed, and ${driver} does not compile it: no pipeline form of the ` +
-        'tenant-walled semi-join is measured for this driver yet. The query was NOT run, rather than ' +
+        `[${driver}] ${leaf}, composed, and ${driver} does not compile it: ${unsupportedReason}. ` +
+        'The query was NOT run, rather than ' +
         'answer a short or an unscoped list. Bind the object and its parent to a SQL-family or memory ' +
         'datasource, or read this object through its bounded probe, chosen before the leaf is written.';
       break;
@@ -167,8 +227,9 @@ export function refuseReadableIdsOnce(
   site: MisplacedReadableIds,
   log: ReadableIdsRefusalLog | undefined,
   state: { logged: boolean },
+  unsupportedReason?: string,
 ): ReadableIdsDriverRefusalError {
-  const err = readableIdsDriverRefusal(driver, site);
+  const err = readableIdsDriverRefusal(driver, site, unsupportedReason);
   if (!state.logged) {
     state.logged = true;
     log?.error(`${err.message} Logged once for this driver; later refusals answer the caller the same way.`, {
