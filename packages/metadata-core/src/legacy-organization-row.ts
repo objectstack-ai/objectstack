@@ -102,8 +102,18 @@ function dialectOfName(name: string): Dialect | null {
  * The driver's dialect, `'none'` when it is not a SQL driver at all, or
  * `'unresolved'` when it is one whose dialect this read cannot name.
  * `dialectName` first: `SqliteWasmDriver`'s `config.client` is a class.
+ *
+ * Exported as the ONE resolver for every raw-SQL reader that must pick a
+ * dialect from a driver it was handed: this read, and the
+ * organization-ownership ceremony (`os migrate organization-ownership`), which
+ * refuses on anything but the three dialects instead of guessing one. A
+ * `dialectName` string is the whole answer, recognised or not; a `config.client`
+ * is read only when there is no `dialectName`, and only as a string — a client
+ * CLASS names no spelling, so it is `'unresolved'`, never a default.
  */
-function dialectOfDriver(driver: RawDriver | null | undefined): Dialect | 'none' | 'unresolved' {
+export function dialectOfDriver(
+  driver: { dialectName?: unknown; config?: { client?: unknown } } | null | undefined,
+): Dialect | 'none' | 'unresolved' {
   if (!driver) return 'none';
   if (typeof driver.dialectName === 'string') return dialectOfName(driver.dialectName) ?? 'unresolved';
   const client = driver.config?.client;
