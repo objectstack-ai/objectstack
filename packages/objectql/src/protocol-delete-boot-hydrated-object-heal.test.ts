@@ -23,9 +23,9 @@
  * same process, and a kernel with an `environmentId` (no bridge).
  *
  * The fix is in `readItemFromMetadataService`, the one read every code-layer
- * reader goes through, the heal's tier 2 included. A tenant-authored body
- * answers there as a clean miss, by the marker #21059 already reads
- * (`isTenantAuthored`). The list's merge drops such items from its base.
+ * reader goes through, the heal's tier 2 included. A tenant-authored OBJECT
+ * body answers there as a clean miss, by the marker #21059 already reads
+ * (`isTenantAuthored`). The list's merge drops such objects from its base.
  *
  * ## Why a real kernel, with `MetadataPlugin`
  *

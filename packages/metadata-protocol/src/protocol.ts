@@ -9437,30 +9437,36 @@ export class ObjectStackProtocolImplementation implements
      * failed is not made trustworthy by an alternate spelling that cleanly
      * missed.
      *
-     * ## [#23645] A tenant-authored body is not a code layer
+     * ## [#23645] A tenant-authored OBJECT body is not a code layer
      *
      * Every caller reads this as the CODE layer: the delete heal's baseline
      * ({@link restoreArtifactRegistryView}, tier 2), the by-name read's step 2,
-     * the layered read's `code` layer and the carry-forward's code layer. The
-     * service can also hold a copy of a stored row. On a kernel with no
-     * `environmentId`, ObjectQL's boot bridge (`bridgeObjectsToMetadataService`)
-     * copies every object the registry holds into the service, so every
-     * runtime object hydrated from `sys_metadata` lands there too, stamped
-     * `_provenance: 'org'`. Nothing removes that copy when the row is deleted.
-     * Measured on a real `ObjectKernel` with `MetadataPlugin` and
-     * `ObjectQLPlugin`: after `DELETE` of a boot-hydrated runtime object
-     * answered "it no longer exists", tier 2 found the copy, re-registered it
-     * and returned before tier 3's `unregisterObject`. The owner, the data
-     * plane and `getMetaItem` (step 2, the same copy) all kept serving the
-     * deleted definition until a restart. An object saved in the same process
-     * was never copied, so its delete worked.
+     * the layered read's `code` layer and the carry-forward's code layer. For
+     * an `object` the service can also hold a copy of a stored row. On a kernel
+     * with no `environmentId`, ObjectQL's boot bridge
+     * (`bridgeObjectsToMetadataService`) copies every object the registry holds
+     * into the service, so every runtime object hydrated from `sys_metadata`
+     * lands there too, stamped `_provenance: 'org'`. Nothing removes that copy
+     * when the row is deleted. Measured on a real `ObjectKernel` with
+     * `MetadataPlugin` and `ObjectQLPlugin`: after `DELETE` of a boot-hydrated
+     * runtime object answered "it no longer exists", tier 2 found the copy,
+     * re-registered it and returned before tier 3's `unregisterObject`. The
+     * owner, the data plane and `getMetaItem` (step 2, the same copy) all kept
+     * serving the deleted definition until a restart. An object saved in the
+     * same process was never copied, so its delete worked.
      *
-     * So a body stamped tenant-authored answers here as a clean miss. This is
-     * the discriminator {@link getMetaItemLayered} already applies to the
-     * registry's plain key ([#21059]): the ADR-0010 marker the hydrator writes,
-     * read through `isTenantAuthored`. ⛔ No new marker. A stored row is read
-     * from the store, never from this code-layer read. A miss here is not
+     * So an `object` body stamped tenant-authored answers here as a clean miss.
+     * This is the discriminator {@link getMetaItemLayered} already applies to
+     * the registry's plain key ([#21059]): the ADR-0010 marker the hydrator
+     * writes, read through `isTenantAuthored`. ⛔ No new marker. A stored row is
+     * read from the store, never from this code-layer read. A miss here is not
      * degraded, because the service answered.
+     *
+     * ⛔ `object` only. The security catalog's echo (`plugin-security`)
+     * registers stored `permission` and `position` rows in the service on
+     * purpose, stamped the same way. It keeps them current on every mutation,
+     * and this read serves them as the code layer by design: its own pins read
+     * the layered `code` layer as the echo.
      */
     private async readItemFromMetadataService(
         type: string,
@@ -9488,8 +9494,10 @@ export class ObjectStackProtocolImplementation implements
             } else {
                 answer = { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
             }
-            // [#23645] A stored row's copy is not a code layer. See the header.
-            return isTenantAuthored(answer.data) ? { ...answer, data: undefined } : answer;
+            // [#23645] A stored object row's copy is not a code layer. See the header.
+            return canonicalMetaType(t) === 'object' && isTenantAuthored(answer.data)
+                ? { ...answer, data: undefined }
+                : answer;
         };
 
         const primary = await read(type);
@@ -10015,11 +10023,12 @@ export class ObjectStackProtocolImplementation implements
             const metadataService = services?.get('metadata');
             if (metadataService && typeof metadataService.list === 'function') {
                 let runtimeItems = await metadataService.list(request.type);
-                // [#23645] The service's copy of a stored row is not the base
-                // this merge lays the stored rows over: the rows above already
-                // serve every live one, and a copy of a deleted one would list
-                // it until a restart. See {@link readItemFromMetadataService}.
-                if (Array.isArray(runtimeItems)) {
+                // [#23645] The service's copy of a stored object row is not the
+                // base this merge lays the stored rows over: the rows above
+                // already serve every live one, and a copy of a deleted one
+                // would list it until a restart. `object` only, as in
+                // {@link readItemFromMetadataService}.
+                if (request.type === 'object' && Array.isArray(runtimeItems)) {
                     runtimeItems = runtimeItems.filter((item: unknown) => !isTenantAuthored(item));
                 }
                 // When filtering by packageId, only include runtime items that
@@ -20509,8 +20518,8 @@ export class ObjectStackProtocolImplementation implements
      *     MetadataService baseline (FilesystemLoader-sourced types) and
      *     re-register it, preserving the historical refresh behaviour
      *     for items the SchemaRegistry never held as artifacts.
-     *     [#23645] A tenant-authored body is no baseline: on a kernel with
-     *     no `environmentId` the service holds a copy of every object
+     *     [#23645] A tenant-authored object body is no baseline: on a kernel
+     *     with no `environmentId` the service holds a copy of every object
      *     hydrated at boot, which is the deleted row itself. The read
      *     answers it as a miss ({@link readItemFromMetadataService}), so the
      *     walk reaches step 3 for a runtime object, as for one saved in the
