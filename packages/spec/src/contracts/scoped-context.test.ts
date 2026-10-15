@@ -71,6 +71,14 @@ const HOOK_ZOD = resolve(SPEC_DIR, 'src/data/hook.zod.ts');
  * `src/`, so a probe can be written the way a hook author would actually type
  * it — import line included — instead of through relative paths no reader of
  * the docs would ever use.
+ *
+ * Diagnostics are asked of each PROBE file only, never of the whole program:
+ * every assertion below reads a probe's own diagnostics, and a whole-program
+ * request type-checks the body of every `packages/spec` source file the probes
+ * reach, for diagnostics a filter then discarded. A probe's diagnostics still
+ * reflect every type it reaches (the contract members, `HookContext`); only
+ * the bodies nobody reads are skipped. `shared/retired-key-tsc-diagnostic.test.ts`
+ * asks the same way.
  */
 function compileProbes(probes: Readonly<Record<string, string>>): Map<string, ts.Diagnostic[]> {
   const dir = resolve(SPEC_DIR, 'src/__scoped_context_probes__');
@@ -107,14 +115,47 @@ function compileProbes(probes: Readonly<Record<string, string>>): Map<string, ts
 
   const program = ts.createProgram([...paths.keys()], options, host);
   const out = new Map<string, ts.Diagnostic[]>();
-  for (const name of Object.keys(probes)) out.set(name, []);
-  for (const d of ts.getPreEmitDiagnostics(program)) {
-    const file = d.file?.fileName ? resolve(d.file.fileName) : undefined;
-    for (const name of Object.keys(probes)) {
-      if (file === resolve(dir, `${name}.ts`)) out.get(name)!.push(d);
-    }
+  for (const name of Object.keys(probes)) {
+    const path = resolve(dir, `${name}.ts`);
+    const file = program.getSourceFile(path);
+    if (file === undefined) throw new Error(`probe ${name} did not enter the program`);
+    out.set(name, ts.getPreEmitDiagnostics(program, file).filter((d) => d.file !== undefined && resolve(d.file.fileName) === path));
   }
   return out;
+}
+
+/**
+ * Every probe this file compiles, by name — registered while the describe
+ * blocks below are COLLECTED, and compiled together in ONE program the first
+ * time any case reads a result.
+ *
+ * Each probe is its own module (an `import` line opens every one), so a probe
+ * cannot see another's declarations and its diagnostics do not depend on which
+ * probes share the program; what four programs did here — each re-parsing and
+ * re-checking the same `HookContext` and contract types — one program does
+ * once. A name registered twice must carry the same text (the
+ * `harness-self-test` control is shared verbatim), and a case reading a probe
+ * the program never saw fails rather than reading an empty answer.
+ */
+const REGISTERED = new Map<string, string>();
+let compiled: Map<string, ts.Diagnostic[]> | undefined;
+
+function registerProbes(probes: Readonly<Record<string, string>>): () => Map<string, ts.Diagnostic[]> {
+  for (const [name, text] of Object.entries(probes)) {
+    const prior = REGISTERED.get(name);
+    if (prior !== undefined && prior !== text) throw new Error(`probe ${name} is registered twice with different text`);
+    REGISTERED.set(name, text);
+  }
+  return () => {
+    compiled ??= compileProbes(Object.fromEntries(REGISTERED));
+    const out = new Map<string, ts.Diagnostic[]>();
+    for (const name of Object.keys(probes)) {
+      const diagnostics = compiled.get(name);
+      if (diagnostics === undefined) throw new Error(`probe ${name} was registered after the program was built`);
+      out.set(name, diagnostics);
+    }
+    return out;
+  };
 }
 
 /** One diagnostic per line, `TS<code>: <message>`, for readable assertions. */
@@ -168,13 +209,15 @@ describe('the `HookContext.api` JSDoc example compiles', () => {
     expect(example.split('\n').length).toBeGreaterThanOrEqual(3);
   });
 
+  const compile = registerProbes({
+    'jsdoc-usage': hook(example),
+    // The harness's own control: a probe that MUST fail. A resolution failure
+    // reports zero diagnostics for every probe and reads as green.
+    'harness-self-test': hook("const x: number = ctx.api?.object('user');"),
+  });
+
   it('compiles verbatim, with zero diagnostics', () => {
-    const results = compileProbes({
-      'jsdoc-usage': hook(example),
-      // The harness's own control: a probe that MUST fail. A resolution failure
-      // reports zero diagnostics for every probe and reads as green.
-      'harness-self-test': hook("const x: number = ctx.api?.object('user');"),
-    });
+    const results = compile();
     expect(render(results.get('harness-self-test')!), 'the harness must be able to report an error')
       .toContain('TS2322');
     expect(render(results.get('jsdoc-usage')!), 'the JSDoc example must compile').toBe('');
@@ -215,12 +258,13 @@ describe('every corpus-measured call compiles', () => {
     'legal-transaction-info': 'await ctx.api?.transaction(async (_tx, info) => info.owned);',
   };
 
-  it('compiles all of them clean', () => {
-    const probes: Record<string, string> = {};
-    for (const [name, body] of Object.entries(legal)) probes[name] = hook(body);
-    probes['harness-self-test'] = hook("const x: number = ctx.api?.object('user');");
+  const probes: Record<string, string> = {};
+  for (const [name, body] of Object.entries(legal)) probes[name] = hook(body);
+  probes['harness-self-test'] = hook("const x: number = ctx.api?.object('user');");
+  const compile = registerProbes(probes);
 
-    const results = compileProbes(probes);
+  it('compiles all of them clean', () => {
+    const results = compile();
     expect(render(results.get('harness-self-test')!), 'the harness must be able to report an error')
       .toContain('TS2322');
 
@@ -259,20 +303,22 @@ describe('the evidence bar is enforced, not just documented', () => {
     'rejects-top-level-insert': ["await ctx.api?.insert('task', { title: 't' });", 'IScopedContext'],
   };
 
+  const probes: Record<string, string> = {};
+  for (const [name, [body]] of Object.entries(rejected)) {
+    probes[name] = name === 'rejects-invented-member'
+      ? [
+        "import type { HookContext } from '@objectstack/spec/data';",
+        "import type { IScopedContext } from '@objectstack/spec/contracts';",
+        'export const handler = async (ctx: HookContext) => {',
+        body,
+        '};',
+      ].join('\n')
+      : hook(body);
+  }
+  const compile = registerProbes(probes);
+
   it('reports TS2339 naming the contract type — not merely "some error"', () => {
-    const probes: Record<string, string> = {};
-    for (const [name, [body]] of Object.entries(rejected)) {
-      probes[name] = name === 'rejects-invented-member'
-        ? [
-          "import type { HookContext } from '@objectstack/spec/data';",
-          "import type { IScopedContext } from '@objectstack/spec/contracts';",
-          'export const handler = async (ctx: HookContext) => {',
-          body,
-          '};',
-        ].join('\n')
-        : hook(body);
-    }
-    const results = compileProbes(probes);
+    const results = compile();
 
     for (const [name, diagnostics] of results) {
       const text = render(diagnostics);
@@ -323,24 +369,26 @@ describe('`updateById` DECLARES its answer, and the declaration is enforced', ()
    * `update` sibling's wider `Record<string, any> | number | null`, so a
    * copy-paste of the wrong sibling's shape is caught too.
    */
+  const compile = registerProbes({
+    // The whole point of the declaration: a by-id update that matched no row
+    // answers `null`, and before this the call site was handed `any` and
+    // never asked.
+    'rejects-unnarrowed-updateById':
+      hook("const row: Record<string, any> = await ctx.api!.object('task').updateById('t1', { status: 'done' });"),
+    // Anti-vacuity twin: the CORRECT spelling must still compile clean, so
+    // the narrowing is a real answer shape and not a blanket refusal.
+    'legal-updateById-null-checked': hook([
+      "const row = await ctx.api!.object('task').updateById('t1', { status: 'done' });",
+      'if (row !== null) {',
+      '  const seen: unknown = row.status;',
+      '  void seen;',
+      '}',
+    ].join('\n')),
+    'harness-self-test': hook("const x: number = ctx.api?.object('user');"),
+  });
+
   it('the answer cannot enter a record slot unnarrowed, and the null-checked read compiles', () => {
-    const results = compileProbes({
-      // The whole point of the declaration: a by-id update that matched no row
-      // answers `null`, and before this the call site was handed `any` and
-      // never asked.
-      'rejects-unnarrowed-updateById':
-        hook("const row: Record<string, any> = await ctx.api!.object('task').updateById('t1', { status: 'done' });"),
-      // Anti-vacuity twin: the CORRECT spelling must still compile clean, so
-      // the narrowing is a real answer shape and not a blanket refusal.
-      'legal-updateById-null-checked': hook([
-        "const row = await ctx.api!.object('task').updateById('t1', { status: 'done' });",
-        'if (row !== null) {',
-        '  const seen: unknown = row.status;',
-        '  void seen;',
-        '}',
-      ].join('\n')),
-      'harness-self-test': hook("const x: number = ctx.api?.object('user');"),
-    });
+    const results = compile();
 
     expect(render(results.get('harness-self-test')!), 'the harness must be able to report an error')
       .toContain('TS2322');
