@@ -1,0 +1,9 @@
+{
+  "file": "packages/rest/src/security-routes.ts",
+  "adrs": [
+    "ADR-0090",
+    "ADR-0105",
+    "ADR-0112"
+  ],
+  "invariant": "The security REST doors, moved here whole from `rest-server.ts` (#23050 slice 6): the access-explanation family (`GET` / `POST {base}/security/explain`, `GET {base}/security/my-delegable-scope`) and the suggested audience bindings (`GET {base}/security/suggested-bindings`, `POST …/:id/confirm`, `POST …/:id/dismiss`). ADR-0090 — the doors decide no access of their own: the explain door relays the security service's `explain`, the same code paths enforcement runs, and explaining ANOTHER user is authorized in the SERVICE, never at the door (its D6, with D12's delegated scope); the delegable-scope door is strictly self-scoped, the caller's own resolved sets and no `userId` parameter (its D12); the suggested-binding doors surface a package's default-set suggestions and relay the deployment's one decision on each to the service, never binding on their own (its D5 and D9). ADR-0105 — the delegable scope is the read half of the scoped-invitation placement gate (its D8). ADR-0112 — every refusal of each family leaves through that family's ONE emitter at the nested position, where `error.code` carries the semantic code (its D5); the explain family's emitter types it as the closed `ErrorCode` vocabulary. An arm answered in a second dialect, an authorization decision re-implemented at a door, or a door that binds instead of relaying is the drift these records forbid; the bodies' own comments carry each citation."
+}

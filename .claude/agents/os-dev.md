@@ -135,6 +135,8 @@ model: opus
 - ② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定。
 - 受影响包 = 本包;import 方只在公开面变化时欠测试:spec 契约、发布的 `exports`、线上形状。
 - 公开面字节不变 ⇒ 只欠本包测试与派生门禁,⛔ 不给每个 import 方补测试。
+- ② 不含 `test:repo`(vitest `repo` 项目):它归 CI,`Test Core` 在 PR 与 merge group 都跑。
+- 仅 diff 改该项目测试或派生清单点名它时本地跑,否则 `deviations` 写明;席位 ACCEPT 读其 CI。
 - ③ 读到改动文件的门禁族 = `--commands` 派生清单(按 diff 收窄);派发词清单与全农场归 CI。
 - 新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒ `check:error-code-casing`。
 - ④ 报告 `gates`:CI 跑的每族引 PR check-runs(名+结论),⛔ 不本地重跑;`--ran` 只对账本地子集。
