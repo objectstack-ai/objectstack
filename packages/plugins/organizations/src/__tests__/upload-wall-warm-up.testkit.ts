@@ -22,10 +22,14 @@
  *
  * It is `@objectstack/verify`'s `warmUpBoot` (`boot-warm-up.testkit.ts`, which
  * that package does not export) with this package's boot: the same two plugins
- * the files mount, under the same two environment variables, set before the
- * boot and restored after it. So the lazily loaded code is loaded under the
- * environment the files' own boots load it under, and a module that reads its
- * environment once, when it is first loaded, reads the same values either way.
+ * the files mount, under the same two environment variables. So the lazily
+ * loaded code is loaded under the environment the files' own boots load it
+ * under (`bootStack` sets `NODE_ENV` itself, first, in both), and a module
+ * that reads its environment once, when it is first loaded, reads the same
+ * values either way. Afterwards the WHOLE environment is put back as it was —
+ * the two variables, and every variable the boot set (`NODE_ENV` among them) —
+ * so the file's first hook starts from the environment it would have started
+ * from without this.
  *
  * ⛔ It shares nothing a case asserts on. It boots an app of its own (no
  * objects), on its own in-memory database and its own storage root, with
@@ -56,11 +60,8 @@ const WALLED_BOOT_ENV = [
  * the seeded admin in, sign one member up, and stop.
  */
 export async function warmUpUploadWallBoot(): Promise<void> {
-  const restoreEnv: Array<[string, string | undefined]> = [];
-  for (const [name, value] of WALLED_BOOT_ENV) {
-    restoreEnv.push([name, process.env[name]]);
-    process.env[name] = value;
-  }
+  const envBefore = { ...process.env };
+  for (const [name, value] of WALLED_BOOT_ENV) process.env[name] = value;
   const rootDir = mkdtempSync(join(tmpdir(), 'upload-wall-warm-up-'));
   try {
     // A fresh configuration object per call: `bootStack`'s instance rule keys
@@ -91,9 +92,11 @@ export async function warmUpUploadWallBoot(): Promise<void> {
     }
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
-    for (const [name, value] of restoreEnv.reverse()) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
+    for (const name of Object.keys(process.env)) {
+      if (!(name in envBefore)) delete process.env[name];
+    }
+    for (const [name, value] of Object.entries(envBefore)) {
+      if (value !== undefined && process.env[name] !== value) process.env[name] = value;
     }
   }
 }
