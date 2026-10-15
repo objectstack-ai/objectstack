@@ -49,7 +49,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -177,7 +177,22 @@ function inProcessTransport() {
   return { transport, rpc, notify: (method: string) => transport.onmessage?.({ jsonrpc: '2.0', method }) };
 }
 
-describe('the MCP stdio door follows a runtime-authored object\'s current definition', () => {
+/**
+ * The two kernel shapes the door is pinned on. `none`: an `ObjectQLPlugin` with
+ * no `environmentId`, where the boot bridge copies the registry. `env_local`:
+ * `createStandaloneStack`'s composition (`os dev`, `os serve`, `os start`, and
+ * the cloud single-environment runtime's shape) — an artifact-sourced
+ * `metadata` service and an `ObjectQLPlugin` with the `environmentId` and
+ * `hydrateMetadataFromDb`, where no bridge runs. On that shape the service held
+ * no copy of ANY runtime-authored object before the fix, so the door served
+ * every one of them whatever its exposure (measured through the real `os dev`).
+ */
+const SHAPES = [
+  { shape: 'no environmentId', environmentId: undefined },
+  { shape: 'environmentId env_local (createStandaloneStack)', environmentId: 'env_local' },
+] as const;
+
+describe.each(SHAPES)('the MCP stdio door follows a runtime-authored object\'s current definition — $shape', ({ environmentId }) => {
   const live: ObjectKernel[] = [];
   const roots: string[] = [];
   const originalKey = process.env.OS_MCP_STDIO_API_KEY;
@@ -205,9 +220,9 @@ describe('the MCP stdio door follows a runtime-authored object\'s current defini
 
   /**
    * One boot over `stores`, then a stdio session over it: `MetadataPlugin` provides
-   * the `metadata` service, `ObjectQLPlugin` with no `environmentId` hydrates
-   * `sys_metadata` and runs the boot bridge, and `MCPServerPlugin` builds the
-   * stdio data bridge over this kernel's own services.
+   * the `metadata` service, `ObjectQLPlugin` (in the shape under test) hydrates
+   * `sys_metadata`, and `MCPServerPlugin` builds the stdio data bridge over this
+   * kernel's own services.
    */
   async function boot(stores: Stores): Promise<Booted> {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
@@ -216,8 +231,21 @@ describe('the MCP stdio door follows a runtime-authored object\'s current defini
     roots.push(root);
     const engine = new ObjectQL();
     engine.registerDriver(makeMemoryDriver(stores), true);
-    await kernel.use(new MetadataPlugin({ watch: false, rootDir: root }));
-    await kernel.use(new ObjectQLPlugin({ ql: engine }));
+    if (environmentId === undefined) {
+      await kernel.use(new MetadataPlugin({ watch: false, rootDir: root }));
+      await kernel.use(new ObjectQLPlugin({ ql: engine }));
+    } else {
+      const artifact = join(root, 'objectstack.json');
+      writeFileSync(artifact, JSON.stringify({
+        manifest: { id: 'com.qa.empty', name: 'empty', version: '0.0.0', type: 'app' },
+        objects: [], views: [], apps: [], flows: [], requires: [],
+      }));
+      await kernel.use(new MetadataPlugin({
+        watch: false, artifactWatch: false, environmentId,
+        artifactSource: { mode: 'local-file', path: artifact }, rootDir: root,
+      }));
+      await kernel.use(new ObjectQLPlugin({ ql: engine, environmentId, hydrateMetadataFromDb: true }));
+    }
     await kernel.bootstrap();
 
     // The faked seam, and only it: the key row the stdio principal resolves from.
@@ -354,6 +382,20 @@ describe('the MCP stdio door follows a runtime-authored object\'s current defini
     expect((await save(k, GATED, 'Gated', { apiEnabled: false })).success).toBe(true);
     await k.engine.insert(GATED, { name: 'rec-1' }, SYSTEM);
 
+    expect(refusal(await k.call('query_records', { objectName: GATED }))).toEqual({ code: 'OBJECT_API_DISABLED', status: 404 });
+    expect(refusal(await k.call('create_record', { objectName: GATED, data: { name: 'leak-probe' } })))
+      .toEqual({ code: 'OBJECT_API_DISABLED', status: 404 });
+    expect(stores.get(GATED)?.size).toBe(1);
+  });
+
+  it('saved with exposure off, then a restart: refused from the first call after the boot', async () => {
+    const stores: Stores = new Map();
+    const k1 = await boot(stores);
+    expect((await save(k1, GATED, 'Gated', { apiEnabled: false })).success).toBe(true);
+    await k1.engine.insert(GATED, { name: 'rec-1' }, SYSTEM);
+    await k1.kernel.shutdown();
+
+    const k = await boot(stores);
     expect(refusal(await k.call('query_records', { objectName: GATED }))).toEqual({ code: 'OBJECT_API_DISABLED', status: 404 });
     expect(refusal(await k.call('create_record', { objectName: GATED, data: { name: 'leak-probe' } })))
       .toEqual({ code: 'OBJECT_API_DISABLED', status: 404 });

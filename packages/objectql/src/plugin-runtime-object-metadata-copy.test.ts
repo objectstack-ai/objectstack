@@ -46,7 +46,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -318,5 +318,134 @@ describe('the metadata service\'s copy of a runtime-authored object follows the 
         expect(k.engine.registry.getObject(SHIPPED)).toMatchObject({ label: 'Shipped' });
         // The runtime object nobody turned off still says it is exposed.
         expect((await copyOf(k, OTHER)).copy).toMatchObject({ enable: { apiEnabled: true } });
+    });
+});
+
+/**
+ * The same copy on a kernel with an `environmentId` that hydrates its own
+ * `sys_metadata`: `createStandaloneStack`'s composition (`os dev` as
+ * `env_local`, `os serve`, `os start`) and the cloud single-environment
+ * runtime. Its `metadata` service is sourced from the artifact and the boot
+ * bridge does not run, so before the fix a runtime-authored object had NO copy
+ * there, exposed or not, and both MCP exposure gates served one saved with
+ * `apiEnabled: false` (measured through the real `os dev`).
+ */
+describe('on a kernel with an environmentId, a runtime-authored object has a copy that follows the registry', () => {
+    const ENV = 'env_local';
+    const live: ObjectKernel[] = [];
+    const roots: string[] = [];
+    afterEach(async () => {
+        while (live.length) {
+            const kernel = live.pop()!;
+            if (kernel.getState() === 'running') await kernel.shutdown();
+        }
+        while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+    });
+
+    /**
+     * One boot over `stores`, with `createStandaloneStack`'s two options:
+     * `MetadataPlugin` reading an (empty) artifact under the environment, and
+     * `ObjectQLPlugin` with the `environmentId` and `hydrateMetadataFromDb`.
+     */
+    async function boot(stores: Stores, beforeBoot?: (engine: ObjectQL) => void): Promise<Booted> {
+        const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+        live.push(kernel);
+        const root = mkdtempSync(join(tmpdir(), 'os-23689-'));
+        roots.push(root);
+        const artifact = join(root, 'objectstack.json');
+        writeFileSync(artifact, JSON.stringify({
+            manifest: { id: 'com.qa.empty', name: 'empty', version: '0.0.0', type: 'app' },
+            objects: [], views: [], apps: [], flows: [], requires: [],
+        }));
+        const engine = new ObjectQL();
+        engine.registerDriver(makeMemoryDriver(stores), true);
+        await kernel.use(new MetadataPlugin({
+            watch: false, artifactWatch: false, environmentId: ENV,
+            artifactSource: { mode: 'local-file', path: artifact }, rootDir: root,
+        }));
+        await kernel.use(new ObjectQLPlugin({ ql: engine, environmentId: ENV, hydrateMetadataFromDb: true }));
+        beforeBoot?.(engine);
+        await kernel.bootstrap();
+        return { kernel, engine, protocol: kernel.getService('protocol'), metadata: kernel.getService('metadata') };
+    }
+
+    const save = (k: Booted, name: string, label: string, enable?: Record<string, unknown>) =>
+        k.protocol.saveMetaItem({ type: 'object', name, item: objectBody(name, label, enable) });
+
+    async function copyOf(k: Booted, name: string) {
+        const listed = ((await k.metadata.listObjects()) as Array<{ name?: string }>).find((o) => o?.name === name);
+        return { copy: await k.metadata.getObject(name), listed };
+    }
+
+    const withShippedPackage = (engine: ObjectQL) => {
+        engine.registerApp({
+            id: SHIPPED_PKG, name: SHIPPED_PKG, version: '1.0.0', type: 'app',
+            objects: [objectBody(SHIPPED, 'Shipped')],
+        });
+    };
+
+    it('created after boot with exposure off: a copy at once, carrying its declaration', async () => {
+        const k = await boot(new Map());
+        expect((await save(k, NAME, 'Gadget', { apiEnabled: false })).success).toBe(true);
+
+        const { copy, listed } = await copyOf(k, NAME);
+        expect(copy).toMatchObject({ label: 'Gadget', enable: { apiEnabled: false }, _provenance: 'org' });
+        expect(listed).toBeDefined();
+    });
+
+    it('saved exposed, then turned off: the copy says so before the save returns', async () => {
+        const k = await boot(new Map());
+        expect((await save(k, NAME, 'Gadget', { apiEnabled: true })).success).toBe(true);
+        expect((await save(k, NAME, 'Gadget Q', { apiEnabled: false })).success).toBe(true);
+
+        expect((await copyOf(k, NAME)).copy)
+            .toMatchObject({ label: 'Gadget Q', enable: { apiEnabled: false }, _provenance: 'org' });
+    });
+
+    it('saved with exposure off, then a restart: the boot gives the hydrated object its copy (no mutation fires for it)', async () => {
+        const stores: Stores = new Map();
+        const k1 = await boot(stores);
+        expect((await save(k1, NAME, 'Gadget', { apiEnabled: false })).success).toBe(true);
+        expect((await save(k1, OTHER, 'Other', { apiEnabled: true })).success).toBe(true);
+        await k1.kernel.shutdown();
+
+        const k2 = await boot(stores);
+        expect(k2.engine.registry.getObject(NAME)).toMatchObject({ enable: { apiEnabled: false } });
+        expect((await copyOf(k2, NAME)).copy)
+            .toMatchObject({ label: 'Gadget', enable: { apiEnabled: false }, _provenance: 'org' });
+        expect((await copyOf(k2, OTHER)).copy).toMatchObject({ enable: { apiEnabled: true } });
+    });
+
+    it('deleted: the copy is gone and the listing no longer names it', async () => {
+        const stores: Stores = new Map();
+        const k1 = await boot(stores);
+        expect((await save(k1, NAME, 'Gadget', { apiEnabled: true })).success).toBe(true);
+        await k1.kernel.shutdown();
+        const k = await boot(stores);
+        expect((await copyOf(k, NAME)).copy).toBeDefined();
+
+        expect(await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).toMatchObject({ success: true, reset: true });
+
+        await vi.waitFor(async () => {
+            const { copy, listed } = await copyOf(k, NAME);
+            expect(copy).toBeUndefined();
+            expect(listed).toBeUndefined();
+        });
+    });
+
+    it('a code package\'s object gets no copy from the boot pass or from a runtime edit beside it', async () => {
+        const stores: Stores = new Map();
+        const k1 = await boot(stores, withShippedPackage);
+        expect((await save(k1, NAME, 'Gadget', { apiEnabled: true })).success).toBe(true);
+        await k1.kernel.shutdown();
+
+        const k = await boot(stores, withShippedPackage);
+        expect(k.engine.registry.getObject(SHIPPED)).toMatchObject({ label: 'Shipped' });
+        // The code package's objects reach this service from the artifact, never from this pass.
+        expect(await k.metadata.getObject(SHIPPED)).toBeUndefined();
+        expect((await save(k, NAME, 'Gadget Q', { apiEnabled: false })).success).toBe(true);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(await k.metadata.getObject(SHIPPED)).toBeUndefined();
+        expect((await copyOf(k, NAME)).copy).toMatchObject({ enable: { apiEnabled: false } });
     });
 });
