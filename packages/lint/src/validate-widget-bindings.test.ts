@@ -2123,7 +2123,7 @@ describe('[#22161] one-line fix — the rule ids whose `fix:` line this file sho
   // What each `fix:` line stopped saying, which `os explain RULE_ID` now prints.
   const MOVED_FROM_HINT: Record<string, readonly string[]> = {
     [DASHBOARD_FILTER_FIELD_UNPROVISIONED]: ['`columnMap`', '`ownership: \'none\'`', 'filterBindings: { NAME: false }', "suppressWarnings: ['dashboard-filter-field-unprovisioned']"],
-    [CHART_FIELD_UNKNOWN]: ['os migrate meta --from 17', 'one entry per mark', 'second `dimensions` entry to split', "suppressWarnings: ['chart-field-unknown']"],
+    [CHART_FIELD_UNKNOWN]: ['Run `os migrate meta --from 17` to list the mechanical edits for existing sources', 'one entry per mark', 'second `dimensions` entry to split', "suppressWarnings: ['chart-field-unknown']"],
     [DASHBOARD_FILTER_FIELD_UNKNOWN]: ['`relationship[.relationship].field`', 'lookup, master_detail, user or tree', '`include`', '"Did you mean"'],
     [CHART_MEASURES_MISSING]: ['chart-dimensions-missing', 'up to three', "suppressWarnings: ['chart-measures-missing']"],
     [WIDGET_LEGACY_ANALYTICS_SHAPE]: ['DatasetWidget', 'pivot rows and columns come from `dimensions`', 'no-op', "suppressWarnings: ['widget-legacy-analytics-shape']"],

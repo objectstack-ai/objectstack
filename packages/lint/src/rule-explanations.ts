@@ -513,9 +513,8 @@ const CHART_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
     'What replaces each key: the x-axis is the widget\'s first `dimensions` entry; the y-axis ' +
       'bindings come from `values`, one entry per mark; series membership follows `values` (and a ' +
       'second `dimensions` entry to split). A measure named by a refused key that the dataset declares ' +
-      'but the widget does not select is plotted by adding it to `values`. For existing sources, ' +
-      '`os migrate meta --from 17` lists the mechanical edits; `--write` applies the ones it can prove, ' +
-      'and you apply the rest by hand.',
+      'but the widget does not select is plotted by adding it to `values`. ' +
+      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ],
 };
 
