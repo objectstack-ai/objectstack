@@ -38,6 +38,10 @@ import type { EngineAggregateOptions } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode } from '@objectstack/spec/api';
+// [#23701] The one key every door that translates the engine's unique-violation
+// envelope asks (the registered code AND the class name, never message text),
+// and the one classification whose arm states the wire code for it.
+import { isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -388,12 +392,57 @@ export interface ThrownRefusalEnvelope {
  * refusal. `undefined` tells the caller to keep its own message-only
  * rendering: nothing is invented for a throw that never had a code. `details`
  * is not read here; {@link errorResultWithCode} says why.
+ *
+ * ## One wire spelling for a unique-constraint refusal (#23701)
+ *
+ * Maintainer ruling (2026-09-03, recorded in commit 65846bc46): one wire
+ * spelling on every route, `UNIQUE_VIOLATION`; the row reports it too.
+ *
+ * The engine's `DuplicateRecordError` declares its in-process identity,
+ * `DUPLICATE_RECORD`, which an in-process caller (a hook, a flow node)
+ * branches on and which is ⛔ not renamed. This reader used to relay that
+ * code verbatim, so a tool call that repeated a unique value
+ * (`create_record`, `update_record`, a `run_action` body's write) answered
+ * `DUPLICATE_RECORD`, while `RestServer`'s arm, the batch and import rows, both
+ * Hono doors and the runtime dispatcher answer the same throw as
+ * `UNIQUE_VIOLATION`. An MCP client is out of process, so it gets the wire
+ * spelling.
+ *
+ * The code is decided here, before it is written, keyed as those doors key it
+ * ({@link isEngineDuplicateRecordEnvelope}, `@objectstack/types`). A producer
+ * that merely SPEAKS `DUPLICATE_RECORD` (a hook or an action handler throwing
+ * the registered code without being the engine's class) keeps its own code.
+ * `message` (the engine's sentence) and `status` (409) are unchanged.
+ *
+ * ⛔ Only the code moves. The other doors also carry the REST arm's context
+ * (`developerMessage`, `object`, `field`) in their envelope's context slot;
+ * this envelope has none. It is `code`, `message` and `status`, and the data
+ * tools withhold `details` by design ({@link errorResultWithCode}).
  */
 export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
-  const code = (err as { code?: unknown } | null | undefined)?.code;
-  if (typeof code !== 'string' || code.length === 0) return undefined;
+  const thrownCode = (err as { code?: unknown } | null | undefined)?.code;
+  if (typeof thrownCode !== 'string' || thrownCode.length === 0) return undefined;
   const status = (err as { status?: unknown }).status;
-  return { code, message: messageOf(err), ...(typeof status === 'number' ? { status } : {}) };
+  return {
+    code: wireCodeOf(err, thrownCode),
+    message: messageOf(err),
+    ...(typeof status === 'number' ? { status } : {}),
+  };
+}
+
+/**
+ * [#23701] The code a thrown refusal crosses to an MCP client with: the
+ * thrown one, except for the engine's `DuplicateRecordError`, whose wire code
+ * is read off the shared classification's arm for that class
+ * (`structuredCodeAnswer`, `@objectstack/types`, the arm `RestServer`
+ * answers with). So this package spells no copy of the wire code of its own:
+ * it relays the classification's answer, as the REST door does, and the
+ * pins in `mcp-unique-violation-wire-code.test.ts` hold what that answer is.
+ */
+function wireCodeOf(err: unknown, thrownCode: string): string {
+  if (!isEngineDuplicateRecordEnvelope(err)) return thrownCode;
+  const armCode = structuredCodeAnswer(err)?.body.code;
+  return typeof armCode === 'string' ? armCode : thrownCode;
 }
 
 /**
