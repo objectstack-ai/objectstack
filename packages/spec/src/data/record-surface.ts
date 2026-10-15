@@ -128,9 +128,24 @@ export interface RecordFlowSurface {
  *     state → route-capable; making/changing one is a task → always overlay.
  *
  * So `view` keeps the #2578 behavior verbatim (`'page'` → route), while the
- * task flows map the derived `'page'` to a FULL-SCREEN MODAL — same big
- * canvas, overlay return semantics. This mapping is why `'modal'` exists in
- * {@link RecordSurface} without the base heuristic ever emitting it.
+ * task flows map the derived `'page'` to a MODAL — overlay return semantics.
+ * This mapping is why `'modal'` exists in {@link RecordSurface} without the
+ * base heuristic ever emitting it. How big that modal is follows the viewport:
+ *   - desktop (the default): a BOUNDED modal, `size: 'auto'` — the renderer's
+ *     own `lg` / `xl` bound applies, so a field-heavy form is not stretched to
+ *     the window edge;
+ *   - `viewport: 'mobile'`: a FULL-SCREEN modal, `size: 'full'` (an overlay on
+ *     a phone has no room to be anything else).
+ * The split is by viewport only. A field-heavy form with an embedded child /
+ * line-items table takes the same bounded modal on desktop: #2604 D1 sized
+ * task flows by field count alone and scoped the in-form `inlineEdit` grid out
+ * of its design, so it never chose full-screen for that case.
+ *
+ * #2604 D1 (2026-07-05) mapped a field-heavy task flow to a full-screen modal
+ * on every viewport.
+ * Amended 2026-10-15 by objectui#12521 ruling 6203721639 (letter B): on
+ * desktop the field-heavy task flow is a bounded modal; mobile keeps
+ * full-screen.
  *
  * Like the base derivation this is a DEFAULT only: explicit `navigation.mode`
  * / `navigation.size`, `FormView.type` / `modalSize`, or an assigned page win
@@ -145,8 +160,11 @@ export function deriveRecordFlowSurface(
   if (flow === 'view') {
     return { container: surface === 'page' ? 'route' : 'overlay', surface, size: 'auto' };
   }
-  // Task flows (create / edit / child-*): never a route. Field-heavy (or
-  // mobile, where the base derivation says 'page') → full-screen modal.
-  if (surface === 'page') return { container: 'overlay', surface: 'modal', size: 'full' };
+  // Task flows (create / edit / child-*): never a route. The base derivation
+  // says 'page' when field-heavy or mobile → a modal: full-screen on mobile,
+  // bounded (`'auto'`, the renderer's lg/xl bound) on desktop.
+  if (surface === 'page') {
+    return { container: 'overlay', surface: 'modal', size: opts.viewport === 'mobile' ? 'full' : 'auto' };
+  }
   return { container: 'overlay', surface, size: 'auto' };
 }
