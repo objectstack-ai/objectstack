@@ -32,8 +32,15 @@ export interface WasmConnectionOptions {
    * (works in Node and WebContainer).
    */
   locateFile?: (file: string) => string;
-  /** Optional logger; defaults to `console`. */
-  logger?: { warn: (msg: string, meta?: unknown) => void };
+  /**
+   * Optional logger; defaults to `console`. `error` is optional so a logger that
+   * only offers `warn` keeps working: a failed background flush is a durability
+   * loss and goes to `error` when the logger has one, else to `warn`.
+   */
+  logger?: {
+    warn: (msg: string, meta?: unknown) => void;
+    error?: (msg: string, meta?: unknown) => void;
+  };
 }
 
 /**
@@ -106,7 +113,13 @@ export class WasmSqliteConnection {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private flushChain: Promise<void> | null = null;
   private destroyed = false;
-  private logger: { warn: (msg: string, meta?: unknown) => void };
+  private logger: NonNullable<WasmConnectionOptions['logger']>;
+  /**
+   * A background flush failure was already reported and no flush has landed
+   * since. Keeps `on-write` (one flush per write) from logging the same
+   * unchanged cause once per write; cleared when a flush actually writes.
+   */
+  private flushFailureReported = false;
 
   /**
    * Whether a `BEGIN…COMMIT/ROLLBACK` transaction is currently open. Tracked
@@ -326,7 +339,7 @@ export class WasmSqliteConnection {
     // close() instead of flushing on every COMMIT.
     if (!this.inTransaction && this.flushDeferred) {
       this.flushDeferred = false;
-      void this.flush();
+      this.flushInBackground();
     }
   }
 
@@ -349,14 +362,14 @@ export class WasmSqliteConnection {
     this.dirty = true;
 
     if (this.persist === 'on-write') {
-      void this.flush();
+      this.flushInBackground();
       return;
     }
     if (this.debounceMs > 0) {
       if (this.debounceTimer) clearTimeout(this.debounceTimer);
       this.debounceTimer = setTimeout(() => {
         this.debounceTimer = null;
-        void this.flush();
+        this.flushInBackground();
       }, this.debounceMs);
     }
     // 'on-disconnect' → flush only at close()
@@ -396,6 +409,8 @@ export class WasmSqliteConnection {
         // sql.js returns a Uint8Array; Buffer.from on it shares memory but
         // works fine for the atomic write below.
         await this.atomicWriteFile(Buffer.from(exported));
+        // A flush landed: the next failure is a new episode worth reporting.
+        this.flushFailureReported = false;
       } catch (err) {
         this.dirty = true; // let a later flush retry
         throw err;
@@ -405,6 +420,50 @@ export class WasmSqliteConnection {
     // flush doesn't poison every future flush; the awaited `step` still throws.
     this.flushChain = step.catch(() => {});
     await step;
+  }
+
+  /**
+   * Run a flush nobody awaits: a write under `on-write`, the debounce timer, a
+   * transaction closing. There is no caller to throw to, so a failure is
+   * reported here (see {@link reportBackgroundFlushFailure}) instead of being
+   * left as a floating rejection, which the host process meets as an
+   * `unhandledRejection` — fatal under Node's default. {@link flush} has
+   * already re-marked `dirty`, so the next flush retries. An AWAITED
+   * {@link flush} or {@link close} is unaffected and still throws.
+   */
+  private flushInBackground(): void {
+    void this.flush().catch((err) => this.reportBackgroundFlushFailure(err));
+  }
+
+  /**
+   * Say, once per failure episode, that the database file is not being
+   * written. The memory image keeps answering queries, so nothing else looks
+   * wrong while committed writes stay off disk: that is a durability loss, hence
+   * `error`, with the consequence and the fix in the first line.
+   *
+   * Never throws. It runs in a rejection handler, where a throw would become
+   * the very unhandled rejection this exists to remove; a logger that cannot
+   * log is the end of the line, so its failure is dropped.
+   */
+  private reportBackgroundFlushFailure(err: unknown): void {
+    if (this.flushFailureReported) return;
+    this.flushFailureReported = true;
+    const reason = typeof err === 'string' ? err : (err as Error)?.message ?? String(err);
+    try {
+      const sink = this.logger.error ?? this.logger.warn;
+      sink.call(
+        this.logger,
+        `[driver-sqlite-wasm] Writing ${this.filename} to disk failed (${reason}). ` +
+          `Writes since the last successful flush are NOT on disk: the database keeps ` +
+          `answering from memory and looks healthy, but they are lost if this process ` +
+          `stops before a flush succeeds. The flush is retried after the next write and ` +
+          `on close (close() throws if it still fails) - free disk space or restore the ` +
+          `data directory (ENOSPC, a removed or read-only directory). Reported once, ` +
+          `until a flush succeeds.`,
+      );
+    } catch {
+      /* the logger itself failed: nowhere left to report */
+    }
   }
 
   /**
