@@ -22,8 +22,10 @@
  * Delete the package-less definition WITHOUT `dropStorage` (the delete door's
  * default), which keeps the table and its records, then save naming Q: Q's row
  * becomes the owner at once and at every later boot. ADR-0070 D5's
- * `adopt-orphans` door is not it: it rebinds an object's row in storage only,
- * and the registry keeps the sentinel owner until the next boot.
+ * `adopt-orphans` door also hands an adopted object's registry owner to Q (its
+ * own pins, `protocol-adopt-orphans-object-registry.test.ts`, run beside these),
+ * but it rebinds EVERY package-less row of the environment, so the refusal
+ * names the narrower way out.
  *
  * ## Why a real kernel, and two of them
  *

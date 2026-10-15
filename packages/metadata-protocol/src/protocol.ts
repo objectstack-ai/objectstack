@@ -19592,10 +19592,12 @@ export class ObjectStackProtocolImplementation implements
      * then save naming `Q`. That save registers `Q`'s row as the owner, and a
      * boot hydrates it as the owner. Walked on a real kernel and through
      * `RestServer`'s `DELETE` and `PUT` doors on a SQLite store, across a boot,
-     * with no table dropped and every record served. ⛔ Not ADR-0070 D5's
-     * `POST /api/v1/packages/:id/adopt-orphans`: it rebinds an object's row in
-     * storage only, so the registry keeps the sentinel owner until the next
-     * boot and a save naming `Q` in between meets this refusal again.
+     * with no table dropped and every record served, for an object saved in
+     * this process and for one hydrated at boot. ADR-0070 D5's
+     * `POST /api/v1/packages/:id/adopt-orphans` also hands an adopted object's
+     * registry owner to `Q` in the same request, but it rebinds EVERY
+     * package-less row of the environment, not only this object, so the
+     * prescription does not name it: it names the narrowest way out.
      *
      * The code is D9.9's, not a new one: the ledger's meaning (a row bound to a
      * package that does not own the object) holds, and the caller's branch is
