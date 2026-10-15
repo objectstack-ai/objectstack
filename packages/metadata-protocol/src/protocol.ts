@@ -2151,6 +2151,14 @@ interface UnboundOwnerRefusalState {
     /** The caller named no package, and the save's address resolved to the package's row. */
     namedNoPackage?: boolean;
     /**
+     * A publish naming no package of a draft bound to NO package, which the
+     * draft doors' address adopts into the one package binding stored
+     * (`packagelessDraftAddress`: `key: null`, `into: P`). No publish moves that
+     * draft into `P`: with `P`'s row gone it promotes into the package-less
+     * definition, and one naming `P` finds no `P` draft (`NO_DRAFT`).
+     */
+    adoptedDraft?: boolean;
+    /**
      * Where the refusal is raised: the save door (default), a draft promotion
      * (the per-item publish and `publish-drafts`), or a registration of a
      * stored row (boot, write-through).
@@ -19638,6 +19646,7 @@ export class ObjectStackProtocolImplementation implements
      * | rows bound to packages (`Q` or any other) are already stored beside the package-less one (the rows the save door wrote before this refusal existed) | delete each of them by naming its package, then the package-less definition, then a publish-mode save naming `Q`. Each row is named because a delete naming no package resolves to the one binding present, or is refused `409` over two ({@link packagelessAddress}), never to the package-less definition |
      * | one such row, a publish save naming NO package | it is addressed to that row ({@link packagelessAddress}); delete the row, then the same save edits the package-less definition. Over two bindings the save is refused `409` before this refusal |
      * | a promotion of `Q`'s draft (the per-item publish, `publish-drafts`), a draft stored before the package-less row or by a draft save the door addressed to `Q` | the deletes above for the state, then the same publish: the draft stays stored, and its promotion registers it |
+     * | a publish naming no package of a draft bound to NO package, which the address adopts into the one stored binding `P` | no publish moves that draft into `P` (measured: with `P`'s row gone it promotes into the package-less definition; one naming `P` answers `NO_DRAFT`). Delete `P`'s row, publish again (it updates the package-less definition), then the package-less DELETE and a publish-mode save naming `P` move the object |
      *
      * The boot (`loadMetaFromDb`) and the write-through
      * ({@link applyObjectRegistryMutation}) meet the third state: the row
@@ -19673,7 +19682,14 @@ export class ObjectStackProtocolImplementation implements
         const rowsServed = rows.length === 1
             ? `its definition bound to '${rows[0]}' is never served`
             : `its definitions bound to ${rows.map((pkg) => `'${pkg}'`).join(', ')} are never served`;
-        if (rows.length > 0 && state.namedNoPackage) {
+        if (rows.length > 0 && state.at === 'promote' && state.adoptedDraft) {
+            // Measured: the publish then lands the draft package-less, so the
+            // text says so, and names the move into the package as the next step.
+            message = `This draft of object '${name}' is bound to no package; a publish naming no package is `
+                + `addressed into '${q}', whose row is never served. DELETE ${path}?package=${q}, then publish again: `
+                + `the draft lands in the package-less definition. To move it into '${q}' then: the same DELETE with no `
+                + `package and no dropStorage (records stay), then save it naming '${q}' in publish mode.` + tail;
+        } else if (rows.length > 0 && state.namedNoPackage) {
             // A save naming no package is addressed to the one binding present.
             message = `A save naming no package of object '${name}' is addressed to its stored definition bound to `
                 + `'${q}', which is never served: the object is served by its definition bound to no package. `
@@ -24685,7 +24701,12 @@ export class ObjectStackProtocolImplementation implements
                     : [];
                 throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
                     request.name, layer.packageId, layer.ownerPackageId,
-                    { at: 'promote', storedPackages },
+                    {
+                        at: 'promote',
+                        storedPackages,
+                        // The package-unbound draft the address adopted into the one binding.
+                        adoptedDraft: !('packageId' in request) && draftKey === null && promoteInto !== null,
+                    },
                 );
             }
         }

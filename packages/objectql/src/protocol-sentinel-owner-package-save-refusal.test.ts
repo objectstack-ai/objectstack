@@ -59,6 +59,10 @@
  *    `[package-less, P, Q]`): the refusal names each row's delete by its
  *    package, since a delete naming no package resolves to the one binding
  *    present or is refused 409 over two, and that walk converges;
+ *  - a draft bound to NO package over `[package-less, P]`, published naming no
+ *    package (the address adopts it into P): the text says the publish lands
+ *    package-less after P's row is deleted, and names the move into P after
+ *    it, and that walk ends where the text says;
  *  - the promote doors (ADR-0029 D9.9 there too): Q's draft stored before the
  *    package-less row existed is refused at publish with the order true for
  *    a promotion (the delete, then the same publish), and that order walks;
@@ -654,6 +658,66 @@ describe('#23514 — a save naming a package beside an object its package-less d
             const k2 = await boot(stores, drops);
             expect((await served(k2)).owner).toBe(Q);
             expect((await served(k2)).records).toBe(2);
+            expect(drops).toEqual([]);
+        });
+
+        it('another package\'s row `[package-less, P]` and a draft bound to NO package, published naming no package: the text says the publish lands package-less, and names the move into P after it', async () => {
+            const stores: Stores = new Map();
+            const drops: string[] = [];
+            const k = await seedLegacyRows(stores, drops, [P]);
+            // The package-less draft, as a draft save naming no package stored it before P's row existed.
+            const rows = stores.get('sys_metadata')!;
+            const unbound = Array.from(rows.values())
+                .find((r) => r.type === 'object' && r.name === NAME && r.package_id == null && r.state === 'active')!;
+            const draftBody = typeof unbound.metadata === 'string'
+                ? JSON.parse(unbound.metadata as string)
+                : { ...(unbound.metadata as Record<string, unknown>) };
+            draftBody.label = 'Gadget unbound draft';
+            rows.set('packageless_draft', {
+                ...unbound,
+                id: 'packageless_draft',
+                state: 'draft',
+                metadata: typeof unbound.metadata === 'string' ? JSON.stringify(draftBody) : draftBody,
+            });
+
+            // The address adopts the unbound draft into P, the one binding; D9.9 refuses it.
+            const err = await k.protocol.publishMetaItem({ type: 'object', name: NAME }).then(() => null, (e: any) => e);
+            expect(err).toBeInstanceOf(Error);
+            expect(err.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
+            expect(err.status).toBe(422);
+            expect(err.packageId).toBe(P);
+            expect(err.message).toMatch(new RegExp(
+                `^This draft of object '${NAME}' is bound to no package; a publish naming no package is addressed `
+                + `into '${P.replace(/\./g, '\\.')}', whose row is never served\\.`,
+            ));
+            expect(err.message).toContain(
+                `DELETE /api/v1/meta/object/${NAME}?package=${P}, then publish again: the draft lands in the `
+                + 'package-less definition.',
+            );
+            expect(err.message).toContain(`then save it naming '${P}' in publish mode.`);
+            expect(storedBindings(stores)).toEqual([null, P, null]);
+
+            // The walk, in the order the text names: P's row, then the same publish…
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME, packageId: P })).success).toBe(true);
+            expect((await k.protocol.publishMetaItem({ type: 'object', name: NAME })).success).toBe(true);
+            // …which lands package-less, as the text says.
+            expect(await served(k)).toEqual({
+                owner: SENTINEL, dataPlaneLabel: 'Gadget unbound draft', metaReadLabel: 'Gadget unbound draft', records: 2,
+            });
+            expect(storedBindings(stores)).toEqual([null]);
+            // Then the move into P: the package-less DELETE, then a publish-mode save naming P.
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
+            expect((await save(k, P, 'Gadget P')).success).toBe(true);
+            expect(await served(k)).toEqual({
+                owner: P, dataPlaneLabel: 'Gadget P', metaReadLabel: 'Gadget P', records: 2,
+            });
+
+            await k.kernel.shutdown();
+            const k2 = await boot(stores, drops);
+            expect(await served(k2)).toEqual({
+                owner: P, dataPlaneLabel: 'Gadget P', metaReadLabel: 'Gadget P', records: 2,
+            });
+            expect(storedBindings(stores)).toEqual([P]);
             expect(drops).toEqual([]);
         });
 
