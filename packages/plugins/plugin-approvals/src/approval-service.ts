@@ -6709,6 +6709,11 @@ export class ApprovalService implements IApprovalService {
    * the notification names the record by the same live title and label its
    * recipient's inbox row shows. Batched: one read per object. Best-effort —
    * an unregistered object or a failed read leaves its entries unset.
+   *
+   * The read runs under the system context, so no reader's field-level
+   * security narrows the title it finds — for the list exactly as for the
+   * notification. Narrowing it per reader is a change to THIS function, and
+   * the notification would then have to pass each recipient.
    */
   private async resolveSubjectDisplays(
     byObject: ReadonlyMap<string, ReadonlySet<string>>,
