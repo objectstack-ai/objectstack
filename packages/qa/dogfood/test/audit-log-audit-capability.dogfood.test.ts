@@ -28,7 +28,7 @@
 //   - a private record the writer owns, which neither member can open;
 //   - a third member's second session, signed out (its sign-in row about an
 //     ended session, and its sign-out row);
-//   - a bulk of rows past the gate's pre-scan bound, inserted as the system
+//   - a bulk of rows past the old pre-scan bound, inserted as the system
 //     (the writers insert as the system too), about records that do not exist.
 //
 // `@objectstack/plugin-audit` resolves through its BUILT output here (a
@@ -54,7 +54,7 @@ const ACTIVITY = 'sys_activity';
 const OBJ = 'alc_item';
 const PRIVATE = 'alc_private';
 const SYS = { isSystem: true } as const;
-/** The parent-record gate's pre-scan bound (`PARENT_GATE_SCAN_LIMIT` in plugin-audit). */
+/** The parent-record gate's old pre-scan bound, the bounded probe's still (`PARENT_GATE_SCAN_LIMIT` in plugin-audit). */
 const SCAN_BOUND = 2_000;
 const BULK = SCAN_BOUND + 50;
 const PASSWORD = 'Alc-Fixture-Pass-21260';
@@ -146,8 +146,8 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
   };
   const servedById = async (who: keyof typeof token, rowId: string) =>
     (await stack.apiAs(token[who], 'GET', `/data/${LEDGER}/${rowId}`)).status;
-  const servedTotal = async (who: keyof typeof token, where: Record<string, unknown>) => {
-    const res = await stack.apiAs(token[who], 'GET', `/data/${LEDGER}?$filter=${filterOf(where)}&limit=1`);
+  const servedTotal = async (who: keyof typeof token, where: Record<string, unknown>, sort?: string) => {
+    const res = await stack.apiAs(token[who], 'GET', `/data/${LEDGER}?$filter=${filterOf(where)}&limit=1${sort ? `&sort=${sort}` : ''}`);
     expect(res.status).toBe(200);
     return Number(((await res.json()) as any).total);
   };
@@ -341,14 +341,21 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     expect(await servedList('admin', ACTIVITY, { object_name: OBJ, record_id: id.gone })).toEqual([]);
   });
 
-  it('non-holder: gets exactly the parent-record gate — none of these rows, and a broad read bounded', async () => {
+  it('non-holder: gets exactly the parent-record gate — none of these rows, and a broad read is exactly the rows about the record it can open', async () => {
     expect(await servedList('reader', LEDGER, { object_name: OBJ, record_id: id.gone })).toEqual([]);
     for (const rowId of [rowIds.goneDelete, rowIds.signOut, rowIds.endedSignIn, rowIds.privateCreate]) {
       expect(await servedById('reader', rowId), `ledger row ${rowId}`).toBe(404);
     }
-    const total = await servedTotal('reader', { object_name: OBJ });
-    expect(total).toBeLessThan(SCAN_BOUND);
-    expect(total).toBeLessThan(bulkAtRest);
+    // [ADR-0139 E5] One ReadableIds leaf per parent object, no candidate
+    // window: the total is the rows about the live record, whatever the order.
+    // Newest first, the bulk (about records that do not exist) fills the
+    // newest 2,000 rows, so the rows about the live record lie past the old
+    // pre-scan window — which answered none of them.
+    const exact = (await ledgerAtRest({ object_name: OBJ, record_id: id.live })).length;
+    expect(exact).toBeGreaterThan(0);
+    expect(await servedTotal('reader', { object_name: OBJ })).toBe(exact);
+    expect(await servedTotal('reader', { object_name: OBJ }, '-created_at')).toBe(exact);
+    expect(bulkAtRest).toBeGreaterThan(SCAN_BOUND);
   });
 
   it('non-holder control: is served the rows about the record it can open', async () => {
