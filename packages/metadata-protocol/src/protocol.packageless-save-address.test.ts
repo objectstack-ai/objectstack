@@ -1300,6 +1300,9 @@ describe('[#23715] the strict draft read naming no package serves its content fr
             const again = await readDraft(f);
             expect(again.item.label).toBe('edited');
             expect(again.version).toBe(saved.version);
+            // The draft-overlay preview naming no package serves the same draft.
+            expect((await f.protocol.getMetaItem({ type: 'app', name: f.name, previewDrafts: true })).item)
+                .toMatchObject({ label: 'edited', _draft: true });
         });
     }
 

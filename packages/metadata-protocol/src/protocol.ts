@@ -10915,12 +10915,13 @@ export class ObjectStackProtocolImplementation implements
         // package, so with drafts `[package-unbound, Q]` this read served the
         // first draft row the store returned under the package-unbound
         // draft's token, and a save pinned to that token wrote a row other
-        // than the one read (#8907).
-        const strictDraftAddress = readState === 'draft' && !request.packageId
+        // than the one read (#8907). The draft-overlay preview below shares
+        // the address: it serves the draft the strict read serves.
+        const draftContentAddress = !request.packageId && (readState === 'draft' || request.previewDrafts)
             ? await this.strictDraftReadAddress(request.type, request.name, member)
             : undefined;
         const contentPackageId = request.packageId
-            || (strictDraftAddress ? undefined : await this.packagelessReadAddress(request.type, request.name, member));
+            || (readState === 'draft' ? undefined : await this.packagelessReadAddress(request.type, request.name, member));
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -10933,13 +10934,22 @@ export class ObjectStackProtocolImplementation implements
                 // [#21716] The served-row resolution, on the draft partition
                 // (ADR-0048 prefer-local, parity with the row read below) — see
                 // {@link findServedOverlayRow}.
-                const draftRec = (await this.findServedOverlayRow({
+                let draftRec = (await this.findServedOverlayRow({
                     type: request.type,
                     name: request.name,
                     state: 'draft',
-                    ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                    ...(draftContentAddress
+                        ? { packageId: draftContentAddress.packageId }
+                        : contentPackageId ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
                 }))?.row;
+                // [#23715] Two or more packages and no package-unbound draft:
+                // the best-effort first match, as the strict read below.
+                if (!draftRec && draftContentAddress?.bestEffort) {
+                    draftRec = (await this.findServedOverlayRow({
+                        type: request.type, name: request.name, state: 'draft', ...memberOption(member),
+                    }))?.row;
+                }
                 if (draftRec) {
                     const draftItem = this.convertStoredItem(
                         String(draftRec.type ?? request.type),
@@ -10983,8 +10993,8 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: readState,
-                ...(strictDraftAddress
-                    ? { packageId: strictDraftAddress.packageId }
+                ...(readState === 'draft' && draftContentAddress
+                    ? { packageId: draftContentAddress.packageId }
                     : contentPackageId ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             }))?.row;
@@ -10992,7 +11002,7 @@ export class ObjectStackProtocolImplementation implements
             // best-effort first match ADR-0048 §3.3 states, as before, served
             // with `version: null` (no row at the address the save naming none
             // resolves, and that save is refused there).
-            if (!record && strictDraftAddress?.bestEffort) {
+            if (!record && readState === 'draft' && draftContentAddress?.bestEffort) {
                 record = (await this.findServedOverlayRow({
                     type: request.type,
                     name: request.name,
@@ -19071,7 +19081,8 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * [#23715, ADR-0048, ADR-0070 TL;DR 1] The package the strict draft read
-     * that names no package (`?state=draft`) takes its CONTENT from: the draft
+     * that names no package (`?state=draft`), and the draft-overlay preview
+     * naming none (`previewDrafts`), take their draft CONTENT from: the draft
      * its `version` names ({@link readVersionToken}, through
      * `SysMetadataRepository.headAt`), which is the draft
      * {@link packagelessDraftAddress} gives the draft save, the per-item
