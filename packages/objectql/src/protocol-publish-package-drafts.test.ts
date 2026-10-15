@@ -452,11 +452,13 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
  */
 describe('protocol.publishMetaItem — seed self-apply', () => {
   function makePublishable(body: unknown) {
-    // A publish that states no package reads the pending draft row's package
-    // binding once (`engine.findOne` on `sys_metadata`) so the gate and the
-    // promotion resolve one draft (ADR-0048). No row here: the binding stays
-    // unstated and the repository double below answers both reads.
-    const protocol = new ObjectStackProtocolImplementation({ findOne: async () => null } as never);
+    // A publish that states no package reads the item's active and draft
+    // rows once (`engine.find` on `sys_metadata`) to resolve the draft a
+    // draft save naming no package writes, so the gate and the promotion
+    // resolve one draft (ADR-0048, #23495). No row here: the address is the
+    // package-unbound draft, and the repository double below answers both
+    // reads.
+    const protocol = new ObjectStackProtocolImplementation({ findOne: async () => null, find: async () => [] } as never);
     (protocol as any).ensureOverlayIndex = async () => {};
     // [#21694] No lock on these items. Stubbed at `lockWriteRefusal`, the
     // verdict the publish path asks (`promoteDraftForPublish`, since #8594),
