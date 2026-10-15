@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the seven files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the eight files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#21733] Joined the population deliberately: the card's acceptance is
         // a plain `os dev` restart on the BUILT packages, and its production leg
@@ -2653,6 +2653,12 @@ export function selfTest() {
         'packages/cli/test/published-entry-node-env-source-reroute.test.ts',
         'packages/cli/test/serve-mcp-capability-collision.e2e.test.ts',
         'packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts',
+        // [#23573] Joined the population deliberately: the no-storage boot
+        // guard is registered only when a PRODUCTION storage step declared
+        // nothing, and `bin/run-dev.js` sets `NODE_ENV=development` before argv
+        // is parsed, where the step always declares a SQLite default. Every
+        // spawn hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/serve-no-storage-boot-guard.integration.test.ts',
         'packages/cli/test/serve-node-env-production-default.e2e.test.ts',
         // [#16630] Joined the population deliberately: the degraded-boot the
         // ready line has to report is only reachable in PRODUCTION posture, and

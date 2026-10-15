@@ -224,6 +224,14 @@ afterAll(() => {
   if (root) rmSync(root, { recursive: true, force: true });
 });
 
+/** A boot the guard must leave alone: it reaches its banner, refused nothing, printed no line. */
+function expectSilentBoot(output: string, ready: boolean): void {
+  const seen = `\n--- output ---\n${output}`;
+  expect(ready, `the boot did not reach its banner${seen}`).toBe(true);
+  expect(output, `the boot was refused${seen}`).not.toContain(REFUSAL_HEAD);
+  expect(output, `the boot got the no-storage line${seen}`).not.toContain(LINE_HEAD);
+}
+
 describe('os serve — a production host config with no storage (#23573)', () => {
   it(
     'refuses before any plugin starts when the auth service needs a driver, naming the remedies',
@@ -274,27 +282,27 @@ describe('os serve — a production host config with no storage (#23573)', () =>
     'stays silent and boots when a plugin no driver test names registers a driver in init()',
     async () => {
       const { output, ready } = await boot(driverDir, { OS_AUTH_SECRET: AUTH_SECRET });
-      const seen = `\n--- output ---\n${output}`;
-
-      expect(ready, `a boot with a driver-providing plugin no longer reaches its banner${seen}`).toBe(true);
-      expect(output, `a boot with a driver was refused${seen}`).not.toContain(REFUSAL_HEAD);
-      expect(output, `a boot with a driver got the no-storage line${seen}`).not.toContain(LINE_HEAD);
+      expectSilentBoot(output, ready);
     },
     240_000,
   );
 
-  it.each([
-    ['OS_DATABASE_URL set', { OS_AUTH_SECRET: AUTH_SECRET, OS_DATABASE_URL: 'file:./ctl.db' }, [] as string[]],
-    ['--dev', { OS_AUTH_SECRET: AUTH_SECRET }, ['--dev']],
-  ])(
-    'control: %s boots and says nothing about storage',
-    async (_label, env, args) => {
-      const { output, ready } = await boot(plainDir, env, args);
-      const seen = `\n--- output ---\n${output}`;
+  // Two `it`s, not an `it.each`: each spawn's env stays a literal at its call,
+  // which is what `check:cli-test-child-env` reads the child's NODE_ENV from.
+  it(
+    'control: OS_DATABASE_URL set boots and says nothing about storage',
+    async () => {
+      const { output, ready } = await boot(plainDir, { OS_AUTH_SECRET: AUTH_SECRET, OS_DATABASE_URL: 'file:./ctl.db' });
+      expectSilentBoot(output, ready);
+    },
+    240_000,
+  );
 
-      expect(ready, `the control did not reach its banner${seen}`).toBe(true);
-      expect(output, `the control was refused${seen}`).not.toContain(REFUSAL_HEAD);
-      expect(output, `the control got the no-storage line${seen}`).not.toContain(LINE_HEAD);
+  it(
+    'control: --dev boots and says nothing about storage',
+    async () => {
+      const { output, ready } = await boot(plainDir, { OS_AUTH_SECRET: AUTH_SECRET }, ['--dev']);
+      expectSilentBoot(output, ready);
     },
     240_000,
   );
