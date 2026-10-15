@@ -42,7 +42,7 @@
  *   — ascending — and D3's envelope on the `refuses-uncomposed` case;
  * - a driver that REFUSES the leaf (D3: `driver-mongodb`, until a card
  *   measures a pipeline form) asserts D3's envelope on every case that holds a
- *   composed leaf ({@link readableIdsCaseHoldsComposedLeaf}), and the row ids on
+ *   composed leaf ({@link ReadableIdsMatchesCase.holdsComposedLeaf}), and the row ids on
  *   the rest. That is what "recorded as refusing" means.
  *
  * A case with {@link ReadableIdsMatchesCase.requiresTenantWall} reads under a
