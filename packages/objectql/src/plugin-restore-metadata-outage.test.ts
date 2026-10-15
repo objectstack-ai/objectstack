@@ -49,8 +49,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import type { IDataDriver } from '@objectstack/spec/contracts';
 import { ObjectQLPlugin } from './plugin.js';
-import type { ObjectQL } from './engine.js';
+import { ObjectQL } from './engine.js';
 
 type AnyRecord = Record<string, any>;
 
@@ -83,9 +84,18 @@ function protocolReturning(result: AnyRecord) {
   return { loadMetaFromDb: vi.fn(async () => result) };
 }
 
-/** The engine is untouched by this path; a bare object satisfies the ctor. */
+/**
+ * A real engine that HAS a datasource: one registered (default) driver. The
+ * outage branch asks the engine whether anything serves `sys_metadata` to pick
+ * the fix it names, so a bare object no longer satisfies it — and a driver
+ * being there is exactly the "a datasource exists and its read failed" shape
+ * these cases pin. The no-storage shape is pinned in
+ * `plugin-restore-metadata-no-storage.test.ts`.
+ */
 function makePlugin() {
-  return new ObjectQLPlugin({ ql: {} as unknown as ObjectQL });
+  const ql = new ObjectQL();
+  ql.registerDriver({ name: 'primary', version: '0.0.0' } as unknown as IDataDriver, true);
+  return new ObjectQLPlugin({ ql });
 }
 
 /** Every string the logger was handed at `level`, joined for keyword checks. */
