@@ -10,6 +10,9 @@
   ⛔ 不在其列:派发席按本席档在 ACCEPT 逐句对照 diff 核,ACCEPT 点名所核句。
 - 档随面定:已发布 schema 或 governed 规则文本 ⇒ `CONTRACT_REVIEW_TIER`,混合 diff 一处命中即此档;
   仅凭 `Clause-②: yes` 申报而欠 ⇒ `TIER_DEFAULT`,由车道席位作复核记录;档恰等不作下限。
+- 混合 diff 的达档复核范围 = `reviewFace` 的 `hits` 路径 + 其 hunk 所断言的文件(读被引代码);
+  规则与执行它的门禁同属一改者一并读;记录 `Scope:` 行列两者,可放宽、⛔ 不窄于 `hits`。
+- 余部归车道席位 `TIER_DEFAULT` 的 ACCEPT,同单独开 PR 并点名;Tier H 人批与队列守卫仍整张 PR。
 - 面读 PR 已提交树的文件清单,同队列守卫判 governed 路径;⛔ 不读席位自述。
 - 已发布面以包的 `exports` 映射为准:从入口类型图不可达、且 `exports` 不可寻址的 `.d.ts` 是
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
