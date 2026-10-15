@@ -23,9 +23,11 @@ import { Logger, createLogger, compensatedSum } from '@objectstack/core';
 // one source for every driver.
 import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
 import type { ComposedReadableIds } from '@objectstack/spec/data';
-// [#23679] mingo over this driver's own context: `$in` hashes its list once per
-// compiled query, not once per row — see `memory-mingo.ts`.
-import { Query, Aggregator } from './memory-mingo.js';
+import { Aggregator } from 'mingo';
+// [ADR-0139 D3] mingo's `Query`, able to compile the member test a composed
+// `ReadableIds` leaf lowers to: its readable ids hashed once per query, not
+// once per row (#23679). Every other operator is mingo's.
+import { Query, READABLE_IDS_MEMBER_OP, isReadableIdsList, markReadableIdsList } from './memory-readable-ids-member.js';
 import {
   assertSingleTenantPosture,
   assertObjectsNotTenantScoped,
@@ -1489,7 +1491,9 @@ export class InMemoryDriver implements IDataDriver {
     let rows: Record<string, any>[] = this.getTable(leaf.object);
     const mongoQuery = this.convertToMongoQuery(leaf.scope, leaf.object);
     if (mongoQuery && Object.keys(mongoQuery).length > 0) rows = new Query(mongoQuery).find(rows).all() as Record<string, any>[];
-    return rows.map((row) => row.id);
+    // [#23679] Marked, so the `$in` arm lowers this list to the member test
+    // that hashes it once (`memory-readable-ids-member.ts`).
+    return markReadableIdsList(rows.map((row) => row.id));
   }
 
   /**
@@ -1892,7 +1896,13 @@ export class InMemoryDriver implements IDataDriver {
         // `$between` arm above).
         case '$eq': case '$ne': case '$gt': case '$gte': case '$lt': case '$lte':
         case '$in': case '$nin':
-          put(op, store(val));
+          // [ADR-0139 D3, #23679] The list a composed `ReadableIds` leaf was
+          // rewritten into is answered by a member test that hashes it once per
+          // query. mingo's `$in` re-hashes its whole list for every row tested,
+          // which made a read cost rows × readable parents. Only the D3 leaf's
+          // list carries the mark; every other `$in` stays mingo's.
+          if (op === '$in' && isReadableIdsList(val)) put(READABLE_IDS_MEMBER_OP, store(val));
+          else put(op, store(val));
           break;
         // [commit 9dac1ae01] `$exists` means "the field HAS A VALUE" (`!= null`), never
         // key presence — #5298 leg 3 / #5369, landed in PR #5962, and ruled

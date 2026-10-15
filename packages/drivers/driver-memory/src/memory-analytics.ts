@@ -51,7 +51,7 @@ import {
 // buckets, so the bucket key can be folded in JS between the two halves — mingo
 // has no expression that produces the canonical labels, and writing one would
 // be the second dialect this repair exists to avoid.
-import { Aggregator } from './memory-mingo.js';
+import { Aggregator } from 'mingo';
 import {
   assertFilterConditionShape,
   uncompilableCombinatorError,
