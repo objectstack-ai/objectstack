@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 50 — spawns the real producer once per single-cause fixture: five production boots of the built CLI (refusal, line, a driver-providing plugin, OS_DATABASE_URL, --dev), each one fixture differing in the one input under test; 36.0 s measured locally on a shared container, no CI reading yet
+// test-budget: 30 — spawns the real producer once per single-cause fixture: five production boots of the built CLI (refusal, line, a driver-providing plugin, OS_DATABASE_URL, --dev), each fixture differing only in the input under test; 23.6 s measured locally on a shared container x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
@@ -52,6 +52,12 @@ import {
  * `runServe()` spawns) pins development, where the storage step always
  * resolves a SQLite default and the guard is never registered. See
  * `serve-ready-degraded-boot.e2e.test.ts` for the same reasoning.
+ *
+ * ## Why `.integration`, not `.e2e`
+ *
+ * The `.e2e` name moves a file to the nightly run on `main` (`OS_TEST_TIERS`,
+ * `scripts/nightly-tiers.mjs`). This pin guards a boot ORDER that any serve.ts
+ * edit can break, so it rides the queue run, where such an edit lands.
  */
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
