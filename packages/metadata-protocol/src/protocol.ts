@@ -17507,21 +17507,16 @@ export class ObjectStackProtocolImplementation implements
      *    package door gives (`ITEM_LOCKED` on a read-only base), so asking
      *    here never moves that door's vocabulary.
      *
-     * ## `create` — a save that TAKES the name
+     * ## One `save`, whatever the write meant
      *
-     * [#22591] A door that knows its write brings an item of the caller's own
-     * into existence under `name` — a create, or a rename into the name — asks
-     * with `operation: 'create'` (Setup's position write-through does). The
-     * verdict is the `save` verdict: the same predicate, code and status, so
-     * no write moves. Only the sentence follows the act: it names the remedy a
-     * create has, a name no package or built-in holds, never the edit remedy
-     * (`managedItemSealedSentence` in `./packaged-base-regime.ts`). A door that
-     * cannot tell an edit from a create asks `save`, and keeps the edit remedy.
+     * [#23577] `save` is every write under the name: a door cannot tell a
+     * create from an edit, so the refusal advises neither and states what it
+     * knows (`managedItemSealedSentence` in `./packaged-base-regime.ts`).
      *
      * @returns the refusal to relay, or `null` when the `/meta` door would not
      *          refuse this write or removal on the locked-base ground.
      */
-    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'create' | 'delete'; packageId?: string | null }): Error | null {
+    packagedBaseRefusal(request: { type: string; name: string; operation: 'save' | 'delete'; packageId?: string | null }): Error | null {
         // [#9009] Folded HERE, at the producer of the verdict, so a caller that
         // arrives with a plural spelling cannot address around the lock.
         const folded = canonicalizeMetaRequestType(request);
@@ -17532,7 +17527,7 @@ export class ObjectStackProtocolImplementation implements
                     type: folded.type,
                     name: folded.name,
                     ...(folded.packageId ? { packageId: folded.packageId } : {}),
-                }, folded.operation);
+                });
             }
         } catch (err) {
             if (ObjectStackProtocolImplementation.isPackagedBaseRefusal(err)) return err;
@@ -17913,15 +17908,10 @@ export class ObjectStackProtocolImplementation implements
      * `/meta`'s handling of every OTHER type is unchanged, so for those this
      * returns `null` and the caller proceeds exactly as before.
      *
-     * [#22591] `operation: 'create'` says the write takes the name for a flow of
-     * the caller's own (the `/meta` door's first-write pin on a publish save —
-     * [#23406] a first draft is an edit); rule 1's refusal then names the
-     * create remedy. The verdict is the same; absent, the write is an edit.
-     *
      * @returns the refusal to relay verbatim, or `null` when the write may
      *          proceed on these grounds.
      */
-    async tenantAuthoredWriteRefusal(request: { type: string; name: string; item: unknown; packageId?: string | null; operation?: 'save' | 'create' }): Promise<Error | null> {
+    async tenantAuthoredWriteRefusal(request: { type: string; name: string; item: unknown; packageId?: string | null }): Promise<Error | null> {
         const folded = canonicalizeMetaRequestType(request);
         const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
         if (singular !== 'flow') return null;
@@ -17930,7 +17920,7 @@ export class ObjectStackProtocolImplementation implements
             const locked = this.packagedBaseRefusal({
                 type: folded.type,
                 name: folded.name,
-                operation: folded.operation ?? 'save',
+                operation: 'save',
                 ...(folded.packageId ? { packageId: folded.packageId } : {}),
             });
             if (locked) return locked;
@@ -18048,15 +18038,9 @@ export class ObjectStackProtocolImplementation implements
      * sentence names the managed package ({@link managedItemSealedSentence}, the
      * one builder the repository's type door reads too); the code and the status
      * are unchanged.
-     *
-     * [#22591] `operation` is what the save does to the name — `create` when the
-     * caller takes it for an item of its own, `save` (an edit) otherwise — and
-     * only the sentence reads it: the remedy follows the act. The predicate, the
-     * limbs, the code and the status are the same for both.
      */
     private refusePackagedBaseOverride(
         request: { type: string; name: string; packageId?: string | null },
-        operation: 'save' | 'create' = 'save',
     ): void {
         if (this.isSealedManagedItem(request.type, request.name)) {
             // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
@@ -18123,9 +18107,9 @@ export class ObjectStackProtocolImplementation implements
             }
             // [#20819, ADR-0131 D6] The SENTENCE is chosen per ADR-0126 regime,
             // and names the managed package for every other type; the code and
-            // the status are unchanged. [#22591] A create reads the held-name
-            // remedy instead, whatever the type.
-            const err = new Error(managedItemSealedSentence(request.type, request.name, operation));
+            // the status are unchanged. [#23577] Every write reads it, whatever
+            // the write meant to do: the door cannot tell a create from an edit.
+            const err = new Error(managedItemSealedSentence(request.type, request.name, 'save'));
             (err as any).code = 'NOT_OVERRIDABLE';
             (err as any).status = 403;
             throw err;
@@ -20527,7 +20511,8 @@ export class ObjectStackProtocolImplementation implements
      * the members it dropped ({@link reconcileViewExpansions}) before the
      * write answers, so the reads that follow it serve the published set.
      * The orphan adoption ({@link reassignOrphanedMetadata}) calls it for each
-     * view row it rebinds, with `reboundFrom`.
+     * view row it rebinds, with `reboundFrom`, and [#23646] for each object
+     * row, once {@link releaseAdoptedObjectOwner} has handed it the name.
      */
     private async applyRegistryWriteThrough(request: {
         type: string;
@@ -22063,36 +22048,12 @@ export class ObjectStackProtocolImplementation implements
         // are no caller's claim about anything: a row stored before the
         // #16702 strip may still carry stale stamps, and rewriting it keeps
         // the silent strip it always had rather than failing the rewrite.
-        //
-        // [#22591] What this save does to the name, read for the sealed-item
-        // refusal's remedy and nothing else. Read by the flow rule just below
-        // and by the package door further down, and each reads it only for a
-        // name a managed package (or the loader's set) already holds — so an
-        // item is under the name whenever it is read.
-        //
-        // [#23406] A present `null` parent is the first-write pin
-        // (`If-None-Match: *` on the REST door), and it asserts what the spec
-        // says it asserts — "no current row of THIS lifecycle"
-        // (`SaveMetaItemRequestSchema.parentVersion`) — and nothing more:
-        //  - on a publish save the lifecycle is the item's live row: the
-        //    caller asserts there is none and brings one into existence under
-        //    the name, a create;
-        //  - on a draft save the lifecycle is the draft's: the pin asserts that
-        //    no draft is pending, never that the name is free. Over a held
-        //    name it is a first draft of the item already there, an edit, and
-        //    its refusal names that item's own remedy, as the unpinned draft's
-        //    does. Read as a create, it named a free name, and a client that
-        //    followed it authored a second item instead of editing the source.
-        // Every other save is an edit.
-        const sealedWrite: 'save' | 'create' =
-            request.parentVersion === null && request.mode !== 'draft' ? 'create' : 'save';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
                 name: request.name,
                 item: request.item,
                 ...(request.packageId ? { packageId: request.packageId } : {}),
-                ...(sealedWrite === 'create' ? { operation: sealedWrite } : {}),
             });
             if (authored) throw authored;
         }
@@ -22254,10 +22215,10 @@ export class ObjectStackProtocolImplementation implements
         // repository has refused these writes on them all along; the door
         // only answers first.
         //
-        // [#22591] A first write of the live row (`sealedWrite`, above) reads
-        // the create remedy — [#23406] a first DRAFT is an edit and keeps the
-        // edit remedy; the verdict is the same.
-        this.refusePackagedBaseOverride(request, sealedWrite);
+        // [#23577] Every write over a sealed name reads one sentence: the
+        // first-write pin (`If-None-Match: *`) declares no create, so the door
+        // advises neither a create nor an edit.
+        this.refusePackagedBaseOverride(request);
 
         // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
         // overlay `_lock`) blocks save independent of the L1 type-level
@@ -27633,7 +27594,25 @@ export class ObjectStackProtocolImplementation implements
      * binding it left ({@link applyRegistryWriteThrough}, `reboundFrom`), so
      * the registry follows the row at once: a view container's expansions are
      * reconciled for the new binding, and the record of the old one moves
-     * with it ({@link reconcileViewExpansions}). Rows of other types are
+     * with it ({@link reconcileViewExpansions}).
+     *
+     * ## [#23646] …and so does each object row it rebinds
+     *
+     * An object row used to be rebound in storage only. The registry kept the
+     * owner the package-less row had registered (the `'sys_metadata'`
+     * sentinel) and the pre-adoption definition until the next restart, and
+     * every save of the object naming the target package answered success
+     * without going live: the write-through's `own` claim under the target met
+     * the registry's single-owner rule (ADR-0029 D3) and landed in
+     * {@link applyObjectRegistryMutation}'s best-effort warn. Measured over
+     * `POST /api/v1/packages/:id/adopt-orphans` on a booted CRM example: the
+     * data plane refused the saved object's new field with `400 INVALID_FIELD`.
+     * So the sentinel's contribution leaves the registry first
+     * ({@link releaseAdoptedObjectOwner}), and the row registers at its new
+     * binding through the same write-through, in the same request; the next
+     * boot registers the same owner. Only an ACTIVE object row is registered,
+     * the rows the boot registers: an adopted draft is rebound in storage
+     * only, because a draft never reaches the runtime. Rows of other types are
      * rebound in storage only, as before.
      */
     async reassignOrphanedMetadata(request: {
@@ -27707,9 +27686,9 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
             // [#23198] The registry follows the rebound row now, not at the
-            // next restart; see the header. ⛔ Views only.
+            // next restart; see the header. [#23646] A view, and an object.
             const type = canonicalMetaType(String(row.type));
-            if (type !== 'view') continue;
+            if (type !== 'view' && type !== 'object') continue;
             let rebound: { name: string; data: unknown };
             try {
                 // The row as the list read hydrates it, at its new binding.
@@ -27718,6 +27697,16 @@ export class ObjectStackProtocolImplementation implements
                 // Best-effort, as the write-through's own failure is: the row
                 // is rebound, and the next list read hydrates it.
                 console.warn(`[Protocol] registry write-through failed for ${type}/${row.name}: ${err?.message ?? err}`);
+                continue;
+            }
+            // [#23646] An object's one registry owner moves with its row. Only
+            // an active row's: the boot registers no other ({@link
+            // loadMetaFromDb}), and a draft never reaches the runtime.
+            if (
+                type === 'object'
+                && (row.state !== 'active'
+                    || !this.releaseAdoptedObjectOwner(rebound.name, rebound.data, request.targetPackageId))
+            ) {
                 continue;
             }
             await this.applyRegistryWriteThrough({
@@ -27758,6 +27747,67 @@ export class ObjectStackProtocolImplementation implements
             reassigned,
             targetPackageId: request.targetPackageId,
         };
+    }
+
+    /**
+     * [#23646, ADR-0070 D5] Hand an adopted object's registry name over to its
+     * rebound row: answers whether {@link reassignOrphanedMetadata} registers
+     * the row at its new binding through {@link applyRegistryWriteThrough}.
+     *
+     * An object has ONE owner per name in the registry (ADR-0029 D3), and a
+     * package-less row registers as its owner under the `'sys_metadata'`
+     * sentinel (the save's write-through and the boot's hydration both key a
+     * package-less row so). A registration at the new binding while that owner
+     * stands is a second package's `own` claim, which `registerObject` refuses.
+     * So the sentinel's contribution leaves first, through
+     * `SchemaRegistry.unregisterObject` — the verb
+     * {@link restoreArtifactRegistryView} already hands an object's name to a
+     * remaining row with — and the write-through then registers the row as a
+     * save of it does. Both run before the adoption answers, with no `await`
+     * between them, so no request sees the name unowned. No new registry verb
+     * exists for this, and none is needed.
+     *
+     * | the name's registered owner | answer |
+     * |:--|:--|
+     * | the sentinel (the adopted row's own registration) | unregistered; `true` |
+     * | none | `true`: the row registers as the next boot would register it |
+     * | another package's row | `false`: the adopted row never held the name; the registry keeps that owner, as before, and the next boot judges both rows |
+     *
+     * A code-shipped object is never adopted ({@link isArtifactBacked} filters
+     * it out first), so a packaged owner does not reach this table.
+     *
+     * `unregisterObject` refuses an object another package extends (its
+     * ADR-0029 guard). The registry then keeps the sentinel's owner and the
+     * pre-adoption definition until the next restart while storage says
+     * otherwise, which is why that refusal is logged at `error`, once per
+     * object, with the consequence and the remedy.
+     *
+     * `false` for a registry with no object half (a metadata-only double) and
+     * for a body with no name, which register nothing.
+     */
+    private releaseAdoptedObjectOwner(name: string, item: unknown, targetPackageId: string): boolean {
+        const registry: any = (this.engine as any)?.registry;
+        if (typeof registry?.registerObject !== 'function') return false;
+        if (!item || typeof item !== 'object' || typeof (item as { name?: unknown }).name !== 'string') return false;
+        const owner: { packageId?: unknown } | undefined = typeof registry.getObjectOwner === 'function'
+            ? registry.getObjectOwner(name)
+            : undefined;
+        if (owner === undefined) return true;
+        if (owner.packageId !== 'sys_metadata' || typeof registry.unregisterObject !== 'function') return false;
+        try {
+            registry.unregisterObject(name);
+            return true;
+        } catch (err: any) {
+            console.error(
+                `[Protocol] reassignOrphanedMetadata: object '${name}' was adopted into package `
+                + `'${targetPackageId}' in sys_metadata, but the registry keeps its package-less definition `
+                + `(owner 'sys_metadata') until the next restart: ${err?.message ?? err}. Until then the data `
+                + `plane serves the pre-adoption definition, and a save of the object naming '${targetPackageId}' `
+                + 'answers success without going live. Fix: restart the server; the boot registers the object '
+                + `under '${targetPackageId}'.`,
+            );
+            return false;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────

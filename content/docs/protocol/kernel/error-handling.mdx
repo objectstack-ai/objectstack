@@ -72,16 +72,17 @@ universal one.
 
 Two corollaries, and both of them bite:
 
-- **A refusal a writer *builds* always carries that writer's envelope.** `UNIQUE_VIOLATION`
-  is built by the `/data` door's classification arms, so it is **always flat**.
+- **A refusal a writer *builds* always carries that writer's envelope.**
   `RATE_LIMIT_EXCEEDED` is built by the inbound rate limiter, so it is **always nested**.
 - **A refusal that is *thrown* and classified at the boundary carries the envelope of
   whichever door caught it.** `PERMISSION_DENIED`, `RESOURCE_NOT_FOUND`,
   `SERVICE_UNAVAILABLE` and `INTERNAL_ERROR` are all thrown by shared guards and reach
-  clients in **either** envelope depending on the route. So are `DELETE_RESTRICTED`,
-  `INVALID_FIELD` and `OBJECT_NOT_FOUND`, which the engine and the protocol throw: the
-  `@objectstack/rest` `/data` door answers them flat, and a [Hono door](#hono-doors)
-  answers them nested, with their structured fields under `error.details`.
+  clients in **either** envelope depending on the route. So are `UNIQUE_VIOLATION`,
+  `DELETE_RESTRICTED`, `INVALID_FIELD` and `OBJECT_NOT_FOUND`, which the engine and the
+  protocol throw (`UNIQUE_VIOLATION` is the wire spelling of the engine's
+  `DuplicateRecordError`, translated by both doors): the `@objectstack/rest` `/data` door
+  answers them flat, and a [Hono door](#hono-doors) answers them nested, with their
+  structured fields under `error.details`.
 
 So do not derive the envelope from the code. Derive it from the body you are holding:
 
@@ -246,6 +247,7 @@ serves `/data`:
 
 | Code | In `error.details` on a Hono door |
 |---|---|
+| `UNIQUE_VIOLATION` | `developerMessage`, `object`, and `field` when the driver named the column |
 | `DELETE_RESTRICTED` | `developerMessage`, `dependentObject`, and `dependentCount` when the flat door would send it |
 | `CONCURRENT_UPDATE` | `currentVersion`, `currentRecord` (the row as the caller reads it) |
 | `INVALID_FIELD` | `field`, `object` |
@@ -253,10 +255,19 @@ serves `/data`:
 | `VALIDATION_FAILED` | `fields` |
 | `FEEDS_DISABLED`, `FILES_DISABLED`, `ATTACHMENT_PARENT_ACCESS`, `ATTACHMENT_DELETE_DENIED`, `RECORD_NOT_ACCESSIBLE` | `object` |
 
+`UNIQUE_VIOLATION` is not the code the engine throws: its `DuplicateRecordError`, whose
+in-process `code` is `DUPLICATE_RECORD`, is answered as `UNIQUE_VIOLATION` here exactly
+as on the flat door. A refusal that only *speaks*
+`DUPLICATE_RECORD` — a hook throwing the registered code without being the engine's
+class — keeps its own code.
+
 ⛔ What a Hono door never sends: `httpStatus`, and an `object` the flat door takes from the request's route
 (on `DELETE_RESTRICTED`, `CONCURRENT_UPDATE` and `VALIDATION_FAILED`). The `message` is the
 thrown one and can differ from the flat door's `error`: an unregistered object reads
-`Object 'ghost' not found` here and `Object 'ghost' is not registered` there.
+`Object 'ghost' not found` here and `Object 'ghost' is not registered` there, and a repeated
+unique value reads the engine's `Duplicate record refused on 'account': …` here, the same
+sentence `details.developerMessage` carries, where the flat door's `error` reads
+`A record with this email already exists`.
 
 ## HTTP Status Codes
 
@@ -664,7 +675,9 @@ three if you handle both families.
 #### `UNIQUE_VIOLATION`
 **HTTP Status:** 409  
 **Meaning:** The write collides with a unique constraint — a record already holds that value  
-**Envelope:** flat — built by the `/data` door's duplicate-record arm, so it is never nested
+**Envelope:** flat on the `@objectstack/rest` `/data` door, built by its duplicate-record
+arm. On a [Hono door](#hono-doors) it is nested: `developerMessage`, `object` and `field`
+ride in `error.details`
 
 **Example:**
 ```json
@@ -677,10 +690,10 @@ three if you handle both families.
 ```
 
 The engine throws `DuplicateRecordError`, whose in-process `code` is
-`DUPLICATE_RECORD`; the REST door translates that envelope at the boundary, so
-every route answers the wire code `UNIQUE_VIOLATION` and the in-process spelling
-never crosses HTTP. The refusal is emitted as the flat body shown above, and
-`field` is best-effort — see
+`DUPLICATE_RECORD`; the REST door and the [Hono doors](#hono-doors) translate that
+envelope at the boundary, so every route answers the wire code `UNIQUE_VIOLATION` and
+the in-process spelling never crosses HTTP. The REST door emits the flat body shown
+above, and `field` is best-effort on either door — see
 [HTTP API](/docs/protocol/kernel/http-protocol) for the degraded shape.
 
 **How to fix:**

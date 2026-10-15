@@ -55,6 +55,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { REST_SERVER_REGISTRAR_FILES, type RestServerRegistrarFile } from './rest-server-registrar-files.js';
 
 const FILE = 'rest-server.ts';
 const SOURCE = readFileSync(new URL('./rest-server.ts', import.meta.url), 'utf8');
@@ -133,10 +134,23 @@ describe('rest-server.ts docblock position', () => {
  * docblock), so it is read under the same rule rather than leaving that block
  * outside every pin. Its floor is its own measured count: the module header,
  * the moved alias's block, the host interface's and the function's.
+ *
+ * [#23050 slice 3] Every module on THE list of the files `RestServer`'s
+ * registrars live in is read under the same rule, imported rather than spelt
+ * here, so a registrar body the split moves next stays inside this pin. Each
+ * floor is that module's own measured count — the batch and approval modules
+ * carry three apiece (the module header, the host interface's block and the
+ * function's) — and a module added to the list needs one here before it reads.
+ * The case below the loop pins the list's length and the sum of the floors.
  */
-const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = [
-    { file: 'data-action-routes.ts', minBlocks: 4 },
-];
+const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
+    'data-action-routes.ts': 4,
+    'batch-routes.ts': 3,
+    'approvals-routes.ts': 3,
+};
+const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
+    .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
+    .map((file) => ({ file, minBlocks: MOVED_FILE_FLOORS[file] }));
 
 for (const { file, minBlocks } of MOVED_FILES) {
     describe(`${file} docblock position (moved out of ${FILE})`, () => {
@@ -155,3 +169,14 @@ for (const { file, minBlocks } of MOVED_FILES) {
         });
     });
 }
+
+describe('[#23050 slice 3] the registrar list this pin reads', () => {
+    it('reads every module on it, each against its own floor — the length and the floors\' sum are pinned', () => {
+        // A module added to the list makes this re-read its numbers rather than
+        // widening unnoticed: 4 + 3 + 3 = 10 blocks over the three modules.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        expect(Object.keys(MOVED_FILE_FLOORS).sort())
+            .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(10);
+    });
+});

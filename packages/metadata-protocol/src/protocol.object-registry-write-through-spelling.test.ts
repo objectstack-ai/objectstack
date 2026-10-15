@@ -63,9 +63,11 @@
 //   6. `reassignOrphanedMetadata` (#23198) folds the STORED row type at the
 //                                call site through `canonicalMetaType`, and
 //                                writes through only a row that folds to
-//                                `'view'`. It never passes `'object'`, so it
-//                                never reaches `applyObjectRegistryMutation`:
-//                                an orphaned object is rebound in storage only.
+//                                `'view'` or [#23646] `'object'` — the latter
+//                                once `releaseAdoptedObjectOwner` has handed
+//                                the adopted row the name. A legacy row stored
+//                                as `'objects'` therefore reaches
+//                                `applyObjectRegistryMutation` as `'object'`.
 //   7. `restoreArtifactRegistryView` (#23297) folds at the call site through
 //                                `canonicalMetaType`, the key it also reads
 //                                the stored rows under, and registers a row
@@ -528,7 +530,11 @@ describe('[#8862] every object registry write-through registers under the singul
         );
     });
 
-    it('the orphan adoption writes a stored `views` row through as `view`, and an orphaned `objects` row not at all', async () => {
+    // [#23646] The orphaned object used to be rebound in storage only, and
+    // this case pinned that (`registeredObjects` empty). It now pins the fold
+    // the adoption's object limb applies: a stored `objects` row registers
+    // under `object`, never under the plural it is stored as.
+    it('the orphan adoption writes a stored `views` row through as `view`, and a stored `objects` row as `object`', async () => {
         // An unscoped kernel: the only one on which a view row is written through.
         const h = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(h.engine, () => new Map()) as any;
@@ -542,8 +548,9 @@ describe('[#8862] every object registry write-through registers under the singul
         const res = await protocol.reassignOrphanedMetadata({ targetPackageId: PKG });
 
         expect(res.reassigned).toEqual([{ type: 'objects', name: 'ticket' }, { type: 'views', name: 'ticket_grid' }]);
-        expect(h.registeredItems).toEqual([{ type: 'view', name: 'ticket_grid' }]);
-        expect(h.registeredObjects).toEqual([]);
+        expect(h.registeredItems).toEqual([{ type: 'object', name: 'ticket' }, { type: 'view', name: 'ticket_grid' }]);
+        expect(h.registeredItems).not.toContainEqual(expect.objectContaining({ type: 'objects' }));
+        expect(h.registeredObjects).toEqual(['ticket']);
     });
 });
 

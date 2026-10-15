@@ -35,10 +35,24 @@ import {
   LEDGER_POPULATION_BASELINE,
   LEDGER_POPULATION_BASELINE_MAX,
 } from './authz-ledger-population.baseline.js';
+// [#23050 slice 3] THE list of the files `RestServer`'s registrars live in —
+// see the two `rest-server.ts` realtime tripwires below.
+import {
+  REST_SERVER_REGISTRAR_DIR,
+  REST_SERVER_REGISTRAR_FILES,
+} from '../../../rest/src/rest-server-registrar-files.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // packages/qa/dogfood/test → repo root.
 const REPO_ROOT = join(HERE, '../../../..');
+
+// [#23050 slice 3] Every file on the registrar list, repo-relative, and the ones
+// beyond `rest-server.ts` that the realtime tripwires read WITH it.
+const REST_SERVER_FILE = 'packages/rest/src/rest-server.ts';
+const REST_SERVER_REGISTRAR_PATHS: readonly string[] =
+  REST_SERVER_REGISTRAR_FILES.map((file) => `${REST_SERVER_REGISTRAR_DIR}/${file}`);
+const REST_SERVER_REGISTRAR_ALSO_READS: readonly string[] =
+  REST_SERVER_REGISTRAR_PATHS.filter((file) => file !== REST_SERVER_FILE);
 
 // ── #7976 — mutual row ↔ proof attribution ────────────────────────────────
 // A proof file self-declares the rows it is the proof FOR with header
@@ -123,6 +137,17 @@ interface Probe {
    * reading OF the table rather than of the file that carries it.
    */
   within?: string;
+  /**
+   * [#23050 slice 3] More files read WITH `file`, as one text. Only the two
+   * `rest-server.ts` realtime tripwires declare it: they watch the code
+   * `RestServer`'s registrars run, and the split of `rest-server.ts` moves
+   * registrar bodies into modules of their own, so they read every file on the
+   * registrar list (`packages/rest/src/rest-server-registrar-files.ts`,
+   * imported above) and a transport wired in a moved body still trips them.
+   * `file` stays the one file the entry NAMES — what the probe-table census and
+   * the matrix header count — and the minted key is unchanged.
+   */
+  alsoReads?: readonly string[];
   key: (m: RegExpExecArray) => string;
 }
 
@@ -430,12 +455,14 @@ const PROBES: readonly Probe[] = [
   {
     kind: 'TRIPWIRE',
     file: 'packages/rest/src/rest-server.ts',
+    alsoReads: REST_SERVER_REGISTRAR_ALSO_READS,
     re: /handleUpgrade\s*\(|new\s+WebSocketServer\b|new\s+WebSocket\b|new\s+EventSource\b|upgradeWebSocket\b|WebSocketPair\b|Sec-WebSocket-|text\/event-stream|streamSSE\s*\(/g,
     key: () => tripwireKey('realtime:rest-server.ts:transport'),
   },
   {
     kind: 'TRIPWIRE',
     file: 'packages/rest/src/rest-server.ts',
+    alsoReads: REST_SERVER_REGISTRAR_ALSO_READS,
     // Word-boundary lookaheads on `ws`/`stream` keep the file's 31 unrelated
     // response-streaming references (and paths like `/workspaces`) out: they
     // are matched only as a whole route segment, never as a prefix.
@@ -520,7 +547,10 @@ const PROBES: readonly Probe[] = [
  */
 function probeSource(probe: Probe): string {
   const src = readFileSync(join(REPO_ROOT, probe.file), 'utf8');
-  return probe.within ? scopedSource(src, probe.within) : src;
+  if (probe.within) return scopedSource(src, probe.within);
+  // [#23050 slice 3] `alsoReads` widens the read, never the scope: no probe
+  // declares both, and `within` above returns before it.
+  return [src, ...(probe.alsoReads ?? []).map((file) => readFileSync(join(REPO_ROOT, file), 'utf8'))].join('\n');
 }
 
 /**
@@ -1591,6 +1621,18 @@ describe('#9084 — the rest-server.ts transport tripwire keys off mechanics', (
     const src = readFileSync(join(REPO_ROOT, REST_SERVER), 'utf8');
     expect(hits(MECHANICS.re, src)).toEqual([]);
     expect(hits(ROUTES.re, src)).toEqual([]);
+    // [#23050 slice 3] …and on every file `RestServer`'s registrars live in:
+    // 0 over the list, whose length is pinned so a module added to it makes this
+    // re-read. The control is that both probes really READ the list — their
+    // text is every file on it, in order — so the zero is not a list ignored.
+    expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+    expect(REST_SERVER_REGISTRAR_PATHS[0]).toBe(REST_SERVER);
+    const listed = REST_SERVER_REGISTRAR_PATHS.map((file) => readFileSync(join(REPO_ROOT, file), 'utf8'));
+    for (const probe of [MECHANICS, ROUTES]) {
+      expect(probe.alsoReads).toEqual(REST_SERVER_REGISTRAR_PATHS.slice(1));
+      expect(probeSource(probe)).toBe(listed.join('\n'));
+    }
+    expect(listed.reduce((n, text) => n + hits(MECHANICS.re, text).length + hits(ROUTES.re, text).length, 0)).toBe(0);
     // …and the surface walk agrees: no rest-server tripwire key is minted.
     const discovered = [...discoverAnonymousDenySurfaces()].filter((k) =>
       k.startsWith('realtime:rest-server.ts:'),

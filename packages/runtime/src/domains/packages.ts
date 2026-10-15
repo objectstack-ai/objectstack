@@ -325,9 +325,9 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  *
  * Package reads disclose authored metadata — the `GET /packages` id
  * ENUMERATION face (the first step of the survey's attack chain), the
- * `GET /packages/:id` detail, the `GET /packages/:id/commits` history and the
- * `GET /packages/:id/export` whole-package export (27 metadata types) — so each
- * requires one of the two "builder" capabilities the object-schema mask exempts
+ * `GET /packages/:id` detail and the `GET /packages/:id/export` whole-package
+ * export (27 metadata types) — so each requires one of the two "builder"
+ * capabilities the object-schema mask exempts
  * read-only ({@link OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES} =
  * `studio.access` / `setup.access`), or `isSystem`. The read cohort is not the
  * write cohort: an `organization_admin` holding `setup.access` (but not
@@ -336,6 +336,8 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * pinned in `packages-capability-gate.test.ts`, beside this file. (#7020
  * unified the object-schema MASK exemption with the write gate; it did not
  * re-rule this cohort, which is why this site names the read-only half.)
+ * [#23546] `GET /packages/:id/commits` left this cohort: the commit trail has
+ * its own gate, {@link requireCommitTrailReadCapability}.
  *
  * Returns a 403 result to short-circuit on, or `null` to proceed. Callers MUST
  * run this BEFORE reading, so the answer never leaks the package inventory to a
@@ -348,6 +350,45 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
         return {
             handled: true,
             response: deps.error('Reading packages requires the `studio.access` or `setup.access` capability.', 403),
+        };
+    }
+    return null;
+}
+
+/**
+ * [#23546] The READ gate of `GET /packages/:id/commits` alone — a package's
+ * commit trail (ADR-0067), read from `sys_metadata_commit`.
+ *
+ * It admits `studio.access` or `isSystem`. That is the data door's rule on the
+ * same table (`requiredPermissions: ['studio.access']`, ADR-0131 D7), and the
+ * `/meta` trail doors' rule (`GET /meta/:type/:name/history`, `/audit` and
+ * `/diff` in `RestServer`).
+ *
+ * `setup.access` is left out on purpose. Organization administrators hold it,
+ * and under a wall it handed each organization's administrator every
+ * package's commit trail: who published what, and when. No organization
+ * authors that trail (ADR-0131 C5).
+ *
+ * `manage_metadata` is not admitted either. This door's read cohort never
+ * admitted it, and narrowing a door does not widen it. The other three reads
+ * (`GET /packages`, `/packages/:id` and `/export`) keep
+ * {@link requireReadCapability}. Pinned in `packages-capability-gate.test.ts`,
+ * beside this file.
+ *
+ * Returns a 403 result to short-circuit on, or `null` to proceed. It runs
+ * BEFORE the protocol is resolved, as the read gate does.
+ */
+function requireCommitTrailReadCapability(deps: DomainHandlerDeps, context: HttpProtocolContext): HttpDispatcherResult | null {
+    const ec: any = context?.executionContext;
+    const held = new Set<string>(ec?.systemPermissions ?? []);
+    if (!ec?.isSystem && !held.has('studio.access')) {
+        return {
+            handled: true,
+            response: deps.error(
+                'Reading a package\'s commit history requires the `studio.access` capability; '
+                + '`setup.access`, which organization administrators hold, does not admit it.',
+                403,
+            ),
         };
     }
     return null;
@@ -1926,7 +1967,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
 
         // GET /packages/:id/commits → the commit timeline (newest-first).
         if (parts.length === 2 && parts[1] === 'commits' && m === 'GET') {
-            const denied = requireReadCapability(deps, _context); if (denied) return denied;
+            // [#23546] The commit trail's own gate: `studio.access`, not the
+            // package read cohort's `setup.access`.
+            const denied = requireCommitTrailReadCapability(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.listCommits === 'function') {
