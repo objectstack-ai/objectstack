@@ -227,9 +227,18 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // A dynamic read would be invisible to the scanner above, and TypeScript's
         // `private` is compile-time only, so the absence of these spellings is
         // what bounds the enumeration to what §1 can see.
+        //
+        // [#23050 slice 2] Over every censused file. `batch-routes.ts` spells the
+        // slot in brackets exactly ONCE, and as a TYPE that reads nothing: its
+        // host interface's member, typed `RestServer['objectQLProvider']`. That
+        // one spelling is set aside before the check and pinned at exactly one
+        // there (zero here), so setting it aside cannot grow into an exemption.
+        const HOST_MEMBER_TYPE = "RestServer['objectQLProvider']";
         for (const [file, source] of SOURCES) {
-            expect(source, file).not.toMatch(/\[\s*['"]objectQLProvider['"]\s*\]/);
-            expect(source, file).not.toMatch(/as any\s*\)\s*\.objectQLProvider/);
+            expect(source.split(HOST_MEMBER_TYPE).length - 1, file).toBe(file === 'rest-server.ts' ? 0 : 1);
+            const code = source.split(HOST_MEMBER_TYPE).join('');
+            expect(code, file).not.toMatch(/\[\s*['"]objectQLProvider['"]\s*\]/);
+            expect(code, file).not.toMatch(/as any\s*\)\s*\.objectQLProvider/);
         }
         // [#23050 slice 2] The one way the slot leaves `RestServer` for another
         // file: a moved registrar's host literal hands it on as a GETTER onto
