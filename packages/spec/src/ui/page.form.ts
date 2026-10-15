@@ -163,6 +163,11 @@ export const pageForm = defineForm({
             // ── User actions ──
             { field: 'userActions', type: 'composite', disclosure: 'popover', helpText: 'Toolbar toggles (search, sort, filter, row height)' },
             { field: 'addRecord', type: 'composite', disclosure: 'popover', helpText: 'Add-record entry point' },
+            // The list page's own empty state — the list view's `EmptyStateSchema`,
+            // by reference, so the same popover shape as `appearance` above. The
+            // console's list page draws it in place of the source view's, whole
+            // (`cfg.emptyState ?? view.emptyState` in objectui's InterfaceListPage).
+            { field: 'emptyState', type: 'composite', disclosure: 'popover', helpText: "What the page shows when its list has no rows: a heading, a message, an icon and one link. Set here, it replaces the source view's empty state." },
             // Buttons ARE object actions — pick from the source object's actions.
             { field: 'buttons', widget: 'action-multi', dependsOn: 'source', helpText: "Toolbar buttons — pick from this object's actions" },
             {

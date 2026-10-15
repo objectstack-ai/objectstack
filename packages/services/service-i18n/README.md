@@ -1,7 +1,8 @@
 # @objectstack/service-i18n
 
 The shipped provider for the kernel's **`i18n`** service slot — a file-based
-`II18nService` implementation that also mounts the `/api/v1/i18n/*` routes.
+`II18nService` implementation. It mounts **no** HTTP route: `/api/v1/i18n/*` is served
+by the runtime's dispatcher (see [REST API](#rest-api)).
 
 Slot criticality: `core` (`ServiceRequirementDef` in `@objectstack/spec/system`).
 
@@ -37,19 +38,16 @@ locale" to set: every call names the locale it wants.
 
 ## Plugin options
 
-`I18nServicePluginOptions` has exactly five fields, all optional.
+`I18nServicePluginOptions` has exactly three fields, all optional.
 
 | Option | Type | Default | Purpose |
 |:---|:---|:---|:---|
 | `defaultLocale` | `string` | `'en'` | Reported by `getDefaultLocale()`; used as the adapter's default. |
 | `localesDir` | `string` | none | Directory of `{locale}.json` files loaded at construction. |
 | `fallbackLocale` | `string` | none | Consulted when a key is missing in the requested locale; reported by `getFallbackLocale()`, which the REST metadata reads pass to the document translators as their fallback chain (#14882). |
-| `registerRoutes` | `boolean` | `true` | Register the REST routes at `kernel:ready`. |
-| `basePath` | `string` | `'/api/v1/i18n'` | Base path for those routes. |
-
-With `registerRoutes: false` — or when no `http-server` service is present — the plugin
-logs a warning and the service stays available programmatically through
-`kernel.getService('i18n')`.
+The service is always available programmatically through `kernel.getService('i18n')`.
+The former `registerRoutes` and `basePath` options are removed: they only drove the
+plugin's own copy of the REST routes, which is retired (see [REST API](#rest-api)).
 
 ## Locale files
 
@@ -128,8 +126,11 @@ bundle layer underneath is untouched.
 
 ## REST API
 
-Registered by this plugin directly on the `http-server` service. These three routes are
-the whole surface (shown at the default `basePath`):
+Served by the dispatcher bridge in `@objectstack/runtime` (`createDispatcherPlugin`, the
+`/i18n` domain), **not** by this plugin. The dispatcher reads whichever provider fills the
+`i18n` slot — this package's adapter, or the kernel's in-memory fallback — and answers only
+an authenticated caller (ADR-0056 D2): an anonymous request gets `401 UNAUTHENTICATED`.
+These three routes are the whole surface:
 
 ```
 GET    /api/v1/i18n/locales                     # available locales
@@ -139,9 +140,15 @@ GET    /api/v1/i18n/labels/:object/:locale      # field labels for one object
 
 ⚠️ The locale is a **path** segment, not a `?locale=` query parameter — the query
 dialect was a wire-level 404 against every serving surface and was retired. Each route
-is expressed by the SDK (`i18n.getLocales`, `i18n.getTranslations`, `i18n.getFieldLabels`);
-`src/i18n-route-ledger.ts` is the audited list, and a conformance test fails when a
-mounted route has no entry or an entry names a route that is no longer mounted.
+is expressed by the SDK (`i18n.getLocales`, `i18n.getTranslations`, `i18n.getFieldLabels`).
+
+This plugin used to register the same three paths a second time, at `kernel:ready`. On
+`objectstack serve` the dispatcher's registration answered every request, so that copy
+was unreachable there — and on a composition with an HTTP server but no dispatcher it
+answered with no authenticated-caller floor. It is retired: one route, one owner. A test
+pins that the plugin mounts nothing on the HTTP server it is given.
+`src/i18n-route-ledger.ts` still carries the three routes' SDK dispositions as wire data
+for the client guards; it is not a list of routes this package mounts.
 
 ## Client integration
 

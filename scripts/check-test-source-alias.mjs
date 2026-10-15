@@ -558,7 +558,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/driver-memory', '@objectstack/driver-sql', '@objectstack/driver-sqlite-wasm',
     '@objectstack/plugin-hono-server', '@objectstack/spec', '@objectstack/types',
   ],
-  '@objectstack/service-i18n': ['@objectstack/core', '@objectstack/spec', '@objectstack/types'],
+  '@objectstack/service-i18n': ['@objectstack/core', '@objectstack/spec'],
   '@objectstack/service-job': ['@objectstack/metadata-core', '@objectstack/platform-objects'],
   '@objectstack/service-knowledge': ['@objectstack/objectql'],
   '@objectstack/service-messaging': [
