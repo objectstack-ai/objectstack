@@ -23,11 +23,11 @@ import type { PersistMode } from './index.js';
  *  - an AWAITED `flush()` / `close()` is unchanged: it still throws to its
  *    caller (the control).
  *
- * "No unhandled rejection" is asserted two ways. Each test attaches its own
- * `process.on('unhandledRejection')` listener and requires it saw nothing, which
- * keeps the assertion local to the test that owns the failing flush. And Vitest
- * itself fails the run on any unhandled rejection — that is the red this file
- * exists to prevent — so a regression cannot slip past by being caught late.
+ * "No unhandled rejection" is asserted directly: every test attaches its own
+ * `process.on('unhandledRejection')` listener and requires that it saw nothing
+ * once the flush chain has settled. That keeps the verdict local to the test
+ * that owns the failing flush, instead of leaving it to whichever test happens
+ * to be running when Vitest's own run-level report fires.
  */
 describe('a failing background flush', () => {
   const dirs: string[] = [];
@@ -226,7 +226,8 @@ describe('a failing background flush', () => {
     const boom = (): never => {
       throw new Error('logger is down');
     };
-    const { conn, dir } = await openConn('on-write', { warn: boom, error: boom });
+    const logger = { warn: boom, error: boom };
+    const { conn, dir } = await openConn('on-write', logger);
     rmSync(dir, { recursive: true, force: true });
 
     write(conn, 'a');

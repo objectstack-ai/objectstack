@@ -33,14 +33,11 @@ export interface WasmConnectionOptions {
    */
   locateFile?: (file: string) => string;
   /**
-   * Optional logger; defaults to `console`. `error` is optional so a logger that
-   * only offers `warn` keeps working: a failed background flush is a durability
-   * loss and goes to `error` when the logger has one, else to `warn`.
+   * Optional logger; defaults to `console`. A failed background flush is a
+   * durability loss: it is reported through the logger's `error` when it has
+   * one (`console` does), else through `warn`.
    */
-  logger?: {
-    warn: (msg: string, meta?: unknown) => void;
-    error?: (msg: string, meta?: unknown) => void;
-  };
+  logger?: { warn: (msg: string, meta?: unknown) => void };
 }
 
 /**
@@ -113,7 +110,14 @@ export class WasmSqliteConnection {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private flushChain: Promise<void> | null = null;
   private destroyed = false;
-  private logger: NonNullable<WasmConnectionOptions['logger']>;
+  /**
+   * The injected logger as this class reads it. `error` is not part of the
+   * public option type (adding it would widen a published surface); it is used
+   * when the object happens to have one, which every real logger does.
+   */
+  private logger: NonNullable<WasmConnectionOptions['logger']> & {
+    error?: (msg: string, meta?: unknown) => void;
+  };
   /**
    * A background flush failure was already reported and no flush has landed
    * since. Keeps `on-write` (one flush per write) from logging the same
