@@ -94,7 +94,6 @@ const sourceOf = (file: string) => readFileSync(resolve(HERE, file), 'utf8');
 // registrars live in, imported rather than spelt here, so a registrar body the
 // split moves next stays inside this census.
 const REGISTRAR_SOURCES = new Map<string, string>(REST_SERVER_REGISTRAR_FILES.map((file) => [file, sourceOf(file)]));
-const REST_SERVER = REGISTRAR_SOURCES.get('rest-server.ts')!;
 // [#23050 slice 1] `RestServer#registerDataActionEndpoints`' body — the
 // import-job read, the import-job listing and the export chunk loop — moved to
 // its own module. Its literals are the same server-built literals, so the
