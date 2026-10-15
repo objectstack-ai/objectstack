@@ -184,9 +184,23 @@ export interface SchemaStack {
   shutdown: () => Promise<void>;
 }
 
+/**
+ * The kernel service names a SQL driver is published under, by driver: the
+ * `driver.<driver.name>` key `DefaultDatasourcePlugin` / `DriverPlugin`
+ * register. A name is listed per driver, never matched as a `driver.*`
+ * pattern: a non-SQL driver must stay unfound, and the two methods
+ * {@link findSqlDriverVia} checks are the second half of that guard.
+ *
+ * [#23648] `SqliteWasmDriver` (`wasm-sqlite://`, `*.wasm.db`, and the dev
+ * boot's step-down from better-sqlite3) is a `SqlDriver` published as
+ * `driver.com.objectstack.driver.sqlite-wasm`, measured on a `wasm-sqlite://`
+ * boot. Without it every `os migrate` command found no SQL driver on such a
+ * database.
+ */
 const SQL_DRIVER_SERVICES = [
   'driver.com.objectstack.driver.sql',
   'driver.com.objectstack.driver.turso',
+  'driver.com.objectstack.driver.sqlite-wasm',
   'driver.sql',
 ];
 
