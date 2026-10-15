@@ -2235,14 +2235,61 @@ export class ObjectStackClient {
      * effect ran, and each reports its own `success`: a 200 here means the
      * draft was promoted, NOT that a seed load or a data-plane projection
      * caught up.
+     *
+     * @param type - Metadata type (e.g., 'view', 'flow')
+     * @param name - Item name (snake_case identifier)
+     * @param opts - The publish `message`, which rides the request body, and
+     *   the package whose draft the publish promotes (`packageId`).
+     *
+     * NAME THE PACKAGE when the draft you mean is not the one a publish naming
+     * none promotes. A publish that names no package promotes the draft a
+     * draft save naming no package writes, and is refused in two states, each
+     * prescribing `?package=` and publishing nothing: `409 RESOURCE_CONFLICT`,
+     * naming the packages, when two or more packages hold the item; and `404
+     * NO_DRAFT`, naming the drafts that remain, when the item's one package
+     * holds no draft and another package's draft is stored. Pass the package
+     * whose draft you mean as `opts.packageId` (`?package=` on the wire), as
+     * `saveItem` and `deleteItem` name the row they act on.
      */
     publishItem: async (
         type: string,
         name: string,
-        opts?: { message?: string },
+        opts?: {
+            message?: string;
+            /**
+             * `?package=<id>` — the software package whose pending draft this
+             * publish promotes (`sys_metadata.package_id`, ADR-0048), into
+             * that package's active row, and no other package's draft.
+             *
+             * Omit to name no package: the door then promotes the draft a
+             * draft save naming no package writes, and refuses the two states
+             * the method's docblock names. Naming the package is what both
+             * refusals prescribe.
+             *
+             * Same member name, same `package` query key and same truthy guard
+             * as {@link SaveMetaItemOptions.packageId} and
+             * {@link DeleteMetaItemOptions.packageId}: only a non-empty id
+             * reaches the wire, and `undefined` and `''` both send nothing.
+             * The door reads the value through the same function as the save
+             * and delete doors, so it reads `all` as naming no package too;
+             * this client forwards the id verbatim and decides nothing about
+             * it.
+             */
+            packageId?: string;
+        },
     ): Promise<PublishMetaItemResponse> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/publish`, {
+        // [#23658] `metaSaveQuery`'s spelling and guard: an empty id names no
+        // package, so it is never put on the wire, and an options-less publish
+        // stays byte-identical to what this method sent before. `set`, never
+        // `append`: the door refuses a repeated `?package=` with a 400.
+        const params = new URLSearchParams();
+        if (opts?.packageId) params.set('package', opts.packageId);
+        const search = params.toString();
+        // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
+        // the three meanings `qs` holds in this file.
+        const query = search ? `?${search}` : '';
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/publish${query}`, {
             method: 'POST',
             body: JSON.stringify(opts?.message ? { message: opts.message } : {}),
         });
