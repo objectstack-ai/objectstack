@@ -229,11 +229,7 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // spread into numbered keys the engine refused as unknown fields.
             // `RestServer` refused all of these `400 VALIDATION_FAILED`, and
             // both doors now do; `null` is refused like the rest, on both
-            // (`query` declares a QueryAST or nothing, never `null`). What the
-            // gate parsed is what is forwarded (never the parse output, as on
-            // the twin), so a body `query` key is no second spelling of the
-            // query here any more: it reaches the engine as the field it
-            // names, as it does through `RestServer`.
+            // (`query` declares a QueryAST or nothing, never `null`).
             //
             // The object's API exposure is asked first, as the twin's
             // `enforceApiAccess` is: a caller the object refuses is answered
@@ -245,7 +241,22 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             const findInput = { object: objectName, ...(query !== undefined ? { query } : {}) };
             const parsedFind = FindDataRequestSchema.safeParse(findInput);
             if (!parsedFind.success) return requestSchemaRefusal(deps, 'query', parsedFind.error.issues, findInput);
-            const result = await actionExec.callData(deps, _context, 'query', findInput, _context.dataDriver, _context.environmentId, _context.executionContext);
+            // What is forwarded is the query the gate parsed (never the parse
+            // output, as on the twin), handed to `callData` as `query`, the
+            // path object riding as the request's `object` and not inside it:
+            // the engine fallback (no protocol registered) serves a query's
+            // clauses only. A body that passes the gate is a record (or
+            // absent), and its clauses reach the engine exactly as they did
+            // before. One body does not: a `query` key used to be unwrapped
+            // here as the query itself (`callData` reads `params.query`
+            // first), a second spelling the gate above never sees, so
+            // `{ query: { limit: "ten" } }` would pass it and be read as the
+            // full set. The catalog declares the body to be the QueryAST, so
+            // a `query` key is the field it names, refused by the engine as
+            // it is through `RestServer`.
+            const { object: _pathObject, ...clauses } = (query ?? {}) as Record<string, unknown>;
+            const result = await actionExec.callData(deps, _context, 'query', { object: objectName, query: clauses },
+                _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 
