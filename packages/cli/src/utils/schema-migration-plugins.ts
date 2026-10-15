@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   isDevelopmentBoot,
+  readDeploymentOrgScopingEntitlement,
   resolveAuthSecret,
   resolvePlatformAuthComposition,
   resolveStackTiers,
@@ -2317,6 +2318,25 @@ export function refuseWhenHostConfigUnloadable(
  * all. This is the framework driving its own registry→driver pass over the
  * declarations the host's `init()` already made.
  *
+ * ## …and the step that pass begins with: the platform-global declaration
+ *
+ * `ObjectQLPlugin.start()` does one thing BEFORE its registry→driver pass: it
+ * installs the deployment's platform-global declaration — the `org-scoping`
+ * service's `platformGlobalObjects` — on the registry (ADR-0131 D7: "an object
+ * a deployment declares platform-global gets no organization column on that
+ * deployment (the injected-columns plan reads the declaration)"). Where that
+ * `start()` is suppressed, this pass takes that step first, through the same
+ * two pieces the engine uses: core's one reader
+ * (`readDeploymentOrgScopingEntitlement`) and the registry's own re-plan
+ * (`setDeploymentPlatformGlobalObjects`). Without it, a host that brings its
+ * own engine and declares objects platform-global was planned WITH their
+ * organization column: `os migrate plan` saw no drift on it, and the
+ * organization-ownership ceremony's column-drops step answered `not-proposed`
+ * for the `column-drop` fate D10 gives exactly those objects. Where the
+ * engine's own `start()` did run, the declaration is already installed and
+ * installing it again re-plans nothing (see
+ * {@link installDeploymentPlatformGlobalObjects}).
+ *
  * ⛔ And it must NOT run on a boot that did not defer: the same call would then
  * take the DDL path and a "plan" would create tables. The caller passes
  * `deferred` rather than this function deducing it — a capability that appears
@@ -2360,6 +2380,10 @@ export async function measureComposedCoverage(
   } catch {
     engine = undefined;
   }
+  // [ADR-0131 D7] FIRST, as `ObjectQLPlugin.start()` does: the declaration is
+  // the injected-columns plan's input, so it is installed before one object
+  // is bound. See this function's docblock.
+  notes.push(...installDeploymentPlatformGlobalObjects(kernel, engine?.registry));
   const objects: unknown = engine?.registry?.getAllObjects?.();
   if (
     !Array.isArray(objects)
@@ -2436,4 +2460,68 @@ export async function measureComposedCoverage(
   }
 
   return { coverage, notes };
+}
+
+/** The registry member the engine installs the platform-global declaration through. */
+interface PlatformGlobalDeclarationRegistry {
+  setDeploymentPlatformGlobalObjects(names: Iterable<string>): {
+    readonly replanned: readonly string[];
+    readonly keptAuthoredColumn: readonly string[];
+  };
+}
+
+/**
+ * [ADR-0131 D7] Install the deployment's platform-global declaration on the
+ * composed engine's registry — the step `ObjectQLPlugin.start()` takes first
+ * (`installDeploymentPlatformGlobalObjects` there), taken here for a boot whose
+ * engine `start()` the declaration composition suppressed. Returns the notes
+ * the plan prints about it; none when nothing was declared and nothing refused.
+ *
+ * The same two pieces the engine uses, never a copy of either: core's one
+ * reader, which fails closed (no service, an absent key, or a refused key
+ * declare nothing), and the registry's re-plan of every registered object.
+ * Installing a declaration the engine already installed re-plans nothing —
+ * an object already planned without the column does not plan it again — so
+ * `replanned` is non-empty exactly when this boot's engine had not installed
+ * it.
+ */
+function installDeploymentPlatformGlobalObjects(kernel: unknown, registry: unknown): string[] {
+  const notes: string[] = [];
+  let service: unknown;
+  try {
+    service = (kernel as { getService?: (name: string) => unknown })?.getService?.call(kernel, 'org-scoping');
+  } catch {
+    service = undefined;
+  }
+  const reading = readDeploymentOrgScopingEntitlement(service);
+  for (const refusal of reading.refused) {
+    if (refusal.key !== 'platformGlobalObjects') continue;
+    notes.push(`The org-scoping service's platformGlobalObjects declaration is REFUSED — ${refusal.problem}.`);
+  }
+  const declared = [...reading.platformGlobalObjects].sort();
+  if (declared.length === 0) return notes;
+  const install = (registry as Partial<PlatformGlobalDeclarationRegistry> | undefined)?.setDeploymentPlatformGlobalObjects;
+  if (typeof install !== 'function') {
+    notes.push(
+      `The deployment declares ${declared.length} object(s) platform-global (${declared.join(', ')}), and the composed `
+      + 'engine\'s registry cannot take that declaration, so they are planned WITH the organization column a served '
+      + 'boot does not plan (ADR-0131 D7). The plan over them is UNMEASURED.',
+    );
+    return notes;
+  }
+  const { replanned, keptAuthoredColumn } = install.call(registry, reading.platformGlobalObjects);
+  if (replanned.length > 0) {
+    notes.push(
+      `Planned ${replanned.length} object(s) the deployment declares platform-global (${[...replanned].sort().join(', ')}) `
+      + 'with no organization column, as a served boot of this stack plans them (ADR-0131 D7): this boot\'s engine '
+      + 'start(), where the engine installs the org-scoping service\'s declaration, did not run, so this pass did.',
+    );
+  }
+  if (keptAuthoredColumn.length > 0) {
+    notes.push(
+      `The deployment declares ${[...keptAuthoredColumn].sort().join(', ')} platform-global, but each DECLARES its own `
+      + 'organization_id: that column is the author\'s, so it stays planned (ADR-0131 D7).',
+    );
+  }
+  return notes;
 }
