@@ -325,7 +325,7 @@ Returns metadata for a single object including all fields, relationships, and co
 
 ## 7. Error Response Format
 
-Data route errors are returned as a flat envelope: a top-level `error` message string, a machine-readable `code`, and operation-specific extras (`fields`, `object`, `currentVersion`, …). The HTTP status is carried by the response, not duplicated in the body.
+Data route errors from the kernel REST server (`@objectstack/rest`) are returned as a flat envelope: a top-level `error` message string, a machine-readable `code`, and operation-specific extras (`fields`, `object`, `currentVersion`, …). The HTTP status is carried by the response, not duplicated in the body. A host built with `createHonoApp` answers the same refusals nested instead when its catch-all serves `/data` — see [Hono hosts nest the extras](#hono-hosts-nest-the-extras). One that registers the kernel REST server's routes on the same Hono app before it mounts `createHonoApp`, the hosted composition, answers them flat, as below: the routes registered first win the match.
 
 ### Validation Error — `400 Bad Request`
 
@@ -481,6 +481,29 @@ envelope put the HTTP status in `error.code` and the real code in
 no longer reads those legacy spots (#4007 — servers and SDKs ship as one
 release group); any code reading them directly should move to `error.code`.
 </Callout>
+
+### Hono hosts nest the extras
+
+A host built with `@objectstack/hono`'s `createHonoApp`, and a route mounted on
+`@objectstack/plugin-hono-server`'s `HonoHttpServer`, answer a declared refusal that
+escapes the handler in the nested envelope above, without `httpStatus`. The extras the
+REST door's classification adds (`fields`, `currentVersion`, `dependentObject`, …) ride in
+`error.details`; `currentRecord`, and an `object` the flat body takes from the request's
+route, are not sent. The concurrent update above, on a `createHonoApp` host whose catch-all serves `/data`:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "CONCURRENT_UPDATE",
+    "message": "Record task/tsk_01HQ4A7B9D3F5G8J2K4L was modified by another user (current version 2025-01-20T14:15:00.000Z, expected 2025-01-20T14:10:00.000Z)",
+    "details": { "currentVersion": "2025-01-20T14:15:00.000Z" }
+  }
+}
+```
+
+See [Error handling → Hono doors](/docs/protocol/kernel/error-handling#hono-doors) for
+every code that carries `error.details` there.
 
 ---
 

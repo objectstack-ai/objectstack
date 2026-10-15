@@ -181,8 +181,9 @@ export interface MetadataConflict {
 /**
  * `sys_user_permission_set` (C7b): the populations the unique index on
  * (`user_id`, `permission_set`, `organization_id`) refuses, which the ceremony
- * reports and never deletes. A NULL organization is keyed with NULL, as the
- * write door keys it.
+ * reports and never deletes. A NULL organization is keyed with NULL, as that
+ * index keys it: it is declared `unique: 'organization'`, so its organization
+ * key part is NULL-safe (ADR-0120 D3).
  */
 export interface GrantKeyPlan {
   /** `absent` on a 17.x database this release has not booted against yet: nothing can be counted. */
