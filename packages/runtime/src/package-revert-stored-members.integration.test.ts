@@ -75,7 +75,6 @@ const SHOWCASE_CAPABILITIES = [
 ];
 const PLATFORM_PKG = '@objectstack/platform-objects';
 const ACTIVE_ORG = 'org_active';
-const OTHER_ORG = 'org_other';
 
 /**
  * Every publish this fixture makes runs the metadata-protocol build probes, and
@@ -256,30 +255,6 @@ describe('#22090 POST /packages/:id/revert on a Studio-authored package', () => 
     const answer = await revert(STUDIO_PKG, ACTIVE_ORG);
 
     expect(answer.status).toBe(200);
-    expect(await draftNames(protocol, STUDIO_PKG)).toEqual([]);
-  });
-
-  it('another organization’s draft of the package is neither read nor discarded', async () => {
-    const { engine, protocol, revert } = await boot();
-    await draftSave(protocol, { view: 'repairs_board', label: 'Board v1', packageId: STUDIO_PKG });
-    await publish(protocol, STUDIO_PKG);
-    // [ADR-0131 D6] The protocol refuses an organization-scoped save, so the
-    // other organization's draft is a LEGACY row, planted at rest.
-    await engine.insert('sys_metadata', {
-      type: 'view', name: 'repairs_board', organization_id: OTHER_ORG, package_id: STUDIO_PKG, state: 'draft',
-      metadata: JSON.stringify(viewBody('repairs_board', 'Other org overlay (draft)')), checksum: 'sha256:legacy', version: 1,
-    });
-
-    const answer = await revert(STUDIO_PKG, ACTIVE_ORG);
-
-    expect(answer.status).toBe(200);
-    // [ADR-0131 D6] The draft listing is the environment's, so the legacy row
-    // is read at rest: still there, untouched.
-    const legacy = (await engine.find('sys_metadata', {
-      where: { organization_id: OTHER_ORG, package_id: STUDIO_PKG, state: 'draft' },
-      context: { isSystem: true },
-    })) as any[];
-    expect(legacy.map((r) => `${r.type}/${r.name}`)).toEqual(['view/repairs_board']);
     expect(await draftNames(protocol, STUDIO_PKG)).toEqual([]);
   });
 });

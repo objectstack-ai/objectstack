@@ -174,7 +174,6 @@ describe('the published-snapshot door answers the loader\'s body for a shipped f
         const row = (name: string, body: Record<string, unknown>) => ({
             type: 'flow',
             name,
-            organization_id: null,
             package_id: null,
             state: 'active',
             version: 1,
@@ -215,7 +214,7 @@ describe('the published-snapshot door answers the loader\'s body for a shipped f
             where: { state: 'active' },
             context: SYSTEM_CTX,
         });
-        const keys = rows.map((r) => `${String(r.type)}/${String(r.name)}@${String(r.organization_id ?? '')}`);
+        const keys = rows.map((r) => `${String(r.type)}/${String(r.name)}@`);
         expect(keys).toContain(`flow/${SUBJECT}@`);
         expect(keys).toContain(`flow/${CUSTOMER}@`);
         expect(keys).toContain(`object/${OBJECT_NAME}@`);

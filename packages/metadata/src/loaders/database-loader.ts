@@ -19,7 +19,7 @@ import type {
   MetadataRecord,
   MetadataHistoryRecord,
 } from '@objectstack/spec/system';
-import { SysMetadataObject, SysMetadataHistoryObject, hashSpec } from '@objectstack/metadata-core';
+import { SysMetadataObject, SysMetadataHistoryObject, hashSpec, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
@@ -31,6 +31,11 @@ import { LRUCache } from '../utils/lru-cache.js';
 // byte-identical; only the import path changed.
 import { isMissingTableError, isSchemaAlreadyExistsError } from '@objectstack/types';
 import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-id-to-environment-id.js';
+
+/** [ADR-0131 D7] The tables whose physical `organization_id` can outlive their declaration. */
+const LEGACY_FAMILY_TABLES: ReadonlySet<string> = new Set([
+  'sys_metadata', 'sys_metadata_audit', 'sys_metadata_commit', 'sys_metadata_history',
+]);
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string
@@ -231,7 +236,12 @@ export interface DatabaseLoaderOptions {
   /** The table name to store history records (default: 'sys_metadata_history') */
   historyTableName?: string;
 
-  /** Organization ID for multi-tenant isolation */
+  /**
+   * @deprecated since ADR-0131 D6/D7 (the `sys_metadata` family declares no
+   * organization column). Every row is the environment's, so this option is
+   * accepted for back-compat but ignored — writes do not set
+   * `organization_id` and filters do not constrain on it.
+   */
   organizationId?: string;
 
   /**
@@ -277,7 +287,6 @@ export class DatabaseLoader implements MetadataLoader {
   private engine?: IDataEngine;
   private tableName: string;
   private historyTableName: string;
-  private organizationId?: string;
   private trackHistory: boolean;
   private schemaReady = false;
   private historySchemaReady = false;
@@ -312,7 +321,8 @@ export class DatabaseLoader implements MetadataLoader {
     this.engine = options.engine;
     this.tableName = options.tableName ?? 'sys_metadata';
     this.historyTableName = options.historyTableName ?? 'sys_metadata_history';
-    this.organizationId = options.organizationId;
+    // ADR-0131 D6/D7: `organizationId` is accepted for back-compat but ignored.
+    void options.organizationId;
     // ADR-0008 §0: `environmentId` option is accepted for back-compat but ignored.
     void options.environmentId;
     this.trackHistory = options.trackHistory !== false; // Default to true
@@ -402,17 +412,41 @@ export class DatabaseLoader implements MetadataLoader {
   // reconcile the two schemas again — not to reinstate the cast.
 
   private async _find(table: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
-    if (this.engine) {
-      return this.engine.find(table, query);
-    }
-    return this.driver!.find(table, query);
+    const rows = this.engine ? await this.engine.find(table, query) : await this.driver!.find(table, query);
+    return this.withoutLegacyOrganizationRows(table, rows);
   }
 
   private async _findOne(table: string, query: DriverQuery): Promise<Record<string, unknown> | null> {
-    if (this.engine) {
-      return this.engine.findOne(table, query);
-    }
-    return this.driver!.findOne(table, query);
+    const row = this.engine ? await this.engine.findOne(table, query) : await this.driver!.findOne(table, query);
+    if (!row) return row ?? null;
+    const legacy = await this.legacyOrganizationRows(table);
+    if (!legacy.has(String(row.id))) return row;
+    return (await this._find(table, query))[0] ?? null;
+  }
+
+  /**
+   * [ADR-0131 D6/D7] The family's rows without a legacy organization's. The
+   * family declares no organization column; on a database the
+   * organization-ownership ceremony has not migrated, the physical column
+   * still holds each legacy organization's rows, and a loader wired to the raw
+   * driver would read them as the environment's. Told apart off that column
+   * ({@link readLegacyOrganizationRows}); a read that cannot answer throws.
+   */
+  private async withoutLegacyOrganizationRows(
+    table: string,
+    rows: Record<string, unknown>[] | null | undefined,
+  ): Promise<Record<string, unknown>[]> {
+    if (!rows || rows.length === 0) return rows ?? [];
+    const legacy = await this.legacyOrganizationRows(table);
+    return legacy.size === 0 ? rows : rows.filter((row) => !legacy.has(String(row.id)));
+  }
+
+  private legacyOrganizationRows(table: string): Promise<ReadonlyMap<string, string>> {
+    if (!LEGACY_FAMILY_TABLES.has(table)) return Promise.resolve(new Map());
+    const driver = this.engine
+      ? (this.engine as { getDriverForObject?: (objectName: string) => unknown }).getDriverForObject?.(table)
+      : this.driver;
+    return readLegacyOrganizationRows(driver, table);
   }
 
   private async _count(table: string, query: DriverQuery): Promise<number> {
@@ -462,8 +496,8 @@ export class DatabaseLoader implements MetadataLoader {
   }
 
   /**
-   * Compute the next per-org `event_seq` for `sys_metadata_history`.
-   * Reads `MAX(event_seq) + 1` for the configured `organization_id`.
+   * Compute the next `event_seq` for `sys_metadata_history`.
+   * Reads `MAX(event_seq) + 1` over the environment's history (ADR-0131 D6).
    * Legacy path — not transactional, so concurrent writes can collide.
    * The canonical (transactional) producer is `SysMetadataRepository`.
    *
@@ -486,9 +520,7 @@ export class DatabaseLoader implements MetadataLoader {
    *         caller ({@link createHistoryRecord}) owns the consequence.
    */
   private async nextEventSeq(): Promise<number> {
-    const where: Record<string, unknown> = this.organizationId
-      ? { organization_id: this.organizationId }
-      : {};
+    const where: Record<string, unknown> = {};
     try {
       const rows = await this._find(this.historyTableName, { where });
       let max = 0;
@@ -679,17 +711,14 @@ export class DatabaseLoader implements MetadataLoader {
 
   /**
    * Build base filter conditions for queries.
-   * Filters by organizationId when configured. `environmentId` is accepted
-   * for back-compat but no longer constrains the query — see
-   * ADR-0008 §0 (branch/project removal).
+   * Neither `organizationId` (ADR-0131 D6/D7: the family declares no
+   * organization column) nor `environmentId` (ADR-0008 §0) constrains the
+   * query — both options are accepted for back-compat only.
    */
   private baseFilter(type: string, name?: string): Record<string, unknown> {
     const filter: Record<string, unknown> = { type };
     if (name !== undefined) {
       filter.name = name;
-    }
-    if (this.organizationId) {
-      filter.organization_id = this.organizationId;
     }
     return filter;
   }
@@ -789,7 +818,6 @@ export class DatabaseLoader implements MetadataLoader {
       changeNote,
       recordedBy,
       recordedAt: now,
-      ...(this.organizationId ? { organizationId: this.organizationId } : {}),
     };
 
     try {
@@ -807,7 +835,6 @@ export class DatabaseLoader implements MetadataLoader {
         recorded_by: historyRecord.recordedBy,
         recorded_at: historyRecord.recordedAt,
         source: 'database-loader',
-        ...(this.organizationId ? { organization_id: this.organizationId } : {}),
       });
     } catch (error) {
       // Log error but don't fail the main operation
@@ -873,7 +900,7 @@ export class DatabaseLoader implements MetadataLoader {
       strategy: (row.strategy as MetadataRecord['strategy']) ?? 'merge',
       owner: row.owner as string | undefined,
       state: (row.state as MetadataRecord['state']) ?? 'active',
-      organizationId: row.organization_id as string | undefined,
+      organizationId: undefined /* [ADR-0131 D7] every row read here is the environment's */,
       environmentId: row.environment_id as string | undefined,
       version: (row.version as number) ?? 1,
       checksum: row.checksum as string | undefined,
@@ -1203,10 +1230,6 @@ export class DatabaseLoader implements MetadataLoader {
       name,
       version,
     };
-    if (this.organizationId) {
-      filter.organization_id = this.organizationId;
-    }
-
     const row = await this._findOne(this.historyTableName, {
       where: filter,
     });
@@ -1222,7 +1245,7 @@ export class DatabaseLoader implements MetadataLoader {
       checksum: row.checksum as string,
       previousChecksum: row.previous_checksum as string | undefined,
       changeNote: row.change_note as string | undefined,
-      organizationId: row.organization_id as string | undefined,
+      organizationId: undefined /* [ADR-0131 D7] every row read here is the environment's */,
       recordedBy: row.recorded_by as string | undefined,
       // [#16422] `MetadataHistoryRecord.recordedAt` is a REQUIRED
       // `z.string().datetime()`, so it is the one site in this family with no
@@ -1271,7 +1294,6 @@ export class DatabaseLoader implements MetadataLoader {
       type,
       name,
     };
-    if (this.organizationId) historyFilter.organization_id = this.organizationId;
     if (options?.operationType) historyFilter.operation_type = options.operationType;
     if (options?.since) historyFilter.recorded_at = { $gte: options.since };
     if (options?.until) {
@@ -1327,7 +1349,7 @@ export class DatabaseLoader implements MetadataLoader {
         checksum: row.checksum as string,
         previousChecksum: row.previous_checksum as string | undefined,
         changeNote: row.change_note as string | undefined,
-        organizationId: row.organization_id as string | undefined,
+        organizationId: undefined /* [ADR-0131 D7] every row read here is the environment's */,
         recordedBy: row.recorded_by as string | undefined,
         // [#16422] The other door onto the same column — same shared spelling,
         // same caller-side terminal value. See `getHistoryRecord` above for
@@ -1478,7 +1500,6 @@ export class DatabaseLoader implements MetadataLoader {
           state: 'active',
           version: 1,
           source: 'database',
-          ...(this.organizationId ? { organization_id: this.organizationId } : {}),
           created_at: now,
           updated_at: now,
         });

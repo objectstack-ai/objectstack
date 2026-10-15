@@ -100,7 +100,6 @@ function makeEngine(row: Record<string, unknown> | null) {
 function makeRepo(row: Record<string, unknown> | null) {
   return new SysMetadataRepository({
     engine: makeEngine(row) as never,
-    organizationId: 'org_alpha',
     orgLabel: 'org_alpha',
   });
 }

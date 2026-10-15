@@ -209,7 +209,6 @@ describe('#14037 — MetadataEvent.ts is canonical ISO text, whatever the dialec
     engine = makeFakeEngine();
     repo = new SysMetadataRepository({
       engine,
-      organizationId: 'org_alpha',
       orgLabel: 'org_alpha',
     });
     await repo.put(ref, view('A'), { parentVersion: null, actor: 'usr_1' });

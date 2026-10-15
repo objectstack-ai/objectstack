@@ -207,7 +207,7 @@ describe('publishMetaItem publishes env-wide drafts (#10219 B; ADR-0131 D6)', ()
         const active = remaining.filter((r) => r.state === 'active');
         expect(active).toHaveLength(1);
         // Promoted in the scope it was authored in.
-        expect(active[0]!.organization_id).toBeNull();
+        expect('organization_id' in active[0]!).toBe(false);
     });
 
     it('reports the promotion under the scope it landed in, so the notification is not a lie', async () => {
@@ -248,7 +248,7 @@ describe('publishMetaItem publishes env-wide drafts (#10219 B; ADR-0131 D6)', ()
         expect(remaining.filter((r) => r.state === 'active')).toHaveLength(0);
         const drafts = remaining.filter((r) => r.state === 'draft');
         expect(drafts).toHaveLength(1);
-        expect(drafts[0]!.organization_id).toBeNull();
+        expect('organization_id' in drafts[0]!).toBe(false);
     });
 
     it('CONTROL — a genuinely absent draft still refuses with NO_DRAFT / 404', async () => {

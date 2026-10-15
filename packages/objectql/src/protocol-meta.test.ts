@@ -63,20 +63,19 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
     // ADR-0005 (revised 2026-05): per-organization overlay isolation
     // ═══════════════════════════════════════════════════════════════
 
-    describe('[ADR-0131 D6] no read serves a legacy organization row', () => {
-        // The per-organization overlay axis is retired: every metadata read is
-        // environment → code. A legacy organization-scoped row of the same
-        // `(type, name)` as an environment row is not read at all — not even
-        // when a caller still names its organization.
-        const orgOrEnv = (orgBody: unknown, envBody: unknown) => (_table: string, opts: any) => {
-            if (opts?.where?.organization_id === 'org_alpha') return Promise.resolve(orgBody);
-            if (opts?.where?.organization_id === null) return Promise.resolve(envBody);
-            return Promise.resolve(Array.isArray(envBody) ? [] : null);
+    describe('[ADR-0131 D6/D7] every read is the environment\'s, whatever organization the caller names', () => {
+        // The per-organization overlay axis is retired and the family declares
+        // no organization column: no query names one, and a caller naming an
+        // organization is served the environment's rows.
+        const envOnly = (envBody: unknown) => (_table: string, opts: any) => {
+            if (opts?.where && 'organization_id' in opts.where) {
+                throw new Error('a sys_metadata read named the retired organization column');
+            }
+            return Promise.resolve(envBody);
         };
 
-        it('getMetaItem serves the environment row, and never asks for the organization\'s', async () => {
-            mockEngine.findOne.mockImplementation(orgOrEnv(
-                { type: 'view', name: 'test_grid', state: 'active', metadata: JSON.stringify({ ...sampleView, label: 'Org Alpha' }) },
+        it('getMetaItem serves the environment row, and never names an organization', async () => {
+            mockEngine.findOne.mockImplementation(envOnly(
                 { type: 'view', name: 'test_grid', state: 'active', metadata: JSON.stringify({ ...sampleView, label: 'Env Default' }) },
             ));
             const result = await protocol.getMetaItem({
@@ -84,21 +83,19 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             } as { type: string; name: string });
             expect((result.item as any).label).toBe('Env Default');
             for (const [table, query] of mockEngine.findOne.mock.calls) {
-                if (table === 'sys_metadata') expect((query as any)?.where?.organization_id ?? null).toBeNull();
+                if (table === 'sys_metadata') expect((query as any)?.where ?? {}).not.toHaveProperty('organization_id');
             }
         });
 
-        it('getMetaItems lists the environment rows only, whatever organization the caller names', async () => {
-            mockEngine.find.mockImplementation(orgOrEnv(
-                [
-                    { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Org Alpha' }) },
-                    { type: 'view', name: 'alpha_only', state: 'active', metadata: JSON.stringify({ name: 'alpha_only', label: 'Alpha Only' }) },
-                ],
-                [
-                    { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Env Default' }) },
-                    { type: 'view', name: 'env_only', state: 'active', metadata: JSON.stringify({ name: 'env_only', label: 'Env Only' }) },
-                ],
-            ));
+        it('getMetaItems lists the environment rows, whatever organization the caller names', async () => {
+            mockEngine.find.mockImplementation((table: string, opts: any) => envOnly(
+                table === 'sys_metadata' && opts?.where?.state !== 'draft'
+                    ? [
+                        { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Env Default' }) },
+                        { type: 'view', name: 'env_only', state: 'active', metadata: JSON.stringify({ name: 'env_only', label: 'Env Only' }) },
+                    ]
+                    : [],
+            )(table, opts));
             const result = await protocol.getMetaItems({ type: 'view', organizationId: 'org_alpha' } as { type: string });
             const names = (result.items as any[]).map((i) => i.name).sort();
             expect(names).toEqual(['env_only', 'shared']);
@@ -239,7 +236,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
                 // ADR-0048 — package-less save scopes the lookup to the global row.
-                where: { type: 'app', name: 'test_app', organization_id: null, state: 'active', package_id: null },
+                where: { type: 'app', name: 'test_app', state: 'active', package_id: null },
                 // [#21911] The platform store read carries the explicit system opt-in.
                 context: { isSystem: true },
             });
@@ -266,7 +263,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
 
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'view', name: 'test_grid', organization_id: null, state: 'active', package_id: 'com.acme.beta' },
+                where: { type: 'view', name: 'test_grid', state: 'active', package_id: 'com.acme.beta' },
                 // [#21911] The platform store read carries the explicit system opt-in.
                 context: { isSystem: true },
             });
@@ -633,7 +630,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
             expect(result.item).toMatchObject(sampleApp);
             expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', name: 'test_app', state: 'active', organization_id: null },
+                where: { type: 'app', name: 'test_app', state: 'active' },
                 // [#21911] The platform store read carries the explicit system opt-in.
                 context: { isSystem: true },
             });
@@ -678,7 +675,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(reads.map((r: any) => r.where?.type)).toEqual(['app', 'apps', 'app']);
             expect(reads.every((r: any) => r.table === 'sys_metadata')).toBe(true);
             expect(reads[2].where).toMatchObject({
-                type: 'app', name: 'test_app', state: 'active', organization_id: null, package_id: null,
+                type: 'app', name: 'test_app', state: 'active', package_id: null,
             });
             expect((result as any).version).toBeNull();
         });
@@ -925,7 +922,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // DB *is* queried (always-merge semantics) so seeded metadata
             // surfaces even when the registry already has unrelated items.
             expect(mockEngine.find).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', state: 'active', organization_id: null },
+                where: { type: 'app', state: 'active' },
                 // [#21911] The platform store read carries the explicit system opt-in.
                 context: { isSystem: true },
             });
@@ -1074,7 +1071,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(result.items).toHaveLength(1);
             expect(result.items[0]).toMatchObject(sampleApp);
             expect(mockEngine.find).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', state: 'active', organization_id: null },
+                where: { type: 'app', state: 'active' },
                 // [#21911] The platform store read carries the explicit system opt-in.
                 context: { isSystem: true },
             });
@@ -1271,7 +1268,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             await protocol.loadMetaFromDb();
 
             expect(mockEngine.find).toHaveBeenCalledWith('sys_metadata', {
-                where: { state: 'active', organization_id: null }
+                where: { state: 'active' }
             });
         });
 

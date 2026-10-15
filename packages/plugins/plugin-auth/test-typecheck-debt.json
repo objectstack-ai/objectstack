@@ -3,9 +3,9 @@
   "_note": "STARTING LEDGER, opened by #14062 under the director ruling of 2026-09-01 (maintainer verbatim: 「同意」), which carries the #5286 maintainer authority for it. 94 errors over 10 files, every one PRE-EXISTING — the build config's `exclude` named `**/*.test.ts`, so no tsc program this package's `typecheck` runs had ever read any of its 87 test files. Measured identically with and without the vitest module semantics: this package carried no config-tier pile at all. The largest class is TS2493 x36 (tuple index out of bounds, from indexing fixed-length mock call tuples). ⛔ Opening the ratchet is not paying it down; paydown follows this ledger's own shrink-only discipline, on its own cards.",
   "entries": {
     "src/admin-import-users.test.ts": {
-      "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 6,
+      "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 3,
       "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 1,
-      "TS2532: Object is possibly 'undefined'.": 4
+      "TS2532: Object is possibly 'undefined'.": 1
     },
     "src/admin-user-endpoints.test.ts": {
       "TS18048: 'auditRow' is possibly 'undefined'.": 5,

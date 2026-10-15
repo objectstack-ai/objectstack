@@ -105,7 +105,6 @@ interface Row {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
@@ -127,14 +126,13 @@ interface HistoryRow {
     previous_checksum: string | null;
     change_note?: string | null;
     source?: string | null;
-    organization_id: string | null;
     recorded_by?: string | null;
     recorded_at: string;
 }
 
 /** The ADR-0048 overlay key — draft and active rows for one identity coexist. */
 function keyOf(w: Record<string, unknown>) {
-    return `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
+    return `${w.type}|${w.name}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
 }
 
 function matchesMetadataWhere(r: Row, where: Record<string, unknown>): boolean {
@@ -204,7 +202,6 @@ function makeStubEngine(opts: { failAudit?: boolean } = {}): Harness {
     };
 
     const matchesHistory = (h: HistoryRow, w: Record<string, unknown>): boolean => {
-        if (w.organization_id !== undefined && h.organization_id !== w.organization_id) return false;
         if (w.type !== undefined && h.type !== w.type) return false;
         if (w.name !== undefined && h.name !== w.name) return false;
         if (w.version !== undefined && h.version !== w.version) return false;
@@ -379,7 +376,7 @@ const publishRows = (h: Harness, outcome: 'allowed' | 'denied') =>
 
 /**
  * Stage one package-bound draft through the ordinary save path — ENV-WIDE
- * (`organization_id IS NULL`), the only scope a write lands in (ADR-0131 D6).
+ * (ADR-0131 D6/D7: no organization column), the only scope a write lands in.
  */
 async function stageDraft(
     protocol: ObjectStackProtocolImplementation,
@@ -420,7 +417,6 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         expect(opRows(h, 'save')[0]).toMatchObject({
             type: 'view',
             name: 'case_grid',
-            organization_id: null,
             operation: 'save',
             outcome: 'allowed',
             code: 'ok',
@@ -473,7 +469,6 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         for (const row of allowed) {
             expect(row).toMatchObject({
                 type: 'view',
-                organization_id: null,
                 operation: 'publish',
                 outcome: 'allowed',
                 code: 'ok',
@@ -577,7 +572,6 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         expect(batchAborted[0]).toMatchObject({
             type: 'view',
             name: 'locked_grid',
-            organization_id: null,
             operation: 'publish',
             outcome: 'denied',
             // The persisted audit column's own vocabulary, lower-case like
@@ -760,7 +754,6 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
         expect(locked[0]).toMatchObject({
             type: 'view',
             name: 'solo_locked',
-            organization_id: null,
             operation: 'publish',
             outcome: 'denied',
             // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -799,7 +792,6 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
         expect(locked[0]).toMatchObject({
             type: 'view',
             name: 'locked_grid',
-            organization_id: null,
             operation: 'publish',
             outcome: 'denied',
             // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -905,7 +897,6 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
             expect(conflict[0]).toMatchObject({
                 type: 'view',
                 name: 'raced_grid',
-                organization_id: null,
                 operation: 'publish',
                 outcome: 'denied',
                 // adr0112-ok: D6b — persisted audit column, its own vocabulary
@@ -1103,10 +1094,10 @@ describe('[#8595] a PRE-FLIGHT refused publish leaves a row per violation', () =
             expect(String(row.note)).toContain(`${NS}_`);
         }
 
-        // Scope: the DRAFT's own partition (env-wide) — the same rule the
-        // promoted rows follow.
+        // Scope: the environment's — the audit row carries no organization
+        // column (ADR-0131 D7), the same rule the promoted rows follow.
         for (const row of denied) {
-            expect(row.organization_id).toBeNull();
+            expect('organization_id' in row).toBe(false);
         }
 
         // The COMPLIANT sibling gets no row of either kind: the batch is

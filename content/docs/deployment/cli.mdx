@@ -989,6 +989,24 @@ occupancy on its own.
 | `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies |
 | `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE`, create a `UNIQUE` index existing rows already violate | `os migrate apply --allow-destructive` |
 
+`--allow-destructive` refuses some drops until the data they would lose is
+safe. No flag skips these refusals:
+
+- `sys_account.issuer` is dropped only when its retirement pre-flight reads the
+  table clean (`os migrate account-issuer` reports the colliding rows).
+- `sys_comment.reactions` waits for a verified `os migrate comment-reactions --apply` run.
+- `organization_id` on any table the organization-ownership ceremony covers
+  waits for a verified `os migrate organization-ownership --apply --plan-file FILE`
+  run. These tables are the ADR-0131 D7 tables and the `sys_metadata` family.
+  The ceremony drops those columns itself, in its column-drops step, before it
+  records the run verified. Dropping one first would turn every legacy
+  organization row into an environment row. Under `--json` the refusal answers
+  `message: 'refused_organization_ownership_unmigrated'` and lists the `tables`.
+
+Each refusal holds the whole `--allow-destructive` run: nothing in it is
+created, applied or dropped, the run's other changes included. A run without
+`--allow-destructive` is unchanged.
+
 #### Index drift
 
 `plan` covers indexes as well as columns:

@@ -44,9 +44,27 @@ function fakes(rows: Array<Record<string, unknown>>, refuse?: (name: string) => 
     const saves: Array<Record<string, unknown>> = [];
     const receipts: Array<Record<string, unknown>> = [];
     const logs: Array<{ level: string; msg: string }> = [];
+    // [ADR-0131 D7] Each row gets an id; the engine shapes a read to the
+    // declared columns (no `organization_id`), and a legacy organization's row
+    // is told apart through the driver's physical column.
+    rows.forEach((row, i) => { row.id ??= `row_${i}`; });
     const engine = {
         async find(object: string) {
-            return object === 'sys_metadata' ? rows : [];
+            return object === 'sys_metadata'
+                ? rows.map(({ organization_id: _physical, ...declared }) => declared)
+                : [];
+        },
+        getDriverForObject(object: string) {
+            if (object !== 'sys_metadata') return undefined;
+            return {
+                dialectName: 'sqlite',
+                async execute(sql: string) {
+                    return /column_name/.test(sql)
+                        ? [{ column_name: 'id' }, { column_name: 'organization_id' }]
+                        : rows.filter((r) => r.organization_id != null && r.organization_id !== '')
+                            .map((r) => ({ id: r.id, organization_id: r.organization_id }));
+                },
+            };
         },
         async findOne(object: string, query?: Record<string, unknown>) {
             assertEngineFindOnePredicate(object, query as never);

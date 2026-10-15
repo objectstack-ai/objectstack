@@ -95,7 +95,6 @@ const REF = { org: 'system', type: 'view' as const, name: 'k9qk_member.member_li
 function makeRepo(engine: ReturnType<typeof makeFakeEngine>) {
   return new SysMetadataRepository({
     engine: engine as never,
-    organizationId: null,
     orgLabel: 'env',
   } as never);
 }
@@ -133,36 +132,14 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
     expect(draft.package_id ?? null).toBeNull();
   });
 
-  it('an ORG-scoped save inherits from the env-wide active row — the ADR-0005 overlay reach (#11087 layer 1b)', async () => {
-    // The console's session carries an active org, so its draft lands in the
-    // org scope while the active base row is env-wide. A same-org-only
-    // inheritance lookup finds nothing there (measured live), so the reach
-    // must mirror listDrafts' $or contract.
-    const engine = makeFakeEngine([
-      {
-        type: REF.type, name: REF.name, organization_id: null, state: 'active',
-        package_id: 'app.k9qk', metadata: '{"label":"Member"}', checksum: 'sha-active', version: 1,
-      },
-    ]);
-    const repo = new SysMetadataRepository({
-      engine: engine as never,
-      organizationId: 'org_1',
-      orgLabel: 'org_1',
-    } as never);
-    await repo.put(REF, { label: 'Member v2' }, { parentVersion: null, actor: 't', state: 'draft' as const });
-    const draft = engine.rows.find((r) => r.state === 'draft')!;
-    expect(draft.organization_id).toBe('org_1'); // org-scoped save, unchanged
-    expect(draft.package_id).toBe('app.k9qk'); // inherited across scopes
-  });
-
   it('adopts a pre-fix orphan draft (NULL package) instead of forking a second draft row', async () => {
     const engine = makeFakeEngine([
       {
-        type: REF.type, name: REF.name, organization_id: null, state: 'active',
+        type: REF.type, name: REF.name, state: 'active',
         package_id: 'app.k9qk', metadata: '{"label":"Member"}', checksum: 'sha-active', version: 1,
       },
       {
-        type: REF.type, name: REF.name, organization_id: null, state: 'draft',
+        type: REF.type, name: REF.name, state: 'draft',
         package_id: null, metadata: '{"label":"Member","description":"orphan"}', checksum: 'sha-orphan', version: 2,
       },
     ]);
@@ -187,7 +164,7 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
  */
 describe('SysMetadataRepository.headAt — the row put locks against (#22128)', () => {
   const seededActive = (pkg: string | null) => ({
-    type: REF.type, name: REF.name, organization_id: null, state: 'active',
+    type: REF.type, name: REF.name, state: 'active',
     package_id: pkg, metadata: '{"label":"Member"}', checksum: 'sha-active', version: 1,
   });
 
@@ -214,7 +191,7 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
     const engine = makeFakeEngine([
       seededActive('app.k9qk'),
       {
-        type: REF.type, name: REF.name, organization_id: null, state: 'draft',
+        type: REF.type, name: REF.name, state: 'draft',
         package_id: null, metadata: '{"label":"orphan"}', checksum: 'sha-orphan', version: 2,
       },
     ]);
@@ -241,17 +218,6 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
     expect((await repo.headAt(REF, { state: 'active', packageId: 'app.k9qk' })).head?.hash).toBe('sha-active');
   });
 
-  it('an org-scoped draft address resolves across the ADR-0005 reach, as the inheriting put does', async () => {
-    const engine = makeFakeEngine([seededActive('app.k9qk')]);
-    const repo = new SysMetadataRepository({
-      engine: engine as never,
-      organizationId: 'org_1',
-      orgLabel: 'org_1',
-    } as never);
-    const first = await repo.put(REF, { label: 'org draft' }, { parentVersion: null, actor: 't', state: 'draft' as const });
-    expect((await repo.headAt(REF, { state: 'draft' })).head?.hash).toBe(first.version);
-  });
-
   it('a brand-new item drafted first: no head, and the package-less binding (nothing to inherit)', async () => {
     const repo = makeRepo(makeFakeEngine());
     expect(await repo.headAt(REF, { state: 'draft' })).toEqual({ head: null, packageId: null });
@@ -271,7 +237,7 @@ describe('SysMetadataRepository.headAt — the row put locks against (#22128)', 
  */
 describe('[#23297] SysMetadataRepository draft inheritance reads every active row', () => {
   const activeRow = (pkg: string | null, checksum: string) => ({
-    type: REF.type, name: REF.name, organization_id: null, state: 'active',
+    type: REF.type, name: REF.name, state: 'active',
     package_id: pkg, metadata: '{"label":"Member"}', checksum, version: 1,
   });
 

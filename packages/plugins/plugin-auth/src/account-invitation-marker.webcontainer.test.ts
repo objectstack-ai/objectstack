@@ -17,7 +17,9 @@
  *  ③ the polyfill really IS process-global — a task started outside the
  *    marker's store reads the store while the marked call is open — and leg 3
  *    (`request` present ⇒ no marker) is what still refuses an HTTP request
- *    there.
+ *    there;
+ *  ④ [#23598] the delivery receipt survives the same awaits: a transport that
+ *    answers `failed` is reported on the import's row.
  *
  * Its own file because it replaces a process-wide slot; it puts the slot and
  * the env signal back when it ends.
@@ -29,7 +31,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { runAdminImportUsers } from './admin-import-users.js';
-import { readAccountInvitation, runAsAccountInvitation } from './account-invitation-marker.js';
+import { readAccountInvitation, runImportPasswordReset } from './account-invitation-marker.js';
 
 const ORIGIN = 'https://acme.example.com';
 const BASE = '/api/v1/auth';
@@ -42,6 +44,8 @@ let savedSignal: string | undefined;
 let engine: ObjectQL;
 let manager: AuthManager;
 const sent: SentMail[] = [];
+/** [#23598] Recipients whose transport answers `failed`. */
+const failing = new Set<string>();
 
 beforeAll(async () => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -67,6 +71,7 @@ beforeAll(async () => {
   manager.setEmailService({
     sendTemplate: async (input: SentMail) => {
       sent.push(input);
+      if (failing.has(input.to.address)) return { status: 'failed', error: '550 mailbox unavailable' };
       return { status: 'sent' };
     },
   } as never);
@@ -143,7 +148,7 @@ describe('[#23343] the account-invitation marker under the WebContainer request-
         httpRequest: await readAccountInvitation(marker.email, new Request(`${ORIGIN}${BASE}/request-password-reset`, { method: 'POST' })),
       };
     })();
-    const seen = await runAsAccountInvitation(marker, async () => {
+    const { result: seen } = await runImportPasswordReset(marker, async () => {
       openGate();
       return outside;
     });
@@ -153,4 +158,34 @@ describe('[#23343] the account-invitation marker under the WebContainer request-
     // … and leg 3 is what refuses a call that carries a Request.
     expect(seen.httpRequest).toBeUndefined();
   });
+
+  it('④ [#23598] a transport that answers failed is reported on the import\'s row', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const email = 'wc-failing@acme.example.com';
+    failing.add(email);
+    const res = await runAdminImportUsers(
+      {
+        getAuthApi: () => manager.getApi(),
+        getDataEngine: () => manager.getDataEngine() as never,
+        phoneNumberEnabled: () => false,
+        emailServiceAvailable: () => manager.isEmailServiceAvailable(),
+        smsInviteAvailable: () => false,
+        sendInviteSms: async () => {},
+        noteMustChangePasswordIssued: () => {},
+      },
+      new Request(`${ORIGIN}${BASE}/admin/import-users`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ format: 'json', mode: 'insert', passwordPolicy: 'invite', rows: [{ email }] }),
+      }),
+      { id: 'usr_wc_23598', email: 'wc-admin@acme.example.com' },
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const data = res.body.data as { rows: Array<Record<string, unknown>>; summary: { errors: number } };
+    expect(sent.filter((m) => m.to.address === email).map((m) => m.template)).toEqual(['auth.account_invitation']);
+    expect(data.rows[0]!.delivery).toBeUndefined();
+    expect(data.rows[0]!.code).toBe('INVITE_EMAIL_FAILED');
+    expect(String(data.rows[0]!.error)).toContain('550 mailbox unavailable');
+    expect(data.summary.errors).toBe(1);
+  }, 120_000);
 });

@@ -2982,13 +2982,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           deprecated: "deprecated"
         }
       },
-      organization_id: {
-        label: "Organization",
-        help: "Organization for multi-tenant isolation."
-      },
       environment_id: {
         label: "Environment (deprecated)",
-        help: "DEPRECATED. Use organization_id for tenant isolation."
+        help: "DEPRECATED. Overlays are environment rows (ADR-0131 D6); no tenant column."
       },
       version: {
         label: "Version"
@@ -3037,7 +3033,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_history: {
     label: "Metadata History",
     pluralLabel: "Metadata History",
-    description: "Durable event log of metadata overlay changes (per-org, append-only)",
+    description: "Durable event log of metadata overlay changes (environment-wide, append-only)",
     fields: {
       id: {
         label: "ID"
@@ -3082,10 +3078,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       source: {
         label: "Source"
       },
-      organization_id: {
-        label: "Organization",
-        help: "Organization for multi-tenant isolation."
-      },
       recorded_by: {
         label: "Recorded By",
         help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
@@ -3118,9 +3110,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Name"
-      },
-      organization_id: {
-        label: "Organization"
       },
       operation: {
         label: "Operation",

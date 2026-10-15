@@ -2982,13 +2982,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           deprecated: "已废弃"
         }
       },
-      organization_id: {
-        label: "组织",
-        help: "用于多租户隔离的组织。"
-      },
       environment_id: {
         label: "环境（已废弃）",
-        help: "已废弃。请使用 organization_id 进行租户隔离。"
+        help: "已废弃。覆盖层是环境级的行（ADR-0131 D6），没有租户列。"
       },
       version: {
         label: "版本"
@@ -3082,10 +3078,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       source: {
         label: "来源"
       },
-      organization_id: {
-        label: "组织",
-        help: "用于多租户隔离的组织。"
-      },
       recorded_by: {
         label: "记录人",
         help: "做出此变更的用户。NULL 表示由系统发起（启动同步、迁移、定时任务）——绝不是哨兵字符串。"
@@ -3118,9 +3110,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "名称"
-      },
-      organization_id: {
-        label: "组织"
       },
       operation: {
         label: "操作",
