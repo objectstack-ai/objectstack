@@ -123,7 +123,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `pm:queue` 卡逾三天欠一次显式转换(派发/转箱/停放/撤单/改前提),⛔ 不是排期。
 - hold/blocked 的行契约、双通道与 `Restart-touch:` 触发文件细则见 `references/state-machine.md`。
 - hold 放行须双查:只放最近一次转换评论的条件,其后卡上有更新的 merged PR 即拒。
-- `Unlock-action:` 只认 `re-check PR #M` 与 `re-check #N when label <标签> <absent|present>`,余者静默回落。
 - `needs-user-decision` 是决定待做,`pm:on-hold` 是决定已做;`manual — <理由>` ⛔ 不是合法出口。
 - 无机制可唤醒的卡 ⛔ 不 hold:关 not planned,理由/出处载关单评论;重开免费,维护者可否决。
 - 缺陷卡 ⛔ 不藏进 hold 也不自行关闭:可复现且用户可达 ⇒ 回 `pm:queue`。
@@ -169,7 +168,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
-- `domain:*` 只由分诊席产出,例外仅在飞卡衍生 sub-issue 承父卡域;无标签的卡 ⛔ 不得认领。
+- `domain:*` 只由分诊席产出,例外一:在飞卡衍生 sub-issue 承父卡域;无标签的卡 ⛔ 不得认领。
+- 例外二:立卡人自贴而车道合上表、正文齐立卡门三件 ⇒ 执行席直接认领,分诊事后抽查。
 - 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
 - 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 排该 PR 之后串行或让行。
