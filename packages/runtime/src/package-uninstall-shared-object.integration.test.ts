@@ -154,7 +154,7 @@ async function boot() {
     const body = objectBody(name, `${name} ${packageId ?? 'unbound'}`);
     const now = new Date().toISOString();
     await engine.insert('sys_metadata', {
-      id: `seed_active_${packageId ?? 'unbound'}_${name}`, type: 'object', name, organization_id: null,
+      id: `seed_active_${packageId ?? 'unbound'}_${name}`, type: 'object', name,
       package_id: packageId, state: 'active', metadata: JSON.stringify(body), checksum: hashSpec(body, 'object'),
       version: 1, created_at: now, updated_at: now,
     }, { context: { isSystem: true } } as any);
