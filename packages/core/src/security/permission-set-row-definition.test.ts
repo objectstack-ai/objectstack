@@ -157,7 +157,7 @@ describe('permissionSetDefinitionFromRow', () => {
     // CONTROL: the identical scope with the keys left in is refused by the
     // door's schema at the retired key — so the drop above is what makes the
     // body acceptable, not something else in it.
-    const kept = { name: 'emea_admin', adminScope: { businessUnit: 'emea', manageBindings: false } };
+    const kept = { ...permissionSetDefinitionFromRow({ name: 'emea_admin' }), adminScope: { businessUnit: 'emea', manageBindings: false } };
     const refused = PermissionSetSchema.safeParse(kept);
     expect(refused.success).toBe(false);
     expect(refused.error?.issues.map((i) => i.path)).toEqual([['adminScope', 'manageBindings']]);
