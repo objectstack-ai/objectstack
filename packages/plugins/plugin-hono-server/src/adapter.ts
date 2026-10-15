@@ -295,10 +295,11 @@ function toLoggableError(thrown: unknown): Error {
  *
  * ## A conflict's current state (#23531)
  *
- * A `409 CONCURRENT_UPDATE` also carries the server's `currentVersion` and
- * `currentRecord` in `details`, read off `RestServer`'s classification by
+ * A `409 CONCURRENT_UPDATE` also carries the server's `currentVersion` in
+ * `details`, read off `RestServer`'s classification by
  * {@link declaredConflictContext}. Before this, both Hono doors answered that
- * `409` with `code` and `message` only.
+ * `409` with `code` and `message` only. `currentRecord` is held back for now
+ * (#23586); that helper's docblock says why.
  */
 export function declaredEnvelopeForThrow(thrown: unknown): {
     status: number;
@@ -352,8 +353,8 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
 
 /**
  * [#23531] The current state a `409 CONCURRENT_UPDATE` carries —
- * `currentVersion` and `currentRecord` — or `undefined` for any other answer,
- * and for a conflict that stated neither.
+ * `currentVersion` — or `undefined` for any other answer, and for a conflict
+ * that stated none.
  *
  * ## Why
  *
@@ -371,9 +372,10 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
  * arm `RestServer`'s `mapDataError` answers this conflict through. So the
  * Hono doors forward what the REST door forwards, under the same rule (each
  * field only when the producer stated it), and an arm that grows a field grows
- * it at every door. ⛔ Never list the fields here. Only the arm's own sentence
- * and code are dropped: this envelope already carries both, as `message` and
- * `code`.
+ * it at every door. ⛔ Never list the fields here. The arm's own sentence and
+ * code are dropped because this envelope already carries both, as `message`
+ * and `code`. `currentRecord` is the ONE field named here, and it is named
+ * only to hold it back (the ⚠️ paragraph below says why).
  *
  * ## Where they land
  *
@@ -391,10 +393,15 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
  * match the envelope already decided, so the arm can only add context to that
  * envelope, never change it.
  *
- * ⚠️ `currentRecord` is forwarded as the protocol threw it, exactly as the
- * REST door forwards it. The protocol reads it with a system context
- * (`probeRecord`), so it is not narrowed to what the caller may read. That is
- * a property of the producer and both doors, not of this one.
+ * ⚠️ `currentRecord` is HELD here: these doors do not forward it, though the
+ * REST door does. The protocol reads that row with a system context
+ * (`probeRecord`), and the OCC check throws it before the caller's write
+ * policy runs, so it is not narrowed to what the caller may read. It may carry
+ * a row, or fields, that row- or field-level security hides from the caller.
+ * Forwarding it would widen that possible disclosure to two more doors. A
+ * version token carries no row data, so `currentVersion` is forwarded. The
+ * record waits for the producer's answer (#23586), and the exclusion is lifted
+ * when that lands.
  */
 function declaredConflictContext(
     thrown: unknown,
@@ -406,7 +413,10 @@ function declaredConflictContext(
         return undefined;
     }
     const context = Object.fromEntries(
-        Object.entries(arm.body).filter(([key]) => key !== 'error' && key !== 'code'),
+        Object.entries(arm.body).filter(([key]) => key !== 'error'
+            && key !== 'code'
+            // Held: a system-context row the caller may not be allowed to read (#23586).
+            && key !== 'currentRecord'),
     );
     return Object.keys(context).length > 0 ? context : undefined;
 }
