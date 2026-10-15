@@ -40,7 +40,10 @@
  *  - #23630 member 2's sequence: saves naming P and then Q are both refused, so
  *    the rows `[P, Q, package-less]` cannot be produced;
  *  - the prescription, followed: the object moves into Q with its table and
- *    records, and Q's row is the owner and the served definition across a boot;
+ *    records, and Q's row is the owner and the served definition across a boot,
+ *    for an object saved in this process and for one HYDRATED AT BOOT, on the
+ *    kernel's fallback metadata and with `MetadataPlugin` (the delete heal for
+ *    a boot-hydrated object is what makes the second half hold);
  *  - CONTROL: a save naming no package over the package-less owner is unchanged.
  *
  * The D9.9 refusal for an owner bound to a real package is pinned, unchanged,
@@ -48,8 +51,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
+import { MetadataPlugin } from '@objectstack/metadata';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 
@@ -157,21 +164,35 @@ interface Booted {
 
 describe('#23514 — a save naming a package beside an object its package-less definition owns', () => {
     const live: ObjectKernel[] = [];
+    const roots: string[] = [];
     afterEach(async () => {
         while (live.length) {
             const kernel = live.pop()!;
             if (kernel.getState() === 'running') await kernel.shutdown();
         }
+        while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
     });
 
-    /** One boot over `stores`: a kernel, a fresh engine, and `loadMetaFromDb` run by the plugin's start. */
-    async function boot(stores: Stores, drops: string[]): Promise<Booted> {
+    /**
+     * One boot over `stores`: a kernel, a fresh engine, and `loadMetaFromDb` run
+     * by the plugin's start. `withMetadataPlugin` adds the `metadata` service
+     * (`MetadataPlugin`, an empty temp root, `watch: false`), into which
+     * `ObjectQLPlugin.start()` copies every object it hydrated: the composition
+     * whose boot-hydrated delete kept the object registered until the delete
+     * heal for boot-hydrated objects landed.
+     */
+    async function boot(stores: Stores, drops: string[], withMetadataPlugin = false): Promise<Booted> {
         // `logger.level` is the real config key, and gracefulShutdown:false keeps
         // process signal handlers out of vitest's fork workers (#4250).
         const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
         live.push(kernel);
         const engine = new ObjectQL();
         engine.registerDriver(makeMemoryDriver(stores, drops), true);
+        if (withMetadataPlugin) {
+            const root = mkdtempSync(join(tmpdir(), 'os-23514-'));
+            roots.push(root);
+            await kernel.use(new MetadataPlugin({ watch: false, rootDir: root }));
+        }
         await kernel.use(new ObjectQLPlugin({ ql: engine }));
         await kernel.bootstrap();
         return { kernel, engine, protocol: kernel.getService('protocol') };
@@ -318,6 +339,55 @@ describe('#23514 — a save naming a package beside an object its package-less d
         });
         expect(drops).toEqual([]);
     });
+
+    for (const { composition, withMetadataPlugin } of [
+        { composition: 'the kernel\'s fallback metadata', withMetadataPlugin: false },
+        { composition: 'MetadataPlugin', withMetadataPlugin: true },
+    ]) {
+        it(`the prescription is a way out for an object HYDRATED AT BOOT too (${composition}): gone at once after the delete, then Q's row is the owner with the table and records kept, and a boot agrees`, async () => {
+            const stores: Stores = new Map();
+            const drops: string[] = [];
+            const k1 = await seedPackagelessOwner(stores, drops);
+            await k1.kernel.shutdown();
+
+            // The object is now hydrated at boot, not saved in this process.
+            const k2 = await boot(stores, drops, withMetadataPlugin);
+            expect(await served(k2)).toEqual({
+                owner: SENTINEL, dataPlaneLabel: 'Gadget unbound', metaReadLabel: 'Gadget unbound', records: 2,
+            });
+            expectRefusal(await refusalOf(k2, Q, 'Gadget Q'));
+            expect(storedBindings(stores)).toEqual([null]);
+
+            // The prescription's first call: the delete names no package and no dropStorage.
+            const del = await k2.protocol.deleteMetaItem({ type: 'object', name: NAME });
+            expect(del.success).toBe(true);
+            // The registry owner, the metadata read and the data plane agree it is gone at once;
+            // the table keeps its records.
+            expect(storedBindings(stores)).toEqual([]);
+            expect(k2.engine.registry.getObjectOwner(NAME)).toBeUndefined();
+            expect(k2.engine.registry.getObject(NAME)).toBeUndefined();
+            expect((await k2.protocol.getMetaItem({ type: 'object', name: NAME }))?.item).toBeUndefined();
+            await expect(k2.engine.find(NAME, {}, { context: { isSystem: true } } as any))
+                .rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
+            expect(stores.get(NAME)?.size).toBe(2);
+
+            // The second call: the same save, sent again.
+            expect((await save(k2, Q, 'Gadget Q')).success).toBe(true);
+            expect(storedBindings(stores)).toEqual([Q]);
+            expect(await served(k2)).toEqual({
+                owner: Q, dataPlaneLabel: 'Gadget Q', metaReadLabel: 'Gadget Q', records: 2,
+            });
+            await k2.engine.insert(NAME, { name: 'rec-3' }, { context: { isSystem: true } } as any);
+
+            await k2.kernel.shutdown();
+            const k3 = await boot(stores, drops, withMetadataPlugin);
+            expect(await served(k3)).toEqual({
+                owner: Q, dataPlaneLabel: 'Gadget Q', metaReadLabel: 'Gadget Q', records: 3,
+            });
+            expect(storedBindings(stores)).toEqual([Q]);
+            expect(drops).toEqual([]);
+        });
+    }
 
     it('CONTROL: a save naming no package over the package-less owner is unchanged', async () => {
         const stores: Stores = new Map();
