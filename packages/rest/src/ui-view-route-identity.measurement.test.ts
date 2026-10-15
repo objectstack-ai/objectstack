@@ -341,8 +341,10 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         expect(body.includes('this.resolveExecCtx(')).toBe(true);
         // ⛔ Reverse-checked: a `true` from a substring test is only worth
         // something if the term is spelled the way the rest of the file spells
-        // it — 52 sibling sites say it is.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        // it — 52 sibling sites say it is. [#23050 slice 4] The list's length
+        // 4 → 5 (`sharing-routes.ts`); over it the two terms read 52 and 67
+        // (50 and 65 before, +1 each per new host-literal forwarder).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(5);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });

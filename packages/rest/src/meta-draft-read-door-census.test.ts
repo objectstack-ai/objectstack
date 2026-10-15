@@ -240,8 +240,9 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // A module added to the list makes this re-read its number rather than
         // widening unnoticed. 8 switches, all in `rest-server.ts` (the `/meta`
         // and analytics doors); the data-action, batch and approval bodies read
-        // no draft.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        // no draft. [#23050 slice 4] Nor do the two record-sharing bodies
+        // (`sharing-routes.ts`): 8 = 8 + 0 + 0 + 0 + 0, length 4 → 5.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(5);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });
