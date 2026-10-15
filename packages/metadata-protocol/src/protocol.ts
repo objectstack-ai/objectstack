@@ -2578,10 +2578,17 @@ interface StoredRowPlace {
  * scope (`resolveOverlayLockLayer` in `item-lock.ts`, #21761).
  */
 function servedOverlayRowCandidates(address: {
-    readonly packageId: string | undefined;
+    /**
+     * [#23715] `null` addresses the package-unbound row alone: the strict
+     * draft read naming no package, at the draft its `version` names
+     * ({@link ObjectStackProtocolImplementation.strictDraftReadAddress}).
+     */
+    readonly packageId: string | null | undefined;
 }): ServedOverlayRowCandidate[] {
     const scopes: Array<Pick<ServedOverlayRowCandidate, 'scope' | 'organizationId'>> = [{ scope: 'env', organizationId: null }];
-    const packages: Array<string | null | undefined> = address.packageId ? [address.packageId, null] : [undefined];
+    const packages: Array<string | null | undefined> = address.packageId === null
+        ? [null]
+        : address.packageId ? [address.packageId, null] : [undefined];
     return scopes.flatMap((scope) => (['canonical', 'other'] as const).flatMap((spelling) =>
         packages.map((packageId) => ({ ...scope, spelling, packageId }))));
 }
@@ -10644,7 +10651,8 @@ export class ObjectStackProtocolImplementation implements
         type: string;
         name: string;
         state: 'active' | 'draft';
-        packageId?: string;
+        /** [#23715] `null`: the package-unbound row alone (see {@link servedOverlayRowCandidates}). */
+        packageId?: string | null;
         /** [#22877] The bundle member a by-name door's selector named; omitted, the canonical one. */
         member?: string;
     }): Promise<{ row: any } | undefined> {
@@ -10898,7 +10906,22 @@ export class ObjectStackProtocolImplementation implements
         //
         // Content only: the lock is selected from the item's rows at the
         // address the `_lock` gate judges a package-less save at, below.
-        const contentPackageId = request.packageId || await this.packagelessReadAddress(request.type, request.name, member);
+        //
+        // [#23715, ADR-0048, ADR-0070 TL;DR 1] The strict draft read that names
+        // no package takes its content from the draft its `version` names
+        // ({@link strictDraftReadAddress}), the address the draft save, the
+        // per-item publish and the draft discard naming none act on. The
+        // active rows above say nothing about an item never published into a
+        // package, so with drafts `[package-unbound, Q]` this read served the
+        // first draft row the store returned under the package-unbound
+        // draft's token, and a save pinned to that token wrote a row other
+        // than the one read (#8907). The draft-overlay preview below shares
+        // the address: it serves the draft the strict read serves.
+        const draftContentAddress = !request.packageId && (readState === 'draft' || request.previewDrafts)
+            ? await this.strictDraftReadAddress(request.type, request.name, member)
+            : undefined;
+        const contentPackageId = request.packageId
+            || (readState === 'draft' ? undefined : await this.packagelessReadAddress(request.type, request.name, member));
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -10911,13 +10934,22 @@ export class ObjectStackProtocolImplementation implements
                 // [#21716] The served-row resolution, on the draft partition
                 // (ADR-0048 prefer-local, parity with the row read below) — see
                 // {@link findServedOverlayRow}.
-                const draftRec = (await this.findServedOverlayRow({
+                let draftRec = (await this.findServedOverlayRow({
                     type: request.type,
                     name: request.name,
                     state: 'draft',
-                    ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                    ...(draftContentAddress
+                        ? { packageId: draftContentAddress.packageId }
+                        : contentPackageId ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
                 }))?.row;
+                // [#23715] Two or more packages and no package-unbound draft:
+                // the best-effort first match, as the strict read below.
+                if (!draftRec && draftContentAddress?.bestEffort) {
+                    draftRec = (await this.findServedOverlayRow({
+                        type: request.type, name: request.name, state: 'draft', ...memberOption(member),
+                    }))?.row;
+                }
                 if (draftRec) {
                     const draftItem = this.convertStoredItem(
                         String(draftRec.type ?? request.type),
@@ -10957,13 +10989,27 @@ export class ObjectStackProtocolImplementation implements
         // repair's `deletable` reads ({@link servedLockState}).
         let storedRowServed = false;
         try {
-            const record = (await this.findServedOverlayRow({
+            let record = (await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: readState,
-                ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                ...(readState === 'draft' && draftContentAddress
+                    ? { packageId: draftContentAddress.packageId }
+                    : contentPackageId ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             }))?.row;
+            // [#23715] Two or more packages and no package-unbound draft: the
+            // best-effort first match ADR-0048 §3.3 states, as before, served
+            // with `version: null` (no row at the address the save naming none
+            // resolves, and that save is refused there).
+            if (!record && readState === 'draft' && draftContentAddress?.bestEffort) {
+                record = (await this.findServedOverlayRow({
+                    type: request.type,
+                    name: request.name,
+                    state: readState,
+                    ...memberOption(member),
+                }))?.row;
+            }
             storedRowServed = record !== undefined && record !== null;
             // [#20946, #21922] The stored-row half — see `storedRowDeclined` above.
             if (record && !storedRowDeclined) {
@@ -19025,10 +19071,44 @@ export class ObjectStackProtocolImplementation implements
      * the save, the delete and the read's `version` resolve), else
      * `undefined`, any row (the best-effort first match). {@link getMetaItem}
      * and {@link getMetaItemLayered} both ask it, so the plain read, the
-     * layered read's `effective` and `/published` serve one row.
+     * layered read's `effective` and `/published` serve one row. [#23715] The
+     * strict draft read asks {@link strictDraftReadAddress} instead: the draft
+     * its `version` names.
      */
     private async packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
         return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member)).packageId ?? undefined;
+    }
+
+    /**
+     * [#23715, ADR-0048, ADR-0070 TL;DR 1] The package the strict draft read
+     * that names no package (`?state=draft`), and the draft-overlay preview
+     * naming none (`previewDrafts`), take their draft CONTENT from: the draft
+     * its `version` names ({@link readVersionToken}, through
+     * `SysMetadataRepository.headAt`), which is the draft
+     * {@link packagelessDraftAddress} gives the draft save, the per-item
+     * publish and the draft discard naming none. `packageId` is that draft's
+     * binding, `null` for the package-unbound draft alone.
+     *
+     * An `ambiguous` address (two or more packages, refused by those doors)
+     * keeps what the read served before: the package-unbound draft, the row
+     * `headAt` answers there, else (`bestEffort`) the first draft row of any
+     * package, the best-effort first match ADR-0048 §3.3 states, served with
+     * `version: null`.
+     *
+     * Before, the read took its content from the item's ACTIVE rows
+     * ({@link packagelessReadAddress}). Over an item never published into a
+     * package those name no package, so the content was the first draft row
+     * a package-agnostic lookup returned (#8907) while the `version` was the
+     * package-unbound draft's.
+     */
+    private async strictDraftReadAddress(
+        type: string,
+        name: string,
+        member?: string,
+    ): Promise<{ packageId: string | null; bestEffort: boolean }> {
+        const address = await this.packagelessDraftAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
+        if (address.kind === 'ambiguous') return { packageId: null, bestEffort: true };
+        return { packageId: address.key, bestEffort: false };
     }
 
     /**
@@ -19119,8 +19199,8 @@ export class ObjectStackProtocolImplementation implements
      * per-item publish ({@link promoteDraftForPublish}) and the draft discard
      * ({@link deleteMetaItem} with `state: 'draft'`) take it, so they act on
      * the draft the draft save naming no package writes (#11087,
-     * `SysMetadataRepository.resolveWriteHead`) and the draft read naming no
-     * package serves (#23291, {@link packagelessReadAddress}).
+     * `SysMetadataRepository.resolveWriteHead`) and the strict draft read
+     * naming no package serves ([#23715] {@link strictDraftReadAddress}).
      *
      * The address is the draft save's, read from the item's ACTIVE rows
      * ({@link packagelessAddress}):

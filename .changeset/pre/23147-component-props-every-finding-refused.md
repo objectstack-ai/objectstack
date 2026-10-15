@@ -16,7 +16,7 @@ Clause-②: no (narrowing)
 - `component-props-unknown-key`: a key the component's props row does not declare, at the bag's own level, on a strict object or union arm below it, or on a strip-mode object below it.
 - `component-props-invalid`: a value the props row rejects (a wrong type, a missing required prop, a closed-set refusal such as a url action's `target` scheme or a `record:details` section's `count`, a retired enum value), and a missing `dataSource.object` on `element:record_picker`, `element:number` and `element:repeater`.
 
-**Not judged here.** The runtime publish door (the Studio, REST `/meta`, MCP) does not run this rule, so a page saved there is not refused for any of these. `defineStack` and the stack schema keep the open `properties` bag as written. A component `type` that `ComponentPropsMap` carries no row for (a `custom.*` or plugin type) is not judged.
+**Not judged here.** `defineStack` and the stack schema keep the open `properties` bag as written. A component `type` that `ComponentPropsMap` carries no row for (a `custom.*` or plugin type) is not judged.
 
 `ComponentPropsSeverity`, the type `@objectstack/lint` exports for these findings, narrows from `'error' | 'warning'` to `'error'`.
 

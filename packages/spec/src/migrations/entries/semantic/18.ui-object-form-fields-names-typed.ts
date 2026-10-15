@@ -32,8 +32,7 @@ export const entry: SemanticMigration = {
     + 'the form skips at the top level with a console warning — is its bare name or belongs in a section. It is '
     + 'read where every page component\'s props are: the component-props gate reports a refused value as a '
     + '`component-props-invalid` error on `objectstack validate`, `objectstack build` and '
-    + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s `properties` is '
-    + 'not parsed on the metadata save or load path. No conversion is registered: nothing on the load path '
+    + '`objectstack lint`, and a stored page still loads, because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is registered: nothing on the load path '
     + 'refuses the shape, the form already draws a stored `{ name }` entry by its name, and an override written '
     + 'beside it has no rewrite that keeps it — moving it onto a section is the judgment this entry leaves to '
     + 'the upgrader. Deployed metadata NOT MEASURED.',
