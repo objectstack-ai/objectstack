@@ -113,7 +113,6 @@
  * byte-identical to a reader.
  */
 
-import { dialectOfDriver } from '@objectstack/metadata-core';
 import { PLATFORM_OBJECT_PREFIXES, StorageNameMapping, hasPlatformObjectPrefix } from '@objectstack/spec/system';
 // The result-set/no-answer predicate `os migrate duplicates` already publishes
 // (#10677). Imported rather than re-spelled: a second copy would drift, and the
@@ -371,16 +370,9 @@ async function readPhysicalTableNames(
     return { detail: 'the planned driver exposes no raw SQL seam, so its table catalog could not be read' };
   }
 
-  const named = driver as { dialectName?: unknown; config?: { client?: unknown } } | null | undefined;
-  const client = named?.config?.client;
+  const client = (driver as { config?: { client?: unknown } } | null | undefined)?.config?.client;
   const clientName = typeof client === 'string' ? client : '';
-  // The one driver-dialect resolver (`@objectstack/metadata-core`), shared
-  // with the organization-ownership ceremony: `dialectName` first, so
-  // `SqliteWasmDriver`, whose knex `client` is a dialect CLASS, is read as the
-  // SQLite it is; then a recognised client string. Anything else stays
-  // unreadable, never a guessed catalog statement.
-  const dialect = dialectOfDriver(named);
-  const sql = dialect === 'sqlite' || dialect === 'postgres' || dialect === 'mysql' ? physicalTableListSql(dialect) : null;
+  const sql = physicalTableListSql(clientName);
   if (sql === null) {
     return {
       detail: `the connected dialect (${clientName || 'unnamed client'}) is not one this sweep enumerates tables on `

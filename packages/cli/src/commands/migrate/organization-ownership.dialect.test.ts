@@ -15,6 +15,12 @@
  * themselves: `SqliteWasmDriver`'s knex `client` is a dialect CLASS and its
  * `dialectName` is `'sqlite'`; `SqlDriver` answers `dialectName: 'unknown'`
  * for a client it does not recognise, a client class included.
+ *
+ * The `SqliteWasmDriver` row pins the resolver's answer for that SHAPE. The
+ * command's boot does not hand that driver over today (the schema boot looks
+ * a SQL driver up by service names that do not include it, so a
+ * `wasm-sqlite://` run is refused earlier, as having no SQL driver at all);
+ * the row keeps the answer right for the day it does.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
