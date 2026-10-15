@@ -404,6 +404,9 @@ describe('tree-scoped absence: no cube member inside the declared radius still c
     // shape, not an authoring, and the two `name` rows are the ones the
     // tombstone route requires to STAY.
     'packages/spec/liveness/',
+    // GITIGNORED build output (`packages/spec/json-schema/`), reached only
+    // because this is a FILESYSTEM walk. Its source is `analytics.zod.ts`.
+    'packages/spec/json-schema/',
   ];
   /** tsup's own bundle of `tsup.config.ts`, written and deleted mid-build. */
   const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
