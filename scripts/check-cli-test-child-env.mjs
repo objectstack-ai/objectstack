@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the eight files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the nine files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#21733] Joined the population deliberately: the card's acceptance is
         // a plain `os dev` restart on the BUILT packages, and its production leg
@@ -2651,6 +2651,12 @@ export function selfTest() {
         // DELIBERATE_REROUTE entries for why that input cannot be scrubbed and
         // why `bin/run-dev.js` is the wrong entry for it.
         'packages/cli/test/published-entry-node-env-source-reroute.test.ts',
+        // [#23649] Joined the population deliberately: the split it pins was
+        // measured at the public door in PRODUCTION posture (a `datasourceMapping`
+        // default over `OS_DATABASE_URL`), and `bin/run-dev.js` sets
+        // `NODE_ENV=development` before argv is parsed. Every spawn hands its
+        // child `NODE_ENV: undefined`.
+        'packages/cli/test/serve-datasource-mapping-before-sync.integration.test.ts',
         'packages/cli/test/serve-mcp-capability-collision.e2e.test.ts',
         'packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts',
         // [#23573] Joined the population deliberately: the no-storage boot

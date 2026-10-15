@@ -573,7 +573,8 @@ export type {
 export { MetadataFacade } from './metadata-facade.js';
 
 // Export Plugin Shim
-export { ObjectQLPlugin } from './plugin.js';
+// [#23649] The pre-sync announcement the app plugin installs `datasourceMapping` on.
+export { ObjectQLPlugin, OBJECTQL_DRIVERS_READY_HOOK } from './plugin.js';
 
 // Export Kernel Factory
 export { createObjectQLKernel } from './kernel-factory.js';
