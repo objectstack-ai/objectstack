@@ -23,27 +23,31 @@ import {
 } from '../default-datasource-driver-factory.js';
 import { isUnbuiltWorkspaceFailure } from '../connect-failure-remedy.js';
 import { MissingDriverPackageError } from '../missing-driver-package-error.js';
-// [#23184] The drivers' first module load is paid HERE, at module load, and not
-// inside the first clocked case: clocked windows measure behaviour, never
-// loading (AGENTS.md, Build & Test; the clocked-window rule of
+// [#23184] The first load of what the drivers stand on is paid HERE, at module
+// load, and not inside the first clocked case: clocked windows measure
+// behaviour, never loading (AGENTS.md, Build & Test; the clocked-window rule of
 // `check-test-source-alias`). The factory reaches every driver through a lazy
-// `await import()`, and each of these drivers imports `@objectstack/core`, which
-// this package's vitest config aliases to its SOURCE. So the first case to
-// build a real driver (the file-backed `sqlite-wasm` round trip) used to pay a
-// cold transform of core's whole module graph: 7-9 s of this file's ~9.5 s of
+// `await import()`, and every driver imports `@objectstack/core`, which this
+// package's vitest config aliases to its SOURCE. So the first case to build a
+// real driver (the file-backed `sqlite-wasm` round trip) used to pay a cold
+// transform of core's whole module graph: 7-9 s of this file's ~9.5 s of
 // clocked wall on a 4 vCPU dev container, against about 0.1 s of round trip.
-// The list is every driver the construction suites build; the module cache
-// hands the factory these same instances, so nothing a case runs is different.
-// ⛔ `@objectstack/driver-turso` stays OUT of this list: the turso
-// missing-package case below stages its absence without `vi.resetModules()`,
-// so it needs the factory's own lazy import to be that package's first. The
-// `sqlite-wasm` and `mongodb` absence cases reset the module registry before
-// they mock, so loading their packages here first is the same condition the
-// construction suites already created for them.
+// `driver-sql` (knex, which `driver-sqlite-wasm` builds on) is the next
+// 0.5-1.3 s. The module cache hands the drivers these same instances, so
+// nothing a case runs is different. Three drivers are deliberately NOT listed:
+// `driver-memory`, whose every module binding is a ruled census entry
+// (`check:driver-memory-census`), and `driver-mongodb`, which this package's
+// tests resolve through `dist/` only from the factory, so a test-file import
+// would be a new unaliased artifact import (`check:test-source-alias`); each
+// still loads in its first case (0.2-0.5 s once core is loaded). And ⛔
+// `driver-turso`, because the turso missing-package case below stages its
+// absence WITHOUT `vi.resetModules()`, so the factory's own lazy import must be
+// that package's first. The `sqlite-wasm` absence case resets the module
+// registry before it mocks, so loading that package here first is the same
+// condition the construction suites already created for it.
+import '@objectstack/core';
 import '@objectstack/driver-sql';
 import '@objectstack/driver-sqlite-wasm';
-import '@objectstack/driver-memory';
-import '@objectstack/driver-mongodb';
 
 const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
 
