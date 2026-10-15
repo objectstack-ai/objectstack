@@ -225,7 +225,8 @@ function readCloneBody(body: unknown): { name: string; label: string } {
  *     (`parentVersion: null`), environment-wide, no package: the same save the
  *     `/meta` door makes, so the same schema, publish gates and hooks judge it,
  *     and the catalog serves the copy from where it serves every
- *     environment-authored set.
+ *     environment-authored set. A save that loses the race for the name (a row
+ *     written under it after step 5's read) is step 5's 409, in step 5's words.
  */
 export async function handlePermissionSetCloneWrite(
     deps: DomainHandlerDeps,
@@ -345,12 +346,27 @@ export async function handlePermissionSetCloneWrite(
         // strip removes stamps silently. The guarantee is the drop above —
         // {@link PERMISSION_SET_CLONE_DROPPED_KEYS} — and the unit pin that
         // asserts every dropped key absent from the saved item.
-        await protocol.saveMetaItem({
-            type: PERMISSION_METADATA_TYPE,
-            name: target.name,
-            item: clone,
-            parentVersion: null,
-        });
+        try {
+            await protocol.saveMetaItem({
+                type: PERMISSION_METADATA_TYPE,
+                name: target.name,
+                item: clone,
+                parentVersion: null,
+            });
+        } catch (err: unknown) {
+            // [#23577] The create-only pin refused: a row was written under the
+            // target name after the catalog read above, so the name is taken —
+            // step 5's condition, answered with step 5's refusal. The protocol's
+            // own conflict sentence speaks to a `/meta` caller (it prescribes
+            // `If-Match`), and this door takes no version from its caller.
+            if ((err as { code?: unknown } | null)?.code === 'METADATA_CONFLICT') {
+                return {
+                    handled: true,
+                    response: deps.error(nameTakenMessage(target.name), PERMISSION_SET_CLONE_NAME_TAKEN_STATUS),
+                };
+            }
+            throw err;
+        }
 
         // ⛔ No ancestry on the way out (ADR-0126 §9): the response names the
         // set that was created and nothing about what it was copied from.

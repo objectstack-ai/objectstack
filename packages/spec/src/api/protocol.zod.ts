@@ -571,7 +571,9 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     + 'code or a package artifact, or from a row in another scope (a '
     + 'package-less row a package read falls back to) — so the next save '
     + 'creates one: pin it with '
-    + '`If-None-Match: *`. ABSENT on the cached published-value branch and on a '
+    + '`If-None-Match: *`. A `null` beside `editable: false` is no such '
+    + 'invitation: that item takes no save at this address, so no pin is '
+    + 'prescribed for it. ABSENT on the cached published-value branch and on a '
     + '`?preview=draft` read, which publish no version: absence means "not '
     + 'published here", never "no row". Opaque — echo it verbatim, never parse '
     + 'it.',
@@ -988,7 +990,9 @@ export const MetadataConflictErrorSchema = lazySchema(() => z.object({
     'The version token of the head the door judged current — the value the '
     + 'sentence names — or `null` when no row of the target lifecycle exists. '
     + 'Send it as `If-Match` to overwrite deliberately (or `If-None-Match: *` '
-    + 'when it is `null`), or re-read the item to merge first. Opaque — echo '
+    + 'when it is `null`), or re-read the item to merge first. A `null` for an '
+    + 'item whose read serves `editable: false` prescribes no pin: that item '
+    + 'takes no save. Opaque — echo '
     + 'it verbatim, never parse it.',
   ),
 }));
