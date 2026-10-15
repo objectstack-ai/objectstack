@@ -40,6 +40,8 @@
  *  - a boot after that agrees;
  *  - an adopted draft object row registers nothing, as the boot registers
  *    none;
+ *  - an object another package extends keeps its old owner (the registry
+ *    refuses to drop it), said once at `error`;
  *  - CONTROL: an adoption of non-object items leaves the object registry
  *    untouched, and the view write-through follows the view as before;
  *  - CONTROL: a package-less row of an object another package's row owns is
@@ -284,6 +286,28 @@ describe('#23646 — an orphan adoption moves an adopted object\'s registry owne
         expect(registerObject).not.toHaveBeenCalled();
         expect(registerItem.mock.calls.filter(([type]) => type === 'object')).toEqual([]);
         expect(k.engine.registry.getObject(NAME)).toBeUndefined();
+    });
+
+    it('an object another package extends keeps its old owner, said once at `error` naming the object', async () => {
+        const stores: Stores = new Map();
+        const drops: string[] = [];
+        const k = await seedPackagelessObject(stores, drops);
+        // A code package's extension of the runtime object: `unregisterObject`'s
+        // ADR-0029 guard refuses to drop an owner another package extends.
+        k.engine.registry.registerObject({
+            name: NAME, fields: { ext_note: { name: 'ext_note', type: 'text', label: 'Note' } },
+        } as any, R, undefined, 'extend');
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const adopted = await k.protocol.reassignOrphanedMetadata({ targetPackageId: Q });
+
+        expect(adopted).toMatchObject({ success: true, reassignedCount: 1 });
+        expect(storedBindings(stores)).toEqual([Q]);
+        expect(k.engine.registry.getObjectOwner(NAME)?.packageId).toBe(SENTINEL);
+        expect(k.engine.registry.getObjectContributors(NAME).map((c) => c.ownership).sort()).toEqual(['extend', 'own']);
+        const said = error.mock.calls.map(([line]) => String(line)).filter((line) => line.includes(`'${NAME}'`));
+        expect(said).toHaveLength(1);
+        expect(said[0]).toContain(`'${Q}'`);
     });
 
     it('CONTROL: an adoption of non-object items leaves the object registry untouched, and the view follows as before', async () => {
