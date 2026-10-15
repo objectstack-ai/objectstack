@@ -321,7 +321,9 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // record-sharing bodies (`sharing-routes.ts`): 9 = 8 + 1 + 0 + 0 + 0,
         // length 4 → 5. [#23050 slice 5] Nor does the analytics dataset body
         // (`analytics-routes.ts`): 9 = 8 + 1 + 0 + 0 + 0 + 0, length 5 → 6.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(6);
+        // [#23050 slice 6] Nor do the two security bodies (`security-routes.ts`):
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0, length 6 → 7.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(7);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });
