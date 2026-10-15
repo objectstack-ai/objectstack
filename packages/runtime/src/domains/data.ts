@@ -61,12 +61,18 @@ function requestIfMatch(headers: unknown): unknown {
  * [#23492] What this domain's `PATCH` and `DELETE` do with the
  * optimistic-concurrency token they read, before `callData` is asked: absent
  * (`undefined` or `null`, which falls through to `If-Match`), judged (a string
- * with something in it, or a finite number, forwarded as its string), or
- * refused `400 VALIDATION_FAILED` (an empty or blank string, a boolean, an
- * array, an object: a token shape that can never carry a version, maintainer
- * decision #20 ①). It replaces a truthiness test that let `expectedVersion: ''`
- * or `false`, and `?expectedVersion=`, hide a stale `If-Match` and run the
- * write unguarded.
+ * with something in it, forwarded as it is), or refused `400
+ * VALIDATION_FAILED` (an empty or blank string, a number, a boolean, an array,
+ * an object: a token shape that can never carry a version, maintainer decision
+ * #20 ①). It replaces a truthiness test that let `expectedVersion: ''` or
+ * `false`, and `?expectedVersion=`, hide a stale `If-Match` and run the write
+ * unguarded.
+ *
+ * [#23517] A number is refused, no longer judged as its string:
+ * `UpdateDataRequestSchema.expectedVersion` declares a string, and forwarding
+ * `String(5)` answered `409` for a token the contract never admits. Only a
+ * body token can be a number; `If-Match` and `?expectedVersion` are strings by
+ * transport.
  *
  * `RestServer`'s twin routes ask the same function, statement for statement
  * (`versionTokenRefusal` in `packages/rest/src/rest-server.ts`, whose docblock
@@ -78,14 +84,13 @@ function requestIfMatch(headers: unknown): unknown {
 function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
     if (token === undefined || token === null) return undefined;
     if (typeof token === 'string' && token.trim() !== '') return undefined;
-    if (typeof token === 'number' && Number.isFinite(token)) return undefined;
     const shape = typeof token === 'string' ? 'empty'
         : Array.isArray(token) ? 'an array'
         : typeof token === 'object' ? 'an object'
         : `the ${typeof token} \`${String(token)}\``;
     return `${spelling} is ${shape}, which can never carry a version, so it is refused rather than read as `
-        + 'no token. Send the version you read (the record\'s `updated_at`), or omit both expectedVersion and '
-        + 'If-Match to perform an unguarded write.';
+        + 'no token. Send the version you read as a string (the record\'s `updated_at`), or omit both '
+        + 'expectedVersion and If-Match to perform an unguarded write.';
 }
 
 /**
@@ -271,11 +276,17 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // twin used to read it as `{}` and answer `200`, an update that
             // changed no field and still moved the record's version; both
             // doors now refuse it.
+            //
+            // [#23517] …and the token as the caller sent it too, never its
+            // `String()`: the gate parsed `String(5)`, so a number the schema
+            // declares no room for was forwarded and judged `409`.
+            // `versionTokenRefusal` above already refuses it, so what reaches
+            // this gate and the forward below is a non-blank string.
             const updateInput = {
                 object: objectName,
                 id,
                 data,
-                ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
+                ...(expectedVersion != null ? { expectedVersion } : {}),
             };
             const parsedUpdate = UpdateDataRequestSchema.safeParse(updateInput);
             if (!parsedUpdate.success) return writeRequestRefusal(deps, 'update', parsedUpdate.error.issues, updateInput);
