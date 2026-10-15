@@ -48,15 +48,17 @@ export class SqliteDatabaseFileError extends Error {
  * The walk below is bounded by the path's depth: find the nearest level that
  * exists, then create the missing ones top-down. `EEXIST` on a level is a
  * concurrent creator winning the race and is accepted; any other refusal is
- * the answer.
+ * the answer. When a file holds the nearest existing name, the operating
+ * system answers for it too: `ENOTDIR` from the first missing level under it,
+ * or `EEXIST` from asking for `dir` itself.
  */
 export async function makeDatabaseDirectory(dir: string): Promise<void> {
   const missing: string[] = [];
   let level = resolve(dir);
   for (;;) {
     try {
-      if ((await stat(level)).isDirectory()) break;
-      throw Object.assign(new Error(`ENOTDIR: '${level}' exists and is not a directory`), { code: 'ENOTDIR' });
+      if (!(await stat(level)).isDirectory() && missing.length === 0) await mkdir(level);
+      break;
     } catch (e) {
       if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
       missing.push(level);

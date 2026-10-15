@@ -81,10 +81,16 @@ describe('SqlDriver.connect — a SQLite file that cannot be created or opened (
 
   it('refuses a path through a regular file, naming it', async () => {
     writeFileSync(join(dir, 'plain'), '');
-    const filename = join(dir, 'plain', 'ds.db');
-    const { error, ms } = await refusalOf(make(filename));
-    expectNamedRefusal(error, filename, 'ENOTDIR');
-    expect(ms).toBeLessThan(WITHIN_MS);
+    const through = join(dir, 'plain', 'sub', 'ds.db');
+    const throughRefusal = await refusalOf(make(through));
+    expectNamedRefusal(throughRefusal.error, through, 'ENOTDIR');
+    expect(throughRefusal.ms).toBeLessThan(WITHIN_MS);
+
+    // The file holds the directory's own name.
+    const at = join(dir, 'plain', 'ds.db');
+    const atRefusal = await refusalOf(make(at));
+    expectNamedRefusal(atRefusal.error, at, 'EEXIST');
+    expect(atRefusal.ms).toBeLessThan(WITHIN_MS);
   });
 
   it('refuses a file SQLite cannot open (SQLITE_CANTOPEN) instead of resolving', async () => {
