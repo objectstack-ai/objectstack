@@ -485,4 +485,21 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
       expect((error as Error).message).toContain('OS_DATABASE_URL');
     }
   });
+
+  // A value carrying a scheme with no `//` (`jdbc:postgresql://…`, `redis:h`)
+  // matches neither host's `<scheme>://` test, so the runtime host takes it as a
+  // SQLite file path and the CLI host mirrors it. Which answer is RIGHT is not
+  // this row's question; that the two hosts give the SAME one is — so a change
+  // to either host's scheme-less arm reddens here until the other follows.
+  it.each(['jdbc:postgresql://localhost:5432/db', 'redis:cache'])(
+    'both hosts give %s the same verdict, in dev and prod',
+    (url) => {
+      const runtime = runtimeUrlVerdict(url);
+      for (const isDev of [false, true]) {
+        const cli = cliUrlVerdict(url, isDev);
+        expect(cli.accepted, `the hosts disagree on ${url} (isDev=${isDev})`).toBe(runtime.accepted);
+        if (cli.accepted && runtime.accepted) expect(cli.driverId).toBe(runtime.driverId);
+      }
+    },
+  );
 });
