@@ -2984,7 +2984,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       environment_id: {
         label: "Entorno (obsoleto)",
-        help: "OBSOLETO. Use organization_id para el aislamiento del tenant."
+        help: "OBSOLETO. Las personalizaciones son filas del entorno (ADR-0131 D6); no hay columna de tenant."
       },
       version: {
         label: "Versión"

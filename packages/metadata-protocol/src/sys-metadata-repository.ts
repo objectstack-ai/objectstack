@@ -1963,6 +1963,14 @@ export class SysMetadataRepository implements MetadataRepository {
    * off the physical column) is the address re-read for the environment's own
    * row — `null` when there is none, so the write creates it. A read of the
    * column that cannot answer throws, and the write fails with it.
+   *
+   * The `sys_metadata_history` reads are not filtered; they read every
+   * lineage of the address. `restoreVersion` (by type, name and version) and
+   * `history()` are reached only through `os serve`'s doors, which refuse a
+   * database the ceremony has not migrated (the v18 boot refusal). The
+   * version and event counters are reached by every write, the ceremony's
+   * included: there a legacy lineage can only raise the next number, never
+   * select a row.
    */
   private async findEnvironmentRow(query: { where: Record<string, unknown>; context?: Record<string, unknown> }): Promise<any | null> {
     const row = await this.engine.findOne('sys_metadata', query);

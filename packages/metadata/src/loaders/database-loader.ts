@@ -19,7 +19,7 @@ import type {
   MetadataRecord,
   MetadataHistoryRecord,
 } from '@objectstack/spec/system';
-import { SysMetadataObject, SysMetadataHistoryObject, hashSpec } from '@objectstack/metadata-core';
+import { SysMetadataObject, SysMetadataHistoryObject, hashSpec, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
@@ -31,6 +31,11 @@ import { LRUCache } from '../utils/lru-cache.js';
 // byte-identical; only the import path changed.
 import { isMissingTableError, isSchemaAlreadyExistsError } from '@objectstack/types';
 import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-id-to-environment-id.js';
+
+/** [ADR-0131 D7] The tables whose physical `organization_id` can outlive their declaration. */
+const LEGACY_FAMILY_TABLES: ReadonlySet<string> = new Set([
+  'sys_metadata', 'sys_metadata_audit', 'sys_metadata_commit', 'sys_metadata_history',
+]);
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string
@@ -407,17 +412,41 @@ export class DatabaseLoader implements MetadataLoader {
   // reconcile the two schemas again — not to reinstate the cast.
 
   private async _find(table: string, query: DriverQuery): Promise<Record<string, unknown>[]> {
-    if (this.engine) {
-      return this.engine.find(table, query);
-    }
-    return this.driver!.find(table, query);
+    const rows = this.engine ? await this.engine.find(table, query) : await this.driver!.find(table, query);
+    return this.withoutLegacyOrganizationRows(table, rows);
   }
 
   private async _findOne(table: string, query: DriverQuery): Promise<Record<string, unknown> | null> {
-    if (this.engine) {
-      return this.engine.findOne(table, query);
-    }
-    return this.driver!.findOne(table, query);
+    const row = this.engine ? await this.engine.findOne(table, query) : await this.driver!.findOne(table, query);
+    if (!row) return row ?? null;
+    const legacy = await this.legacyOrganizationRows(table);
+    if (!legacy.has(String(row.id))) return row;
+    return (await this._find(table, query))[0] ?? null;
+  }
+
+  /**
+   * [ADR-0131 D6/D7] The family's rows without a legacy organization's. The
+   * family declares no organization column; on a database the
+   * organization-ownership ceremony has not migrated, the physical column
+   * still holds each legacy organization's rows, and a loader wired to the raw
+   * driver would read them as the environment's. Told apart off that column
+   * ({@link readLegacyOrganizationRows}); a read that cannot answer throws.
+   */
+  private async withoutLegacyOrganizationRows(
+    table: string,
+    rows: Record<string, unknown>[] | null | undefined,
+  ): Promise<Record<string, unknown>[]> {
+    if (!rows || rows.length === 0) return rows ?? [];
+    const legacy = await this.legacyOrganizationRows(table);
+    return legacy.size === 0 ? rows : rows.filter((row) => !legacy.has(String(row.id)));
+  }
+
+  private legacyOrganizationRows(table: string): Promise<ReadonlyMap<string, string>> {
+    if (!LEGACY_FAMILY_TABLES.has(table)) return Promise.resolve(new Map());
+    const driver = this.engine
+      ? (this.engine as { getDriverForObject?: (objectName: string) => unknown }).getDriverForObject?.(table)
+      : this.driver;
+    return readLegacyOrganizationRows(driver, table);
   }
 
   private async _count(table: string, query: DriverQuery): Promise<number> {
@@ -871,7 +900,7 @@ export class DatabaseLoader implements MetadataLoader {
       strategy: (row.strategy as MetadataRecord['strategy']) ?? 'merge',
       owner: row.owner as string | undefined,
       state: (row.state as MetadataRecord['state']) ?? 'active',
-      organizationId: row.organization_id as string | undefined,
+      organizationId: undefined /* [ADR-0131 D7] every row read here is the environment's */,
       environmentId: row.environment_id as string | undefined,
       version: (row.version as number) ?? 1,
       checksum: row.checksum as string | undefined,
@@ -1216,7 +1245,7 @@ export class DatabaseLoader implements MetadataLoader {
       checksum: row.checksum as string,
       previousChecksum: row.previous_checksum as string | undefined,
       changeNote: row.change_note as string | undefined,
-      organizationId: row.organization_id as string | undefined,
+      organizationId: undefined /* [ADR-0131 D7] every row read here is the environment's */,
       recordedBy: row.recorded_by as string | undefined,
       // [#16422] `MetadataHistoryRecord.recordedAt` is a REQUIRED
       // `z.string().datetime()`, so it is the one site in this family with no
@@ -1320,7 +1349,7 @@ export class DatabaseLoader implements MetadataLoader {
         checksum: row.checksum as string,
         previousChecksum: row.previous_checksum as string | undefined,
         changeNote: row.change_note as string | undefined,
-        organizationId: row.organization_id as string | undefined,
+        organizationId: undefined /* [ADR-0131 D7] every row read here is the environment's */,
         recordedBy: row.recorded_by as string | undefined,
         // [#16422] The other door onto the same column — same shared spelling,
         // same caller-side terminal value. See `getHistoryRecord` above for

@@ -7195,7 +7195,7 @@ export class ObjectStackProtocolImplementation implements
             // (the v18 boot refusal, ADR-0131 D10 item 5).
             const read = async (type: string): Promise<Record<string, unknown>[]> => {
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
-                const rs = await this.engine.find('sys_metadata', {
+                const rs = await this.findEnvironmentRows('sys_metadata', {
                     where: { type, state: 'active' },
                     context: { isSystem: true },
                 });
@@ -9910,18 +9910,14 @@ export class ObjectStackProtocolImplementation implements
                     if (pkg) whereClause.package_id = pkg;
                     // [#21911] The explicit system opt-in — see findServedOverlayRow.
                     // [ADR-0131 D6/D7] The environment's drafts only — see
-                    // {@link withoutLegacyOrganizationRows}.
-                    let rs = await this.withoutLegacyOrganizationRows(
-                        await this.engine.find('sys_metadata', { where: whereClause, context: { isSystem: true } }),
-                    );
+                    // {@link findEnvironmentRows}.
+                    let rs = await this.findEnvironmentRows('sys_metadata', { where: whereClause, context: { isSystem: true } });
                     if (!rs || rs.length === 0) {
                         const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                         if (alt) {
                             const altWhere: Record<string, unknown> = { type: alt, state: 'draft' };
                             if (pkg) altWhere.package_id = pkg;
-                            rs = await this.withoutLegacyOrganizationRows(
-                                await this.engine.find('sys_metadata', { where: altWhere, context: { isSystem: true } }),
-                            );
+                            rs = await this.findEnvironmentRows('sys_metadata', { where: altWhere, context: { isSystem: true } });
                         }
                     }
                     return rs ?? [];
@@ -10223,22 +10219,57 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [ADR-0131 D6/D7] `rows` without a legacy organization's. The family
-     * declares no organization column, so an engine row never carries one; on
-     * a database the organization-ownership ceremony has not migrated, the
-     * physical column still does ({@link readLegacyOrganizationRows}). `os
-     * serve` refuses such a database; the `os migrate` boots, the ceremony's
-     * own among them, read it — and must not serve, list or bind one
-     * organization's rows as the environment's. On a migrated or fresh
-     * database this is one catalog read per process (the absent verdict is
-     * remembered). A read that cannot answer throws.
+     * [ADR-0131 D6/D7] THE protocol seam for every read of a `sys_metadata`
+     * family table: the engine's read, without a legacy organization's rows.
+     *
+     * The family declares no organization column, so the engine can neither
+     * filter on it nor return it. On a database the organization-ownership
+     * ceremony has not migrated, the physical column still holds each legacy
+     * organization's rows ({@link readLegacyOrganizationRows}). `os serve`
+     * refuses such a database; the `os migrate` boots (the ceremony's own
+     * among them) read it, and none of their reads may serve, list, address,
+     * lock or bind one organization's row as the environment's. So every read
+     * goes through here: on a migrated or fresh database this costs one catalog
+     * read per process (the absent verdict is remembered), and a read that
+     * cannot answer throws. A read inside a transaction joins it
+     * (`context.transaction`).
+     *
+     * Two reads deliberately do NOT: {@link migrateStoredMetadata}, which must
+     * see a legacy row to report it, and {@link revertCommit}'s commit read,
+     * which refuses a legacy commit by name; each reads the column itself.
      */
-    private async withoutLegacyOrganizationRows<R>(rows: R[] | null | undefined): Promise<R[]> {
+    private async findEnvironmentRows(table: string, query: { where: Record<string, unknown>; context?: unknown; [key: string]: unknown }): Promise<any[]> {
+        return this.withoutLegacyOrganizationRows(table, await this.engine.find(table, query as never), query.context);
+    }
+
+    /**
+     * [ADR-0131 D6/D7] {@link findEnvironmentRows} for one row: the single-row
+     * read stays the common path; only when the row it returns is a legacy
+     * organization's is the address re-read for the environment's own row
+     * (`null` when there is none).
+     */
+    private async findEnvironmentRow(table: string, query: { where: Record<string, unknown>; context?: unknown; [key: string]: unknown }): Promise<any> {
+        const row = await this.engine.findOne(table, query as never);
+        if (!row) return row ?? null;
+        const legacy = await this.legacyOrganizationRowsOf(table, query.context);
+        if (!legacy.has(String((row as { id?: unknown }).id))) return row;
+        const rows = (await this.engine.find(table, query as never)) as any[] | null | undefined;
+        return (rows ?? []).find((r) => !legacy.has(String(r?.id))) ?? null;
+    }
+
+    private async withoutLegacyOrganizationRows<R>(table: string, rows: R[] | null | undefined, context?: unknown): Promise<R[]> {
         if (!rows || rows.length === 0) return rows ?? [];
-        const legacy = await readLegacyOrganizationRows(
-            (this.engine as { getDriverForObject?: (objectName: string) => unknown }).getDriverForObject?.('sys_metadata'),
-        );
+        const legacy = await this.legacyOrganizationRowsOf(table, context);
         return legacy.size === 0 ? rows : rows.filter((row) => !legacy.has(String((row as { id?: unknown }).id)));
+    }
+
+    private legacyOrganizationRowsOf(table: string, context?: unknown): Promise<ReadonlyMap<string, string>> {
+        const transaction = (context as { transaction?: unknown } | undefined)?.transaction;
+        return readLegacyOrganizationRows(
+            (this.engine as { getDriverForObject?: (objectName: string) => unknown }).getDriverForObject?.(table),
+            table,
+            transaction !== undefined ? { transaction } : {},
+        );
     }
 
     /**
@@ -10265,18 +10296,14 @@ export class ObjectStackProtocolImplementation implements
             if (packageId) whereClause.package_id = packageId;
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
             // [ADR-0131 D6/D7] The environment's rows only, on every find —
-            // see {@link withoutLegacyOrganizationRows}.
-            let rs = await this.withoutLegacyOrganizationRows(
-                await this.engine.find('sys_metadata', { where: whereClause, context: { isSystem: true } }),
-            );
+            // see {@link findEnvironmentRows}.
+            let rs = await this.findEnvironmentRows('sys_metadata', { where: whereClause, context: { isSystem: true } });
             if ((!rs || rs.length === 0)) {
                 const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
                 if (alt) {
                     const altWhere: Record<string, unknown> = { type: alt, state: 'active' };
                     if (packageId) altWhere.package_id = packageId;
-                    rs = await this.withoutLegacyOrganizationRows(
-                        await this.engine.find('sys_metadata', { where: altWhere, context: { isSystem: true } }),
-                    );
+                    rs = await this.findEnvironmentRows('sys_metadata', { where: altWhere, context: { isSystem: true } });
                 }
             }
             return rs ?? [];
@@ -10520,8 +10547,9 @@ export class ObjectStackProtocolImplementation implements
      * reported that package's row while the gate bound whichever row
      * `findOne` returned first.
      *
-     * The environment's rows only (`organization_id` null, ADR-0131 D6): a
-     * legacy organization-scoped row is refused at boot and never served.
+     * The environment's rows only (ADR-0131 D6/D7): a legacy organization's
+     * row, on a database the ceremony has not migrated, is left out by
+     * {@link findEnvironmentRow}, off the physical column, and never served.
      * ADR-0048 prefer-local: with a `packageId`, that package's row first and
      * then the package-less row, never another package's; with none, any row.
      *
@@ -10566,9 +10594,9 @@ export class ObjectStackProtocolImplementation implements
             // [#21911, ADR-0096] The explicit system opt-in: a platform store
             // read, which no caller's grants scope — the door that asked
             // already authorized the caller, and the protocol scopes the row
-            // itself (`organization_id` above). It no longer reaches the data
-            // engine as a principal-less context.
-            const row = await this.engine.findOne('sys_metadata', { where, context: { isSystem: true } });
+            // itself ({@link findEnvironmentRow}: the environment's rows only).
+            // It no longer reaches the data engine as a principal-less context.
+            const row = await this.findEnvironmentRow('sys_metadata', { where, context: { isSystem: true } });
             if (row) return { row };
         }
         return undefined;
@@ -10604,7 +10632,7 @@ export class ObjectStackProtocolImplementation implements
             const type = spelling === 'canonical' ? address.type : other;
             if (type === undefined) return [];
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            const rows: StoredOverlayRow[] | null | undefined = await this.engine.find('sys_metadata', {
+            const rows: StoredOverlayRow[] | null | undefined = await this.findEnvironmentRows('sys_metadata', {
                 where: { type, name: address.name, state: 'active' },
                 context: { isSystem: true },
             });
@@ -10842,7 +10870,7 @@ export class ObjectStackProtocolImplementation implements
         }
 
         // 1. Customization overlay lookup (sys_metadata): the environment's
-        //    row (organization_id IS NULL, ADR-0131 D6) before falling
+        //    row (ADR-0131 D6/D7: {@link findEnvironmentRow}) before falling
         //    through to the in-memory registry / MetadataService.
         //    ADR-0048 prefer-local (a package id prefers that
         //    package's row, then the package-less one, mirroring
@@ -11668,8 +11696,9 @@ export class ObjectStackProtocolImplementation implements
      *         unprovisioned table. The `/audit` route's existing
      *         `handleRouteError` turns it into an honest 5xx.
      *
-     * [ADR-0131 D6] The environment's rows (`organization_id IS NULL`) only,
-     * enforced in the query below.
+     * [ADR-0131 D6/D7] The environment's rows only: the trail table declares no
+     * organization column, and a legacy organization's rows are left out off
+     * the physical column ({@link findEnvironmentRows}).
      */
     async auditMetaItem(request: {
         type: string;
@@ -11792,7 +11821,7 @@ export class ObjectStackProtocolImplementation implements
             // trail is a platform store the audit door already authorized the
             // caller to read; the protocol builds the `where` itself.
             // Principal-less, the engine refuses it and this door answered 503.
-            const rows = await this.engine.find('sys_metadata_audit', {
+            const rows = await this.findEnvironmentRows('sys_metadata_audit', {
                 where,
                 orderBy: [{ field: 'occurred_at', order: 'desc' }],
                 limit,
@@ -17846,7 +17875,7 @@ export class ObjectStackProtocolImplementation implements
     private async storedFlowBindingAgrees(name: string, packageId: string): Promise<boolean> {
         try {
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            const row = await this.engine.findOne('sys_metadata', {
+            const row = await this.findEnvironmentRow('sys_metadata', {
                 where: { type: 'flow', name, package_id: packageId },
                 context: { isSystem: true },
             });
@@ -18965,7 +18994,7 @@ export class ObjectStackProtocolImplementation implements
         let rows: Array<{ package_id?: unknown }> | null | undefined;
         try {
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            rows = await this.engine.find('sys_metadata', {
+            rows = await this.findEnvironmentRows('sys_metadata', {
                 where: { type, name, state, ...overlayMemberWhere(type, member) },
                 context: { isSystem: true },
             });
@@ -19364,8 +19393,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * ── [#6602] THE ROW-SCOPE GATE LIVES HERE, AND ITS ARGUMENT IS REQUIRED ──
      *
-     * ADR-0005 (revised 2026-05): **only env-wide rows
-     * (`organization_id IS NULL`) enter the process-wide SchemaRegistry.**
+     * ADR-0005 (revised 2026-05): **only env-wide rows enter the process-wide
+     * SchemaRegistry** (ADR-0131 D7: a legacy organization's row is left out
+     * at the read, {@link findEnvironmentRows}).
      * Per-org overlays are served on demand by `getMetaItem` /
      * `getMetaItems` and never grafted into the shared registry, because that
      * registry has exactly one plain key per `(type, name)` and no org
@@ -20614,7 +20644,7 @@ export class ObjectStackProtocolImplementation implements
             let storedRows: Array<Record<string, unknown>> | null | undefined;
             try {
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
-                storedRows = await this.engine.find('sys_metadata', {
+                storedRows = await this.findEnvironmentRows('sys_metadata', {
                     where: { type: canonical, name, state: 'active', ...overlayMemberWhere(canonical, member) },
                     context: { isSystem: true },
                 });
@@ -20860,7 +20890,7 @@ export class ObjectStackProtocolImplementation implements
         member?: string,
     ): Promise<string | null> {
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
-        const row = await this.engine.findOne('sys_metadata', {
+        const row = await this.findEnvironmentRow('sys_metadata', {
             where: {
                 type,
                 name,
@@ -21128,7 +21158,7 @@ export class ObjectStackProtocolImplementation implements
         try {
             // [#21908, ADR-0096 D5] The explicit system opt-in: an existence
             // probe of the platform store, never a read on a caller's behalf.
-            const row = await this.engine.findOne('sys_metadata', { where: { type }, context: { isSystem: true } });
+            const row = await this.findEnvironmentRow('sys_metadata', { where: { type }, context: { isSystem: true } });
             return row != null;
         } catch (error) {
             this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
@@ -24178,10 +24208,10 @@ export class ObjectStackProtocolImplementation implements
                 // store read, which no caller's grants scope. The publish door
                 // already authorized the caller, the request carries no
                 // execution context to forward (only its `actor`), and the
-                // protocol scopes the row itself (`organization_id` above),
+                // protocol scopes the row itself ({@link findEnvironmentRow}),
                 // exactly as its sibling store reads do. Principal-less, the
                 // engine now refuses it.
-                draftRow = await this.engine.findOne('sys_metadata', {
+                draftRow = await this.findEnvironmentRow('sys_metadata', {
                     where: {
                         type: singularType, name: request.name, state: 'draft',
                         // [#22877] The addressed member's draft (the canonical
@@ -24945,8 +24975,9 @@ export class ObjectStackProtocolImplementation implements
             `Package '${request.packageId}'`, request,
         );
         await this.ensureOverlayIndex();
-        // Environment-wide drafts only: the environment repository lists
-        // `organization_id IS NULL` rows, so a legacy organization-scoped draft
+        // Environment-wide drafts only: the environment repository lists the
+        // environment's rows (a legacy organization's is left out off the
+        // physical column), so a legacy organization-scoped draft
         // is never promoted here (it waits for the promotion ceremony,
         // ADR-0131 C7).
         const repo = this.getOverlayRepo();
@@ -25249,7 +25280,7 @@ export class ObjectStackProtocolImplementation implements
                 // [#22877] …and the draft's own bundle member: another
                 // member's active row is not this member's pre-publish state,
                 // and the revert plan records the member it describes.
-                const activeRow = (await this.engine.findOne('sys_metadata', {
+                const activeRow = (await this.findEnvironmentRow('sys_metadata', {
                     where: {
                         type: d.type, name: d.name, state: 'active',
                         ...overlayMemberWhere(d.type, d.member),
@@ -25935,7 +25966,7 @@ export class ObjectStackProtocolImplementation implements
         try {
             drafts = await this.getOverlayRepo().listDrafts({ packageId: request.packageId });
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            publishedRows = (await this.engine.find('sys_metadata', {
+            publishedRows = (await this.findEnvironmentRows('sys_metadata', {
                 where: packageScopedRowWhere('active', { packageId: request.packageId }),
                 limit: 1,
                 context: { isSystem: true },
@@ -26046,7 +26077,7 @@ export class ObjectStackProtocolImplementation implements
         let rows: any[];
         try {
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
+            rows = (await this.findEnvironmentRows('sys_metadata', { where, context: { isSystem: true } })) as any[];
         } catch (e) {
             // [#12536] …through the classifier: a marked application refusal
             // is not a store fault. See {@link metadataReadFailureError}.
@@ -26391,7 +26422,7 @@ export class ObjectStackProtocolImplementation implements
             state: 'active',
         };
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
-        const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
+        const rows = (await this.findEnvironmentRows('sys_metadata', { where, context: { isSystem: true } })) as any[];
 
         // Rows other than objects and qualified view items (each below) are
         // renamed by the source-prefix swap alone; a name without the prefix
@@ -27120,7 +27151,7 @@ export class ObjectStackProtocolImplementation implements
         try {
             for (let at = 0; at < names.length; at += 200) {
                 // [#21911] The explicit system opt-in — see findServedOverlayRow.
-                const rows = (await this.engine.find('sys_metadata', {
+                const rows = (await this.findEnvironmentRows('sys_metadata', {
                     where: { name: { $in: names.slice(at, at + 200) } },
                     context: { isSystem: true },
                 })) as Array<{ type?: unknown; name?: unknown; package_id?: unknown }>;
@@ -27265,7 +27296,7 @@ export class ObjectStackProtocolImplementation implements
         // adoption sees it.
         const where: Record<string, unknown> = {};
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
-        const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
+        const rows = (await this.findEnvironmentRows('sys_metadata', { where, context: { isSystem: true } })) as any[];
         const orphans = rows.filter(
             (r) => (r?.package_id == null || r.package_id === '' || r.package_id === 'sys_metadata')
                 // [#23198] An overlay of an artifact item keeps its binding
@@ -27594,7 +27625,7 @@ export class ObjectStackProtocolImplementation implements
             // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
             // platform store the door already authorized. Principal-less, the
             // engine refuses it.
-            const rows = (await this.engine.find('sys_metadata_commit', {
+            const rows = (await this.findEnvironmentRows('sys_metadata_commit', {
                 where,
                 ...(request.limit ? { limit: request.limit } : {}),
                 context: { isSystem: true },
@@ -28209,7 +28240,7 @@ export class ObjectStackProtocolImplementation implements
         // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
         // platform store the door already authorized; the protocol scopes the
         // `where` by organization itself. Principal-less, the engine refuses it.
-        const target = (await this.engine.findOne('sys_metadata_commit', { where, context: { isSystem: true } })) as any;
+        const target = (await this.findEnvironmentRow('sys_metadata_commit', { where, context: { isSystem: true } })) as any;
         if (!target) {
             const err: any = new Error(`No commit '${request.commitId}'.`);
             err.code = 'COMMIT_NOT_FOUND';
@@ -28648,7 +28679,6 @@ export class ObjectStackProtocolImplementation implements
         // `protocol.diff-dead-history-read.test.ts`.
         const histRows: Array<{ version: number; body: Record<string, unknown> | null }> = [];
         try {
-            const engineAny = this.engine as any;
             // [#21908, ADR-0096 D5] The explicit system opt-in: the history
             // lineage is a platform store the diff door already authorized.
             // Principal-less,
@@ -28657,7 +28687,7 @@ export class ObjectStackProtocolImplementation implements
             // [#22877] The canonical member's lineage only — a by-name diff of a
             // bundled type compares the member a by-name read serves, never a
             // second locale's snapshot as its "earlier version".
-            const rows: any[] = historyRowsOfMember<any>(singularType, await engineAny.find('sys_metadata_history', {
+            const rows: any[] = historyRowsOfMember<any>(singularType, await this.findEnvironmentRows('sys_metadata_history', {
                 where: {
                     type: singularType,
                     name: request.name,
@@ -28751,7 +28781,7 @@ export class ObjectStackProtocolImplementation implements
             // bodies repeat earlier ones.
             // [#21908, ADR-0096 D5] The explicit system opt-in, as the history
             // read above.
-            const current = (await this.engine.findOne('sys_metadata', {
+            const current = (await this.findEnvironmentRow('sys_metadata', {
                 where: {
                     type: singularType, name: request.name, state: 'active',
                     // [#22877] The canonical member, as the by-name read serves.
@@ -29409,7 +29439,7 @@ export class ObjectStackProtocolImplementation implements
             // authorized the caller to remove, addressed by the protocol's own
             // `scopedWhere` and then by id. Principal-less, the engine refuses
             // both.
-            const existing = await this.engine.findOne('sys_metadata', { where: scopedWhere, context: { isSystem: true } });
+            const existing = await this.findEnvironmentRow('sys_metadata', { where: scopedWhere, context: { isSystem: true } });
             if (!existing) {
                 return {
                     success: true,
@@ -29611,11 +29641,11 @@ export class ObjectStackProtocolImplementation implements
             // database the ceremony has not migrated (an `os migrate` boot, the
             // ceremony's own among them — `os serve` refuses one) a legacy
             // organization's rows are left out off the physical column, never
-            // registered as the environment's ({@link withoutLegacyOrganizationRows}).
+            // registered as the environment's ({@link findEnvironmentRows}).
             const where: Record<string, unknown> = {
                 state: 'active',
             };
-            const records = await this.withoutLegacyOrganizationRows(await this.engine.find('sys_metadata', { where }));
+            const records = await this.findEnvironmentRows('sys_metadata', { where });
             // Asked even when no row came back: the verdict on a migrated or
             // fresh store ("no column") is remembered for the process, so the
             // reads and writes after boot — some inside a transaction — never

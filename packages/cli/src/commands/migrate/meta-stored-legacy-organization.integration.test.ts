@@ -65,11 +65,27 @@ const legacyFlow = (name: string) => ({
 const TEMPLATE = 'm23429_welcome';
 const template = (subject: string) => ({ name: TEMPLATE, label: 'Welcome', locale: 'en-US', subject, bodyHtml: `<p>${subject}</p>` });
 
-interface SeedRow { id: string; type: string; name: string; organization_id: string | null; body: unknown }
+const PKG = 'com.example.m23429';
+const PKG_TEMPLATE = 'm23429_pkg_tpl';
+const LOCKED_TEMPLATE = 'm23429_locked_tpl';
+const tpl = (name: string, subject: string, extra: Record<string, unknown> = {}) =>
+  ({ name, label: name, locale: 'en-US', subject, bodyHtml: `<p>${subject}</p>`, ...extra });
+const permission = (name: string, label: string) => ({ name, label, objects: {} });
+
+interface SeedRow { id: string; type: string; name: string; organization_id: string | null; package_id?: string | null; body: unknown }
 const SEED: SeedRow[] = [
   { id: 'env_flow', type: 'flow', name: 'm23429_env_purge', organization_id: null, body: legacyFlow('m23429_env_purge') },
   { id: 'org_flow', type: 'flow', name: 'm23429_org_purge', organization_id: 'org_a', body: legacyFlow('m23429_org_purge') },
   { id: 'org_template', type: 'email_template', name: TEMPLATE, organization_id: 'org_a', body: template('Org A welcome') },
+  // An organization row BOUND TO A PACKAGE: its binding must never become the
+  // package-less write address (packagelessAddress) or the served row.
+  { id: 'org_pkg_template', type: 'email_template', name: PKG_TEMPLATE, organization_id: 'org_a', package_id: PKG, body: tpl(PKG_TEMPLATE, 'Org A packaged') },
+  // An organization row CARRYING `_lock`: it must never lock the environment's item.
+  { id: 'org_locked_template', type: 'email_template', name: LOCKED_TEMPLATE, organization_id: 'org_a', body: tpl(LOCKED_TEMPLATE, 'Org A locked', { _lock: 'full' }) },
+  // The kernel:ready security-catalog echo: an organization's permission
+  // overlay, beside the environment's control.
+  { id: 'org_permission', type: 'permission', name: 'm23429_org_perm', organization_id: 'org_a', body: permission('m23429_org_perm', 'Org A') },
+  { id: 'env_permission', type: 'permission', name: 'm23429_env_perm', organization_id: null, body: permission('m23429_env_perm', 'Environment') },
 ];
 
 let dir: string;
@@ -153,7 +169,7 @@ beforeAll(async () => {
     const now = new Date().toISOString();
     for (const row of SEED) {
       await k('sys_metadata').insert({
-        id: row.id, type: row.type, name: row.name, organization_id: row.organization_id, package_id: null,
+        id: row.id, type: row.type, name: row.name, organization_id: row.organization_id, package_id: row.package_id ?? null,
         state: 'active', version: 1, checksum: `sha256:seed_${row.id}`, created_at: now, updated_at: now,
         metadata: JSON.stringify(row.body),
       });
@@ -206,8 +222,8 @@ describe('os migrate meta --stored on a v17-shape database — the legacy organi
   }, CASE_TIMEOUT_MS);
 });
 
-/** The ceremony's `--apply` boot (`organization-ownership.ts`), and its `door.save`. */
-async function saveTemplateOnCeremonyBoot(db: string, subject: string): Promise<unknown> {
+/** The ceremony's `--apply` boot (`organization-ownership.ts`), with `fn` run against its kernel. */
+async function onCeremonyBoot<T>(db: string, fn: (kernel: { getService(name: string): any }) => Promise<T>): Promise<T> {
   const stack = await bootSchemaStack({
     jsonOutput: false,
     databaseUrl: `file:${db}`,
@@ -218,14 +234,19 @@ async function saveTemplateOnCeremonyBoot(db: string, subject: string): Promise<
     composeAuthGatedSecurity: true,
   });
   try {
-    const protocol = (stack.kernel as { getService(name: string): any }).getService('protocol');
-    await protocol.saveMetaItem({ type: 'email_template', name: TEMPLATE, item: template(subject), actor: 'os migrate organization-ownership' });
-    return null;
-  } catch (error) {
-    return error;
+    return await fn(stack.kernel as { getService(name: string): any });
   } finally {
     await stack.shutdown();
   }
+}
+
+/** The ceremony's `door.save` (`protocol.saveMetaItem`, no `source`): `null`, or what it threw. */
+const doorSave = (kernel: { getService(name: string): any }, type: string, name: string, item: unknown) =>
+  kernel.getService('protocol').saveMetaItem({ type, name, item, actor: 'os migrate organization-ownership' })
+    .then(() => null, (error: unknown) => error);
+
+async function saveTemplateOnCeremonyBoot(db: string, subject: string): Promise<unknown> {
+  return onCeremonyBoot(db, (kernel) => doorSave(kernel, 'email_template', TEMPLATE, template(subject)));
 }
 
 describe('the ceremony\'s template-promotion save on a v17-shape database', () => {
@@ -252,3 +273,71 @@ describe('the ceremony\'s template-promotion save on a v17-shape database', () =
     expect(rows[0]!.metadata).toMatchObject({ subject: 'Environment welcome' });
   }, CASE_TIMEOUT_MS);
 });
+
+describe('[ADR-0131 D6/D7] the ceremony boot\'s readers ignore a legacy organization row (re-review 6181366782)', () => {
+  it('door.save of a package-less item an organization holds BOUND TO A PACKAGE: the address is the environment\'s, never the organization row\'s package', async () => {
+    const db = caseDb();
+    const error = await onCeremonyBoot(db, (kernel) => doorSave(kernel, 'email_template', PKG_TEMPLATE, tpl(PKG_TEMPLATE, 'Environment')));
+    expect(error, String((error as Error | null)?.message ?? error)).toBeNull();
+    const rows = (await rawRows(db)).filter((r) => r.name === PKG_TEMPLATE);
+    const org = rows.find((r) => r.id === 'org_pkg_template')!;
+    expect(org).toMatchObject({ organization_id: 'org_a' });
+    expect(org.metadata).toEqual(tpl(PKG_TEMPLATE, 'Org A packaged'));
+    const env = rows.filter((r) => r.organization_id === null);
+    expect(env).toHaveLength(1);
+    expect(env[0]!.metadata).toMatchObject({ subject: 'Environment' });
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: db }, useNullAsDefault: true });
+    try {
+      const pkg = await (driver as any).knex('sys_metadata').where({ id: env[0]!.id }).first('package_id');
+      expect(pkg.package_id ?? null, 'the organization row\'s binding is not the environment row\'s address').toBeNull();
+    } finally {
+      await driver.disconnect();
+    }
+  }, CASE_TIMEOUT_MS);
+
+  it('lock.verdict and the _lock gate: an organization row carrying _lock: full neither reads as the item\'s lock nor is the gate\'s refusal', async () => {
+    const db = caseDb();
+    const { read, error } = await onCeremonyBoot(db, async (kernel) => {
+      const protocol = kernel.getService('protocol');
+      // The ceremony's `lock.verdict` port reads `getMetaItem`.
+      const read = await protocol.getMetaItem({ type: 'email_template', name: LOCKED_TEMPLATE }).catch(() => null);
+      const error = await doorSave(kernel, 'email_template', LOCKED_TEMPLATE, tpl(LOCKED_TEMPLATE, 'Environment'));
+      return { read, error };
+    });
+    expect((read as { lock?: unknown } | null)?.lock ?? 'none').not.toBe('full');
+    expect((read as { editable?: unknown } | null)?.editable).not.toBe(false);
+    // The `_lock` gate runs BEFORE the write. It did not refuse over the
+    // organization's lock: the save reached the store, where the re-keyed
+    // unique index refuses an environment row beside the organization's row of
+    // the same key — the refusal the template pin above measures.
+    expect(String((error as Error | null)?.message ?? error)).toMatch(/Duplicate record refused on 'sys_metadata'/);
+    expect(String((error as Error | null)?.message ?? error)).not.toMatch(/lock/i);
+    const org = (await rawRows(db)).find((r) => r.id === 'org_locked_template')!;
+    expect(org.metadata).toEqual(tpl(LOCKED_TEMPLATE, 'Org A locked', { _lock: 'full' }));
+  }, CASE_TIMEOUT_MS);
+
+  it('the kernel:ready security-catalog echo registers the environment\'s permission overlay and never an organization\'s', async () => {
+    const db = caseDb();
+    const saved = process.env.OS_AUTH_SECRET;
+    process.env.OS_AUTH_SECRET = 'm23429-secret-'.padEnd(40, 'x');
+    try {
+      const { orgEntry, envEntry } = await onCeremonyBoot(db, async (kernel) => {
+        const { createSecurityCatalogReader } = await import('@objectstack/core');
+        const catalog = createSecurityCatalogReader({
+          registry: kernel.getService('objectql').registry,
+          metadata: kernel.getService('metadata'),
+        });
+        return {
+          orgEntry: await catalog.resolve('permission', 'm23429_org_perm'),
+          envEntry: await catalog.resolve('permission', 'm23429_env_perm'),
+        };
+      });
+      expect(envEntry, 'control: the environment\'s overlay is in the catalog').toBeDefined();
+      expect(orgEntry, 'an organization\'s overlay is not the environment\'s').toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env.OS_AUTH_SECRET;
+      else process.env.OS_AUTH_SECRET = saved;
+    }
+  }, CASE_TIMEOUT_MS);
+});
+

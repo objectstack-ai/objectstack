@@ -2984,7 +2984,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       environment_id: {
         label: "環境（非推奨）",
-        help: "非推奨。テナント分離には organization_id を使用してください。"
+        help: "非推奨。オーバーレイは環境の行です（ADR-0131 D6）。テナント列はありません。"
       },
       version: {
         label: "バージョン"

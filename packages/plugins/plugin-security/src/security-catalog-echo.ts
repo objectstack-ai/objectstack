@@ -79,6 +79,7 @@
  * stored row is gone.
  */
 
+import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { seedCtx } from './organization-scope.js';
 import {
   ENV_PROJECTION_MARKER,
@@ -284,9 +285,20 @@ export async function echoStoredSecurityCatalogOverlays(
     // The plural spelling is a legacy `type` column value the protocol still reads.
     for (const stored of [type, `${type}s`]) {
       let rows: any[];
+      // [ADR-0131 D6/D7] Env-wide overlays only. The family declares no
+      // organization column, so the engine row never carries one: a legacy
+      // organization's row is told apart off the physical column, on a
+      // database the ceremony has not migrated. A read that cannot answer is a
+      // failed read, below.
+      let legacy: ReadonlyMap<string, string> = new Map();
       try {
         const found = await ql.find('sys_metadata', { where: { type: stored, state: 'active' } }, { context: seedCtx() });
         rows = Array.isArray(found) ? found : [];
+        if (rows.length > 0) {
+          legacy = await readLegacyOrganizationRows(
+            typeof ql.getDriverForObject === 'function' ? ql.getDriverForObject('sys_metadata') : undefined,
+          );
+        }
       } catch (e) {
         logger?.warn(
           `[security] stored ${type} overlays could not be read at boot, so none is echoed into the security ` +
@@ -297,7 +309,7 @@ export async function echoStoredSecurityCatalogOverlays(
         continue;
       }
       for (const row of rows) {
-        if ((row?.organization_id ?? null) !== null || !row?.name) continue; // env-wide overlays only
+        if (!row?.name || legacy.has(String(row.id))) continue; // env-wide overlays only
         names.add(String(row.name));
       }
     }

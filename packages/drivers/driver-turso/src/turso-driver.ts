@@ -3884,16 +3884,6 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
-   * Schema introspection — refused on the REMOTE face. The inherited member
-   * reads every table's columns, foreign keys, primary keys and unique
-   * constraints through Knex (`columnInfo()` and the SQLite pragmas), so a
-   * remote answer would be a second copy of those four readers, the copy
-   * {@link refuseRemoteDriftDetection} declines for drift. Its callers already
-   * treat a throw as "could not introspect": the datasource connection test
-   * answers `ok: false` with this message, and the federation validation sweep
-   * rows the datasource `unreachable`.
-   */
-  /**
    * [ADR-0131 D7 · #23429] The physical column names of `object`'s table. The
    * remote arm asks the remote catalog (`pragma_table_info`): the inherited
    * read goes through Knex, which a remote face has no connection for. A table
@@ -3906,12 +3896,29 @@ export class TursoDriver extends SqlDriver {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) {
         throw new Error(`listPhysicalColumns: "${table}" is not a table name the remote catalog read can quote.`);
       }
-      const rows = await this.remoteTransport!.execute(`SELECT name FROM pragma_table_info('${table}')`);
+      const sql = `SELECT name FROM pragma_table_info('${table}')`;
+      let rows: unknown;
+      try {
+        rows = await this.remoteTransport!.execute(sql);
+      } catch (error) {
+        // One envelope for both transports, as `execute()` declares it.
+        throw this.rawStatementFault(sql, error);
+      }
       return (Array.isArray(rows) ? rows : []).map((row) => String((row as { name?: unknown }).name ?? ''));
     }
     return super.listPhysicalColumns(object, options);
   }
 
+  /**
+   * Schema introspection — refused on the REMOTE face. The inherited member
+   * reads every table's columns, foreign keys, primary keys and unique
+   * constraints through Knex (`columnInfo()` and the SQLite pragmas), so a
+   * remote answer would be a second copy of those four readers, the copy
+   * {@link refuseRemoteDriftDetection} declines for drift. Its callers already
+   * treat a throw as "could not introspect": the datasource connection test
+   * answers `ok: false` with this message, and the federation validation sweep
+   * rows the datasource `unreachable`.
+   */
   override async introspectSchema(): Promise<IntrospectedSchema> {
     if (this.isRemote) {
       refuseRemoteInheritedMember(

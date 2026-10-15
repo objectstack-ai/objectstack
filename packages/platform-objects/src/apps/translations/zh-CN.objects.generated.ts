@@ -2984,7 +2984,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       environment_id: {
         label: "环境（已废弃）",
-        help: "已废弃。请使用 organization_id 进行租户隔离。"
+        help: "已废弃。覆盖层是环境级的行（ADR-0131 D6），没有租户列。"
       },
       version: {
         label: "版本"
