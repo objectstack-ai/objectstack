@@ -1048,7 +1048,12 @@ export class ObjectQLPlugin implements Plugin {
     // [#23649] The drivers are live and nothing has been synced, hydrated, read
     // or written: the moment a subscriber can still decide WHERE objects live
     // (the stack's `datasourceMapping`). See {@link OBJECTQL_DRIVERS_READY_HOOK}.
-    if (this.ql) await ctx.trigger(OBJECTQL_DRIVERS_READY_HOOK, this.ql);
+    // Spelled as the literal here, not the constant: the settings bind-window
+    // guard derives the hooks fired before the settings bind from their call
+    // sites and can only read a literal name. The constant is the subscribers'
+    // spelling; the runtime pin `datasource-mapping-before-schema-sync.test.ts`
+    // subscribes through it and goes red if the two ever differ.
+    if (this.ql) await ctx.trigger('objectql:drivers-ready', this.ql);
 
     // Phase 1: Sync built-in schemas so sys_metadata table exists before reading it.
     //
