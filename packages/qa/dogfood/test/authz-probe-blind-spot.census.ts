@@ -238,6 +238,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+// [#23050 slice 3] THE list of the files `RestServer`'s registrars live in —
+// see the `rest-server.ts` row's population rule.
+import {
+  REST_SERVER_REGISTRAR_DIR,
+  REST_SERVER_REGISTRAR_FILES,
+} from '../../../rest/src/rest-server-registrar-files.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // packages/qa/dogfood/test → repo root.
@@ -511,9 +517,10 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
       '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
       'indentation and the subtrahend is pinned at 1 by the `forwarder slice:` control, never inferred from a ' +
-      'terminator spelling), PLUS `registerPerItemRoute(` call sites; counted over this file AND ' +
-      '`data-action-routes.ts` and `batch-routes.ts`, the modules the bodies of `registerDataActionEndpoints` ' +
-      'and `registerBatchEndpoints` moved to; ' +
+      'terminator spelling), PLUS `registerPerItemRoute(` call sites; counted over this file AND every ' +
+      'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
+      '`data-action-routes.ts`, `batch-routes.ts` and `approvals-routes.ts`, the modules the bodies of ' +
+      '`registerDataActionEndpoints`, `registerBatchEndpoints` and `registerApprovalsEndpoints` moved to; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -657,11 +664,26 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // are counted in both readings; the four new occurrences are that slice's
     // seam, the same two spellings as slice 1's (the host literal's forwarder,
     // two; the host interface's member, two). No call site was added.
+    // [#23050 slice 3] 70 / 19 / 51 UNCHANGED, the same measurement again:
+    // `registerApprovalsEndpoints`' body (seven registration sites, all outside
+    // `registerMetadataEndpoints`, so all in the blind spot) moved to
+    // `approvals-routes.ts`. The population rule now reads the registrar LIST
+    // rather than naming each module, so the slice that moves the next body
+    // widens it by adding its module there; each module keeps its own control
+    // and the list's length is one too. `this.routeManager.register(` stays 63
+    // over the four files (42 here + 9 + 5 + 7), `private register*Endpoints(`
+    // stays 16, and `enforceAuth` 68 -> 72 is RE-ANCHORED, not relaxed: the
+    // seven call sites moved with their routes and are counted in both
+    // readings; the four new occurrences are this slice's seam, the same two
+    // spellings (the host literal's forwarder, two; the host interface's
+    // member, two). No call site was added.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
+      'registrar list length': 4,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
+      'approvals-routes.ts: this.routeManager.register(': 7,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -669,7 +691,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 68,
+      enforceAuth: 72,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
@@ -1045,13 +1067,22 @@ export function deriveProbeFileCensus(): {
     // no route. The moved module defines no registrar (`private register…(`) and
     // no `registerPerItemRoute`, so appending it moves neither the forwarder
     // slice nor the `reachable` slice; its own control below proves it is read.
-    const moved = read('packages/rest/src/data-action-routes.ts');
+    //
     // [#23050 slice 2] The same lesson, again: `registerBatchEndpoints`' body
     // moved to `batch-routes.ts` with its five registration sites. Appended for
     // the same reason and on the same terms — it declares no registrar and no
     // `registerPerItemRoute` either — with its own control below.
-    const movedBatch = read('packages/rest/src/batch-routes.ts');
-    const all = `${src}\n${moved}\n${movedBatch}`;
+    //
+    // [#23050 slice 3] …and `registerApprovalsEndpoints`' body to
+    // `approvals-routes.ts`, with its seven. The modules are no longer named
+    // here one by one: they are read off THE registrar list, in its order, so
+    // the slice that moves the next body adds its module there once. Every
+    // module on it is appended on the same terms and gets its own control
+    // below, and the list's length is a control too.
+    const movedModules = REST_SERVER_REGISTRAR_FILES
+      .filter((file) => file !== 'rest-server.ts')
+      .map((file) => [file, read(`${REST_SERVER_REGISTRAR_DIR}/${file}`)] as const);
+    const all = [src, ...movedModules.map(([, text]) => text)].join('\n');
     const registrarRe = /^\s*private\s+register[A-Za-z]*Endpoints\s*\(/gm;
     const mountRe = /this\.routeManager\.register\(/g;
     // Matches the CALL sites only. The declaration reads
@@ -1152,10 +1183,14 @@ export function deriveProbeFileCensus(): {
       controls: {
         'private register*Endpoints(': occurrences(src, /private\s+register[A-Za-z]*Endpoints\s*\(/g),
         'this.routeManager.register(': occurrences(all, /this\.routeManager\.register\(/g),
+        // [#23050 slice 3] The registrar list's length, so a module added to it
+        // makes this row re-read its numbers.
+        'registrar list length': REST_SERVER_REGISTRAR_FILES.length,
         // [#23050 slice 1] The moved module's own share, so a reading that
         // silently stopped appending it cannot hide behind the total above.
-        'data-action-routes.ts: this.routeManager.register(': occurrences(moved, /this\.routeManager\.register\(/g),
-        'batch-routes.ts: this.routeManager.register(': occurrences(movedBatch, /this\.routeManager\.register\(/g),
+        // [#23050 slice 3] One such control per module on the list.
+        ...Object.fromEntries(movedModules.map(([file, text]) =>
+          [`${file}: this.routeManager.register(`, occurrences(text, /this\.routeManager\.register\(/g)])),
         'registerPerItemRoute(': occurrences(src, /registerPerItemRoute\(/g),
         'const registerPerItemRoute =': occurrences(src, /const\s+registerPerItemRoute\s*=/g),
         // ⭐ The one control here that is NOT a whole-file count, deliberately:

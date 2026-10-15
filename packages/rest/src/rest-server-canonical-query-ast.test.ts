@@ -84,17 +84,22 @@ import { dirname, resolve } from 'node:path';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { FindDataRequest } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
+import { REST_SERVER_REGISTRAR_FILES, type RestServerRegistrarFile } from './rest-server-registrar-files.js';
 import type { ImportProtocolLike } from '@objectstack/core';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sourceOf = (file: string) => readFileSync(resolve(HERE, file), 'utf8');
 
-const REST_SERVER = sourceOf('rest-server.ts');
+// [#23050 slice 3] Every file on THE list of the files `RestServer`'s
+// registrars live in, imported rather than spelt here, so a registrar body the
+// split moves next stays inside this census.
+const REGISTRAR_SOURCES = new Map<string, string>(REST_SERVER_REGISTRAR_FILES.map((file) => [file, sourceOf(file)]));
+const REST_SERVER = REGISTRAR_SOURCES.get('rest-server.ts')!;
 // [#23050 slice 1] `RestServer#registerDataActionEndpoints`' body — the
 // import-job read, the import-job listing and the export chunk loop — moved to
 // its own module. Its literals are the same server-built literals, so the
 // census follows them there rather than losing them.
-const DATA_ACTION_ROUTES = sourceOf('data-action-routes.ts');
+const DATA_ACTION_ROUTES = REGISTRAR_SOURCES.get('data-action-routes.ts')!;
 // [#20919] The runner moved to `@objectstack/core`, beside `bulkWrite`.
 const IMPORT_RUNNER = readFileSync(resolve(HERE, '../../core/src/utils/import-runner.ts'), 'utf8');
 
@@ -116,6 +121,20 @@ interface CensusEntry {
     noDoor: boolean;
 }
 
+/**
+ * [#23050 slice 3] Each registrar file's floor, its own measured `querySlots`
+ * count: a file the split adds to the list needs a floor here before this
+ * census reads it. The §1 controls pin the list's length and the census's sum
+ * over it (4 = 1 + 3 + 0 + 0; the batch and approval bodies build no `query:`
+ * literal).
+ */
+const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
+    'rest-server.ts': 1,
+    'data-action-routes.ts': 3,
+    'batch-routes.ts': 0,
+    'approvals-routes.ts': 0,
+};
+
 const CENSUS: CensusEntry[] = [
     // [#21180] 5 -> 4: the anonymous lookup picker's `pickerRequest` literal
     // left with its route. Re-derived with `querySlots` itself: 5 slots on the
@@ -129,8 +148,12 @@ const CENSUS: CensusEntry[] = [
     // parses `filter` / `orderby` off the caller's querystring too, so it is a
     // door). Re-derived with `querySlots`: 1 slot left here (`req.query`), 3
     // there, the same 4 in all. Each floor equals its file's measured count.
-    { file: 'rest-server.ts', source: REST_SERVER, minQuerySlots: 1, noDoor: false },
-    { file: 'data-action-routes.ts', source: DATA_ACTION_ROUTES, minQuerySlots: 3, noDoor: false },
+    //
+    // [#23050 slice 3] The registrar files are read off the list, each with its
+    // floor from `REGISTRAR_QUERY_SLOT_FLOORS` above.
+    ...REST_SERVER_REGISTRAR_FILES.map((file): CensusEntry => ({
+        file, source: REGISTRAR_SOURCES.get(file)!, minQuerySlots: REGISTRAR_QUERY_SLOT_FLOORS[file], noDoor: false,
+    })),
     { file: 'import-runner.ts', source: IMPORT_RUNNER, minQuerySlots: 3, noDoor: true },
 ];
 
@@ -293,6 +316,16 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // The two shapes `import-runner.ts` actually contains.
         expect(wireKeysAnywhere('const filter: Record<string, any> = {};')).toEqual([]);
         expect(wireKeysAnywhere('const a = { where: filter, limit: 2 };')).toEqual([]);
+    });
+
+    it('[#23050 slice 3] censuses every file on the registrar list — its length and the slot sum are pinned', () => {
+        // A module added to the list makes this re-read its number rather than
+        // widening unnoticed.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
+        expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
+            .toEqual([...REST_SERVER_REGISTRAR_FILES]);
+        expect([...REGISTRAR_SOURCES.values()].reduce((n, source) => n + querySlots(source).length, 0)).toBe(4);
     });
 
     it('dropping comment lines leaves the code that is being censused', () => {
