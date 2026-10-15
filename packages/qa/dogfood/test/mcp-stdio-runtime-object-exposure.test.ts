@@ -39,9 +39,10 @@
  * JSON-RPC a stdio client speaks (a process cannot give a test its stdin).
  *
  * The one seam faked is the key row the stdio principal resolves from: the
- * engine is wrapped so `sys_api_key` answers one non-revoked key and any other
- * platform table the principal chain reads that this kernel does not register
- * answers empty. Every other read goes to the real engine.
+ * engine is wrapped so `sys_api_key` answers one non-revoked key (and takes its
+ * use stamp), and any other platform table the principal chain reads that this
+ * kernel does not register answers empty. Every other call goes to the real
+ * engine.
  *
  * The negative control (red with the producer's follow removed) is a one-time
  * ablation, cited in the PR, not a permanent case.
@@ -222,6 +223,11 @@ describe('the MCP stdio door follows a runtime-authored object\'s current defini
     // The faked seam, and only it: the key row the stdio principal resolves from.
     const ql = new Proxy(engine as any, {
       get(target, prop, receiver) {
+        // The use stamp a resolved key takes (`last_used_at`) has no table here.
+        if (prop === 'update') {
+          return async (object: string, data: unknown, options?: unknown) =>
+            object === 'sys_api_key' ? {} : target.update(object, data, options);
+        }
         if (prop === 'find') {
           return async (object: string, query?: unknown, options?: unknown) => {
             if (object === 'sys_api_key') return [{ id: 'k1', user_id: 'usr_stdio', revoked: false }];
