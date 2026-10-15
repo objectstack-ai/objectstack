@@ -9032,8 +9032,18 @@ export class RestServer {
                         // reaching the engine as `data`. Per-field checks stay
                         // downstream (object metadata / validation rules); this
                         // gate is about the SHAPE the contract declares.
+                        //
+                        // [#23574] …the body AS THE CALLER SENT IT. It was
+                        // `req.body ?? {}`, so a JSON `null` body parsed as an
+                        // empty record and created an empty row (`201`). `null`
+                        // is not the record `data` declares, so it is refused
+                        // like an array, a string or a number, and the runtime
+                        // dispatcher's twin (`domains/data.ts`) asks this gate
+                        // over the same assembled request. An empty request
+                        // body is not `null`: the HTTP adapter hands it over
+                        // as `{}`, a record.
                         const { CreateDataRequestSchema } = await import('@objectstack/spec/api');
-                        const createInput = { object: req.params.object, data: req.body ?? {} };
+                        const createInput = { object: req.params.object, data: req.body };
                         const parsedCreate = (CreateDataRequestSchema as any).safeParse(createInput);
                         if (!parsedCreate.success) {
                             res.status(400).json({
@@ -9046,7 +9056,7 @@ export class RestServer {
                         }
                         const createRequest: ServerScopedDataRequest<CreateDataRequest> = {
                             object: req.params.object,
-                            data: req.body ?? {},
+                            data: req.body,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
@@ -9096,11 +9106,21 @@ export class RestServer {
                         // ORIGINAL body is forwarded, not the parse output, so the
                         // schema cannot inject defaults the engine did not receive
                         // before (the analytics-entry precedent, #3878).
+                        //
+                        // [#23574] …the body AS THE CALLER SENT IT. It was
+                        // `req.body ?? {}`, so a JSON `null` body read as no
+                        // query and answered the full record set (`200`).
+                        // `query` declares a QueryAST or nothing, never `null`,
+                        // so `null` is refused like a string or a number, and
+                        // the runtime dispatcher's twin (`domains/data.ts`) now
+                        // asks this gate over the same assembled request. An
+                        // empty request body is not `null`: the HTTP adapter
+                        // hands it over as `{}`, an empty query.
                         const { FindDataRequestSchema } = await import('@objectstack/spec/api');
-                        const rawQuery = req.body ?? {};
+                        const rawQuery = req.body;
                         const query = (rawQuery && typeof rawQuery === 'object' && !Array.isArray(rawQuery))
                             ? { ...rawQuery, object: req.params.object }
-                            : rawQuery; // non-object bodies go to the schema as-is and fail with `query: invalid_type`
+                            : rawQuery; // non-object bodies (`null` included) go to the schema as-is and fail with `query: invalid_type`
                         const findInput = { object: req.params.object, query };
                         const parsedFind = (FindDataRequestSchema as any).safeParse(findInput);
                         if (!parsedFind.success) {

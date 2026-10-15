@@ -275,6 +275,43 @@ async function resolveEngineQuietly(deps: ActionExecutionDeps, requestContext: H
     }
 }
 
+/**
+ * ── Object-level API exposure gate (ADR-0049, #1889) ─────
+ * Honour the object's `apiEnabled` / `apiMethods` declarations for external
+ * traffic: throws the refusal ({@link checkApiExposure}'s `404` / `405`) when
+ * `object` does not expose `action`, and returns otherwise. System/internal
+ * contexts bypass — these flags govern API *exposure*, not internal engine
+ * self-writes.
+ *
+ * [#23574] Extracted from {@link callData}, which still asks it first for
+ * every caller, so that the runtime dispatcher's `/data` domain can ask the
+ * SAME question before its own request-schema gate (`domains/data.ts`): a
+ * caller the object refuses is answered the refusal, never a shape verdict
+ * about the body it sent. `RestServer` asks `enforceApiAccess` before its
+ * twin gate for the same reason. Moved, not copied: this is the one place the
+ * dispatcher's exposure decision is resolved.
+ */
+export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    action: string,
+    object: unknown,
+    scopeId?: string,
+    executionContext?: ExecutionContext,
+): Promise<void> {
+    if (executionContext?.isSystem || !object) return;
+    let def: any;
+    try {
+        const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
+        def = await (meta as any)?.getObject?.(object);
+    } catch {
+        def = undefined; // fall open to schema defaults (apiEnabled=true)
+    }
+    const gate = checkApiExposure(def, action);
+    if (!gate.allowed) {
+        throw { statusCode: gate.status ?? 403, message: gate.reason ?? 'API access denied' };
+    }
+}
+
 export async function callData(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: string,
@@ -283,27 +320,12 @@ export async function callData(deps: ActionExecutionDeps,
     scopeId?: string,
     executionContext?: ExecutionContext,
 ): Promise<any> {
-    // ── Object-level API exposure gate (ADR-0049, #1889) ─────
-    // Honour the object's `apiEnabled` / `apiMethods` declarations for
-    // external traffic. System/internal contexts bypass — these flags
-    // govern API *exposure*, not internal engine self-writes.
+    // The object-level API exposure gate ({@link refuseUnexposedDataAction}).
     // [#22823] Decided ONCE, here: the same bypass covers each nested-relation
     // condition's target, asked below on the two arms that hand the engine a
     // caller's `where` ({@link refuseUnservedRelationTargets}).
     const exposureGated = !executionContext?.isSystem;
-    if (exposureGated && params?.object) {
-        let def: any;
-        try {
-            const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
-            def = await (meta as any)?.getObject?.(params.object);
-        } catch {
-            def = undefined; // fall open to schema defaults (apiEnabled=true)
-        }
-        const gate = checkApiExposure(def, action);
-        if (!gate.allowed) {
-            throw { statusCode: gate.status ?? 403, message: gate.reason ?? 'API access denied' };
-        }
-    }
+    await refuseUnexposedDataAction(deps, requestContext, action, params?.object, scopeId, executionContext);
 
     const protocol = await deps.resolveService(requestContext, 'protocol', scopeId);
     const qlService = dataDriver ?? await deps.getObjectQL(requestContext, scopeId);
