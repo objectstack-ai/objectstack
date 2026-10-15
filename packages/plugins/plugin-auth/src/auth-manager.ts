@@ -1803,11 +1803,11 @@ export class AuthManager {
           // forget-password route always returns {status:true}, so this never
           // leaks whether an address exists nor turns the request into a 500.
           // commit 35e94c96b — the ladder's stored rung. It matters most HERE: an
-          // admin-initiated reset (`admin-import-users.ts` calls
-          // `requestPasswordReset`) reaches this callback with the ADMIN's
-          // request, so without this rung the user's mail carries the admin's
-          // browser language. Best-effort; `undefined` leaves the #14319
-          // ladder exactly as it was.
+          // admin-initiated send (`admin-import-users.ts` calls
+          // `requestPasswordReset` server-side) reaches this callback with NO
+          // request at all (measured on 1.7.3, #23343), so without this rung
+          // the user's mail carries only the deployment default. Best-effort;
+          // `undefined` leaves the #14319 ladder exactly as it was.
           const storedLocale = await this.storedRecipientLocale({ id: user.id });
           const result = await email.sendTemplate(invitation
             ? {
