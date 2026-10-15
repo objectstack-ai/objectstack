@@ -40,6 +40,20 @@
  *
  * Every case runs the real command, plan then apply, over a fresh copy of the
  * database; each fate the case does not exercise is `report`. SQLite only.
+ *
+ * ## `os migrate apply --allow-destructive` on the same composition
+ *
+ * The schema-drift report of this composition offers the two declared
+ * objects' `organization_id` for the destructive apply. Its drop gate
+ * (`organization-ownership-drop-gate.ts`, ADR-0131 D10 item 5) holds that drop
+ * back until the ceremony's marker is verified — on these host-declared
+ * objects as on the platform's inventory, since the ceremony plans every
+ * table that carries the column. The real `os migrate apply` command, over a
+ * fresh copy of the same v17 database:
+ *
+ *  - no marker: refused, naming the ceremony; nothing dropped;
+ *  - CONTROL: a verified marker: the drop applies;
+ *  - CONTROL: a destructive drop of another column is unchanged.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -50,7 +64,9 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ORGANIZATION_OWNERSHIP_MIGRATION_ID } from '@objectstack/spec/system';
 import { isExitSignal } from './format.js';
+import MigrateApply from '../commands/migrate/apply.js';
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 
 // Paid at module load, not inside a clocked case (`check:test-source-alias`).
@@ -248,6 +264,74 @@ async function ceremony(name: string, drop: string): Promise<Run> {
   }
 }
 
+/** A fresh copy of the v17 database for one `os migrate apply` case, with `prepare` run on it raw. */
+function applyCase(name: string, prepare?: (db: Database.Database) => void): string {
+  const caseDir = join(dir, 'apply-cases', name);
+  mkdirSync(caseDir, { recursive: true });
+  const dbFile = join(caseDir, 'v17.db');
+  copyFileSync(templateDb, dbFile);
+  if (prepare) {
+    const db = new Database(dbFile);
+    try {
+      prepare(db);
+    } finally {
+      db.close();
+    }
+  }
+  return dbFile;
+}
+
+/** The real `os migrate apply --allow-destructive --yes --json` over `dbFile`, from the host's project. */
+async function migrateApply(dbFile: string): Promise<{ payload: any; exitCode: number }> {
+  const savedExit = process.exitCode;
+  const swallow = ((_chunk: unknown, ...rest: unknown[]) => {
+    const cb = rest.find((a) => typeof a === 'function') as (() => void) | undefined;
+    if (cb) cb();
+    return true;
+  }) as typeof process.stdout.write;
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(swallow);
+  vi.spyOn(process.stderr, 'write').mockImplementation(swallow);
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  // `run()` ends the one-shot process itself once the document is written.
+  let processExit: number | undefined;
+  vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    processExit = code ?? 0;
+    throw new Error(`__PROCESS_EXIT__:${processExit}`);
+  }) as never);
+  process.chdir(projectDir);
+  let thrownExit: number | undefined;
+  try {
+    try {
+      await MigrateApply.run(['--database-url', `file:${dbFile}`, '--allow-destructive', '--yes', '--json'], { root: CLI_ROOT });
+    } catch (error) {
+      const trapped = error instanceof Error && error.message.startsWith('__PROCESS_EXIT__');
+      if (!trapped && !isExitSignal(error)) throw error;
+      if (!trapped) thrownExit = (error as { oclif?: { exit?: number } }).oclif?.exit;
+    }
+    const out = stdout.mock.calls.map((c) => String(c[0])).join('').trim();
+    let payload: any;
+    try {
+      payload = JSON.parse(out);
+    } catch {
+      payload = { unparsed: out.slice(-600) };
+    }
+    return { payload, exitCode: processExit ?? thrownExit ?? (process.exitCode as number | undefined) ?? 0 };
+  } finally {
+    process.chdir(savedCwd);
+    process.exitCode = savedExit;
+    vi.restoreAllMocks();
+  }
+}
+
+/** The `organization_id` drops among an apply payload's entries, by table, sorted. */
+const organizationDropsIn = (entries: any[] | undefined): string[] =>
+  (entries ?? [])
+    .filter((d) => d?.op?.type === 'drop_column' && d.op.column === 'organization_id')
+    .map((d) => String(d.table))
+    .sort();
+
 const columnDrops = (report: any): { status: string; summary: Record<string, number>; blockers: string[] } =>
   report.steps.find((s: { step: string }) => s.step === 'column-drops');
 const blockersFor = (report: any, table: string): string[] =>
@@ -335,5 +419,68 @@ describe('organization-ownership --apply: column-drop on an object the host decl
     expect(tableOf(report, HELD)).toMatchObject({ columnDropped: false });
     expect(hasOrganizationColumn(dbFile, HELD)).toBe(true);
     expect(exitCode).toBe(1);
+  }, CASE_TIMEOUT_MS);
+});
+
+describe('os migrate apply --allow-destructive: the organization_id drop on a host-declared platform-global object waits for the ceremony', () => {
+  it('holds the drop back until the marker is verified, naming the ceremony, and drops nothing', async () => {
+    const dbFile = applyCase('no-marker');
+    const { payload, exitCode } = await migrateApply(dbFile);
+
+    const seen = { message: payload.message, error: payload.error, appliedOrganizationDrops: organizationDropsIn(payload.applied) };
+    expect(exitCode, JSON.stringify(seen)).toBe(1);
+    expect(payload).toMatchObject({
+      message: 'refused_organization_ownership_unmigrated',
+      tables: [...DECLARED].sort(),
+      applied: [],
+      created: [],
+      marker: null,
+    });
+    expect(payload.detail).toMatch(/os migrate organization-ownership --apply/);
+    // The drops the refusal held back are the ones the drift offered.
+    expect(organizationDropsIn(payload.skipped)).toEqual([...DECLARED].sort());
+    for (const table of HOST_OBJECTS) expect(hasOrganizationColumn(dbFile, table), table).toBe(true);
+  }, CASE_TIMEOUT_MS);
+
+  it('CONTROL: once the ceremony\'s marker is verified, the drop applies', async () => {
+    const dbFile = applyCase('verified-marker', (db) => {
+      const now = new Date().toISOString();
+      db.prepare('INSERT INTO sys_migration (id, last_run_at, verified_at, blocking) VALUES (?, ?, ?, 0)').run(
+        ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+        now,
+        now,
+      );
+    });
+    const { payload, exitCode } = await migrateApply(dbFile);
+
+    expect(exitCode, JSON.stringify(payload).slice(0, 600)).toBe(0);
+    expect(payload.message).toBeUndefined();
+    expect(organizationDropsIn(payload.applied)).toEqual([...DECLARED].sort());
+    for (const table of DECLARED) expect(hasOrganizationColumn(dbFile, table), table).toBe(false);
+    // The undeclared object's column is the release's, and stays.
+    expect(hasOrganizationColumn(dbFile, AUDIT)).toBe(true);
+  }, CASE_TIMEOUT_MS);
+
+  it('CONTROL: a destructive drop of another column is unchanged', async () => {
+    // The declared objects' organization_id already gone, and a column no
+    // object declares on one of them: the run's one destructive change.
+    const dbFile = applyCase('other-column', (db) => {
+      for (const table of DECLARED) db.exec(`ALTER TABLE "${table}" DROP COLUMN organization_id`);
+      db.exec(`ALTER TABLE "${LEDGER}" ADD COLUMN legacy_23684_note TEXT`);
+    });
+    const { payload, exitCode } = await migrateApply(dbFile);
+
+    expect(exitCode, JSON.stringify(payload).slice(0, 600)).toBe(0);
+    expect(payload.message).toBeUndefined();
+    expect(
+      (payload.applied as any[]).filter((d) => d?.op?.type === 'drop_column').map((d) => `${d.table}.${d.op.column}`),
+    ).toEqual([`${LEDGER}.legacy_23684_note`]);
+    const db = new Database(dbFile, { readonly: true });
+    try {
+      const columns = (db.prepare(`PRAGMA table_info("${LEDGER}")`).all() as Array<{ name: string }>).map((c) => c.name);
+      expect(columns).not.toContain('legacy_23684_note');
+    } finally {
+      db.close();
+    }
   }, CASE_TIMEOUT_MS);
 });

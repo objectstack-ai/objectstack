@@ -605,8 +605,9 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
  * ## Why this exists as an export rather than as a rule each route re-states
  *
  * Two route families build their error body by hand and share no branch with
- * either door in this file: `/analytics/dataset/query` and the three
- * record-share routes, both in `rest-server.ts`. Both re-derived
+ * either door in this file: `/analytics/dataset/query` (in `rest-server.ts`)
+ * and the three record-share routes (in `sharing-routes.ts` since #23050
+ * slice 4, `rest-server.ts` before). Both re-derived
  * classification locally — analytics from an in-line `error.status` +
  * `error.code` read, the share family from `message.startsWith(CODE)` over
  * five literal prefixes — and both landed a *different* answer from `/data`
@@ -770,8 +771,9 @@ export function sandboxFaultAnswer(
  *
  * ## The derivation is the record-share family's
  *
- * `respondSharingError` in `rest-server.ts` re-dresses the same answer inline,
- * and its comments carry the argument for each field; they are not restated:
+ * `respondSharingError` in `sharing-routes.ts` (moved out of `rest-server.ts`
+ * by #23050 slice 4) re-dresses the same answer inline, and its comments carry
+ * the argument for each field; they are not restated:
  *
  *  - `code` is REQUIRED by the nested envelope and the flat classification
  *    legitimately carries none for an undeclared sandbox refusal, so the

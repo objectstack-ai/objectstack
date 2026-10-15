@@ -21,9 +21,12 @@
  *
  * The activity stream's gate (`activity-read-visibility.ts`), applied to the
  * ledger through the SAME mechanism, `parent-record-read-gate.ts`: a row naming
- * a record is served exactly when the caller's own engine read of that record
- * finds it (`resolveReadableParentIds`, shared with the comment and activity
- * gates). ⛔ Nothing here derives row scope a second way.
+ * a record is served exactly when the caller may read that record — one
+ * `ReadableIds` leaf per parent object, composed by the engine from the
+ * caller's read scope (ADR-0139 D4), and the bounded probe for D5's three
+ * classes. ⛔ Nothing here derives row scope a second way. A composition or
+ * driver refusal is the read's own failure (D3): it reaches the caller, never
+ * this gate's deny-all sentinel.
  *
  * ## The ledger's row classes, measured per writer
  *
@@ -31,7 +34,9 @@
  *    mirror's `create` / `update` / `delete` (`audit-writers.ts`), record-view
  *    `read` rows (`read-audit.ts`), plugin-auth's administrative `create` /
  *    `update` on a `sys_user`, and the auth-event sink's `login` / `logout`,
- *    which name the session (`auth-event-audit.ts`). Judged by the record gate.
+ *    which name the session (`auth-event-audit.ts`). Judged by the record gate;
+ *    the session is in the audit writer's `AUDIT_EXCLUDED_OBJECTS`, so the gate
+ *    names it ({@link LEDGER_NAMED_PARENTS}) to keep judging it.
  *    A record that no longer exists is read by no caller, so its rows are
  *    excluded for every caller that is not system context and does not hold
  *    the audit capability below: every `delete` row, every other row about a
@@ -44,7 +49,8 @@
  *    There is no record to judge, and none carries a record's field values
  *    (the per-writer measurement in `audit-log-field-redaction.ts`), so they
  *    are OUTSIDE this gate's class and are served under the ledger's own grant
- *    exactly as before. This is where the ledger differs from the activity
+ *    exactly as before — through a predicate on the ledger's own columns
+ *    ({@link ledgerRowAboutNoRecordWhere}), so a broad read is served whole. This is where the ledger differs from the activity
  *    stream, which excludes every row naming no parent: the stream has no
  *    platform producer of such rows, while these have three, and the shipped
  *    `config_changes` list view reads two of them through the data door.
@@ -64,8 +70,7 @@
  *
  * A caller holding {@link LEDGER_AUDIT_CAPABILITY} is not narrowed by this
  * gate: it is served the deletion and sign-out trail, the rows about records
- * it cannot open, and a broad read whole (the gate's pre-scan, and so its
- * bound, never runs for it). It still needs the ledger's own object grant,
+ * it cannot open, and a broad read whole (nothing of the gate runs for it). It still needs the ledger's own object grant,
  * and the field redaction still narrows every snapshot it is served. Platform
  * administrators hold it by default (`ADMIN_FULL_ACCESS_CAPABILITIES` in
  * `@objectstack/spec`); every other position only by explicit grant. The
@@ -78,7 +83,8 @@
  * context.
  */
 
-import type { CommentAccessEngine, CommentAccessLogger } from './comment-access-hooks.js';
+import { SystemObjectName } from '@objectstack/spec/system';
+import type { CommentAccessLogger } from './comment-access-hooks.js';
 import { LEDGER_RECORD_WRITE_ACTIONS } from './audit-log-field-redaction.js';
 import { READ_AUDIT_ACTION } from './read-audit.js';
 import {
@@ -87,6 +93,7 @@ import {
   computeParentRecordFilter,
   type ParentObjectReadAdmissionSource,
   type ParentRecordGate,
+  type ParentRecordGateEngine,
 } from './parent-record-read-gate.js';
 
 const LEDGER_OBJECT = 'sys_audit_log';
@@ -115,6 +122,26 @@ export function isLedgerRowAboutNoRecord(row: Record<string, unknown>): boolean 
 }
 
 /**
+ * [ADR-0139 D4] {@link isLedgerRowAboutNoRecord} as a WHERE on the ledger's own
+ * columns — the outside class the gate ORs in beside its parent branches, so
+ * the driver evaluates it, unbounded. A fresh tree per call. The two are one
+ * statement in two forms, pinned row for row against a real driver in
+ * `audit-log-read-visibility.integration.test.ts`.
+ */
+export function ledgerRowAboutNoRecordWhere(): Record<string, unknown> {
+  return {
+    $and: [
+      // No record id: absent, null or empty.
+      { $or: [{ record_id: null }, { record_id: '' }] },
+      // An action, and not a record action. `$ne: null` first, so the
+      // membership test is never asked of a null.
+      { action: { $ne: null } },
+      { action: { $nin: ['', ...LEDGER_RECORD_ACTIONS] } },
+    ],
+  };
+}
+
+/**
  * The compliance ledger's audit capability: its holder is exempt from this
  * gate. Declared in `PLATFORM_CAPABILITIES` (`@objectstack/spec/security`) and
  * granted by `ADMIN_FULL_ACCESS_CAPABILITIES`; this spelling is pinned against
@@ -122,12 +149,22 @@ export function isLedgerRowAboutNoRecord(row: Record<string, unknown>): boolean 
  */
 export const LEDGER_AUDIT_CAPABILITY = 'view_all_audit_log';
 
+/**
+ * The parent the ledger's auth-event sink names (`auth-event-audit.ts`: a
+ * `login` / `logout` row is about the session). It is in the audit writer's
+ * `AUDIT_EXCLUDED_OBJECTS` — the CRUD mirror writes no row about a session —
+ * so the gate names it, and a row about a session is served exactly when that
+ * session is readable, as before ADR-0139 E5.
+ */
+export const LEDGER_NAMED_PARENTS: readonly string[] = [SystemObjectName.SESSION];
+
 const LEDGER_GATE: ParentRecordGate = {
   object: LEDGER_OBJECT,
   seam: 'audit log read visibility',
   denyAll: { id: '__audit_log_parent_denied__' },
-  outsideClass: { fields: ['action'], test: isLedgerRowAboutNoRecord },
+  outsideClass: { where: ledgerRowAboutNoRecordWhere },
   exemptCapability: LEDGER_AUDIT_CAPABILITY,
+  namedParents: LEDGER_NAMED_PARENTS,
 };
 
 /**
@@ -140,7 +177,7 @@ const LEDGER_GATE: ParentRecordGate = {
  * an access attempt").
  */
 export function installAuditLogReadVisibility(
-  engine: CommentAccessEngine,
+  engine: ParentRecordGateEngine,
   logger: CommentAccessLogger,
   getAdmission: ParentObjectReadAdmissionSource,
 ): void {
@@ -153,16 +190,13 @@ export function installAuditLogReadVisibility(
       if (!PARENT_GATE_READ_OPS.has(ctx.operation) || !ctx.ast || !ctx.context || ctx.context.isSystem) {
         return next();
       }
-      try {
-        const filter = await computeParentRecordFilter(engine, ctx, logger, LEDGER_GATE, getAdmission);
-        if (filter) andIntoWhere(ctx, filter);
-      } catch (err) {
-        // A filter-compute failure must never fall open into a leak.
-        logger.warn(
-          `[audit] audit log read visibility: filter failed, denying all (${(err as Error)?.message ?? err})`,
-        );
-        andIntoWhere(ctx, LEDGER_GATE.denyAll);
-      }
+      // [ADR-0139 D3] No catch: the gate answers its own probe's failure with
+      // the deny-all sentinel, and a `ReadableIds` leaf is composed by the
+      // engine after `next()`, so a composition or driver refusal is this
+      // read's own failure and reaches the caller saying why — ⛔ never
+      // turned into the deny-all sentinel here.
+      const filter = await computeParentRecordFilter(engine, ctx, logger, LEDGER_GATE, getAdmission);
+      if (filter) andIntoWhere(ctx, filter);
       return next();
     },
     { object: LEDGER_OBJECT },

@@ -317,8 +317,10 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // A module added to the list makes this re-read its number rather than
         // widening unnoticed. 9 sites = 8 in `rest-server.ts` + 1 in
         // `data-action-routes.ts` (the export door's `page`); the batch and
-        // approval bodies carry none.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        // approval bodies carry none. [#23050 slice 4] Nor do the two
+        // record-sharing bodies (`sharing-routes.ts`): 9 = 8 + 1 + 0 + 0 + 0,
+        // length 4 → 5.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(5);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });

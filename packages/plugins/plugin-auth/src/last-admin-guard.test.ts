@@ -51,7 +51,7 @@
  * file re-run it on the same fixtures rather than describing it.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { isAPIError } from 'better-auth/api';
@@ -63,6 +63,7 @@ import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { createObjectQLAdapterFactory } from './objectql-adapter.js';
 import { buildAdminPluginSchema, buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
+import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
 import { admin } from 'better-auth/plugins/admin';
 import { organization } from 'better-auth/plugins/organization';
 
@@ -246,6 +247,7 @@ afterEach(async () => {
   else process.env[POSTURE_ENV] = ambientPosture;
   if (ambientMultiOrg === undefined) delete process.env[MULTI_ORG_ENV];
   else process.env[MULTI_ORG_ENV] = ambientMultiOrg;
+  defaultEngines.release();
   // `:memory:` dies with its connection; closing keeps one live database per
   // test from piling up in a file this size.
   const open = engines;
@@ -255,17 +257,34 @@ afterEach(async () => {
   }
 });
 
+/**
+ * [#23184] Every `boot()` with no options — the engine most cases take, often
+ * twice in one case — comes from a per-file pool instead of a fresh boot: the
+ * same six objects, the same guard registration, its rows deleted and its
+ * catalog emptied before a case receives it (`sqlite-engine-pool.testkit.ts`
+ * says what a reused engine does and does not carry). 110 cases spent about a
+ * second booting engines they never told apart. Any other option set boots a
+ * fresh engine per call, as before, because its hooks differ.
+ */
+const defaultEngines = sqliteEnginePool(() => bootEngine({}), {
+  onReset: (engine) => catalogOf(engine).clear(),
+});
+afterAll(defaultEngines.destroy);
+
 async function boot(opts: BootOptions = {}): Promise<ObjectQL> {
+  if (Object.keys(opts).length === 0) return defaultEngines.take();
+  return (await bootEngine(opts, engines)).engine;
+}
+
+async function bootEngine(opts: BootOptions, track?: ObjectQL[]): Promise<BootedSqliteEngine> {
   const engine = new ObjectQL();
-  engines.push(engine);
-  engine.registerDriver(
-    new SqlDriver({
-      client: 'better-sqlite3',
-      connection: { filename: ':memory:' },
-      useNullAsDefault: true,
-    }),
-    true,
-  );
+  track?.push(engine);
+  const driver = new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
+  engine.registerDriver(driver, true);
   await engine.init();
   for (const o of [sysUser, sysMember, sysPermissionSet, sysUserPermissionSet, sysAccount, sysMetadataActivation]) {
     engine.registry.registerObject(o as never);
@@ -288,7 +307,7 @@ async function boot(opts: BootOptions = {}): Promise<ObjectQL> {
       ...(opts.maxScan !== undefined ? { maxScan: opts.maxScan } : {}),
     });
   }
-  return engine;
+  return { engine, driver };
 }
 
 /** A user row, plus whatever standing the case needs. */
