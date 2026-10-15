@@ -35,7 +35,14 @@
  *    owner P's own draft;
  *  - CONTROL: the per-item publish naming no package still promotes a
  *    package-unbound draft INTO the owner's package (#23495's adoption): the
- *    question is asked of the package the promotion writes under.
+ *    question is asked of the package the promotion writes under;
+ *  - CONTROL, per door: a CODE-packaged owner answers what it answered before.
+ *    An object a code package ships is sealed managed content (ADR-0131 D6), so
+ *    the save door's package door answers `NOT_OVERRIDABLE` / 403 ahead of its
+ *    D9.9 check, and a promotion of a Q-bound draft stored before the package
+ *    shipped the object answers that same refusal from the store — never
+ *    `OBJECT_OVERLAY_PACKAGE_MISMATCH`, whose prescription ("bind to the
+ *    owner") the sealed rule refuses — and nothing is written.
  *
  * ## The composition — the shipped pieces
  *
@@ -62,12 +69,15 @@ import {
   SysMetadataHistoryObject,
   SysMetadataAuditObject,
   SysMetadataCommitObject,
+  hashSpec,
 } from '@objectstack/metadata-core';
 import { PackageServicePlugin } from '@objectstack/service-package';
 import { HttpDispatcher } from './http-dispatcher.js';
 
 const P = 'com.probe.p';
 const Q = 'com.probe.q';
+/** A CODE package shipping the object (registered as `registerApp` registers it). */
+const O = 'com.probe.code';
 const PLATFORM_PKG = 'com.objectstack.platform';
 const ENV = 'platform';
 const X = 'probe_ticket';
@@ -177,6 +187,27 @@ async function boot() {
       });
       expect(res.success, 'the draft save').toBe(true);
     },
+    /**
+     * A draft row of the object bound to `packageId` as it exists at rest,
+     * written straight into the store, never through the save door: the shape
+     * a draft save stores (the body's checksum by `hashSpec`). The save door
+     * refuses a draft of a code-packaged object today, so such a row is one
+     * stored before the code package shipped the object.
+     */
+    async seedStoredDraft(packageId: string) {
+      const body = objectBody(packageId);
+      const now = new Date().toISOString();
+      await engine.insert('sys_metadata', {
+        id: `seed_draft_${packageId}_${X}`, type: 'object', name: X,
+        package_id: packageId, state: 'draft', metadata: JSON.stringify(body), checksum: hashSpec(body, 'object'),
+        version: 1, created_at: now, updated_at: now,
+      }, { context: { isSystem: true } } as any);
+    },
+    /** The object as a code package ships it: contributors only, with the provenance a loader stamps. */
+    registerCodeOwner(packageId: string) {
+      engine.registry.registerObject({ ...objectBody(packageId), _packageId: packageId, _provenance: 'package' } as any, packageId);
+      expect(engine.registry.getPackagedObjectOwner(X)?.packageId, 'precondition: a code-packaged owner').toBe(packageId);
+    },
     /** A publish-mode save bound to `packageId` — the runtime-authored owner's row. */
     saveActive: (packageId: string) =>
       protocol.saveMetaItem({ type: 'object', name: X, item: objectBody(packageId), packageId }),
@@ -206,6 +237,28 @@ async function qDraftThenPOwner(): Promise<Process> {
   expect(await h.draftBindings(), 'precondition: Q\'s draft is stored').toEqual([Q]);
   expect(h.registryOwner(), 'precondition: the registry holds the object as P\'s').toBe(P);
   return h;
+}
+
+/**
+ * A code package O ships the object; Q's draft of it was stored before O
+ * shipped it (a row at rest — the save door refuses that draft today).
+ */
+async function qDraftThenCodeOwner(): Promise<Process> {
+  const h = await boot();
+  await h.install(Q);
+  await h.seedStoredDraft(Q);
+  h.registerCodeOwner(O);
+  expect(await h.activeBindings(), 'precondition: no active row').toEqual([]);
+  expect(await h.draftBindings(), 'precondition: Q\'s draft is stored').toEqual([Q]);
+  return h;
+}
+
+/** Everything a refused promotion over the code-packaged owner must leave as it was. */
+async function expectCodeOwnerUntouched(h: Process) {
+  expect(await h.activeBindings(), 'no active row for Q').toEqual([]);
+  expect(await h.draftBindings(), 'Q\'s draft stays stored').toEqual([Q]);
+  expect(h.engine.registry.getPackagedObjectOwner(X)?.packageId).toBe(O);
+  expect(h.registryLabel()).toBe(`${X} ${O}`);
 }
 
 /** The save door's own answer for the row the promotion would write: Q's active row. */
@@ -292,6 +345,33 @@ describe('[#23630] ADR-0029 D9.9 at the promote doors — a draft promoted after
     expect(await h.activeBindings()).toEqual([P]);
     expect(await h.draftBindings()).toEqual([]);
     expect(h.registryOwner()).toBe(P);
+  }, 60_000);
+
+  it('CONTROL: a code-packaged owner — publishMetaItem naming Q answers the sealed refusal NOT_OVERRIDABLE / 403, as before', async () => {
+    const h = await qDraftThenCodeOwner();
+
+    const err = await h.protocol.publishMetaItem({ type: 'object', name: X, packageId: Q }).then(() => null, (e: any) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect({ code: err.code, status: err.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+    await expectCodeOwnerUntouched(h);
+    // The save door's answer for the same row is that same refusal (the package
+    // door ahead of D9.9), never the D9.9 mismatch.
+    const saveErr = await h.saveActive(Q).then(() => null, (e: any) => e);
+    expect({ code: saveErr?.code, status: saveErr?.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+  }, 60_000);
+
+  it('CONTROL: a code-packaged owner — POST /packages/Q/publish-drafts refuses the batch with NOT_OVERRIDABLE in failed[], as before', async () => {
+    const h = await qDraftThenCodeOwner();
+
+    const answer = await h.call('POST', `/${Q}/publish-drafts`);
+
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    const result = answer.body?.data;
+    expect(result).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0, failedCount: 1, published: [] });
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]).toMatchObject({ type: 'object', name: X, code: 'NOT_OVERRIDABLE' });
+    await expectCodeOwnerUntouched(h);
   }, 60_000);
 
   it('CONTROL: publishMetaItem naming no package promotes a package-unbound draft INTO the owner\'s package', async () => {
