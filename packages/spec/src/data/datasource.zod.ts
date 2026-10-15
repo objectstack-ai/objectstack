@@ -5,7 +5,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { urlUserinfoUsername } from './driver/common.zod';
-import { resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
+import { resolveDriverId, retiredDriverIdGuidance, validateDriverConfig } from './driver/config-registry.zod';
 
 /*
  * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
@@ -171,8 +171,21 @@ const RETIRED_READ_REPLICAS =
 /**
  * Driver Identifier
  * Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowflake").
+ *
+ * An open namespace, so a `z.string()` — with one closed exception: a spelling
+ * the driver vocabulary RETIRED (`mongo`, at 18) is refused by name, with the
+ * prescription naming its canonical id
+ * (`DriverVocabularyEntry.retiredAliases`, `driver/config-registry.zod.ts`).
+ * Data at rest never reaches this refusal: every stored-row rehydration seam
+ * replays `datasource-driver-mongo-to-mongodb` before it parses.
  */
-export const DriverType = z.string().describe('Underlying driver identifier');
+export const DriverType = z
+  .string()
+  .superRefine((driver, ctx) => {
+    const guidance = retiredDriverIdGuidance(driver);
+    if (guidance !== undefined) ctx.addIssue({ code: 'custom', message: guidance });
+  })
+  .describe('Underlying driver identifier');
 export type DriverType = z.input<typeof DriverType>;
 
 /**

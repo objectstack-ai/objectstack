@@ -15,6 +15,7 @@ import {
   getDriverConfigSchema,
   resolveDatabaseDriverId,
   resolveDriverId,
+  retiredDriverIdGuidance,
   validateDriverConfig,
 } from './config-registry.zod';
 
@@ -41,7 +42,8 @@ describe('driver config registry', () => {
 
   it('resolves case- and whitespace-insensitively', () => {
     expect(resolveDriverId('  PostgreSQL ')).toBe('postgres');
-    // `mongodb`, not `mongo`, since commit e2798fab7 renamed the canonical id.
+    // `mongodb`, not `mongo`, since commit e2798fab7 renamed the canonical id;
+    // `mongo` is retired at 18 but still resolves the CONTRACT (see the row's describe).
     expect(resolveDriverId('MongoDB')).toBe('mongodb');
     expect(resolveDriverId(' Mongo ')).toBe('mongodb');
   });
@@ -259,16 +261,82 @@ describe('the `memory` row: contract face kept, selection face withdrawn', () =>
   });
 
   it('moved no other row: the selection face is exactly the six other drivers\' spellings', () => {
+    // `mongo` left this face at 18 for the `mongodb` row's retired column
+    // (pinned in its own describe below); no other spelling moved.
     expect([...DATABASE_DRIVER_SELECTION_ALIASES]).toEqual([
       'sqlite', 'sql',
       'sqlite-wasm', 'wasm-sqlite', 'wasm',
       'postgres', 'postgresql', 'pg',
       'mysql', 'mysql2',
-      'mongodb', 'mongo',
+      'mongodb',
       'turso', 'libsql',
     ]);
     expect([...DATABASE_DRIVER_SELECTION_IDS]).toEqual(['sqlite', 'sqlite-wasm', 'postgres', 'mysql', 'mongodb', 'turso']);
     expect([...BUILTIN_DRIVER_IDS]).toEqual(['memory', 'sqlite', 'sqlite-wasm', 'postgres', 'mysql', 'mongodb', 'turso']);
+  });
+});
+
+/**
+ * The `mongodb` row's retired spelling `mongo` (#23543, ruling F1 A): refused
+ * at authoring by name, offered by no boot selection, and kept on the CONTRACT
+ * face — the half a raw stored legacy row's credential redaction rests on
+ * (`datasource-credential-redaction.test.ts`).
+ */
+describe('the retired `mongo` spelling: authoring refused, selection withdrawn, contract kept', () => {
+  const VALID_CONFIG = { url: 'mongodb://db.internal:27017/events' };
+
+  it('is refused at authoring with the prescription naming `mongodb`, as the only issue', () => {
+    for (const driver of ['mongo', 'Mongo', '  MONGO ']) {
+      const result = DatasourceSchema.safeParse({ name: 'events', driver, config: VALID_CONFIG });
+      expect(result.success, driver).toBe(false);
+      expect(result.error!.issues, driver).toHaveLength(1);
+      const [issue] = result.error!.issues;
+      expect(issue!.code, driver).toBe('custom');
+      expect(issue!.path, driver).toEqual(['driver']);
+      expect(issue!.message, driver).toMatch(
+        /^Datasource `driver: 'mongo'` was removed in @objectstack\/spec 18 \(ADR-0087 D2\)/,
+      );
+      expect(issue!.message, driver).toContain("Use `driver: 'mongodb'`");
+    }
+  });
+
+  it('still judges the config of a refused `mongo` datasource — the driver refusal hides nothing', () => {
+    const result = DatasourceSchema.safeParse({ name: 'events', driver: 'mongo', config: { hostname: 'db.internal' } });
+    expect(result.success).toBe(false);
+    const paths = result.error!.issues.map((i) => i.path.join('.'));
+    expect(paths).toContain('driver');
+    expect(paths).toContain('config.hostname');
+  });
+
+  it('is offered by no boot selection', () => {
+    expect(DATABASE_DRIVER_SELECTION_ALIASES).not.toContain('mongo');
+    expect(resolveDatabaseDriverId('mongo')).toBeUndefined();
+    expect(resolveDatabaseDriverId('mongodb')).toBe('mongodb');
+  });
+
+  it('keeps the contract face, so a stored legacy row is judged, redacted and converged as `mongodb`', () => {
+    expect(resolveDriverId('mongo')).toBe('mongodb');
+    expect(getDriverConfigSchema('mongo')).toBe(DRIVER_CONFIG_SCHEMAS.mongodb);
+    expect(validateDriverConfig('mongo', VALID_CONFIG)).toEqual({ known: true, issues: [] });
+  });
+
+  it('answers a prescription for the retired spelling only — never a live id, a plugin id or a prototype word', () => {
+    expect(retiredDriverIdGuidance(' Mongo ')).toBe(retiredDriverIdGuidance('mongo'));
+    for (const value of ['mongodb', 'pg', 'memory', 'com.vendor.mongolike', 'constructor', '__proto__', '', 42, null, undefined]) {
+      expect(retiredDriverIdGuidance(value), String(value)).toBeUndefined();
+    }
+  });
+
+  it('a retired spelling is no live spelling of any row — the refusal could never fire on a legal value', () => {
+    const live = new Set([...DATABASE_DRIVER_SELECTION_ALIASES, ...BUILTIN_DRIVER_IDS]);
+    for (const alias of Object.keys(DRIVER_ID_ALIASES)) {
+      if (retiredDriverIdGuidance(alias) === undefined) continue;
+      expect(live.has(alias), alias).toBe(false);
+      // …and every retired spelling still resolves a contract (the kept half).
+      expect(resolveDriverId(alias), alias).toBeDefined();
+    }
+    // Anti-vacuity: the loop above judged at least the one retirement this row carries.
+    expect(Object.keys(DRIVER_ID_ALIASES).filter((a) => retiredDriverIdGuidance(a) !== undefined)).toEqual(['mongo']);
   });
 });
 

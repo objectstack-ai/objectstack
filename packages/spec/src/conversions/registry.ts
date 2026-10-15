@@ -3601,13 +3601,14 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
 };
 
 /**
- * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7).
+ * `datasource.driver: 'mongo'` → `'mongodb'` (protocol 17, commit e2798fab7;
+ * retired from the load path at 18, #23543 F1).
  *
  * ## Why a stored value has to move at all
  *
- * `mongo` and `mongodb` have both been accepted spellings since #4410, and both
- * still are — this conversion does NOT rescue a broken boot, and a deployment
- * that never runs it keeps connecting exactly as before. What moved is the
+ * `mongo` and `mongodb` were both accepted spellings from #4410 through 17 —
+ * this conversion never rescued a broken boot, and a stored row it has not
+ * reached still resolves the same contract and builds the same driver. What moved is the
  * CANONICAL id: commit e2798fab7 landed the ruling that renamed it to `mongodb`, the spelling both boot
  * hosts, the driver package (`@objectstack/driver-mongodb`) and every URL scheme
  * already used, so that the id which selects a driver and the id which selects
@@ -3635,26 +3636,35 @@ const datasourceConfigDriverKeyAliases: MetadataConversion = {
  *
  * Losslessness decides only that the data repair is D2. It does not decide
  * whether the family ALSO owes a D3 entry — every retirement family does
- * (`SemanticMigration`, `migrations/types.ts`). This one converts into
- * protocol 17, whose step shipped before that rule and was not back-filled,
- * so it has none.
+ * (`SemanticMigration`, `migrations/types.ts`). The rename into protocol 17
+ * shipped before that rule and was not back-filled; the value's retirement at
+ * 18 is a family of its own, and its D3 entry is
+ * `datasource-driver-mongo-alias-retired`.
  *
- * ## Why it stays on the LIVE load path
+ * ## Retired from the load path at 18 (#23543, ruling F1 A)
  *
- * Unlike the key-alias conversion above, `mongo` is not a spelling the authoring
- * gate rejects — it is still a legal alias, deliberately, so that nothing breaks
- * for a deployment that skipped the migration. There is therefore no loud
- * rejection for a live-window entry to pre-empt, and every rehydration seam
- * converging on one spelling is the whole point.
- *
- * **A recorded verdict at 18 (#23487):** it stays. Retiring it needs a decision
- * first: retire `'mongo'` as a value, refused with a prescription naming
- * `mongodb`, or record this entry as permanent. While the value is legal there
- * is no refusal for a retirement to hand the author to.
+ * Through 17 it stayed live because `mongo` was still a legal alias, so there
+ * was no refusal for a retirement to hand the author to (the verdict #23487
+ * recorded). The ruling retired the value: `mongo` left the selection face, and
+ * `DriverType` refuses an authored `datasource.driver: 'mongo'` by name with
+ * the prescription naming `mongodb` (`DriverVocabularyEntry.retiredAliases`,
+ * `data/driver/config-registry.zod.ts`). So the authoring funnel no longer
+ * replays this entry, and an author is taught the canonical id instead of
+ * being rewritten. Stored rows are the `includeRetired` seams: stored-row
+ * rehydration (`applyConversionsToStoredItem`) and the artifact door still
+ * rewrite them, and `os migrate meta --from 16` lists the edit for existing
+ * sources, as step 17's mechanical member. The spelling keeps resolving the
+ * mongodb CONTRACT, which is what lets
+ * {@link datasourceConfigDriverKeyAliases} — ordered ahead of this entry —
+ * still reach a stored `driver: 'mongo'` row's legacy config keys. That D3
+ * entry names what the chain cannot reach: an environment variable, a REST
+ * caller, a script.
  */
 const datasourceDriverMongoToMongodb: MetadataConversion = {
   id: 'datasource-driver-mongo-to-mongodb',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'datasource.driver',
   summary:
     "datasource driver id 'mongo' → 'mongodb' — the canonical id both boot hosts, the driver "
