@@ -55,6 +55,10 @@
  *    with the way out true for those rows, and that way out walks: delete Q's
  *    row by naming Q, then the save naming no package edits the package-less
  *    definition, or the object moves into Q, with its records, across a boot;
+ *  - the same for rows bound to ANY package (`[package-less, P]`,
+ *    `[package-less, P, Q]`): the refusal names each row's delete by its
+ *    package, since a delete naming no package resolves to the one binding
+ *    present or is refused 409 over two, and that walk converges;
  *  - the promote doors (ADR-0029 D9.9 there too): Q's draft stored before the
  *    package-less row existed is refused at publish with the order true for
  *    a promotion (the delete, then the same publish), and that order walks;
@@ -451,8 +455,8 @@ describe('#23514 — a save naming a package beside an object its package-less d
     });
 
     describe('the rows the save door stored before this refusal: `[package-less, Q]`, Q\'s row never served', () => {
-        /** The package-less owner with two records, plus Q's row stored beside it, as the pre-refusal save wrote it. */
-        async function seedLegacyRows(stores: Stores, drops: string[]): Promise<Booted> {
+        /** The package-less owner with two records, plus each package's row stored beside it, as the pre-refusal save wrote it. */
+        async function seedLegacyRows(stores: Stores, drops: string[], packages: string[] = [Q]): Promise<Booted> {
             const k1 = await seedPackagelessOwner(stores, drops);
             await k1.kernel.shutdown();
             const rows = stores.get('sys_metadata')!;
@@ -460,25 +464,31 @@ describe('#23514 — a save naming a package beside an object its package-less d
             const body = typeof unbound.metadata === 'string'
                 ? JSON.parse(unbound.metadata as string)
                 : { ...(unbound.metadata as Record<string, unknown>) };
-            body.label = 'Gadget Q legacy';
-            rows.set('legacy_q_row', {
-                ...unbound,
-                id: 'legacy_q_row',
-                package_id: Q,
-                metadata: typeof unbound.metadata === 'string' ? JSON.stringify(body) : body,
-            });
+            for (const pkg of packages) {
+                body.label = `Gadget ${pkg} legacy`;
+                rows.set(`legacy_row_${pkg}`, {
+                    ...unbound,
+                    id: `legacy_row_${pkg}`,
+                    package_id: pkg,
+                    metadata: typeof unbound.metadata === 'string' ? JSON.stringify(body) : { ...body },
+                });
+            }
             const warn = vi.spyOn(console, 'warn');
             try {
                 const k2 = await boot(stores, drops);
-                // The boot keeps the package-less owner and names the way out for these rows.
-                const hydrateWarn = warn.mock.calls.map((c) => String(c[0]))
-                    .find((line) => line.includes(`Failed to hydrate object/${NAME}`));
-                expect(hydrateWarn).toContain(
-                    `Object '${NAME}' is served by its definition bound to no package; its stored definition bound to '${Q}' is never served.`,
-                );
-                expect(hydrateWarn).toContain(`DELETE /api/v1/meta/object/${NAME}?package=${Q}`);
-                expect(hydrateWarn).toContain('(code=OBJECT_OVERLAY_PACKAGE_MISMATCH)');
-                expect(storedBindings(stores)).toEqual([null, Q]);
+                // The boot keeps the package-less owner and, for each package's row,
+                // names the way out: every package's row deleted by name.
+                const hydrateWarns = warn.mock.calls.map((c) => String(c[0]))
+                    .filter((line) => line.includes(`Failed to hydrate object/${NAME}`));
+                expect(hydrateWarns).toHaveLength(packages.length);
+                for (const line of hydrateWarns) {
+                    expect(line).toContain(`Object '${NAME}' is served by its package-less definition; its definition`);
+                    expect(line).toContain(`DELETE /api/v1/meta/object/${NAME}?package=${[...packages].sort()[0]}`);
+                    for (const pkg of packages) expect(line).toContain(`?package=${pkg}`);
+                    expect(line).toContain('then the same DELETE with no package and no dropStorage');
+                    expect(line).toContain('(code=OBJECT_OVERLAY_PACKAGE_MISMATCH)');
+                }
+                expect(storedBindings(stores)).toEqual([null, ...packages]);
                 expect(k2.engine.registry.getObjectOwner(NAME)?.packageId).toBe(SENTINEL);
                 expect((k2.engine.registry.getObject(NAME) as { label?: string }).label).toBe('Gadget unbound');
                 return k2;
@@ -533,8 +543,10 @@ describe('#23514 — a save naming a package beside an object its package-less d
             expect(err.packageId).toBe(Q);
             expect(err.ownerPackageId).toBeNull();
             expect(err.message).toMatch(new RegExp(
-                `^Object '${NAME}' is served by its definition bound to no package; its stored definition bound to `
-                + `'${Q.replace(/\./g, '\\.')}' is never served\\. To move the object into`,
+                `^Object '${NAME}' is served by its package-less definition; its definition bound to `
+                + `'${Q.replace(/\./g, '\\.')}' is never served\\. To move it into '${Q.replace(/\./g, '\\.')}': `
+                + `DELETE /api/v1/meta/object/${NAME}\\?package=${Q.replace(/\./g, '\\.')}, then the same DELETE `
+                + 'with no package and no dropStorage',
             ));
             expect(storedBindings(stores)).toEqual([null, Q]);
 
@@ -550,6 +562,133 @@ describe('#23514 — a save naming a package beside an object its package-less d
             // …then the save naming Q, in publish mode.
             expect((await save(k, Q, 'Gadget Q')).success).toBe(true);
             expect(storedBindings(stores)).toEqual([Q]);
+            expect(await served(k)).toEqual({
+                owner: Q, dataPlaneLabel: 'Gadget Q', metaReadLabel: 'Gadget Q', records: 2,
+            });
+
+            await k.kernel.shutdown();
+            const k2 = await boot(stores, drops);
+            expect(await served(k2)).toEqual({
+                owner: Q, dataPlaneLabel: 'Gadget Q', metaReadLabel: 'Gadget Q', records: 2,
+            });
+            expect(drops).toEqual([]);
+        });
+
+        it('another package\'s row `[package-less, P]`: a save naming Q is refused naming P\'s delete, and the walk in that order moves the object into Q', async () => {
+            const stores: Stores = new Map();
+            const drops: string[] = [];
+            const k = await seedLegacyRows(stores, drops, [P]);
+
+            const err = await refusalOf(k, Q, 'Gadget Q');
+            expect(err).toBeInstanceOf(Error);
+            expect(err.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
+            expect(err.status).toBe(422);
+            expect(err.packageId).toBe(Q);
+            expect(err.ownerPackageId).toBeNull();
+            expect(err.message).toMatch(new RegExp(
+                `^Object '${NAME}' is served by its package-less definition; its definition bound to `
+                + `'${P.replace(/\./g, '\\.')}' is never served\\. To move it into '${Q.replace(/\./g, '\\.')}': `
+                + `DELETE /api/v1/meta/object/${NAME}\\?package=${P.replace(/\./g, '\\.')}, then the same DELETE `
+                + 'with no package and no dropStorage',
+            ));
+            expect(storedBindings(stores)).toEqual([null, P]);
+
+            // P's row by naming P…
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME, packageId: P })).success).toBe(true);
+            expect(storedBindings(stores)).toEqual([null]);
+            expect((await served(k)).owner).toBe(SENTINEL);
+            // …then the package-less definition, without dropStorage…
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
+            expect(storedBindings(stores)).toEqual([]);
+            expect(stores.get(NAME)?.size).toBe(2);
+            // …then the save naming Q.
+            expect((await save(k, Q, 'Gadget Q')).success).toBe(true);
+            expect(await served(k)).toEqual({
+                owner: Q, dataPlaneLabel: 'Gadget Q', metaReadLabel: 'Gadget Q', records: 2,
+            });
+
+            await k.kernel.shutdown();
+            const k2 = await boot(stores, drops);
+            expect(await served(k2)).toEqual({
+                owner: Q, dataPlaneLabel: 'Gadget Q', metaReadLabel: 'Gadget Q', records: 2,
+            });
+            expect(storedBindings(stores)).toEqual([Q]);
+            expect(drops).toEqual([]);
+        });
+
+        it('another package\'s row `[package-less, P]`: a DRAFT save naming Q and a publish of Q\'s stored draft are refused naming P\'s delete, and the publish walks', async () => {
+            const stores: Stores = new Map();
+            const drops: string[] = [];
+            const k = await seedLegacyRows(stores, drops, [P]);
+            const pRowDelete = new RegExp(
+                `To move it into '${Q.replace(/\./g, '\\.')}': DELETE /api/v1/meta/object/${NAME}\\?package=`
+                + `${P.replace(/\./g, '\\.')}, then the same DELETE with no package and no dropStorage`,
+            );
+
+            const draftErr = await k.protocol.saveMetaItem({
+                type: 'object', name: NAME, packageId: Q, mode: 'draft', item: gadgetBody('Gadget Q draft'),
+            }).then(() => null, (e: any) => e);
+            expect(draftErr?.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
+            expect(draftErr?.status).toBe(422);
+            expect(draftErr?.message).toMatch(pRowDelete);
+            expect(draftErr?.message).toContain(`then save it naming '${Q}' in publish mode.`);
+
+            // Q's draft as an earlier door stored it, beside P's active row.
+            const rows = stores.get('sys_metadata')!;
+            const unbound = Array.from(rows.values()).find((r) => r.type === 'object' && r.name === NAME && r.package_id == null)!;
+            rows.set('legacy_q_draft', { ...unbound, id: 'legacy_q_draft', package_id: Q, state: 'draft' });
+            const promoteErr = await k.protocol.publishMetaItem({ type: 'object', name: NAME, packageId: Q })
+                .then(() => null, (e: any) => e);
+            expect(promoteErr?.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
+            expect(promoteErr?.status).toBe(422);
+            expect(promoteErr?.message).toMatch(pRowDelete);
+            expect(promoteErr?.message).toContain('then publish this draft again.');
+
+            // The walk the promote text names: P's row, the package-less definition, then the same publish.
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME, packageId: P })).success).toBe(true);
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
+            expect((await k.protocol.publishMetaItem({ type: 'object', name: NAME, packageId: Q })).success).toBe(true);
+            expect((await served(k)).owner).toBe(Q);
+            expect((await served(k)).records).toBe(2);
+            await k.kernel.shutdown();
+            const k2 = await boot(stores, drops);
+            expect((await served(k2)).owner).toBe(Q);
+            expect((await served(k2)).records).toBe(2);
+            expect(drops).toEqual([]);
+        });
+
+        it('two packages\' rows `[package-less, P, Q]`: the delete naming no package is refused 409, so the refusal names each row\'s delete, and that walk converges', async () => {
+            const stores: Stores = new Map();
+            const drops: string[] = [];
+            const k = await seedLegacyRows(stores, drops, [P, Q]);
+
+            const err = await refusalOf(k, Q, 'Gadget Q');
+            expect(err).toBeInstanceOf(Error);
+            expect(err.code).toBe('OBJECT_OVERLAY_PACKAGE_MISMATCH');
+            expect(err.status).toBe(422);
+            expect(err.message).toMatch(new RegExp(
+                `^Object '${NAME}' is served by its package-less definition; its definitions bound to `
+                + `'${P.replace(/\./g, '\\.')}', '${Q.replace(/\./g, '\\.')}' are never served\\. `,
+            ));
+            expect(err.message).toContain(
+                `DELETE /api/v1/meta/object/${NAME}?package=${P}, then ?package=${Q}, then the same DELETE with no `
+                + `package and no dropStorage (the table and records stay), then save it naming '${Q}' in publish mode.`,
+            );
+
+            // Measured: the delete naming no package removes neither row here; it is refused.
+            const ambiguous = await k.protocol.deleteMetaItem({ type: 'object', name: NAME }).then(() => null, (e: any) => e);
+            expect(ambiguous?.code).toBe('RESOURCE_CONFLICT');
+            expect(ambiguous?.status).toBe(409);
+            expect(storedBindings(stores)).toEqual([null, P, Q]);
+
+            // The walk in the named order.
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME, packageId: P })).success).toBe(true);
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME, packageId: Q })).success).toBe(true);
+            expect(storedBindings(stores)).toEqual([null]);
+            expect((await served(k)).owner).toBe(SENTINEL);
+            expect((await k.protocol.deleteMetaItem({ type: 'object', name: NAME })).success).toBe(true);
+            expect(storedBindings(stores)).toEqual([]);
+            expect((await save(k, Q, 'Gadget Q')).success).toBe(true);
             expect(await served(k)).toEqual({
                 owner: Q, dataPlaneLabel: 'Gadget Q', metaReadLabel: 'Gadget Q', records: 2,
             });
