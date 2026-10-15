@@ -600,10 +600,10 @@ describe("flow.runAs decides isSystem for every flow writer kind (#15953 row 8)"
   }
 
   it.each([
-    ["runAs:'system'", 'system', true],
-    ["runAs:'user'", 'user', false],
-    ['runAs omitted', undefined, false],
-  ] as const)("screen flow, %s: the write on the resumed leg is isSystem %s", async (_label, runAs, elevated) => {
+    ["runAs:'system'", true, 'system'],
+    ["runAs:'user'", false, 'user'],
+    ['runAs omitted', false, undefined],
+  ] as const)("screen flow, %s: the write on the resumed leg is isSystem %s", async (_label, elevated, runAs) => {
     const { engine, calls } = writerEngine();
     engine.registerFlow('screen_write', screenWriteFlow('screen_write', runAs));
 

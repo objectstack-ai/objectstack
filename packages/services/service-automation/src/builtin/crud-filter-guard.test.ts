@@ -29,10 +29,11 @@ import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
  * variables, an unresolved one was erased and refused here, and a placeholder
  * no flow variable shadowed was handed on.
  *
- * #15953 row 11 (the service-automation half) is the last describe: a flow
- * filter's date value reaches the data engine resolved, the query engine's
- * `{today}` is handed on for it to resolve, and the retired `{TODAY()}` macro
- * is refused before any query. It lets objectstack-ai/hotcrm retire
+ * #15953 row 11 (the service-automation half): a flow filter's date value
+ * reaches the data engine resolved and the retired `{TODAY()}` macro is
+ * refused before any query (the last describe), while the query engine's
+ * `{today}` is handed on for it to resolve (the first describe's placeholder
+ * case). It lets objectstack-ai/hotcrm retire
  * `test/flow-filter-today-token.test.ts` (objectstack-ai/hotcrm#1583), whose
  * `interpolateFilter` no longer exists. The objectql half (`resolveFilterTokens`
  * resolves `{today}` and refuses `{TODAY()}`) is the engine's.
@@ -134,14 +135,15 @@ describe('a filter operand envelope is evaluated before the query; a query place
     it.each(NODES)('%s: a query placeholder reaches the engine untouched, beside a literal', async (nodeType, verb, extra) => {
         engine.registerFlow('crud_flow', crudFlow(nodeType, {
             objectName: 'deal',
-            filter: { close_date: { $lt: '{current_year_start}' }, a: '{30_days_ago}', b: '{current_user_id}', status: 'open' },
+            filter: { close_date: { $lt: '{current_year_start}' }, a: '{30_days_ago}', b: '{current_user_id}', due: { $lte: '{today}' }, status: 'open' },
             ...extra,
         }));
         const result = await engine.execute('crud_flow', { record: { id: 'r1' } } as any);
 
         expect(result.success).toBe(true);
+        // `{today}` included (#15953 row 11): the query engine's word, never the executor's to resolve.
         expect(data.seen[verb]).toEqual({
-            close_date: { $lt: '{current_year_start}' }, a: '{30_days_ago}', b: '{current_user_id}', status: 'open',
+            close_date: { $lt: '{current_year_start}' }, a: '{30_days_ago}', b: '{current_user_id}', due: { $lte: '{today}' }, status: 'open',
         });
     });
 
@@ -343,13 +345,13 @@ describe('a flow `{…}` token at a filter operand is refused at every door (#19
  * its spelling is the CEL envelope `isoDate(today())`, which the executor
  * evaluates, so the `where` the data engine receives holds the date itself.
  * `{today}` is a different word: a query placeholder, the query engine's to
- * resolve, so the executor hands it on as written. The clock is pinned, so
- * each case asserts the exact value the engine received.
+ * resolve, so the executor hands it on as written — carried by the first
+ * describe's placeholder case, which lists it beside the other placeholders.
+ * The clock is pinned, so each case asserts the exact value the engine received.
  *
  * Directions decided before running: the envelope reaches the engine as
- * `YYYY-MM-DD` text, `{today}` reaches it untouched, and `{TODAY()}` reaches
- * nothing — refused at `registerFlow` and by the executor's contract parse,
- * naming `isoDate(today())`.
+ * `YYYY-MM-DD` text, and `{TODAY()}` reaches nothing — refused at
+ * `registerFlow` and by the executor's contract parse, naming `isoDate(today())`.
  */
 describe("a filter's date value reaches the data engine resolved (#15953 row 11)", () => {
     // Midday UTC, so the reference-timezone day is this one wherever the run's
@@ -383,21 +385,6 @@ describe("a filter's date value reaches the data engine resolved (#15953 row 11)
             close_date: { $lt: '2026-03-14' },
             created: { $gte: '2026-02-12' },
         });
-    });
-
-    it.each(NODES)('%s: the `{today}` query placeholder reaches the engine untouched — it is not the executor\'s to resolve', async (nodeType, verb, extra) => {
-        const data = fakeData();
-        const engine = new AutomationEngine(createTestLogger());
-        registerCrudNodes(engine, ctxWith(data.service));
-        engine.registerFlow('crud_flow', crudFlow(nodeType, {
-            objectName: 'deal',
-            filter: { close_date: { $lt: '{today}' }, due: '{today}' },
-            ...extra,
-        }));
-        const result = await engine.execute('crud_flow', { record: { id: 'r1' } } as any);
-
-        expect(result.success, `run failed: ${JSON.stringify(result)}`).toBe(true);
-        expect(data.seen[verb]).toEqual({ close_date: { $lt: '{today}' }, due: '{today}' });
     });
 
     it.each(NODES)('%s: `registerFlow` refuses the retired `{TODAY()}` macro, located at the operand, naming its CEL spelling', async (nodeType, _verb, extra) => {
