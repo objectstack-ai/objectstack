@@ -45,9 +45,15 @@ import type { Flow } from '@objectstack/spec/automation';
 
 import { bootStack, type VerifyStack } from './harness.js';
 import { isVerifyRefusal } from './handle.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
+
+// The boot's first load, paid during collection rather than in the
+// `beforeAll` below (see `boot-warm-up.testkit.ts`): the same options and the
+// same `requires` as this file's own boot.
+await warmUpBoot({ automation: true }, { requires: ['automation', 'triggers'] });
 
 const LEDGER = 'fda_ledger';
 const WATCH = 'fda_watch';
