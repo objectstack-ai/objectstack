@@ -90,8 +90,63 @@
 //      own: widen the shared vocabulary in `scripts/symbol-anchors.mjs`, and
 //      ⛔ never re-fork a private extension set here.
 //
+// ## The scoped mode: `--changed-from REF` (#23653, ruling record 6190922830)
+//
+// A PR that renames or removes a symbol this ledger cites by `#symbol` used to
+// get no signal before merge: this gate is not a per-PR gate (the README's
+// standing decision, unchanged), so the break reached `main` and only the
+// daily watchdog saw it. The scoped mode is the author's own pre-push check:
+//
+//     node scripts/check-platform-checklist.mjs --changed-from origin/main
+//
+// It runs the same registered sweep the full gate runs (⛔ no resolution of
+// its own) and FILTERS the verdict. An anchor is judged only when its target
+// file is in the change set, and the run reds only on judged anchors that no
+// longer resolve. Nothing else this gate checks is judged in this mode: the
+// ledger's structure, coverage, traps and floor, and any anchor broken by a
+// file outside the change set. So a branch never inherits a red it did not
+// cause, and the full gate stays the full gate.
+//
+//   - "Lost" means a judged anchor that the shared resolver does not resolve
+//     at the WORKING TREE. Either its symbol is gone from the file
+//     (`unresolved-symbol`), or the file itself is gone from the index
+//     (`unresolved-path`). A deleted file, or the OLD side of a rename, is the
+//     strongest loss there is, so it is judged and named. An anchor on the
+//     named residual below is not a loss, because the full gate does not red
+//     on it either. A BARE citation (no `#symbol`) is not judged, because the
+//     full gate does not judge one (`checkBarePaths` is off for this corpus).
+//     The mode narrows the full gate's verdict and ⛔ never widens it.
+//   - The change set is computed, never typed. It is the files that differ
+//     between `git merge-base REF HEAD` and the working tree (committed, staged
+//     and unstaged, in one read), plus untracked files. Rename detection is OFF,
+//     so a moved file contributes its OLD path, which is the path the citations
+//     name. The diff starts at the merge base and not at REF, because a two-dot
+//     range would hand this branch every sibling PR that landed on REF since
+//     the branch was cut. These are the semantics of
+//     `scripts/pm/dispatch-gates.mjs#changedPathsFromGit`, re-stated rather than
+//     imported: that module is frozen, and its 16,000-line import chain is not
+//     this gate's to load on every daily run.
+//   - Absence is loud. A change set that touches no anchored file prints
+//     "0 anchored files in the change set — nothing judged", never a bare OK
+//     that reads like the full gate's. A change set that cannot be read (no
+//     REF, a REF that does not resolve, no merge base in a shallow checkout) is
+//     a REFUSAL. The mode ⛔ never falls back to the full corpus or to an empty
+//     set.
+//   - Exit codes: 0 when nothing judged was lost, or nothing was judged; 1 when
+//     an anchor was lost; 2 when the change set was refused.
+//   - Cost: the same wall time as the full gate, one whole-corpus sweep plus
+//     the inline batteries, because the filter sits on the verdict and not on
+//     the resolution. Resolving only the judged anchors would need a
+//     target-filtered sweep in `scripts/symbol-anchors.mjs`, which this mode
+//     does not touch.
+//   - ⛔ Wired nowhere. No CI job runs it, and it is in no derived gate family:
+//     ruling item 2 keeps `scripts/pm/dispatch-gates.mjs` unchanged. The dev
+//     contract quotes the command instead.
+//
 // Usage: node scripts/check-platform-checklist.mjs   (pnpm check:platform-checklist)
+//        node scripts/check-platform-checklist.mjs --changed-from REF   (the scoped mode above)
 
+import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
 import * as symbolAnchorsModule from './symbol-anchors.mjs';
@@ -1053,7 +1108,7 @@ const BATTERY_PROVISIONING_USE = 'selfTestProvisioningUse: both `use` spellings 
 const BATTERY_UNREFERENCED_RECIPES = 'selfTestUnreferencedRecipes: the reverse direction';
 const BATTERY_META_CALL_SPELLING = 'selfTestMetaCallSpelling: the folded `/meta` plural, read from the live contract';
 const BATTERY_LINE_CITATION_BINDING = 'selfTestLineCitationBinding: the corpus declaration, the absent fork, and the binding driven both ways';
-const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the corpus registration, the binding to the shared resolver, the residual and the floor';
+const BATTERY_SYMBOL_ANCHORS = 'selfTestSymbolAnchors: the corpus registration, the binding to the shared resolver, the residual, the floor, and the scoped mode\'s filter';
 const BATTERY_PLANNED_STATUS = 'selfTestPlannedStatus: the `planned` accept set, the fields it relaxes, the `retired` rule beside it, and the coverage ratchet driven BOTH ways';
 
 const SELF_TEST_BATTERIES = Object.freeze({
@@ -1077,7 +1132,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // their place — the registration, the ONE-vocabulary pin, the live `runs/`
   // exclusion in both directions, and every re-judged #16898 case, which
   // ⛔ survives the transplant unchanged in verdict.
-  [BATTERY_SYMBOL_ANCHORS]: 42,
+  //
+  // 42 → 64 at #23653: the scoped mode's 22 cases. S1 to S9 drive the
+  // verdict's filter, C1 to C6 the change set through a fake `git`, Q1 to Q5
+  // the request on argv, and L4/L5 the live population and the real runner.
+  // They live in this battery rather than one of their own because the mode
+  // is a filter on this limb's verdict, with no resolution of its own.
+  [BATTERY_SYMBOL_ANCHORS]: 64,
   // New with the `planned` status. Set at its landed count (headroom 0, the
   // convention every entry above uses). The load-bearing third of it is the
   // coverage direction: no coverage.json entry maps a planned item today, so
@@ -2085,6 +2146,210 @@ function anchorFloorProblems(counts, floors) {
   return problems;
 }
 
+// ── The scoped mode, in four pieces (#23653) ────────────────────────────────
+//
+// The header's `## The scoped mode` section says what the mode judges and why.
+// The pieces are pure wherever they can be, so the battery below drives every
+// branch on a fixture: the request read off argv, the change set read through
+// an INJECTED `git`, the anchor population read with the shared extractor, and
+// the verdict over the sweep's findings. Only the dispatch at the bottom of
+// this file touches the real process.
+
+const SCOPED_FLAG = '--changed-from';
+const SCOPED_REFUSED_EXIT = 2;
+
+/**
+ * The request on argv: `null` for the full gate, `{ ref }` for the scoped
+ * mode, or `{ refusal }`.
+ *
+ * One spelling, as two arguments. ⛔ A near spelling (`--changed-from=REF`, or
+ * `--changed` followed by paths) is REFUSED, never ignored, because an ignored
+ * flag runs the full gate, and that verdict would then be read as the scoped
+ * one.
+ *
+ * @param {string[]} argv the arguments after the script path
+ * @returns {null | {ref: string} | {refusal: string}}
+ */
+function scopedModeRequest(argv) {
+  const near = argv.filter((a) => a !== SCOPED_FLAG && a.startsWith('--changed'));
+  if (near.length) {
+    return { refusal: `${near.map((a) => `\`${a}\``).join(', ')} is not a spelling this gate reads. The scoped mode is \`${SCOPED_FLAG} REF\`, as two arguments.` };
+  }
+  const at = argv.indexOf(SCOPED_FLAG);
+  if (at === -1) return null;
+  if (argv.indexOf(SCOPED_FLAG, at + 1) !== -1) return { refusal: `\`${SCOPED_FLAG}\` is given twice. Name one REF.` };
+  const ref = argv[at + 1];
+  if (ref === undefined || ref.startsWith('-')) {
+    return { refusal: `\`${SCOPED_FLAG}\` needs the REF to diff against, as the next argument: the branch your change will merge into.` };
+  }
+  if (argv.includes('--anchor-census')) {
+    return { refusal: `\`${SCOPED_FLAG}\` and \`--anchor-census\` cannot be combined: the census reads the whole corpus. Run them separately.` };
+  }
+  return { ref };
+}
+
+/**
+ * One read-only `git` command, in this checkout.
+ *
+ * The ambient `GIT_*` environment is inherited on purpose. The isolation rule
+ * (`scripts/git-env.mjs#GIT_ENV_ISOLATION_RULE`) is for a child that operates
+ * on a THROWAWAY repository. These children read the REAL one, and under a
+ * hook the inherited variables name this very repository.
+ *
+ * @param {string[]} args
+ * @returns {{status: number | null, stdout: string, stderr: string}}
+ */
+function gitInRoot(args) {
+  const r = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28 });
+  if (r.error) return { status: null, stdout: '', stderr: String(r.error.message) };
+  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
+/**
+ * The change set for REF: every file that differs between the merge base of
+ * REF and HEAD and the WORKING TREE, plus untracked files, with rename
+ * detection off. Returns `{ files, mergeBase, counts }` or `{ refusal }`.
+ *
+ * ⛔ It never returns an empty set in place of a refusal. An unreadable change
+ * set judged as "no files" would print the nothing-judged line for a branch
+ * that may have lost every anchor it touched.
+ *
+ * @param {string} ref
+ * @param {(args: string[]) => {status: number | null, stdout: string, stderr: string}} git
+ * @returns {{files: string[], mergeBase: string, counts: {tracked: number, untracked: number}} | {refusal: string}}
+ */
+function changedFilesSince(ref, git) {
+  const commit = git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+  if (commit.status !== 0 || !commit.stdout.trim()) {
+    return { refusal: `REF \`${ref}\` does not resolve to a commit in this checkout. Fetch it first, then re-run.` };
+  }
+  const mb = git(['merge-base', ref, 'HEAD']);
+  const mergeBase = mb.stdout.trim();
+  if (mb.status !== 0 || !mergeBase) {
+    const shallow = git(['rev-parse', '--is-shallow-repository']).stdout.trim() === 'true';
+    return {
+      refusal: `there is no merge base between \`${ref}\` and HEAD.`
+        + (shallow ? ' This checkout is SHALLOW, so the branch point is likely below the graft: deepen it (`git fetch --deepen=200`) and re-run.' : '')
+        + ' ⛔ This mode does not fall back to a two-dot range, which would count every change that landed on REF since the branch was cut as this branch\'s own.',
+    };
+  }
+  const listed = (args) => {
+    const r = git(args);
+    return r.status === 0 ? r.stdout.split('\0').filter(Boolean) : null;
+  };
+  // ONE read covers committed, staged and unstaged changes, because a diff
+  // against a single commit compares it with the working tree. Rename detection
+  // is off so a move contributes BOTH of its paths, and a citation names the old
+  // one.
+  const tracked = listed(['diff', '--name-only', '--no-renames', '-z', mergeBase]);
+  const untracked = listed(['ls-files', '--others', '--exclude-standard', '-z']);
+  if (tracked === null || untracked === null) {
+    return { refusal: `git could not list ${tracked === null ? 'the changes since' : 'the untracked files beside'} merge base ${mergeBase.slice(0, 9)}.` };
+  }
+  return {
+    files: [...new Set([...tracked, ...untracked])].sort(),
+    mergeBase,
+    counts: { tracked: tracked.length, untracked: untracked.length },
+  };
+}
+
+/**
+ * Every anchor in the documents a sweep reached, read with the SHARED extractor
+ * and this corpus's own options. That makes it the sweep's population, not a
+ * second one. The mode needs it for one fact the sweep does not return: which
+ * target files carry an anchor at all. The dispatch refuses when it disagrees
+ * with the sweep's own per-document count, because the judged-anchor count
+ * would then be wrong.
+ *
+ * @param {{byDoc: Map<string, {anchors: number}>}} sweep
+ * @returns {{targets: Array<{doc: string, path: string, symbol: string | null, repo: string | null}>, disagreements: string[]}}
+ */
+function corpusAnchorTargets(sweep) {
+  const targets = [];
+  const disagreements = [];
+  for (const [doc, counted] of sweep.byDoc) {
+    const raw = readFileSync(join(ROOT, doc), 'utf8');
+    const { anchors } = extractAnchors(CORPUS.docProjection ? CORPUS.docProjection(raw) : raw, {
+      unspannedAnchors: CORPUS.unspannedAnchors,
+      pathlessLineCitations: CORPUS.pathlessLineCitations,
+    });
+    if (anchors.length !== counted.anchors) disagreements.push(`${doc}: ${anchors.length} read here, ${counted.anchors} swept`);
+    for (const a of anchors) targets.push({ doc, path: a.path, symbol: a.symbol, repo: a.repo });
+  }
+  return { targets, disagreements };
+}
+
+/**
+ * The scoped verdict. Pure: the change set, the anchor population and the
+ * sweep's findings go in, and the state, exit code and printed lines come out.
+ *
+ * ⭐ THE FILTER is one membership test on the anchor's TARGET file,
+ * `changed.has(f.path)`. That one test is all of the ruling's "an anchor broken
+ * elsewhere is not reported", and the battery's S3 leg is what holds it.
+ *
+ * @param {{ref: string, change: {files: string[], mergeBase: string}, targets: Array<{path: string, symbol: string | null, repo: string | null}>, findings: Array<{kind: string, doc: string, line?: number, path?: string, symbol?: string, repo?: string, absent?: string[]}>, onResidual: (doc: string, anchor: string) => boolean}} input
+ */
+function scopedAnchorVerdict({ ref, change, targets, findings, onResidual }) {
+  const changed = new Set(change.files);
+  const judged = targets.filter((a) => a.symbol && !a.repo && changed.has(a.path));
+  const anchoredFiles = new Set(judged.map((a) => a.path));
+  const lost = [];
+  let residual = 0;
+  for (const f of findings) {
+    if (f.kind !== 'unresolved-symbol' && f.kind !== 'unresolved-path') continue;
+    if (f.repo || !changed.has(f.path)) continue;
+    const anchor = `${f.path}#${f.symbol}`;
+    if (onResidual(f.doc, anchor)) {
+      residual += 1;
+      continue;
+    }
+    lost.push({ doc: f.doc, line: f.line, anchor, kind: f.kind, path: f.path, absent: f.absent ?? [] });
+  }
+  const head = `check-platform-checklist ${SCOPED_FLAG} ${ref}`;
+  const scope = `${change.files.length} changed file(s) since merge base ${change.mergeBase.slice(0, 9)}`;
+  const base = { judged: judged.length, anchoredFiles: anchoredFiles.size, lost, residual };
+  if (lost.length) {
+    return {
+      ...base,
+      state: 'lost',
+      exitCode: 1,
+      lines: [
+        `${head}: ${lost.length} LOST anchor(s). The change set removed or renamed what these checklist citations name (${scope}):`,
+        ...lost.map((l) => `  ✗ ${l.doc} line ${l.line}: \`${l.anchor}\` — ${l.kind === 'unresolved-path'
+          ? `${l.path} is not a tracked file any more (deleted, or the old side of a rename).`
+          : `${l.absent.map((s) => `\`${s}\``).join(' and ')} ${l.absent.length > 1 ? 'are' : 'is'} no longer declared in ${l.path}.`}`),
+        'Re-point each citation at what the code declares now (the file the symbol moved to, or its new name), or restore the symbol.'
+          + ' ⛔ Do not widen the resolution rule in `scripts/symbol-anchors.mjs` to make this green: it is shared with four other corpora.',
+      ],
+    };
+  }
+  if (anchoredFiles.size === 0) {
+    return {
+      ...base,
+      state: 'nothing-judged',
+      exitCode: 0,
+      lines: [`${head}: 0 anchored files in the change set — nothing judged. ${scope}, and none of them is the target of a checklist symbol anchor. ⚠️ This is not the full gate's verdict: run \`pnpm check:platform-checklist\` for that.`],
+    };
+  }
+  return {
+    ...base,
+    state: 'ok',
+    exitCode: 0,
+    lines: [
+      `${head}: OK — ${anchoredFiles.size} anchored file(s) in the change set, ${judged.length} anchor(s) judged, 0 lost`
+        + `${residual ? ` (${residual} on the named residual, which the full gate does not red on either)` : ''}. ${scope}.`
+        + ' Anchors whose target file is outside the change set were not judged: this is the scoped verdict, not the full gate\'s.',
+    ],
+  };
+}
+
+/** A refused change set: say so, never judge anything in its place, exit 2. */
+function refuseScoped(reason) {
+  console.error(`check-platform-checklist ${SCOPED_FLAG}: REFUSED — ${reason}`);
+  console.error('\nThis is a REFUSAL, not a pass: no change set was read, so nothing was judged, and the full corpus is not judged in its place. The full gate is `pnpm check:platform-checklist`.');
+  process.exit(SCOPED_REFUSED_EXIT);
+}
+
 /**
  * Both directions for all three limbs — the detector, the resolver and the
  * floor. The detector's whole value is the boundary (this ledger is dense with
@@ -2301,6 +2566,127 @@ function selfTestSymbolAnchors() {
     anchorFloorProblems(new Map([['areas/a.json', 99], ['areas/b.json', 4]]), floors).length === 0);
   t('B6 a family file with zero anchors needs no entry — a document that cites nothing is not a regression',
     anchorFloorProblems(new Map([['areas/a.json', 10], ['areas/b.json', 4], ['RUNNER.md', 0]]), floors).length === 0);
+
+  // ── the scoped mode, `--changed-from REF` (#23653) ───────────────────────
+  //
+  // The ruling's three legs come first (S1 to S3). Then what keeps the mode
+  // honest about itself: a deleted target is a loss, the residual is not, a
+  // bare or cross-repo citation is not judged, and an empty intersection says
+  // so. The verdict is driven on FIXTURE findings because the live ledger
+  // resolves cleanly, so its findings list is empty and nothing but a fixture
+  // can tell a working filter from a deleted one. These cases live in this
+  // battery, not a battery of their own, because the mode is a filter on this
+  // limb's verdict and owns no resolution.
+  const fxDir = 'docs/qa/platform-checklist/areas';
+  const fxTargets = [
+    { doc: `${fxDir}/a.json`, path: 'pkg/kept.ts', symbol: 'stillHere', repo: null },
+    { doc: `${fxDir}/a.json`, path: 'pkg/lost.ts', symbol: 'goneNow', repo: null },
+    { doc: `${fxDir}/b.json`, path: 'pkg/elsewhere.ts', symbol: 'brokenElsewhere', repo: null },
+    { doc: `${fxDir}/b.json`, path: 'pkg/deleted.ts', symbol: 'wasHere', repo: null },
+    { doc: `${fxDir}/b.json`, path: 'pkg/bare.ts', symbol: null, repo: null },
+    { doc: `${fxDir}/c.json`, path: 'pkg/residual.ts', symbol: 'knownGap', repo: null },
+    { doc: `${fxDir}/c.json`, path: 'pkg/kept.ts', symbol: 'siblingSymbol', repo: 'objectui' },
+  ];
+  const fxFindings = [
+    { kind: 'unresolved-symbol', doc: `${fxDir}/a.json`, line: 3, path: 'pkg/lost.ts', symbol: 'goneNow', absent: ['goneNow'] },
+    { kind: 'unresolved-symbol', doc: `${fxDir}/b.json`, line: 5, path: 'pkg/elsewhere.ts', symbol: 'brokenElsewhere', absent: ['brokenElsewhere'] },
+    { kind: 'unresolved-path', doc: `${fxDir}/b.json`, line: 8, path: 'pkg/deleted.ts', symbol: 'wasHere' },
+    { kind: 'unresolved-symbol', doc: `${fxDir}/c.json`, line: 2, path: 'pkg/residual.ts', symbol: 'knownGap', absent: ['knownGap'] },
+    { kind: 'unresolved-symbol', doc: `${fxDir}/c.json`, line: 4, path: 'pkg/kept.ts', symbol: 'siblingSymbol', repo: 'objectui', absent: ['siblingSymbol'] },
+    // ⚠️ A real `line-anchor` finding carries no `path`. This one is given one
+    // so that S9 exercises the KIND test, which the path test would otherwise
+    // shadow, and S9 could not fail.
+    { kind: 'line-anchor', doc: `${fxDir}/a.json`, line: 9, raw: 'pkg/kept.ts:12', path: 'pkg/kept.ts', detail: 'a line number' },
+  ];
+  const fxResidual = (doc, anchor) => doc === `${fxDir}/c.json` && anchor === 'pkg/residual.ts#knownGap';
+  const scoped = (files) => scopedAnchorVerdict({
+    ref: 'REF', change: { files, mergeBase: 'f'.repeat(40) }, targets: fxTargets, findings: fxFindings, onResidual: fxResidual,
+  });
+  const lostNames = (v) => v.lost.map((l) => l.anchor).join(',');
+
+  const s1 = scoped(['pkg/lost.ts']);
+  t('S1 a changed file that LOST an anchor reds, exit 1, naming the citation it lost',
+    s1.state === 'lost' && s1.exitCode === 1 && lostNames(s1) === 'pkg/lost.ts#goneNow', `${s1.state}: ${lostNames(s1)}`);
+  const s2 = scoped(['pkg/kept.ts']);
+  t('S2 a changed file that KEPT its anchors stays green, exit 0, and its anchor WAS judged rather than skipped',
+    s2.state === 'ok' && s2.exitCode === 0 && s2.judged === 1 && s2.anchoredFiles === 1, `${s2.state}, ${s2.judged} judged: ${lostNames(s2)}`);
+  const s3 = scoped(['pkg/kept.ts', 'pkg/lost.ts']);
+  t('S3 an anchor broken in a file NOT in the change set is not reported: the red names the loss in the set and nothing else',
+    lostNames(s3) === 'pkg/lost.ts#goneNow' && !s3.lines.join('\n').includes('brokenElsewhere') && !s3.lines.join('\n').includes('wasHere'),
+    lostNames(s3));
+  const s4 = scoped(['pkg/deleted.ts']);
+  t('S4 a DELETED target, or the old side of a rename, is a loss: an `unresolved-path` whose file is in the change set reds',
+    s4.state === 'lost' && lostNames(s4) === 'pkg/deleted.ts#wasHere' && s4.lost[0]?.kind === 'unresolved-path', lostNames(s4));
+  const s5 = scoped(['pkg/residual.ts']);
+  t('S5 an anchor on the named residual is NOT a loss: the full gate does not red on it either, and this mode never widens the full gate',
+    s5.state === 'ok' && s5.lost.length === 0 && s5.residual === 1, `${s5.state}, ${s5.residual} residual`);
+  const s6 = scoped(['pkg/unrelated.ts', 'README.md']);
+  t('S6 a change set touching NO anchored file says so: nothing-judged, exit 0, with a headline that is not the OK line',
+    s6.state === 'nothing-judged' && s6.exitCode === 0 && s6.judged === 0 && !s6.lines[0].includes(': OK'), s6.lines[0]);
+  t('S7 a BARE citation does not make its file anchored: the full gate does not judge one, so neither does this mode',
+    scoped(['pkg/bare.ts']).state === 'nothing-judged');
+  t('S8 a CROSS-REPO citation is not this checkout\'s file, whatever its path: its finding is not judged against a same-named changed file',
+    !lostNames(s2).includes('siblingSymbol') && s2.judged === 1);
+  t('S9 only the two anchor-finding kinds are judged: a line citation is a property of the document, not of a changed target file',
+    s2.lost.length === 0 && !s2.lines.join('\n').includes('pkg/kept.ts:12'), lostNames(s2));
+
+  // The change set, through a FAKE `git` that answers by its arguments, so the
+  // composition is pinned without building a throwaway repository: the diff
+  // names the rename's old path only under `--no-renames`, and adds a file that
+  // landed on REF after the branch was cut unless it is diffed from the merge
+  // base. Each leg reds if the call it pins changes.
+  const fakeGit = ({ resolves = true, mergeBase = 'mb0', shallow = false, diffFails = false } = {}) => (args) => {
+    const ok = (stdout) => ({ status: 0, stdout, stderr: '' });
+    const no = { status: 1, stdout: '', stderr: 'fatal: fixture' };
+    if (args[0] === 'rev-parse' && args.includes('--verify')) return resolves ? ok('c0ffee\n') : no;
+    if (args[0] === 'rev-parse' && args.includes('--is-shallow-repository')) return ok(shallow ? 'true\n' : 'false\n');
+    if (args[0] === 'merge-base') return mergeBase ? ok(`${mergeBase}\n`) : no;
+    if (args[0] === 'diff') {
+      if (diffFails) return no;
+      const names = ['src/edited.ts', 'src/new-name.ts'];
+      if (args.includes('--no-renames')) names.push('src/old-name.ts');
+      if (!args.includes(mergeBase)) names.push('src/landed-on-ref.ts');
+      return ok(names.map((n) => `${n}\0`).join(''));
+    }
+    if (args[0] === 'ls-files') return ok('src/untracked.ts\0src/edited.ts\0');
+    return no;
+  };
+  const c1 = changedFilesSince('REF', fakeGit());
+  t('C1 the change set is the merge base against the WORKING TREE, plus untracked files, de-duplicated and sorted',
+    !c1.refusal && c1.mergeBase === 'mb0' && c1.files.join(',') === 'src/edited.ts,src/new-name.ts,src/old-name.ts,src/untracked.ts',
+    JSON.stringify(c1));
+  t('C2 a RENAME contributes its OLD path, the one the citations name: rename detection is off',
+    Boolean(c1.files?.includes('src/old-name.ts')), JSON.stringify(c1.files));
+  t('C3 the diff starts at the MERGE BASE, never at REF: a file that landed on REF after the branch was cut is not this change',
+    Boolean(c1.files) && !c1.files.includes('src/landed-on-ref.ts'), JSON.stringify(c1.files));
+  t('C4 a REF that does not resolve is REFUSED, never read as an empty change set',
+    Boolean(changedFilesSince('REF', fakeGit({ resolves: false })).refusal));
+  t('C5 no merge base is REFUSED, in a shallow checkout and a full one alike: there is no two-dot fallback',
+    Boolean(changedFilesSince('REF', fakeGit({ mergeBase: null, shallow: true })).refusal)
+      && Boolean(changedFilesSince('REF', fakeGit({ mergeBase: null })).refusal));
+  t('C6 a git listing that fails is REFUSED, never read as "nothing changed"',
+    Boolean(changedFilesSince('REF', fakeGit({ diffFails: true })).refusal));
+
+  // The request on argv.
+  t('Q1 no `--changed-from` is the full gate, untouched — the census flag included',
+    scopedModeRequest([]) === null && scopedModeRequest(['--anchor-census']) === null);
+  t('Q2 `--changed-from REF` is the scoped mode for that REF',
+    scopedModeRequest(['--changed-from', 'origin/main'])?.ref === 'origin/main');
+  t('Q3 `--changed-from` with no REF, or a flag where the REF belongs, is REFUSED',
+    Boolean(scopedModeRequest(['--changed-from'])?.refusal) && Boolean(scopedModeRequest(['--changed-from', '--anchor-census'])?.refusal));
+  t('Q4 a NEAR spelling is REFUSED, never ignored: an ignored flag runs the full gate, and its verdict would read as the scoped one',
+    Boolean(scopedModeRequest(['--changed-from=origin/main'])?.refusal) && Boolean(scopedModeRequest(['--changed', 'pkg/a.ts'])?.refusal));
+  t('Q5 the scoped mode and the whole-corpus census are REFUSED together',
+    Boolean(scopedModeRequest(['--changed-from', 'origin/main', '--anchor-census'])?.refusal));
+
+  // Live: the population the mode counts, and the real runner in both directions.
+  const liveTargets = corpusAnchorTargets(liveSweep);
+  t('L4 the anchor population the scoped mode counts IS the sweep\'s: the same extractor and options, equal document by document',
+    liveTargets.disagreements.length === 0 && liveTargets.targets.length === liveSweep.counts.anchors && liveTargets.targets.length > 0,
+    `${liveTargets.targets.length} read vs ${liveSweep.counts.anchors} swept; ${liveTargets.disagreements.join('; ')}`);
+  t('L5 the real `git` answers in this checkout: a REF that cannot exist is refused AND HEAD is read, so a refusal is the runner reporting and not a runner that always fails',
+    Boolean(changedFilesSince('refs/heads/no-such-ref/scoped-mode-self-test', gitInRoot).refusal)
+      && Array.isArray(changedFilesSince('HEAD', gitInRoot).files));
 
   symbolAnchorsReachedVerdict = true;
   return { checked, failures };
@@ -2603,6 +2989,7 @@ if (process.argv.slice(2).includes('--self-test')) {
         ' and the `/meta` call-spelling refusal reads its vocabulary out of the live generated contract, fires on every folded spelling a `call` can instruct, and stays silent on the canonical singular, on parameter placeholders, and on the `why`/`expect`/`source`/`requires` prose that narrates the fold;' +
         ' and the line-citation limb DETECTS NOTHING ITSELF EITHER: the last forked grammar in this file went into the shared core at #18592, so what is pinned here is the BINDING — the corpus declaring `pathlessLineCitations`, a source read finding no citation regex and no detector while the same read DOES find the declaration, the binding driven ON and OFF against ONE text so the green is the declaration working rather than a text that would have matched anyway, the DARK case that a citation both grammars already agreed on keeps its verdict either way, the refusal to over-fire on this ledger\'s own HTTP statuses, config literals, URL ports, clock times and quoted JSON, and the live zero with the control that says it is a reading;' +
         ' and the symbol-anchor limb DETECTS NOTHING AND RESOLVES NOTHING ITSELF: it is a registered corpus (#18107), so the grammar, the walk and the verdict are all `scripts/symbol-anchors.mjs`\'s, pinned here by a source read that finds no local extension set, no anchor regex and no detector while the same read DOES find the registration, by the anchorable-extension vocabulary being the shared OBJECT rather than a copy of it, by the `runs/` exclusion driven three ways on the live corpus (the subtree holds files, none is swept, the areas beside it still are, and dropping the exclusion puts them back), and by the #16898 binding re-taken through the registration — a call site / import / local parameter / string-substring all reading ABSENT, the positive control that a declaration and a complete quoted token still resolve, a `.json` key resolving where a `.json` value does not, an INLINE object-literal key reading absent where one at the start of a line resolves — with the closed, grow-never residual and the per-file anchor floor held in both directions beside it;' +
+        ` and the scoped mode (\`${SCOPED_FLAG} REF\`) is driven on fixtures: a changed file that lost an anchor reds, one that kept its anchors stays green, an anchor broken outside the change set is not reported, a deleted target is a loss while the residual, a bare citation and a cross-repo citation are not, an empty intersection prints the nothing-judged line, the change set is diffed from the merge base with renames off, and a REF, a merge base or a listing that cannot be read is refused;` +
         ` and the \`planned\` status is driven on fixtures — the accept set widened without losing its closure, \`since: null\`/no-steps/personas relaxed for planned alone while the ${plannedStatus.liveItems} live items are judged exactly as before, and the coverage ratchet held BOTH ways: a planned item beside an active one is silent, a kind whose only items are planned is UNMAPPED, and the bearing set is pinned NOT to contain \`planned\`; and the two CALL SITES those rules ride on are pinned by a source read over comment-MASKED source driven ON and OFF, because severing either one — by deletion OR by commenting it out in place — left this very self-test green; \u26d4 that pin is a TEXT pin and G12 records the three semantic severings it cannot see;` +
         ' and the `retired` status is judged by its own rule, driven both ways \u2014 a non-empty `retiredReason`, `since` null or release-shaped, steps unjudged \u2014 so a planned item retired before it was implemented is legal, an item retired after it shipped stays legal, and a retired item with no reason or a non-release `since` is refused.',
     );
@@ -2612,6 +2999,12 @@ if (process.argv.slice(2).includes('--self-test')) {
   for (const f of failures) console.error(`  • ${f}`);
   process.exit(1);
 }
+
+// The scoped mode's request, read BEFORE the batteries, so a malformed one is
+// refused at once instead of after the batteries' wall time. Its change set is
+// read after them, because the verdict it feeds needs their controls to pass.
+const scopedRequest = scopedModeRequest(process.argv.slice(2));
+if (scopedRequest?.refusal) refuseScoped(scopedRequest.refusal);
 
 // The extractor's own positive control, before it is trusted with anything.
 const trapControl = selfTestTrapVocabulary();
@@ -2708,6 +3101,30 @@ if (inlineRosterFailures.length) {
   console.error('check-platform-checklist: the self-test battery roster FAILED — assertions stopped running, and every leg below would read the smaller count as a pass.\n');
   for (const f of inlineRosterFailures) console.error(`  ✗ ${f}`);
   process.exit(1);
+}
+
+// ── The scoped mode's dispatch ──────────────────────────────────────────────
+// After the batteries, before anything else this gate judges: the mode judges
+// the symbol-anchor sweep alone, filtered to the change set, and exits here.
+// The ledger walk, coverage, traps, the floor and the residual's own upkeep are
+// the full gate's and are not judged (see the header).
+if (scopedRequest) {
+  const change = changedFilesSince(scopedRequest.ref, gitInRoot);
+  if (change.refusal) refuseScoped(change.refusal);
+  const scopedSweep = sweepCorpus(CORPUS, ROOT);
+  const { targets, disagreements } = corpusAnchorTargets(scopedSweep);
+  if (disagreements.length) {
+    refuseScoped(`the anchor population read for this mode disagrees with the sweep's own (${disagreements.join('; ')}), so the count of judged anchors would be wrong.`);
+  }
+  const verdict = scopedAnchorVerdict({
+    ref: scopedRequest.ref,
+    change,
+    targets,
+    findings: scopedSweep.findings,
+    onResidual: (doc, anchor) => SHARED_RESOLVER_RESIDUAL_INDEX.has(residualKey(relative(CHECKLIST_REL, doc), anchor)),
+  });
+  for (const line of verdict.lines) (verdict.exitCode === 0 ? console.log : console.error)(line);
+  process.exit(verdict.exitCode);
 }
 
 // The folded-spelling vocabulary, read from the contract before anything is
