@@ -2099,7 +2099,7 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     expect(deletes()).toEqual([]);
   });
 
-  it('under a wall, the rewrite gate: the everyone binding gets the composition; an undeclared position keeps its remedy', async () => {
+  it('under a wall, the rewrite gate: the everyone binding gets the composition; an undeclared position gets the walled remedy', async () => {
     db.exec(v17Bindings);
     const report = await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin: NO_SECRET });
 
@@ -2108,7 +2108,8 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     expect(rewrite.status).toBe('blocked');
     const undeclared = blockerOf(rewrite, 'position zz_undeclared ');
     expect(undeclared).not.toContain(COMPOSITION);
-    expect(undeclared).toMatch(/resolve its blocker/);
+    expect(undeclared).toContain('PUT /api/v1/meta/position/zz_undeclared');
+    expect(undeclared).not.toMatch(/resolve its blocker/);
     const everyone = blockerOf(rewrite, 'position everyone ');
     expect(everyone).toContain(COMPOSITION);
     expect(everyone).not.toMatch(/\bremove\b/);
@@ -2135,7 +2136,140 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     `);
     const rewrite = step(await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin }), 'rewrite');
     expect(blockerOf(rewrite, 'the permission set admin_full_access,')).toMatch(/or remove the grants/);
-    expect(blockerOf(rewrite, 'position everyone ')).toMatch(/resolve its blocker/);
+    // Not the pointer. This fake catalog declares no `everyone` (a composed boot declares it, sealed), so which
+    // walled remedy follows is not this control's question.
+    expect(blockerOf(rewrite, 'position everyone ')).not.toMatch(/resolve its blocker/);
     expect(rewrite.blockers.join('\n')).not.toContain(COMPOSITION);
+  });
+});
+
+describe('ADR-0131 D10 --apply — under a wall, the rewrite gate names the act the wall allows for a converted binding', () => {
+  type Step = OrganizationOwnershipApplyReport['steps'][number];
+  const step = (report: OrganizationOwnershipApplyReport, name: Step['step']): Step => report.steps.find((s) => s.step === name)!;
+  /** The one blocker of `s` that names `subject`. */
+  const blockerOf = (s: Step, subject: string): string => {
+    const found = s.blockers.filter((b) => b.includes(subject));
+    expect(found, subject).toHaveLength(1);
+    return found[0]!;
+  };
+  /** The remedy half of a binding blocker: what follows the fact. */
+  const remedyOf = (blocker: string): string => blocker.slice(blocker.indexOf('deleting them would lose a grant.'));
+  /** Every DELETE the run issued, beside the settings rung that moves before the rewrite. */
+  const deletes = (): string[] => writes.filter((w) => /^DELETE/.test(w) && !/^DELETE FROM "sys_setting"/.test(w));
+  /** An act, a door or a re-run: what a blocker with no sanctioned act never names. */
+  const ACT = /\b(Declare|Add|remove|resolve)\b|PUT |re-run/;
+  const POINTER = 'The authored-conversion step carries them; resolve its blocker, then re-run.';
+  /** The metadata door's lock verdict, answering `answer` and recording what it was asked. */
+  const lockAnswering = (answer: Awaited<ReturnType<MetadataLockPort['verdict']>> | Error): MetadataLockPort & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      async verdict(type, name, packageId) {
+        asked.push(`${type}|${name}|${packageId}`);
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+    };
+  };
+  /** A seeded position no catalog declares, its row binding member_default. */
+  const UNDECLARED = `
+    INSERT INTO sys_position VALUES ('pos_gone', NULL, 'zz_undeclared', 'Undeclared', 'platform', 0, 1);
+    INSERT INTO sys_position_permission_set VALUES ('bind_gone', NULL, 'pos_gone', 'ps_null');
+  `;
+  /** A seeded position whose rows bind member_default and zz_extra; the catalog's definition names member_default only. */
+  const DECLARED = `
+    INSERT INTO sys_permission_set VALUES ('ps_extra', NULL, 'zz_extra', 'Extra', 'platform', 1, '{}', '[]');
+    INSERT INTO sys_position VALUES ('pos_env', NULL, 'zz_env', 'Env', 'platform', 0, 1);
+    INSERT INTO sys_position_permission_set VALUES ('bind_env_1', NULL, 'pos_env', 'ps_null'), ('bind_env_2', NULL, 'pos_env', 'ps_extra');
+  `;
+  /** The catalog, declaring zz_env as `definition` from the next boot on. */
+  const declaring = async (definition: Record<string, unknown>): Promise<ReturnType<typeof catalog>> => {
+    const c = catalog();
+    await c.save('position', 'zz_env', { name: 'zz_env', label: 'Env', permissionSets: ['member_default'], ...definition });
+    return c;
+  };
+
+  it('⭐ undeclared: declare it with the bound sets through ONE of its two doors — never the step that reports done; nothing is deleted', async () => {
+    db.exec(UNDECLARED);
+    const lock = lockAnswering({ editable: true });
+    const report = await apply(catalog(), ledger(), { posture: 'isolated', lock });
+
+    expect(step(report, 'authored-conversion')).toMatchObject({ status: 'done', blockers: [] });
+    const rewrite = step(report, 'rewrite');
+    expect(rewrite.status).toBe('blocked');
+    const remedy = remedyOf(blockerOf(rewrite, 'position zz_undeclared '));
+    expect(remedy).not.toContain(POINTER);
+    expect(remedy).toContain('member_default');
+    // Both doors, and one only: the deployment's code, or the metadata door as the platform administrator.
+    expect(remedy).toContain('deployment\'s code');
+    expect(remedy).toContain('PUT /api/v1/meta/position/zz_undeclared');
+    expect(remedy).toMatch(/one door only/);
+    // The organization-authored position the base fixture binds is undeclared too, and gets the same act.
+    expect(remedyOf(blockerOf(rewrite, 'position sales_lead '))).toContain('PUT /api/v1/meta/position/sales_lead');
+    // An undeclared name has no definition for the door to judge.
+    expect(lock.asked).toEqual([]);
+    // Still refused: nothing is deleted or guessed.
+    expect(step(report, 'mirror-deletion').status).toBe('not-reached');
+    expect(deletes()).toEqual([]);
+  });
+
+  it('⭐ declared and editable: add the missing sets through the metadata door alone, as the door itself answers', async () => {
+    db.exec(DECLARED);
+    const lock = lockAnswering({ editable: true });
+    const report = await apply(await declaring({}), ledger(), { posture: 'group', lock });
+
+    const remedy = remedyOf(blockerOf(step(report, 'rewrite'), 'position zz_env '));
+    expect(remedy).not.toContain(POINTER);
+    expect(remedy).toContain('zz_extra');
+    expect(remedy).not.toContain('member_default');
+    expect(remedy).toContain('PUT /api/v1/meta/position/zz_env');
+    // The environment holds the name: the code door would refuse the cold boot.
+    expect(remedy).not.toContain('deployment\'s code');
+    expect(lock.asked).toEqual(['position|zz_env|null']);
+    expect(deletes()).toEqual([]);
+  });
+
+  it.each([
+    ['a package ships it (ADR-0131 D6)', { _packageId: 'com.example.vendor', _provenance: 'package' }, { editable: false, lock: 'no-overlay' }, ['com.example.vendor', 'ADR-0131 D6']],
+    ['an item lock', {}, { editable: false, lock: 'full', lockReason: 'frozen by the operator' }, ['full', 'frozen by the operator']],
+    ['the door\'s verdict is unreadable', {}, new Error('no metadata protocol is composed on this stack'), ['no metadata protocol is composed on this stack']],
+  ] as const)('⭐ declared and not editable — %s: the fact, and no act', async (_label, definition, answer, facts) => {
+    db.exec(DECLARED);
+    const lock = lockAnswering(answer as Awaited<ReturnType<MetadataLockPort['verdict']>> | Error);
+    const report = await apply(await declaring(definition), ledger(), { posture: 'isolated', lock });
+
+    const blocker = blockerOf(step(report, 'rewrite'), 'position zz_env ');
+    for (const fact of facts) expect(blocker).toContain(fact);
+    expect(blocker).not.toMatch(ACT);
+    expect(lock.asked).toEqual(['position|zz_env|null']);
+    expect(deletes()).toEqual([]);
+  });
+
+  it('conflicting, under a wall: the fact, and no act', async () => {
+    db.exec(`
+      INSERT INTO sys_position VALUES ('pos_c1', 'org_default', 'zz_conflict', 'C', 'platform', 0, 1),
+        ('pos_c2', 'org_b', 'zz_conflict', 'C', 'platform', 0, 1);
+      INSERT INTO sys_position_permission_set VALUES ('bind_c1', 'org_default', 'pos_c1', 'ps_null');
+    `);
+    const report = await apply(catalog(), ledger(), { posture: 'isolated' });
+
+    const blocker = blockerOf(step(report, 'rewrite'), 'Position zz_conflict:');
+    expect(blocker).not.toMatch(ACT);
+    expect(deletes()).toEqual([]);
+  });
+
+  it('control — single: the gate keeps the pointer at authored-conversion, and asks the door nothing', async () => {
+    const c = catalog();
+    const l = ledger();
+    await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE FROM "sys_capability"/ }) })).rejects.toThrow(/killed mid-step/);
+    db.exec(UNDECLARED);
+    const lock = lockAnswering({ editable: true });
+
+    const resumed = await apply(c, l, { lock });
+
+    const deletion = step(resumed, 'mirror-deletion');
+    expect(deletion.status).toBe('blocked');
+    expect(remedyOf(blockerOf(deletion, 'position zz_undeclared '))).toBe(`deleting them would lose a grant. ${POINTER}`);
+    expect(lock.asked).toEqual([]);
   });
 });

@@ -364,8 +364,16 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
    * inside a fenced example is still caught.
    */
   const stripInlineCode = (text: string): string => text.replace(/`[^`\n]*`/g, '');
+  /**
+   * Every `AUTHORING` pattern requires this literal, so a stripped text that
+   * lacks it matches none of them: the patterns run only where it appears.
+   * Read on the STRIPPED text, never the raw one — stripping can join a
+   * literal across an inline code span.
+   */
+  const AUTHORING_LITERAL = 'refreshKey';
   const judge = (text: string): RegExpExecArray | null => {
     const stripped = stripInlineCode(text);
+    if (!stripped.includes(AUTHORING_LITERAL)) return null;
     for (const re of AUTHORING) {
       const m = re.exec(stripped);
       if (m) return m;

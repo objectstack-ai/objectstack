@@ -115,7 +115,7 @@ const translationRow = (name: string, payload: AnyRecord, extra: AnyRecord = {})
 });
 
 async function bootPlugin(services: AnyRecord) {
-  const plugin = new I18nServicePlugin({ registerRoutes: false });
+  const plugin = new I18nServicePlugin();
   const harness = makeCtx(services);
   await plugin.init(harness.ctx as any);
   await plugin.start(harness.ctx as any);

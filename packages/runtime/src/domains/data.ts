@@ -36,7 +36,11 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 import { assertFilterParamSuppliedOnce, repeatedQueryParamMessage } from '@objectstack/rest';
 // [#23492] The dispatcher's one constructor for a `400 VALIDATION_FAILED`
 // answer, which a refused version token returns in this transport's envelope.
-import { validationFailure, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
+// [#23491] …and the one Zod-issue → `fields[]` mapping, which a write whose
+// assembled protocol request does not parse returns the same way.
+import { validationFailure, fieldsFromZodIssues, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
+// [#23491] The request contracts `RestServer`'s twin routes validate (#3899).
+import { CreateDataRequestSchema, UpdateDataRequestSchema } from '@objectstack/spec/api';
 
 /**
  * [#23265] The request's `If-Match`, from either header shape a host hands
@@ -57,12 +61,18 @@ function requestIfMatch(headers: unknown): unknown {
  * [#23492] What this domain's `PATCH` and `DELETE` do with the
  * optimistic-concurrency token they read, before `callData` is asked: absent
  * (`undefined` or `null`, which falls through to `If-Match`), judged (a string
- * with something in it, or a finite number, forwarded as its string), or
- * refused `400 VALIDATION_FAILED` (an empty or blank string, a boolean, an
- * array, an object: a token shape that can never carry a version, maintainer
- * decision #20 ①). It replaces a truthiness test that let `expectedVersion: ''`
- * or `false`, and `?expectedVersion=`, hide a stale `If-Match` and run the
- * write unguarded.
+ * with something in it, forwarded as it is), or refused `400
+ * VALIDATION_FAILED` (an empty or blank string, a number, a boolean, an array,
+ * an object: a token shape that can never carry a version, maintainer decision
+ * #20 ①). It replaces a truthiness test that let `expectedVersion: ''` or
+ * `false`, and `?expectedVersion=`, hide a stale `If-Match` and run the write
+ * unguarded.
+ *
+ * [#23517] A number is refused, no longer judged as its string:
+ * `UpdateDataRequestSchema.expectedVersion` declares a string, and forwarding
+ * `String(5)` answered `409` for a token the contract never admits. Only a
+ * body token can be a number; `If-Match` and `?expectedVersion` are strings by
+ * transport.
  *
  * `RestServer`'s twin routes ask the same function, statement for statement
  * (`versionTokenRefusal` in `packages/rest/src/rest-server.ts`, whose docblock
@@ -74,14 +84,39 @@ function requestIfMatch(headers: unknown): unknown {
 function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
     if (token === undefined || token === null) return undefined;
     if (typeof token === 'string' && token.trim() !== '') return undefined;
-    if (typeof token === 'number' && Number.isFinite(token)) return undefined;
     const shape = typeof token === 'string' ? 'empty'
         : Array.isArray(token) ? 'an array'
         : typeof token === 'object' ? 'an object'
         : `the ${typeof token} \`${String(token)}\``;
     return `${spelling} is ${shape}, which can never carry a version, so it is refused rather than read as `
-        + 'no token. Send the version you read (the record\'s `updated_at`), or omit both expectedVersion and '
-        + 'If-Match to perform an unguarded write.';
+        + 'no token. Send the version you read as a string (the record\'s `updated_at`), or omit both '
+        + 'expectedVersion and If-Match to perform an unguarded write.';
+}
+
+/**
+ * [#23491] This domain's answer to a `PATCH` or `POST` create whose assembled
+ * protocol request (`UpdateDataRequestSchema` / `CreateDataRequestSchema`)
+ * does not parse: `400 VALIDATION_FAILED`, `details.fields[]` naming each
+ * failing member, before `callData` is asked. `RestServer`'s twin routes gate
+ * the same assembled request (#3899); this domain had no gate, so a body that
+ * is not a record (an array, a string, a number, `null`) reached the engine
+ * as the patch or the row, and answered `500` with the engine's own error, or
+ * created rows. RETURNED, not thrown, for the reason `versionTokenRefusal`'s
+ * refusal is: a throw out of `dispatch()` reaches a `createHonoApp` host's
+ * catch-all, which renders only some declared statuses.
+ */
+function writeRequestRefusal(
+    deps: DomainHandlerDeps,
+    write: 'update' | 'create',
+    issues: Array<{ path: Array<string | number | symbol>; code: string; message: string }>,
+    input: unknown,
+): HttpDispatcherResult {
+    const fields = fieldsFromZodIssues(issues, input);
+    const message = `Invalid ${write} request: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`;
+    return {
+        handled: true,
+        response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS),
+    };
 }
 
 export function createDataDomain(deps: DomainHandlerDeps): DomainRoute {
@@ -231,13 +266,33 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
                     response: deps.errorFromThrown(validationFailure(versionRefusal, []), VALIDATION_FAILED_STATUS),
                 };
             }
-            // Spec: returns UpdateDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, _context, 'update', {
+            // [#23491] The assembled request is validated as
+            // `UpdateDataRequestSchema`, the gate `RestServer`'s twin has
+            // asked since #3899, over the patch AS THE CALLER SENT IT (the
+            // token stripped, nothing defaulted): a body that is not a record
+            // is refused `400` here, before the engine is asked. It used to
+            // reach `updateData` as the patch and answer `500` with the
+            // engine's own error. A JSON `null` is refused like the rest: the
+            // twin used to read it as `{}` and answer `200`, an update that
+            // changed no field and still moved the record's version; both
+            // doors now refuse it.
+            //
+            // [#23517] …and the token as the caller sent it too, never its
+            // `String()`: the gate parsed `String(5)`, so a number the schema
+            // declares no room for was forwarded and judged `409`.
+            // `versionTokenRefusal` above already refuses it, so what reaches
+            // this gate and the forward below is a non-blank string.
+            const updateInput = {
                 object: objectName,
                 id,
                 data,
-                ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
-            }, _context.dataDriver, _context.environmentId, _context.executionContext);
+                ...(expectedVersion != null ? { expectedVersion } : {}),
+            };
+            const parsedUpdate = UpdateDataRequestSchema.safeParse(updateInput);
+            if (!parsedUpdate.success) return writeRequestRefusal(deps, 'update', parsedUpdate.error.issues, updateInput);
+            // Spec: returns UpdateDataResponse = { object, id, record }
+            const result = await actionExec.callData(deps, _context, 'update', updateInput,
+                _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 
@@ -327,8 +382,21 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
 
         // POST /data/:object (Create)
         if (m === 'POST') {
+            // [#23491] The `PATCH` above's gate, on the create: the assembled
+            // request is validated as `CreateDataRequestSchema` before the
+            // engine is asked. This branch had no gate, so an array body
+            // created one row per element (`201`), a number created an empty
+            // row (`201`), and a string answered the engine's own unknown-field
+            // `400`; `RestServer`'s twin refused all three `400
+            // VALIDATION_FAILED` (#3899). The assembled request is the twin's,
+            // statement for statement, `null` read as `{}` included: both doors
+            // answer a JSON `null` create alike (an empty row), and that
+            // leniency is retired on both at once or not at all.
+            const createInput = { object: objectName, data: body ?? {} };
+            const parsedCreate = CreateDataRequestSchema.safeParse(createInput);
+            if (!parsedCreate.success) return writeRequestRefusal(deps, 'create', parsedCreate.error.issues, createInput);
             // Spec: returns CreateDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, _context, 'create', { object: objectName, data: body }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await actionExec.callData(deps, _context, 'create', createInput, _context.dataDriver, _context.environmentId, _context.executionContext);
             const res = deps.success(result);
             res.status = 201;
             return { handled: true, response: res };

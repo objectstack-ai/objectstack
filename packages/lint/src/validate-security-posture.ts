@@ -754,18 +754,47 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // `budget` key matches NOTHING — the declared masking silently never
     // enforces (the worst declared-≠-enforced class, ADR-0049). The showcase
     // itself shipped this bug for months.
+    //
+    // [#23549] "Qualified" means a NON-EMPTY object part before the first '.',
+    // not merely "contains a '.'". A key whose object part is empty
+    // (`'.full_name'`, `'.'`, `'..x'`, `'.x.y'`) names no object, and no object
+    // can be named by the empty string — `ObjectSchema.name` is
+    // `/^[a-z_][a-z0-9_]*$/` — so it fails the evaluator's prefix match exactly
+    // as a bare key does. The guard used to skip it for containing a '.', and
+    // the unknown-field rule below read its empty head as another package's
+    // object (its skip 1), so it passed both and the mask never enforced. It is
+    // judged HERE, under this id, because this is the same defect: the id, the
+    // runtime consequence and the remedy (qualify the key with its object) all
+    // fit, so a consumer acting on the id has no second branch to take (the
+    // charter's test for a new id). The rule below skips it, so each key earns
+    // one finding.
     const flsMap = (ps.fields && typeof ps.fields === 'object' ? ps.fields : {}) as AnyRec;
     for (const flsKey of Object.keys(flsMap)) {
-      if (flsKey.includes('.')) continue;
+      const dot = flsKey.indexOf('.');
+      if (dot > 0) continue; // a non-empty object part — judged by the rule below
+      // dot < 0 is the bare key, dot === 0 the empty object part. For the
+      // latter the hint's example keeps the remainder as the field only when it
+      // is one plain segment: for `'.'`, `'..x'` or `'.x.y'` that example would
+      // itself be refused by the rule below, and a remedy followed literally
+      // must not lead to the next refusal.
+      const remainder = flsKey.slice(dot + 1);
+      const emptyObjectExample =
+        remainder.length > 0 && !remainder.includes('.') ? `, e.g. 'crm_opportunity.${remainder}'` : '';
       findings.push({
         severity: 'error',
         rule: SECURITY_FLS_UNQUALIFIED_KEY,
         where: `permission set "${psName}"`,
         path: `${psPath}.fields["${flsKey}"]`,
         message:
-          `field-permission key '${flsKey}' is not object-qualified — the runtime matches FLS keys ` +
-          `by '<object>.<field>' prefix, so a bare key is silently IGNORED and the declared masking never enforces.`,
-        hint: `Qualify the key with its object, e.g. 'crm_opportunity.${flsKey}': { readable: true, editable: false }.`,
+          dot < 0
+            ? `field-permission key '${flsKey}' is not object-qualified — the runtime matches FLS keys ` +
+              `by '<object>.<field>' prefix, so a bare key is silently IGNORED and the declared masking never enforces.`
+            : `field-permission key '${flsKey}' is not object-qualified — its object part (before the first '.') is ` +
+              `empty, so the key matches no object, is silently IGNORED, and the declared masking never enforces.`,
+        hint:
+          dot < 0
+            ? `Qualify the key with its object, e.g. 'crm_opportunity.${flsKey}': { readable: true, editable: false }.`
+            : `Name the object before the '.': FLS keys take the '<object>.<field>' form${emptyObjectExample}.`,
       });
     }
 
@@ -815,7 +844,11 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // real and addressable while appearing in no authored `fields`.
     for (const flsKey of Object.keys(flsMap)) {
       const dot = flsKey.indexOf('.');
-      if (dot < 0) continue; // the bare-key shape — judged by the rule above
+      // dot < 0 is the bare key and dot === 0 the empty object part (#23549):
+      // both are unqualified, judged by the rule above. Without the second
+      // half the empty head would reach skip 1 below and be read as another
+      // package's object — the silence that let `'.full_name'` through.
+      if (dot <= 0) continue;
       const flsObject = flsKey.slice(0, dot);
       const flsField = flsKey.slice(dot + 1);
       if (!flsGraph.has(flsObject)) continue; // skip 1: not this stack's object
@@ -844,11 +877,13 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       // of the object — `FieldSchema.name` is `/^[a-z_][a-z0-9_]*$/`, so no
       // object of any package can declare one — but hoisting the check above
       // skip 1 would start this rule judging keys whose OBJECT half it cannot
-      // resolve, which is exactly the disposition `'.description'` (empty
-      // object name) and a mis-cased object name are deliberately left to. One
-      // story, one guard order: the object must be visible before the key is
-      // judged. `'no_such_object.'` therefore falls to skip 1, like every other
-      // key naming an object this stack does not define.
+      // resolve, which is exactly the disposition a mis-cased object name is
+      // deliberately left to. One story, one guard order: the object must be
+      // visible before the key is judged. `'no_such_object.'` therefore falls
+      // to skip 1, like every other key naming an object this stack does not
+      // define. (An EMPTY object half — `'.description'` — never reaches this
+      // loop: no package can declare it, so it is the unqualified-key rule's,
+      // #23549.)
       const emptyField = flsField.length === 0;
 
       // [#22161] The `fix:` line names the nearest column the key could have

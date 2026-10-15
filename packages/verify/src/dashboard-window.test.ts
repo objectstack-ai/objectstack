@@ -15,6 +15,12 @@
 //   • the DAY TURN: a run that crosses UTC midnight between its start (where
 //     the presets resolve) and a measure's probe does not run that measure,
 //     never contradicts it.
+//
+// Every run here is made on a frozen clock (`onFrozenClock`, below), so no
+// verdict depends on the hour the suite runs at; the runs that judge anything
+// but the day turn start from a wall clock 100 ms before UTC midnight
+// (`wallClockAtMidnight`), so a run that lost its frozen clock fails on any
+// day, not only on the one whose run crosses 00:00Z.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
@@ -139,6 +145,43 @@ const widgetOf = (report: DashboardWindowReport, widget: string) => {
   return r;
 };
 
+// ── The clock ───────────────────────────────────────────────────────────────
+
+const utcDay = (now: Date) => now.toISOString().slice(0, 10);
+
+/**
+ * Run `run` on a clock frozen at noon UTC of the day it starts on, then give
+ * the real clock back. The family reads the clock through `Date` alone: once
+ * when the run starts (the presets resolve there), then per measure for its
+ * fixture day; the server it asks resolves the same presets on `new Date()`
+ * in this process. So only `Date` is faked (every timer stays real), and a
+ * run on the real clock that crosses UTC midnight between those reads gets
+ * the probe's day-turn `not-run`, a correct answer and the wrong one for a
+ * case that asserts any other verdict.
+ */
+async function onFrozenClock<T>(run: () => Promise<T>): Promise<T> {
+  const day = utcDay(new Date());
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(Date.parse(`${day}T12:00:00.000Z`));
+  try {
+    return await run();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+/**
+ * The pin: the wall clock 100 ms before UTC midnight on today's date, moving
+ * at its real pace (only `Date` is faked; the clock ticks on a real interval).
+ * A run started on it without `onFrozenClock` crosses midnight in its first
+ * measure and is not run.
+ */
+function wallClockAtMidnight(): void {
+  const day = utcDay(new Date());
+  vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+  vi.setSystemTime(Date.parse(`${day}T23:59:59.900Z`));
+}
+
 describe('deriveDashboardWindowCases — what the family reads from the metadata', () => {
   it("reads the binding through the spec's parse and names every widget it cannot compare", () => {
     const cases = new Map(deriveDashboardWindowCases(source).map((c) => [`${c.dashboard}/${c.widget}`, c]));
@@ -178,7 +221,9 @@ describe('runDashboardWindowProofs — the fixture app', () => {
 
   beforeAll(async () => {
     stack = await bootStack(app as never);
-    report = await runDashboardWindowProofs(stack, await stack.signIn(), app);
+    const token = await stack.signIn();
+    wallClockAtMidnight();
+    report = await onFrozenClock(() => runDashboardWindowProofs(stack, token, app));
   }, BOOT_TIMEOUT + RUN_TIMEOUT);
 
   afterAll(async () => {
@@ -336,7 +381,9 @@ describe.each(['drop', 'zero'] as const)("NEGATIVE CONTROL — an app plugin tha
 
   beforeAll(async () => {
     stack = await bootStack(app as never);
-    report = await runDashboardWindowProofs(stack, await stack.signIn(), app);
+    const token = await stack.signIn();
+    wallClockAtMidnight();
+    report = await onFrozenClock(() => runDashboardWindowProofs(stack, token, app));
   }, BOOT_TIMEOUT + RUN_TIMEOUT);
 
   afterAll(async () => {
@@ -404,12 +451,9 @@ describe("THE DAY TURN — a run that crosses UTC midnight between its start and
   beforeAll(async () => {
     stack = await bootStack(app as never);
     const token = await stack.signIn();
-    // The family reads the clock through `Date` alone: once when the run
-    // starts (the presets resolve there), then per measure for its fixture day.
-    // So only `Date` is faked (every timer stays real), frozen at the real
-    // instant, and moved one day on the run's first door call: the measure's
-    // control leg, which falls between those two reads.
-    vi.useFakeTimers({ toFake: ['Date'] });
+    // On the frozen clock (`onFrozenClock`), moved one day on the run's first
+    // door call: the measure's control leg, which falls between the run's
+    // start (where the presets resolve) and the measure's read of its day.
     let turned = false;
     const turning: VerifyStack = {
       ...stack,
@@ -421,11 +465,7 @@ describe("THE DAY TURN — a run that crosses UTC midnight between its start and
         return stack.apiAs(...args);
       },
     };
-    try {
-      report = await runDashboardWindowProofs(turning, token, app);
-    } finally {
-      vi.useRealTimers();
-    }
+    report = await onFrozenClock(() => runDashboardWindowProofs(turning, token, app));
   }, BOOT_TIMEOUT + RUN_TIMEOUT);
 
   afterAll(async () => {

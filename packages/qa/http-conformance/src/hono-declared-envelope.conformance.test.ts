@@ -240,6 +240,62 @@ describe('[#23365] a real createHonoApp host: the dispatch() catch-all renders a
     }, 60_000);
 });
 
+/**
+ * [#23531] The stale-`If-Match` `409` above carries the server's
+ * `currentVersion`, as `RestServer`'s does. The wire contract and
+ * `ConcurrentUpdateError`'s docblock name it, and objectui's conflict bar reads
+ * it. Before this card the body was `code` and `message` only.
+ *
+ * The field rides `error.details`, the wrapped envelope's declared context
+ * slot, which is where `@objectstack/client` reads a wrapped body's context
+ * from. `currentVersion` is proved by USE, not by spelling: echoed back as the
+ * next `If-Match`, it is accepted ("Overwrite anyway" in the conflict bar), so
+ * it is the record's real version token.
+ *
+ * `currentRecord` is asserted ABSENT. The real protocol below states it (the
+ * system-context row its `probeRecord` read, thrown before the caller's write
+ * policy runs), and `RestServer` forwards it. These doors hold it until the
+ * producer answers #23586, so the absence is the door's doing, not the
+ * producer's.
+ */
+describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries currentVersion, and holds currentRecord (#23586)', () => {
+    it('PATCH with a stale If-Match: currentVersion in `error.details` and accepted when echoed; no currentRecord', async () => {
+        const host = await boot();
+        const id = await host.seed('original');
+        const answer = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': STALE_VERSION }, body: { name: 'lost update' } });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
+
+        const details = answer.body.error.details;
+        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
+        // Held until #23586: the protocol stated it, and the door does not forward it.
+        expect(details, JSON.stringify(answer.body)).not.toHaveProperty('currentRecord');
+        expect(JSON.stringify(answer.body)).not.toContain('original');
+        expect(await host.stored(id)).toBe('original');
+
+        const overwrite = await host.send('PATCH', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` }, body: { name: 'overwritten' } });
+        expect(overwrite.status, JSON.stringify(overwrite.body)).toBe(200);
+        expect(await host.stored(id)).toBe('overwritten');
+    }, 60_000);
+
+    it('DELETE with a stale If-Match: currentVersion in `error.details` and accepted when echoed; no currentRecord', async () => {
+        const host = await boot();
+        const id = await host.seed('kept');
+        const answer = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': STALE_VERSION } });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: 'CONCURRENT_UPDATE' });
+
+        const details = answer.body.error.details;
+        expect(typeof details?.currentVersion, JSON.stringify(answer.body)).toBe('string');
+        // Held until #23586: the protocol stated it, and the door does not forward it.
+        expect(details, JSON.stringify(answer.body)).not.toHaveProperty('currentRecord');
+        expect(JSON.stringify(answer.body)).not.toContain('kept');
+        expect(await host.stored(id)).toBe('kept');
+
+        const overwrite = await host.send('DELETE', `/data/task/${id}`, { headers: { 'If-Match': `"${details.currentVersion}"` } });
+        expect(overwrite.status, JSON.stringify(overwrite.body)).toBe(200);
+        expect(await host.stored(id)).toBeUndefined();
+    }, 60_000);
+});
+
 describe('[#23365] a real createHonoApp host: the auth-mount arm renders a declared envelope', () => {
     it('an auth service that throws a declared envelope: that envelope, with no cause in the body', async () => {
         const host = await boot({

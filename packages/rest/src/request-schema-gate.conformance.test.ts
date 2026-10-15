@@ -131,7 +131,9 @@ const CASES: GateCase[] = [
   {
     route: 'PATCH /api/v1/data/:object/:id',
     params: PARAMS_ID,
-    violating: ['garbage', 42, [{ name: 'x' }]],
+    // #23491 — `null` was read as an empty patch (`data ?? {}`) and answered
+    // 200, an update that changed no field and still moved the version.
+    violating: ['garbage', 42, [{ name: 'x' }], null],
     valid: { name: 'ACME (renamed)' },
     spy: 'updateData',
   },

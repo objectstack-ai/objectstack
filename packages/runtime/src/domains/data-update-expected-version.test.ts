@@ -294,12 +294,12 @@ for (const [doorName, boot] of DOORS) {
  * row. What either door does with them is `RestServer`'s reading, not this
  * file's: a token is the body key when it is not nullish (else `If-Match`),
  * the key is stripped from the patch whatever its value, and a token is
- * forwarded as its string unless it can never carry a version, which is
- * refused (#23492, pinned in its own block below).
+ * forwarded unless it can never carry a version, which is refused (#23492,
+ * pinned in its own block below; a number among them since #23517, pinned in
+ * the block after it).
  */
 const EDGE_SHAPES: ReadonlyArray<readonly [string, (version: string) => PatchOptions]> = [
     ['a stale token', () => ({ body: { name: AFTER, expectedVersion: STALE } })],
-    ['a number token', () => ({ body: { name: AFTER, expectedVersion: 20000101 } })],
     ['a null body token beside a stale If-Match', () => ({ body: { name: AFTER, expectedVersion: null }, headers: { 'If-Match': STALE } })],
     ['a null body token beside the current If-Match', (v) => ({ body: { name: AFTER, expectedVersion: null }, headers: { 'If-Match': v } })],
     ['an empty-string body token beside a stale If-Match', () => ({ body: { name: AFTER, expectedVersion: '' }, headers: { 'If-Match': STALE } })],
@@ -346,7 +346,8 @@ describe('[#23462] the two doors answer each token shape with the same status, c
  * position that can never carry a version is refused with the protocol's own
  * answer to the quoted-empty tag `""`, `400 VALIDATION_FAILED`, before
  * `updateData` is asked; maintainer decision #20 ① rules that shape refused,
- * neither read as "no token" nor answered `409`.
+ * neither read as "no token" nor answered `409`. A number joined this set
+ * with #23517 and has its own block below.
  */
 const UNUSABLE: ReadonlyArray<readonly [string, PatchOptions]> = [
     ["a body expectedVersion of '' beside a stale If-Match", { body: { name: AFTER, expectedVersion: '' }, headers: { 'If-Match': STALE } }],
@@ -391,10 +392,13 @@ for (const [doorName, boot] of DOORS) {
             expect(await door.name()).toBe(BEFORE);
         }, 60_000);
 
-        it('control: a body token of 0 is a number, judged as "0" (refused 409), never dropped', async () => {
+        it('control: a body token of 0 is never dropped: it is refused 400, so the current If-Match beside it is not read', async () => {
+            // [#23517] It was judged as '0' (409) until a number joined the
+            // refused set. Either way it is not read as "no token": had it
+            // been dropped, the current If-Match would have applied the write.
             const door = await boot();
-            conflict(await door.patch({ body: { name: AFTER, expectedVersion: 0 }, headers: { 'If-Match': door.version } }));
-            expect(door.forwarded()).toEqual([{ expectedVersion: '0', data: { name: AFTER } }]);
+            refused(await door.patch({ body: { name: AFTER, expectedVersion: 0 }, headers: { 'If-Match': door.version } }));
+            expect(door.forwarded()).toEqual([]);
             expect(await door.name()).toBe(BEFORE);
         }, 60_000);
     });
@@ -408,6 +412,71 @@ describe('[#23492] the two doors refuse each token that can never carry a versio
             const [rest, catchAllAnswer] = answers;
             expect(catchAllAnswer).toEqual(rest);
         }, 60_000);
+    }
+});
+
+// ── A number token ────────────────────────────────────────────────────────────
+
+/**
+ * [#23517] `UpdateDataRequestSchema.expectedVersion` declares a string. Both
+ * doors forwarded a number as `String(token)`, so `RestServer`'s request gate
+ * only ever parsed the coerced copy and the dispatcher had no gate: a body
+ * `expectedVersion: 5` was judged as `'5'` and answered `409
+ * CONCURRENT_UPDATE` on both doors (measured on this rig before the fix,
+ * beside a stale and beside the current `If-Match`; the row unchanged). Now a
+ * number is refused `400 VALIDATION_FAILED` before `updateData` is asked, the
+ * answer maintainer decision #20 ① gives a token shape that can never carry a
+ * version. The `If-Match` beside it is never read: the body key is the token
+ * whenever it is not nullish.
+ */
+const NUMBER_TOKENS: ReadonlyArray<readonly [string, number]> = [['5', 5], ['0', 0]];
+const IF_MATCH_BESIDE: ReadonlyArray<readonly [string, (version: string) => string]> = [
+    ['a stale If-Match', () => STALE],
+    ['the current If-Match', (version) => version],
+];
+
+for (const [doorName, boot] of DOORS) {
+    describe(`[#23517] ${doorName}: PATCH /data/:object/:id refuses a number expectedVersion`, () => {
+        for (const [tokenName, token] of NUMBER_TOKENS) {
+            for (const [besideName, ifMatch] of IF_MATCH_BESIDE) {
+                it(`expectedVersion: ${tokenName} beside ${besideName}: 400 VALIDATION_FAILED, updateData never asked, the row unchanged`, async () => {
+                    const door = await boot();
+                    refused(await door.patch({ body: { name: AFTER, expectedVersion: token }, headers: { 'If-Match': ifMatch(door.version) } }));
+                    expect(door.forwarded()).toEqual([]);
+                    expect(await door.name()).toBe(BEFORE);
+                }, 60_000);
+            }
+        }
+
+        it('control: the same token as a string is judged, not refused (409 against a stale version)', async () => {
+            const door = await boot();
+            conflict(await door.patch({ body: { name: AFTER, expectedVersion: '5' }, headers: { 'If-Match': door.version } }));
+            expect(door.forwarded()).toEqual([{ expectedVersion: '5', data: { name: AFTER } }]);
+            expect(await door.name()).toBe(BEFORE);
+        }, 60_000);
+
+        it('control: If-Match alone is a string by transport, so the current one still updates', async () => {
+            const door = await boot();
+            updated(await door.patch({ body: { name: AFTER }, headers: { 'If-Match': door.version } }));
+            expect(door.forwarded()).toEqual([{ expectedVersion: door.version, data: { name: AFTER } }]);
+            expect(await door.name()).toBe(AFTER);
+        }, 60_000);
+    });
+}
+
+describe('[#23517] the two doors refuse a number expectedVersion alike', () => {
+    for (const [tokenName, token] of NUMBER_TOKENS) {
+        for (const [besideName, ifMatch] of IF_MATCH_BESIDE) {
+            it(`expectedVersion: ${tokenName} beside ${besideName}: the same status, code and sentence`, async () => {
+                const answers: Answer[] = [];
+                for (const [, boot] of DOORS) {
+                    const door = await boot();
+                    answers.push(await door.patch({ body: { name: AFTER, expectedVersion: token }, headers: { 'If-Match': ifMatch(door.version) } }));
+                }
+                const [rest, catchAllAnswer] = answers;
+                expect(catchAllAnswer).toEqual(rest);
+            }, 60_000);
+        }
     }
 });
 

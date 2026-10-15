@@ -1289,6 +1289,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "レコードを追加",
         helpText: "レコード追加の入口"
       },
+      "interfaceConfig.emptyState": {
+        label: "空の状態",
+        helpText: "リストにレコードがないときにページに表示する内容：見出し、メッセージ、アイコン、リンク 1 つ。ここで設定すると、ソースビューの空の状態を置き換えます。"
+      },
       "interfaceConfig.buttons": {
         label: "ボタン",
         helpText: "ツールバーのボタン——このオブジェクトのアクションから選択します"

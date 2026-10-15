@@ -1743,17 +1743,25 @@ function sendMetaItemAbsent(res: any): void {
  *  - ABSENT: the spelling consulted is `undefined` or `null`. The body key or
  *    the query name falls through to `If-Match`, and no `If-Match` either is
  *    the legal unguarded write.
- *  - JUDGED: a string with something in it, or a finite number. The door
- *    forwards its string, and the protocol compares it (`409
- *    CONCURRENT_UPDATE` on a mismatch; the quoted-empty tag `""` is the
- *    protocol's own `400`, `MalformedVersionTokenError`).
+ *  - JUDGED: a string with something in it. The door forwards it, and the
+ *    protocol compares it (`409 CONCURRENT_UPDATE` on a mismatch; the
+ *    quoted-empty tag `""` is the protocol's own `400`,
+ *    `MalformedVersionTokenError`).
  *  - REFUSED `400 VALIDATION_FAILED`: anything else the caller put in a token
- *    position — an empty or blank string, a boolean, an array, an object. It
- *    can never carry a version, so it is the protocol's ruled answer to `""`
- *    (maintainer decision #20 ①: a token shape that can never carry a version
- *    is refused, neither read as "no token" nor answered `409`), given here
- *    because the protocol never sees these: it reads a blank string as no
- *    token.
+ *    position — an empty or blank string, a number, a boolean, an array, an
+ *    object. It can never carry a version, so it is the protocol's ruled
+ *    answer to `""` (maintainer decision #20 ①: a token shape that can never
+ *    carry a version is refused, neither read as "no token" nor answered
+ *    `409`), given here because the protocol never sees these: it reads a
+ *    blank string as no token.
+ *
+ * [#23517] A number is in the refused set, no longer judged as its string.
+ * `UpdateDataRequestSchema.expectedVersion` declares a string, and the door
+ * forwarded `String(5)`, so the request gate below only ever parsed the
+ * coerced copy and a token the contract never admits was answered `409` as if
+ * it were a stale version. Only a body token can be a number: `If-Match` and
+ * `?expectedVersion` are strings by transport, so the `DELETE` and every
+ * header token are unaffected.
  *
  * What it replaces is a truthiness test. The door forwarded a token only when
  * it was truthy, and `bodyVersion ?? If-Match` reads `If-Match` only when the
@@ -1779,14 +1787,13 @@ function sendMetaItemAbsent(res: any): void {
 function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
     if (token === undefined || token === null) return undefined;
     if (typeof token === 'string' && token.trim() !== '') return undefined;
-    if (typeof token === 'number' && Number.isFinite(token)) return undefined;
     const shape = typeof token === 'string' ? 'empty'
         : Array.isArray(token) ? 'an array'
         : typeof token === 'object' ? 'an object'
         : `the ${typeof token} \`${String(token)}\``;
     return `${spelling} is ${shape}, which can never carry a version, so it is refused rather than read as `
-        + 'no token. Send the version you read (the record\'s `updated_at`), or omit both expectedVersion and '
-        + 'If-Match to perform an unguarded write.';
+        + 'no token. Send the version you read as a string (the record\'s `updated_at`), or omit both '
+        + 'expectedVersion and If-Match to perform an unguarded write.';
 }
 
 /**
@@ -9173,12 +9180,29 @@ export class RestServer {
                         // validated as the assembled `UpdateDataRequestSchema`
                         // request so a non-record body 400s instead of reaching
                         // the engine.
+                        //
+                        // [#23491] …the patch AS THE CALLER SENT IT. It was
+                        // `data ?? {}`, so a JSON `null` body parsed as an empty
+                        // patch and answered `200`: an update that changed no
+                        // field and still moved the record's version. `null` is
+                        // not the record the contract declares, so it is refused
+                        // like an array, a string or a number, and the runtime
+                        // dispatcher's twin (`domains/data.ts`) asks this gate
+                        // over the same assembled request.
+                        //
+                        // [#23517] …and the token as the caller sent it, never
+                        // its `String()`: this gate parsed `String(5)`, so a
+                        // number `expectedVersion: z.string()` declares no room
+                        // for was forwarded and judged `409`.
+                        // `versionTokenRefusal` above already refuses it, so what
+                        // reaches this gate and the forward below is a non-blank
+                        // string.
                         const { UpdateDataRequestSchema } = await import('@objectstack/spec/api');
                         const updateInput = {
                             object: req.params.object,
                             id: req.params.id,
-                            data: data ?? {},
-                            ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
+                            data,
+                            ...(expectedVersion != null ? { expectedVersion } : {}),
                         };
                         const parsedUpdateOne = (UpdateDataRequestSchema as any).safeParse(updateInput);
                         if (!parsedUpdateOne.success) {
@@ -9193,8 +9217,8 @@ export class RestServer {
                         const updateRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
-                            data: data ?? {},
-                            ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
+                            data,
+                            ...(expectedVersion != null ? { expectedVersion } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
