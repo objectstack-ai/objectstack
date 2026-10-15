@@ -172,6 +172,11 @@ import {
   jsonColumnOperatorRefusalText,
   type JsonColumnFieldClass,
 } from '@objectstack/core';
+// [ADR-0139 D3] The walk that finds a `ReadableIds` leaf this compiler will not
+// evaluate, and the one refusal every driver answers it with — shared with
+// Turso's remote transport, `driver-memory` and `driver-mongodb`.
+import { findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/core';
+import { isComposedReadableIds, type ComposedReadableIds } from '@objectstack/spec/data';
 
 /**
  * [#20768] The async scope of a driver's own PRE-DDL question: the ADR-0104
@@ -5699,6 +5704,8 @@ export class SqlDriver implements IDataDriver {
 
   /** Throttle table for missing-tenantId warnings ({object}:{op}). */
   protected tenantAuditWarned: Set<string> = new Set();
+  /** [ADR-0139 D3] Whether this instance has logged its `ReadableIds` refusal (once per driver). */
+  protected readonly readableIdsRefusalLog = { logged: false };
 
   /**
    * Optional logger sink for security-audit warnings. Tests inject a spy;
@@ -7313,7 +7320,7 @@ export class SqlDriver implements IDataDriver {
 
       // WHERE
       if (query.where) {
-        this.applyFilters(b, query.where);
+        this.applyFilters(b, query.where, options);
       }
 
       // ORDER BY
@@ -10133,7 +10140,7 @@ export class SqlDriver implements IDataDriver {
       const issue = (candidate: Record<string, any>, issueOptions?: DriverOptions): Promise<number> => {
         const builder = this.getBuilder(target, issueOptions);
         this.applyTenantScope(builder, object, issueOptions);
-        if (query.where) this.applyFilters(builder, query.where);
+        if (query.where) this.applyFilters(builder, query.where, issueOptions);
         return builder.update(candidate) as unknown as Promise<number>;
       };
       total +=
@@ -10150,7 +10157,7 @@ export class SqlDriver implements IDataDriver {
     for (const target of this.rotationShardsOf(object) ?? [object]) {
       const builder = this.getBuilder(target, options);
       this.applyTenantScope(builder, object, options);
-      if (query.where) this.applyFilters(builder, query.where);
+      if (query.where) this.applyFilters(builder, query.where, options);
       total += (await builder.delete()) || 0;
     }
     return total;
@@ -10375,7 +10382,7 @@ export class SqlDriver implements IDataDriver {
     this.applyTenantScope(builder, object, options);
 
     if (query?.where) {
-      this.applyFilters(builder, query.where);
+      this.applyFilters(builder, query.where, options);
     }
 
     // [#8790] `count()` has no recovery ladder and needs none — it carries no
@@ -10638,7 +10645,7 @@ export class SqlDriver implements IDataDriver {
     this.applyTenantScope(builder, object, options);
 
     if (query.where) {
-      this.applyFilters(builder, query.where);
+      this.applyFilters(builder, query.where, options);
     }
 
     // The same coercion key `applyFilters` just used, so every part of this
@@ -11189,7 +11196,7 @@ export class SqlDriver implements IDataDriver {
     this.applyTenantScope(builder, object, options);
 
     if (filters) {
-      this.applyFilters(builder, filters);
+      this.applyFilters(builder, filters, options);
     }
 
     builder.distinct(field);
@@ -11459,7 +11466,7 @@ export class SqlDriver implements IDataDriver {
     builder.select('*');
 
     if (query.where) {
-      this.applyFilters(builder, query.where);
+      this.applyFilters(builder, query.where, options);
     }
 
     if (query.windowFunctions && Array.isArray(query.windowFunctions)) {
@@ -11591,7 +11598,7 @@ export class SqlDriver implements IDataDriver {
     }
 
     if (query.where) {
-      this.applyFilters(builder, query.where);
+      this.applyFilters(builder, query.where, options);
     }
 
     if (query.orderBy && Array.isArray(query.orderBy)) {
@@ -15592,6 +15599,32 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [ADR-0139 D3] The subquery a composed `ReadableIds` leaf compiles to:
+   * `SELECT id FROM P_TABLE WHERE SCOPE AND TENANT`, which the `$in` arm of
+   * {@link applyFilterCondition} embeds as `field IN (…)`.
+   *
+   * - **TENANT** is {@link applyTenantScope} on the PARENT table with the
+   *   OUTER read's options — the engine never composes the wall (D2 step 3),
+   *   so a parent row in another tenant is never readable through the leaf;
+   * - **SCOPE** is the composed scope, compiled by this same compiler against
+   *   the parent table (`undefined` is no row restriction). It arrives lowered
+   *   and `'policy'`-marked, so a refusal inside it withholds its operands
+   *   exactly as an injected RLS predicate's does.
+   *
+   * One statement, so `find`, `count` and `aggregate` agree by construction,
+   * and the subquery binds only the scope's and the wall's own parameters —
+   * no per-id parameter, whatever the parent's size. The subquery carries no
+   * transaction of its own: it is part of the outer statement, which does.
+   */
+  protected readableIdsSubquery(leaf: ComposedReadableIds, options?: DriverOptions): Knex.QueryBuilder {
+    const parent = leaf.object;
+    const sub = this.getBuilder(parent).select(this.remoteColumn(parent, 'id', 'id'));
+    this.applyTenantScope(sub, parent, options);
+    if (leaf.scope !== undefined) this.applyFilters(sub, leaf.scope, options);
+    return sub;
+  }
+
+  /**
    * Auto-inject the tenant column on insert rows when:
    *   1. `options.tenantId` is provided, AND
    *   2. the object has a tenant-isolation field, AND
@@ -16686,9 +16719,15 @@ export class SqlDriver implements IDataDriver {
    * `code` and `status` are the redacted refusal's own, and the diagnostic
    * stays on the symbol key where nothing that serialises an error can reach it.
    */
-  protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
+  protected applyFilters(builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+    // [ADR-0139 D3] A `ReadableIds` leaf this compiler will not evaluate — an
+    // UNCOMPOSED one anywhere, a composed one outside a `$in` comparand — is
+    // refused before anything compiles: INTERNAL_ERROR / 500, logged at
+    // `error` once per driver. ⛔ Never evaluated as "no restriction".
+    const misplaced = findMisplacedReadableIds(filters, true);
+    if (misplaced) throw refuseReadableIdsOnce('driver-sql', misplaced, this.logger, this.readableIdsRefusalLog);
     try {
-      this.compileFilters(builder, filters);
+      this.compileFilters(builder, filters, options);
     } catch (err) {
       throw this.resolveWithheldFilterRefusal(err, filters);
     }
@@ -16798,7 +16837,7 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
-  private compileFilters(builder: Knex.QueryBuilder, filters: any) {
+  private compileFilters(builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
     if (!filters) return;
 
     // [#5158] `where` is a `FilterCondition` OBJECT. It always was — the spec
@@ -16834,7 +16873,7 @@ export class SqlDriver implements IDataDriver {
       );
 
       if (hasMongoOperators) {
-        this.applyFilterCondition(builder, filters, 'and', table, filters);
+        this.applyFilterCondition(builder, filters, 'and', table, filters, options);
         return;
       }
 
@@ -17153,6 +17192,12 @@ export class SqlDriver implements IDataDriver {
     // merge boundaries actually marked. Defaults to this frame's own
     // `condition` for any direct caller compiling a standalone tree.
     rootFilter?: unknown,
+    // [ADR-0139 D3] The OUTER read's options, threaded down every combinator so
+    // a composed `ReadableIds` leaf's subquery is tenant-walled by
+    // {@link applyTenantScope} with exactly the options the outer read was
+    // scoped with — captured by the lazily invoked group callbacks below,
+    // never read from instance state.
+    options?: DriverOptions,
   ) {
     if (!condition || typeof condition !== 'object') return;
     const root = rootFilter ?? condition;
@@ -17185,7 +17230,7 @@ export class SqlDriver implements IDataDriver {
         (builder as any)[method]((qb: any) => {
           for (const sub of branches) {
             qb.where((subQb: any) => {
-              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root));
+              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
             });
           }
         });
@@ -17210,7 +17255,7 @@ export class SqlDriver implements IDataDriver {
             // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
             // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
             qb.orWhere((subQb: any) => {
-              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root));
+              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
             });
           }
         });
@@ -17239,7 +17284,7 @@ export class SqlDriver implements IDataDriver {
           // refusal raised inside a `$not` resolves against `root` like any
           // other; the walk-side refusals ran on the same nodes, eagerly.
           this.withWithheldFilterLog(root, () =>
-            this.applyFilterCondition(qb, value as Record<string, unknown>, 'and', table, root),
+            this.applyFilterCondition(qb, value as Record<string, unknown>, 'and', table, root, options),
           );
         });
       } else if (isFilterNode(value)) {
@@ -17268,6 +17313,15 @@ export class SqlDriver implements IDataDriver {
         const columnExpr = this.filterColumnExpr(table, localField, field);
         for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
+          // [ADR-0139 D3] The composed `ReadableIds` leaf — the one non-list a
+          // `$in` may hold — compiles to the semi-join, ahead of every comparand
+          // gate below (none of which has a reading for it). Only `$in` reaches
+          // here: `applyFilters` refused it at every other position.
+          if (rawOp === '$in' && isComposedReadableIds(opValue)) {
+            const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
+            (builder as any)[mIn](field, this.readableIdsSubquery(opValue, options));
+            continue;
+          }
           // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar
           // comparison compiles to a same-table column-to-column comparison
           // (or refuses inside the emitter, with the specific boundary named).
