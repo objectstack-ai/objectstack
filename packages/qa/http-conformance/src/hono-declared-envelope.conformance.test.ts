@@ -396,14 +396,14 @@ describe('[#23531] a real createHonoApp host: the 409 CONCURRENT_UPDATE carries 
         expect(record).not.toHaveProperty('secret');
         expect(JSON.stringify(answer.body)).not.toContain(SECRET_TEXT);
         // It is the caller's own read of the row, and the record the protocol threw.
-        const callerRead = await host.ql.findOne('ledger', { where: { id }, context: { ...MEMBER } } as any);
+        const callerRead = await host.ql.findOne('ledger', { where: { id }, context: { ...MEMBER } });
         expect(callerRead).not.toHaveProperty('secret');
         expect(record).toEqual(asWire(callerRead));
         expect(produced).toHaveLength(1);
         expect(record).toEqual(asWire(produced[0].currentRecord));
         // The store still holds the field and the row, so the absence is the
         // caller's mask, not the row's content.
-        const systemRead: any = await host.ql.findOne('ledger', { where: { id } } as any);
+        const systemRead: any = await host.ql.findOne('ledger', { where: { id } });
         expect(systemRead).toMatchObject({ name: 'visible', secret: SECRET_TEXT });
     }, 60_000);
 });
