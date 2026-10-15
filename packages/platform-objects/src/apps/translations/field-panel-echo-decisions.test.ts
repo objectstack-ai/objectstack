@@ -703,8 +703,13 @@ describe('#19403 round 4 — the blind spot, FOURTH shape: a type-level coverage
     // pin exactly as these five are, and the extractor emitted a key for each —
     // but that flight authored all six of their string leaves in all three
     // locales, so the echo rule above reads them translated, not undecided.
-    expect(UNWALKED_CHILDREN.length).toBe(8);
-    for (const child of ['currencyConfig.currencyMode', 'currencyConfig.defaultCurrency', 'storage.notNull']) {
+    // 10 since #23735: the `referenceDeletedWhen` composite (`field`, `value`),
+    // whose four string leaves that card authored in all three locales.
+    expect(UNWALKED_CHILDREN.length).toBe(10);
+    for (const child of [
+      'currencyConfig.currencyMode', 'currencyConfig.defaultCurrency', 'storage.notNull',
+      'referenceDeletedWhen.field', 'referenceDeletedWhen.value',
+    ]) {
       expect(UNWALKED_CHILDREN).toContain(child);
     }
     for (const child of ['object', 'function', 'field', 'relationshipField', 'filter']) {
@@ -742,7 +747,9 @@ describe('#19403 round 4 — the blind spot, FOURTH shape: a type-level coverage
     // `currencyConfig` and `storage` joined in #19332 (flight G1b), in form
     // order around it; their children were authored by that flight, so the
     // broken five still hang off `summaryOperations` alone.
-    expect([...skippedParents]).toEqual(['currencyConfig', 'summaryOperations', 'storage']);
+    // `referenceDeletedWhen` joined in #23735, beside `referenceVia`; its
+    // children were authored by that card.
+    expect([...skippedParents]).toEqual(['currencyConfig', 'referenceDeletedWhen', 'summaryOperations', 'storage']);
     // The type is "carried" — the control the other pin reads — yet none of the
     // leaves this round had to decide is inside its derivation.
     expect(ROW_PROPERTIES.length, 'field DOES carry repeater row properties, so the other pin counts it covered').toBeGreaterThan(0);
