@@ -35,6 +35,13 @@
  * `{ isSystem: true }` predicate write over the same rows fires the metadata
  * hook per row. Without it, "the hook fired 0 times" could be a hook that was
  * never bound.
+ *
+ * [#23354] The NULL arm re-owns only the rows the seed reported landing on, as
+ * `owner_id IS NULL AND id IN (chunk)`, one write per chunk of half the
+ * ceiling. So its writes are under the ceiling by construction, and the
+ * over-ceiling case is driven through the seed-identity arm, which is still
+ * one predicate over every such row. The chunked write is measured here on the
+ * real driver too: an `IN` list that size binds one parameter per id.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -51,6 +58,9 @@ const SYS = { context: { isSystem: true } } as const;
 const ADMIN = 'usr_admin_human';
 const SEED_IDENTITY = 'usr_system';
 const OBJECT = 'probe_deal';
+
+/** [#23354] The seed's report of the rows it landed on: every id given. */
+const seededAre = (ids: string[]) => (object: string): readonly string[] => (object === OBJECT ? ids : []);
 
 const PROBE_OBJECT: any = {
   name: OBJECT,
@@ -161,14 +171,15 @@ describe('[#22067] the seed ownership claim dispatches no metadata-bound automat
   it('the whole-set write: no metadata hook fires, code hooks fire per row with the flag and skipTriggers', async () => {
     const { engine, metadataHook, codeHook } = await boot();
     const N = 40;
-    await seed(engine, Array.from({ length: N }, (_, i) => ({
+    const rows = Array.from({ length: N }, (_, i) => ({
       id: `d${i}`,
       name: `Deal ${i}`,
       stage: 'open',
       owner_id: i % 2 === 0 ? null : SEED_IDENTITY,
-    })));
+    }));
+    await seed(engine, rows);
 
-    const result = await claimSeedOwnership(engine, ADMIN);
+    const result = await claimSeedOwnership(engine, ADMIN, { seededRecordIds: seededAre(rows.map((r) => r.id)) });
 
     expect(result).toEqual([{ object: OBJECT, count: N }]);
     const owners = await ownersOf(engine);
@@ -218,7 +229,7 @@ describe('[#22067] the seed ownership claim dispatches no metadata-bound automat
       id: `d${String(i).padStart(6, '0')}`,
       name: `Deal ${i}`,
       stage: 'open',
-      owner_id: null,
+      owner_id: SEED_IDENTITY,
     })));
 
     // The measurement the fallback's page size rests on: with metadata hooks
@@ -227,12 +238,12 @@ describe('[#22067] the seed ownership claim dispatches no metadata-bound automat
     // no hook run.
     await expect(
       (engine as any).update(OBJECT, { owner_id: ADMIN }, {
-        where: { owner_id: null },
+        where: { owner_id: SEED_IDENTITY },
         multi: true,
         context: { isSystem: true, skipAutomations: true },
       }),
     ).rejects.toMatchObject({ code: BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE, limit: MAX_BULK_PER_ROW_HOOK_ROWS });
-    expect([...(await ownersOf(engine)).values()].every((o) => o === null)).toBe(true);
+    expect([...(await ownersOf(engine)).values()].every((o) => o === SEED_IDENTITY)).toBe(true);
     expect(codeHook).toEqual([]);
 
     const result = await claimSeedOwnership(engine, ADMIN);
@@ -259,5 +270,31 @@ describe('[#22067] the seed ownership claim dispatches no metadata-bound automat
       context: { isSystem: true },
     });
     expect(metadataHook).toHaveLength(6);
+  }, 180_000);
+
+  it('[#23354] the NULL arm in chunks of seeded ids: never refused, every seeded row claimed, an unreported row left alone', async () => {
+    const { engine, metadataHook, codeHook } = await boot();
+    const N = MAX_BULK_PER_ROW_HOOK_ROWS + 500;
+    const seededRows = Array.from({ length: N }, (_, i) => ({
+      id: `d${String(i).padStart(6, '0')}`,
+      name: `Deal ${i}`,
+      stage: 'open',
+      owner_id: null,
+    }));
+    // Unowned, and never reported by the seed: a guest's, a form's (ADR-0138 D1).
+    const unreported = { id: 'guest_row', name: 'Guest enquiry', stage: 'new', owner_id: null };
+    await seed(engine, [...seededRows, unreported]);
+
+    const result = await claimSeedOwnership(engine, ADMIN, { seededRecordIds: seededAre(seededRows.map((r) => r.id)) });
+
+    expect(result).toEqual([{ object: OBJECT, count: N }]);
+    const owners = await ownersOf(engine);
+    expect(owners.get('guest_row')).toBeNull();
+    expect([...owners.entries()].filter(([id]) => id !== 'guest_row').every(([, o]) => o === ADMIN)).toBe(true);
+    // Every matched row went through the per-row path under the flag, and no
+    // write was refused whole: one afterUpdate per seeded row, none for the
+    // unreported one.
+    expect(codeHook.filter((s) => s.event === 'afterUpdate')).toHaveLength(N);
+    expect(metadataHook).toEqual([]);
   }, 180_000);
 });

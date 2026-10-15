@@ -142,15 +142,29 @@ function makeEngine(tables: Record<string, any[]>, schemas: any[]) {
   return engine;
 }
 
-/** A seed-settlement tracker whose tally the test drives by hand. */
+/**
+ * A seed-settlement tracker whose tally the test drives by hand.
+ *
+ * [#23354] It also carries the contract's `seededRecordIds`: the claim
+ * re-owns only the NULL-owner rows the seed reported landing on, so the test
+ * publishes each seed row it lands (`publish`), exactly as the runtime host
+ * publishes the loader's `landedIds` before the source settles.
+ */
 function makeSettlement(initialInFlight: number) {
   let inFlight = initialInFlight;
+  const seeded = new Map<string, Set<string>>();
   return {
     settleOne: () => {
       inFlight = Math.max(0, inFlight - 1);
     },
+    publish: (object: string, ...ids: string[]) => {
+      const set = seeded.get(object) ?? new Set<string>();
+      for (const id of ids) set.add(id);
+      seeded.set(object, set);
+    },
     service: {
       snapshot: (): SeedSettlementSnapshot => ({ pending: inFlight, inFlight, suppressed: [] }),
+      seededRecordIds: (object: string): readonly string[] => [...(seeded.get(object) ?? [])],
     },
   };
 }
@@ -172,10 +186,10 @@ const seedRow = (id: string) => ({ id, owner_id: null });
  * Boot `SecurityPlugin` over the double with one promotable human, one object
  * whose seed rows have already landed, and one whose rows land later.
  */
-async function bootPlugin() {
+async function bootPlugin(existing?: Record<string, any[]>) {
   const settlement = makeSettlement(1);
   const schemas = [businessObject('crm_account'), businessObject('crm_contract')];
-  const tables: Record<string, any[]> = {
+  const tables: Record<string, any[]> = existing ?? {
     // The seeder's identity row plus one human who can authenticate — the
     // promotion target.
     sys_user: [
@@ -190,6 +204,9 @@ async function bootPlugin() {
     // LOSER: the object whose rows the background seed has not reached yet.
     crm_contract: [],
   };
+  // The seed reports the rows it landed on; a replay on a later boot reports
+  // the same rows again (the loader records a key it matched).
+  settlement.publish('crm_account', 'acc_seed_1', 'acc_seed_2');
   const engine = makeEngine(tables, schemas);
   const hooks: Array<[string, (...a: any[]) => any]> = [];
   const services: Record<string, any> = {
@@ -219,7 +236,12 @@ async function bootPlugin() {
     return matching.length;
   };
   const ownerOf = (object: string) => (tables[object] ?? []).map((r) => r.owner_id);
-  return { tables, logger, fire, ownerOf, settlement };
+  /** The background seed lands rows, and publishes them, as the host does. */
+  const landSeedRows = (object: string, ...rows: any[]) => {
+    (tables[object] ??= []).push(...rows);
+    settlement.publish(object, ...rows.map((r) => r.id));
+  };
+  return { tables, logger, fire, ownerOf, settlement, landSeedRows };
 }
 
 describe('seed-ownership claim — the one-shot pass and the seed it races', () => {
@@ -236,7 +258,7 @@ describe('seed-ownership claim — the one-shot pass and the seed it races', () 
     expect(rig.ownerOf('crm_account')).toEqual([ADMIN, ADMIN]);
 
     // ── The background seed lands its remaining rows, past kernel start ─────
-    rig.tables.crm_contract.push(seedRow('con_1'), seedRow('con_2'), seedRow('con_3'));
+    rig.landSeedRows('crm_contract', seedRow('con_1'), seedRow('con_2'), seedRow('con_3'));
     // Ownerless at this instant — this is the defect's own moment, measured
     // rather than asserted away: the one-shot pass walked `crm_contract` before
     // these rows existed and nothing re-reads it.
@@ -260,7 +282,8 @@ describe('seed-ownership claim — the one-shot pass and the seed it races', () 
     // DIFFERENT human. The third is the permission boundary this repair must
     // not move — re-owning it would be a change of who owns a row beyond the
     // rows the one-shot pass missed.
-    rig.tables.crm_contract.push(
+    rig.landSeedRows(
+      'crm_contract',
       { id: 'con_null', owner_id: null },
       { id: 'con_system', owner_id: SYSTEM },
       { id: 'con_other', owner_id: 'usr_someone_else' },
@@ -287,7 +310,7 @@ describe('seed-ownership claim — the one-shot pass and the seed it races', () 
     rig.tables.sys_permission_set.push({ id: 'ps_admin_full_access', name: 'admin_full_access' });
 
     await rig.fire('kernel:ready');
-    rig.tables.crm_contract.push(seedRow('con_late'));
+    rig.landSeedRows('crm_contract', seedRow('con_late'));
     rig.settlement.settleOne();
     await rig.fire('app:seeded', { appId: 'com.example.crm', overBudget: true });
 
@@ -302,7 +325,7 @@ describe('seed-ownership claim — the one-shot pass and the seed it races', () 
     rig.tables.sys_user = [];
     rig.tables.sys_account = [];
     await rig.fire('kernel:ready');
-    rig.tables.crm_contract.push(seedRow('con_1'));
+    rig.landSeedRows('crm_contract', seedRow('con_1'));
 
     rig.settlement.settleOne();
     await rig.fire('app:seeded', { appId: 'com.example.crm', overBudget: false });
@@ -320,7 +343,9 @@ async function runClaim(rows: any[], seedSettlement: SeedSettlementSnapshot | un
   const schemas = [businessObject('crm_contract')];
   const engine = makeEngine({ crm_contract: rows }, schemas);
   const logger = { info: vi.fn(), warn: vi.fn() };
-  const results = await claimSeedOwnership(engine, ADMIN, { logger, seedSettlement });
+  // Every row here is one the seed wrote, and the seed says so.
+  const seededRecordIds = (object: string) => (object === 'crm_contract' ? rows.map((r) => r.id) : []);
+  const results = await claimSeedOwnership(engine, ADMIN, { logger, seedSettlement, seededRecordIds });
   return { results, logger };
 }
 
@@ -405,3 +430,52 @@ describe('seed-ownership claim — "claimed 0 of 0" versus "nothing to claim"', 
     expect(meta).toMatchObject({ claimed: 2, eligibleObjects: 1 });
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#23354] ADR-0138 D1 — the rows the seed did not write, across two boots
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('seed-ownership claim — a guest\'s and a form\'s unowned rows keep no owner (#23354)', () => {
+  /**
+   * ADR-0138 D1 item 5: "Empty state: the owner stays unset. When nothing in
+   * the scenario sets it, a guest-written row keeps no owner, exactly as the
+   * public form doors' intake does today; hooks and flows may set it."
+   *
+   * The claim runs on EVERY `app:seeded` — every boot of an app with seed data
+   * — so a row it wrongly re-owns is re-owned at the very next boot. Driven
+   * through the real plugin, over one table set, across two boots: the second
+   * boot is a fresh plugin and a fresh tracker whose replay re-reports the
+   * seed's rows, as the loader's matched-key record does.
+   */
+  it('a seed row is claimed; a guest row and a form row keep no owner on either boot; a hook-set owner stands', async () => {
+    // ── Boot 1: the seed has landed; then a guest, a form and a hook write ──
+    const boot1 = await bootPlugin();
+    boot1.tables.crm_contract.push(
+      { id: 'guest_row', owner_id: null },          // the guest door left it unset (E3)
+      { id: 'form_row', owner_id: null },           // a public form's intake
+      { id: 'hook_row', owner_id: 'usr_hook_set' }, // a hook set the scenario's owner
+    );
+    await boot1.fire('kernel:ready');
+    boot1.settlement.settleOne();
+    await boot1.fire('app:seeded', { appId: 'com.example.crm', overBudget: false });
+
+    // (a) the seed rows are claimed — the positive control for everything below.
+    expect(boot1.ownerOf('crm_account')).toEqual([ADMIN, ADMIN]);
+    // (b) and (c)
+    expect(boot1.ownerOf('crm_contract')).toEqual([null, null, 'usr_hook_set']);
+
+    // ── Boot 2: same tables, an admin already holds the grant; the seed replays ──
+    const boot2 = await bootPlugin(boot1.tables);
+    // A seed row an earlier boot wrote and nobody owned yet (say the admin
+    // appeared after boot 1's claim): the replay reports it, so it is claimed.
+    boot1.tables.crm_account.push(seedRow('acc_seed_3'));
+    boot2.settlement.publish('crm_account', 'acc_seed_3');
+    await boot2.fire('kernel:ready');
+    boot2.settlement.settleOne();
+    await boot2.fire('app:seeded', { appId: 'com.example.crm', overBudget: false });
+
+    expect(boot2.ownerOf('crm_account')).toEqual([ADMIN, ADMIN, ADMIN]);
+    expect(boot2.ownerOf('crm_contract')).toEqual([null, null, 'usr_hook_set']);
+  });
+});
+

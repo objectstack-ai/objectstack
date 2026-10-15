@@ -216,12 +216,19 @@ describe('#14348 — the promotion target is the oldest human that can AUTHENTIC
     // Seeded business rows carry no owner — the state `claimSeedOwnership`
     // re-owns. This is the second half of the harm: a wrong promotion target
     // also mis-assigns every seeded record.
+    const seededIds: string[] = [];
     for (const name of ['Seeded Task A', 'Seeded Task B']) {
-      await (engine as any).insert('demo_task', { name }, { context: SYSTEM_CTX });
+      const row = await (engine as any).insert('demo_task', { name }, { context: SYSTEM_CTX });
+      seededIds.push(String(row.id));
     }
 
     const { logger } = collectingLogger();
-    const report = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { logger });
+    // [#23354] The seed reports the rows it landed on; the promotion hands
+    // over those (ADR-0138 D1), read through the `seed-settlement` contract.
+    const report = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {
+      logger,
+      seededRecordIds: (object: string) => (object === 'demo_task' ? seededIds : []),
+    });
 
     expect(report.adminPromoted).toBe(true);
     expect(report.ownershipClaimed).toBe(2);
