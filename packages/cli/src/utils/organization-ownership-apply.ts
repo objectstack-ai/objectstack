@@ -2003,7 +2003,7 @@ async function walledBindingRemedy(run: Run, name: string, sets: readonly string
   const entry = await resolveName(run, 'position', name);
   if (!entry) {
     return (
-      `${why} Declare the position ${name} in the environment catalog with permissionSets naming ${sets.join(', ')}, ` +
+      `${why} Declare the position ${name} with permissionSets naming ${sets.join(', ')}, ` +
       `through one door only: the deployment's code (compiled into the artifact this ceremony boots), or ${door}. A ` +
       'cold boot refuses a position name a package declares and the environment catalog also holds. Then re-run.'
     );

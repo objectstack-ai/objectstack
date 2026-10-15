@@ -12,7 +12,7 @@ The blocker's first sentence is unchanged: "Binding rows give position NAME sets
 
 - **A position no catalog declares.**
   - FROM: "The authored-conversion step carries them; resolve its blocker, then re-run."
-  - TO: "Under the POSTURE posture no ceremony step carries binding rows (ADR-0131 D3). Declare the position NAME in the environment catalog with permissionSets naming SETS, through one door only: the deployment's code (compiled into the artifact this ceremony boots), or the metadata door as the platform administrator (PUT /api/v1/meta/position/NAME). A cold boot refuses a position name a package declares and the environment catalog also holds. Then re-run."
+  - TO: "Under the POSTURE posture no ceremony step carries binding rows (ADR-0131 D3). Declare the position NAME with permissionSets naming SETS, through one door only: the deployment's code (compiled into the artifact this ceremony boots), or the metadata door as the platform administrator (PUT /api/v1/meta/position/NAME). A cold boot refuses a position name a package declares and the environment catalog also holds. Then re-run."
 - **A declared position the metadata door reports editable, whose definition lacks some of the bound sets.**
   - FROM: the same pointer.
   - TO: "Under the POSTURE posture no ceremony step carries binding rows (ADR-0131 D3). Add MISSING to the permissionSets of the position NAME through the metadata door as the platform administrator (PUT /api/v1/meta/position/NAME), then re-run."

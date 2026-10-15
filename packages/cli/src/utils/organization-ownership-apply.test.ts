@@ -2136,7 +2136,9 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     `);
     const rewrite = step(await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin }), 'rewrite');
     expect(blockerOf(rewrite, 'the permission set admin_full_access,')).toMatch(/or remove the grants/);
-    expect(blockerOf(rewrite, 'position everyone ')).toContain('PUT /api/v1/meta/position/everyone');
+    // Not the pointer. This fake catalog declares no `everyone` (a composed boot declares it, sealed), so which
+    // walled remedy follows is not this control's question.
+    expect(blockerOf(rewrite, 'position everyone ')).not.toMatch(/resolve its blocker/);
     expect(rewrite.blockers.join('\n')).not.toContain(COMPOSITION);
   });
 });
