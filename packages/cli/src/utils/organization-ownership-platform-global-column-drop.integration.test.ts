@@ -427,7 +427,8 @@ describe('os migrate apply --allow-destructive: the organization_id drop on a ho
     const dbFile = applyCase('no-marker');
     const { payload, exitCode } = await migrateApply(dbFile);
 
-    expect(exitCode, JSON.stringify(payload).slice(0, 600)).toBe(1);
+    const seen = { message: payload.message, error: payload.error, appliedOrganizationDrops: organizationDropsIn(payload.applied) };
+    expect(exitCode, JSON.stringify(seen)).toBe(1);
     expect(payload).toMatchObject({
       message: 'refused_organization_ownership_unmigrated',
       tables: [...DECLARED].sort(),
