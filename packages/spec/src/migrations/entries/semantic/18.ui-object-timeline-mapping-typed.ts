@@ -27,8 +27,8 @@ export const entry: SemanticMigration = {
     + 'of the binding record, four optional field names, closed as every element shape on that map is. It is '
     + 'read where every page component\'s props are: the component-props gate reports a refused value as a '
     + '`component-props-invalid` / `component-props-unknown-key` error on `objectstack validate`, '
-    + '`objectstack build` and `objectstack lint`, and a stored page still saves and loads, because a page '
-    + 'component\'s `properties` is not parsed on the metadata save or load path. No conversion is '
+    + '`objectstack build` and `objectstack lint`, and a stored page still loads, because a page '
+    + 'component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is '
     + 'registered: nothing on the load path refuses the shape, and the authored census found nothing to '
     + 'respell. Deployed metadata NOT MEASURED.',
   acceptanceCriteria: 'Every `object-timeline` node validates: `objectstack validate` reports no '

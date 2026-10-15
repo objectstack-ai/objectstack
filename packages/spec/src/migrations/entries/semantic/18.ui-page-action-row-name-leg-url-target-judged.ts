@@ -23,8 +23,7 @@ export const entry: SemanticMigration = {
     + 'reach the url navigator. The rows judged `target` only when the executor KEY read `\'url\'`, so such a row '
     + 'carried a target the click refuses past the parse. The rows now judge `target` against the executor the '
     + 'runner runs, whichever key spelled it, with the one url-target grammar. `name` is not refused as an '
-    + 'executor spelling: a row whose `name` names any other handler is untouched. A page\'s `properties` is not '
-    + 'parsed on the metadata save or load path; `os validate`\'s props gate parses it against these same rows '
+    + 'executor spelling: a row whose `name` names any other handler is untouched. A page\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door; `os validate`\'s props gate parses it against these same rows '
     + 'and reports the refusal at the row\'s `target`. No measured producer writes such a row: no page action row '
     + 'in this repository, in objectui or in hotcrm is named `url` or `navigation` — so the entry is owed for rows '
     + 'authored outside them.',

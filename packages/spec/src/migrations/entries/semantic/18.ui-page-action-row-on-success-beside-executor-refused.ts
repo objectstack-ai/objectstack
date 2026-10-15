@@ -25,7 +25,8 @@ export const entry: SemanticMigration = {
     + '`script`; the rows now carry that rule on the vocabulary the action\'s closed `ActionType` can see, with '
     + 'the same refusal text. A name outside the runner\'s built-in table is a host-registered handler and stays '
     + 'open: the runner hops after it too, and only the host knows whether its handler navigates. A page\'s '
-    + '`properties` is not parsed on the metadata save or load path; `os validate`\'s props gate parses it against '
+    + '`properties` is not parsed on the metadata load path, so a stored page keeps loading; `os validate`\'s props '
+    + 'gate, which the metadata save door also runs on the next save of the page, parses it against '
     + 'these same rows and reports the refusal at the row\'s `onSuccess`. Measured producers: none in this '
     + 'repository or in hotcrm; objectui\'s one is a test row with no executor asserted accepted.',
   acceptanceCriteria:
