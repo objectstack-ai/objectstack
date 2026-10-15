@@ -433,7 +433,7 @@ describe('on a kernel with an environmentId, a runtime-authored object has a cop
         });
     });
 
-    it('CONTROL: a code package\'s object gets no copy from the boot pass or from a runtime edit beside it', async () => {
+    it('a code package\'s object gets no copy from the boot pass or from a runtime edit beside it', async () => {
         const stores: Stores = new Map();
         const k1 = await boot(stores, withShippedPackage);
         expect((await save(k1, NAME, 'Gadget', { apiEnabled: true })).success).toBe(true);
