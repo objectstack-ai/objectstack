@@ -69,16 +69,12 @@ import { FieldType } from '../data/field.zod';
 //     ships.
 //   - `params[].options[]` is `.passthrough()` — and since the parent closed it
 //     is the ONE open level left here. Still measured, never inherited from a
-//     neighbour by symmetry. objectui's option TYPE is closed
-//     (`Array<{ label; value }>`, `packages/types/src/objectql.ts:271`), but the
-//     type is not what an authored option meets: `bulkParamToField` SPREADS each
-//     entry — `options?.map(o => ({ ...o, value: String(o.value) }))`,
-//     `packages/plugin-grid/src/components/bulkParamToField.ts:131` — so every
-//     extra key survives verbatim into the field metadata, where the widget
-//     vocabulary is `SelectOptionMetadata`
-//     (`packages/types/src/field-types.ts:288`): `color` / `icon` / `disabled` /
-//     `visibleWhen` beyond the pair, and read (`option?.color`,
-//     `packages/fields/src/index.tsx:1089`). Stripping here therefore DELETES
+//     neighbour by symmetry. The renderer SPREADS each authored entry into the
+//     field metadata it hands the widget (`{ ...o, value: String(o.value) }`),
+//     so every extra key survives verbatim, and the widget's option vocabulary
+//     carries `color` / `icon` / `disabled` / `visibleWhen` beyond the pair,
+//     with `color` read by the select cell (read points recorded in
+//     `liveness/view.json`, row `list.bulkActionDefs`). Stripping here therefore DELETES
 //     authored widget config the renderer would have honoured — the silent
 //     narrowing this file exists to stop. Until #4001's 2026-08-03 re-measure
 //     this level was bare strip while the ledger prose called it open: one
