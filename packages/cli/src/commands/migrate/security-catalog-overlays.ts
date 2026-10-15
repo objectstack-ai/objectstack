@@ -290,7 +290,7 @@ export default class MigrateSecurityCatalogOverlays extends Command {
     // The preview's read-only boot measured whether `sys_metadata` exists; a
     // table that does not exist stores no row (the `meta --stored` reading).
     const reads = absentTableReads(stack);
-    const rows = reads.absent('sys_metadata') ? [] : await listSecurityCatalogOverlayRows(stack.kernel);
+    const rows = reads.absent('sys_metadata') ? [] : await listSecurityCatalogOverlayRows(stack.kernel, stack.driver);
     const outcomes = apply && rows.length > 0 ? await deleteSecurityCatalogOverlayRows(stack.kernel, rows) : [];
     const deleted = outcomes.filter((o) => o.outcome === 'deleted').length;
     const failed = outcomes.filter((o) => o.outcome === 'failed').length;

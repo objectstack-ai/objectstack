@@ -424,7 +424,7 @@ describe('[#21899] the repository delete gate lifts the origin-gated type only',
                 return { deleted: rows.delete((o as any)?.where?.id) ? 1 : 0 };
             },
         };
-        return { rows, repo: new SysMetadataRepository({ engine, organizationId: null, orgLabel: 'env' }) };
+        return { rows, repo: new SysMetadataRepository({ engine, orgLabel: 'env' }) };
     };
 
     it('removes a stored row under a code-defined datasource on the override-artifact intent', async () => {

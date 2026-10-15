@@ -1067,21 +1067,6 @@
       "pinned": 1
     },
     {
-      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
       "file": "packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3343,6 +3328,11 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/invitation-placement.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/metadata-family-data-door-gate.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

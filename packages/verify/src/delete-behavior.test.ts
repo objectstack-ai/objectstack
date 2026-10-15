@@ -22,10 +22,16 @@ import {
   formatDeleteBehaviorReport,
   type DeleteBehaviorReport,
 } from './delete-behavior.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
 const RUN_TIMEOUT = 120_000;
+
+// The boot's first load, paid during collection rather than in the first
+// `beforeAll` (see `boot-warm-up.testkit.ts`). Both boots below use the
+// default options.
+await warmUpBoot();
 
 /** One holder per shape the family probes, and one per shape it names instead. */
 const app = {

@@ -498,11 +498,25 @@ describe('the boot pass echoes every stored env-wide overlay, and only those', (
       { type: 'position', name: 'env_position', state: 'active', organization_id: null },
       { type: 'permission', name: 'org_set', state: 'active', organization_id: 'org_a' },
     ];
+    rows.forEach((row, i) => { (row as Row & { id?: string }).id = `row_${i}`; });
     const engine = {
       registry: { listItems: () => [] },
+      // [ADR-0131 D7] The engine shapes a read to the declared columns (no
+      // `organization_id`): an organization's row is told apart through the
+      // driver's physical column.
       find: async (object: string, query: { where: Row; limit?: number }) => {
         const hits = object === 'sys_metadata' ? rows.filter((row) => matches(row, query.where)) : [];
-        return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
+        const bounded = typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
+        return bounded.map(({ organization_id: _physical, ...declared }) => declared);
+      },
+      getDriverForObject: (object: string) => object !== 'sys_metadata' ? undefined : {
+        dialectName: 'sqlite',
+        async execute(sql: string) {
+          return /column_name/.test(sql)
+            ? [{ column_name: 'id' }, { column_name: 'organization_id' }]
+            : rows.filter((r) => r.organization_id != null && r.organization_id !== '')
+              .map((r) => ({ id: (r as Row & { id?: string }).id, organization_id: r.organization_id }));
+        },
       },
     };
     const overlays: Record<string, { body: Row }> = {};

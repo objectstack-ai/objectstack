@@ -17,7 +17,7 @@
 // permission check at all), so it is pinned with a control that FIRES: the
 // admin, on the identical call, is admitted by both doors.
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { bootStack, bootStackOnce, type VerifyStack, type BootOptions } from './harness.js';
 import { isVerifyRefusal } from './handle.js';
@@ -28,12 +28,17 @@ import {
   STAGE_FORECAST,
   today,
 } from './handle.fixture.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
 
 /** A module constant, so `bootStackOnce` can key the shared boot on it. */
 const BOOT_OPTIONS: BootOptions = { automation: true };
+
+// The boot's first load, paid during collection rather than in the shared
+// boot's `beforeAll` (see `boot-warm-up.testkit.ts`).
+await warmUpBoot(BOOT_OPTIONS);
 
 let stack: VerifyStack;
 let admin: string;
@@ -61,10 +66,22 @@ afterAll(async () => {
  * `packages/objectql/src/registry.ts`, `definition: { ...schema, name: fqn }`).
  * So the fixture is BUILT AGAIN: a fresh module instance of `./handle.fixture.js`
  * runs its builder once more, and every nested definition is new.
+ *
+ * The fresh instance is the fixture module alone, under a specifier of its own
+ * (the module runner keys a module by its id, query included). Its imports
+ * resolve to the instances this file already holds, as they did for the
+ * original. `vi.resetModules()` would also give a fresh instance, but it drops
+ * the whole registry, so the re-import re-evaluated the fixture's entire graph
+ * (`@objectstack/spec` and the rest) and the boot after it re-loaded every
+ * module it imports lazily: 1.2 to 1.6 s more per call, isolated, inside the
+ * case's clock.
  */
+let freshInstances = 0;
 async function freshHandleFixtureStack(): Promise<typeof handleFixtureStack> {
-  vi.resetModules();
-  return (await import('./handle.fixture.js')).handleFixtureStack;
+  freshInstances += 1;
+  const specifier = `./handle.fixture.js?instance=${freshInstances}`;
+  const fresh = (await import(/* @vite-ignore */ specifier)) as typeof import('./handle.fixture.js');
+  return fresh.handleFixtureStack;
 }
 
 /** Unique per run, so list assertions never see another test's rows. */

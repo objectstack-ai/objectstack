@@ -63,6 +63,7 @@
  *    silent fork, which is why the LOCK's provenance read is not a page at all.
  */
 
+import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { classifyPackagedPermissionSet } from './packaged-permission-set-lock.js';
 import { seedCtx } from './organization-scope.js';
 
@@ -121,12 +122,19 @@ export async function detectPackagedPermissionSetOverlays(
 ): Promise<PackagedPermissionSetOverlayReading> {
   if (!ql || typeof ql.find !== 'function') return { count: 0, names: [], findings: [] };
 
+  // [ADR-0131 D6/D7] Env-wide only. The family declares no organization
+  // column, so the engine row never carries one: a legacy organization's row is
+  // told apart by the physical column, on a database the ceremony has not
+  // migrated. A read that cannot answer throws, and the boot wiring reports it.
+  const legacy = await readLegacyOrganizationRows(
+    typeof ql.getDriverForObject === 'function' ? ql.getDriverForObject('sys_metadata') : undefined,
+  );
   // Both type spellings, same as the reconciler and the drift diagnostic.
   const overlayIdsByName = new Map<string, string[]>();
   for (const type of ['permission', 'permissions']) {
     const rows = await tryFind(ql, 'sys_metadata', { type, state: 'active' }, OVERLAY_PAGE_LIMIT);
     for (const r of rows) {
-      if ((r?.organization_id ?? null) !== null || !r?.name) continue; // env-wide only
+      if (!r?.name || legacy.has(String(r.id))) continue; // env-wide only
       const name = String(r.name);
       const ids = overlayIdsByName.get(name);
       if (ids) ids.push(String(r.id)); else overlayIdsByName.set(name, [String(r.id)]);

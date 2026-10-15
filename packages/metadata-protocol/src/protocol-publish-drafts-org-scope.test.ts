@@ -195,19 +195,8 @@ const objectBody = (name: string) => ({
     },
 });
 
-/** [#6190] The org-scoped specimen — `view`, one of the five overlay-enabled
- *  types, was a type that legitimately carried per-org rows before ADR-0131
- *  D6. See the third case. */
-const viewBody = (name: string) => ({
-    name,
-    label: 'Project Tasks',
-    object: 'proj_task',
-    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
-    columns: [{ field: 'title', label: 'Title' }],
-});
-
 describe('publishPackageDrafts — env-wide draft under a non-null active org (#3115)', () => {
-    it('saves the object draft env-wide (organization_id = NULL) when no org is threaded', async () => {
+    it('saves the object draft env-wide (no organization column, ADR-0131 D7) when no org is threaded', async () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
 
@@ -223,7 +212,7 @@ describe('publishPackageDrafts — env-wide draft under a non-null active org (#
 
         const draftRows = Array.from(rows.values()).filter((r) => r.state === 'draft');
         expect(draftRows).toHaveLength(1);
-        expect(draftRows[0].organization_id).toBeNull();
+        expect('organization_id' in draftRows[0]).toBe(false);
         expect(draftRows[0].package_id).toBe('app.projects');
     });
 
@@ -264,30 +253,6 @@ describe('publishPackageDrafts — env-wide draft under a non-null active org (#
         expect(remaining.filter((r) => r.state === 'draft')).toHaveLength(0);
         const active = remaining.filter((r) => r.state === 'active');
         expect(active).toHaveLength(1);
-        expect(active[0].organization_id).toBeNull();
-    });
-
-    it('never promotes a legacy org-scoped draft — the publish lists env-wide drafts only (ADR-0131 D6)', async () => {
-        const { engine, rows } = makeStubEngine();
-        const protocol = new ObjectStackProtocolImplementation(engine);
-
-        // A legacy per-org draft (organization_id = org_alpha), planted
-        // directly: no protocol write can create one any more.
-        await engine.insert('sys_metadata', {
-            type: 'view',
-            name: 'proj_task_grid',
-            organization_id: 'org_alpha',
-            package_id: 'app.projects',
-            state: 'draft',
-            metadata: JSON.stringify(viewBody('proj_task_grid')),
-        });
-
-        const res = await protocol.publishPackageDrafts({ packageId: 'app.projects' });
-
-        expect(res).toMatchObject({ publishedCount: 0, failedCount: 0 });
-        expect(Array.from(rows.values()).filter((r) => r.state === 'active')).toHaveLength(0);
-        const draft = Array.from(rows.values()).filter((r) => r.state === 'draft');
-        expect(draft).toHaveLength(1);
-        expect(draft[0].organization_id).toBe('org_alpha');
+        expect('organization_id' in active[0]).toBe(false);
     });
 });

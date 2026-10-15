@@ -24,8 +24,8 @@
  * `flow-shipped-name-layered-read.dogfood.test.ts`.
  *
  * Controls: a flow name no managed package ships keeps its stored row as the
- * effective layer, a shipped name with no stored row is unchanged, an
- * organization-scoped flow row is out of the read's reach, and a type in the
+ * effective layer, a shipped name with no stored row is unchanged, a caller
+ * naming an organization reads as the environment does, and a type in the
  * overlay regime keeps overlay-wins.
  */
 import { describe, expect, it } from 'vitest';
@@ -53,17 +53,15 @@ interface StoredRow {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
 }
 
 const storedRow = (type: string, name: string, body: unknown, extra: Partial<StoredRow> = {}): StoredRow => ({
-    id: `r_${type}_${name}_${extra.organization_id ?? 'env'}`,
+    id: `r_${type}_${name}_env`,
     type,
     name,
-    organization_id: null,
     package_id: null,
     state: 'active',
     metadata: JSON.stringify(body),
@@ -275,20 +273,18 @@ describe('[#21002] the layered read of a shipped flow name reports the loader\'s
         expect(answer.overlayScope).toBeNull();
     });
 
-    it('control: an organization-scoped flow row is out of the read\'s reach', async () => {
+    it('control: a caller naming an organization reads as the environment does', async () => {
         const { protocol } = harness([
-            storedRow('flow', SHIPPED, flowBody(SHIPPED, 'ORG ROW'), { organization_id: ORG_ID }),
-            storedRow('flow', CUSTOMER, flowBody(CUSTOMER, 'ORG ROW'), { organization_id: ORG_ID }),
+            storedRow('flow', SHIPPED, flowBody(SHIPPED, 'STORED ROW')),
+            storedRow('flow', CUSTOMER, flowBody(CUSTOMER, 'STORED ROW')),
         ]);
 
         const shipped = await layered(protocol, { type: 'flow', name: SHIPPED, organizationId: ORG_ID });
         expect(shipped.effective?.label).toBe('LOADER');
-        expect(shipped.overlay).toBeNull();
-        expect(shipped.overlayScope).toBeNull();
 
         const customer = await layered(protocol, { type: 'flow', name: CUSTOMER, organizationId: ORG_ID });
-        expect(customer.overlay).toBeNull();
-        expect(customer.effective).toBeNull();
+        expect(customer.effective?.label).toBe('STORED ROW');
+        expect(customer.overlayScope).toBe('env');
     });
 
     it('control: an overlay of a packaged type in the overlay regime is still the effective layer', async () => {

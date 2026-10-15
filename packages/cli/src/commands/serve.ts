@@ -3872,6 +3872,25 @@ export default class Serve extends Command {
         }
       }
 
+      // 5c-ter. [ADR-0131 D10 item 5] The v18 boot refusal, beside the
+      // recovery scan and in its shape: at `kernel:ready` it refuses to start
+      // a database still in the v17 organization-ownership shape whose
+      // ceremony marker is not verified, naming `os migrate
+      // organization-ownership`. Composed HERE, on served kernels only —
+      // ⛔ never in `createStandaloneStack`, which every CLI data and schema
+      // boot shares, the ceremony's own boot among them. A host that composes
+      // its own instance keeps it; a guard that cannot be composed fails the
+      // boot rather than leave the database unjudged (no escape hatch, D10).
+      const hasOrganizationOwnershipGuard = plugins.some(
+        (p: any) => p?.name === 'com.objectstack.organization-ownership-boot-guard'
+          || p?.constructor?.name === 'OrganizationOwnershipBootGuardPlugin'
+      );
+      if (!hasOrganizationOwnershipGuard) {
+        const { OrganizationOwnershipBootGuardPlugin } = await import('@objectstack/runtime');
+        await kernel.use(new OrganizationOwnershipBootGuardPlugin());
+        trackPlugin('OrganizationOwnershipBootGuard');
+      }
+
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.
       // The Console expects /api/v1/auth/* to be served by better-auth via

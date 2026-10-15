@@ -222,7 +222,6 @@ describe('#4981 — a failed draft drain is discriminated, not blanket-swallowed
     engine = makeFakeEngine();
     repo = new SysMetadataRepository({
       engine,
-      organizationId: 'org_alpha',
       orgLabel: 'org_alpha',
     });
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -395,7 +394,6 @@ describe('#4981 — a failed draft drain is discriminated, not blanket-swallowed
     const engine2 = makeFakeEngine();
     const repo2 = new SysMetadataRepository({
       engine: engine2,
-      organizationId: 'org_alpha',
       orgLabel: 'org_alpha',
     });
     await repo2.put(ref, view('A'), { parentVersion: null, actor: 'studio', state: 'draft' });

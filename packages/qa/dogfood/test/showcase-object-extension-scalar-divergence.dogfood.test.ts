@@ -195,7 +195,6 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
         await ql.insert('sys_metadata', {
             type: 'object',
             name: 'showcase_account',
-            organization_id: null,
             package_id: null,
             state: 'active',
             version: 1,

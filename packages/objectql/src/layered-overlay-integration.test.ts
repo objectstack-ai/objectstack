@@ -149,7 +149,6 @@ describe('LayeredRepository(overlay over artifact) — ADR-0008 PR-10c', () => {
 
         overlay = new SysMetadataRepository({
             engine: makeFakeEngine(),
-            organizationId: 'org_alpha',
             orgLabel: 'org_alpha',
         });
 

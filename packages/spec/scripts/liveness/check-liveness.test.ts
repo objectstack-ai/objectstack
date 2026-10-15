@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 410 — spawns the real producer once per single-cause fixture: each case spawns the real liveness gate (check-liveness.mts) on a ledger copy with exactly one cause for its verdict; slowest CI reading 320.4 s (hourly run 38657693085) x 1.25, rounded up
 //
 // Self-test for the liveness gate's EVIDENCE guard (#5623).
 //

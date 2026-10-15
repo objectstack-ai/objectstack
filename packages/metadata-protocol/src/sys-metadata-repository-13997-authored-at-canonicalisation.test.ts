@@ -196,7 +196,6 @@ describe('#13997 — authoredAt is canonical ISO-8601 text, whatever the dialect
     engine = makeFakeEngine();
     repo = new SysMetadataRepository({
       engine,
-      organizationId: 'org_alpha',
       orgLabel: 'org_alpha',
     });
   });

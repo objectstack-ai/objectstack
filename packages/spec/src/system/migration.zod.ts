@@ -170,6 +170,22 @@ export const FILE_REFERENCES_MIGRATION_ID = 'adr-0104-file-references';
 export const VALUE_SHAPES_MIGRATION_ID = 'adr-0104-value-shapes';
 
 /**
+ * Well-known migration id: ADR-0131 D10, the v18 organization-ownership
+ * ceremony (`os migrate organization-ownership --apply`). Its row in
+ * `sys_migration` is the ceremony's checkpoint and, once verified, its
+ * completion marker: `verified_at` is set only by a run that finished every
+ * step and whose post-check found zero discrepancies. The v18 runtime refuses
+ * to start against a database still in the v17 shape while this marker is not
+ * verified (D10 item 5).
+ *
+ * ⛔ Not a member of {@link CREATION_ATTESTED_MIGRATION_IDS}: a fresh store is
+ * not in the v17 shape (no table it creates carries a retired organization
+ * column), so the boot needs no attestation to start it, and a row claiming a
+ * ceremony that never ran would read as one that did.
+ */
+export const ORGANIZATION_OWNERSHIP_MIGRATION_ID = 'adr-0131-organization-ownership';
+
+/**
  * ⚰️ RETIRED migration id: ADR-0030 notification convergence.
  *
  * The runner this id stood for — `migrateSysNotificationToEvent` in
