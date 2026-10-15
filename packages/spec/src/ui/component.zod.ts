@@ -9420,9 +9420,10 @@ export type ObjectMapProps = z.input<typeof ObjectMapPropsSchema>;
 export type ObjectMapPropsParsed = z.infer<typeof ObjectMapPropsSchema>;
 
 /**
- * The flat `GanttConfig` spellings `getGanttConfig`'s branch 2 reads
- * (`ObjectGantt.tsx:513-543`) and that `ObjectView` / `ListView` EMIT when they
- * flatten `options.gantt` — objectui's own `FLAT_GANTT_CONFIG_KEYS`. Read, but
+ * The flat `GanttConfig` spellings `getGanttConfig`'s branch 2 reads and that
+ * `ObjectView` / `ListView` EMIT when they flatten `options.gantt` — objectui's
+ * own `FLAT_GANTT_CONFIG_KEYS` (read points recorded in `liveness/page.json`,
+ * row `regions`). Read, but
  * NOT authorable, for the reason the map's twin set above records: objectui#6469
  * inherited the objectui#5018 ruling for this block, so the `gantt` block is the
  * authoring shape, it is taken WHOLE when present, and every flat key beside it
@@ -9467,19 +9468,17 @@ const OBJECT_GANTT_FLAT_CONFIG_GUIDANCE: readonly KeySetGuidance[] = [
 
 /**
  * [#21464] One `object-gantt` reference line — the element of the block's
- * `markers`, as the chart reads it at the `.objectui-sha` pin `ab1879721595`
- * (unchanged at objectui `main` `94985a92ba`). `ObjectGantt.tsx:2505` hands
- * `schema.markers` to `GanttView` verbatim, which reads three members per
- * marker: `date` places the line (`GanttView.tsx:913-924` re-bases it for the
- * chart's time zone, `:2394-2413` maps it through the axis and DROPS a marker
- * whose date does not parse or falls outside the drawn range), `label` is the
- * text drawn against it, and `color` its CSS colour, the theme's primary colour
- * when absent (`:2407`, drawn at `:4083-4100` and in the SVG export at
- * `:3320-3332`). Nothing else is read off a marker.
+ * `markers`, as the chart reads it (read points recorded in
+ * `liveness/page.json`, row `regions`). The block hands `schema.markers` to
+ * `GanttView` verbatim, which reads three members per marker: `date` places
+ * the line (re-based for the chart's time zone, then mapped through the axis,
+ * which DROPS a marker whose date does not parse or falls outside the drawn
+ * range), `label` is the text drawn against it, and `color` its CSS colour, the
+ * theme's primary colour when absent (drawn on the chart and in the SVG
+ * export). Nothing else is read off a marker.
  *
  * The contract is objectui's own authoring declaration, taken as it stands:
- * `ObjectGanttSchema.markers` (`types/src/objectql.ts:3787-3794`) and its zod
- * mirror (`types/src/zod/objectql.zod.ts:2738-2746`) declare
+ * `ObjectGanttSchema.markers` and its zod mirror declare
  * `{ date: string; label?: string; color?: string }`, `date` a STRING because
  * authored metadata is JSON and a `Date` cannot survive it (the runtime
  * `GanttMarker` this feeds also takes a `Date`, which only a code-composed
@@ -9513,221 +9512,38 @@ function objectGanttMarker() {
 }
 
 /**
- * `object-gantt` (objectui `plugin-gantt/src/ObjectGantt.tsx` plus the registry
- * shell `plugin-gantt/src/index.tsx`, read at objectui `b9814b334`, re-read there 2026-10-14:
- * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
- * byte-identical across the hop from `1fb1ced36` (`git diff --quiet`), so every
- * anchor in them held unmoved; `ListView.tsx` changed (+23/-3: objectui#12292,
- * objectui#12030 and objectui#12270, none of it in a `case` arm), and its `case
- * 'gantt'` MOVED `3964` -> `3981`, byte-identical, and still writes the toolbar
- * Search term onto the node as `search` / `searchableFields`. At `1fb1ced36`,
- * re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
- * `7578323a5`, re-read there 2026-10-12:
- * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
- * byte-identical across the hop from `9646e2ed2` (`git diff --quiet`), so every
- * anchor in them held unmoved; `ListView.tsx` changed (+34/-79, objectui#12217,
- * objectui `f5b66bf97`: two import lines changed in place and one added at the
- * top, a docblock added and `useListViewTranslation` exported near `:1040`, the
- * grid's inline empty state replaced from `:5677` down), and its `case 'gantt'`
- * MOVED `3959` -> `3964`, byte-identical, and still writes the toolbar Search
- * term onto the node as `search` / `searchableFields`. At `9646e2ed2`, re-read
- * there 2026-10-12:
- * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
- * byte-identical across the hop from `088e0f705` (`git diff --quiet`), so every
- * anchor in them held unmoved; `ListView.tsx` changed (+9/-9, objectui#12189,
- * objectui `26b0bd2d1`: the FilterBuilder group type's rename, nine lines
- * replaced in place, the last at `:1558`), and its `case 'gantt'` held at
- * `3959` and still writes the toolbar Search term onto the node as `search` /
- * `searchableFields`. At `088e0f705`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
- * `e5311165a`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
- * `499799502`, re-read there 2026-10-11:
- * `record-source.ts`, `plugin-gantt/src/index.tsx` and `ListView.tsx` are
- * byte-identical across the hop from `0df67f237` (`git diff --quiet`), so every
- * anchor in them held unmoved; `ObjectGantt.tsx` +27/-4 changed for
- * objectui#12082 (objectui `752504520`: the chart's in-chart writes read the
- * affordance-to-grant map) — two import lines above `getGanttConfig`, a
- * 21-line block of grant reads below the reload, and four handler props whose
- * handlers are now withheld without the grant — no hunk on a cited read, so
- * every anchor MOVED with its cited text byte-identical, by 2 above the block
- * (`:613-615` -> `:615-617`, `:725` -> `:727`, `:921` -> `:923`,
- * `:1066`/`:1067` -> `:1068`/`:1069`, `:888-891` -> `:890-893`,
- * `:1081-1086` -> `:1083-1088`, `:1075`/`:1077` -> `:1077`/`:1079`,
- * `:1679`/`:1680` -> `:1681`/`:1682`, `:1831`/`:1833` -> `:1833`/`:1835`,
- * `:1969` -> `:1971`, `:2036` -> `:2038`) and by 23 below it (`:2348` ->
- * `:2371`, `:2506`-`:2514` -> `:2529`-`:2537`, `:2549-2555` -> `:2572-2578`),
- * and each is cited below at this pin. At `0df67f237`, re-read there
- * 2026-10-11:
- * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
- * byte-identical across the hop from `20c6d351a` (`git diff --quiet`), so every
- * anchor in them held unmoved; `ListView.tsx` changed (+229/-57), and its
- * `case 'gantt'` is byte-identical, moved `3804` -> `3959`, and still writes
- * the toolbar Search term onto the node as `search` / `searchableFields`. At
- * `20c6d351a`, re-read there 2026-10-10:
- * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
- * byte-identical across the hop from `47b1f0bb7` (`git diff --quiet`), so every
- * anchor in them held unmoved; `ListView.tsx` changed (+281/-235), and its
- * `case 'gantt'` still writes the toolbar Search term onto the node as `search`
- * / `searchableFields`. At `47b1f0bb7`, re-read there 2026-10-09:
- * `ObjectGantt.tsx`, `record-source.ts` and `plugin-gantt/src/index.tsx` are
- * byte-identical across the hop from `f0268ad78` (`git diff --quiet`), so every
- * anchor in them held unmoved. At `f0268ad78`, re-read there 2026-10-09:
- * `ObjectGantt.tsx` and `record-source.ts` are byte-identical across the hop from
- * `a58626c88` (`git diff --quiet`), so every anchor in them held unmoved;
- * `plugin-gantt/src/index.tsx` changed in one line only, the `markers` input's
- * description (`:190`, objectui `c0862c1cc`), below the `gantt` input, which did
- * not move from `:179`. At `a58626c88`, re-read there 2026-10-06:
- * every objectui file this record cites is byte-identical across the hop from
- * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
- * At `0abd4f9f8`, re-read there 2026-10-05:
- * every objectui file this record cites is byte-identical across the hop from
- * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
- * At `9dfaca654`, re-measured there 2026-10-05:
- * `record-source.ts` is byte-identical to `2e818d0b5` (`git diff --quiet`), so
- * its anchors held unmoved; `plugin-gantt/src/index.tsx` changed there in one
- * docblock only, line for line, below the `gantt` input (`:215-217`,
- * objectui#8347), which did not move; and `ObjectGantt.tsx` +4/-3 grew one
- * line in the `ObjectGanttProps` docblock above `getGanttConfig`
- * (objectui#8347 putting the index-signature note in the past tense), so
- * every anchor in it MOVED by 1 (`:612-614` -> `:613-615`, `:724` -> `:725`,
- * `:920` -> `:921`, `:1065`/`:1066` -> `:1066`/`:1067`, `:1074`/`:1076` ->
- * `:1075`/`:1077`, `:887-890` -> `:888-891`, `:1080-1085` -> `:1081-1086`,
- * `:1678`/`:1679` -> `:1679`/`:1680`, `:1830`/`:1832` -> `:1831`/`:1833`,
- * `:1968` -> `:1969`, `:2035` -> `:2036`, `:2347` -> `:2348`, `:2505`-`:2513`
- * -> `:2506`-`:2514`, `:2548-2554` -> `:2549-2555`), each with its cited text
- * byte-identical; NONE changed content. At `2e818d0b5`, re-measured there
- * 2026-10-04:
- * `plugin-gantt/src/index.tsx`, `record-source.ts` and `ObjectGantt.tsx` are
- * byte-identical to `ab1879721` (`git diff --quiet`), so every anchor held
- * unmoved. At `ab1879721`, re-measured there 2026-10-03:
- * `plugin-gantt/src/index.tsx` and `record-source.ts` are byte-identical to
- * `89cad75d5` (`git diff --quiet`), so their anchors held unmoved; and
- * `ObjectGantt.tsx` +8/-0 gained one import line above `getGanttConfig` and,
- * in the tooltip's `percent` row, objectui#11475's `percentCellScale(def)`
- * argument with its comment (+7) — so every anchor through the tooltip MOVED
- * by 1 (`:611-613` -> `:612-614`, `:723` -> `:724`, `:919` -> `:920`,
- * `:1064`/`:1065` -> `:1065`/`:1066`, `:1073`/`:1075` -> `:1074`/`:1076`,
- * `:886-889` -> `:887-890`, `:1079-1084` -> `:1080-1085`) and every anchor
- * after it by 8 (`:1670`/`:1671` -> `:1678`/`:1679`, `:1822`/`:1824` ->
- * `:1830`/`:1832`, `:1960` -> `:1968`, `:2027` -> `:2035`, `:2339` ->
- * `:2347`, `:2497`-`:2505` -> `:2505`-`:2513`, `:2540-2546` -> `:2548-2554`),
- * each with its cited text byte-identical; NONE changed content. At
- * `89cad75d5` (2026-10-02) all three
- * files changed across the hop from `31971ff1e`, so every anchor was
- * re-mapped through the diff and re-READ; NONE changed content.
- * `ObjectGantt.tsx` +47/-10: one import added above `getGanttConfig` and one
- * removed above it (objectui#11254's `resolveFieldScale` /
- * `formatDisplayNumber`), objectui#11355 typing the flat-key read in
- * `warnOnShadowedFlatGanttKeys` (+1 net), and objectui#11254's field-width
- * reads in the tooltip's `number` and `percent` rows (+23 and +13) — so
- * `getGanttConfig` MOVED by 1 (`:610-612` -> `:611-613`), the record-source
- * ladder, the filter, the reload and its search pair by 1 (`:722` -> `:723`,
- * `:918` -> `:919`, `:1063`/`:1064` -> `:1064`/`:1065`, `:1072`/`:1074` ->
- * `:1073`/`:1075`, `:885-888` -> `:886-889`, `:1078-1083` -> `:1079-1084`),
- * and every anchor after the tooltip by 37 (`:1633`/`:1634` ->
- * `:1670`/`:1671`, `:1785`/`:1787` -> `:1822`/`:1824`, `:1923` -> `:1960`,
- * `:1990` -> `:2027`, `:2302` -> `:2339`, `:2460`-`:2468` -> `:2497`-`:2505`,
- * `:2503-2509` -> `:2540-2546`), each with its cited text byte-identical.
- * `record-source.ts` +4/-5 (objectui#10859 batch 8 retiring the bare `tree`
- * arm) changed only below the three rungs, which did not move.
- * `plugin-gantt/src/index.tsx` +45/-1 (objectui#11168 slice 4): a navigation
- * description constant and a comment above the registration, the `gantt`
- * input's description rewritten from a member list naming `percentageField`
- * (which nothing reads) into this row's own describe, and eleven inputs
- * after `sort` — `navigation`, `label`, `skipWeekends`, `holidays`,
- * `persistLayout`, `viewName`, `markers`, `criticalPath`, `showBaselines`,
- * `readOnly`, `mobileReadOnly` (`:184-194`), every one a key this row
- * declares — so the `gantt` input MOVED `:146` -> `:179` with its
- * `{ name: 'gantt', type: 'object' }` head unchanged. At `31971ff1e`
- * (2026-10-01) `ObjectGantt.tsx` and `record-source.ts` were byte-identical to
- * `e420df310`, so every anchor in them held unmoved and was re-read in place;
- * `plugin-gantt/src/index.tsx` changed (+3/-2, objectui#11117: the
- * `objectName` input's description and the comment above the registration
- * now count a `dataSource.object` binding), the `gantt` input MOVING `:145`
- * -> `:146` byte-identical. At `e420df310` (2026-09-30) all three
- * files changed across the hop from `db11afd49`, and every anchor was
- * re-mapped through the diff and re-READ; NONE changed content. `ObjectGantt.tsx`
- * +85/-26 (objectui#11141's inclusive date-only end, objectui#8348's
- * record-source ladder, objectui#11070's `reference` spelling), every anchor
- * MOVING with its cited text byte-identical — by 47 through `getGanttConfig`,
- * by 49 through the reload, by 51 through the layout key and by 59 after it;
- * `plugin-gantt/src/index.tsx` +10/-0 (objectui#8220: a comment and `filter` /
- * `sort` inputs, in the array forms this row declares), the `gantt` input
- * MOVING `:137` -> `:145`; `record-source.ts` +38/-27, the three rungs MOVING
- * by 8. At `db11afd49` (2026-09-29)
- * `plugin-gantt/src/index.tsx` and `record-source.ts` were byte-identical to
- * `dd3f7e1be`, and `ObjectGantt.tsx` changed (+14/-10: objectui#10866's
- * zoned-chart DST day read and write through `invertTo` / `invertFrom`, and
- * comment re-citations), the first insertion at `:391` and every later anchor
- * MOVED by 4 with its cited text byte-identical, none of the cited lines changing
- * content. At `dd3f7e1be` (2026-09-28) all three
- * files changed across the hop from `f8a9d0fb0` — `ObjectGantt.tsx` +285/-56
- * (in-place refresh on the invalidation bus, objectui#10035 / objectui#7237,
- * the core row ceiling, objectui#7508, objectui#10666's resolved filter,
- * objectui#10866's date-only days), `plugin-gantt/src/index.tsx` +19/-1
- * (`objectName` no longer a required input, objectui#7470) and
- * `record-source.ts` (docblocks and the retired bare `map` arm) — so every
- * anchor was re-mapped through the diff and re-READ. Two changed CONTENT and
- * say so where they are cited, the `filter` handoff and the row ceiling;
- * every other one MOVED (by 56 to 232 lines in `ObjectGantt.tsx`, `121` ->
- * `137` in `index.tsx`, by 7 in `record-source.ts`) with its cited text
- * byte-identical, and the retired `:1849` reading is a blank line at its new
- * `:2103` too. On the hop onto `f8a9d0fb0`, `plugin-gantt/src/index.tsx` and
- * `record-source.ts` were byte-identical to `62597c588` and `ObjectGantt.tsx`
- * changed (+29/-2, objectui#10250: the toolbar Search term, below) — those
- * above the insertion (`:501-503`, `:613`) did not move, and every later one
- * MOVED 21 or 29 lines with its cited text byte-identical (the retired `:1849`
- * reading was a blank line at `:1878`). All three files were
- * byte-identical across the hop onto `62597c588`. At `87af769e9`
- * (re-READ 2026-09-22) not one anchor below was carried from `53ded82bf`;
- * every number was re-derived from that tree, and the `label` one moved far
- * enough that the retired reading now lands in an unrelated callback.)
- * Read points per key: `data` (`resolveRecordSourceConfig` at
- * `:727` — rung 1, `core/src/utils/record-source.ts:307`), `staticData` (rung 2,
- * `record-source.ts:311`), `objectName` (rung 3; also `:1835` and `:2038` here),
- * `filter` (`:923`, read once through `useResolvedFilter`, which resolves its
- * context tokens — objectui#10666 — and `:1068` sends the held result to
- * `$filter`; at `f8a9d0fb0` it was sent verbatim), `sort` (`:1069`, through
- * `convertSortToQueryParams` to `$orderby`), `gantt` (`:615-617` —
- * `getGanttConfig` branch 1, the author face and the registration's declared
- * `{ name: 'gantt', type: 'object' }` input (`plugin-gantt/src/index.tsx:179`),
- * validated there against this
- * repo's own {@link GanttConfigSchema}), `navigation` (`:1971`), `label`
- * (`:2574`, resolved through `resolveInlineI18nLabel` for the export file
- * name — this record said `resolveI18nLabel`, which the line did not read at
- * `f8a9d0fb0` either —
- * ⚠️ the retired reading `:1849` was the comment ABOVE that chain and at this
- * pin `87af769e9` was a BLANK line (nothing cites `:1849` now), two above a dependency-delete callback's own comment,
- * so it is re-READ here, not re-pointed),
- * `skipWeekends` (`:1681`), `holidays` (`:1682`), `persistLayout` (`:1833`),
- * `viewName` (`:1835`), `markers` (`:2529`), `criticalPath` (`:2532`),
- * `showBaselines` (`:2535`), `readOnly` (`:2371` and `:2536`) and
- * `mobileReadOnly` (`:2537`).
+ * `object-gantt` (objectui's `plugin-gantt` renderer plus its registry shell;
+ * read points recorded in `liveness/page.json`, row `regions`).
+ * Read points per key: `data` (rung 1 of `resolveRecordSourceConfig`),
+ * `staticData` (rung 2), `objectName` (rung 3; also the layout-persistence key
+ * and the navigation binding), `filter` (read once through `useResolvedFilter`,
+ * which resolves its context tokens — objectui#10666 — and the reload sends the
+ * held result to `$filter`), `sort` (through `convertSortToQueryParams` to
+ * `$orderby`), `gantt` (`getGanttConfig` branch 1, the author face and the
+ * registration's declared `{ name: 'gantt', type: 'object' }` input, validated
+ * there against this repo's own {@link GanttConfigSchema}), `navigation`,
+ * `label` (resolved through `resolveInlineI18nLabel` for the export file name),
+ * `skipWeekends` and `holidays` (the working calendar), `persistLayout` and
+ * `viewName` (the layout-persistence key), `markers`, `criticalPath`,
+ * `showBaselines`, `readOnly` (the chart and the record overlay's lock) and
+ * `mobileReadOnly`.
  *
  * Measured and deliberately NOT declared: the flat `GanttConfig` spellings (the
  * flatten product — {@link OBJECT_GANTT_FLAT_CONFIG_GUIDANCE}); `title`, which
  * this renderer never reads (the export-name chain is `gantt.exportFileName` →
- * `label` → the OBJECT's label → `objectName`, `:2572-2578`); a row cap — the
- * reload's `$top` is the platform ceiling, spread in as core's
- * `nonGridRowCeilingQuery()` (`:1079`: one probe row past the ceiling, which
- * `applyNonGridRowCeiling` slices back off; at `f8a9d0fb0` a bare
- * `$top: NON_GRID_ROW_CEILING_TOP`, until objectui#7508 homed the ceiling in
- * core) and the renderer's own comment marks it "⛔ Not authorable" (`:1077`); and
- * the `onTaskClick` / `onRowClick` / `onBeforeTaskUpdate` callbacks, which are
- * host props. ⚠️ New at `f8a9d0fb0` and recorded, not ruled: objectui#10250
- * gave the renderer two more reads, `search` and `searchableFields`
- * (`:890-893`, sent as `$search` / `$searchFields` at `:1083-1088`), which
- * `ListView.tsx` writes onto the node it generates from its toolbar Search
- * box — a host-generated key pair in the same position as the flatten
- * product, and not declared here.
+ * `label` → the OBJECT's label → `objectName`); a row cap — the reload's `$top`
+ * is the platform ceiling, spread in as core's `nonGridRowCeilingQuery()` (one
+ * probe row past the ceiling, which `applyNonGridRowCeiling` slices back off),
+ * and the renderer's own comment marks it "⛔ Not authorable"; and the
+ * `onTaskClick` / `onRowClick` / `onBeforeTaskUpdate` callbacks, which are host
+ * props. ⚠️ Recorded, not ruled: objectui#10250 gave the renderer two more
+ * reads, `search` and `searchableFields` (sent as `$search` / `$searchFields`),
+ * which `ListView` writes onto the node it generates from its toolbar Search
+ * box (its `case 'gantt'` arm) — a host-generated key pair in the same position
+ * as the flatten product, and not declared here.
  *
  * VALUE posture: `gantt` is the one config block in this family whose value
- * contract is already the SPEC's — `ObjectGantt.tsx:617` validates it against
+ * contract is already the SPEC's — the renderer validates it against
  * `GanttConfigSchema` imported from `@objectstack/spec/ui` — so the read point
  * names the schema and this door takes it rather than `z.unknown()`. The
  * scalars below are read as their coercions say: `!!schema.readOnly`,
@@ -9771,10 +9587,10 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
   /**
    * [#21464] The list view's own {@link NavigationConfigSchema}, by reference
    * — the carrier `object-grid`, `object-kanban`, `object-calendar` and
-   * `object-timeline` already take. `ObjectGantt.tsx:1960` (at the pin
-   * `89cad75d55`) reads `schema.navigation ?? { mode: 'drawer' }`, classifies
-   * its `.mode` there, and hands it to `useNavigationOverlay` (`:2025-2026`),
-   * which types its mode union as that schema's. Until #21464 this member was
+   * `object-timeline` already take. The renderer reads
+   * `schema.navigation ?? { mode: 'drawer' }`, classifies its `.mode` there,
+   * and hands it to `useNavigationOverlay`, which types its mode union as that
+   * schema's (read points recorded in `liveness/page.json`, row `regions`). Until #21464 this member was
    * `z.unknown()`, so `navigation: 42` and a bare mode string such as
    * `'drawer'` passed every door and opened the record page, whatever they
    * named.
@@ -9816,165 +9632,26 @@ export type ObjectGanttPropsParsed = z.infer<typeof ObjectGanttPropsSchema>;
 
 /**
  * The flat `TreeConfig` spellings `getTreeConfig` reads ahead of the `tree`
- * block (`ObjectTree.tsx:289-302`) and that `ObjectView` / `ListView` EMIT when
- * they flatten `options.tree` (`ListView.tsx:4142-4166`, `case 'tree'`: the
- * product carries these keys, the EFFECTIVE `filter` objectui#10250 added, and
- * NO `tree` key). Both halves re-READ at objectui `b9814b334` (re-read there 2026-10-14:
- * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
- * `1fb1ced36` (`git diff --quiet`), so `289-302` and `240-261` did not move;
- * and `ListView.tsx` changed (+23/-3: objectui#12292, objectui#12030 and
- * objectui#12270, none of it in a `case` arm), so its `case 'tree'` arm MOVED
- * `4125-4149` -> `4142-4166`, byte-identical, with `labelField:
- * treeCfg.labelField || 'name'` at `:4162`, and the flat key set it emits did
- * not move. At `1fb1ced36`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
- * `7578323a5`, re-read there 2026-10-12:
- * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
- * `9646e2ed2` (`git diff --quiet`), so `289-302` and `240-261` did not move;
- * and `ListView.tsx` changed (+34/-79, objectui#12217, objectui `f5b66bf97`:
- * two import lines changed in place and one added at the top, a docblock added
- * and `useListViewTranslation` exported near `:1040`, the grid's inline empty
- * state replaced from `:5677` down), so its `case 'tree'` arm MOVED `4120-4144`
- * -> `4125-4149`, byte-identical, with `labelField: treeCfg.labelField ||
- * 'name'` at `:4145`, and the flat key set it emits did not move. At
- * `9646e2ed2`, re-read there 2026-10-12:
- * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
- * `088e0f705` (`git diff --quiet`), so `289-302` and `240-261` did not move;
- * and `ListView.tsx` changed (+9/-9, objectui#12189, objectui `26b0bd2d1`: the
- * FilterBuilder group type's rename, nine lines replaced in place, the last at
- * `:1558`), so its `case 'tree'` arm held at `4120-4144` with `labelField:
- * treeCfg.labelField || 'name'` at `:4140`, and the flat key set it emits did
- * not move. At `088e0f705`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
- * `e5311165a`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
- * `499799502`, re-read there 2026-10-11:
- * every objectui file this record cites is byte-identical across the hop from
- * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
- * `0df67f237`, re-read there 2026-10-11:
- * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
- * `20c6d351a` (`git diff --quiet`), so `289-302` and `240-261` did not move;
- * `ListView.tsx` changed above and below its `case 'tree'` arm (+229/-57:
- * objectui#12081 item 2, objectui#12086 and objectui#12082), which MOVED
- * byte-identical `3965-3989` -> `4120-4144`, so the flat key set it emits did
- * not move: `parentField`, `labelField: treeCfg.labelField || 'name'`
- * (`:4140`), `fields` and `defaultExpandedDepth`, and NO `titleField`. This
- * re-read also corrects two anchors the hop below left: this paragraph's
- * opening still named the arm at `3913-3932`, its `47b1f0bb7` span, and the
- * hop below cites the `labelField` line as `:3986`, which at `20c6d351a` is
- * the `fields` line under it (`labelField` was `:3985` there, as the
- * `titleField` paragraph below says). At `20c6d351a`, re-read there
- * 2026-10-10:
- * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
- * `47b1f0bb7` (`git diff --quiet`), so `289-302` and `240-261` did not move;
- * `ListView.tsx` changed (+281/-235), its `case 'tree'` arm with it, which
- * MOVED `3913-3932` -> `3965-3989`: objectui#6152 round 14 (objectui
- * `3fd862510`) retired the arm's `treeCfg.titleField` label rung and its raw
- * `...treeCfg` spread, so the arm now emits `parentField`, `labelField:
- * treeCfg.labelField || 'name'` (`:3986`), `fields` and
- * `defaultExpandedDepth` by name and NO `titleField`. The read `:3927` that the
- * `titleField` paragraph below cites is therefore GONE at this pin, not moved;
- * that paragraph is left as written and reported to the pin bump's review,
- * because changing the key set it justifies is a schema change this re-read
- * does not make. At `47b1f0bb7`, re-read there 2026-10-09:
- * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
- * `f0268ad78` (`git diff --quiet`), so `289-302` and `240-261` did not move;
- * `ListView.tsx` changed above and below its `case 'tree'` arm (+85/-26:
- * objectui#11865 slice p, objectui `8f8f760fa`: the "Color by field" and
- * rows-per-page pickers drawn with the shared `Select`), which MOVED
- * byte-identical `3853-3872` -> `3913-3932`, `:3867` -> `:3927` with it, so the
- * flat key set each reads or emits did not move. At `f0268ad78`, re-read there
- * 2026-10-09:
- * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
- * `a58626c88` (`git diff --quiet`), so `289-302` and `240-261` did not move;
- * `ListView.tsx` changed above and below its `case 'tree'` arm (+286/-46:
- * objectui#11984, objectui#6152 round 12, objectui#11860, objectui#11943,
- * objectui#11925, objectui#11816, objectui#11810 and objectui#11687), which
- * MOVED byte-identical `3770-3789` -> `3853-3872`, `:3784` -> `:3867` with it,
- * so the flat key set each reads or emits did not move. At `a58626c88`,
- * re-read there 2026-10-06:
- * `plugin-tree/src/index.tsx` and `ListView.tsx` are byte-identical to
- * `0abd4f9f8` (`git diff --quiet`), so `3770-3789` and `:3784` did not move;
- * `ObjectTree.tsx` changed (+81/-3, objectui#11686: five import lines at the
- * top, and the cell-format helpers further down), so `235-256` MOVED to
- * `240-261` and `284-297` to `289-302`, each byte-identical, and the flat key
- * set each reads or emits did not move.
- * At `0abd4f9f8`, re-read there 2026-10-05:
- * every objectui file this record cites is byte-identical across the hop from
- * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved).
- * At `9dfaca654`, on 2026-10-05 —
- * `plugin-tree/src/index.tsx` and `ListView.tsx` are byte-identical to
- * `2e818d0b5` (`git diff --quiet`), so `3770-3789` and `:3784` did not move;
- * `ObjectTree.tsx` changed in two docblocks only (+8/-5, objectui#8347
- * putting `BaseSchema`'s index signature in the past tense), one above each
- * range, so `233-254` MOVED to `235-256` and `281-294` to `284-297`, each
- * byte-identical, and the flat key set each reads or emits did not move. At
- * `2e818d0b5`, on 2026-10-04 —
- * `ObjectTree.tsx`, `plugin-tree/src/index.tsx` and `ListView.tsx` are
- * byte-identical to `ab1879721` (`git diff --quiet`), so every anchor held
- * unmoved. At `ab1879721`, on 2026-10-03 —
- * `ObjectTree.tsx` and `plugin-tree/src/index.tsx` are byte-identical to
- * `89cad75d5`, so `281-294` and `233-254` did not move and were re-read in
- * place; `ListView.tsx` changed around its `case 'tree'` arm (+36/-18:
- * above it objectui#10813's `isempty` / `isnotempty` filter operators and
- * objectui#11445's record-count translation keys, below it objectui#11227's
- * resolved empty-state labels and objectui#11445's count line), so the arm
- * MOVED byte-identical `3756-3775` -> `3770-3789`, `:3770` -> `:3784` with
- * it, and the flat key set each reads or emits did not move. At
- * `89cad75d5`, 2026-10-02 —
- * `ListView.tsx` is byte-identical to `31971ff1e`, so `3756-3775` and `:3770`
- * did not move; `ObjectTree.tsx` changed (+8/-17, objectui#11168 slice 3
- * replacing the cast comment on its `navigation` read with a typed read),
- * every line of it at `:1044` or below, so `281-294` and `233-254` did not
- * move and were re-read in place; and `plugin-tree/src/index.tsx` changed
- * (+73/-8: objectui#11168 slice 3 published `data`, `staticData`, `filter`
- * and `navigation` inputs beside `objectName` and `tree`, and objectui#10859
- * batch 8 retired the bare `tree` / `view:tree` registration), and its one
- * remaining registration, `object-tree`, still declares `tree` as an object
- * input and no flat config key. At `31971ff1e`, 2026-10-01 —
- * `ObjectTree.tsx` was byte-identical to `e420df310`, so `281-294` and
- * `233-254` did not move; `ListView.tsx` changed above its `case 'tree'` arm
- * (+35/-1, objectui#10689's re-read on a harvested query input), which MOVED
- * byte-identical `3722-3741` -> `3756-3775`, so the flat key set each reads or
- * emits did not move. At `e420df310`, 2026-09-30 —
- * `ObjectTree.tsx` changed (+29/-26, objectui#8348's record-source arm and the
- * host-data read below it), none of it inside `281-294` or `233-254`, which did
- * not move; `ListView.tsx` changed above its `case 'tree'` arm (objectui#11021
- * among others), which MOVED byte-identical `3668-3687` -> `3722-3741`, so the
- * flat key set each reads or emits did not move. At `db11afd49`, 2026-09-29 —
- * `ObjectTree.tsx` changed in one comment line (`:1054`) and `ListView.tsx` in
- * comment citations and its region-aria read, none of it inside these ranges, so
- * `281-294` and `3668-3687` did not move; measured at `dd3f7e1be` on
- * 2026-09-28 — both files changed on this hop (`ObjectTree.tsx` +136/-30,
- * `ListView.tsx` +434/-85), neither inside these ranges: both MOVED with
- * their text byte-identical, `246-259` -> `281-294` and `3366-3385` ->
- * `3668-3687`, so the flat key set each reads or emits did not move. On the
- * hop onto `f8a9d0fb0` both files changed too (`getTreeConfig` lost its
- * `filter.tree` arm, objectui#9549; the flatten gained `filter`), and the
- * flat key set did not move then either. At `62597c588` both were
- * byte-identical to `87af769e9`, where both were re-READ 2026-09-22 (this record carried no pin
- * at all before that, so nothing re-checked it when the pin moved). Read, but NOT authorable —
- * one composition key per concept (Prime Directive #12), the ruling the map and
- * the gantt carry from objectui#5018 / #6469 and the channel `object-calendar`
- * uses above. The registration agrees: `plugin-tree/src/index.tsx` declares
+ * block and that `ObjectView` / `ListView` EMIT when they flatten
+ * `options.tree` (its `case 'tree'` arm: the product carries these keys, the
+ * EFFECTIVE `filter` objectui#10250 added, and NO `tree` key; both halves'
+ * read points recorded in `liveness/page.json`, row `regions`). The flatten
+ * emits `parentField`, `labelField: treeCfg.labelField || 'name'`, `fields` and
+ * `defaultExpandedDepth`, and NO `titleField`. Read, but NOT authorable — one
+ * composition key per concept (Prime Directive #12), the ruling the map and the
+ * gantt carry from objectui#5018 / #6469 and the channel `object-calendar`
+ * uses above. The registration agrees: it declares
  * `{ name: 'tree', type: 'object' }` and no flat input.
  *
  * `titleField` is in the set although no `tree` block key is spelled that way,
- * and at `20c6d351a` NOTHING reads it: both halves that once did are DELETED
- * reads, not moved ones. The flatten half went on objectui#6152 round 14
- * (objectui `3fd862510`): at `47b1f0bb7` the `case 'tree'` arm resolved
- * `labelField: treeCfg.labelField || treeCfg.titleField || 'name'` (`:3927`);
- * at `20c6d351a` it reads `labelField: treeCfg.labelField || 'name'`
- * (`ListView.tsx:3985`) and emits no `titleField`. The renderer half went
- * earlier: `getTreeConfig`'s `?? schema.titleField` rung — the `:117` this
- * record used to cite — was removed on objectui#8841 because it read the
- * FLATTENED NODE and never the block, and the docblock at
- * `ObjectTree.tsx:240-261` records the three measurements that retired it.
- * This paragraph is the correction the 2026-10-10 re-read above reported;
- * ⛔ restore neither rung from this record's history.
+ * and NOTHING reads it: both halves that once did are DELETED reads, not moved
+ * ones. The flatten half went on objectui#6152 round 14 (objectui
+ * `3fd862510`), which retired the arm's `treeCfg.titleField` label rung, so the
+ * arm emits no `titleField`. The renderer half went earlier: `getTreeConfig`'s
+ * `?? schema.titleField` rung was removed on objectui#8841 because it read the
+ * FLATTENED NODE and never the block, and the renderer's own docblock records
+ * the three measurements that retired it. ⛔ Restore neither rung from this
+ * record's history.
  *
  * So `titleField` is in this set for its prescription, not for a read: an
  * author who writes a flat `titleField` on an `object-tree` is naming the
