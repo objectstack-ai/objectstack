@@ -30,9 +30,15 @@
  * the module the per-page `/llms.mdx/docs/**` route and `/llms.txt` read --
  * imported here as plain Node: fumadocs-mdx's Node loader compiles each page
  * with the same `source.config.ts`, and `llms-full/resolve-hooks.mjs` maps the
- * two tsconfig aliases. The output was byte-identical (sha256) to the retired
- * route's prerendered body on the same tree when this script replaced it; a
- * second copy of the page list or of `getLLMText` here would fork the two.
+ * two tsconfig aliases. When this script replaced the route, its output was
+ * byte-identical (sha256) to the route's prerendered body read off the same
+ * `.source/`. A second copy of the page list or of `getLLMText` here would fork
+ * the two.
+ *
+ * Page ORDER is `source.getPages()` order, which follows the `.source/` index,
+ * and fumadocs-mdx writes that index in a different order on every run
+ * (measured: four runs on one tree, four orders) -- as it did for the route.
+ * Each build's file holds the same pages and bytes; their order may differ.
  *
  * ## `.source/` is regenerated first
  *
@@ -49,7 +55,7 @@
 
 import { register } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -58,14 +64,15 @@ const DEFAULT_OUT = join(APP_ROOT, 'public', 'llms-full.txt');
 if (!process.features.typescript) {
   console.error(
     `build-llms-full: this Node (${process.version}) cannot load lib/source.ts: it has no ` +
-      'TypeScript type stripping. Use Node 22.18 or newer (the version CI and the deploy run).',
+      'TypeScript type stripping. Use Node 22.18 or newer (CI and the docs deploy install the latest 22).',
   );
   process.exit(1);
 }
 
+const out = process.argv[2] ? resolve(process.argv[2]) : DEFAULT_OUT;
+
 // `source.config.ts` resolves the content directory against the cwd, as it
 // does under `next build`, whose cwd is this app.
-const out = process.argv[2] ? resolve(process.argv[2]) : DEFAULT_OUT;
 process.chdir(APP_ROOT);
 
 const { postInstall } = await import('fumadocs-mdx/next');
@@ -90,5 +97,5 @@ writeFileSync(out, body);
 const bytes = Buffer.byteLength(body);
 console.log(
   `build-llms-full: ${pages.length} pages, ${bytes.toLocaleString('en-US')} bytes ` +
-    `(${(bytes / 1e6).toFixed(2)} MB) -> ${relative(APP_ROOT, out) || out}`,
+    `(${(bytes / 1e6).toFixed(2)} MB) -> ${out.startsWith(APP_ROOT + sep) ? relative(APP_ROOT, out) : out}`,
 );
