@@ -44,6 +44,7 @@ import {
   resolveAuthSecret,
   resolvePlatformAuthComposition,
   stackSuppliesAuthPlugin,
+  stackDeclaresOrganizationRecordPage,
   isDevelopmentBoot,
   type CapabilitySpec,
 } from '@objectstack/core';
@@ -4061,6 +4062,14 @@ export default class Serve extends Command {
                     },
                   } as any)
                 : undefined,
+              // One default record page per object per deployment (ruling A on
+              // objectstack#23015). When the app this boot serves declares its
+              // own `sys_organization` default record page, the deployment is
+              // composed without plugin-auth's; otherwise plugin-auth's page
+              // registers as before. One yes/no on the app's own declaration,
+              // the predicate `DevPlugin` asks too — no ordering, no
+              // precedence, and no second switch for the author to keep in step.
+              registerOrganizationRecordPage: !stackDeclaresOrganizationRecordPage(config, plugins),
             }));
             trackPlugin('Auth');
 

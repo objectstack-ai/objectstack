@@ -39,6 +39,8 @@ import {
   ANONYMOUS_DENY_STATUS,
   evaluateAuthGate,
   isAuthzStoreUnavailableError,
+  // [#23367] The API-key lifecycle refusal's brand, relayed beside the outage.
+  isApiKeyLifecycleRefusalError,
   shouldDenyAnonymous,
 } from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
@@ -99,8 +101,9 @@ const defaultContext = (_req: IHttpRequest): SettingsContext => ({ enforced: tru
  *   runs only for a caller the anonymous floor admitted.
  * - `refuse` maps anything thrown — by the context resolver or by `serve` — to
  *   this route's envelope. It is the route's own `catch` arm, unchanged; the
- *   door calls it for every throw except an authorization-store outage, which
- *   the door relays itself ({@link relayAuthzStoreOutage}).
+ *   door calls it for every throw except an authorization-store outage and an
+ *   API key's lifecycle refusal, which the door relays itself
+ *   ({@link relayAuthzStoreOutage}, {@link relayApiKeyLifecycleRefusal}).
  */
 interface SettingsFamilyRoute {
   serve(req: IHttpRequest, res: IHttpResponse, ctx: SettingsContext): Promise<void>;
@@ -146,6 +149,20 @@ interface SettingsFamilyRoute {
  */
 function relayAuthzStoreOutage(res: IHttpResponse, err: unknown): boolean {
   if (!isAuthzStoreUnavailableError(err)) return false;
+  sendError(res, err.status, err.code, err.message);
+  return true;
+}
+
+/**
+ * [#23367, ruling A item 3] Relay an API key's own lifecycle refusal
+ * (revoked, expired, inactive) as the envelope it declares: its `403` and its
+ * ledger code (`API_KEY_REVOKED` / `API_KEY_EXPIRED` / `API_KEY_INACTIVE`), the
+ * answer REST gives the same key. Read off the error, as the outage relay
+ * above reads it, and scoped to the brand the same way: every other throw
+ * keeps its existing arm. Returns `true` when the refusal was answered.
+ */
+function relayApiKeyLifecycleRefusal(res: IHttpResponse, err: unknown): boolean {
+  if (!isApiKeyLifecycleRefusalError(err)) return false;
   sendError(res, err.status, err.code, err.message);
   return true;
 }
@@ -201,7 +218,8 @@ export function registerSettingsRoutes(
    *
    *  1. Resolve the caller (`contextFromRequest`). This is identity resolution,
    *     not settings logic; an authorization-store outage it raises is relayed
-   *     as its own `503` (#15999), and any other throw takes the route's own
+   *     as its own `503` (#15999), an API key's lifecycle refusal as its own
+   *     `403` and code (#23367), and any other throw takes the route's own
    *     `refuse` arm exactly as it did before the door existed.
    *  2. ADR-0069: a held session is refused `403` with the gate's code
    *     ({@link refuseHeldSession}), asked first as REST's `enforceAuth` asks
@@ -232,6 +250,7 @@ export function registerSettingsRoutes(
         await route.serve(req, res, ctx);
       } catch (err: any) {
         if (relayAuthzStoreOutage(res, err)) return;
+        if (relayApiKeyLifecycleRefusal(res, err)) return;
         route.refuse(res, err);
       }
     }) satisfies RouteHandler);

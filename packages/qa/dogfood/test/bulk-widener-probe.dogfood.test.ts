@@ -150,6 +150,7 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
     const headers = new Headers({ authorization: `Bearer ${token}` });
     return resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers,
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

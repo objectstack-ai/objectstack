@@ -21,6 +21,12 @@ import { fileURLToPath } from 'node:url';
 
 const boot = vi.hoisted(() => vi.fn());
 vi.mock('../../utils/schema-migrate.js', () => ({ bootSchemaStack: boot }));
+// The siblings' occupancy stub: no case here passes --database-url, so the real
+// probe would read whatever database the package's own directory resolves to.
+vi.mock('../../utils/migrate-occupancy-gate.js', () => ({
+  OCCUPANCY_STOP_HINT: 'occupancy hint',
+  probeMigrationTarget: vi.fn(async () => ({ status: 'free' })),
+}));
 
 const apply = vi.hoisted(() => vi.fn());
 vi.mock('../../utils/organization-ownership-apply.js', async (importOriginal) => ({

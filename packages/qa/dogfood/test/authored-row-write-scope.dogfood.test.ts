@@ -193,6 +193,7 @@ describe('[#7281] checkAuthoredRowWrite answers the declaration, not the caller 
     const headers = new Headers({ authorization: `Bearer ${token}` });
     return resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers,
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

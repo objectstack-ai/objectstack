@@ -5321,6 +5321,48 @@ function collectReferenceHits(
 }
 
 /**
+ * Every place a stored document names `targetName` as the HEAD of a composite
+ * record key, through a composite-key site of the derived index
+ * (`REFERENCE_SITES.compositeKeyByTarget`; the one site today is a permission
+ * set's `fields`, keyed `<object>.<field>`).
+ *
+ * A separate walk, not a branch inside {@link collectReferenceHits}: that walk
+ * matches a WHOLE value and serves every other site, so it stays as it is. This
+ * one reads only the record each site names, at the document ROOT where the
+ * site's premise is derived (`compositeKeySiteHolds`, `./reference-sites.ts`),
+ * and only its keys.
+ *
+ * A key names the target when the text before its FIRST separator equals the
+ * target's name — the split the security plugin makes for field rules
+ * (`key.startsWith(object + '.')`), exact because no object name contains a `.`.
+ * A key with no separator, or one at index 0 (`.full_name`), names no object.
+ * The field part is never read, so a key whose FIELD part spells the target
+ * (`invoice.customer`) is not a reference to it. One hit per site: the reported
+ * path (`fields{key}`) does not carry the key, so a second matching key is the
+ * same row.
+ */
+function collectCompositeKeyHeadHits(
+    item: unknown,
+    separators: ReadonlyMap<string, string>,
+    targetName: string,
+): Array<{ path: string; property: string }> {
+    const hits: Array<{ path: string; property: string }> = [];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return hits;
+    for (const [property, separator] of separators) {
+        const record = (item as Record<string, unknown>)[property];
+        if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
+        for (const key of Object.keys(record)) {
+            const at = key.indexOf(separator);
+            if (at > 0 && key.slice(0, at) === targetName) {
+                hits.push({ path: `${property}{key}`, property });
+                break;
+            }
+        }
+    }
+    return hits;
+}
+
+/**
  * Phase 3a-destructive: detect changes between an existing object schema
  * and an incoming overlay that would break runtime data — removed fields,
  * field type narrowing, required toggled on without a default. Returned
@@ -26210,6 +26252,19 @@ export class ObjectStackProtocolImplementation implements
      * A copied permission set's field rules follow too: in `fields`, keyed
      * `<object>.<field>`, a key's object part takes the renamed object's name
      * and its field part is left as stored.
+     *
+     * A rename at a reference site that meets a name the item already holds
+     * there (a permission set's or a translation's `objects` key, a hook's
+     * `object` entry) is never merged: the item is refused in `failed[]`,
+     * naming both, before anything is written for it.
+     *
+     * Every copied name stays in step with what it names. A view item's
+     * `<object>.<viewKey>` name takes its object's copy name and keeps its view
+     * key (`ticket.board` becomes `iojn2_ticket.board`), and a value that is
+     * that whole name follows it; an item of an object the copy does not rename
+     * keeps its name. A record entry's `name` that echoes its key (an object's
+     * field) follows the key, and free text renames an object's name only as a
+     * whole identifier, never inside a longer one (`x_iojn_customer` stays).
      */
     async duplicatePackage(request: {
         sourcePackageId: string;
@@ -26338,8 +26393,9 @@ export class ObjectStackProtocolImplementation implements
         // [#21911] The explicit system opt-in — see findServedOverlayRow.
         const rows = (await this.engine.find('sys_metadata', { where, context: { isSystem: true } })) as any[];
 
-        // Views/etc. are renamed by the source-prefix swap alone; a name without
-        // the prefix keeps it (the docblock re-namespaces OBJECT names).
+        // Rows other than objects and qualified view items (each below) are
+        // renamed by the source-prefix swap alone; a name without the prefix
+        // keeps it (the docblock re-namespaces OBJECT names).
         const renameName = (name: string): string =>
             sourceNs && typeof name === 'string' && name.startsWith(`${sourceNs}_`)
                 ? `${targetNs}_${name.slice(sourceNs.length + 1)}`
@@ -26414,9 +26470,50 @@ export class ObjectStackProtocolImplementation implements
         // `iojn_task_log`, and `iojn_x` inside `record.iojn_x`/`iojn_x.view` matches.
         // Prefixed names only: a prefixed name is distinctive enough to find in
         // free text, a bare one is not (below).
+        //
+        // ⭐ THE BOUNDARY HOLDS ON BOTH SIDES. With the right side alone, a
+        // name that merely ENDS in an object's name was rewritten inside it:
+        // the field `x_iojn_task` came out `x_iojn2_task` — its `name` and every
+        // value naming it — while its `fields` key stayed, so the copy's key
+        // and `name` disagreed. `x_iojn_task` is another identifier, never the
+        // object: `renameName` swaps the source prefix only at the START of a
+        // name, and this rewrite now matches only a whole identifier too.
         const olds = prefixed.filter((name) => renameMap.has(name)).sort((a, b) => b.length - a.length);
         const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const re = olds.length ? new RegExp(`(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g') : null;
+        const re = olds.length
+            ? new RegExp(`(?<![A-Za-z0-9_])(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g')
+            : null;
+        // ⭐ A VIEW ITEM'S NAME FOLLOWS ITS OBJECT. A view row's qualified name
+        // is `<object>.<viewKey>` (`ViewItemNameSchema`,
+        // `packages/spec/src/ui/view.zod.ts`: "the object can be recovered from
+        // the prefix, so the registry key never collides across objects"), so
+        // its object part takes exactly the rename its `object` property takes
+        // — `renameMap`, whole — and its view key is left as stored:
+        // `ticket.board` copies as `iojn2_ticket.board` beside the body's
+        // `object: 'iojn2_ticket'`. The source-prefix swap (`renameName`)
+        // reached a prefixed object's items only: a bare object's item kept
+        // `ticket.board`, a name the source's item still holds, so a by-name
+        // read naming no package served the source and the copy was shadowed.
+        // The swap also moved an item of an object OUTSIDE the package that
+        // carries the source prefix (`iojn_ext.board` → `iojn2_ext.board`)
+        // while its `object` stayed `iojn_ext`. An object this copy does not
+        // rename keeps its items' names.
+        //
+        // A value that IS such a name, whole, follows the item: a form action's
+        // `target` (`<object>.<viewKey>`) kept `ticket.entry`, so the copy's
+        // button opened the SOURCE's form, on the source's object. Whole values
+        // only, and only names of the view items this copy renames — a bare
+        // object's name is never rewritten inside free text (below).
+        const isQualifiedViewRow = (row: any): boolean =>
+            (PLURAL_TO_SINGULAR[String(row?.type)] ?? String(row?.type)) === 'view'
+            && typeof row?.name === 'string' && row.name.includes('.');
+        const viewItemRenames = new Map<string, string>();
+        for (const row of rows) {
+            if (!isQualifiedViewRow(row)) continue;
+            const dot = (row.name as string).indexOf('.');
+            const renamed = renameMap.get((row.name as string).slice(0, dot));
+            if (renamed !== undefined) viewItemRenames.set(row.name, `${renamed}${(row.name as string).slice(dot)}`);
+        }
         // ⭐ AT AN OBJECT-REFERENCE PROPERTY, A NAME IS REWRITTEN WHOLE — the
         // only place a BARE name is rewritten. Measured: putting `ticket` in the
         // free-text rewrite above turns "A support ticket raised by a customer"
@@ -26432,26 +26529,93 @@ export class ObjectStackProtocolImplementation implements
         // KEY (`permission.objects` is keyed by object name) or a `.name`. The
         // record key holds for prefixed names too: a copied permission set
         // otherwise kept `objects.<source object>`, a grant on the SOURCE.
+        //
+        // ⛔ REFUSED, NEVER MERGED: at a reference site, a renamed name can
+        // meet a name the item already holds there — the source also names
+        // the object the copy is about to be called (`dupdst_customer`, an
+        // object outside the package or not yet created) beside its own
+        // (`dupsrc_customer`). Two record KEYS that land on one key keep only
+        // the last entry: a permission set's `objects` dropped a grant (and
+        // the copied object could gain edit and delete its source never gave
+        // it), a translation's `objects` dropped a label. Two array ELEMENTS
+        // that land on one name bind it twice: a hook's handler ran twice per
+        // event on the copied object. So every such meeting is recorded in
+        // `collisions` — the path, the name that moved, the name it met — and
+        // the call site refuses the item in `failed[]` before anything is
+        // written for it. `renameMap` is one-to-one, so a meeting is always a
+        // renamed name and a name this copy does not rename; an element the
+        // source itself repeats is copied as stored.
         const objectReferenceProperties = new Set(
             (REFERENCE_SITES.byTarget.get('object') ?? []).map((site) => site.property),
         );
-        const deepRewrite = (v: any, atReference = false): any => {
+        type ReferenceCollision = { at: string; shape: 'key' | 'entry'; moved: string; met: string };
+        const deepRewrite = (v: any, collisions: ReferenceCollision[], atReference = false, at = ''): any => {
             if (typeof v === 'string') {
                 const whole = atReference ? renameMap.get(v) : undefined;
                 if (whole !== undefined) return whole;
+                const viewItem = viewItemRenames.get(v);
+                if (viewItem !== undefined) return viewItem;
                 return re ? v.replace(re, (m) => renameMap.get(m) ?? m) : v;
             }
-            if (Array.isArray(v)) return v.map((element) => deepRewrite(element, atReference));
+            if (Array.isArray(v)) {
+                const out = v.map((element, i) => deepRewrite(element, collisions, atReference, `${at}[${i}]`));
+                if (atReference) {
+                    const firstAt = new Map<string, number>();
+                    out.forEach((element, i) => {
+                        if (typeof element !== 'string') return;
+                        const j = firstAt.get(element);
+                        if (j === undefined) {
+                            firstAt.set(element, i);
+                        } else if (v[j] !== v[i]) {
+                            collisions.push({ at, shape: 'entry', moved: v[i] !== element ? v[i] : v[j], met: element });
+                        }
+                    });
+                }
+                return out;
+            }
             if (v && typeof v === 'object') {
                 const o: any = {};
+                const from = new Map<string, string>();
                 for (const [k, val] of Object.entries(v)) {
                     const key = atReference ? (renameMap.get(k) ?? k) : k;
-                    o[key] = deepRewrite(val, objectReferenceProperties.has(k) || (atReference && k === 'name'));
+                    const other = from.get(key);
+                    if (other !== undefined) {
+                        collisions.push({ at, shape: 'key', moved: key === k ? other : k, met: key });
+                    }
+                    from.set(key, k);
+                    const entry = deepRewrite(
+                        val, collisions,
+                        objectReferenceProperties.has(k) || (atReference && k === 'name'),
+                        at ? `${at}.${k}` : k,
+                    );
+                    // ⭐ A RECORD ENTRY'S `name` FOLLOWS ITS KEY. An entry that
+                    // echoes its key in `name` (an object's field: `fields`
+                    // keyed by field name) is ONE identity spelled twice, so
+                    // the name takes the key's rename decision. Outside a
+                    // reference site a key is never renamed, while the
+                    // free-text rewrite above renamed a `name` equal to a
+                    // prefixed object's: the field `iojn_customer` was copied
+                    // as `fields.iojn_customer.name: 'iojn2_customer'`. The
+                    // data plane addresses the column by the key, the save
+                    // door's FLS lint reads the `name`, so a copied permission
+                    // set's rule on that field was refused at the copy.
+                    if (typeof (val as any)?.name === 'string' && (val as any).name === k
+                        && entry && typeof entry === 'object' && !Array.isArray(entry)) {
+                        entry.name = key;
+                    }
+                    o[key] = entry;
                 }
                 return o;
             }
             return v;
         };
+        const describeCollision = (c: ReferenceCollision): string =>
+            `its \`${c.at}\` ${c.shape} '${c.moved}' follows the copied object to '${c.met}', `
+            + `${c.shape === 'key' ? 'a key' : 'an entry'} it already holds there, which this copy does not rename. `
+            + (c.shape === 'key'
+                ? 'A record keeps one entry per key, so the copy would drop one of the two. '
+                : `The copy would name '${c.met}' twice. `)
+            + `Remove '${c.moved}' or '${c.met}' on the source, then duplicate again.`;
         // ⭐ A COPIED PERMISSION SET'S FIELD RULES FOLLOW THE RENAMED OBJECTS.
         // `PermissionSetSchema.fields` is a record keyed `<entity_name>.<field_name>`
         // (`packages/spec/src/security/permission.zod.ts`), and the security
@@ -26541,7 +26705,11 @@ export class ObjectStackProtocolImplementation implements
                 failed.push({ type: row.type, name: row.name, error: refusal });
                 continue;
             }
-            const newName = row?.type === 'object' ? (renameMap.get(row.name) ?? row.name) : renameName(row.name);
+            const newName = row?.type === 'object'
+                ? (renameMap.get(row.name) ?? row.name)
+                : isQualifiedViewRow(row)
+                    ? (viewItemRenames.get(row.name) ?? row.name)
+                    : renameName(row.name);
             const rawType = String(row.type);
             const singular = PLURAL_TO_SINGULAR[rawType] ?? rawType;
             let body: unknown;
@@ -26620,7 +26788,21 @@ export class ObjectStackProtocolImplementation implements
                     continue;
                 }
             }
-            const rewritten = deepRewrite(item);
+            const collisions: ReferenceCollision[] = [];
+            const rewritten = deepRewrite(item, collisions);
+            if (collisions.length > 0) {
+                const noun = singular === 'permission'
+                    ? 'Permission set'
+                    : `${singular.charAt(0).toUpperCase()}${singular.slice(1)}`;
+                const more = collisions.length - 1;
+                failed.push({
+                    type: row.type,
+                    name: row.name,
+                    error: `${noun} '${row.name}' is not copied: ${describeCollision(collisions[0]!)}`
+                        + (more > 0 ? ` It has ${more} more such collision${more === 1 ? '' : 's'}.` : ''),
+                });
+                continue;
+            }
             if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) {
                 rewritten.name = newName;
                 // [ADR-0086 D3] A permission set that declares its SOURCE
@@ -29982,8 +30164,17 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
 
-        const sites = REFERENCE_SITES.byTarget.get(singularTarget);
-        if (!sites || sites.length === 0) {
+        const sites = REFERENCE_SITES.byTarget.get(singularTarget) ?? [];
+        // [#23539] Sites that name the target in the HEAD of a composite record
+        // key — a permission set's `fields`, keyed `<object>.<field>`, for target
+        // `object` and nothing else. They live in their own map, never in
+        // `byTarget`, because `duplicatePackage` reads `byTarget.get('object')` as
+        // a flat set of object-naming property names (see
+        // COMPOSITE_KEY_REFERENCE_SITES in `./reference-sites.ts`). Without them a
+        // set whose only rule for an object was a field rule was missing here,
+        // and the "Used by" panel could clear that object for deletion.
+        const compositeSites = REFERENCE_SITES.compositeKeyByTarget.get(singularTarget) ?? [];
+        if (sites.length === 0 && compositeSites.length === 0) {
             return { references: [] };
         }
 
@@ -29999,7 +30190,23 @@ export class ObjectStackProtocolImplementation implements
             }
             properties.set(site.property, site.target);
         }
-        const matchers = [...propertiesByFromType].map(([fromType, properties]) => ({ fromType, properties }));
+        // Composite-key sites share that one read: property → separator, per
+        // source type, and a source type they alone name still gets its matcher.
+        const separatorsByFromType = new Map<string, Map<string, string>>();
+        for (const site of compositeSites) {
+            let separators = separatorsByFromType.get(site.fromType);
+            if (!separators) {
+                separators = new Map<string, string>();
+                separatorsByFromType.set(site.fromType, separators);
+            }
+            separators.set(site.property, site.separator);
+            if (!propertiesByFromType.has(site.fromType)) propertiesByFromType.set(site.fromType, new Map());
+        }
+        const matchers = [...propertiesByFromType].map(([fromType, properties]) => ({
+            fromType,
+            properties,
+            separators: separatorsByFromType.get(fromType),
+        }));
 
         const seen = new Set<string>(); // dedup key: `${fromType}|${itemName}|${path}`
         const out: Array<{ type: string; name: string; label?: string; path: string; kind: string }> = [];
@@ -30046,7 +30253,9 @@ export class ObjectStackProtocolImplementation implements
                     // Don't list an item as a reference to itself unless the
                     // self-reference is meaningful (e.g. object→field path).
                     const isSelfReference = matcher.fromType === singularTarget && sourceName === targetName;
-                    for (const { path, property } of collectReferenceHits(raw, matcher.properties, targetName)) {
+                    const hits = collectReferenceHits(raw, matcher.properties, targetName);
+                    if (matcher.separators) hits.push(...collectCompositeKeyHeadHits(raw, matcher.separators, targetName));
+                    for (const { path, property } of hits) {
                         // An item naming ITSELF through a scalar property is
                         // the item, not a dependent. Collection-valued paths
                         // are kept, because an item that lists itself among

@@ -66,6 +66,7 @@ describe('sys_attachment reads inherit parent RLS — the COUNT too (#9483)', ()
     const headers = new Headers({ authorization: `Bearer ${token}` });
     return resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers,
       getSession: async (h: any) => api?.getSession?.({ headers: h }),

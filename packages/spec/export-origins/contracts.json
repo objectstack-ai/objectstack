@@ -29,6 +29,7 @@
     "AnalyticsResult": "src/contracts/analytics-service.ts#AnalyticsResult (interface)",
     "AnalyticsStrategy": "src/contracts/analytics-service.ts#AnalyticsStrategy (interface)",
     "ApiEndpointMatch": "src/contracts/metadata-service.ts#ApiEndpointMatch (interface)",
+    "ApiKeyLifecyclePolicy": "src/contracts/auth-service.ts#ApiKeyLifecyclePolicy (interface)",
     "ApprovalActionAttachment": "src/contracts/approval-service.ts#ApprovalActionAttachment (interface)",
     "ApprovalActionKind": "src/contracts/approval-service.ts#ApprovalActionKind (type)",
     "ApprovalActionRow": "src/contracts/approval-service.ts#ApprovalActionRow (interface)",

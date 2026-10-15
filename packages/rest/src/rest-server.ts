@@ -20,6 +20,8 @@ import {
     // form doors' tenancy read (see `registerFormEndpoints`).
     isServiceNotRegisteredError,
     assembleExecutionContext, normalizeAuthGate, userAuthGateSourceOf, type AuthGate,
+    // [#23367] The API-key lifecycle policy source, and its branded refusal.
+    apiKeyLifecyclePolicySourceOf, isApiKeyLifecycleRefusalError, type ApiKeyLifecycleRefusalError,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
     // owner, shared with the runtime dispatcher's `/security` domain.
@@ -2370,6 +2372,18 @@ export class RestServer {
     }
 
     /**
+     * [#23367, ruling A] The API-key lifecycle refusal a request's identity
+     * resolution raised (revoked, expired, inactive), kept beside the REQUEST
+     * by {@link computeExecCtx}'s catch so {@link enforceAuth} can answer it.
+     * The resolution itself still answers "no context", exactly as for any
+     * identity fault: every door that never reaches `enforceAuth` keeps the
+     * fail-closed answer it has always given a dead key, and the one that does
+     * now says which state and which date. Weak, so it lives no longer than
+     * the request object.
+     */
+    private readonly apiKeyLifecycleRefusals = new WeakMap<object, ApiKeyLifecycleRefusalError>();
+
+    /**
      * Reject anonymous requests with HTTP 401 — unconditionally (#3963: the
      * `api.requireAuth` opt-out is retired). Returns `true` if the response was
      * sent and the caller should stop
@@ -2378,6 +2392,10 @@ export class RestServer {
      * The check is intentionally narrow: only `context?.userId` counts as
      * "authenticated". `isSystem` flags are never set on inbound HTTP
      * requests (they're internal-only), so they cannot bypass this gate.
+     *
+     * [#23367] A request whose API key its own lifecycle refused resolves no
+     * context either, and is answered here with the refusal's `403`, code and
+     * located message instead of the generic 401.
      */
     private enforceAuth(req: any, res: any, context: any): boolean {
         // ADR-0069 — authentication-policy gate (password expiry, enforced MFA).
@@ -2418,6 +2436,11 @@ export class RestServer {
             isSystem: context?.isSystem,
             method: req?.method,
         })) {
+            const lifecycle = req && typeof req === 'object' ? this.apiKeyLifecycleRefusals.get(req) : undefined;
+            if (lifecycle) {
+                res.status(lifecycle.status).json({ error: { code: lifecycle.code, message: lifecycle.message } });
+                return true;
+            }
             res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY);
             return true;
         }
@@ -3245,6 +3268,8 @@ export class RestServer {
                 getSession,
                 tenancyPosture,
                 userAuthGates: userAuthGateSourceOf(authService),
+                // [#23367] The API-key lifecycle policy, from the same service.
+                apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
             });
             // [commit f586f1a89] The anonymous contract IS the shared assembler's default
             // entry: no resolved principal → no context → 401. Taken early here
@@ -3421,6 +3446,15 @@ export class RestServer {
             // (measured: with `tryFind` loud but this net untouched, the
             // package door answered 401, byte-identical to a genuine anonymous
             // caller). Every OTHER fault still fails closed exactly as before.
+            //
+            // [#23367, ruling A] A key its own lifecycle refused (revoked,
+            // expired, inactive) resolves no context too — so every door keeps
+            // its fail-closed answer — and is remembered beside the request
+            // for `enforceAuth`, which answers its `403` and code.
+            if (isApiKeyLifecycleRefusalError(err) && req && typeof req === 'object') {
+                this.apiKeyLifecycleRefusals.set(req, err);
+                return undefined;
+            }
             return rethrowAuthzStoreUnavailable(err);
         }
     }

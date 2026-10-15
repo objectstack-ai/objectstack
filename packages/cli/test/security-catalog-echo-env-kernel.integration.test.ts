@@ -99,6 +99,7 @@ async function boot(kind: Kind, dbFile: string, rootDir: string, app: any): Prom
 async function readAs(ql: any, userId: string, org: string): Promise<'granted' | 'refused'> {
   const authz = await resolveAuthzContext({
     userAuthGates: undefined,
+    apiKeyLifecycle: undefined,
     ql,
     headers: {},
     getSession: () => ({ user: { id: userId }, session: { userId, activeOrganizationId: org } }),

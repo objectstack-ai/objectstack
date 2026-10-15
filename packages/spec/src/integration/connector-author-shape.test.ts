@@ -86,6 +86,14 @@ const SYNC_ARCHITECTURE = resolve(SPEC_DIR, 'docs/SYNC_ARCHITECTURE.md');
  * gate's reason: a documentation snippet declares a `const` and stops, and
  * TS6133 is an opinion about the snippet's framing. Everything else runs at the
  * repo's real strictness (`strict: true`).
+ *
+ * Diagnostics are asked of each PROBE file only, never of the whole program:
+ * every assertion below reads a probe's own diagnostics, and a whole-program
+ * request type-checks the body of every `packages/spec` source file the probes
+ * reach, for diagnostics a filter then discarded. A probe's diagnostics still
+ * reflect every type it reaches (`Connector`, its tombstones, `ConnectorParsed`);
+ * only the bodies nobody reads are skipped.
+ * `shared/retired-key-tsc-diagnostic.test.ts` asks the same way.
  */
 function compileProbes(probes: Readonly<Record<string, string>>): Map<string, ts.Diagnostic[]> {
   const dir = resolve(SPEC_DIR, 'src/__connector_author_shape_probes__');
@@ -121,14 +129,46 @@ function compileProbes(probes: Readonly<Record<string, string>>): Map<string, ts
 
   const program = ts.createProgram([...paths.keys()], options, host);
   const out = new Map<string, ts.Diagnostic[]>();
-  for (const name of Object.keys(probes)) out.set(name, []);
-  for (const d of ts.getPreEmitDiagnostics(program)) {
-    const file = d.file?.fileName ? resolve(d.file.fileName) : undefined;
-    for (const [name] of Object.entries(probes)) {
-      if (file === resolve(dir, `${name}.ts`)) out.get(name)!.push(d);
-    }
+  for (const name of Object.keys(probes)) {
+    const path = resolve(dir, `${name}.ts`);
+    const file = program.getSourceFile(path);
+    if (file === undefined) throw new Error(`probe ${name} did not enter the program`);
+    out.set(name, ts.getPreEmitDiagnostics(program, file).filter((d) => d.file !== undefined && resolve(d.file.fileName) === path));
   }
   return out;
+}
+
+/**
+ * Every probe this file compiles, by name — registered while the describe
+ * blocks below are COLLECTED, and compiled together in ONE program the first
+ * time any case reads a result.
+ *
+ * Each probe is its own module (an `import` line opens every one), so a probe
+ * cannot see another's declarations and its diagnostics do not depend on which
+ * probes share the program; what three programs did here — each re-parsing and
+ * re-checking the same `Connector` types — one program does once. A name
+ * registered twice must carry the same text, and a case reading a probe the
+ * program never saw fails rather than reading an empty answer.
+ */
+const REGISTERED = new Map<string, string>();
+let compiled: Map<string, ts.Diagnostic[]> | undefined;
+
+function registerProbes(probes: Readonly<Record<string, string>>): () => Map<string, ts.Diagnostic[]> {
+  for (const [name, text] of Object.entries(probes)) {
+    const prior = REGISTERED.get(name);
+    if (prior !== undefined && prior !== text) throw new Error(`probe ${name} is registered twice with different text`);
+    REGISTERED.set(name, text);
+  }
+  return () => {
+    compiled ??= compileProbes(Object.fromEntries(REGISTERED));
+    const out = new Map<string, ts.Diagnostic[]>();
+    for (const name of Object.keys(probes)) {
+      const diagnostics = compiled.get(name);
+      if (diagnostics === undefined) throw new Error(`probe ${name} was registered after the program was built`);
+      out.set(name, diagnostics);
+    }
+    return out;
+  };
 }
 
 /** One diagnostic per line, `TS<code>: <message>`, for readable assertions. */
@@ -191,10 +231,24 @@ describe('SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
     expect(markdown).not.toContain("```typescript\nimport type { ETLPipeline }");
   });
 
+  const probes: Record<string, string> = {};
+  compilable.forEach((block, i) => { probes[`doc-l3-connector-${i}`] = block; });
+  // The harness's own control: a probe that MUST fail. Without it a
+  // resolution failure (paths mapping wrong, host overlay not applied) would
+  // report zero diagnostics and read as a green example.
+  probes['harness-self-test'] = [
+    "import type { Connector } from '@objectstack/spec/integration';",
+    "const broken: Connector = { label: 'no name, no type' };",
+  ].join('\n');
+  const compile = registerProbes(probes);
+
   // This `it` carries its OWN timeout instead of the package's 60 s default
-  // (`vitest.config.ts`): it builds one `ts.createProgram` over the spec's types
-  // (both document examples plus the harness self-test probe, at `strict`), and
-  // that is more work than the default is sized for. CI readings, `Test Core
+  // (`vitest.config.ts`): it is the first case to read a compile result, so it
+  // builds the file's one `ts.createProgram` over the spec's types (every
+  // probe registered above and below, at `strict`), and that was more work
+  // than the default is sized for. The readings that follow are of the harness
+  // before it shared one program and asked only the probe files for
+  // diagnostics; the timeout is left where they put it. CI readings, `Test Core
   // (1/6)`: 55,680 ms on `main` (commit 85b4ac634e; the same figure appears at
   // 018b077fbf and eab7236ff7 because turbo replayed one cached run, so it is
   // one reading, not three) and 61,767 ms on a cold spec re-run (PR head
@@ -205,17 +259,7 @@ describe('SYNC_ARCHITECTURE.md L3 connector examples compile', () => {
   // import-everything `beforeAll`. Only this `it` is widened: raising the
   // global `testTimeout` would hide the next slow test as well.
   it('compiles every full connector example verbatim, import line included', () => {
-    const probes: Record<string, string> = {};
-    compilable.forEach((block, i) => { probes[`doc-l3-connector-${i}`] = block; });
-    // The harness's own control: a probe that MUST fail. Without it a
-    // resolution failure (paths mapping wrong, host overlay not applied) would
-    // report zero diagnostics and read as a green example.
-    probes['harness-self-test'] = [
-      "import type { Connector } from '@objectstack/spec/integration';",
-      "const broken: Connector = { label: 'no name, no type' };",
-    ].join('\n');
-
-    const results = compileProbes(probes);
+    const results = compile();
     expect(render(results.get('harness-self-test')!), 'the harness must be able to report an error')
       .toContain('TS2739');
     compilable.forEach((_, i) => {
@@ -279,7 +323,7 @@ describe('the spellings the example used to carry are rejected', () => {
     `,
   } as const;
 
-  const results = compileProbes(probes);
+  const compile = registerProbes(probes);
 
   // ⚠ Measured, not assumed — and it is the one place the two tombstone
   // channels are NOT equally good. `retiredKey()` types the key as its
@@ -291,6 +335,7 @@ describe('the spellings the example used to carry are rejected', () => {
   // channel (the runtime block below) carries the key's own prescription.
   for (const probe of ['field-mappings-retired', 'sync-config-retired', 'webhooks-retired'] as const) {
     it(`\`${probe}\`: the key no longer type-checks, whatever it holds`, () => {
+      const results = compile();
       const message = render(results.get(probe)!);
       expect(message).toMatch(/^TS(2741|2353): /);
       expect(message).toContain('[REMOVED]');
@@ -299,6 +344,7 @@ describe('the spellings the example used to carry are rejected', () => {
   }
 
   it('…while a live sibling key in the same literal compiles', () => {
+    const results = compile();
     expect(render(results.get('live-key-control')!)).toBe('');
   });
 });
@@ -382,13 +428,15 @@ describe('the bare `Connector` is the author shape; `ConnectorParsed` is the par
     `,
   } as const;
 
-  const results = compileProbes(probes);
+  const compile = registerProbes(probes);
 
   it('accepts the omitted defaults under the bare `Connector`', () => {
+    const results = compile();
     expect(render(results.get('author-connector')!)).toBe('');
   });
 
   it('rejects the same literal under `ConnectorParsed`, on the defaults it left out', () => {
+    const results = compile();
     const message = render(results.get('parsed-connector')!);
     expect(message).toMatch(/TS2739: .* is missing the following properties/);
     expect(message).toContain('enabled');

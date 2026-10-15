@@ -25,6 +25,7 @@ import { createHash, randomBytes } from 'node:crypto';
 
 import { postureEnforcesWall, postureUsesUnionScope, normalizeTenancyPosture } from '@objectstack/spec/security';
 import type { TenancyPosture } from '@objectstack/spec/security';
+import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 
 import { accountScopeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
@@ -114,7 +115,16 @@ export function parseScopes(value: unknown): string[] {
 
 /** Return true when an expiry timestamp is in the past (i.e. the key is dead). */
 export function isExpired(value: unknown, nowMs: number): boolean {
-  if (value == null) return false;
+  const ms = instantMs(value);
+  return ms !== undefined && ms <= nowMs;
+}
+
+/**
+ * Read a stored instant (`expires_at`, `last_used_at`, `created_at`) as epoch
+ * milliseconds, or `undefined` when the column is empty or unreadable.
+ */
+function instantMs(value: unknown): number | undefined {
+  if (value == null) return undefined;
   let ms: number;
   if (typeof value === 'number') {
     // Heuristic: seconds vs milliseconds epoch.
@@ -124,10 +134,310 @@ export function isExpired(value: unknown, nowMs: number): boolean {
   } else if (typeof value === 'string') {
     ms = Date.parse(value);
   } else {
-    return false;
+    return undefined;
   }
-  if (Number.isNaN(ms)) return false;
-  return ms <= nowMs;
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+// ── [#23367, ruling A] The API-key lifecycle policy ──────────────────────────
+//
+// Ruling `6159880505` (letter A, maintainer 「同意」): a key signed with no
+// expiry lives 90 days; no signing may ask for more than a year; a key unused
+// for 90 days is refused (not revoked: a new key is the remedy); keys signed
+// before the policy with no expiry get a one-year grace from its landing; and
+// expired, inactive and revoked are three distinct, located refusals. The
+// numbers are auth configuration (`IAuthService.resolveApiKeyLifecyclePolicy`),
+// and these constants are the defaults the auth service falls back to.
+
+const DAY_MS = 86_400_000;
+
+/** [#23367] Default life of a key signed with no `expires_at`, in days. */
+export const API_KEY_DEFAULT_EXPIRY_DAYS = 90;
+
+/** [#23367] Default ceiling on a signed key's life, in days from the signing. */
+export const API_KEY_MAX_EXPIRY_DAYS = 365;
+
+/** [#23367] Default inactivity window, in days without a recorded use. */
+export const API_KEY_INACTIVITY_DAYS = 90;
+
+/**
+ * [#23367] The grace a key signed with NO expiry gets, in days from the
+ * policy's landing (`ApiKeyLifecyclePolicy.startedAt`). A one-time transition,
+ * not a standing knob: the end is stamped onto the key's own `expires_at` the
+ * first time the key is admitted, so the keys page names the date, and a
+ * setting could not move a date already stamped.
+ */
+export const API_KEY_LEGACY_GRACE_DAYS = 365;
+
+/**
+ * [#23367] How stale `sys_api_key.last_used_at` may get before an admitted
+ * call stamps it again: at most one write per key per hour. The inactivity
+ * window is counted in days, so an hour of staleness never moves a verdict,
+ * and the field's promise ("updated on each API call") costs one write per
+ * key per hour instead of one per request.
+ */
+export const API_KEY_LAST_USED_STAMP_INTERVAL_MS = 60 * 60 * 1000;
+
+/**
+ * [#23367] The policy source the key-admission seam reads — the auth service's
+ * {@link ApiKeyLifecyclePolicy}, bound by {@link apiKeyLifecyclePolicySourceOf}.
+ * A function, not a value, so a request that carries no key never asks.
+ */
+export type ApiKeyLifecyclePolicySource = () => ApiKeyLifecyclePolicy | Promise<ApiKeyLifecyclePolicy>;
+
+/**
+ * [#23367] Bind an auth service's lifecycle policy into the
+ * {@link ApiKeyLifecyclePolicySource} a transport hands `resolveAuthzContext`,
+ * or `undefined` when the service implements none (a kernel composed without
+ * `plugin-auth` has no auth configuration, so only the row's own facts —
+ * revoked, `expires_at` — are judged). Structural on purpose, like
+ * `userAuthGateSourceOf`: `@objectstack/core` does not depend on the plugin
+ * that provides it.
+ */
+export function apiKeyLifecyclePolicySourceOf(
+  authService: {
+    resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy | Promise<ApiKeyLifecyclePolicy>;
+  } | null | undefined,
+): ApiKeyLifecyclePolicySource | undefined {
+  if (!authService || typeof authService.resolveApiKeyLifecyclePolicy !== 'function') return undefined;
+  const service = authService;
+  return () => service.resolveApiKeyLifecyclePolicy!();
+}
+
+/**
+ * [#23367] The three lifecycle refusals, each declared as its wire pair — the
+ * ADR-0112 code (registered under `@objectstack/core`) beside the status it
+ * answers. `403` for all three, as the ruling words it ("the key's own 403 body
+ * names the date") and as a held key's posture refusal answers: the credential
+ * was recognised, and its state is what refuses it. Unknown keys keep the
+ * generic 401.
+ */
+const API_KEY_EXPIRED_REFUSAL = { code: 'API_KEY_EXPIRED', status: 403 } as const;
+const API_KEY_INACTIVE_REFUSAL = { code: 'API_KEY_INACTIVE', status: 403 } as const;
+const API_KEY_REVOKED_REFUSAL = { code: 'API_KEY_REVOKED', status: 403 } as const;
+
+export const API_KEY_EXPIRED_CODE = API_KEY_EXPIRED_REFUSAL.code;
+export const API_KEY_INACTIVE_CODE = API_KEY_INACTIVE_REFUSAL.code;
+export const API_KEY_REVOKED_CODE = API_KEY_REVOKED_REFUSAL.code;
+export type ApiKeyLifecycleCode =
+  | typeof API_KEY_EXPIRED_CODE
+  | typeof API_KEY_INACTIVE_CODE
+  | typeof API_KEY_REVOKED_CODE;
+
+/** [#23367] The status every lifecycle refusal answers with (see the pairs above). */
+export const API_KEY_LIFECYCLE_REFUSAL_STATUS = API_KEY_REVOKED_REFUSAL.status;
+
+/** [#23367] One lifecycle refusal, as the seam decides it. */
+export interface ApiKeyLifecycleRefusal {
+  code: ApiKeyLifecycleCode;
+  /** The located message: which key, which date, and the remedy. Never the raw key or its hash. */
+  message: string;
+  /** The date the refusal names (ISO 8601): the expiry, or the start of the idle window. Absent for a revocation. */
+  at?: string;
+  /** The `sys_api_key` row id, for the operator; ⛔ never the key or its hash. */
+  keyId?: string;
+  /** The key's owner. */
+  userId?: string;
+}
+
+/** The own-property brand {@link isApiKeyLifecycleRefusalError} tests (see `authz-store-unavailable.ts` on why not `instanceof`). */
+const API_KEY_LIFECYCLE_REFUSAL_BRAND = '__objectstackApiKeyLifecycleRefusal' as const;
+
+/**
+ * [#23367] The branded refusal `resolveAuthzContext` raises for a key that is
+ * revoked, expired or inactive. Thrown rather than returned as an envelope
+ * field, for the reason `AuthzStoreUnavailableError` is: a throw is loud by
+ * default. A face whose door relays the brand answers `status`, `code` and
+ * the located `message` in its own envelope; a face that does not catches it
+ * as any other identity fault and answers its generic 401 — it never admits.
+ */
+export class ApiKeyLifecycleRefusalError extends Error {
+  /** Brand — tested by {@link isApiKeyLifecycleRefusalError}. */
+  readonly [API_KEY_LIFECYCLE_REFUSAL_BRAND] = true as const;
+  /** ADR-0112 wire code (registered in the ledger under `@objectstack/core`). */
+  readonly code: ApiKeyLifecycleCode;
+  /** HTTP status a relaying face answers. */
+  readonly status = API_KEY_LIFECYCLE_REFUSAL_STATUS;
+  /** The date the refusal names, when it names one. */
+  readonly at?: string;
+  /** The refused key's row id — for logs; never sent by a door. */
+  readonly keyId?: string;
+  /** The refused key's owner — for logs; never sent by a door. */
+  readonly userId?: string;
+
+  constructor(refusal: ApiKeyLifecycleRefusal) {
+    super(refusal.message);
+    this.name = 'ApiKeyLifecycleRefusalError';
+    this.code = refusal.code;
+    if (refusal.at !== undefined) this.at = refusal.at;
+    if (refusal.keyId !== undefined) this.keyId = refusal.keyId;
+    if (refusal.userId !== undefined) this.userId = refusal.userId;
+  }
+}
+
+/** [#23367] True when `err` is the branded API-key lifecycle refusal. */
+export function isApiKeyLifecycleRefusalError(err: unknown): err is ApiKeyLifecycleRefusalError {
+  return typeof err === 'object' && err !== null
+    && (err as Record<string, unknown>)[API_KEY_LIFECYCLE_REFUSAL_BRAND] === true;
+}
+
+/** How a refusal names the key: its stored, non-secret display prefix. */
+function keyLabel(row: any): string {
+  const prefix = typeof row?.prefix === 'string' && row.prefix ? row.prefix : undefined;
+  return prefix ? `This API key (${prefix}…)` : 'This API key';
+}
+
+const API_KEY_REMEDY =
+  'Create a new key (POST /api/v1/keys, or the API Keys page) and replace this one wherever it is configured.';
+
+/**
+ * The lifecycle verdict on a recognised row, or `undefined` when its own state
+ * admits it. Order: revoked, then expired (its own `expires_at`, else the
+ * legacy grace), then inactive. Reads the row as found — the PRE-stamp
+ * `last_used_at` — so a key's own call can never revive it.
+ */
+function lifecycleRefusalOf(
+  row: any,
+  nowMs: number,
+  policy: ApiKeyLifecyclePolicy | undefined,
+  ids: { keyId?: string; userId: string },
+): ApiKeyLifecycleRefusal | undefined {
+  const label = keyLabel(row);
+  if (row.revoked === true || row.revoked === 1) {
+    return {
+      code: API_KEY_REVOKED_REFUSAL.code,
+      message: `${label} was revoked, and a revoked key never works again. ${API_KEY_REMEDY}`,
+      ...ids,
+    };
+  }
+
+  const expiresMs = instantMs(row.expires_at ?? row.expiresAt);
+  if (expiresMs !== undefined) {
+    if (expiresMs <= nowMs) {
+      const at = new Date(expiresMs).toISOString();
+      return {
+        code: API_KEY_EXPIRED_REFUSAL.code,
+        message: `${label} expired on ${at}. Keys do not renew. ${API_KEY_REMEDY}`,
+        at,
+        ...ids,
+      };
+    }
+  } else {
+    const graceEndMs = legacyGraceEndMs(policy);
+    if (graceEndMs !== undefined && graceEndMs <= nowMs) {
+      const at = new Date(graceEndMs).toISOString();
+      return {
+        code: API_KEY_EXPIRED_REFUSAL.code,
+        message:
+          `${label} was signed with no expiry, and its one-year grace under the API-key lifecycle policy `
+          + `ended on ${at}. ${API_KEY_REMEDY}`,
+        at,
+        ...ids,
+      };
+    }
+  }
+
+  const idle = idleWindowStartMs(row, policy);
+  if (idle && policy && nowMs - idle.ms > policy.inactivityDays * DAY_MS) {
+    const at = new Date(idle.ms).toISOString();
+    const since = idle.from === 'use'
+      ? `has not been used since ${at}`
+      : idle.from === 'signing'
+        ? `has not been used since it was signed on ${at}`
+        : `has no recorded use since the API-key lifecycle policy took effect on ${at}`;
+    return {
+      code: API_KEY_INACTIVE_REFUSAL.code,
+      message:
+        `${label} ${since}, longer than the ${policy.inactivityDays} days the inactivity policy allows, so it `
+        + `is refused. It is not revoked. ${API_KEY_REMEDY}`,
+      at,
+      ...ids,
+    };
+  }
+  return undefined;
+}
+
+/** The end of a no-expiry key's grace: the policy's landing plus a year. */
+function legacyGraceEndMs(policy: ApiKeyLifecyclePolicy | undefined): number | undefined {
+  const startedMs = instantMs(policy?.startedAt);
+  return startedMs === undefined ? undefined : startedMs + API_KEY_LEGACY_GRACE_DAYS * DAY_MS;
+}
+
+/**
+ * Where a key's idle window starts, or `undefined` when no inactivity policy
+ * applies or nothing anchors it.
+ *
+ *  - a recorded use (`last_used_at`) anchors it;
+ *  - a key with NO recorded use counts from the policy's landing — never from
+ *    its own `created_at` when that is earlier (no row was ever stamped before
+ *    the policy, so an early signing date says nothing about use) — or from
+ *    its signing when that is later (a key signed after the landing has been
+ *    unused only since then).
+ */
+function idleWindowStartMs(
+  row: any,
+  policy: ApiKeyLifecyclePolicy | undefined,
+): { ms: number; from: 'use' | 'landing' | 'signing' } | undefined {
+  if (!policy || !(policy.inactivityDays > 0)) return undefined;
+  const lastUsedMs = instantMs(row.last_used_at ?? row.lastUsedAt);
+  if (lastUsedMs !== undefined) return { ms: lastUsedMs, from: 'use' };
+  const startedMs = instantMs(policy.startedAt);
+  if (startedMs === undefined) return undefined;
+  const createdMs = instantMs(row.created_at ?? row.createdAt);
+  return createdMs !== undefined && createdMs > startedMs
+    ? { ms: createdMs, from: 'signing' }
+    : { ms: startedMs, from: 'landing' };
+}
+
+/**
+ * Engines whose stamp failure has already been reported — so the line is said
+ * once per engine, at the first failure (AGENTS.md, degradation log levels),
+ * not once per request of a key whose stamp keeps failing.
+ */
+const STAMP_FAILURE_REPORTED = new WeakSet<object>();
+
+/**
+ * [#23367] Stamp an admitted key's row: `last_used_at` when it is older than
+ * {@link API_KEY_LAST_USED_STAMP_INTERVAL_MS} (or empty), and, for a key
+ * signed with no expiry, the end of its grace as `expires_at` (the MFA-grace
+ * precedent: the clock is stamped on the row, so the keys page names it).
+ *
+ * ⛔ A stamp failure never fails the request: the key was judged on the row as
+ * found. It is a durability degradation all the same — the field claims each
+ * use, and an unstamped use lets a key in daily use read as idle — so it is
+ * said at `error`, once per engine, with the consequence and the remedy.
+ */
+async function stampAdmittedKey(
+  ql: any,
+  row: any,
+  keyId: string | undefined,
+  nowMs: number,
+  policy: ApiKeyLifecyclePolicy | undefined,
+): Promise<void> {
+  if (!keyId || !ql || typeof ql.update !== 'function') return;
+  const patch: Record<string, string> = {};
+  const lastUsedMs = instantMs(row.last_used_at ?? row.lastUsedAt);
+  if (lastUsedMs === undefined || nowMs - lastUsedMs >= API_KEY_LAST_USED_STAMP_INTERVAL_MS) {
+    patch.last_used_at = new Date(nowMs).toISOString();
+  }
+  if (instantMs(row.expires_at ?? row.expiresAt) === undefined) {
+    const graceEndMs = legacyGraceEndMs(policy);
+    if (graceEndMs !== undefined) patch.expires_at = new Date(graceEndMs).toISOString();
+  }
+  if (Object.keys(patch).length === 0) return;
+  try {
+    await ql.update('sys_api_key', { id: keyId, ...patch }, { context: { isSystem: true } });
+  } catch (err) {
+    if (typeof ql === 'object' && STAMP_FAILURE_REPORTED.has(ql)) return;
+    if (typeof ql === 'object') STAMP_FAILURE_REPORTED.add(ql);
+    console.error(
+      `[security] API key use NOT recorded: the sys_api_key stamp (${Object.keys(patch).join(', ')}) failed `
+      + `for key=${keyId}. The request was served, and every later one will be too, but a key in daily `
+      + 'use whose uses are not recorded reads as unused and will be refused API_KEY_INACTIVE once the '
+      + 'inactivity window passes. Fix: restore write access to sys_api_key for the system context. '
+      + `Said once for this data engine. Cause: ${String((err as any)?.message ?? err)}`,
+    );
+  }
 }
 
 /** The principal resolved from a valid `sys_api_key`. */
@@ -168,11 +478,19 @@ export interface ApiKeyPrincipal {
 export type ApiKeyRefusalReason = 'organization_required' | 'organization_membership_ended';
 
 /**
- * The verdict on an inbound API key. Four outcomes, deliberately distinct:
+ * The verdict on an inbound API key. Five outcomes, deliberately distinct:
  *
- *  - `none` — no key header, or a key that is unknown / revoked / expired /
- *    owner-less. Indistinguishable by design (never tell a prober which), and
- *    the caller MAY fall through to the session path exactly as before.
+ *  - `none` — no key header, or a key that is unknown / owner-less.
+ *    Indistinguishable by design (never tell a prober which), and the caller
+ *    MAY fall through to the session path exactly as before.
+ *  - `lifecycle` — [#23367, ruling A] a REAL key whose own state refuses it:
+ *    revoked, expired (its `expires_at`, or the grace of a key signed with
+ *    none), or inactive. Distinct and located by ruling: the holder of a key
+ *    that once worked is told which state and which date, with the remedy (a
+ *    new key). A prober holding no real key still learns nothing — an unknown
+ *    hash stays `none`. The caller must NOT fall through to the session path,
+ *    for the `refused` arm's reason; `resolveAuthzContext` raises it as the
+ *    branded {@link ApiKeyLifecycleRefusalError}.
  *  - `admitted` — a usable principal.
  *  - `held` — [#23287, ruling C′ item 3] a real, intact key whose OWNER holds
  *    an `account`-scope ADR-0069 posture (`AUTH_GATE_SCOPES`): the account's
@@ -190,6 +508,7 @@ export type ApiKeyRefusalReason = 'organization_required' | 'organization_member
  */
 export type ApiKeyAdmission =
   | { outcome: 'none' }
+  | { outcome: 'lifecycle'; refusal: ApiKeyLifecycleRefusal }
   | { outcome: 'admitted'; principal: ApiKeyPrincipal }
   | { outcome: 'held'; principal: ApiKeyPrincipal; gate: AuthGate }
   | {
@@ -252,9 +571,10 @@ export function effectiveTenancyPosture(
  * the verdict of {@link resolveApiKeyAdmission}, collapsed to a principal.
  *
  * Fail-closed: returns `undefined` for a missing key, an unusable data engine,
- * a lookup error, a key that is unknown / revoked / expired / owner-less, a key
- * the tenancy posture refuses, and a key whose OWNER holds an `account`-scope
- * ADR-0069 posture (`held`).
+ * a lookup error, a key that is unknown / owner-less, a key its own lifecycle
+ * refuses (revoked / expired / inactive — `lifecycle`), a key the tenancy
+ * posture refuses, and a key whose OWNER holds an `account`-scope ADR-0069
+ * posture (`held`).
  *
  * ⚠️ The collapse is lossy by construction: a principal-or-nothing answer cannot
  * carry the posture's code, so a host that admits keys through this function
@@ -273,8 +593,12 @@ export function effectiveTenancyPosture(
  * @param ql             A data engine with `find(object, { where, limit, context })`.
  * @param headers        Request headers (Web `Headers` or a plain object).
  * @param nowMs          Clock for expiry checks (injectable for tests).
- * @param tenancyPosture The deployment's effective tenancy posture, or `undefined` when no `tenancy` service is registered.
- * @param userAuthGates  `userAuthGateSourceOf(authService)`, or `undefined` when the kernel has no auth service.
+ * [#23367] `apiKeyLifecycle` is REQUIRED for the same reason, and with the
+ * same meaning of `undefined`.
+ *
+ * @param tenancyPosture  The deployment's effective tenancy posture, or `undefined` when no `tenancy` service is registered.
+ * @param userAuthGates   `userAuthGateSourceOf(authService)`, or `undefined` when the kernel has no auth service.
+ * @param apiKeyLifecycle `apiKeyLifecyclePolicySourceOf(authService)`, or `undefined` when the kernel has no auth service.
  */
 export async function resolveApiKeyPrincipal(
   ql: any,
@@ -282,8 +606,9 @@ export async function resolveApiKeyPrincipal(
   nowMs: number = Date.now(),
   tenancyPosture: TenancyPosture | undefined,
   userAuthGates: UserAuthGateSource | undefined,
+  apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined,
 ): Promise<ApiKeyPrincipal | undefined> {
-  const admission = await resolveApiKeyAdmission(ql, headers, nowMs, tenancyPosture, userAuthGates);
+  const admission = await resolveApiKeyAdmission(ql, headers, nowMs, tenancyPosture, userAuthGates, apiKeyLifecycle);
   return admission.outcome === 'admitted' ? admission.principal : undefined;
 }
 
@@ -326,16 +651,32 @@ export async function resolveApiKeyAdmission(
    * compiler.
    */
   userAuthGates: UserAuthGateSource | undefined,
+  /**
+   * [#23367, ruling A] The auth service's API-key lifecycle policy
+   * (`apiKeyLifecyclePolicySourceOf(authService)`): the inactivity window and
+   * the landing that anchors keys with no recorded use or no expiry.
+   *
+   * REQUIRED, for the #23455 reason `userAuthGates` is: an optional source is
+   * how a new seam compiles while skipping the policy. `undefined` is the
+   * value a kernel without `plugin-auth` passes — there is no auth
+   * configuration there, so only the row's own facts (revoked, `expires_at`)
+   * are judged — ⛔ never the value a caller that can reach the `auth`
+   * service passes to quiet the compiler.
+   */
+  apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined,
 ): Promise<ApiKeyAdmission> {
   const apiKey = extractApiKey(headers);
   if (!apiKey) return { outcome: 'none' };
   if (!ql || typeof ql.find !== 'function') return { outcome: 'none' };
 
   // Match by the indexed at-rest hash only — never query by the raw key.
+  //
+  // [#23367] By the hash alone: a REVOKED row is found too, so it can be
+  // refused with its own code instead of reading as an unknown key.
   let rows: any;
   try {
     rows = await ql.find('sys_api_key', {
-      where: { key: hashApiKey(apiKey), revoked: false },
+      where: { key: hashApiKey(apiKey) },
       limit: 1,
       context: { isSystem: true },
     });
@@ -344,13 +685,35 @@ export async function resolveApiKeyAdmission(
   }
   if (rows && (rows as any).value) rows = (rows as any).value;
   const row = Array.isArray(rows) ? rows[0] : undefined;
-  if (!row || row.revoked === true) return { outcome: 'none' };
-
-  const expiresAt = row.expires_at ?? row.expiresAt;
-  if (isExpired(expiresAt, nowMs)) return { outcome: 'none' };
+  if (!row) return { outcome: 'none' };
 
   const userId = row.user_id ?? row.userId;
   if (!userId || typeof userId !== 'string') return { outcome: 'none' };
+
+  // [#15256 / 2A] The row's own id — a non-secret handle for the refusal log.
+  // ⛔ Never `row.key` (the at-rest hash) and never the inbound `apiKey`.
+  const keyId = typeof row.id === 'string' && row.id ? row.id : undefined;
+
+  // [#23367, ruling A] The key's own lifecycle, judged FIRST: a revoked,
+  // expired or inactive key is no credential at all, so its state is what the
+  // holder is told — before any posture question is asked of its owner. Read
+  // off the row AS FOUND, i.e. the pre-stamp `last_used_at`: the stamp below
+  // runs only for a key this verdict admits, so a key's own call can never
+  // revive it.
+  //
+  // The policy is asked only once a real, unrevoked key is in hand. A source
+  // that REJECTS leaves the policy unknown, and an unknown policy is not an
+  // admission: the branded store outage, as for the owner-posture source.
+  let policy: ApiKeyLifecyclePolicy | undefined;
+  if (apiKeyLifecycle && !(row.revoked === true || row.revoked === 1)) {
+    try {
+      policy = await apiKeyLifecycle();
+    } catch (err) {
+      throw new AuthzStoreUnavailableError('api_key_policy', err);
+    }
+  }
+  const lifecycle = lifecycleRefusalOf(row, nowMs, policy, { keyId, userId });
+  if (lifecycle) return { outcome: 'lifecycle', refusal: lifecycle };
 
   // [#8287 / PD #12] ONE spelling. The producer (`runtime` `/keys`) writes
   // `active_organization_id` and nothing else, so this reads that column and
@@ -362,10 +725,6 @@ export async function resolveApiKeyAdmission(
   const tenantId = typeof row.active_organization_id === 'string' && row.active_organization_id
     ? row.active_organization_id
     : undefined;
-
-  // [#15256 / 2A] The row's own id — a non-secret handle for the refusal log.
-  // ⛔ Never `row.key` (the at-rest hash) and never the inbound `apiKey`.
-  const keyId = typeof row.id === 'string' && row.id ? row.id : undefined;
 
   // [#8287] Posture-conditional refusal for a key that carries no organization.
   //
@@ -459,6 +818,7 @@ export async function resolveApiKeyAdmission(
   // active gate whose session re-read fails gets). The computation itself fails
   // open on a lookup error, exactly as the session gate does, so this arm is a
   // fault in the service, not in its store.
+  let gate: AuthGate | null = null;
   if (userAuthGates) {
     let gates: readonly AuthGate[];
     try {
@@ -466,10 +826,17 @@ export async function resolveApiKeyAdmission(
     } catch (err) {
       throw new AuthzStoreUnavailableError('auth_gate', err);
     }
-    const gate = accountScopeAuthGate(gates);
-    if (gate) return { outcome: 'held', principal, gate };
+    gate = accountScopeAuthGate(gates);
   }
 
+  // [#23367] The key is live: record the use (throttled), and stamp the grace
+  // of a key signed with no expiry. A HELD key is stamped too — its
+  // integration is using it, and ruling C′ item 4 serves it again the moment
+  // the owner remediates, which an idle clock run out during the hold would
+  // defeat. A key the tenancy posture refused (above) is not.
+  await stampAdmittedKey(ql, row, keyId, nowMs, policy);
+
+  if (gate) return { outcome: 'held', principal, gate };
   return { outcome: 'admitted', principal };
 }
 

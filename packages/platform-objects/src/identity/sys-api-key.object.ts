@@ -264,11 +264,17 @@ export const SysApiKey = ObjectSchema.create({
       group: 'Lifecycle',
     }),
 
+    // [#23367, ruling A] The description used to read "Automatically updated
+    // on each API call" while nothing wrote the column at all. Its one writer
+    // is now the shared key-admission seam (`resolveApiKeyAdmission`,
+    // `@objectstack/core`), throttled to one write per key per hour; the
+    // inactivity expiry reads it.
     last_used_at: Field.datetime({
       label: 'Last Used At',
       required: false,
       readonly: true,
-      description: 'Automatically updated on each API call',
+      description:
+        'Recorded when the key is used, at most once an hour. A key with no recorded use for the inactivity window (90 days by default) is refused until replaced',
       group: 'Lifecycle',
     }),
 

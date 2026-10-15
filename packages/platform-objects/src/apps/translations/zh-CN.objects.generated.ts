@@ -1003,7 +1003,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       last_used_at: {
         label: "最近使用时间",
-        help: "每次 API 调用时自动更新"
+        help: "密钥被使用时记录，每小时至多一次。在不活动期限内（默认 90 天）没有使用记录的密钥会被拒绝，需更换新密钥"
       },
       revoked: {
         label: "已撤销"

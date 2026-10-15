@@ -15,7 +15,7 @@ import { sendOk, sendError, sendServerFault } from '@objectstack/types';
 // (`src` under vitest aliases, `dist` under the published `exports`), so two
 // copies of the class make `instanceof` answer FALSE for a genuine instance.
 // See `packages/core/src/security/authz-store-unavailable.ts`.
-import { isAuthzStoreUnavailableError } from '@objectstack/core';
+import { isAuthzStoreUnavailableError, isApiKeyLifecycleRefusalError } from '@objectstack/core';
 // ADR-0069 — the authentication-policy gate's ONE decision, asked at this
 // family's door (`registerStorageFamily`), never re-derived here.
 import { evaluateAuthGate } from '@objectstack/core';
@@ -561,6 +561,14 @@ export function registerStorageFamily(
       // to "anything that carries a status" would let an unrelated coded throw
       // decide the answer.
       if (isAuthzStoreUnavailableError(err)) {
+        sendError(res, err.status, err.code, err.message);
+        return false;
+      }
+      // [#23367, ruling A item 3] An API key its own lifecycle refused
+      // (revoked, expired, inactive), re-raised by brand by the authorizer:
+      // relayed the same way, as its declared 403 and ledger code — the answer
+      // REST gives the same key. Scoped to its brand like the arm above.
+      if (isApiKeyLifecycleRefusalError(err)) {
         sendError(res, err.status, err.code, err.message);
         return false;
       }

@@ -256,6 +256,10 @@ export const zhCN: PlatformTranslationData = {
           title: '网络',
           description: '限制用户可以从哪里登录。',
         },
+        api_keys: {
+          title: 'API 密钥',
+          description: '个人 API 密钥的有效期。过期、超过不活动期限未使用或已吊销的密钥会以各自的错误码被拒绝,补救方式都是新建密钥。',
+        },
         social: {
           title: '社交登录',
           description: '配置内置的 Google 登录提供商。部署环境变量仍优先生效。',
@@ -353,6 +357,22 @@ export const zhCN: PlatformTranslationData = {
         allowed_ip_ranges: {
           label: '允许的 IP 段',
           help: 'CIDR 段或精确 IP(每行一个,或用逗号分隔),例如 203.0.113.0/24。设置后,来自这些范围之外的登录将被拒绝。留空表示不限制。需要可信代理设置 X-Forwarded-For。',
+        },
+        api_key_default_expiry_days: {
+          label: '默认密钥有效期(天)',
+          help: '未指定到期日期的密钥在创建后经过这么多天到期。不会超过下方的最长有效期。',
+        },
+        api_key_max_expiry_days: {
+          label: '密钥最长有效期(天)',
+          help: '新密钥可以申请的最远到期日期,从创建时算起。更长的会被拒绝(API_KEY_EXPIRY_TOO_LONG);恰好这么多天可以接受。',
+        },
+        api_key_inactivity_days: {
+          label: '不活动失效(天)',
+          help: '这么多天内没有使用记录的密钥会被拒绝(API_KEY_INACTIVE)。它不会被吊销;请新建密钥。从未使用的密钥从创建时算起,若早于下方的策略开始时间则从策略开始时间算起。0 表示关闭不活动失效。',
+        },
+        api_key_policy_started_at: {
+          label: '密钥策略开始时间',
+          help: '服务器首次以此策略运行时自动记录(UTC,ISO 8601)。在此之前创建且没有到期日期的密钥在此时间一年后到期;没有使用记录的密钥从此时间开始计算不活动期。修改它会移动尚未获得日期的密钥的这两个日期。',
         },
         google_enabled: {
           label: '启用 Google 登录',

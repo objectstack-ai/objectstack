@@ -185,6 +185,7 @@ describe('[#8119] federated phantom anchor: single-record gates + share posture'
     adminToken = await stack.signIn();
     adminCtx = await resolveAuthzContext({
       userAuthGates: undefined,
+      apiKeyLifecycle: undefined,
       ql,
       headers: new Headers({ authorization: `Bearer ${adminToken}` }),
       getSession: async (h: unknown) => {
