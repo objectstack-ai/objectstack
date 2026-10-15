@@ -273,7 +273,7 @@ describe('countJsxGatePages — the pages the JSX gate checks against a manifest
   it('counts the name-keyed map shape too, and ignores non-records', () => {
     expect(
       countJsxGatePages({
-        pages: { a: { kind: 'html', source: '<div />' }, b: { kind: 'jsx', source: '<div />' }, c: 'x', d: null },
+        pages: { a: { kind: 'html', source: '<div />' }, b: { kind: 'html', source: '<div />' }, c: 'x', d: null },
       }),
     ).toBe(2);
     expect(countJsxGatePages({ pages: 'nope' })).toBe(0);
@@ -350,7 +350,7 @@ describe('resolveJsxGateManifest — one decision, three commands', () => {
 
   it('absent with a page to check: parse level, and ONE notice carrying the count and every place looked', () => {
     const r = resolveJsxGateManifest(
-      { pages: [...HTML_STACK.pages, { name: 'b', kind: 'jsx', source: '<div />' }] },
+      { pages: [...HTML_STACK.pages, { name: 'b', kind: 'html', source: '<div />' }] },
       PROJECT_DIR,
       ABSENT,
     );

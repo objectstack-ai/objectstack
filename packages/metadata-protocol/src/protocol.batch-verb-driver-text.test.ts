@@ -388,8 +388,9 @@ describe('[#8333] the batch verbs report a failure without quoting the driver', 
 
     it('P13 `migrateStoredMetadata` — `rows[].reason`', async () => {
         const { protocol, engine } = makeKernel({
-            // `page.kind: 'jsx'` → `'html'` is a live ADR-0087 conversion, so
-            // this row is genuinely non-canonical and the migration really
+            // `page.kind: 'jsx'` → `'html'` is an ADR-0087 conversion every
+            // stored-row seam replays (retired from the load path at 18, it
+            // still heals rows at rest), so this row is genuinely non-canonical and the migration really
             // attempts the rewrite. A canonical row would never reach the save.
             seed: [row({
                 type: 'page', name: 'crm_landing',

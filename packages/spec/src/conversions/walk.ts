@@ -383,7 +383,7 @@ function mapComponentTree(
  * Three differences from the lint walk remain, all deliberate, and each makes
  * this walker reach MORE, never less:
  *
- *   1. **Source-authored pages** (`kind: 'html' | 'react' | 'jsx'`) are visited
+ *   1. **Source-authored pages** (`kind: 'html' | 'react'`) are visited
  *      here and skipped there. For lint that skip prevents findings about a
  *      DERIVED region cache the author never wrote; a conversion still has to
  *      normalize that cache, or a stored page rehydrates in a shape the runtime
