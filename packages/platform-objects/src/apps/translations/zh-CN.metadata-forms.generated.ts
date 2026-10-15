@@ -2323,7 +2323,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       adminScope: {
         label: "委派管理范围",
-        helpText: "委派管理（ADR-0090 D12）：让持有本权限集的人管理一个业务单元子树。businessUnit 是子树的根（sys_business_unit.name），必填且不能为空白；includeSubtree 默认为 true；manageAssignments、manageBindings 和 authorEnvironmentSets 默认为 false；被委派者只能分配 assignablePermissionSets 中列出的权限集。不委派任何管理权的权限集请留空。"
+        helpText: "委派管理（ADR-0090 D12）：让持有本权限集的人管理一个业务单元子树。businessUnit 是子树的根（sys_business_unit.name），必填且不能为空白；includeSubtree 默认为 true；manageAssignments 默认为 false，开启后持有人可在该子树内把人员分配到岗位、并直接授予权限集；被委派者只能分配 assignablePermissionSets 中列出的权限集。不委派任何管理权的权限集请留空。"
       },
       objects: {
         label: "对象权限",

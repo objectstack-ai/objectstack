@@ -2323,7 +2323,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       adminScope: {
         label: "Admin Scope",
-        helpText: "Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments, manageBindings and authorEnvironmentSets default to false; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing."
+        helpText: "Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments defaults to false and lets the holder assign people to positions, and grant sets directly, inside that subtree; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing."
       },
       objects: {
         label: "Objects",

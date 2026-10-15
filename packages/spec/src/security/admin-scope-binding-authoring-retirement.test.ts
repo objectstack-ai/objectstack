@@ -57,8 +57,8 @@ const SCOPE = {
   assignablePermissionSets: ['sales_user'],
 } as const;
 
-/** A well-formed permission set carrying {@link SCOPE}. */
-const SET = { name: 'east_admin', label: 'East Admin', adminScope: SCOPE } as const;
+/** A well-formed permission set carrying {@link SCOPE} (`objects` is the set's one required key). */
+const SET = { name: 'east_admin', label: 'East Admin', objects: {}, adminScope: SCOPE } as const;
 
 // Unanchored, because a thrown `ZodError`'s message is the JSON of its issues;
 // the key-first house convention is asserted on the issue message itself.
@@ -212,7 +212,7 @@ describe('adminScope binding/authoring retirement — the D2 conversion', () => 
         { ...SET, name: 'b_two', adminScope: { ...SCOPE, authorEnvironmentSets: 7 } },
         // Already canonical, and a set with no scope: no notice, handed back by reference.
         { ...SET, name: 'c_three' },
-        { name: 'd_four', label: 'Four' },
+        { name: 'd_four', label: 'Four', objects: {} },
       ],
     };
     const { stack, notices } = collectConversionNotices(input, { includeRetired: true });

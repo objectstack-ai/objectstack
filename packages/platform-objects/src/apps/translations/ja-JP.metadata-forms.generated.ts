@@ -2323,7 +2323,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       adminScope: {
         label: "委任管理スコープ",
-        helpText: "委任管理（ADR-0090 D12）: この権限セットの保持者が 1 つのビジネスユニットのサブツリーを管理できるようにします。businessUnit はサブツリーのルート（sys_business_unit.name）で、必須かつ空白不可です。includeSubtree の既定値は true、manageAssignments・manageBindings・authorEnvironmentSets の既定値は false です。委任先が付与できるのは assignablePermissionSets に挙げた権限セットだけです。何も委任しない権限セットでは空のままにしてください。"
+        helpText: "委任管理（ADR-0090 D12）: この権限セットの保持者が 1 つのビジネスユニットのサブツリーを管理できるようにします。businessUnit はサブツリーのルート（sys_business_unit.name）で、必須かつ空白不可です。includeSubtree の既定値は true です。manageAssignments の既定値は false で、有効にすると保持者はそのサブツリー内でユーザーをポジションに割り当て、権限セットを直接付与できます。委任先が付与できるのは assignablePermissionSets に挙げた権限セットだけです。何も委任しない権限セットでは空のままにしてください。"
       },
       objects: {
         label: "オブジェクト権限",

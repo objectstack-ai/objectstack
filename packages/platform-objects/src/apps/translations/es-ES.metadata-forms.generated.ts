@@ -2323,7 +2323,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       adminScope: {
         label: "Ámbito de administración delegada",
-        helpText: "Administración delegada (ADR-0090 D12): permite a quienes tienen este conjunto administrar un subárbol de unidades de negocio. businessUnit es la raíz del subárbol (sys_business_unit.name), es obligatorio y no puede estar en blanco; includeSubtree vale true por defecto; manageAssignments, manageBindings y authorEnvironmentSets valen false por defecto; un delegado solo puede asignar los conjuntos nombrados en assignablePermissionSets. Déjalo vacío en un conjunto que no delega nada."
+        helpText: "Administración delegada (ADR-0090 D12): permite a quienes tienen este conjunto administrar un subárbol de unidades de negocio. businessUnit es la raíz del subárbol (sys_business_unit.name), es obligatorio y no puede estar en blanco; includeSubtree vale true por defecto; manageAssignments vale false por defecto y permite al titular asignar personas a puestos, y conceder conjuntos directamente, dentro de ese subárbol; un delegado solo puede asignar los conjuntos nombrados en assignablePermissionSets. Déjalo vacío en un conjunto que no delega nada."
       },
       objects: {
         label: "Permisos de objeto",
