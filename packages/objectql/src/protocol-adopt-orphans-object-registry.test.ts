@@ -54,7 +54,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
-import { ObjectQL } from './engine.js';
+import { ObjectQL, type EngineReadOptions } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 
 type Stores = Map<string, Map<string, Record<string, unknown>>>;
@@ -137,6 +137,9 @@ function makeMemoryDriver(stores: Stores, drops: string[]) {
     return driver;
 }
 
+/** The data plane read, as the system reads it: typed, never erased (`check:query-options-erasure`). */
+const SYSTEM_READ: EngineReadOptions = { context: { isSystem: true } };
+
 const Q = 'com.qa.q';
 const R = 'com.qa.r';
 const NAME = 'qa_probe_gadget';
@@ -202,7 +205,7 @@ describe('#23646 — an orphan adoption moves an adopted object\'s registry owne
      */
     async function served(k: Booted) {
         const read = await k.protocol.getMetaItem({ type: 'object', name: NAME });
-        const records = await k.engine.find(NAME, {}, { context: { isSystem: true } } as any);
+        const records = await k.engine.find(NAME, {}, SYSTEM_READ);
         const object = k.engine.registry.getObject(NAME) as { label?: string; _packageId?: string } | undefined;
         return {
             owner: k.engine.registry.getObjectOwner(NAME)?.packageId,
