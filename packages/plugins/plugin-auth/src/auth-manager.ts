@@ -110,7 +110,7 @@ import {
   removalBlockedByOwnerTarget,
 } from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
-import { readAccountInvitation } from './account-invitation-marker.js';
+import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
 import {
   REVOKE_SESSION_NOT_FOUND_CODE,
   REVOKE_SESSION_NOT_FOUND_MESSAGE,
@@ -1758,7 +1758,14 @@ export class AuthManager {
           ...(this.config.emailAndPassword?.revokeSessionsOnPasswordReset != null
             ? { revokeSessionsOnPasswordReset: this.config.emailAndPassword.revokeSessionsOnPasswordReset } : {}),
         // #14319 — better-auth calls this as `sendResetPassword(data, ctx.request)`.
-        sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
+        // [#23598] better-auth CATCHES what this callback throws
+        // (`runInBackgroundOrAwait`) and still answers `{ status: true }`, so a
+        // failed send can never reach the identity import that asked for it.
+        // `settleImportResetDelivery` settles the import's own delivery receipt
+        // with the outcome (and re-raises it unchanged); a call that carries a
+        // `Request` — the public door — is handed straight through.
+        // `account-invitation-marker.ts` holds the legs that keep it server-only.
+        sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => settleImportResetDelivery(user.email, request, async () => {
           // #2766 V1.5 — placeholder addresses (phone-only users) are never
           // real recipients. Refuse loudly instead of "sending" into the void;
           // the reset path for these users is phone sign-in / an admin
@@ -1848,7 +1855,7 @@ export class AuthManager {
               `${invitation ? 'Account-invitation' : 'Password-reset'} email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
             );
           }
-        },
+        }),
         };
       })(),
 

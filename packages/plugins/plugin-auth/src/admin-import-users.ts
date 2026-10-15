@@ -27,7 +27,10 @@
  *                   no channel", and — unlike `invite` — it never rejects the
  *                   request for missing infrastructure: undeliverable rows just
  *                   degrade to temporary. The per-row outcome is surfaced as
- *                   `rows[].delivery` (`email` | `sms` | `temporary`).
+ *                   `rows[].delivery` (`email` | `sms` | `temporary`); a row
+ *                   whose invitation fails carries none, is not `ok`, names
+ *                   `INVITE_EMAIL_FAILED` / `INVITE_SMS_FAILED`, and counts in
+ *                   `summary.errors` (#23598).
  *  - `invite`     — force the invite path for EVERY row: better-auth's
  *                   reset-password mints the credential account on first set, so
  *                   creation stays credential-less, and a "set your password"
@@ -110,7 +113,11 @@ import { prepareImportRequest, runImport } from '@objectstack/rest';
 import { generatePlaceholderEmail, isPlaceholderEmail } from './placeholder-email.js';
 import { generateTemporaryPassword, normalizePhoneNumber, isLikelyEmail, type AdminActor, type EndpointResult } from './admin-user-endpoints.js';
 import { SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
-import { runAsAccountInvitation, type AccountInvitationMarker } from './account-invitation-marker.js';
+import {
+  runImportPasswordReset,
+  type AccountInvitationMarker,
+  type ImportResetDelivery,
+} from './account-invitation-marker.js';
 import {
   applyUserManagerLink,
   type SetUserManagerDeps,
@@ -338,7 +345,11 @@ export type ImportManagerOutcome = 'linked' | 'unresolved' | SetUserManagerRefus
 export interface IdentityImportRowResult extends ImportRowResult {
   /** Returned ONCE, never persisted — `temporary` rows only. */
   temporaryPassword?: string;
-  /** How this created row's credential was delivered. */
+  /**
+   * How this created row's credential was delivered. Absent on a row whose
+   * invitation did not go out (`ok: false`, `code` names the failure — see
+   * {@link noteInvitationFailure}): nothing was delivered.
+   */
   delivery?: 'email' | 'sms' | 'temporary';
   /**
    * Present only on rows that named a manager. Absent means the row's
@@ -381,6 +392,34 @@ function noteManagerFailure(
   row.manager = outcome;
   if (row.error === undefined) row.error = message;
 }
+
+/**
+ * [#23598] Stamp a created row whose invitation did not go out.
+ *
+ * The account exists — `action` stays `'created'` and `id` stays, because a
+ * re-import of the same address would collide with it — but what the
+ * administrator asked for, an invitation, did not happen. So the row is NOT
+ * `ok`, carries no `delivery` (nothing was delivered), names the failure in
+ * `code`, and the caller counts it in `summary.errors`: the Console lists a
+ * row by `ok`, and a failure it cannot see is the defect this fixes. ⛔ Not a
+ * rollback and ⛔ not a silent downgrade to a temporary password — the remedy
+ * is re-sending, or an admin set-user-password.
+ *
+ * One stamp for both channels, so the email and SMS rows cannot drift apart.
+ */
+function noteInvitationFailure(
+  row: IdentityImportRowResult,
+  code: 'INVITE_EMAIL_FAILED' | 'INVITE_SMS_FAILED',
+  message: string,
+): void {
+  row.ok = false;
+  delete row.delivery;
+  row.code = code;
+  row.error = message;
+}
+
+/** The reason a delivery failed, as one bounded line. */
+const failureReason = (e: unknown) => ((e as Error)?.message ?? String(e)).slice(0, 200);
 
 /**
  * A manager cell, read as an identity key.
@@ -713,6 +752,9 @@ export async function runAdminImportUsers(
 
   // ── Post-write phases (skipped on dryRun) ─────────────────────────────
   const delivery = { emailInvite: 0, smsInvite: 0, temporary: 0 };
+  // [#23598] Created rows whose invitation did not go out — each is reported
+  // on its row ({@link noteInvitationFailure}) and counted in `summary.errors`.
+  let invitationFailures = 0;
   // [#18028] How the second pass went. Declared out here so the summary
   // reports the same three keys on a dry run — where the pass does not run —
   // as it does on a real one.
@@ -729,55 +771,74 @@ export async function runAdminImportUsers(
     // phone-only rows (#2780; the SMS carries no credential — the user
     // requests their own OTP at first sign-in). Temporary rows get the
     // generated password attached to the response body ONLY.
+    //
+    // [#23598] A row is reported delivered only on a delivery that answered
+    // success. Every failure — a send that threw or answered `failed`, or one
+    // nobody confirmed — is stamped by `noteInvitationFailure` and counted.
     for (const r of results) {
       if (!r || r.action !== 'created' || !r.id) continue;
       const invite = inviteTargets.get(r.id);
       if (invite) {
         if (invite.channel === 'sms') {
-          r.delivery = 'sms';
-          delivery.smsInvite++;
           if (!invite.phone) continue; // defensive — SMS rows carry a phone
           try {
+            // `sendPhoneInviteSms` throws on a transport that answers `failed`.
             await deps.sendInviteSms(invite.phone);
+            r.delivery = 'sms';
+            delivery.smsInvite++;
           } catch (e) {
-            // The account exists; only the SMS failed. Not a rollback —
-            // remediation is re-sending or an admin set-user-password.
-            r.code = 'INVITE_SMS_FAILED';
-            r.error = `User created, but the invitation SMS failed: ${((e as Error)?.message ?? String(e)).slice(0, 200)}`;
+            noteInvitationFailure(r, 'INVITE_SMS_FAILED', `User created, but the invitation SMS failed: ${failureReason(e)}`);
+            invitationFailures++;
           }
         } else {
-          r.delivery = 'email';
-          delivery.emailInvite++;
-          try {
-            // [#23152] The link lands on the Console's set-password page only
-            // when the request names it; see `consoleResetPasswordUrl`.
-            const requestReset = () => authApi.requestPasswordReset({
-              body: deps.consoleResetPasswordUrl
-                ? { email: invite.email, redirectTo: deps.consoleResetPasswordUrl() }
-                : { email: invite.email },
-            });
-            // [#23343] better-auth hands the link only to `sendResetPassword`,
-            // so the invitation copy is chosen THERE; this marks the one reset
-            // this row asks for as an account invitation from this admin. See
-            // `account-invitation-marker.ts` for why nothing else can.
-            if (inviter === null) {
-              inviter = await resolveImportInviter(engine, actor, deps.logger);
-              if (!inviter) {
-                deps.logger?.warn(
-                  `[AuthPlugin] import-users: the importing administrator ${actor.id} has no email address, `
-                    + 'so this batch\'s invited rows receive the password-reset email instead of the '
-                    + 'account invitation (which names its inviter).',
-                );
-              }
+          // [#23152] The link lands on the Console's set-password page only
+          // when the request names it; see `consoleResetPasswordUrl`.
+          const requestReset = () => authApi.requestPasswordReset({
+            body: deps.consoleResetPasswordUrl
+              ? { email: invite.email, redirectTo: deps.consoleResetPasswordUrl() }
+              : { email: invite.email },
+          });
+          // [#23343] better-auth hands the link only to `sendResetPassword`,
+          // so the invitation copy is chosen THERE; the marker makes the one
+          // reset this row asks for an account invitation from this admin.
+          if (inviter === null) {
+            inviter = await resolveImportInviter(engine, actor, deps.logger);
+            if (!inviter) {
+              deps.logger?.warn(
+                `[AuthPlugin] import-users: the importing administrator ${actor.id} has no email address, `
+                  + 'so this batch\'s invited rows receive the password-reset email instead of the '
+                  + 'account invitation (which names its inviter).',
+              );
             }
-            await (inviter
-              ? runAsAccountInvitation({ email: invite.email, inviter }, requestReset)
-              : requestReset());
+          }
+          // [#23598] better-auth catches what the send throws and answers
+          // `{ status: true }` regardless, so the outcome is read off the
+          // receipt `sendResetPassword` settles, never off this call. The call
+          // itself can still throw BEFORE any send (a refused `redirectTo`, a
+          // reset that is not enabled, a failed token write): that is a
+          // failed invitation too. See `account-invitation-marker.ts`.
+          let sent: ImportResetDelivery;
+          try {
+            ({ delivery: sent } = await runImportPasswordReset(
+              { email: invite.email, ...(inviter ? { inviter } : {}) },
+              requestReset,
+            ));
           } catch (e) {
-            // The account exists; only the email failed. Not a rollback —
-            // remediation is re-sending or an admin set-user-password.
-            r.code = 'INVITE_EMAIL_FAILED';
-            r.error = `User created, but the invitation email failed: ${((e as Error)?.message ?? String(e)).slice(0, 200)}`;
+            sent = { status: 'failed', reason: failureReason(e) };
+          }
+          if (sent.status === 'accepted') {
+            r.delivery = 'email';
+            delivery.emailInvite++;
+          } else {
+            noteInvitationFailure(
+              r,
+              'INVITE_EMAIL_FAILED',
+              sent.status === 'failed'
+                ? `User created, but the invitation email failed: ${sent.reason.slice(0, 200)}`
+                : 'User created, but the invitation email failed: its delivery was never confirmed — the '
+                  + 'password-reset request answered without the email service accepting the message.',
+            );
+            invitationFailures++;
           }
         }
         continue;
@@ -946,7 +1007,7 @@ export async function runAdminImportUsers(
             mode, matchBy, passwordPolicy: policy,
             total: prepared.rows.length,
             created: summary.created, updated: summary.updated,
-            skipped: summary.skipped, errors: summary.errors + preErrors,
+            skipped: summary.skipped, errors: summary.errors + preErrors + invitationFailures,
             // How `auto` (and the fixed policies) split the batch across channels.
             delivery,
             // [#18028] And how the second pass's manager links went — a run
@@ -983,7 +1044,11 @@ export async function runAdminImportUsers(
     }
   }
 
-  const errors = summary.errors + preErrors;
+  // [#23598] A created row whose invitation failed counts here too: it is not
+  // `ok` (see `noteInvitationFailure`), and `errors` agrees with the rows. It
+  // is ALSO in `created` — the account exists — so `created + updated +
+  // skipped + errors` exceeds `total` by exactly those rows.
+  const errors = summary.errors + preErrors + invitationFailures;
   return {
     status: 200,
     body: {
@@ -999,11 +1064,15 @@ export async function runAdminImportUsers(
           passwordPolicy: policy,
           // Per-channel split of the created rows — the value of `auto`: how
           // many rows were invited vs. fell back to a temporary password.
+          // [#23598] Only deliveries that answered success: a failed
+          // invitation is in `errors`, never in a channel's count.
           delivery,
           // [#18028] The second pass's split. `unresolved` and `refused` are
           // both per-row failures on rows that otherwise LANDED, so they are
           // reported here rather than folded into `errors`, which would make
-          // `created` and `errors` disagree about the same row.
+          // `created` and `errors` disagree about the same row. (A failed
+          // invitation IS folded in: the invitation was the row's ask, so the
+          // row is not `ok` — see `errors` above. A manager link is not.)
           manager: managerLinks,
           mode,
           matchBy,
