@@ -3595,13 +3595,12 @@ export class ApprovalService implements IApprovalService {
     // No one-tap decision links: ADR-0043 mints those on `remind()` only, and
     // minting bearer tokens on every opening is a decision this does not make.
     //
-    // [#23556] The body names the record the way the approvals list does —
-    // `Deal "Acme renewal"`, never `crm_deal/<id>` — so a grouped bell entry
-    // tells its reader which record is waiting. One name for every recipient,
-    // read once, and only when someone is told.
+    // [#23556] The body names the record by its object's label and its id —
+    // `Deal D_123`, never `crm_deal/D_123` — so a grouped bell entry tells its
+    // reader which kind of record is waiting. One name for every recipient.
     const toldByOoo = new Set(substitutions.map((sub) => sub.to));
     const openedOn = new Set(approvers.filter((a) => a && !a.includes(':') && !toldByOoo.has(a)));
-    const subject = openedOn.size ? await this.nameSubjectRecord(input.object, input.recordId) : '';
+    const subject = this.nameSubjectRecord(input.object, input.recordId);
     for (const approver of openedOn) {
       await this.notify({
         topic: 'approval.requested',
@@ -6704,16 +6703,15 @@ export class ApprovalService implements IApprovalService {
    * `record_title` and `object_label` from it, then falls back to the reader's
    * redacted payload snapshot for a title this read did not find).
    *
-   * [#23556] One resolution with two readers: the list, and the
-   * `approval.requested` body ({@link ApprovalService.nameSubjectRecord}), so
-   * the notification names the record by the same live title and label its
-   * recipient's inbox row shows. Batched: one read per object. Best-effort —
-   * an unregistered object or a failed read leaves its entries unset.
+   * Batched: one read per object. Best-effort — an unregistered object or a
+   * failed read leaves its entries unset.
    *
-   * The read runs under the system context, so no reader's field-level
-   * security narrows the title it finds — for the list exactly as for the
-   * notification. Narrowing it per reader is a change to THIS function, and
-   * the notification would then have to pass each recipient.
+   * [#23594] The read runs under the system context, so no reader's
+   * field-level security narrows the title it finds. Narrowing it per reader
+   * is a change to THIS function — the one place the inbox's subject title is
+   * resolved. The `approval.requested` body ({@link ApprovalService.nameSubjectRecord})
+   * withholds the title until then, because notification text is stored and
+   * may be e-mailed, so a title sent cannot be withdrawn by a later fix.
    */
   private async resolveSubjectDisplays(
     byObject: ReadonlyMap<string, ReadonlySet<string>>,
@@ -6721,10 +6719,8 @@ export class ApprovalService implements IApprovalService {
     const titles = new Map<string, string>();
     const objectLabels = new Map<string, string>();
     for (const [object, idSet] of byObject) {
-      try {
-        const schema: any = (this.engine as any).getSchema?.(object);
-        if (schema?.label) objectLabels.set(object, String(schema.label));
-      } catch { /* label optional */ }
+      const label = this.objectLabelOf(object);
+      if (label) objectLabels.set(object, label);
       const ids = Array.from(idSet);
       const displayField = this.resolveDisplayField(object);
       try {
@@ -6741,24 +6737,32 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * [#23556] The record an approval notification is about, named the way the
-   * approvals list names it: the object's label (its API name only when the
-   * schema has none, as the list falls back), then the record's title in
-   * quotes — `Deal "Acme renewal"` — from {@link ApprovalService.resolveSubjectDisplays}.
-   *
-   * With no title from that read, the record id stands in for it
-   * (`Deal D_123`), which is what the body carried before. ⛔ The payload
-   * snapshot is NOT consulted for a title here, unlike the list's fallback:
-   * the list reads the snapshot only after redacting it for the READER's
-   * field-level security (#10749), and stored notification text has no
-   * reader to redact for, so an unredacted snapshot title could name a field
-   * a recipient's inbox row would withhold.
+   * An object's schema label, or `undefined` — the one spelling of "the
+   * object's label" the inbox row ({@link ApprovalService.resolveSubjectDisplays})
+   * and the `approval.requested` body ({@link ApprovalService.nameSubjectRecord})
+   * share. A schema that cannot be read has no label (the label is optional).
    */
-  private async nameSubjectRecord(object: string, recordId: string): Promise<string> {
-    const { titles, objectLabels } = await this.resolveSubjectDisplays(new Map([[object, new Set([recordId])]]));
-    const label = objectLabels.get(object) ?? object;
-    const title = titles.get(`${object} ${recordId}`);
-    return title ? `${label} "${title}"` : `${label} ${recordId}`;
+  private objectLabelOf(object: string): string | undefined {
+    try {
+      const schema: any = (this.engine as any).getSchema?.(object);
+      return schema?.label ? String(schema.label) : undefined;
+    } catch { return undefined; }
+  }
+
+  /**
+   * [#23556] The record an approval notification is about: the object's label
+   * (its API name only when the schema has none, as the inbox falls back),
+   * then the record id — `Deal D_123`. The body carried the id before; what
+   * changed is the API name giving way to the label.
+   *
+   * ⛔ No title, from any source — neither the live record nor the payload
+   * snapshot (which the inbox serves only after redacting it for its reader,
+   * #10749). Notification text is stored and may be e-mailed, and it has no
+   * reader to narrow for.
+   */
+  private nameSubjectRecord(object: string, recordId: string): string {
+    // [#23594] The title would go here; withheld until resolveSubjectDisplays narrows it by each reader's FLS.
+    return `${this.objectLabelOf(object) ?? object} ${recordId}`;
   }
 
   /**
