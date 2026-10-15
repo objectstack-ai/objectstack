@@ -64,7 +64,12 @@ import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/dat
 // mechanism for a second producer, and commit aa5994e17 landed this service's key
 // (`approval_recall_not_submitter`) into it ahead of this consumer half.
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
-import { isGrantActive, omitInternalFieldsFromWriteResponse, resolveUserAuthzGrants } from '@objectstack/core';
+import {
+  isGrantActive,
+  omitInternalFieldsFromWriteResponse,
+  resolveReadableParentIds,
+  resolveUserAuthzGrants,
+} from '@objectstack/core';
 import {
   filterApproversWhoCanRead,
   resolveApproverDirectoryOrg,
@@ -6692,6 +6697,8 @@ export class ApprovalService implements IApprovalService {
    * the same target. It takes no caller: the read runs under a system context.
    * [#23618] What is SERVED from that read is the reader's: the title is picked
    * from the target as served to the reader ({@link titlesAsServed}).
+   * [#23637] And only for a target record the reader may read, asked as the
+   * reader after this gate ({@link ApprovalService.enrichRows}).
    *
    * A refused target is not read, so its key gets no display value and the
    * snapshot's stored id stands, the answer a deleted target already gets. A
@@ -6786,8 +6793,10 @@ export class ApprovalService implements IApprovalService {
    * and the lookup targets' `payload_display` ({@link ApprovalService.enrichRows}).
    * The records are read under the system context, so the read narrows nothing
    * (#7497 ruling C: record access stays with object permissions, sharing and
-   * row-level rules); only what is served from it is narrowed. Throws what the
-   * read throws; each caller keeps its own best-effort catch.
+   * row-level rules); only what is served from it is narrowed. Which `ids` are
+   * read is the caller's: the subject's are every request's record, the
+   * targets' only those the reader may read ([#23637], {@link enrichRows}).
+   * Throws what the read throws; each caller keeps its own best-effort catch.
    */
   private async titlesAsServed(
     object: string,
@@ -6859,6 +6868,15 @@ export class ApprovalService implements IApprovalService {
    * target gets. The targets' answers are asked through
    * {@link servedFields} into `served`, once per object per read, so a target
    * that is also a subject object reuses the subject's answer.
+   * [#23637] And only a target RECORD the reader may read is titled at all:
+   * the readable ids come from `resolveReadableParentIds` (`@objectstack/core`),
+   * the one caller-scoped "which of these records may this caller read" answer
+   * the parent-derived read gates ask, so the target object's object-level
+   * read, sharing and row-level rules decide, as they do for the data door's
+   * `$expand`. One ask per target object per read. An unreadable target gets
+   * no display value and its stored id stands, as a deleted one does. The
+   * SUBJECT is not asked: its title and snapshot are served whatever the
+   * reader's access to the subject record (#7497 ruling C, #10749).
    */
   private async enrichRows(
     rows: ApprovalRequestRow[],
@@ -6901,11 +6919,22 @@ export class ApprovalService implements IApprovalService {
       }
     }
     const refTitles = new Map<string, string>();
-    const targets = Array.from(refIds.keys()).filter((object) => this.servesPayloadDisplayTarget(object));
+    const exposed = Array.from(refIds.keys()).filter((object) => this.servesPayloadDisplayTarget(object));
+    // [#23637] Only the target RECORDS the reader may read are titled: the
+    // platform's one caller-scoped row-access answer, one ask per target object
+    // per read. An object the reader may not read, a row its sharing or
+    // row-level rules hide, and a deleted record all come back absent, so that
+    // key gets no display value and the snapshot's stored id stands.
+    const readableIds = await resolveReadableParentIds(
+      this.engine,
+      context,
+      new Map(exposed.map((object) => [object, refIds.get(object)!])),
+    );
+    const targets = exposed.filter((object) => (readableIds.get(object)?.size ?? 0) > 0);
     await this.servedFields(targets, context, served);
     for (const object of targets) {
       try {
-        await this.titlesAsServed(object, refIds.get(object)!, served.get(object), refTitles);
+        await this.titlesAsServed(object, readableIds.get(object)!, served.get(object), refTitles);
       } catch { /* referenced object unreadable — leave unresolved */ }
     }
 
