@@ -2,7 +2,7 @@
 '@objectstack/spec': patch
 ---
 
-The last live renderer line numbers leave the published spec source: `packages/spec/src` no longer cites an objectui `File.tsx:NNN` for a live read point.
+The sha-less objectui `File.tsx:NNN` read points that have a liveness row leave the published spec source and move into that row. Two live citations with no ledger row stay in `packages/spec/src`, named under "Unchanged on purpose" below.
 
 Clause-②: no
 
