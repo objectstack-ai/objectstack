@@ -63,11 +63,18 @@
  *
  *   - A ceiling may be LOWERED by any PR that shrinks its file — lowering is
  *     always legitimate and encouraged.
- *   - RAISING one requires a maintainer ruling quoted in the raising PR's body
- *     (the same evidence bar as Guardrails' `.claude/` tooling exception).
- *     A protocol change that would cross a ceiling pays its way by moving
- *     narrative out (SKILL.md → references/) or compressing in place, instead
- *     of raising the roof.
+ *   - RAISING one is authorized by the RULING OF RECORD that orders text into
+ *     the file (maintainer ruling 2026-10-15, letter B, ruling record
+ *     6184799323): the raising PR quotes that ruling comment's id and the
+ *     measured line delta in its body and moves the CEILINGS row in the same
+ *     PR by at most that delta — no second word from the maintainer. A raise
+ *     quoting no ruling id stays RED; there is no tolerance band; every line
+ *     no ruling ordered is still paid for by deletion (「新增以删减付账」);
+ *     ceilings already landed are not revisited. The script cannot read
+ *     rulings: the quote is checked by the seat's contract-review record and
+ *     by the queue guard's reader, never here. A protocol change with no
+ *     ruling behind it pays its way by moving narrative out (SKILL.md →
+ *     references/) or compressing in place, instead of raising the roof.
  *   - The headroom between a file's count and its ceiling is the budget for
  *     ordinary rule edits between compressions; it is deliberately small.
  *   - A same-PR CROSS-FILE MOVE is the one raise an author may take without a
@@ -2111,7 +2118,10 @@ export function verdict(rel, lineCount, maxLines) {
         `${rel} is ${lineCount} lines; the ratchet ceiling is ${maxLines}. ` +
         'Keep the surface compressed: principles in SKILL.md, on-demand detail in ' +
         '.claude/skills/pm-dispatch/references/ — provenance is one line, stories live on cards, ' +
-        'not in operational text. Raising a ceiling requires a maintainer ruling quoted in the PR.',
+        'not in operational text. Raising a ceiling is authorized only by the ruling of record that ' +
+        'orders the text: its comment id and the measured line delta quoted in the raising PR\'s body, ' +
+        'the `CEILINGS` row moved in the same PR by at most that delta. A raise quoting no ruling id ' +
+        'stays red, and there is no tolerance band.',
     };
   }
   return { ok: true, msg: `${rel} is ${lineCount} lines (ceiling ${maxLines}; headroom ${maxLines - lineCount}).` };
@@ -2202,7 +2212,7 @@ export function crossFileMoveVerdict(dest, move, ceilings) {
     return bad(`cross-file move declares ${dest} as its destination, which carries no ceiling — red, not a skip (#4690). A move can only land between files this map covers.`);
   }
   if (!String(move?.ruling ?? '').includes(RULING_CITATION)) {
-    return bad(`cross-file move into ${dest} cites no authorising ruling — it must name "${RULING_CITATION}". An undeclared raise is a raise, and raising a ceiling otherwise requires a maintainer ruling quoted in the raising PR.`);
+    return bad(`cross-file move into ${dest} cites no authorising ruling — it must name "${RULING_CITATION}". An undeclared raise is a raise, and raising a ceiling otherwise requires the ruling of record that orders the text: its comment id and the measured line delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta.`);
   }
   if (!Number.isInteger(move.was) || move.was <= 0) {
     return bad(`cross-file move into ${dest} records no usable pre-move ceiling ("was"), so its raise cannot be measured — red, not a skip (#4690).`);
@@ -2233,7 +2243,7 @@ export function crossFileMoveVerdict(dest, move, ceilings) {
   }
   const decrease = sources.reduce((sum, [src, wasSrc]) => sum + (wasSrc - ceilings.get(src)), 0);
   if (raise > decrease) {
-    return bad(`cross-file move into ${dest} raises its ceiling ${move.was}→${ceilings.get(dest)}${less} (+${raise}) against a net source decrease of ${decrease} (${parts}). A move pays for itself by DELETION at the source; re-wrapping does not pay, and a raise the sources do not cover is an ordinary raise, which needs a maintainer ruling quoted in the raising PR. If part of that rise IS such a raise, record it under \`ruledRaises\` with the ruling's own words instead of carrying \`was\` forward: an ordinary ruled raise and a move's raise are separate quantities, and this arithmetic measures only the second.`);
+    return bad(`cross-file move into ${dest} raises its ceiling ${move.was}→${ceilings.get(dest)}${less} (+${raise}) against a net source decrease of ${decrease} (${parts}). A move pays for itself by DELETION at the source; re-wrapping does not pay, and a raise the sources do not cover is an ordinary raise, which needs the ruling of record that orders the text: its comment id and the measured line delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta. If part of that rise IS such a raise, record it under \`ruledRaises\` with the ruling's own words instead of carrying \`was\` forward: an ordinary ruled raise and a move's raise are separate quantities, and this arithmetic measures only the second.`);
   }
   return { ok: true, msg: `cross-file move into ${dest}: +${raise} (${move.was}→${ceilings.get(dest)}${less}) against a net source decrease of ${decrease} (${parts}); authorised by ${RULING_CITATION}.` };
 }
@@ -2270,7 +2280,7 @@ export function crossFileMoveTotalVerdict(moves, ceilings) {
     }
   }
   if (net > 0) {
-    return { ok: false, msg: `the declared cross-file moves raise the map's total by ${net} line${net === 1 ? '' : 's'}. The ruling admits a move only while total lines do not increase: pay the difference by deleting more at a source, or take the raise the ordinary way — a maintainer ruling quoted in the raising PR.` };
+    return { ok: false, msg: `the declared cross-file moves raise the map's total by ${net} line${net === 1 ? '' : 's'}. The ruling admits a move only while total lines do not increase: pay the difference by deleting more at a source, or take the raise the ordinary way — the ruling of record that orders the text: its comment id and the measured line delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta.` };
   }
   return { ok: true, msg: `declared cross-file moves: ${moves.size}, total ceilings ${net === 0 ? 'unchanged' : `down ${-net} line${net === -1 ? '' : 's'}`}.` };
 }
@@ -2697,6 +2707,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'over the ceiling -> red': 1,
   'red message names the file': 1,
   'red message names the remedy': 1,
+  'red message names the ruled raise form: the ordering ruling\'s comment id and the measured line delta in the raising PR body': 1,
+  'red message bounds the raise by that measured delta': 1,
+  'red message says a raise quoting no ruling id stays red, with no tolerance band': 1,
   'red message names the authoring rule': 1,
   'empty read -> red, not a skip': 1,
   'every covered file has a positive ceiling': 1,
@@ -2811,6 +2824,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'cross-file move — a raise whose sources did NOT shrink is RED (the whole defect: a `move` that licenses an ordinary raise would run green forever)': 1,
   '...and the RED verdict names the raise and the net decrease it fell short of': 1,
   '...and sends the author to the ordinary path rather than to a bigger declaration': 1,
+  '...and the ordinary path it names is the ruled form, not a per-instance maintainer word': 1,
+  '...and the citation refusal names the same ruled form for the ordinary path': 1,
+  '...and the RED total names the same ruled form for the ordinary path': 1,
+  'none of the four line-ceiling refusals still sends the author to a per-instance maintainer ruling': 1,
   'cross-file move — a raise EXCEEDING the net decrease is RED, even by one line': 1,
   '...while a raise exactly equal to it is legal': 1,
   'cross-file move — a declaration citing no ruling is RED, however sound its arithmetic': 1,
@@ -2857,7 +2874,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 157;
+const SELF_TEST_BATTERY_FLOOR = 164;
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
@@ -2938,6 +2955,12 @@ function selfTest() {
     ['over the ceiling -> red', verdict(rel, 3051, 3050).ok, false],
     ['red message names the file', verdict(rel, 9999, 3050).msg.includes(rel), true],
     ['red message names the remedy', verdict(rel, 9999, 3050).msg.includes('references/'), true],
+    // The ruled raise form (maintainer ruling 2026-10-15, letter B, ruling record
+    // 6184799323): the ordering ruling's comment id and the measured line delta,
+    // quoted in the raising PR's body; the row moves by at most that delta.
+    ['red message names the ruled raise form: the ordering ruling\'s comment id and the measured line delta in the raising PR body', verdict(rel, 9999, 3050).msg.includes('its comment id and the measured line delta quoted in the raising PR\'s body'), true],
+    ['red message bounds the raise by that measured delta', verdict(rel, 9999, 3050).msg.includes('by at most that delta'), true],
+    ['red message says a raise quoting no ruling id stays red, with no tolerance band', verdict(rel, 9999, 3050).msg.includes('no ruling id stays red') && verdict(rel, 9999, 3050).msg.includes('no tolerance band'), true],
     ['red message names the authoring rule', verdict(rel, 9999, 3050).msg.includes('stories live on cards'), true],
     ['empty read -> red, not a skip', verdict(rel, 0, 3050).ok, false],
     ['every covered file has a positive ceiling', [...CEILINGS.values()].every((n) => Number.isInteger(n) && n > 0), true],
@@ -3169,18 +3192,24 @@ function selfTest() {
         // (2) A raise with no decrease behind it is an ordinary raise.
         ['cross-file move — a raise whose sources did NOT shrink is RED (the whole defect: a `move` that licenses an ordinary raise would run green forever)', mv(unpaid).ok, false],
         ['...and the RED verdict names the raise and the net decrease it fell short of', mv(unpaid).msg.includes('+5') && mv(unpaid).msg.includes('decrease of 0'), true],
-        ['...and sends the author to the ordinary path rather than to a bigger declaration', mv(unpaid).msg.includes('maintainer ruling quoted in the raising PR'), true],
+        ['...and sends the author to the ordinary path rather than to a bigger declaration', mv(unpaid).msg.includes('its comment id and the measured line delta quoted in the raising PR\'s body'), true],
+        ['...and the ordinary path it names is the ruled form, not a per-instance maintainer word', mv(unpaid).msg.includes('by at most that delta') && !mv(unpaid).msg.includes('maintainer ruling quoted'), true],
         // (3) Partly paid is not paid — the boundary case, one line short.
         ['cross-file move — a raise EXCEEDING the net decrease is RED, even by one line', mv(short).ok, false],
         ['...while a raise exactly equal to it is legal', crossFileMoveVerdict('dest.md', { ...decl, was: 98 }, ceil({ 'dest.md': 105, 'a.md': 27, 'b.md': 16 })).ok, true],
         // (4) The citation. A raise that names no ruling is not a move at all.
         ['cross-file move — a declaration citing no ruling is RED, however sound its arithmetic', mv(paid, uncited).ok, false],
         ['...and the RED verdict spells the citation it wanted', mv(paid, uncited).msg.includes(RULING_CITATION), true],
+        ['...and the citation refusal names the same ruled form for the ordinary path', mv(paid, uncited).msg.includes('its comment id and the measured line delta quoted in the raising PR\'s body'), true],
         // (5) Condition (b), map-wide. Stated separately because it is the
         // ruling's own wording; over disjoint participants it follows from (a).
         ['cross-file move — declarations whose net movement is 0 leave the map total unchanged', total(paid, [['dest.md', decl]]).ok, true],
         ['cross-file move — a declaration whose participants net POSITIVE fails the total (+2 here)', total(short, [['dest.md', decl]]).ok, false],
         ['...and the RED total names the lines it grew by', total(short, [['dest.md', decl]]).msg.includes('by 2 lines'), true],
+        ['...and the RED total names the same ruled form for the ordinary path', total(short, [['dest.md', decl]]).msg.includes('its comment id and the measured line delta quoted in the raising PR\'s body'), true],
+        // The old form — a per-instance maintainer word quoted in the PR — is gone
+        // from every line-ceiling refusal; the table-row pin's refusal is not one.
+        ['none of the four line-ceiling refusals still sends the author to a per-instance maintainer ruling', [verdict(rel, 9999, 3050).msg, mv(unpaid).msg, mv(paid, uncited).msg, total(short, [['dest.md', decl]]).msg].some((m) => m.includes('maintainer ruling quoted')), false],
         ['...and a net-negative move reports the corpus shrinking', total(paidDown, [['dest.md', decl]]).msg.includes('down 9 lines'), true],
         // (6) Disjointness — the one thing that makes (a) summed equal (b).
         ['cross-file move — one source may not pay for two destinations', total(ceil({ 'dest.md': 105, 'other.md': 105, 'a.md': 27, 'b.md': 16 }), [['dest.md', decl], ['other.md', { ruling: RULING_CITATION, was: 100, sources: [['a.md', 30]] }]]).ok, false],
