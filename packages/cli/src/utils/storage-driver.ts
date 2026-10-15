@@ -187,7 +187,8 @@ function missingUrlMessage(kind: BuiltinDriverId): string {
  *    value by name. A spelling of the retired in-memory engine (`memory`,
  *    `mingo`, `in-memory`) is this case too, with the retirement's own wording,
  *    and so is its `memory://` / `mingo://` scheme, which
- *    {@link inferDriverTypeFromUrl} refuses;
+ *    {@link inferDriverTypeFromUrl} refuses — as it refuses every
+ *    `<scheme>://` it does not recognise, naming the scheme only;
  *  - a recognized kind with **no local default** selected with **no URL**
  *    (`postgres` / `mysql` / `mongodb` / `turso`). Only `turso` refused before;
  *    the other three guessed — `url: undefined` into `pg`, an invented
@@ -241,9 +242,39 @@ export class UnsupportedDriverError extends Error {
 }
 
 /**
+ * The `OS_DATABASE_URL` spellings {@link inferDriverTypeFromUrl} classifies, in
+ * the order the runtime host's refusal lists them — the sentence an operator
+ * reads when the scheme they typed is none of these.
+ *
+ * Written out rather than derived because the classifier is a chain of regexes,
+ * not a table. What keeps the two from drifting is
+ * `driver-vocabulary-parity.test.ts`, which drives BOTH hosts over the same
+ * URLs and holds their verdicts equal.
+ */
+const RECOGNISED_DATABASE_URL_SCHEMES =
+  'postgres:// (or postgresql://, pg://), mysql:// (or mysql2://), mongodb:// (or mongodb+srv://), '
+  + 'libsql:// or an https:// *.turso.* URL (optional @objectstack/driver-turso), wasm-sqlite://, '
+  + 'file: (or sqlite:), or a file path with no scheme; :memory: is SQLite\'s in-memory database';
+
+/**
+ * The refusal for an `OS_DATABASE_URL` whose `<scheme>://` no arm recognises.
+ *
+ * It names the SCHEME and never the URL: the URL is where postgres/mysql/mongodb
+ * credentials ride, and this sentence is printed to the console on the way out.
+ */
+function unsupportedUrlSchemeMessage(scheme: string): string {
+  return (
+    `Unsupported database URL scheme "${scheme}" (OS_DATABASE_URL / --database). `
+    + `Supported: ${RECOGNISED_DATABASE_URL_SCHEMES}. `
+    + 'Booting on the SQLite default instead would silently ignore the database you named '
+    + 'and write into one you never chose. Fix the URL, or unset it.'
+  );
+}
+
+/**
  * Infer a canonical driver kind from an `OS_DATABASE_URL` scheme.
- * Returns `''` when the URL is absent or its scheme is unrecognized (the caller
- * then falls back to the dev default / registers nothing in production).
+ * Returns `''` only when the URL is absent or blank (the caller then falls back
+ * to the dev default / registers nothing in production).
  *
  * Throws {@link UnsupportedDriverError} for `memory://` and `mingo://`: they name
  * the in-memory engine, which is no longer a boot store. Returning `''` instead
@@ -251,12 +282,28 @@ export class UnsupportedDriverError extends Error {
  * #3276 shape again — and returning a kind would leave the refusal to
  * {@link resolveStorageDefinition}, whose spelling refusal names
  * `OS_DATABASE_DRIVER`, a variable this operator never set.
+ *
+ * Throws it too for any other `<scheme>://` no arm below recognises
+ * (`redis://…`), for the same two reasons. That URL used to answer `''`, so
+ * `serve --dev` booted the SQLite `:memory:` default and threw away the database
+ * the operator named without a word, and a production boot met the no-storage
+ * refusal, which tells an operator who DID set `OS_DATABASE_URL` to set it.
+ *
+ * The arms are the runtime host's (`detectDriverFromUrl` in
+ * `packages/runtime/src/standalone-stack.ts`), so the two hosts give one answer
+ * per URL: `pg://` is postgres, and a value with no `<scheme>://` is a SQLite
+ * file path, whatever its extension. The runtime refuses every other
+ * `<scheme>://`, so refusing it here takes away nothing that host accepts.
  */
 export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (!url) return '';
   const u = url.trim();
+  // Blank is absent, as the runtime host's URL resolution reads it — never a
+  // file path named by whitespace (the scheme-less arm below would take it).
+  if (!u) return '';
   if (/^mongodb(\+srv)?:\/\//i.test(u)) return 'mongodb';
-  if (/^postgres(ql)?:\/\//i.test(u)) return 'postgres';
+  // `pg://` is the runtime host's spelling too (`detectDriverFromUrl`).
+  if (/^(postgres(ql)?|pg):\/\//i.test(u)) return 'postgres';
   if (/^mysql2?:\/\//i.test(u)) return 'mysql';
   // libSQL / Turso URLs classify as `turso`, and since #5602 that classification
   // CONSTRUCTS: resolveStorageDefinition returns a `turso` definition and the CLI
@@ -282,8 +329,21 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
       { recognized: false },
     );
   }
-  if (/^file:/i.test(u) || /^sqlite:/i.test(u) || u === ':memory:' || /\.(db|sqlite|sqlite3)$/i.test(u)) return 'sqlite';
-  return '';
+  if (/^file:/i.test(u) || /^sqlite:/i.test(u)) return 'sqlite';
+  // No `<scheme>://` at all: a SQLite file path — `:memory:`, `./app.db`,
+  // `data/app`. The runtime host's arm, character for character. It is what
+  // keeps a `.db` name from rescuing an unrecognised scheme: `redis://h/x.db`
+  // is refused below, as the runtime refuses it, rather than handed to SQLite
+  // as a file path.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return 'sqlite';
+  const scheme = `${/^[a-z][a-z0-9+.-]*/i.exec(u)![0]}://`;
+  throw new UnsupportedDriverError(
+    scheme,
+    unsupportedUrlSchemeMessage(scheme),
+    // Not a kind this resolver can produce — `database-driver-allowlist.pin`
+    // reads `recognized` to tell the two apart.
+    { recognized: false },
+  );
 }
 
 /**
