@@ -190,14 +190,20 @@ none of them.
 | `/api/v1/i18n/*` | nested | `i18n-service-plugin.ts` → `sendError` |
 | every route on a host served by the **runtime HTTP dispatcher** (`/meta`, `/auth`, `/ai`, `/automation`, `/packages`, `/ui`, `/security`, `/notifications`, `/analytics`, `/mcp`, `/keys`, `/actions`, `/share-links`, `/i18n`) | nested | `buildApiError` / `apiErrorResponse` |
 | the inbound rate limiter, ahead of every route | nested | `inbound-rate-limit.ts` |
-| a declared refusal thrown out of the dispatcher on a `createHonoApp` host (`/data` included), or out of any route mounted on `HonoHttpServer` | nested | `declaredEnvelopeForThrow` — see [Hono doors](#hono-doors) |
+| a declared refusal thrown out of the dispatcher on a `createHonoApp` host — `/data` included only where no `@objectstack/rest` route is registered ahead of its catch-all (see the callout below) — or out of any route mounted on `HonoHttpServer` | nested | `declaredEnvelopeForThrow` — see [Hono doors](#hono-doors) |
 
 <Callout type="warn">
-**The `/meta` family is split by door, not by path.** A host that serves `/meta` through
-the runtime dispatcher answers nested — that is the shape the
-[error catalog's `/meta` examples](/docs/api/error-catalog) publish. A host that serves it
+**The `/meta` and `/data` families are split by door, not by path.** A host that serves
+`/meta` through the runtime dispatcher answers nested — that is the shape the
+[error catalog's `/meta` examples](/docs/api/error-catalog) publish — and so does one that
+serves `/data` through it (see [Hono doors](#hono-doors)). A host that serves either
 through `@objectstack/rest` answers the flat body for the *same* refusal, because the same
-thrown error is classified by a different door. Read the body, not the path.
+thrown error is classified by a different door. A `createHonoApp` host can be either. One
+that registers `@objectstack/rest`'s routes on the same Hono app before it mounts
+`createHonoApp` — the hosted composition — answers those paths on the REST door, flat,
+because the routes registered first win the match. One with no `@objectstack/rest` route
+ahead of the catch-all answers them through the dispatcher, nested. Read the body, not
+the path.
 </Callout>
 
 <Callout type="info">
@@ -213,13 +219,16 @@ conforming bodies and fails loudly rather than silently on the rest.
 
 Two hosts render a refusal that escapes the handler themselves:
 `@objectstack/hono`'s `createHonoApp`, for a throw that leaves the runtime dispatcher (the
-`/data` routes' refusals do), and `@objectstack/plugin-hono-server`'s `HonoHttpServer`, for
+`/data` routes' refusals do, on a host whose catch-all serves `/data`; a host that registers
+`@objectstack/rest`'s routes ahead of it answers those flat — see
+[Which route families answer which](#which-route-families-answer-which)), and `@objectstack/plugin-hono-server`'s `HonoHttpServer`, for
 a throw that escapes a route mounted on it. When the throw declares an ADR-0112 status and
 a registered code, both answer it in the **nested** envelope, written by
 `declaredEnvelopeForThrow`. The per-condition siblings the flat `/data` door carries for
 the codes below ride in `error.details` instead.
 
-**Example** — `DELETE /api/v1/data/account/acc_123` on a `createHonoApp` host:
+**Example** — `DELETE /api/v1/data/account/acc_123` on a `createHonoApp` host whose catch-all
+serves `/data`:
 ```json
 {
   "success": false,

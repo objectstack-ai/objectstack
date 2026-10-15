@@ -218,7 +218,7 @@ Validation failures additionally include a `fields` array (one entry per invalid
 }
 ```
 
-On a host built with `@objectstack/hono`'s `createHonoApp`, a declared refusal thrown out of the dispatcher (the `/data` routes' refusals among them) is answered in this envelope **without** `httpStatus`, and so is one escaping a route mounted on `HonoHttpServer`. The fields the kernel REST server's classification adds beside `code` ride in `details` there, for example `DELETE_RESTRICTED`'s `dependentObject`, except `currentRecord` and an `object` taken from the request's route — see [Wire Format](/docs/api/wire-format#hono-hosts-nest-the-extras).
+On a host built with `@objectstack/hono`'s `createHonoApp`, a declared refusal thrown out of the dispatcher (the `/data` routes' refusals among them, where its catch-all serves `/data`; a host that registers the kernel REST server's routes ahead of the catch-all, the hosted composition, answers those flat, as above) is answered in this envelope **without** `httpStatus`, and so is one escaping a route mounted on `HonoHttpServer`. The fields the kernel REST server's classification adds beside `code` ride in `details` there, for example `DELETE_RESTRICTED`'s `dependentObject`, except `currentRecord` and an `object` taken from the request's route — see [Wire Format](/docs/api/wire-format#hono-hosts-nest-the-extras).
 
 Branch on `error.code`, never on `error.httpStatus` — the status answers "what
 class of failure" and the code answers "which failure". A branch that has no

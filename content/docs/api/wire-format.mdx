@@ -325,7 +325,7 @@ Returns metadata for a single object including all fields, relationships, and co
 
 ## 7. Error Response Format
 
-Data route errors from the kernel REST server (`@objectstack/rest`) are returned as a flat envelope: a top-level `error` message string, a machine-readable `code`, and operation-specific extras (`fields`, `object`, `currentVersion`, …). The HTTP status is carried by the response, not duplicated in the body. A host built with `createHonoApp` answers the same refusals nested instead — see [Hono hosts nest the extras](#hono-hosts-nest-the-extras).
+Data route errors from the kernel REST server (`@objectstack/rest`) are returned as a flat envelope: a top-level `error` message string, a machine-readable `code`, and operation-specific extras (`fields`, `object`, `currentVersion`, …). The HTTP status is carried by the response, not duplicated in the body. A host built with `createHonoApp` answers the same refusals nested instead when its catch-all serves `/data` — see [Hono hosts nest the extras](#hono-hosts-nest-the-extras). One that registers the kernel REST server's routes on the same Hono app before it mounts `createHonoApp`, the hosted composition, answers them flat, as below: the routes registered first win the match.
 
 ### Validation Error — `400 Bad Request`
 
@@ -489,7 +489,7 @@ A host built with `@objectstack/hono`'s `createHonoApp`, and a route mounted on
 escapes the handler in the nested envelope above, without `httpStatus`. The extras the
 REST door's classification adds (`fields`, `currentVersion`, `dependentObject`, …) ride in
 `error.details`; `currentRecord`, and an `object` the flat body takes from the request's
-route, are not sent. The concurrent update above, on a `createHonoApp` host:
+route, are not sent. The concurrent update above, on a `createHonoApp` host whose catch-all serves `/data`:
 
 ```json
 {
