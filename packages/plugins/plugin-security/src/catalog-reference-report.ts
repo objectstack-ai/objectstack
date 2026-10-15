@@ -435,9 +435,9 @@ function logReport(report: CatalogReferenceReport, logger?: CatalogReferenceRepo
       `[security] ${unnamed.count} ${GRANT_OBJECT} grant(s) name no permission set (${GRANT_SET_NAME_FIELD} is ` +
         'empty), so each confers nothing (ADR-0131 D4). Nothing was changed. Fix: run the v18 ceremony. Plan it ' +
         'first, os migrate organization-ownership --out plan.json, and review the file it writes; then run ' +
-        'os migrate organization-ownership --apply --plan-file plan.json, which executes that plan: it names each ' +
-        'legacy grant from its retired id and lists the ones it cannot name. Then restart. Granting the set again ' +
-        'by name before it runs makes a second grant the ceremony will report, not name.',
+        'os migrate organization-ownership --apply --backup-taken --plan-file plan.json, which executes that plan: ' +
+        'it names each legacy grant from its retired id and lists the ones it cannot name. Then restart. Granting ' +
+        'the set again by name before it runs makes a second grant the ceremony will report, not name.',
       { count: unnamed.count, organizations: unnamed.organizations },
     );
   }

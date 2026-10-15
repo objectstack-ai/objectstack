@@ -23,7 +23,7 @@ export const entry: SemanticMigration = {
     + 'the key from any authored `sys_user_permission_set` seed row or data-door write that still '
     + 'carries it, and name the set instead. Existing databases: run the v18 ceremony. Plan it first, '
     + '`os migrate organization-ownership --out plan.json`, and review the file it writes; then '
-    + '`os migrate organization-ownership --apply --plan-file plan.json` executes that plan: its verified '
+    + '`os migrate organization-ownership --apply --backup-taken --plan-file plan.json` executes that plan: its verified '
     + 'rewrite names every grant from the column and its column-drops step then drops the two retired '
     + 'indexes and then the column. Restart the server afterwards',
   reason:
