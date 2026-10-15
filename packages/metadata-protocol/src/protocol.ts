@@ -2857,7 +2857,9 @@ function simpleHash(str: string): string {
  * The HTTP layer maps this to `409 Conflict` with code `CONCURRENT_UPDATE`,
  * and includes both the current server-side version and the current record
  * payload so the client can render an informed conflict-resolution UI
- * ("Reload latest" vs. "Overwrite anyway").
+ * ("Reload latest" vs. "Overwrite anyway"). The record is the row as the
+ * caller reads it, and a row the caller cannot read is never a conflict: it
+ * answers not-found instead (#23586, see `assertVersionOf`).
  *
  * NOTE: This is an *application-level* compare-and-set — not an atomic
  * storage-layer CAS. There is a small TOCTOU window between the version
@@ -14678,7 +14680,7 @@ export class ObjectStackProtocolImplementation implements
         // 404 wins over 409 when both could apply: OCC has always declined to
         // treat a missing record as a concurrency conflict, and "this record
         // does not exist" is the more specific answer.
-        this.assertVersionOf(request.object, request.id, current, request.expectedVersion);
+        await this.assertVersionOf(request.object, request.id, current, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         // [#3407/#3431] Capture the engine's LEGAL write strips (static `readonly`
@@ -14774,7 +14776,7 @@ export class ObjectStackProtocolImplementation implements
 
     async deleteData(request: { object: string, id: string, expectedVersion?: string, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
-        await this.assertVersionMatch(request.object, request.id, request.expectedVersion);
+        await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         const deleted = await this.engine.delete(request.object, opts);
@@ -14915,10 +14917,11 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Optimistic Concurrency Control — the COMPARISON half, over a row the
-     * caller has already read. Pure: it issues no query of its own, which is
-     * what lets `updateData` run the gate on its existence probe's result
-     * rather than re-reading the record (#4435).
+     * Optimistic Concurrency Control — the COMPARISON half, over the row the
+     * existence probe has already read. A token that agrees (or no token)
+     * issues no query of its own, which is what lets `updateData` run the gate
+     * on its existence probe's result rather than re-reading the record
+     * (#4435). Only a MISMATCH reads again — see the conflict paragraph below.
      *
      * When the caller passes a non-empty `expectedVersion` token (typically the
      * `updated_at` value they read), a mismatch throws `ConcurrentUpdateError`,
@@ -14948,13 +14951,35 @@ export class ObjectStackProtocolImplementation implements
      *    SQLite family — must not decide whether a save is a conflict. See
      *    `normaliseVersionToken` for the measured input domain and for why the
      *    change cannot refuse a token that is accepted today.
+     *
+     * ## [#23586] The conflict reports only what the caller may read
+     *
+     * `current` is the SYSTEM-context probe ({@link probeRecord}: existence,
+     * not visibility), and this gate runs before `engine.update` /
+     * `engine.delete` apply the caller's policy. So a mismatch does not answer
+     * from it. It re-reads the row under the caller's own `context`, the read
+     * door's question (every RLS and FLS rule applies):
+     *
+     *  - no row → `recordNotFoundError`, the producer the security layer's
+     *    by-id write gate answers a row the caller cannot read with. The stale
+     *    token then gets exactly the answer the same request without a token
+     *    gets: no `currentVersion`, no `currentRecord`, so the `409` no longer
+     *    tells a caller that a hidden row exists or when it was last written;
+     *  - a row → the `409`, with THAT row as `currentRecord`, field-masked as
+     *    the caller's own read is. `currentVersion` stays the token this
+     *    comparison ran on.
+     *
+     * The read is issued only on a mismatch: a request whose token agrees, or
+     * that sends none, reads exactly what it read before. A read that throws
+     * (the caller's read grant withheld, a store fault) propagates as raised.
      */
-    private assertVersionOf(
+    private async assertVersionOf(
         object: string,
         id: string,
         current: any,
         expectedVersion: string | undefined,
-    ): void {
+        context: unknown,
+    ): Promise<void> {
         assertVersionTokenNotMalformed(expectedVersion);
         const expected = normaliseVersionToken(expectedVersion);
         if (!expected) return;
@@ -14972,9 +14997,11 @@ export class ObjectStackProtocolImplementation implements
             // it names, turning a resolvable conflict into an unresolvable one.
             const currentVersion = currentToken.instant ?? currentToken.token;
             const expectedVersionText = expected.instant ?? expected.token;
+            const visible = await this.readAsCaller(object, id, context);
+            if (!visible) throw recordNotFoundError(object, id);
             throw new ConcurrentUpdateError({
                 currentVersion,
-                currentRecord: current,
+                currentRecord: visible,
                 message: `Record ${object}/${id} was modified by another user (current version ${currentVersion}, expected ${expectedVersionText})`,
             });
         }
@@ -15001,11 +15028,24 @@ export class ObjectStackProtocolImplementation implements
         object: string,
         id: string,
         expectedVersion: string | undefined,
+        context: unknown,
     ): Promise<void> {
         assertVersionTokenNotMalformed(expectedVersion);
         if (!normaliseVersionToken(expectedVersion)) return;
         const current = await this.probeRecord(object, id);
-        this.assertVersionOf(object, id, current, expectedVersion);
+        await this.assertVersionOf(object, id, current, expectedVersion, context);
+    }
+
+    /**
+     * [#23586] The row as the CALLER reads it by id — the twin of
+     * {@link probeRecord}, which asks existence as the system. Same `context`
+     * spelling as the write it precedes: passed only when the request carried
+     * one, so a caller with no context reads as its write would run.
+     */
+    private async readAsCaller(object: string, id: string, context: unknown): Promise<any> {
+        const opts: any = { where: { id } };
+        if (context !== undefined) opts.context = context;
+        return this.engine.findOne(object, opts);
     }
 
     // ==========================================
