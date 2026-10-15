@@ -12,6 +12,12 @@
  * #6603 / #7019 on `/meta` writes), and the ADR-0106 D4 read set
  * (`studio.access` / `setup.access`) on every read.
  *
+ * [#23546] Except the commit history: ruling 6187280122 (letter A), amended by
+ * 6190477105, narrows `GET /packages/:id/commits` to `studio.access` (or
+ * `isSystem`), the data door's rule on `sys_metadata_commit`. A
+ * `setup.access`-only caller (the organization admin's shape) is refused it
+ * and still reads the other three (section 4b).
+ *
  * ## One handler, every transport
  *
  * Unlike `/meta` — whose REST and dispatcher transports are two SEPARATE handler
@@ -271,18 +277,17 @@ describe('/packages discard-drafts — the destructive route refuses BEFORE any 
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 4. Read gate — `studio.access` / `setup.access` on every read
+// 4. Read gate — `studio.access` / `setup.access` on every read but the commits
 // ══════════════════════════════════════════════════════════════════════════════
 
 type ReadCase = { name: string; path: string; target: (p: any, r: any) => any };
 const READ_ROUTES: ReadCase[] = [
     { name: 'GET /packages (enumeration)', path: '/', target: (_p, r) => r.getAllPackages },
     { name: 'GET /:id (detail)', path: '/pkg-a', target: (_p, r) => r.getPackage },
-    { name: 'GET /:id/commits', path: '/pkg-a/commits', target: (p) => p.listCommits },
     { name: 'GET /:id/export', path: '/pkg-a/export', target: (p) => p.getMetaItems },
 ];
 
-describe('/packages — read gate: every read demands studio.access or setup.access', () => {
+describe('/packages — read gate: every read but the commit history demands studio.access or setup.access', () => {
     for (const rc of READ_ROUTES) {
         it(`403s a zero-capability caller on ${rc.name} and the target never runs`, async () => {
             const protocol = fullProtocol();
@@ -324,6 +329,59 @@ describe('/packages — read gate: every read demands studio.access or setup.acc
             expect(r.response?.status).not.toBe(401);
         });
     }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 4b. [#23546] The commit history — `studio.access` (or `isSystem`) alone
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('[#23546] /packages/:id/commits — the commit trail demands studio.access; setup.access no longer reads it', () => {
+    const COMMITS = '/pkg-a/commits';
+
+    for (const [label, caps] of [
+        ['zero-capability', []],
+        ['setup.access-only (the organization admin\'s capability)', ['setup.access']],
+        ['the organization admin\'s full grant (setup.access, setup.write, manage_org_users, manage_mailboxes)', ['setup.access', 'setup.write', 'manage_org_users', 'manage_mailboxes']],
+        ['WRITE-only (manage_metadata), which this door never admitted', ['manage_metadata']],
+        ['setup.access + manage_metadata', ['setup.access', 'manage_metadata']],
+    ] as const) {
+        it(`403 PERMISSION_DENIED for a ${label} caller, and listCommits never runs`, async () => {
+            const protocol = fullProtocol();
+            const { dispatcher } = make({ protocol });
+            const r = await dispatcher.handlePackages(COMMITS, 'GET', undefined, {}, authed([...caps]));
+            expect(r.response?.status).toBe(403);
+            expect(r.response?.body?.error?.code).toBe('PERMISSION_DENIED');
+            expect(protocol.listCommits).not.toHaveBeenCalled();
+        });
+    }
+
+    it('200 for a studio.access caller, and listCommits runs', async () => {
+        const protocol = fullProtocol();
+        const { dispatcher } = make({ protocol });
+        const r = await dispatcher.handlePackages(COMMITS, 'GET', undefined, {}, authed(['studio.access']));
+        expect(r.response?.status).toBe(200);
+        expect(protocol.listCommits).toHaveBeenCalledTimes(1);
+    });
+
+    it('200 for an isSystem caller, and listCommits runs', async () => {
+        const protocol = fullProtocol();
+        const { dispatcher } = make({ protocol });
+        const r = await dispatcher.handlePackages(COMMITS, 'GET', undefined, {}, system());
+        expect(r.response?.status).toBe(200);
+        expect(protocol.listCommits).toHaveBeenCalledTimes(1);
+    });
+
+    it('the same setup.access-only caller still reads GET /packages, /:id and /:id/export — only the commits door narrowed', async () => {
+        const protocol = fullProtocol();
+        const { dispatcher } = make({ protocol });
+        for (const rc of READ_ROUTES) {
+            const r = await dispatcher.handlePackages(rc.path, 'GET', undefined, {}, authed(['setup.access']));
+            expect(r.response?.status, rc.name).not.toBe(403);
+            expect(r.response?.status, rc.name).not.toBe(401);
+        }
+        const commits = await dispatcher.handlePackages(COMMITS, 'GET', undefined, {}, authed(['setup.access']));
+        expect(commits.response?.status).toBe(403);
+    });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

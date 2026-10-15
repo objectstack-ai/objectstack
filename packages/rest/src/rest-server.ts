@@ -1854,9 +1854,48 @@ export function metaItemPackageBinding(raw: unknown): string | undefined {
 }
 
 /**
+ * [#23546] The capabilities that admit a caller to the AUTHORING TRAIL —
+ * `GET /meta/:type/:name/history`, `/audit` and `/diff` — beside `isSystem`.
+ *
+ * Both are platform-scoped: plugin-security's `PLATFORM_ADMIN_ONLY_CAPABILITIES`
+ * lists them, and no organization administrator holds either by role.
+ * `setup.access` is left out on purpose. Organization administrators hold it,
+ * and under a wall it handed each organization's administrator the
+ * environment-wide trail of every item: who saved it, when, and the superseded
+ * bodies. No organization authors that trail (ADR-0131 C5), and the data door
+ * on the same three tables already refuses them
+ * (`requiredPermissions: ['studio.access']`, ADR-0131 D7).
+ */
+const AUTHORING_TRAIL_READ_CAPABILITIES: readonly string[] = ['studio.access', 'manage_metadata'];
+
+/**
+ * [#23546] May this caller read the AUTHORING TRAIL of a metadata item — its
+ * version history, its audit rows and the diff of its stored versions? The
+ * admission {@link refuseNonAuthoringCaller} asks, and nothing else asks it.
+ *
+ * A system caller, or a holder of one of
+ * {@link AUTHORING_TRAIL_READ_CAPABILITIES}, read from `systemPermissions`
+ * exactly as `isObjectSchemaMaskExempt` reads it.
+ *
+ * It is a strict subset of {@link mayReadPendingDrafts}: it admits nobody the
+ * draft predicate refuses, and it refuses the `setup.access`-only caller the
+ * draft predicate admits. The draft switches (`GET /meta/_drafts`,
+ * `?state=draft`, `?preview=draft`) keep `mayReadPendingDrafts`, unchanged.
+ * `meta-history-diff-authoring-door.test.ts` holds the two predicates to that
+ * relation, caller by caller.
+ */
+function mayReadAuthoringTrail(caller: unknown): boolean {
+    if (!caller || typeof caller !== 'object') return false;
+    const ctx = caller as { isSystem?: unknown; systemPermissions?: unknown };
+    if (ctx.isSystem === true) return true;
+    return Array.isArray(ctx.systemPermissions)
+        && ctx.systemPermissions.some((p) => typeof p === 'string' && AUTHORING_TRAIL_READ_CAPABILITIES.includes(p));
+}
+
+/**
  * [#20378 · #20441] THE AUTHORING-DOOR REFUSAL — ruling 5865708652 (letter B),
  * carried to `/audit` by triage's grade 5871509797. Sends it and answers `true`
- * when {@link mayReadPendingDrafts} does not admit `caller`; answers `false`,
+ * when {@link mayReadAuthoringTrail} does not admit `caller`; answers `false`,
  * sending nothing, when it does. The `refuseRepeatedQueryParams` convention:
  * `if (refuseNonAuthoringCaller(ctx, res, …)) return;`.
  *
@@ -1865,10 +1904,14 @@ export function metaItemPackageBinding(raw: unknown): string | undefined {
  * event is read: `/history` and `/diff` read `sys_metadata_history`, and
  * `/audit` reads `sys_metadata_audit`. Both logs record a DRAFT save exactly
  * as they record an active one, so they have no published-only answer to fall
- * back to, and a caller who may not read pending drafts is refused as
- * `GET /meta/_drafts` refuses them: 403 `FORBIDDEN`, the same nested
- * envelope. The answer is the same for an item that exists, one that does
- * not and a draft-only one, so the door is no existence oracle.
+ * back to, and a caller the trail does not admit is refused in
+ * `GET /meta/_drafts`'s shape: 403 `FORBIDDEN`, the same nested envelope. The
+ * answer is the same for an item that exists, one that does not and a
+ * draft-only one, so the door is no existence oracle.
+ *
+ * [#23546] The admission is {@link mayReadAuthoringTrail}, no longer
+ * {@link mayReadPendingDrafts}: the trail drops `setup.access`, and the draft
+ * switches keep it.
  *
  * `reading` names THE DOOR and never drafts: a refusal worded about drafts
  * would read as "this item has one". This is ONE function so the three doors
@@ -1876,11 +1919,12 @@ export function metaItemPackageBinding(raw: unknown): string | undefined {
  * door's own name differs between them.
  */
 function refuseNonAuthoringCaller(caller: unknown, res: any, reading: string): boolean {
-    if (mayReadPendingDrafts(caller)) return false;
+    if (mayReadAuthoringTrail(caller)) return false;
     res.status(403).json({
         error: {
             code: 'FORBIDDEN',
-            message: `${reading} requires an authoring capability (studio.access, setup.access or manage_metadata).`,
+            message: `${reading} requires an authoring capability (studio.access or manage_metadata); `
+                + 'setup.access, which organization administrators hold, does not admit the authoring trail.',
         },
     });
     return true;
@@ -7558,8 +7602,8 @@ export class RestServer {
                     // not read pending drafts, lists unpublished authoring work
                     // (ADR-0106 D4: 「draft/preview reads are admin-gated
                     // upstream」). The caller is asked
-                    // {@link mayReadPendingDrafts} FIRST, and one it does not
-                    // admit is refused exactly as `GET /meta/_drafts` refuses
+                    // {@link mayReadAuthoringTrail} FIRST, and one it does not
+                    // admit is refused in `GET /meta/_drafts`'s shape
                     // (403 `FORBIDDEN`, the same nested envelope): before the
                     // protocol is resolved (no 501-vs-200 probe), before the
                     // query is parsed, before any item or event is read. The
@@ -7570,6 +7614,9 @@ export class RestServer {
                     // drafts: a refusal worded about drafts would read as
                     // "this item has one". Whoever it admits reads exactly what
                     // they read before, the per-caller refusal below included.
+                    // [#23546] `setup.access` alone no longer admits it: under a
+                    // wall it handed every organization administrator the
+                    // environment-wide trail (see AUTHORING_TRAIL_READ_CAPABILITIES).
                     //
                     // Ruling 5856774816 (#20156) item 2 is narrowed for this
                     // door and `/diff` only: `/layers` and `?layers=true` read
@@ -7706,13 +7753,14 @@ export class RestServer {
                     // withholding only the draft-save rows would hand a member
                     // a pruned log that reads as a true, complete one, the
                     // shape the ruling measured wrong. So the caller is asked
-                    // {@link mayReadPendingDrafts} FIRST and refused by
+                    // {@link mayReadAuthoringTrail} FIRST and refused by
                     // {@link refuseNonAuthoringCaller} — the refusal `/history`
                     // and `/diff` give, and `GET /meta/_drafts`'s shape — before
                     // the protocol is resolved (no 501-vs-200 probe), before the
                     // query is parsed, and before any item or event is read.
                     // Whoever it admits reads exactly what they read before,
-                    // the per-caller refusal below included.
+                    // the per-caller refusal below included. [#23546]
+                    // `setup.access` alone no longer admits it.
                     //
                     // `auditCtx` is this door's one caller resolution.
                     const auditCtx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
@@ -8167,8 +8215,8 @@ export class RestServer {
                     // so there is no exact published-only answer to fall back
                     // to: the `/meta/_drafts` shape, not the draft switches'
                     // "answer as if absent". The caller is asked
-                    // {@link mayReadPendingDrafts} FIRST, and one it does not
-                    // admit is refused exactly as `GET /meta/_drafts` refuses
+                    // {@link mayReadAuthoringTrail} FIRST, and one it does not
+                    // admit is refused in `GET /meta/_drafts`'s shape
                     // (403 `FORBIDDEN`, the same nested envelope): before the
                     // protocol is resolved, before the query is parsed, before
                     // the mask posture, the current document or any version is
@@ -8178,6 +8226,7 @@ export class RestServer {
                     // door, never drafts. Whoever it admits reads exactly what
                     // they read before: every per-caller gate below, and ruling
                     // 5856774816's author exemption, still apply to them.
+                    // [#23546] `setup.access` alone no longer admits it.
                     //
                     // Ruling 5856774816 (#20156) item 2 is narrowed for this
                     // door and `/history` only: `/layers` and `?layers=true`
