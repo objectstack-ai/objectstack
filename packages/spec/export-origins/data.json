@@ -599,6 +599,7 @@
     "RECORD_CONTEXT_TOKENS": "src/data/context-tokens.zod.ts#RECORD_CONTEXT_TOKENS (const)",
     "RECORD_SURFACE_PAGE_THRESHOLD": "src/data/record-surface.ts#RECORD_SURFACE_PAGE_THRESHOLD (const)",
     "REFERENCE_VALUE_TYPES": "src/data/field-value.zod.ts#REFERENCE_VALUE_TYPES (const)",
+    "RETIRED_DRIVER_ID_GUIDANCE": "src/data/driver/config-registry.zod.ts#RETIRED_DRIVER_ID_GUIDANCE (const)",
     "RETIRED_FILTER_OPERATORS": "src/data/filter.zod.ts#RETIRED_FILTER_OPERATORS (const)",
     "RETIRED_SUB_DAY_INTERVALS": "src/data/analytics.zod.ts#RETIRED_SUB_DAY_INTERVALS (const)",
     "RLS_DENY_FILTER": "src/data/readable-ids.ts#RLS_DENY_FILTER (const)",
