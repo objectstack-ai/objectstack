@@ -200,13 +200,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   },
   {
     kind: 'omit',
-    type: 'page',
-    path: 'interfaceConfig',
-    key: 'emptyState',
-    why: "PLANNED, not yet rendered (#23005): the list page's own empty state — the list view's EmptyStateSchema, by reference — parses, and no console list page draws it yet (objectui's InterfaceListPage handed ListView a source view's emptyState only when this row was written; read points recorded in liveness/page.json, row interfaceConfig). A control here would let a Studio author write a value nothing draws; the form offers it in the change that makes the list page read it (the renderer half, objectstack-ai/objectui#12270), and this row leaves then",
-  },
-  {
-    kind: 'omit',
     type: 'object',
     path: 'enable',
     key: 'apiMethods',

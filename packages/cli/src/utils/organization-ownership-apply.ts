@@ -1970,6 +1970,68 @@ async function unnamedForComposition(run: Run, ids: readonly string[]): Promise<
   return out;
 }
 
+/**
+ * [#23542] The remedy for a `converted` binding — rows that bind position
+ * `name` to sets its catalog definition does not name; `sets` is the
+ * conversion's answer, the definition's sets followed by the ones the rows add
+ * — when the gate refuses it under a wall. There no step carries binding rows:
+ * `authored-conversion` reports and returns before it reads one (ADR-0131 D3,
+ * the module doc), so pointing at that step points at nothing.
+ *
+ * The one act that clears the gate is a definition naming every bound set,
+ * which the operator makes, through the door the position's definition lives
+ * behind:
+ *
+ *  - undeclared: declare it with `sets`, in the deployment's code or through
+ *    the metadata door as the platform administrator — one of the two only, as
+ *    a cold boot refuses a name a package declares and the environment catalog
+ *    also holds;
+ *  - declared, and the metadata door reports it editable: add the missing sets
+ *    to its `permissionSets` through that door;
+ *  - declared, and not editable (ADR-0131 D6: a definition a package ships is
+ *    sealed; or an ADR-0010 lock), or its state unreadable: the fact — the
+ *    package that ships it, when the definition's provenance names one — and
+ *    no act, because no door adds the sets.
+ *
+ * Whether it is editable is the metadata door's own answer
+ * ({@link MetadataLockPort}), never inferred from the body; the body only
+ * names the shipping package. The gate still refuses; nothing here writes.
+ */
+async function walledBindingRemedy(run: Run, name: string, sets: readonly string[]): Promise<string> {
+  const why = `Under the ${run.opts.posture} posture no ceremony step carries binding rows (ADR-0131 D3).`;
+  const door = `the metadata door as the platform administrator (PUT /api/v1/meta/position/${name})`;
+  const entry = await resolveName(run, 'position', name);
+  if (!entry) {
+    return (
+      `${why} Declare the position ${name} with permissionSets naming ${sets.join(', ')}, ` +
+      `through one door only: the deployment's code (compiled into the artifact this ceremony boots), or ${door}. A ` +
+      'cold boot refuses a position name a package declares and the environment catalog also holds. Then re-run.'
+    );
+  }
+  let verdict: Awaited<ReturnType<MetadataLockPort['verdict']>>;
+  try {
+    verdict = await run.opts.lock.verdict('position', name, null);
+  } catch (error) {
+    return (
+      `${why} Whether the metadata door can edit the definition of ${name} could not be read ` +
+      `(${error instanceof Error ? error.message : String(error)}), so no act is named here.`
+    );
+  }
+  if (!verdict.editable) {
+    const lock = `lock ${verdict.lock ?? 'unknown'}${verdict.lockReason ? `: ${verdict.lockReason}` : ''}`;
+    const { isCodeArtifactBody } = await import('@objectstack/metadata-core');
+    const shipped = isCodeArtifactBody(entry.definition) ? String(entry.definition._packageId) : undefined;
+    return shipped
+      ? `${why} Package ${shipped} ships the definition of ${name}, which is sealed (ADR-0131 D6: the metadata door ` +
+          `reports it not editable, ${lock}), so no door on this database adds those sets.`
+      : `${why} The metadata door reports the definition of ${name} not editable (${lock}), so no door on this ` +
+          'database adds those sets.';
+  }
+  const declared = Array.isArray(entry.definition.permissionSets) ? entry.definition.permissionSets.map(String) : [];
+  const missing = sets.filter((set) => !declared.includes(set));
+  return `${why} Add ${missing.join(', ')} to the permissionSets of the position ${name} through ${door}, then re-run.`;
+}
+
 /** Read-only: does every reference resolve by name? The gate of fate 2. */
 async function verifyReferences(run: Run): Promise<Verification> {
   const out: Verification = { blockers: [], notes: [], grants: 0, verified: 0 };
@@ -2052,7 +2114,10 @@ async function verifyReferences(run: Run): Promise<Verification> {
         position.fate === 'conflicting'
           ? `Position ${position.name}: organizations bind different permission sets to it; the bindings cannot be carried into one definition.`
           : `Binding rows give position ${position.name} sets its catalog definition does not name (${position.permissionSets.join(', ')}); ` +
-            `deleting them would lose a grant. ${(await uncomposedSecurityRemedy(run, 'position', position.name)) ?? 'The authored-conversion step carries them; resolve its blocker, then re-run.'}`,
+            `deleting them would lose a grant. ${(await uncomposedSecurityRemedy(run, 'position', position.name)) ??
+              (run.opts.posture === 'single'
+                ? 'The authored-conversion step carries them; resolve its blocker, then re-run.'
+                : await walledBindingRemedy(run, position.name, position.permissionSets))}`,
       );
     }
   }

@@ -13,18 +13,28 @@
  * The catalog: the apply command's boot (`bootSchemaStack` with its four
  * composition flags) over a compiled artifact, with an auth secret set so the
  * security plugin is composed, read through core's security catalog reader as
- * the command reads it. The database: the 17.x catalog rows every environment
- * database holds — the seeded `everyone` position, the seeded `member_default`
- * set and the seeded binding between them — plus the control: a seeded binding
- * that names a position no catalog declares.
+ * the command reads it. The artifact declares two positions in code:
+ * `zz_in_code` naming `member_default`, and `zz_shipped` naming no set. The
+ * database: the 17.x catalog rows every environment database holds — the
+ * seeded `everyone` position, the seeded `member_default` set and the seeded
+ * binding between them — plus the control: a seeded binding that names a
+ * position no catalog declares.
  *
  * ## What each case measures
  *
  * The catalog holds the six built-ins and `everyone`'s baseline. Under
  * `single`, `authored-conversion` blocks on the control and on nothing else;
  * under a wall it reports, and the rewrite gate blocks on the control and on
- * nothing else. With the declarations made from `start()` and `kernel:ready`,
- * which this boot never runs, both block on `everyone` as well.
+ * nothing else, naming the act the wall allows: declare the position with its
+ * sets, through the deployment's code or the metadata door. With the
+ * declarations made from `start()` and `kernel:ready`, which this boot never
+ * runs, both block on `everyone` as well.
+ *
+ * [#23542] Under a wall, the metadata door's own lock verdict — read as the
+ * command reads it — tells the gate which definitions no door edits: a binding
+ * the artifact's declaration already names clears the gate (the code door), and
+ * one that adds a set to `zz_shipped`, a definition a package ships, gets the
+ * fact and no act (ADR-0131 D6).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -52,6 +62,7 @@ import '@objectstack/platform-objects/plugin';
 import '@objectstack/plugin-security';
 
 const CASE_TIMEOUT_MS = 180_000;
+const PACKAGE_ID = 'com.example.ownership-catalog';
 const ENV_KEYS = ['OS_ARTIFACT_PATH', 'OS_DATABASE_URL', 'DATABASE_URL', 'OS_DATABASE_DRIVER', 'OS_HOME', 'NODE_ENV',
   'OS_AUTH_SECRET', 'AUTH_SECRET', 'BETTER_AUTH_SECRET', 'OS_ENVIRONMENT_ID', 'OS_MULTI_ORG_ENABLED'] as const;
 const savedEnv: Record<string, string | undefined> = {};
@@ -70,7 +81,11 @@ beforeAll(async () => {
   process.env.OS_HOME = join(dir, 'home');
   process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
   writeFileSync(process.env.OS_ARTIFACT_PATH, JSON.stringify({
-    manifest: { id: 'com.example.ownership-catalog', name: 'ownership-catalog', version: '1.0.0', type: 'app' },
+    manifest: { id: PACKAGE_ID, name: 'ownership-catalog', version: '1.0.0', type: 'app' },
+    positions: [
+      { name: 'zz_in_code', label: 'In code', permissionSets: ['member_default'] },
+      { name: 'zz_shipped', label: 'Shipped' },
+    ],
   }));
   // The apply command's boot, flag for flag.
   stack = await bootSchemaStack({
@@ -134,7 +149,16 @@ async function ceremony(posture: string, db: Database.Database): Promise<Organiz
     securityPlugin: stack.composition.securityPlugin,
     // No view is served here: the form-withdrawal carry has nothing to judge.
     views: { list: async () => [] },
-    lock: { verdict: async () => ({ editable: true }) },
+    // The save door's own verdict, as the command reads it: the item read's `editable`.
+    lock: {
+      verdict: async (type, name, packageId) => {
+        const protocol = (stack.kernel as { getService(name: string): unknown }).getService('protocol') as {
+          getMetaItem(request: { type: string; name: string; packageId?: string }): Promise<{ editable?: unknown; lock?: unknown } | null>;
+        };
+        const read = await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) });
+        return { editable: read?.editable !== false, ...(typeof read?.lock === 'string' ? { lock: read.lock } : {}) };
+      },
+    },
     door: { save: async (type, name) => { throw new Error(`the door was asked to save ${type} ${name}`); } },
     templates: { find: async () => undefined },
     columnDrops: { drop: async (columns) => columns.map((c) => ({ table: c.table, column: c.column, outcome: 'not-proposed' as const })) },
@@ -178,7 +202,7 @@ describe('the ownership ceremony resolves bindings against what a started kernel
     expect(rewrite).toMatchObject({ status: 'done', summary: { grants: 2, verified: 2 } });
   }, CASE_TIMEOUT_MS);
 
-  it('walled: the rewrite gate blocks on the undeclared position, and not on everyone', async () => {
+  it('walled: the rewrite gate blocks on the undeclared position, and not on everyone, naming the act the wall allows', async () => {
     const report = await ceremony('isolated', v17Database('walled'));
     expect(step(report, 'authored-conversion').status).toBe('done');
     const rewrite = step(report, 'rewrite');
@@ -186,5 +210,29 @@ describe('the ownership ceremony resolves bindings against what a started kernel
     expect(rewrite.blockers).toHaveLength(1);
     expect(rewrite.blockers[0]).toContain('position zz_undeclared');
     expect(rewrite.blockers.join('\n')).not.toContain('everyone');
+    // Not the step that reported done: the declaration, through either of its two doors.
+    expect(rewrite.blockers[0]).not.toMatch(/resolve its blocker/);
+    expect(rewrite.blockers[0]).toContain('deployment\'s code');
+    expect(rewrite.blockers[0]).toContain('PUT /api/v1/meta/position/zz_undeclared');
+  }, CASE_TIMEOUT_MS);
+
+  it('walled: a binding the code declaration names clears the gate; one a sealed package definition lacks gets the fact, and no act', async () => {
+    const db = v17Database('walled-declared');
+    db.exec(`
+      INSERT INTO sys_position VALUES
+        ('pos_in_code', NULL, 'zz_in_code', 'In code', 'platform', 0, 1),
+        ('pos_shipped', NULL, 'zz_shipped', 'Shipped', 'platform', 0, 1);
+      INSERT INTO sys_position_permission_set VALUES
+        ('bind_in_code', NULL, 'pos_in_code', 'ps_member_default'),
+        ('bind_shipped', NULL, 'pos_shipped', 'ps_member_default');
+    `);
+    const rewrite = step(await ceremony('isolated', db), 'rewrite');
+    expect(rewrite.status).toBe('blocked');
+    expect(rewrite.blockers.join('\n')).not.toContain('zz_in_code');
+    const sealed = rewrite.blockers.filter((b) => b.includes('position zz_shipped '));
+    expect(sealed).toHaveLength(1);
+    expect(sealed[0]).toContain(PACKAGE_ID);
+    expect(sealed[0]).toContain('ADR-0131 D6');
+    expect(sealed[0]).not.toMatch(/\b(Declare|Add|remove|resolve)\b|PUT |re-run/);
   }, CASE_TIMEOUT_MS);
 });
