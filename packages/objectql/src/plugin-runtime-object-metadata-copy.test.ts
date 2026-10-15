@@ -133,7 +133,6 @@ const NAME = 'qa_probe_gadget';
 const OTHER = 'qa_probe_other';
 const SHIPPED_PKG = 'com.qa.shipped';
 const SHIPPED = 'qa_shipped_widget';
-const SYSTEM = { context: { isSystem: true } } as any;
 
 /** A runtime object body; `label` tells the writes apart, `enable` is the exposure under test. */
 const objectBody = (name: string, label: string, enable?: Record<string, unknown>) => ({
