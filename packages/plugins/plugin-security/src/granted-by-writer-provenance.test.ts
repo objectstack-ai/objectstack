@@ -86,8 +86,6 @@ const DELEGATE = PermissionSetSchema.parse({
     businessUnit: 'east',
     includeSubtree: true,
     manageAssignments: true,
-    manageBindings: false,
-    authorEnvironmentSets: false,
     assignablePermissionSets: ['qa_plain'],
   },
 });

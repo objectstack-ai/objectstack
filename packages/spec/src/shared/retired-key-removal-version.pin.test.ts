@@ -86,6 +86,7 @@ import {
 } from '../automation/builtin-node-config.zod';
 import { NotifyConfigSchema } from '../automation/io-node-config.zod';
 import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemaless-node-config.zod';
+import { AdminScopeSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
@@ -227,6 +228,10 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'email-template-category-is-system-removed': [
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'category'),
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'isSystem'),
+  ],
+  'permission-admin-scope-binding-authoring-removed': [
+    tombstone(AdminScopeSchema, 'permission.adminScope', 'manageBindings'),
+    tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
   ],
   'manifest-permissions-string-list-removed': [
     refusal('manifest.permissions as a list of strings', () => ManifestPermissionsSchema.safeParse(['system.user.read'])),

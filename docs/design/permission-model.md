@@ -294,7 +294,7 @@ itself is a scoped grant*. Example: the 华东 subsidiary's IT admin receives an
 that says:
 
 - *where*: the 华东 business-unit subtree only;
-- *what*: assign users to positions, bind sets to positions — inside that subtree;
+- *what*: assign users to positions, and grant allowlisted sets directly — inside that subtree;
 - *which*: an **allowlist** of sets they may hand out (say, the CRM and HR self-service sets).
 
 They can onboard their own staff and reshuffle their own positions, but they can never grant
@@ -303,19 +303,21 @@ things (the `everyone`/`guest` anchors, security publishes). Headquarters keeps 
 the same explain engine answers "who *could have* granted this", not just "who did".
 
 **How it is authored (landed in P3).** An admin scope is a field on an ordinary permission set
-(`adminScope: { businessUnit, includeSubtree, manageAssignments, manageBindings,
-authorEnvironmentSets, assignablePermissionSets[] }`), so it is distributed via positions and
-audited like every other grant. The same set should also carry plain CRUD on the RBAC link
-tables (`sys_user_position`, `sys_position_permission_set`, `sys_user_permission_set`) — the
-scope authorizes *what* may be administered, the CRUD bits let the requests through at all.
+(`adminScope: { businessUnit, includeSubtree, manageAssignments, assignablePermissionSets[] }`),
+so it is distributed via positions and audited like every other grant. The same set should also
+carry plain CRUD on the assignment tables (`sys_user_position`, `sys_user_permission_set`) — the
+scope authorizes *what* may be administered, the CRUD bits let the requests through at all. A
+position's sets and a set's body are environment definitions written through the metadata door by
+a `manage_metadata` holder (ADR-0131 D3), so binding and set authoring are not delegable: the
+scope's former `manageBindings` and `authorEnvironmentSets` retired with the binding and set rows
+they gated.
 Runtime rules enforced by the `DelegatedAdminGate` (plugin-security):
 
 - assignments a delegate creates must be **anchored** (`sys_user_position.business_unit_id`)
   inside their subtree, and are `granted_by`-stamped automatically;
 - every set reached by the write — bound to the assigned position, or granted directly — must be
-  in the allowlist; re-composing a position (bindings) requires every current holder to sit
-  inside the subtree;
-- granting or authoring a set that itself carries an `adminScope` requires a held scope that
+  in the allowlist;
+- granting a set that itself carries an `adminScope` requires a held scope that
   **strictly contains** it (handing your own exact scope to a peer is refused — no lateral
   propagation);
 - delegates write **single rows by id** only (a broad filter-write cannot be boundary-checked);

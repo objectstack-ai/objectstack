@@ -24,8 +24,6 @@ const EAST_SCOPE = {
   businessUnit: 'east',
   includeSubtree: true,
   manageAssignments: true,
-  manageBindings: true,
-  authorEnvironmentSets: true,
   assignablePermissionSets: ['sales_user', 'sub_admin'],
 };
 
@@ -315,6 +313,55 @@ describe('DelegatedAdminGate — direct grants (sys_user_permission_set)', () =>
       data: { user_id: 'u_east_1', permission_set: 'sub_admin' },
       context: h.ctxOf('delegate'),
     })).rejects.toThrow(/not strictly contained/);
+  });
+
+  // [#23488] `manageBindings` / `authorEnvironmentSets` are retired: no door
+  // honoured either, so the containment comparison reads neither. Both scopes
+  // below are what a stored row the D2 conversion has not yet rewritten could
+  // hand the gate — the keys are written on purpose, as raw data.
+  describe('[#23488] the retired binding/authoring flags count on no containment axis', () => {
+    const RETIRED_FLAGS = { manageBindings: true, authorEnvironmentSets: true } as const;
+    /** A delegate whose held scope is EAST_SCOPE plus an inert `true` on both retired flags. */
+    const gateFor = (adminScope: Record<string, unknown>) => new DelegatedAdminGate({
+      ql: h.ql,
+      resolveSets: async () => [{ name: 'east_admin', objects: {}, adminScope }] as any[],
+    });
+    const grantSubAdmin = (gate: DelegatedAdminGate) => gate.assert({
+      object: 'sys_user_permission_set', operation: 'insert',
+      data: { user_id: 'u_east_1', permission_set: 'sub_admin' },
+      context: h.ctxOf('east_delegate', 'u_east_delegate'),
+    });
+
+    it('an inert `true` on the delegate\'s side no longer makes an otherwise EQUAL scope strictly contained — 403 PERMISSION_DENIED', async () => {
+      // Before the retirement the delegate's `true` against sub_admin's
+      // absent flag counted as the strictly-larger axis, so the equal-scope
+      // refusal let sub_admin's identical scope through.
+      const refusal = await grantSubAdmin(gateFor({ ...EAST_SCOPE, ...RETIRED_FLAGS })).then(
+        () => undefined,
+        (e: unknown) => e as { code?: string; status?: number; message?: string },
+      );
+      expect(refusal, 'the grant must be refused').toBeDefined();
+      expect(refusal?.code).toBe('PERMISSION_DENIED');
+      expect(refusal?.status).toBe(403);
+      expect(refusal?.message).toMatch(/would hand out an adminScope not strictly contained by yours/);
+    });
+
+    it('CONTROL: the same delegate grants a scope narrower on a REAL axis (the subtree)', async () => {
+      // sub_admin's scope stops covering descendants: strictly contained on
+      // the tree axis, so the same delegate, retired flags and all, may grant it.
+      const row = h.tables.sys_permission_set.find((r: any) => r.name === 'sub_admin');
+      row.admin_scope = JSON.stringify({ ...EAST_SCOPE, includeSubtree: false });
+      await expect(grantSubAdmin(gateFor({ ...EAST_SCOPE, ...RETIRED_FLAGS }))).resolves.toBeUndefined();
+    });
+
+    it('the granted side\'s retired `true` no longer out-reaches a delegate that lacks it', async () => {
+      // Before the retirement sub_admin's `manageBindings: true` against the
+      // delegate's absent flag failed the rights axis. Narrower on the tree
+      // axis and otherwise equal, it is strictly contained now.
+      const row = h.tables.sys_permission_set.find((r: any) => r.name === 'sub_admin');
+      row.admin_scope = JSON.stringify({ ...EAST_SCOPE, includeSubtree: false, ...RETIRED_FLAGS });
+      await expect(grantSubAdmin(gateFor({ ...EAST_SCOPE }))).resolves.toBeUndefined();
+    });
   });
 
   // [ADR-0131 D4] A stored grant's pre-image is judged by the set it NAMES
@@ -749,8 +796,6 @@ describe('DelegatedAdminGate — the anchor is picked by organization, not by ar
     businessUnit: 'sales',
     includeSubtree: true,
     manageAssignments: true,
-    manageBindings: false,
-    authorEnvironmentSets: false,
     assignablePermissionSets: ['sales_user'],
   };
   const DELEGATE_SETS = [
@@ -861,8 +906,6 @@ describe('DelegatedAdminGate — a position is the catalog definition, not an or
     businessUnit: 'sales',
     includeSubtree: true,
     manageAssignments: true,
-    manageBindings: false,
-    authorEnvironmentSets: false,
     assignablePermissionSets: ['sales_user'],
   };
   const DELEGATE_SETS = [{ name: 'sales_admin', objects: {}, adminScope: SALES_SCOPE }] as any[];

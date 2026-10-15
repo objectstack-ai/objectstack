@@ -95,7 +95,11 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     const scope = def.adminScope ?? null;
     expect(scope?.businessUnit).toBe('Field Operations');
     expect(scope?.manageAssignments).toBe(true);
-    expect(scope?.manageBindings).toBe(false);
+    // [#23488] The retired binding/authoring rights are absent from the
+    // served definition — the showcase no longer writes them and nothing
+    // materializes a default for a tombstone.
+    expect(scope).not.toHaveProperty('manageBindings');
+    expect(scope).not.toHaveProperty('authorEnvironmentSets');
     expect(scope?.assignablePermissionSets).toContain('showcase_contributor');
   });
 

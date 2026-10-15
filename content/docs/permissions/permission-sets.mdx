@@ -336,9 +336,11 @@ export const EastSubsidiaryAdmin = definePermissionSet({
 The runtime gate enforces: assignments anchored inside the subtree only,
 allowlisted sets only (**to others and to themselves** — no self-escalation),
 single-row writes, `granted_by` audit stamping, and **strict containment**
-when granting or authoring a set that itself carries an `adminScope` (handing
-out your own exact scope is refused). Anchors and security publishes stay
-tenant-level.
+when granting a set that itself carries an `adminScope` (handing out your own
+exact scope is refused). A delegate's scope is placement, assignment and the
+allowlist: writing a set's body or a position's sets is a metadata write, judged
+by `manage_metadata`, never by an `adminScope`. Anchors and security publishes
+stay tenant-level.
 
 ## Provenance — package vs environment sets (ADR-0086)
 

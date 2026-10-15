@@ -635,21 +635,64 @@ const ADMIN_SCOPE_BUSINESS_UNIT_BLANK =
   + 'permission set should not delegate administration.';
 
 /**
+ * [#23488] The prescriptions the two retired delegation rights are refused
+ * with — `manageBindings` and `authorEnvironmentSets` (ADR-0049
+ * enforce-or-remove; ruling of record 6181988435, letter A).
+ *
+ * Both named a door that no longer exists. `manageBindings` gated the
+ * `sys_position_permission_set` binding rows and `authorEnvironmentSets` the
+ * `sys_permission_set` rows; ADR-0131 D3 retired both objects. A position's
+ * sets are part of its definition and a permission set is a definition, and
+ * both are written through the metadata door, which admits a
+ * `manage_metadata` holder (the platform operator under a wall) and reads no
+ * `adminScope`. So a delegate who "may bind" or "may author" was granted
+ * nothing — while the flag still counted in the delegated-admin gate's
+ * strict-containment comparison, where an inert `true` on the delegate's
+ * side let an otherwise EQUAL scope through the equal-scope refusal.
+ *
+ * Module-private for the reason {@link ADMIN_SCOPE_BUSINESS_UNIT_BLANK} gives.
+ */
+const ADMIN_SCOPE_MANAGE_BINDINGS_REMOVED =
+  '`permission.adminScope.manageBindings` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0090 D12) — '
+  + 'nothing honoured it once the position-to-permission-set binding rows it gated were retired: a position\'s sets are '
+  + 'part of its definition (ADR-0131 D3), and that definition is written through the metadata door, which admits a '
+  + '`manage_metadata` holder and reads no adminScope. Delete the key; a delegate\'s scope is placement, assignment and '
+  + 'the allowlist — `businessUnit` with `includeSubtree`, `manageAssignments`, and `assignablePermissionSets`. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+const ADMIN_SCOPE_AUTHOR_ENVIRONMENT_SETS_REMOVED =
+  '`permission.adminScope.authorEnvironmentSets` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0090 D12) — '
+  + 'nothing honoured it once permission sets stopped being rows: a permission set is an environment metadata '
+  + 'definition (ADR-0131 D3), written through the metadata door, which admits a `manage_metadata` holder and reads no '
+  + 'adminScope. Delete the key; a delegate\'s scope is placement, assignment and the allowlist — `businessUnit` with '
+  + '`includeSubtree`, `manageAssignments`, and `assignablePermissionSets`. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+/**
  * [ADR-0090 D12] Delegated-administration scope.
  *
  * Attaches to a permission set (and is therefore distributed via positions,
  * audited in the same tables, and explained by the same engine as every other
  * grant). Declares WHERE a delegate may administer (a business-unit subtree),
- * WHAT they may do there (manage user↔position assignments, position↔set
- * bindings, author environment-owned sets), and WHICH permission sets they may
- * hand out (the anti-self-escalation allowlist — a delegate can never assign,
- * to others or themselves, a set outside it).
+ * WHAT they may do there (manage user↔position assignments, and direct
+ * user↔set grants), and WHICH permission sets they may hand out (the
+ * anti-self-escalation allowlist — a delegate can never assign, to others or
+ * themselves, a set outside it).
  *
  * Runtime enforcement lives in `@objectstack/plugin-security`'s delegated-admin
- * write gate on `sys_user_position` / `sys_position_permission_set` /
- * `sys_user_permission_set` / `sys_permission_set`. Tenant-level admins
- * (ADR-0066 superuser wildcard) are exempt; the `everyone`/`guest` audience
- * anchors stay tenant-level only — no delegated scope can touch them.
+ * write gate on `sys_user_position` / `sys_user_permission_set`. Tenant-level
+ * admins (ADR-0066 superuser wildcard) are exempt; the `everyone`/`guest`
+ * audience anchors stay tenant-level only — no delegated scope can touch them.
+ *
+ * [#23488] It no longer declares position↔set bindings or the authoring of
+ * environment sets: `manageBindings` and `authorEnvironmentSets` are
+ * `retiredKey()` tombstones below. A position's sets and a permission set's
+ * body are environment definitions (ADR-0131 D3), written through the
+ * metadata door under `manage_metadata`, so neither right had a door to
+ * honour it. The ADR-0087 D2 conversion
+ * `permission-admin-scope-binding-authoring-removed` strips both from stored
+ * rows and built artifacts; the D3 record is the semantic entry
+ * `permission-admin-scope-binding-authoring-retired`.
  */
 export const AdminScopeSchema = lazySchema(() => strictObject(
   {
@@ -688,13 +731,25 @@ export const AdminScopeSchema = lazySchema(() => strictObject(
   includeSubtree: z.boolean().default(true).describe('Cover descendant business units too (default true)'),
   /** May create/update/delete `sys_user_position` assignments (and direct `sys_user_permission_set` grants) within the boundary. */
   manageAssignments: z.boolean().default(false).describe('Manage user↔position assignments within the subtree'),
-  /** May create/delete `sys_position_permission_set` bindings whose blast radius lies within the boundary. */
-  manageBindings: z.boolean().default(false).describe('Manage position↔permission-set bindings within the subtree'),
-  /** May author environment-owned permission sets (package-managed rows stay publish-only per ADR-0086). */
-  authorEnvironmentSets: z.boolean().default(false).describe('Author environment-owned permission sets (single posture only: under group or isolated the platform operator authors the catalog, ADR-0131 D3)'),
+  /**
+   * REMOVED (#23488): the binding rows it gated are retired, and a position's
+   * sets are written through the metadata door, which reads no adminScope.
+   * The key was DEFAULTED (`false`), so a 17.x parse wrote it into every scope
+   * it emitted; the `acceptRetiredDefaultResidue` stage is NOT adopted (the
+   * `email_template.isSystem` precedent): stored rows and built artifacts are
+   * healed by the replayed D2 conversion, and an authored source meets the
+   * prescription.
+   */
+  manageBindings: retiredKey(ADMIN_SCOPE_MANAGE_BINDINGS_REMOVED),
+  /**
+   * REMOVED (#23488): a permission set is an environment definition written
+   * through the metadata door, which reads no adminScope. Defaulted like
+   * `manageBindings`, and healed the same way.
+   */
+  authorEnvironmentSets: retiredKey(ADMIN_SCOPE_AUTHOR_ENVIRONMENT_SETS_REMOVED),
   /**
    * The anti-self-escalation core: permission-set NAMES the delegate may
-   * assign/bind. Every set reached by a delegated write must be in this list;
+   * assign. Every set reached by a delegated write must be in this list;
    * granting a set that itself carries an adminScope additionally requires the
    * grantor's scope to STRICTLY contain the granted one.
    */
@@ -946,7 +1001,7 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
   /**
    * [ADR-0090 D12] Delegated-administration scope carried by this set.
    * Holding the set makes the user a SCOPED administrator: they may manage
-   * assignments/bindings (and optionally author environment sets) within the
+   * assignments (user↔position, and direct user↔set grants) within the
    * declared business-unit subtree, handing out ONLY the allowlisted sets.
    * See {@link AdminScopeSchema} for the full contract.
    */

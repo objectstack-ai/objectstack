@@ -30,8 +30,6 @@ const EAST_SCOPE = {
   businessUnit: 'east',
   includeSubtree: true,
   manageAssignments: true,
-  manageBindings: false,
-  authorEnvironmentSets: false,
   assignablePermissionSets: ['sales_user'],
 };
 

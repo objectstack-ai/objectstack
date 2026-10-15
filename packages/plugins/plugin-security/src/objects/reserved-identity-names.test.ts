@@ -213,8 +213,6 @@ describe('#15972 the service write door funnels into the same single refusal', (
     businessUnit: 'east',
     includeSubtree: true,
     manageAssignments: true,
-    manageBindings: false,
-    authorEnvironmentSets: false,
     assignablePermissionSets: ['sales_user'],
   };
 

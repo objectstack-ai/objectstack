@@ -73,8 +73,6 @@ const SALES_SCOPE = {
   businessUnit: 'sales',
   includeSubtree: true,
   manageAssignments: true,
-  manageBindings: false,
-  authorEnvironmentSets: false,
   assignablePermissionSets: ['sales_user'],
 };
 
