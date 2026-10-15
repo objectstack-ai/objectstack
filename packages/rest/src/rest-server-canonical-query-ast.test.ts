@@ -126,12 +126,18 @@ interface CensusEntry {
  * census reads it. The §1 controls pin the list's length and the census's sum
  * over it (4 = 1 + 3 + 0 + 0; the batch and approval bodies build no `query:`
  * literal).
+ *
+ * [#23050 slice 4] 4 = 1 + 3 + 0 + 0 + 0: the two record-sharing bodies
+ * (`sharing-routes.ts`) build no `query:` literal either — the rule list hands
+ * `listRules` an `object` / `activeOnly` pair read off `req.query`, never a
+ * `query:` slot.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 1,
     'data-action-routes.ts': 3,
     'batch-routes.ts': 0,
     'approvals-routes.ts': 0,
+    'sharing-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -319,8 +325,8 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
 
     it('[#23050 slice 3] censuses every file on the registrar list — its length and the slot sum are pinned', () => {
         // A module added to the list makes this re-read its number rather than
-        // widening unnoticed.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        // widening unnoticed. [#23050 slice 4] Length 4 → 5, the sum unchanged.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(5);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

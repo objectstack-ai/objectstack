@@ -142,11 +142,18 @@ describe('rest-server.ts docblock position', () => {
  * carry three apiece (the module header, the host interface's block and the
  * function's) — and a module added to the list needs one here before it reads.
  * The case below the loop pins the list's length and the sum of the floors.
+ *
+ * [#23050 slice 4] `sharing-routes.ts` carries eight: the module header, two
+ * host interfaces' blocks and two functions' (it holds two registrars' bodies),
+ * plus the three blocks that moved with the record-share body (`respondError`'s,
+ * `sharingDeclaredExtra`'s and `sharingFaultMessage`'s), which `rest-server.ts`
+ * therefore no longer holds (168 → 165 there, above its floor).
  */
 const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
     'data-action-routes.ts': 4,
     'batch-routes.ts': 3,
     'approvals-routes.ts': 3,
+    'sharing-routes.ts': 8,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -174,9 +181,10 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
     it('reads every module on it, each against its own floor — the length and the floors\' sum are pinned', () => {
         // A module added to the list makes this re-read its numbers rather than
         // widening unnoticed: 4 + 3 + 3 = 10 blocks over the three modules.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        // [#23050 slice 4] 4 + 3 + 3 + 8 = 18 over four, length 4 → 5.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(5);
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(10);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(18);
     });
 });
