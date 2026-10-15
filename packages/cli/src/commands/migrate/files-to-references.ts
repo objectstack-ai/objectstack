@@ -19,7 +19,7 @@ import {
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { isNarrowedRun, narrowedFlagNote, refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 import {
@@ -192,7 +192,7 @@ export default class MigrateFilesToReferences extends Command {
       // the numbers it reports are a moving target while another process writes.
       printWarning(apply
         ? `--force: ${describeOccupancy(occupancy)} Converting anyway — the live process may write records mid-scan.`
-        : `${describeOccupancy(occupancy)} The dry run below writes nothing, but its counts may shift while that process is running.`);
+        : `${describeOccupancy(occupancy)} The dry run below writes no row or table, but its counts may shift while that process is running. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
     if (occupancy.status === 'unknown' && !flags.json) {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);

@@ -17,7 +17,7 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import type { ManagedDriftEntry } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 
@@ -394,7 +394,7 @@ export default class MigrateMultiValueColumns extends Command {
     if (occupancy.status === 'busy' && !flags.json) {
       printWarning(apply
         ? `--force: ${describeOccupancy(occupancy)} Altering the column anyway — the live process may write rows mid-migration.`
-        : `${describeOccupancy(occupancy)} The dry run below writes nothing.`);
+        : `${describeOccupancy(occupancy)} The dry run below writes no row or table. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
 
     if (apply && !flags.yes) {

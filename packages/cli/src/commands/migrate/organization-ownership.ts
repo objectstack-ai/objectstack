@@ -21,6 +21,7 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_STOP_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { resolvePlannedDriverExec } from '../../utils/unmanaged-tables.js';
 import {
   buildOrganizationOwnershipPlan,
@@ -269,8 +270,9 @@ export default class MigrateOrganizationOwnership extends Command {
     // command's own envelope, with one difference: the ceremony takes no
     // `--force` (no flag skips its reviewed plan or its backup either), so
     // `--apply` beside a holder is refused outright and the refusal names the
-    // stop remedy alone. The plan writes nothing and warns, as every sibling's
-    // read-only arm does.
+    // stop remedy alone. The plan writes no row or table and warns, as every
+    // sibling's read-only arm does, saying what its connect can still change
+    // on a SQLite file (`JOURNAL_MODE_SWITCH_NOTE`).
     const occupancy = await probeMigrationTarget(flags['database-url']);
     if (occupancy.status === 'busy' && flags.apply) {
       await refuse(
@@ -286,7 +288,7 @@ export default class MigrateOrganizationOwnership extends Command {
       return;
     }
     if (occupancy.status === 'busy' && !json) {
-      printWarning(`${describeOccupancy(occupancy)} The plan below writes nothing, but --apply will refuse until the database is free.`);
+      printWarning(`${describeOccupancy(occupancy)} The plan below writes no row or table, but --apply will refuse until the database is free. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
     if (occupancy.status === 'unknown' && !json) {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
@@ -423,7 +425,10 @@ export default class MigrateOrganizationOwnership extends Command {
     if (summary.unattributableRows > 0) {
       printWarning(`${summary.unattributableRows} row(s) whose owner cannot be derived are listed by id in the plan file.`);
     }
-    printSuccess(`Plan written to ${target} — nothing in the database was changed.`);
+    // The occupancy probe answered `not_applicable` for a target that is no
+    // SQLite file (PostgreSQL, MySQL, `:memory:`): no file header to switch.
+    const sqliteFile = occupancy.status !== 'not_applicable';
+    printSuccess(`Plan written to ${target} — no row or table in the database was changed.${sqliteFile ? ` ${JOURNAL_MODE_SWITCH_NOTE}` : ''}`);
     console.log(chalk.dim(`  ${timer.display()}`));
   }
 

@@ -33,7 +33,7 @@ import {
   renderUnmanagedTables,
   type UnmanagedTablesReport,
 } from '../../utils/unmanaged-tables.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import {
   resolveTenancyPosture,
   collectGlobalUniques,
@@ -131,7 +131,7 @@ export default class MigratePlan extends Command {
     // not our own pool.
     const occupancy = await probeMigrationTarget(flags['database-url']);
     if (occupancy.status === 'busy' && !flags.json) {
-      printWarning(`${describeOccupancy(occupancy)} The plan below is still accurate — nothing is written — but "os migrate apply" will refuse until it is free (or you pass --force).`);
+      printWarning(`${describeOccupancy(occupancy)} The plan below is still accurate — it writes no row or table — but "os migrate apply" will refuse until it is free (or you pass --force). ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
 
     let stack;
