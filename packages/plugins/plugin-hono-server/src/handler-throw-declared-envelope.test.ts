@@ -45,7 +45,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
 
-import { HonoHttpServer } from './adapter';
+import { HonoHttpServer, declaredEnvelopeForThrow } from './adapter';
 
 /**
  * The exact bytes `wrap()` answers for a throw carrying no declared envelope,
@@ -485,6 +485,131 @@ describe('[#23587] a structured refusal on a direct-mount route carries RestServ
     const body = await res.json();
 
     expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body.error.code).toBe('RESOURCE_CONFLICT');
+    expect(Object.keys(body.error).sort()).toEqual(['code', 'message']);
+  });
+});
+
+/**
+ * [#23587] The engine's `DuplicateRecordError` crosses a Hono door as `409
+ * UNIQUE_VIOLATION`, the one wire spelling the maintainer ruled for every route
+ * (recorded in commit 65846bc46), with `RestServer`'s arm fields in
+ * `error.details`. Before this, both doors answered the engine's in-process
+ * spelling, `DUPLICATE_RECORD`, with `code` and `message` only.
+ *
+ * Measured on a real `createHonoApp` over the real engine (SQLite WASM), a
+ * repeated unique value: `409 {"success":false,"error":{"code":
+ * "DUPLICATE_RECORD","message":"Duplicate record refused on 'udoc': …"}}`, the
+ * same on a `HonoHttpServer` route and on its raw mount.
+ *
+ * The producer below is shaped exactly like `@objectstack/objectql`'s class
+ * (`name`, `code`, `status`, `httpStatus`, `object`, `field`, the in-process
+ * `developerMessage` and the driver's error on `cause`), because this package
+ * does not depend on that one. Three doors render it: a route (`wrap()`), the
+ * raw mount (the transport `onError` seam), and `declaredEnvelopeForThrow`
+ * itself, which is what `createHonoApp`'s catch arms call.
+ *
+ * The controls are the discrimination the ruling keeps: the mapping keys on the
+ * registered code AND the class, as `RestServer`'s arm does, so a producer
+ * that merely SPEAKS `DUPLICATE_RECORD` keeps its own code, and the class name
+ * without that code changes nothing either.
+ */
+describe('[#23587] a repeated unique value answers 409 UNIQUE_VIOLATION on a Hono door, with the arm’s fields', () => {
+  /** The driver's own text, so a row can assert it never reaches the wire. */
+  const DRIVER_TEXT = "UNIQUE constraint failed: index 'uniq_udoc_email'";
+
+  /** The engine's envelope, as `engine.insert` throws it. */
+  function engineDuplicate(field?: string) {
+    return Object.assign(
+      new Error(field
+        ? `Duplicate record refused on 'udoc': a unique constraint on '${field}' already holds this value. No record was written.`
+        : "Duplicate record refused on 'udoc': a unique constraint already holds these values. No record was written."),
+      {
+        name: 'DuplicateRecordError',
+        code: 'DUPLICATE_RECORD',
+        status: 409,
+        httpStatus: 409,
+        object: 'udoc',
+        ...(field ? { field } : {}),
+        // The in-process remedy text: it names the engine's spelling, and the
+        // arm deliberately does not relay it.
+        developerMessage: "Branch on the platform code: over the HTTP API this refusal is reported as code === 'UNIQUE_VIOLATION'; inside the engine the thrown class carries code === 'DUPLICATE_RECORD'.",
+        cause: new Error(DRIVER_TEXT),
+      },
+    );
+  }
+
+  /** A hook that SPEAKS the registered code without being the engine's class. */
+  function hookDuplicate() {
+    return Object.assign(new Error('A hook refused this row as a duplicate of its own bookkeeping.'), {
+      code: 'DUPLICATE_RECORD',
+      status: 409,
+    });
+  }
+
+  type Door = (thrown: () => unknown) => Promise<{ status: number; body: any }>;
+  const doors: Array<[string, Door]> = [
+    ['a HonoHttpServer route', async (thrown) => {
+      const s = server();
+      s.post('/api/v1/direct/udoc', async () => { throw thrown(); });
+      const res = await call(s, '/api/v1/direct/udoc', { method: 'POST' });
+      return { status: res.status, body: await res.json() };
+    }],
+    ['the HonoHttpServer raw mount', async (thrown) => {
+      const s = server();
+      s.getRawApp().post('/raw/udoc', async () => { throw thrown(); });
+      const res = await call(s, '/raw/udoc', { method: 'POST' });
+      return { status: res.status, body: await res.json() };
+    }],
+    ['declaredEnvelopeForThrow (createHonoApp’s renderer)', async (thrown) => {
+      const envelope = declaredEnvelopeForThrow(thrown());
+      return envelope ? { status: envelope.status, body: envelope.body } : { status: 0, body: undefined };
+    }],
+  ];
+
+  it.each(doors)('%s: the engine’s class answers 409 UNIQUE_VIOLATION with developerMessage, field and object', async (_door, door) => {
+    const thrown = engineDuplicate('email');
+    const { status, body } = await door(() => thrown);
+
+    expect(status, JSON.stringify(body)).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('UNIQUE_VIOLATION');
+    expect(Object.keys(body.error.details ?? {}).sort()).toEqual(['developerMessage', 'field', 'object']);
+    expect(body.error.details.field).toBe('email');
+    expect(body.error.details.object).toBe('udoc');
+    // One spelling of the code: no demoted `declaredCode`, and the in-process
+    // spelling appears nowhere on the wire, nor does the driver's text.
+    expect(body.error).not.toHaveProperty('declaredCode');
+    expect(JSON.stringify(body)).not.toContain('DUPLICATE_RECORD');
+    expect(JSON.stringify(body)).not.toContain(DRIVER_TEXT);
+  });
+
+  it.each(doors)('%s: no field when the driver named none, and none invented', async (_door, door) => {
+    const { status, body } = await door(() => engineDuplicate());
+
+    expect(status, JSON.stringify(body)).toBe(409);
+    expect(body.error.code).toBe('UNIQUE_VIOLATION');
+    expect(Object.keys(body.error.details ?? {}).sort()).toEqual(['developerMessage', 'object']);
+  });
+
+  it.each(doors)('%s: CONTROL — a hook that speaks DUPLICATE_RECORD keeps its own code and its two keys', async (_door, door) => {
+    const { status, body } = await door(hookDuplicate);
+
+    expect(status, JSON.stringify(body)).toBe(409);
+    expect(body.error.code).toBe('DUPLICATE_RECORD');
+    expect(Object.keys(body.error).sort()).toEqual(['code', 'message']);
+  });
+
+  it.each(doors)('%s: CONTROL — the class name with another registered code keeps that code', async (_door, door) => {
+    const { status, body } = await door(() => Object.assign(new Error('conflict'), {
+      name: 'DuplicateRecordError',
+      code: 'RESOURCE_CONFLICT',
+      status: 409,
+      object: 'udoc',
+      field: 'email',
+    }));
+
+    expect(status, JSON.stringify(body)).toBe(409);
     expect(body.error.code).toBe('RESOURCE_CONFLICT');
     expect(Object.keys(body.error).sort()).toEqual(['code', 'message']);
   });
