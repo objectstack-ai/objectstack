@@ -125,11 +125,8 @@ const OPEN = { readable: true, editable: true };
 /**
  * A prefixed object with a field that spells the renamed bare object's name.
  *
- * ⛔ No field here spells a PREFIXED object's name. The object copy's
- * free-text rewrite renames such a field's `name` but not its `fields` key, so
- * the save door's FLS lint (which reads the `name`) refuses the copied set while
- * the data plane still addresses the column by its key — a separate defect,
- * not this rule's.
+ * A field that spells a PREFIXED object's name, and a copied set's rule on it,
+ * are pinned in `protocol-duplicate-package-names-in-step.test.ts`.
  */
 const customerBody = {
     name: 'dupsrc_customer', label: 'Customer', sharingModel: 'private',

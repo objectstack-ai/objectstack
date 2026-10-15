@@ -529,11 +529,37 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
    * before: a bare `Error` is still `500` carrying `code` and `message`, with
    * no `cause`, and a throw declaring `statusCode` with no registered code
    * keeps that status.
+   *
+   * [#23532] …with one exception, the disclosure filter. That answer ships the
+   * thrown message, so this arm is a door emitting a thrown message, and it
+   * runs `looksLikeInternalErrorLeak` (`@objectstack/types`) exactly as the
+   * other such doors do: `HttpDispatcher.error`, `packages/rest`'s registrars,
+   * the recogniser's own 5xx limb above and this file's `/auth/config` arm.
+   * Without it a driver diagnostic reached the client verbatim. Measured
+   * through this host (an object registered, its table never synced):
+   *
+   *     POST /api/v1/data/ghost
+   *       500 {"success":false,"error":{"code":"INTERNAL_ERROR",
+   *            "message":"insert into [statement and bound values redacted] - no such table: ghost"}}
+   *
+   * Same scope as the twins: only a 5xx, because a 4xx message is a
+   * caller-facing answer by design, and only a message the predicate flags,
+   * so an ordinary bare `Error` still names itself. The replacement is the
+   * twins' `INTERNAL_ERROR_MESSAGE`, never a new literal. ⛔ This does not
+   * withhold every undeclared 5xx: whether an undeclared 5xx stays legible is
+   * a standing decision this arm does not reopen. The status and `code` are
+   * unchanged; only the message is replaced.
    */
   const thrownJson = (c: any, err: any) => {
     const declared = declaredEnvelopeForThrow(err);
     if (declared) return c.json(declared.body, declared.status);
-    return errorJson(c, err.message || 'Internal Server Error', err.statusCode || 500);
+    const status = err.statusCode || 500;
+    const message = err.message || 'Internal Server Error';
+    return errorJson(
+      c,
+      status >= 500 && looksLikeInternalErrorLeak(message) ? INTERNAL_ERROR_MESSAGE : message,
+      status,
+    );
   };
 
   const toResponse = (c: any, result: HttpDispatcherResult) => {
