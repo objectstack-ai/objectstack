@@ -57,7 +57,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { MetadataPlugin } from '@objectstack/metadata';
-import { ObjectQL } from './engine.js';
+import { ObjectQL, type EngineReadOptions } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 
 type Stores = Map<string, Map<string, Record<string, unknown>>>;
@@ -144,6 +144,8 @@ const P = 'com.qa.p';
 const Q = 'com.qa.q';
 const NAME = 'qa_probe_gadget';
 const SENTINEL = 'sys_metadata';
+/** The data plane's reads and writes in these pins run as the system. */
+const SYSTEM: EngineReadOptions = { context: { isSystem: true } };
 
 /** A runtime object body; `label` tells the writes apart. */
 const gadgetBody = (label: string) => ({
@@ -219,7 +221,7 @@ describe('#23514 — a save naming a package beside an object its package-less d
      */
     async function served(k: Booted) {
         const read = await k.protocol.getMetaItem({ type: 'object', name: NAME });
-        const records = await k.engine.find(NAME, {}, { context: { isSystem: true } } as any);
+        const records = await k.engine.find(NAME, {}, SYSTEM);
         return {
             owner: k.engine.registry.getObjectOwner(NAME)?.packageId,
             dataPlaneLabel: (k.engine.registry.getObject(NAME) as { label?: string } | undefined)?.label,
@@ -233,8 +235,8 @@ describe('#23514 — a save naming a package beside an object its package-less d
         const k = await boot(stores, drops);
         const res = await save(k, undefined, 'Gadget unbound');
         expect(res.success).toBe(true);
-        await k.engine.insert(NAME, { name: 'rec-1' }, { context: { isSystem: true } } as any);
-        await k.engine.insert(NAME, { name: 'rec-2' }, { context: { isSystem: true } } as any);
+        await k.engine.insert(NAME, { name: 'rec-1' }, SYSTEM);
+        await k.engine.insert(NAME, { name: 'rec-2' }, SYSTEM);
         expect(storedBindings(stores)).toEqual([null]);
         expect(k.engine.registry.getObjectOwner(NAME)?.packageId).toBe(SENTINEL);
         expect(k.engine.registry.getPackagedObjectOwner(NAME)).toBeUndefined();
@@ -367,7 +369,7 @@ describe('#23514 — a save naming a package beside an object its package-less d
             expect(k2.engine.registry.getObjectOwner(NAME)).toBeUndefined();
             expect(k2.engine.registry.getObject(NAME)).toBeUndefined();
             expect((await k2.protocol.getMetaItem({ type: 'object', name: NAME }))?.item).toBeUndefined();
-            await expect(k2.engine.find(NAME, {}, { context: { isSystem: true } } as any))
+            await expect(k2.engine.find(NAME, {}, SYSTEM))
                 .rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
             expect(stores.get(NAME)?.size).toBe(2);
 
@@ -377,7 +379,7 @@ describe('#23514 — a save naming a package beside an object its package-less d
             expect(await served(k2)).toEqual({
                 owner: Q, dataPlaneLabel: 'Gadget Q', metaReadLabel: 'Gadget Q', records: 2,
             });
-            await k2.engine.insert(NAME, { name: 'rec-3' }, { context: { isSystem: true } } as any);
+            await k2.engine.insert(NAME, { name: 'rec-3' }, SYSTEM);
 
             await k2.kernel.shutdown();
             const k3 = await boot(stores, drops, withMetadataPlugin);
