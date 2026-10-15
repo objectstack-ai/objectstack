@@ -136,6 +136,7 @@ async function ceremony(posture: string, db: Database.Database): Promise<Organiz
   let checkpoint: CeremonyCheckpoint | null = null;
   return applyOrganizationOwnership({
     executor: {
+      dialect: 'sqlite',
       client: 'better-sqlite3',
       query: async (sql, params = []) => db.prepare(sql).all(...(params as unknown[])) as Record<string, unknown>[],
       execute: async (sql, params = []) => { db.prepare(sql).run(...(params as unknown[])); },

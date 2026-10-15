@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   buildOrganizationOwnershipPlan,
+  ceremonyDialectOf,
   OrganizationOwnershipPlanRefusal,
   type OrganizationOwnershipPlan,
   type PlanReader,
@@ -28,9 +29,10 @@ let db: Database.Database;
 /** Every statement the plan issued, in order. */
 let statements: string[];
 
-function reader(opts: { client?: string; failOn?: RegExp } = {}): PlanReader {
+function reader(opts: { failOn?: RegExp } = {}): PlanReader {
   return {
-    client: opts.client ?? 'better-sqlite3',
+    dialect: 'sqlite',
+    client: 'better-sqlite3',
     async query(sql, params = []) {
       statements.push(sql);
       if (opts.failOn?.test(sql)) throw new Error('SQLITE_IOERR: disk I/O error');
@@ -249,9 +251,10 @@ describe('ADR-0131 D10 preflight — it refuses a table it cannot enumerate, nam
     expect(r.message).toContain('managed_by');
   });
 
-  it('a driver with no catalog statement', async () => {
-    const r = await refusal(plan('isolated', reader({ client: 'oracledb' })));
+  it('a driver with no catalog statement: its dialect is refused before the plan issues one', async () => {
+    const r = await refusal((async () => plan('isolated', { ...reader(), dialect: ceremonyDialectOf({ config: { client: 'oracledb' } }) }))());
     expect(r.reason).toBe('driver-unsupported');
+    expect(statements).toEqual([]);
   });
 
   it('a database that is not an ObjectStack one (the wrong --database-url)', async () => {
