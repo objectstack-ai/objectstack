@@ -1701,8 +1701,8 @@ function flowPackageRefusalMessage(verb: 'save' | 'delete', name: string, packag
     const shown = packageIds.slice(0, FLOW_PACKAGES_SHOWN).map((id) => `'${id}'`).join(', ');
     const more = packageIds.length > FLOW_PACKAGES_SHOWN ? ` and ${packageIds.length - FLOW_PACKAGES_SHOWN} more` : '';
     const prescription = verb === 'save'
-        ? `PUT ${FLOW_META_ITEM_ROUTE}/${name}?package= naming one of the packages below, with the flow definition as the body`
-        : `DELETE ${FLOW_META_ITEM_ROUTE}/${name}?package= naming one of the packages below, which removes that package's row and keeps the others`;
+        ? `PUT ${FLOW_META_ITEM_ROUTE}/${name}?package= naming one of the packages listed last, with the flow definition as the body`
+        : `DELETE ${FLOW_META_ITEM_ROUTE}/${name}?package= naming one of the packages listed last, which removes that package's row and keeps the others`;
     const [nothing, single] = verb === 'save'
         ? ['Nothing was written', 'no single row to write']
         : ['Nothing was deleted', 'no single row to remove'];
