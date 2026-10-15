@@ -269,7 +269,7 @@ describe('#23646 — an orphan adoption moves an adopted object\'s registry owne
         const k = await boot(stores, drops);
         // A package-less view row, as a pre-package-first stopgap left it.
         await k.engine.insert('sys_metadata', {
-            type: 'view', name: VIEW, state: 'active', package_id: null, organization_id: null,
+            type: 'view', name: VIEW, state: 'active', package_id: null,
             metadata: JSON.stringify({
                 name: VIEW, label: 'Gadgets', type: 'grid', data: { provider: 'object', object: NAME },
             }),
@@ -295,7 +295,7 @@ describe('#23646 — an orphan adoption moves an adopted object\'s registry owne
         expect((await save(k, R, 'Gadget R')).success).toBe(true);
         // Legacy residue beside R's row: a package-less row no door writes today.
         await k.engine.insert('sys_metadata', {
-            type: 'object', name: NAME, state: 'active', package_id: null, organization_id: null,
+            type: 'object', name: NAME, state: 'active', package_id: null,
             metadata: JSON.stringify(gadgetBody('Gadget residue')),
         }, { context: { isSystem: true } } as any);
         const registerObject = vi.spyOn(k.engine.registry, 'registerObject');
