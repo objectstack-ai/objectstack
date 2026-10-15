@@ -290,6 +290,35 @@ export interface ObjectQLPluginOptions {
  */
 const SKIP_SCHEMA_SYNC_ENGINE_KEY = 'skipSchemaSync';
 
+/**
+ * [#23649] The kernel-bus event {@link ObjectQLPlugin.start} triggers once per
+ * boot, with the live engine as its one argument, at the last moment a routing
+ * decision can still be made for free: every boot-registered driver has been
+ * adopted (`driver.*` services) and connected (`ObjectQL.init()`), and nothing
+ * has been schema-synced, hydrated from `sys_metadata`, read or written yet.
+ *
+ * It exists for the stack's `datasourceMapping` (ADR-0062 D2 (d), #4462). A
+ * mapping rule is routing, not a hint: from the moment it is installed, every
+ * object it matches resolves to the named datasource and never falls back to
+ * the default store. Installed any later than this (it used to be installed in
+ * `AppPlugin.start()`, after this plugin's schema sync and after the auth
+ * plugin wrote the Default Organization), the rules re-route platform objects
+ * whose tables and rows already sit in the default store, and the boot reports
+ * ready over two stores. The app plugin subscribes in its `init()`: it installs
+ * the rules and connects every datasource they route a registered object to,
+ * so the first DDL and every boot write land where the mapping routes them.
+ *
+ * After driver adoption on purpose, never in Phase 1: the engine makes its
+ * first registered driver the default, so a datasource connected before a
+ * stack plugin's `driver.*` service is adopted would take the default slot
+ * from it and move every unbound object with it. A handler's throw propagates
+ * and fails the boot (a mapped datasource that cannot connect has no fallback).
+ *
+ * Not in `IPluginLifecycleEvents`: the bus is open to custom names, and this
+ * one has one emitter (here) and one subscriber (`AppPlugin`).
+ */
+export const OBJECTQL_DRIVERS_READY_HOOK = 'objectql:drivers-ready';
+
 export class ObjectQLPlugin implements Plugin {
   name = 'com.objectstack.engine.objectql';
   type = 'objectql' as const;
@@ -1011,6 +1040,11 @@ export class ObjectQLPlugin implements Plugin {
 
     // Initialize drivers (calls driver.connect() which sets up persistence)
     await this.ql?.init();
+
+    // [#23649] The drivers are live and nothing has been synced, hydrated, read
+    // or written: the moment a subscriber can still decide WHERE objects live
+    // (the stack's `datasourceMapping`). See {@link OBJECTQL_DRIVERS_READY_HOOK}.
+    if (this.ql) await ctx.trigger(OBJECTQL_DRIVERS_READY_HOOK, this.ql);
 
     // Phase 1: Sync built-in schemas so sys_metadata table exists before reading it.
     //
