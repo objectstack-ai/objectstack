@@ -333,3 +333,72 @@ describe('[#23495] SysMetadataRepository.promoteDraft adoptInto', () => {
     expect(activeRows(engine)).toEqual([['app.k9qk', 'live'], [null, 'orphan']]);
   });
 });
+
+/**
+ * [#23657, ADR-0070 TL;DR 1] An item with no active row bound to a package:
+ * the draft address is read from the DRAFT rows (`unboundItemDraftAddress`, the
+ * rule the publish and the discard naming no package take). The package-unbound
+ * draft keeps it; else the one package's draft is the address, so `put`
+ * updates it and `headAt` serves it, never a package-unbound draft minted
+ * beside it; two or more packages' drafts is refused `409 RESOURCE_CONFLICT`.
+ */
+describe('[#23657] SysMetadataRepository draft address of an item never published into a package', () => {
+  const draftRow = (pkg: string | null, checksum: string) => ({
+    type: REF.type, name: REF.name, state: 'draft',
+    package_id: pkg, metadata: '{"label":"Member"}', checksum, version: 1,
+  });
+
+  it('the only draft bound to one package: put updates it, and headAt serves it', async () => {
+    const engine = makeFakeEngine([draftRow('app.q', 'sha-q')]);
+    const repo = makeRepo(engine);
+    const head = await repo.headAt(REF, { state: 'draft', packageId: null });
+    expect(head.packageId).toBe('app.q');
+    expect(head.head?.hash).toBe('sha-q');
+    // The parent the head named is the one put's lock accepts.
+    await repo.put(REF, { label: 'edited' }, { parentVersion: head.head!.hash, actor: 't', state: 'draft' as const });
+    const drafts = engine.rows.filter((r) => r.state === 'draft');
+    expect(drafts.map((r) => r.package_id)).toEqual(['app.q']);
+    expect(JSON.parse(String(drafts[0]!.metadata)).label).toBe('edited');
+  });
+
+  for (const order of [['app.q', 'app.r'], ['app.r', 'app.q']] as const) {
+    it(`two packages' drafts (${order.join(' stored before ')}): put refuses 409 RESOURCE_CONFLICT and writes nothing`, async () => {
+      const engine = makeFakeEngine(order.map((pkg, i) => draftRow(pkg, `sha-${i}`)));
+      const repo = makeRepo(engine);
+      const err = await repo
+        .put(REF, { label: 'pending' }, { parentVersion: null, actor: 't', state: 'draft' as const })
+        .then(() => null, (e: unknown) => e as Error);
+      expect(err).not.toBeNull();
+      const envelope = resolveThrownHttpError(err);
+      expect(envelope.status).toBe(409);
+      expect(envelope.code).toBe('RESOURCE_CONFLICT');
+      expect(err!.message).toContain("'app.q', 'app.r'");
+      expect(engine.rows).toHaveLength(2);
+      expect(engine.history).toHaveLength(0);
+      expect(await repo.headAt(REF, { state: 'draft', packageId: null })).toEqual({ head: null, packageId: null });
+    });
+  }
+
+  it('control: a package-unbound draft beside packages\' drafts keeps the address', async () => {
+    const engine = makeFakeEngine([draftRow('app.q', 'sha-q'), draftRow(null, 'sha-u'), draftRow('app.r', 'sha-r')]);
+    const repo = makeRepo(engine);
+    const head = await repo.headAt(REF, { state: 'draft', packageId: null });
+    expect(head.packageId).toBeNull();
+    expect(head.head?.hash).toBe('sha-u');
+    await repo.put(REF, { label: 'edited' }, { parentVersion: 'sha-u', actor: 't', state: 'draft' as const });
+    const unbound = engine.rows.filter((r) => r.state === 'draft' && (r.package_id ?? null) === null);
+    expect(unbound).toHaveLength(1);
+    expect(JSON.parse(String(unbound[0]!.metadata)).label).toBe('edited');
+    expect(engine.rows.filter((r) => r.state === 'draft')).toHaveLength(3);
+  });
+
+  it('control: an active binding decides, whatever package another draft is bound to', async () => {
+    const engine = makeFakeEngine([
+      { type: REF.type, name: REF.name, state: 'active', package_id: 'app.k9qk', metadata: '{"label":"Member"}', checksum: 'sha-a', version: 1 },
+      draftRow('app.q', 'sha-q'),
+    ]);
+    const repo = makeRepo(engine);
+    await repo.put(REF, { label: 'edited' }, { parentVersion: null, actor: 't', state: 'draft' as const });
+    expect(engine.rows.filter((r) => r.state === 'draft').map((r) => r.package_id).sort()).toEqual(['app.k9qk', 'app.q']);
+  });
+});

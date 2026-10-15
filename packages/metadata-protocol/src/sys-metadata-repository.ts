@@ -585,6 +585,41 @@ export function packagelessAddressAmbiguityRefusal(
 }
 
 /**
+ * [#23657, ADR-0048, ADR-0070 TL;DR 1] THE draft address of an item never
+ * published into a package (no active row bound to one), from the bindings of
+ * its draft rows: the package-unbound draft when one is stored (ADR-0048
+ * prefer-local); with none, the one package's draft when exactly one package
+ * holds a draft; two or more packages is `ambiguous`, refused with
+ * {@link packagelessAddressAmbiguityRefusal}; no draft at all is `none`, whose
+ * key is the package-unbound row a create writes.
+ *
+ * One rule for every draft door that names no package, so they cannot address
+ * different drafts: the draft save ({@link SysMetadataRepository.put}, through
+ * `resolveWriteHead`, and so `headAt` and the strict draft read's `version`),
+ * and the per-item publish and the draft discard
+ * (`ObjectStackProtocolImplementation.packagelessDraftAddress` in
+ * `protocol.ts`). The draft save used to write the package-unbound draft here
+ * whatever was stored, so over an item whose only draft is bound to `Q` it
+ * minted a second draft beside `Q`'s, while the publish and the discard acted
+ * on `Q`'s.
+ *
+ * `drafts` is every draft row of the address read in full, never sampled
+ * (#8907): `candidates` the distinct package bindings, sorted, `unbound`
+ * whether a package-unbound draft is among them.
+ *
+ * Deliberately NOT exported from the package entry, as
+ * {@link packagelessAddressAmbiguityRefusal} is not.
+ */
+export function unboundItemDraftAddress(
+  drafts: { candidates: readonly string[]; unbound: boolean },
+): { kind: 'ambiguous'; candidates: readonly string[] } | { kind: 'draft' | 'none'; key: string | null } {
+  if (drafts.unbound) return { kind: 'draft', key: null };
+  if (drafts.candidates.length > 1) return { kind: 'ambiguous', candidates: drafts.candidates };
+  const only = drafts.candidates[0];
+  return only !== undefined ? { kind: 'draft', key: only } : { kind: 'none', key: null };
+}
+
+/**
  * One live `watch()` subscription, as a record rather than a bare listener.
  *
  * Both halves live together because SHUTDOWN NEEDS THE SECOND ONE. A registry
@@ -783,7 +818,8 @@ export class SysMetadataRepository implements MetadataRepository {
    * Inherit the overlaid ACTIVE row's binding instead. An explicit
    * `packageId` is untouched (a caller that states its base keeps it,
    * ADR-0048), and with no active row — a brand-new item drafted first —
-   * there is nothing to inherit and the package-less semantics stand.
+   * there is nothing to inherit from the active rows (the draft rows decide,
+   * [#23657] below).
    *
    * [#23297] The binding inherited is read from EVERY active row of the
    * address, never from the first row a package-agnostic `findOne` returns
@@ -798,7 +834,14 @@ export class SysMetadataRepository implements MetadataRepository {
    *    ({@link packagelessAddressAmbiguityRefusal}, the refusal the direct save
    *    and the delete answer); {@link headAt} answers the package-unbound
    *    draft key, so a read's version token never names a package picked by
-   *    storage order.
+   *    storage order;
+   *  - [#23657] bound to none (an item never published into a package): the
+   *    address is read from the item's draft rows
+   *    ({@link unboundItemDraftAddress}, the rule the per-item publish and the
+   *    draft discard naming no package take): the package-unbound draft, else
+   *    the one package's draft, else, with two or more packages' drafts,
+   *    `ambiguousPackages`, refused by {@link put} as above. No draft at all
+   *    keeps the package-less semantics of a brand-new item drafted first.
    *
    * [#22877] A write addresses ONE bundle member of a type whose identity is
    * a pair: `member` is that member as {@link OVERLAY_MEMBER_COLUMN} stores
@@ -844,6 +887,30 @@ export class SysMetadataRepository implements MetadataRepository {
       }
       if (bindings.size === 1) targetPackageId = [...bindings][0] ?? null;
       else if (bindings.size > 1) ambiguousPackages = [...bindings].sort();
+      else {
+        // [#23657, ADR-0070 TL;DR 1] No active row bound to a package (an
+        // item never published into one): the address is read from the
+        // item's DRAFT rows, by the rule the per-item publish and the draft
+        // discard naming no package take ({@link unboundItemDraftAddress}).
+        // A package-unbound draft keeps the address; with none, the one
+        // package's draft is the address, never a package-unbound draft
+        // minted beside it; two or more packages' drafts is refused by
+        // {@link put}, as for two packages' active rows.
+        const draftWhere: Record<string, unknown> = { ...activeWhere, state: 'draft' };
+        const draftRows = await this.withoutLegacyOrganizationRows(
+          await this.engine.find('sys_metadata', { where: draftWhere, context }),
+          context,
+        );
+        const draftBindings = new Set<string>();
+        let unbound = false;
+        for (const draftRow of (draftRows ?? []) as Array<{ package_id?: unknown }>) {
+          if (typeof draftRow?.package_id === 'string' && draftRow.package_id !== '') draftBindings.add(draftRow.package_id);
+          else unbound = true;
+        }
+        const address = unboundItemDraftAddress({ candidates: [...draftBindings].sort(), unbound });
+        if (address.kind === 'ambiguous') ambiguousPackages = address.candidates;
+        else targetPackageId = address.key;
+      }
     }
     let row = await this.findEnvironmentRow({
       where: this.whereFor(ref, state, targetPackageId, member),

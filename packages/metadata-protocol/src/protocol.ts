@@ -65,6 +65,7 @@ import {
     packageScopedRowWhere,
     packagelessAddressAmbiguityRefusal,
     resetEnvWritableMetadataTypes,
+    unboundItemDraftAddress,
     type SysMetadataEngine,
 } from './sys-metadata-repository.js';
 import { isOriginGatedType, managedItemSealedSentence } from './packaged-base-regime.js';
@@ -19162,10 +19163,12 @@ export class ObjectStackProtocolImplementation implements
      *    with the refusal the draft save answers
      *    ({@link packagelessAddressAmbiguityRefusal}, `409 RESOURCE_CONFLICT`).
      *  - bound to none (an item never published into a package): the
-     *    package-unbound draft, the one the draft save writes. With no such
-     *    draft, the one package's draft when exactly one package holds a draft
-     *    (the only draft the read naming no package can serve); two or more
-     *    is `ambiguous`; none at all is `none`.
+     *    package-unbound draft. With no such draft, the one package's draft
+     *    when exactly one package holds a draft (the only draft the read
+     *    naming no package can serve); two or more is `ambiguous`; none at
+     *    all is `none`. [#23657] The draft save naming no package writes the
+     *    same draft and is refused the same way: one rule,
+     *    {@link unboundItemDraftAddress}, which `resolveWriteHead` asks too.
      *
      * Every row is read in full, never sampled: a package-agnostic `findOne`
      * over two drafts is a driver-order coin toss (#8907). The per-item publish
@@ -19203,11 +19206,11 @@ export class ObjectStackProtocolImplementation implements
             if (drafts.unbound) return { kind: 'draft', key: null, into: own, drafts };
             return { kind: 'none', key: own, into: own, drafts };
         }
-        if (drafts.unbound) return { kind: 'draft', key: null, into: null, drafts };
-        if (drafts.candidates.length > 1) return { kind: 'ambiguous', candidates: drafts.candidates };
-        const only = drafts.candidates[0];
-        if (only !== undefined) return { kind: 'draft', key: only, into: only, drafts };
-        return { kind: 'none', key: null, into: null, drafts };
+        // [#23657] Bound to none: the rule the draft save's address takes too
+        // ({@link unboundItemDraftAddress}, in `resolveWriteHead`).
+        const address = unboundItemDraftAddress(drafts);
+        if (address.kind === 'ambiguous') return address;
+        return { kind: address.kind, key: address.key, into: address.key, drafts };
     }
 
     /**
@@ -29970,8 +29973,13 @@ export class ObjectStackProtocolImplementation implements
                     // package's row names the package, as the save receipt
                     // does; a delete of the package-unbound row with nothing
                     // left reads byte for byte as before.
+                    //
+                    // [#23657] The draft discard names the package of the
+                    // draft it removed too, as the draft save's receipt names
+                    // the package it wrote into; a package-unbound draft's
+                    // discard reads byte for byte as before.
                     message: (request.state === 'draft')
-                        ? `Draft discarded — ${request.type}/${request.name}. [seq=${result.seq}]`
+                        ? `Draft discarded${deletedPackage} — ${request.type}/${request.name}. [seq=${result.seq}]`
                         : artifactBacked
                             ? (remains
                                 ? `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} still carries another overlay: ${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}. [seq=${result.seq}]`

@@ -524,3 +524,124 @@ describe('[#23495] the draft doors naming no package act on the draft the draft 
         }
     }, 60_000);
 });
+
+/**
+ * [#23657, ADR-0048, ADR-0070 TL;DR 1] An item never published into a package
+ * (no active row bound to one), whose drafts are bound to packages: the draft
+ * save naming no package takes the address the publish and the discard naming
+ * none take (#23495). With no package-unbound draft and exactly one package's
+ * draft, that draft is the address, so the save updates it instead of minting a
+ * package-unbound draft beside it; with two or more packages' drafts the save
+ * is refused `409 RESOURCE_CONFLICT` with the `?package=` remedy, as the
+ * publish and the discard are. Measured on these routes before the fix: the
+ * save answered `200` and the drafts became `[package-unbound, Q]`, after
+ * which the publish and the discard acted on the package-unbound one.
+ */
+describe('[#23657] an item never published into a package: the draft save naming no package takes the draft doors\' address', () => {
+    const Q = 'com.probe.q';
+    const R = 'com.probe.r';
+
+    /** No active row; the only draft bound to `Q`. */
+    const corner = async () => {
+        const h = await boot();
+        ok(await h.save(view('pending'), { mode: 'draft', package: Q }));
+        return h;
+    };
+
+    it('the only draft bound to Q: the save updates Q\'s draft, and the read, the publish and the discard naming none act on it', async () => {
+        const s = await corner();
+        const saved = ok(await s.save(view('saved'), { mode: 'draft' }));
+        expect(saved.message).toContain(`package=${Q}`);
+        expect(await s.stored('draft')).toEqual([{ label: 'saved', packageId: Q }]);
+        // The strict draft read serves that draft, with the version the save
+        // answered, which a second save pinned to it is accepted against.
+        const read = ok(await s.read({ state: 'draft' }));
+        expect(read.item.label).toBe('saved');
+        expect(read.version).toMatch(KEYED);
+        expect(read.version).toBe(saved.version);
+        ok(await s.save(view('saved again'), { mode: 'draft' }, { 'if-match': read.version }));
+        expect(await s.stored('draft')).toEqual([{ label: 'saved again', packageId: Q }]);
+
+        ok(await s.publish());
+        expect(await s.stored('active')).toEqual([{ label: 'saved again', packageId: Q }]);
+        expect(await s.stored('draft')).toEqual([]);
+
+        const d = await corner();
+        ok(await d.save(view('saved'), { mode: 'draft' }));
+        const discarded = ok(await d.remove({ state: 'draft' }));
+        expect(discarded.reset).toBe(true);
+        expect(await d.stored('draft')).toEqual([]);
+    }, 60_000);
+
+    it('the only draft bound to Q: a first-write pin (`If-None-Match: *`) is refused 409 METADATA_CONFLICT, because Q\'s draft is the row it writes', async () => {
+        const s = await corner();
+        refusedConflict(await s.save(view('first?'), { mode: 'draft' }, { 'if-none-match': '*' }));
+        expect(await s.stored('draft')).toEqual([{ label: 'pending', packageId: Q }]);
+    }, 60_000);
+
+    it('the discard receipt names the package of the draft it removed; a package-unbound draft\'s receipt reads as before', async () => {
+        const d = await corner();
+        const bound = ok(await d.remove({ state: 'draft' }));
+        expect(bound.message).toContain(`(package=${Q})`);
+
+        const u = await boot();
+        ok(await u.save(view('plain'), { mode: 'draft' }));
+        const unbound = ok(await u.remove({ state: 'draft' }));
+        expect(unbound.message).toBe(`Draft discarded — view/case_grid. [seq=${unbound.seq}]`);
+    }, 60_000);
+
+    it('drafts bound to two packages and no package-unbound draft: the save naming none is refused 409 RESOURCE_CONFLICT, as the publish and the discard are, and writes nothing', async () => {
+        const build = async () => {
+            const h = await boot();
+            ok(await h.save(view('q'), { mode: 'draft', package: Q }));
+            ok(await h.save(view('r'), { mode: 'draft', package: R }));
+            return h;
+        };
+        const both = [{ label: 'q', packageId: Q }, { label: 'r', packageId: R }];
+        for (const door of ['save', 'publish', 'discard'] as const) {
+            const h = await build();
+            const res = door === 'save'
+                ? await h.save(view('saved'), { mode: 'draft' })
+                : door === 'publish' ? await h.publish() : await h.remove({ state: 'draft' });
+            expect(res.statusCode, `${door}: ${JSON.stringify(res.body)}`).toBe(409);
+            expect(res.body.code, door).toBe('RESOURCE_CONFLICT');
+            expect(res.body.error, door).toContain('?package=');
+            expect(res.body.error, door).toContain(R);
+            expect(await h.stored('draft'), door).toEqual(expect.arrayContaining(both));
+            expect(await h.stored('draft'), door).toHaveLength(2);
+            expect(await h.stored('active'), door).toEqual([]);
+        }
+        // The remedy: naming the package saves that package's draft.
+        const named = await build();
+        ok(await named.save(view('saved'), { mode: 'draft', package: R }));
+        expect(await named.stored('draft')).toEqual(expect.arrayContaining([{ label: 'q', packageId: Q }, { label: 'saved', packageId: R }]));
+    }, 60_000);
+
+    it('control: an item with an active binding inherits the active row\'s package, whatever package another draft is bound to', async () => {
+        const h = await boot();
+        ok(await h.save(view('live'), { package: PKG }));
+        ok(await h.save(view('pending'), { mode: 'draft', package: Q }));
+        const saved = ok(await h.save(view('saved'), { mode: 'draft' }));
+        expect(saved.message).toContain(`package=${PKG}`);
+        expect(await h.stored('draft')).toEqual(expect.arrayContaining([{ label: 'pending', packageId: Q }, { label: 'saved', packageId: PKG }]));
+        expect(await h.stored('draft')).toHaveLength(2);
+    }, 60_000);
+
+    it('control: a package-unbound draft is the address whatever packages\' drafts sit beside it, as for the publish and the discard', async () => {
+        const only = await boot();
+        ok(await only.save(view('plain'), { mode: 'draft' }));
+        const saved = ok(await only.save(view('plain 2'), { mode: 'draft' }));
+        expect(saved.message).not.toContain('package=');
+        expect(await only.stored('draft')).toEqual([{ label: 'plain 2', packageId: null }]);
+
+        const beside = await boot();
+        ok(await beside.save(view('plain'), { mode: 'draft' }));
+        ok(await beside.save(view('q'), { mode: 'draft', package: Q }));
+        ok(await beside.save(view('r'), { mode: 'draft', package: R }));
+        ok(await beside.save(view('plain 2'), { mode: 'draft' }));
+        expect(await beside.stored('draft')).toEqual(expect.arrayContaining([
+            { label: 'plain 2', packageId: null }, { label: 'q', packageId: Q }, { label: 'r', packageId: R },
+        ]));
+        expect(await beside.stored('draft')).toHaveLength(3);
+    }, 60_000);
+});
