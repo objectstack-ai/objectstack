@@ -18,7 +18,7 @@ export const entry: SemanticMigration = {
   // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
   // inside a code span.
   surface:
-    "kind:'html' page source (and its deprecated kind:'jsx' alias) in a project with no "
+    "kind:'html' page source in a project with no "
     + 'sdui.manifest.json of its own — the div tag, and any other tag or prop the SDUI '
     + 'component manifest shipped in @objectstack/console does not declare',
   replacement:

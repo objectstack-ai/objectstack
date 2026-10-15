@@ -26143,6 +26143,9 @@ export class ObjectStackProtocolImplementation implements
      *  3. the registry's uninstall refusal (another package extends an object
      *     this one owns, ADR-0029), asked through
      *     `SchemaRegistry.assertPackageUninstallable` — pure; thrown as is;
+     *     then [#23473] the shared-object refusal (another stored row holds an
+     *     object whose table this uninstall would drop) — reads only, the
+     *     per-item delete's own address reads; `RESOURCE_CONFLICT` / 409;
      *  4. the `sys_packages` delete through the `package` service — the FIRST
      *     durable step; a refusal, returned or thrown, is thrown as this verb's
      *     failure (see {@link packagePersistFailureError});
@@ -26230,6 +26233,73 @@ export class ObjectStackProtocolImplementation implements
         const packageRegistry = (this.engine as any)?.registry;
         if (typeof packageRegistry?.assertPackageUninstallable === 'function') {
             packageRegistry.assertPackageUninstallable(request.packageId);
+        }
+
+        // [#23473, ADR-0048] THE SHARED-OBJECT REFUSAL, ALSO ASKED BEFORE THE
+        // STORE DELETE. A `sys_metadata` row is keyed by its package, so an
+        // object this package holds can also be held by another package's row,
+        // or by the package-less row, all served over the ONE table its name
+        // maps to. The per-item delete below drops an object's table only with
+        // its last stored row and otherwise refuses `409`
+        // ({@link dropStorageRemainingRowsRefusal}). Met there, that refusal
+        // came after the stored package row was gone, so it left the package
+        // half-uninstalled: no `sys_packages` row, and its row of the shared
+        // object still stored and served.
+        //
+        // So the same question is asked here, of the same rows, before anything
+        // durable: for each active object row whose table this uninstall would
+        // drop ({@link shouldDropStorage}), the per-item delete's own address
+        // read ({@link packagelessAddress}, the type folded as that delete
+        // folds it). An object this package holds there beside any other row
+        // refuses the whole uninstall, with nothing removed, as step 3 does
+        // for an extended object. ⛔ Not "uninstall and keep the shared table":
+        // dropping the tables is this verb's declared default, and an
+        // uninstall that quietly drops fewer than it says is an opt-in the
+        // runtime does not honour.
+        //
+        // With `keepData: true` no table is dropped, so sharing decides
+        // nothing and nothing is read. `RESOURCE_CONFLICT` / 409, no code
+        // minted: the per-item refusal's code for the same rows (environment
+        // state, not the request: the same uninstall is accepted once the other
+        // rows, or this package's row, are gone). A failed read is this verb's
+        // step-2 read failure ({@link metadataReadFailureError}), never "not
+        // shared". The prescription first: a 4xx message can be truncated.
+        if (request.keepData !== true) {
+            const shared: string[] = [];
+            const asked = new Set<string>();
+            for (const row of rows) {
+                if (row?.state === 'draft' || typeof row?.name !== 'string') continue;
+                const canonical = canonicalMetaType(String(row.type));
+                const type = PLURAL_TO_SINGULAR[canonical] ?? canonical;
+                if (!this.shouldDropStorage(type, row.name, true, 'active') || asked.has(row.name)) continue;
+                asked.add(row.name);
+                let at: { candidates: readonly string[]; unbound: boolean };
+                try {
+                    at = await this.packagelessAddress(type, row.name, undefined, 'active');
+                } catch (e) {
+                    throw metadataReadFailureError(e);
+                }
+                if (!at.candidates.includes(request.packageId)) continue;
+                const others = at.candidates.filter((id) => id !== request.packageId);
+                if (others.length === 0 && !at.unbound) continue;
+                shared.push(`'${row.name}' (${remainingRowsPhrase(others, at.unbound, 'row')})`);
+            }
+            if (shared.length > 0) {
+                const more = shared.length > 5 ? `; and ${shared.length - 5} more` : '';
+                const err = new Error(
+                    `Uninstall package '${request.packageId}' with keepData (?keepData=true; keepData: true in `
+                    + 'process), which keeps all its object tables, or first delete, without dropStorage, its row '
+                    + 'or the other rows of each object below (DELETE /api/v1/meta/object/NAME?package=ID). '
+                    + "Nothing was removed: an uninstall drops an object's table only with the object's last row, and "
+                    + (shared.length === 1
+                        ? 'an object of this package is'
+                        : `${shared.length} objects of this package are`)
+                    + ` also held by other rows: ${shared.slice(0, 5).join('; ')}${more}.`,
+                ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
+                err.code = 'RESOURCE_CONFLICT';
+                err.status = 409;
+                throw err;
+            }
         }
 
         // [#21276] THE STORE DELETE COMES FIRST, and its refusal is this verb's

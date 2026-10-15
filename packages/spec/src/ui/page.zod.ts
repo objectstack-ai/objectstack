@@ -8,7 +8,7 @@ import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { SortItemSchema } from '../shared/enums.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ResponsiveStylesSchema } from './responsive.zod';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import {
   UserActionsConfigSchema,
   AppearanceConfigSchema,
@@ -941,7 +941,7 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
 
 /**
  * The `kind` ⇄ `source` completeness check attached to {@link PageSchema}
- * (ADR-0080/0081 + ADR-0078): an `html` / `react` / `jsx` page with no
+ * (ADR-0080/0081 + ADR-0078): an `html` / `react` page with no
  * `source` is silently inert — it validates and then renders nothing — so it
  * is refused at author time, at `source`, naming the kind. A `kind` that is
  * absent is the spec default (`full`), which carries no source: nothing to
@@ -959,7 +959,7 @@ export function checkPageSourceCompleteness(
   page: { kind?: string; source?: unknown },
   ctx: z.RefinementCtx,
 ): void {
-  const sourceKinds = ['html', 'react', 'jsx'];
+  const sourceKinds = ['html', 'react'];
   if (page.kind === undefined || !sourceKinds.includes(page.kind)) return;
   if (!(typeof page.source === 'string' && page.source.trim().length > 0)) {
     ctx.addIssue({
@@ -971,17 +971,40 @@ export function checkPageSourceCompleteness(
 }
 
 /**
+ * The `PageSchema.kind` members retired from the vocabulary, each with the
+ * prescription an author meets in place of zod's anonymous enum error
+ * (`enumWithRetiredValues`, `shared/retired-key.ts`).
+ *
+ * `jsx` was the first name of the constrained-JSX tier (ADR-0080); ADR-0081
+ * renamed it `html`, and the `page-kind-jsx-to-html` conversion (ADR-0087 D2,
+ * protocol 11) rewrote it at load until 18, when a maintainer ruling retired
+ * the value (#23543, F5-jsx A). Stored pages keep loading: every stored-row
+ * rehydration seam replays the retired conversion, so a `sys_metadata` row
+ * written as `jsx` reaches this schema as `html`. The prescription carries no
+ * `os migrate meta` sentence on purpose: the rename belongs to protocol 11,
+ * below `MIGRATION_SUPPORT_FLOOR`, so the tool lists no edit for it.
+ */
+const PAGE_KIND_RETIRED_GUIDANCE = {
+  jsx:
+    "Page `kind: 'jsx'` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the first name of the "
+    + "constrained-JSX tier, which ADR-0081 renamed `html`, and the loader rewrote it to `html` until this "
+    + "release. Use `kind: 'html'`. Change the value; the page's `source` is compiled and rendered exactly as "
+    + 'before, and `requires` stays legal on it.',
+} as const;
+
+/**
  * The page kinds whose `source` the metadata save door compiles at save —
- * `html` and its deprecated alias `jsx` (ADR-0080) — and therefore the only
+ * `html` alone since its first name, `jsx`, was retired at 18 (ADR-0081
+ * renamed it; `PAGE_KIND_RETIRED_GUIDANCE`) — and therefore the only
  * kinds that carry `requires`: on these the platform derives the list from the
  * compiled source and stores it (ADR-0080 §5). A `react` source is executed at
  * render, never compiled at save (ADR-0081), and `full` / `slotted` pages have
  * no source to derive from, so nothing derives the key there.
  *
- * The save door's own compile gate holds the same two kinds
+ * The save door's own compile gate holds the same kind
  * (`COMPILED_PAGE_KINDS` in `metadata-protocol`'s `runtime-authoring-gate.ts`).
  */
-export const COMPILED_PAGE_KINDS = ['html', 'jsx'] as const;
+export const COMPILED_PAGE_KINDS = ['html'] as const;
 
 /**
  * The `kind` ⇄ `requires` check attached to {@link PageSchema}: `requires` is
@@ -1020,8 +1043,8 @@ export function checkPageRequiresKind(
     message:
       `\`requires\` is refused on a \`kind: '${kind}'\` page`
       + (kind === 'full' ? ' (`full` is also the kind of a page that omits `kind`)' : '')
-      + ': it exists only on the kinds whose source the platform compiles at save, `html` and its '
-      + 'deprecated alias `jsx`, where it is derived from the source and stored. On a '
+      + ': it exists only on the kind whose source the platform compiles at save, `html`, where '
+      + 'it is derived from the source and stored. On a '
       + `\`${kind}\` page nothing derives it and nothing enforces it. Delete the key. `
       + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   });
@@ -1450,7 +1473,7 @@ const PRINT_PAGE_TYPES_PHRASE = "of `type: 'record'`, `'home'` or `'app'` with i
  *  - `print` on a `slotted` page — every slot it does not override is drawn
  *    from the synthesized default layout (related lists, the discussion feed),
  *    which the subset refuses and no author ever wrote;
- *  - `print` on an `html` / `jsx` / `react` page — its blocks are compiled (or,
+ *  - `print` on an `html` / `react` page — its blocks are compiled (or,
  *    for `react`, executed) from `source`, so there are no authored blocks to
  *    judge;
  *  - `print` on a `list` page — it draws its records through `interfaceConfig`
@@ -1722,11 +1745,11 @@ export const PageSchema = lazySchema(() => strictObject({
    * amendment; the describe cites the ADRs and leaves the amendment date here,
    * since it is form help in Studio (#22093).
    */
-  kind: z.enum(['full', 'slotted', 'html', 'react', 'jsx']).default('full')
+  kind: enumWithRetiredValues(['full', 'slotted', 'html', 'react'], PAGE_KIND_RETIRED_GUIDANCE).default('full')
     .describe(
       "Page override mode. full | slotted = structured authoring; " +
       "html = author-written constrained JSX compiled (parsed, never " +
-      "executed) to the tree (ADR-0080; the legacy value 'jsx' is a deprecated alias), " +
+      "executed) to the tree (ADR-0080; ADR-0081 named it html), " +
       "styled by the registered components' structured props plus a JSON `style` " +
       "object with hsl(var(--token)) theme colors; " +
       "react = real-React source executed at render by the runtime (ADR-0081), styled " +
@@ -1779,7 +1802,7 @@ export const PageSchema = lazySchema(() => strictObject({
   }).optional().describe('Slot override map for slotted pages'),
 
   /**
-   * JSX-source authoring (ADR-0080). When `kind === 'html'` (alias `'jsx'`),
+   * JSX-source authoring (ADR-0080). When `kind === 'html'`,
    * `source` is the source-of-truth: a constrained JSX text compiled by
    * `@objectstack/sdui-parser` into the SchemaNode tree at SAVE time — parse,
    * never execute. `regions` then hold the DERIVED tree (a cache; the source
@@ -1793,12 +1816,12 @@ export const PageSchema = lazySchema(() => strictObject({
    * styles via inline `style` with the same token colors.
    */
   source: z.string().optional()
-    .describe("Page source text. For kind==='html' (alias 'jsx') it is constrained JSX compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute), styled by the registered components' structured props plus a JSON `style` object with hsl(var(--token)) theme colors. For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier), styled by inline `style` with the same token colors. Do not author Tailwind classes in page source in either tier: `source` is runtime metadata the build-time Tailwind never scans, so utility classNames silently produce no CSS (ADR-0065; ADR-0080). Authoritative over `regions` in both."),
+    .describe("Page source text. For kind==='html' it is constrained JSX compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute), styled by the registered components' structured props plus a JSON `style` object with hsl(var(--token)) theme colors. For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier), styled by inline `style` with the same token colors. Do not author Tailwind classes in page source in either tier: `source` is runtime metadata the build-time Tailwind never scans, so utility classNames silently produce no CSS (ADR-0065; ADR-0080). Authoritative over `regions` in both."),
   /**
    * Plugin namespaces an html page's source uses (ADR-0080 §5; ADR-0048
    * provenance). Derived from the source at save, so authors omit it. The key
    * exists only on the kinds whose source the save door compiles —
-   * {@link COMPILED_PAGE_KINDS}, `html` (alias `jsx`) — and is refused at
+   * {@link COMPILED_PAGE_KINDS}, `html` — and is refused at
    * parse on a `react`, `full` or `slotted` page, a page that omits `kind`
    * included ({@link checkPageRequiresKind}). On a server that has the
    * deployment's SDUI component manifest, the save door compiles a
@@ -1809,7 +1832,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * boot.
    */
   requires: z.array(z.string()).optional()
-    .describe("Plugin namespaces the page's source uses, derived from the source at save — omit it. The key exists only on a kind==='html' page (alias 'jsx'), the kinds whose source is compiled at save; on a 'react', 'full' or 'slotted' page — and a page that omits kind, which is 'full' — it is refused at parse. On a server that has the deployment's SDUI component manifest, saving an html page compiles its source and stores the namespaces it uses here; a written list that disagrees with the source is refused (422 INVALID_METADATA, page-requires-disagrees-with-source) — on a draft save it is kept until the draft's publish, which refuses it. At load, a stored page whose list names a plugin no component in that manifest carries is reported, page and plugin named, and is still served. A server with no manifest checks neither and says so once at boot."),
+    .describe("Plugin namespaces the page's source uses, derived from the source at save — omit it. The key exists only on a kind==='html' page, the kind whose source is compiled at save; on a 'react', 'full' or 'slotted' page — and a page that omits kind, which is 'full' — it is refused at parse. On a server that has the deployment's SDUI component manifest, saving an html page compiles its source and stores the namespaces it uses here; a written list that disagrees with the source is refused (422 INVALID_METADATA, page-requires-disagrees-with-source) — on a draft save it is kept until the draft's publish, which refuses it. At load, a stored page whose list names a plugin no component in that manifest carries is reported, page and plugin named, and is still served. A server with no manifest checks neither and says so once at boot."),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `page` is a registered metadata type, so `MetadataPlugin`'s loader stamps
@@ -1818,7 +1841,7 @@ export const PageSchema = lazySchema(() => strictObject({
   // shape closed.
   ...MetadataProtectionFields,
 })
-  // ADR-0080/0081 + ADR-0078 (completeness): an html/react/jsx page with no
+  // ADR-0080/0081 + ADR-0078 (completeness): an html/react page with no
   // `source` is silently inert — fail loudly at author time, never render empty.
   // Attached by identifier, not inlined: the export is the rule a `.shape`
   // mirror re-attaches (#16489), and it must be this binding, not a copy.

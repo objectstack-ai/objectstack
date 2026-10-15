@@ -42,7 +42,7 @@ const D3_ID = 'page-requires-non-compiled-kind-refused';
 
 const BASE = { name: 'home_page', label: 'Home', type: 'home' } as const;
 /** The kinds a `source` is required on — every fixture of one carries a source, so only `requires` is judged. */
-const SOURCE_KINDS = new Set(['html', 'jsx', 'react']);
+const SOURCE_KINDS = new Set(['html', 'react']);
 const page = (kind: string | undefined, extra: Record<string, unknown> = {}) => ({
   ...BASE,
   ...(kind === undefined ? {} : { kind }),
@@ -64,9 +64,10 @@ function refusalOf(value: unknown) {
 }
 
 describe('page `requires` — the parse refuses it outside the compiled kinds', () => {
-  it('the vocabulary: five kinds, of which `html` and `jsx` are the compiled ones', () => {
-    expect([...PAGE_KINDS].sort()).toEqual(['full', 'html', 'jsx', 'react', 'slotted']);
-    expect([...COMPILED_PAGE_KINDS]).toEqual(['html', 'jsx']);
+  // `jsx`, the compiled tier's first name, retired at 18 (#23543 F5-jsx).
+  it('the vocabulary: four kinds, of which `html` is the compiled one', () => {
+    expect([...PAGE_KINDS].sort()).toEqual(['full', 'html', 'react', 'slotted']);
+    expect([...COMPILED_PAGE_KINDS]).toEqual(['html']);
     expect(PAGE_KINDS.filter((k) => !(COMPILED_PAGE_KINDS as readonly string[]).includes(k)).sort())
       .toEqual([...NON_COMPILED].sort());
   });
@@ -79,7 +80,8 @@ describe('page `requires` — the parse refuses it outside the compiled kinds', 
     expect(issue!.path).toEqual(['requires']);
     expect(issue!.message.startsWith(`\`requires\` is refused on a \`kind: '${kind}'\` page`)).toBe(true);
     expect(issue!.message).toContain('`html`');
-    expect(issue!.message).toContain('`jsx`');
+    // The retired `jsx` is no compiled kind to send an author to.
+    expect(issue!.message).not.toContain('jsx');
     expect(issue!.message).toContain('Delete the key.');
     // Runtime prose carries no tracker number (`check:doc-authoring`).
     expect(issue!.message).not.toMatch(/#\d/);

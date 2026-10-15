@@ -1204,7 +1204,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       source: {
         label: "页面源码",
-        helpText: "页面源码文本。kind 为 'html'（别名 'jsx'）时，它是受约束的 JSX，在保存时被编译成组件树——只解析，绝不执行。kind 为 'react' 时，它是真正的 React，由受信任运行时在渲染时执行。"
+        helpText: "页面源码文本。kind 为 'html' 时，它是受约束的 JSX，在保存时被编译成组件树——只解析，绝不执行。kind 为 'react' 时，它是真正的 React，由受信任运行时在渲染时执行。"
       },
       object: {
         label: "对象",
