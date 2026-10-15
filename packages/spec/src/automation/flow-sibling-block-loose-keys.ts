@@ -65,6 +65,23 @@ function looseKeyTargets(type: unknown): ReadonlyMap<string, string> | undefined
 }
 
 /**
+ * Where a loose key goes. `timeoutMs` is the one key whose block spelling is
+ * itself retired (`waitEventConfig.timeoutMs`, removed at 17 because it was only
+ * ever read as the timer duration), so its move is the one the chain makes for
+ * it: onto `timerDuration`, as a string.
+ */
+function looseKeyMove(block: string, key: string, target: string): string {
+  if (block === 'waitEventConfig' && key === 'timeoutMs') {
+    return 'It was only ever read as the timer duration in milliseconds: move it to `waitEventConfig.timerDuration` '
+      + "as a string (`timeoutMs: 60000` → `timerDuration: '60000'`, or `'PT1M'`). If `waitEventConfig.timerDuration` "
+      + 'is already set, it is the one the node runs with — delete `config.timeoutMs`.';
+  }
+  const rename = target === key ? '' : ` (the key is \`${target}\` there; \`${key}\` was only ever an executor fallback)`;
+  return `Move it to \`${block}.${target}\`${rename}; the value is unchanged. If \`${block}.${target}\` is already set, `
+    + `it is the one the node runs with — delete \`config.${key}\`.`;
+}
+
+/**
  * Every named loose key under a `wait` / `connector_action` node's `config`,
  * each refused at `config.<key>` with the prescription naming the sibling block
  * key it belongs on. Judged by the `FlowSchema` superRefine for every node the
@@ -83,14 +100,12 @@ export function siblingBlockLooseConfigRefusals(node: unknown): Array<{ path: Pr
   for (const key of Object.keys(node.config)) {
     const target = targets.get(key);
     if (target === undefined || node.config[key] === undefined) continue;
-    const rename = target === key ? '' : ` (the key is \`${target}\` there; \`${key}\` was only ever an executor fallback)`;
     out.push({
       path: ['config', key],
       message:
         `A \`${String(node.type)}\` node's \`config.${key}\` was removed in @objectstack/spec 18 (ADR-0087 D2) — this `
         + `node type has no \`config\` contract: its executor reads only the \`${block}\` block, and the loader lifted `
-        + `this key into it until this release. Move it to \`${block}.${target}\`${rename}; the value is unchanged. If `
-        + `\`${block}.${target}\` is already set, it is the one the node runs with — delete \`config.${key}\`. `
+        + `this key into it until this release. ${looseKeyMove(block, key, target)} `
         + MIGRATE_META_SENTENCE,
     });
   }
