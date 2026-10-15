@@ -22,6 +22,6 @@ What changes for you, wherever `@objectstack/rest` or the runtime dispatcher ser
 
 How it renders: `RestServer` answers `{ error, code: 'VALIDATION_FAILED', fields, object }`, the envelope its request gate already used. The runtime dispatcher returns its own `400 VALIDATION_FAILED` envelope, `fields` under `error.details`, instead of throwing, so a `@objectstack/hono` `createHonoApp` host renders it as `400`.
 
-Unchanged: a record body, `{}` included; a string `expectedVersion` (judged; `409` on a mismatch); `If-Match` and the `DELETE`'s `?expectedVersion`, which are strings by transport; and a JSON `null` body on a `POST` create, which both doors still read as an empty record and answer `201`.
+Unchanged: a record body, `{}` included; a string `expectedVersion` (judged; `409` on a mismatch); and `If-Match` and the `DELETE`'s `?expectedVersion`, which are strings by transport. A JSON `null` body on a `POST` create is refused too, on both doors, in the companion entry for the `/data` create and query requests.
 
 To send a patch or a row, send the fields as a JSON object. To guard a write, send the version you read (the record's `updated_at`) as a string. The `@objectstack/client` SDK's `data.update` sends the version as an `If-Match` header string, so an SDK caller is affected only when the `data` it passes is not an object, or carries a number `expectedVersion`.
