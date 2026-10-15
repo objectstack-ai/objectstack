@@ -1289,6 +1289,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "添加记录",
         helpText: "添加记录的入口"
       },
+      "interfaceConfig.emptyState": {
+        label: "空状态",
+        helpText: "列表没有记录时页面显示的内容：标题、说明、图标和一个链接。在此设置后，它将替换源视图的空状态。"
+      },
       "interfaceConfig.buttons": {
         label: "按钮",
         helpText: "工具栏按钮——从该对象的操作中选择"

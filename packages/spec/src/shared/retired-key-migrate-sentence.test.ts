@@ -235,9 +235,14 @@ const lineAt = (segments: Array<{ start: number; line: number }>, at: number): n
   return line;
 };
 
+type Reconstructed = ReturnType<typeof reconstruct>;
+
 /** Every `os migrate meta --from <N>` prescription in one file, with its verdict. */
 export function judgeMigrateSentences(raw: string, file = '<inline>'): JudgedSite[] {
-  const { merged, segments } = reconstruct(raw);
+  return judgeReconstructed(reconstruct(raw), file);
+}
+
+function judgeReconstructed({ merged, segments }: Reconstructed, file: string): JudgedSite[] {
   const judged: JudgedSite[] = [];
   for (const m of merged.matchAll(MARKER)) {
     const at = m.index ?? 0;
@@ -257,7 +262,10 @@ export function judgeMigrateSentences(raw: string, file = '<inline>'): JudgedSit
  * that names `--from <N>`.
  */
 export function findWithdrawnClaims(raw: string, file = '<inline>'): Array<{ file: string; line: number; excerpt: string }> {
-  const { merged, segments } = reconstruct(raw);
+  return withdrawnClaimsIn(reconstruct(raw), file);
+}
+
+function withdrawnClaimsIn({ merged, segments }: Reconstructed, file: string): Array<{ file: string; line: number; excerpt: string }> {
   return [...merged.matchAll(WITHDRAWN_CLAIM)].map((m) => {
     const at = m.index ?? 0;
     return {
@@ -276,28 +284,33 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-function judgeTree(): JudgedSite[] {
-  const all: JudgedSite[] = [];
+/**
+ * The corpora, walked, read and reconstructed ONCE per run of this file: four
+ * cases below ask `judgeTree()` or `claimTree()` about the same tree, and each
+ * used to repeat the whole walk. Only the INPUT is shared — every case still
+ * judges it for itself, with the functions the inline cases below exercise.
+ */
+let corpusMemo: Array<{ file: string; text: Reconstructed }> | undefined;
+function reconstructedCorpus(): Array<{ file: string; text: Reconstructed }> {
+  if (corpusMemo) return corpusMemo;
+  const files: Array<{ file: string; text: Reconstructed }> = [];
   for (const corpus of CORPORA) {
     for (const file of walk(corpus.root)) {
       const rel = path.relative(corpus.root, file);
       if (corpus.outOfScope.has(rel)) continue;
-      all.push(...judgeMigrateSentences(fs.readFileSync(file, 'utf8'), `${corpus.name}:${rel}`));
+      files.push({ file: `${corpus.name}:${rel}`, text: reconstruct(fs.readFileSync(file, 'utf8')) });
     }
   }
-  return all;
+  corpusMemo = files;
+  return files;
+}
+
+function judgeTree(): JudgedSite[] {
+  return reconstructedCorpus().flatMap(({ file, text }) => judgeReconstructed(text, file));
 }
 
 function claimTree(): Array<{ file: string; line: number; excerpt: string }> {
-  const all: Array<{ file: string; line: number; excerpt: string }> = [];
-  for (const corpus of CORPORA) {
-    for (const file of walk(corpus.root)) {
-      const rel = path.relative(corpus.root, file);
-      if (corpus.outOfScope.has(rel)) continue;
-      all.push(...findWithdrawnClaims(fs.readFileSync(file, 'utf8'), `${corpus.name}:${rel}`));
-    }
-  }
-  return all;
+  return reconstructedCorpus().flatMap(({ file, text }) => withdrawnClaimsIn(text, file));
 }
 
 describe('`os migrate meta` sentences are the house sentence, across corpora', () => {

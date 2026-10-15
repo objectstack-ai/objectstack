@@ -1289,6 +1289,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Agregar registro",
         helpText: "Punto de entrada para agregar registros"
       },
+      "interfaceConfig.emptyState": {
+        label: "Estado vacío",
+        helpText: "Lo que muestra la página cuando su lista no tiene registros: un título, un mensaje, un icono y un enlace. Si se define aquí, sustituye al estado vacío de la vista de origen."
+      },
       "interfaceConfig.buttons": {
         label: "Botones",
         helpText: "Botones de la barra de herramientas — elige entre las acciones de este objeto"
