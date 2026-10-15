@@ -72,7 +72,15 @@ Page
 
 ## Page Templates
 
-Top-level layout structures that define macro organization.
+Top-level layout structures that define macro organization. `template` is one of the
+layouts the console registers — `default` (`header`, `sidebar`, `main`, `aside`,
+`footer`), `header-sidebar-main` (`header`, `sidebar`, `main`), `three-column` (the same
+five as `default`) or `dashboard` (`header`, `footer`, and every other region a grid cell)
+— and each region's `name` is a slot that template places. Any other template name, and
+on a `kind: 'full'` page any region name the template does not place, is refused when the
+page is parsed (`os validate`, `os build`, the metadata save door): the console would draw
+an unregistered template as the default layout, and stack an unplaced region under `main`
+at full width with its `width` ignored.
 
 ### Standard Template
 
@@ -102,7 +110,7 @@ name: account_record
 label: Account Record Page
 type: record
 object: account
-template: standard
+template: default
 regions:
   - name: header
     components:
@@ -150,22 +158,23 @@ regions:
 
 High-density layout for power users (like Salesforce Service Console).
 
+It is the `header-sidebar-main` template: the list in `sidebar`, the record in `main`.
+
 {/* os:check-yaml page */}
 ```yaml
 name: service_console
 label: Service Console
 type: app
-template: console
+template: header-sidebar-main
 regions:
-  - name: left
+  - name: sidebar
     width: small
     components:
       - type: object-grid
         properties:
           objectName: case
 
-  - name: right
-    width: full
+  - name: main
     components:
       - type: page:tabs
         properties:
@@ -218,9 +227,8 @@ regions:
   a matching `Multi-Step Onboarding Wizard` example further down. **`steps` exists
   on no schema.** `PageSchema` is `.strict()`, so it is refused by name
   (`Unrecognized key(s) on this page: steps`), and no other shape in the spec
-  declares it either. `template: wizard` compounds it quietly: `template` is a
-  free-form string, so that half *parses* while naming a layout template no
-  renderer provides.
+  declares it either. `template: wizard` is refused as well: `template` names
+  one of the layouts the console registers, and no renderer provides a wizard.
 
   Both are **removed rather than implemented** — multi-step authoring is an
   implementation card first, exactly like the deferred tab loading and the
@@ -751,7 +759,7 @@ properties:
   **There is no page-level `layout:` block.** Earlier revisions of this page
   described three advanced layouts as a top-level `layout:` mapping —
   `split_view`, `card_grid` and `kanban`. On `PageSchema`, `layout` is an
-  **alias for `template`**, a plain string naming a layout template, so a mapping
+  **alias for `template`**, which names one of the registered layout templates, so a mapping
   written there is refused with exactly that rename hint (`Did you mean layout →
   template?`). None of `split_view`, `card_grid`, `list_view` or `detail_view` is
   a type on any schema.
@@ -837,12 +845,12 @@ interface Page {
   // ever shipped). They live in PAGE_TYPE_ROADMAP; authoring one now fails
   // validation. See page.zod.ts (PageTypeSchema / PAGE_TYPE_ROADMAP).
   object?: string;       // bound object for record pages
-  template?: string;     // layout template name, default 'default'
+  template?: 'default' | 'header-sidebar-main' | 'three-column' | 'dashboard';  // default 'default'
   regions?: PageRegion[]; // named regions, each holding components (optional; defaults to [])
 }
 
 interface PageRegion {
-  name: string;          // e.g. "header", "main", "sidebar"
+  name: string;          // a slot the page's template places: header, sidebar, main, aside, footer
   width?: 'small' | 'medium' | 'large' | 'full';
   components: PageComponent[];
 }
@@ -1010,7 +1018,7 @@ name: customer_360
 label: Customer 360
 type: record
 object: customer
-template: standard
+template: default
 regions:
   - name: header
     components:
