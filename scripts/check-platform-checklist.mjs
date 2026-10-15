@@ -133,7 +133,9 @@
 //     a REFUSAL. The mode ⛔ never falls back to the full corpus or to an empty
 //     set.
 //   - Exit codes: 0 when nothing judged was lost, or nothing was judged; 1 when
-//     an anchor was lost; 2 when the change set was refused.
+//     an anchor was lost; 2 when the run was refused (the request, the change
+//     set, or a working tree the sweep cannot read, such as a file deleted from
+//     disk but not from the index).
 //   - Cost: the same wall time as the full gate, one whole-corpus sweep plus
 //     the inline batteries, because the filter sits on the verdict and not on
 //     the resolution. Resolving only the judged anchors would need a
@@ -3000,11 +3002,14 @@ if (process.argv.slice(2).includes('--self-test')) {
   process.exit(1);
 }
 
-// The scoped mode's request, read BEFORE the batteries, so a malformed one is
-// refused at once instead of after the batteries' wall time. Its change set is
-// read after them, because the verdict it feeds needs their controls to pass.
+// The scoped mode's request and change set, read BEFORE the batteries, so a
+// malformed request or an unreadable change set is refused at once instead of
+// after the batteries' wall time. The verdict waits for the batteries, because
+// it is only as good as their controls.
 const scopedRequest = scopedModeRequest(process.argv.slice(2));
 if (scopedRequest?.refusal) refuseScoped(scopedRequest.refusal);
+const scopedChange = scopedRequest ? changedFilesSince(scopedRequest.ref, gitInRoot) : null;
+if (scopedChange?.refusal) refuseScoped(scopedChange.refusal);
 
 // The extractor's own positive control, before it is trusted with anything.
 const trapControl = selfTestTrapVocabulary();
@@ -3109,16 +3114,24 @@ if (inlineRosterFailures.length) {
 // The ledger walk, coverage, traps, the floor and the residual's own upkeep are
 // the full gate's and are not judged (see the header).
 if (scopedRequest) {
-  const change = changedFilesSince(scopedRequest.ref, gitInRoot);
-  if (change.refusal) refuseScoped(change.refusal);
-  const scopedSweep = sweepCorpus(CORPUS, ROOT);
+  // The shared sweep lists files from the INDEX and reads them from the
+  // working tree, so a file deleted from disk but not from the index throws
+  // ENOENT. Measured on this branch: the full gate crashes on it with exit 1.
+  // Here exit 1 means "an anchor was lost", so a sweep that cannot read the
+  // tree is a refusal with its remedy, and never a red or a green.
+  let scopedSweep;
+  try {
+    scopedSweep = sweepCorpus(CORPUS, ROOT);
+  } catch (e) {
+    refuseScoped(`the sweep could not read the tree (${e.message}). A file deleted from the working tree but still in the index is the usual cause: stage the deletion or restore the file, then re-run.`);
+  }
   const { targets, disagreements } = corpusAnchorTargets(scopedSweep);
   if (disagreements.length) {
     refuseScoped(`the anchor population read for this mode disagrees with the sweep's own (${disagreements.join('; ')}), so the count of judged anchors would be wrong.`);
   }
   const verdict = scopedAnchorVerdict({
     ref: scopedRequest.ref,
-    change,
+    change: scopedChange,
     targets,
     findings: scopedSweep.findings,
     onResidual: (doc, anchor) => SHARED_RESOLVER_RESIDUAL_INDEX.has(residualKey(relative(CHECKLIST_REL, doc), anchor)),
