@@ -182,14 +182,15 @@ export const SysMetadataHistoryObject = ObjectSchema.create({
   // `'*'` grant — so without an object-level gate the generic data door would
   // serve every organization's rows of this table (every item version body). D7 governs it by
   // object permission: `studio.access`, platform-scoped (no tenant
-  // administrator holds it by role) and admitted by every `/meta` door that
-  // serves this table (`/meta/:type/:name/history` and `/audit` admit it among
-  // `studio.access` / `setup.access` / `manage_metadata`; `/packages/:id/commits`
-  // among `studio.access` / `setup.access`). `requiredPermissions` is an
-  // AND-gate, so it names one capability all three doors admit — and not
-  // `setup.access`, which organization admins DO hold (plugin-security's
-  // `PLATFORM_ADMIN_ONLY_CAPABILITIES` excludes it on purpose). Platform code
-  // reads under the system context, which the gate does not stop.
+  // administrator holds it by role) and admitted by every door that serves
+  // this table's trail (`/meta/:type/:name/history`, `/audit` and `/diff` admit
+  // it beside `manage_metadata`; `/packages/:id/commits` admits it alone).
+  // `requiredPermissions` is an AND-gate, so it names the one capability all
+  // of those doors admit — and not `setup.access`, which organization admins
+  // DO hold (plugin-security's `PLATFORM_ADMIN_ONLY_CAPABILITIES` excludes it
+  // on purpose). [#23546] None of those doors admits `setup.access` either, so
+  // the data door and the trail doors refuse an organization admin alike.
+  // Platform code reads under the system context, which the gate does not stop.
   requiredPermissions: ['studio.access'],
 
   indexes: [
