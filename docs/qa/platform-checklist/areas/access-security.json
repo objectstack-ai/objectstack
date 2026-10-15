@@ -1590,7 +1590,7 @@
       "negative": [
         "a 200 or 201, or a landed row, at either door after step 4's withdrawal is a FAIL: the environment-wide withdrawal did not hold (the #21835 class, a layer re-opening a withdrawn form)",
         "a step 4 save that answers 200 but names org=ORG, or a no-organization read that still serves allowAnonymous true, is a FAIL of ADR-0131 D6: an administrator's save lands environment-wide whatever organization is active",
-        "a 403 NOT_OVERRIDABLE to the save in step 4 or step 5 is a FAIL of the /meta doors: the save reached the protocol organization-scoped, which no door may hand it",
+        "a 403 to the save in step 4 or step 5 on the stock boot is a FAIL (the dogfood pin saves the same body with 200); read its message before attributing it: one naming an organization means the save reached the protocol organization-scoped, which no /meta door may hand it",
         "a door probed with the admin's cookie or bearer token scores the admin, not the public: re-run it anonymously (auth-state-leak)",
         "acceptance[2] to acceptance[5] scored from the stock boot prove nothing: the showcase ships the form from one package, so no second body of the name exists to compose. Score them from their pins",
         "an organization-scoped metadata row met on the boot is an environment fault (knownGaps, first entry), not a FAIL of this item"
