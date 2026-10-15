@@ -137,18 +137,18 @@ describe('Q2 — the template set is closed', () => {
     });
     expect(PAGE_TEMPLATE_OPEN_GRID).toEqual(['dashboard']);
     expect(PageTemplateSchema.options).toEqual(Object.keys(PAGE_TEMPLATE_SLOTS));
-    expect(PageSchema.parse({ name: 'p', label: 'P', type: 'home' }).template).toBe('default');
+    expect(PageSchema.parse({ name: 'pg_page', label: 'P', type: 'home' }).template).toBe('default');
   });
 
   it('refuses the retired `full-width` by name, prescribing `default`', () => {
-    const issues = refusalOf({ name: 'p', label: 'P', type: 'home', template: 'full-width' });
+    const issues = refusalOf({ name: 'pg_page', label: 'P', type: 'home', template: 'full-width' });
     expect(issues.map((i) => i.path.join('.'))).toEqual(['template']);
     expect(issues[0]!.message.startsWith("Page `template: 'full-width'` was removed in @objectstack/spec 18")).toBe(true);
     expect(issues[0]!.message).toContain("Use `template: 'default'`");
   });
 
   it.each(['two-column', 'single-column', 'three-column-layout'])('refuses an unregistered `%s` at `template`', (template) => {
-    const issues = refusalOf({ name: 'p', label: 'P', type: 'home', template });
+    const issues = refusalOf({ name: 'pg_page', label: 'P', type: 'home', template });
     expect(issues.map((i) => ({ path: i.path.join('.'), code: i.code }))).toEqual([{ path: 'template', code: 'invalid_value' }]);
   });
 });
@@ -175,9 +175,9 @@ describe('Q2 — a region the template does not place', () => {
   });
 
   it('judges a page that leaves `template` out as `default`, and names only that template\'s slots on `header-sidebar-main`', () => {
-    expect(refusalOf({ name: 'p', label: 'P', type: 'home', regions: [region('content')] })[0]!.message)
+    expect(refusalOf({ name: 'pg_page', label: 'P', type: 'home', regions: [region('content')] })[0]!.message)
       .toContain('Rename it `main`');
-    const hsm = refusalOf({ name: 'p', label: 'P', type: 'app', template: 'header-sidebar-main', regions: [region('main'), region('aside')] });
+    const hsm = refusalOf({ name: 'pg_page', label: 'P', type: 'app', template: 'header-sidebar-main', regions: [region('main'), region('aside')] });
     expect(hsm.map((i) => i.path.join('.'))).toEqual(['regions.1.name']);
     expect(hsm[0]!.message).toContain('places only `header`, `sidebar`, `main`,');
     // `aside` is not one of its slots, so no rename is offered for it.
@@ -201,7 +201,7 @@ describe('Q2 — a region the template does not place', () => {
     ['an unplaced name on a `slotted` record page — it renders its slots', { type: 'record', object: 'account', kind: 'slotted', regions: [region('left_sidebar')] }],
     ['an unplaced name on an `html` page — it renders its source', { kind: 'html', source: '<box />', regions: [region('content')] }],
   ])('CONTROL — %s parses', (_label, extra) => {
-    const r = PageSchema.safeParse({ name: 'p', label: 'P', type: 'home', ...extra });
+    const r = PageSchema.safeParse({ name: 'pg_page', label: 'P', type: 'home', ...extra });
     expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
   });
 });
@@ -215,8 +215,8 @@ describe('the ledger — two D3 entries and no D2 conversion', () => {
 
   it.each([
     ['a non-record `isDefault`', { name: 'sales_home_page', label: 'Home', type: 'home', isDefault: true, regions: [] }, ['isDefault']],
-    ['the retired `full-width`', { name: 'p', label: 'P', type: 'record', object: 'invoice', template: 'full-width', regions: [region('main')] }, ['template']],
-    ['an unplaced region', { name: 'p', label: 'P', type: 'home', template: 'three-column', regions: [region('main'), region('left_sidebar')] }, ['regions.1.name']],
+    ['the retired `full-width`', { name: 'pg_page', label: 'P', type: 'record', object: 'invoice', template: 'full-width', regions: [region('main')] }, ['template']],
+    ['an unplaced region', { name: 'pg_page', label: 'P', type: 'home', template: 'three-column', regions: [region('main'), region('left_sidebar')] }, ['regions.1.name']],
   ])('a STORED row with %s replays unchanged — no conversion touches it — and the parse still refuses it', (_label, row, paths) => {
     const notices: ConversionNotice[] = [];
     const rehydrated = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) });
