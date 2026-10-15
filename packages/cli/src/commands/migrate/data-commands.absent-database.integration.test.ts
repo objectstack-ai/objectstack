@@ -503,7 +503,7 @@ const DOORS: readonly Door[] = [
         expect(family.status).toBe('enumerated');
       }
     },
-    humanEmpty: /Report only — nothing was written or deleted/,
+    humanEmpty: /Report only — no row or table was written or deleted/,
     tables: ['sys_secret', 'sys_setting', 'sys_metadata'],
     work: (doc) => expect(doc.plan.counts.total).toBe(1),
   },
@@ -516,7 +516,7 @@ const DOORS: readonly Door[] = [
         expect(family.status).toBe('enumerated');
       }
     },
-    humanEmpty: /Dry run — nothing was written/,
+    humanEmpty: /Dry run — no row or table was written/,
     tables: ['sys_secret', 'sys_setting', 'sys_metadata'],
     work: (doc) => expect(doc.report.counts.total).toBe(1),
   },

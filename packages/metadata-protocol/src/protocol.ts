@@ -27824,6 +27824,14 @@ export class ObjectStackProtocolImplementation implements
      * the rows the boot registers: an adopted draft is rebound in storage
      * only, because a draft never reaches the runtime. Rows of other types are
      * rebound in storage only, as before.
+     *
+     * ## [#23690] The active-only rule holds for a view too
+     *
+     * The view limb admitted a row by its type alone, so an adopted
+     * package-less DRAFT view was registered as live (its draft body, at the
+     * new binding) until the next boot dropped it again, against the
+     * write-through's own rule that a draft never leaks into the runtime
+     * (ADR-0048). One gate before both limbs now admits active rows only.
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;
@@ -27899,6 +27907,11 @@ export class ObjectStackProtocolImplementation implements
             // next restart; see the header. [#23646] A view, and an object.
             const type = canonicalMetaType(String(row.type));
             if (type !== 'view' && type !== 'object') continue;
+            // [#23646, #23690] Only an ACTIVE row reaches the registry: the
+            // boot registers no other ({@link loadMetaFromDb}), and a draft
+            // never reaches the runtime. An adopted draft is rebound in
+            // storage only.
+            if (row.state !== 'active') continue;
             let rebound: { name: string; data: unknown };
             try {
                 // The row as the list read hydrates it, at its new binding.
@@ -27909,13 +27922,10 @@ export class ObjectStackProtocolImplementation implements
                 console.warn(`[Protocol] registry write-through failed for ${type}/${row.name}: ${err?.message ?? err}`);
                 continue;
             }
-            // [#23646] An object's one registry owner moves with its row. Only
-            // an active row's: the boot registers no other ({@link
-            // loadMetaFromDb}), and a draft never reaches the runtime.
+            // [#23646] An object's one registry owner moves with its row.
             if (
                 type === 'object'
-                && (row.state !== 'active'
-                    || !this.releaseAdoptedObjectOwner(rebound.name, rebound.data, request.targetPackageId))
+                && !this.releaseAdoptedObjectOwner(rebound.name, rebound.data, request.targetPackageId)
             ) {
                 continue;
             }

@@ -18,6 +18,8 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { oneShotSettingsPlugin, resolveExistingDataKey } from '../../utils/one-shot-settings.js';
 import { absentTableReads, secretUnionReadView } from '../../utils/absent-table-reads.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import type {
   DatasourceArtefactLike,
   SecretReferenceEngineLike,
@@ -66,7 +68,7 @@ import { readDeclaredDatasources } from './orphans.js';
 export default class SecretRewrap extends Command {
   static override description =
     'Re-wrap version-1 `sys_secret` ciphertext under the current AAD derivation, each row under the '
-    + 'scope of the producer that holds it. A dry run by default: it writes nothing without --apply.';
+    + 'scope of the producer that holds it. A dry run by default: it writes no row or table without --apply.';
 
   static override examples = [
     '<%= config.bin %> secret rewrap --no-declared-datasources',
@@ -82,7 +84,7 @@ export default class SecretRewrap extends Command {
     }),
     apply: Flags.boolean({
       description:
-        'Write the re-wrapped rows (default is a dry run that writes nothing). Refuses whenever a '
+        'Write the re-wrapped rows (default is a dry run that writes no row or table). Refuses whenever a '
         + 'holder family could not be enumerated.',
       default: false,
     }),
@@ -184,6 +186,17 @@ export default class SecretRewrap extends Command {
     }
 
     try {
+      // [#23622] Either mode's connect may have switched a SQLite file's
+      // journal mode (`SqlDriver.applySqliteJournalMode`, one rule for every
+      // connect), which rewrites the file header and no row. So no line below
+      // says that nothing changed: the read-only mode claims no row or table
+      // (its boot defers DDL), an abort after the plain boot claims no row
+      // (that boot may have created a missing table), and on a SQLite file
+      // each says what the connect may still have changed. A target that is
+      // no SQLite file (PostgreSQL, MySQL) has no header to switch.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
       const engine = stack.kernel.getService('objectql') as SecretReferenceEngineLike | undefined;
       if (!engine) {
         const message = 'No ObjectQL engine on this runtime, so no holder family can be enumerated.';
@@ -291,7 +304,7 @@ export default class SecretRewrap extends Command {
         const ok = await confirm(
           chalk.yellow(`  Open, re-seal, verify and write up to ${plan.attempts} sys_secret row(s)? [y/N] `),
         );
-        if (!ok) { printInfo('Aborted — nothing was opened or written.'); return; }
+        if (!ok) { printInfo(`Aborted — no row was opened or written.${journalNote}`); return; }
       }
 
       const result = await executeSysSecretRewrap({
@@ -313,7 +326,7 @@ export default class SecretRewrap extends Command {
       if (flags.apply) {
         printSuccess(`Re-wrapped ${report.counts.rewrap} sys_secret row(s) in ${timer.display()}.`);
       } else {
-        printInfo(`Dry run — nothing was written. (${timer.display()})`);
+        printInfo(`Dry run — no row or table was written.${journalNote} (${timer.display()})`);
       }
       if (exitCode !== 0) this.exit(exitCode);
     } catch (error) {

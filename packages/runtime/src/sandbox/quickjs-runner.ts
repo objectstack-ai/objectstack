@@ -38,7 +38,7 @@ import {
   type QuickJSDeferredPromise,
   type QuickJSHandle,
 } from 'quickjs-emscripten';
-import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope } from '@objectstack/types';
+import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import type {
   ScriptContext,
@@ -311,9 +311,34 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // [#22588] `__errorRefusal` is the third channel, and as additive as the
       // second: a NESTED refusal's sentence, relayed only when the body
       // re-threw that error unchanged (see SANDBOX_REFUSAL_PROP).
+      //
+      // [#23718] A thrown value that is NOT an `Error` — the plain
+      // `{ code, message }` object metadata app bodies throw — has no class
+      // name, so `<name>: <message>` flattened it to `undefined: <message>`,
+      // and with no `message` `String(e)` gave `[object Object]`; both became
+      // the `innerMessage` every door serves as the caller's sentence. Such a
+      // value is flattened under the default name `Error` (the one
+      // `userFacingMessage` strips), so its `message` is the sentence byte for
+      // byte; a `name` on it is a field, never a frame. With no usable
+      // `message` and no `toString` of its own, the sentence is
+      // `INTERNAL_ERROR_MESSAGE`, what every door answers for a fault with no
+      // business message. `code` and the rest still ride `__errorInfo`. An
+      // `Error`, a primitive, and a value whose reads throw keep the
+      // flattening below unchanged.
       const REJECT_HANDLER =
         `function(e){
-              globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
+              var flat;
+              try {
+                if (e !== null && typeof e === 'object' && !(e instanceof Error)) {
+                  var m = e.message;
+                  if (typeof m === 'string' && m.trim() !== '') flat = 'Error: ' + m;
+                  else {
+                    var s = String(e);
+                    flat = (s !== '' && s !== Object.prototype.toString.call(e)) ? s : ${JSON.stringify(`Error: ${INTERNAL_ERROR_MESSAGE}`)};
+                  }
+                }
+              } catch (_) { flat = undefined; }
+              globalThis.__error = flat !== undefined ? flat : ((e && e.message) ? (e.name + ': ' + e.message) : String(e));
               try {
                 globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e.userMessage || e['${SANDBOX_FAULT_PROP}']))
                   ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
