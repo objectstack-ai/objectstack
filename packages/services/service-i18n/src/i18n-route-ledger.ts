@@ -1,39 +1,36 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * i18n route ledger — the audited disposition of every HTTP route
- * `I18nServicePlugin` mounts, against what `@objectstack/client` can express
- * (#3636, tranche 3 of the #3563 audit).
+ * i18n route ledger — the `/api/v1/i18n/*` wire table and the audited SDK
+ * disposition of each route (#3636, tranche 3 of the #3563 audit).
  *
- * WHY THIS EXISTS. Like `service-storage`, this plugin reaches for the
- * `http-server` service at `kernel:ready` and registers straight on
- * `IHttpServer`, so neither the dispatcher ledger nor the REST ledger has ever
- * seen these routes. The dispatcher ledger DOES carry three `/i18n/*` rows —
- * but those guard the dispatcher's own mounts, and its guard only asks whether
- * the named client method EXISTS. It never asked whether the client speaks a
- * URL shape any server actually mounts, which is precisely what this tranche
- * caught: `i18n.getTranslations` and `i18n.getFieldLabels` shipped the
- * `?locale=` query dialect while every serving surface — this plugin, the
- * dispatcher's HTTP mounts, and the `plugin-rest-api.zod.ts` contract — mounts
- * only the path form. Both were 404s on the wire. Fixed in #3636 by moving the
- * client to the path dialect, the same resolution #3611 gave `meta.getView`.
+ * ⚠️ NOT A LIST OF ROUTES THIS PACKAGE MOUNTS — it mounts none (#23347).
+ * `I18nServicePlugin` used to register these three paths a second time, at
+ * `kernel:ready`, beside the dispatcher bridge's own registrations. Measured on
+ * `objectstack serve` over `examples/app-showcase`, the dispatcher answered
+ * every request on all three, so the plugin's copy was retired (see the class
+ * docblock in `i18n-service-plugin.ts`). The ONE owner is the dispatcher bridge,
+ * and its ledger (`packages/runtime/src/route-ledger.ts`, the three `/i18n`
+ * rows) carries the same routes as dispatcher-relative patterns.
  *
- * `i18n-route-ledger.conformance.test.ts` fails when a route appears with no
- * ledger entry, and when an entry names a route the plugin no longer mounts.
- * The client half lives in
- * `packages/client/src/service-route-ledger-coverage.test.ts` (no
- * service→client package edge, per the tranche-1 lesson).
+ * WHY THIS FILE STILL EXISTS. Its rows are read as relative SOURCE by guards
+ * outside this package — `packages/client`'s URL-conformance, response-schema
+ * and service-ledger-coverage tests, and the dogfood live-mount parity gate —
+ * and those readers are outside the change that retired the mount. Folding them
+ * onto the dispatcher ledger and deleting this file is the named follow-up of
+ * #23347; until then a row here is wire data, never evidence of a mount.
+ * `i18n-route-ledger.conformance.test.ts` holds the hygiene of the rows;
+ * `i18n-service-plugin.test.ts` pins that the plugin mounts nothing.
  *
- * SCOPE & SHAPE. Rows carry full wire paths at the DEFAULT base
- * (`/api/v1/i18n`); `I18nServicePluginOptions.basePath` can move the family,
- * and the conformance test enumerates at the same default. The whole family is
- * behind the `registerRoutes` option (default on) — when a host turns it off,
- * the dispatcher's `/i18n` domain still serves the same three shapes, which is
- * why route registration stays multi-provider.
+ * HISTORY THE ROWS CARRY. The audit caught `i18n.getTranslations` and
+ * `i18n.getFieldLabels` shipping the `?locale=` query dialect while every
+ * serving surface and the `plugin-rest-api.zod.ts` contract mount only the path
+ * form. Both were 404s on the wire, fixed in #3636 by moving the client to the
+ * path dialect, the same resolution #3611 gave `meta.getView`.
  *
  * This module is package-internal (not exported from the index): it is the
- * guard's data, not public API. It must stay import-free — the client-side
- * guard imports it as a relative SOURCE file.
+ * guards' data, not public API. It must stay import-free — the client-side
+ * guards import it as a relative SOURCE file.
  */
 
 /** Disposition of a single i18n route. Same vocabulary as the REST ledger. */

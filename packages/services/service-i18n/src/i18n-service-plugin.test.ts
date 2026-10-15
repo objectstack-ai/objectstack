@@ -2,28 +2,41 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { I18nServicePlugin } from './i18n-service-plugin.js';
-import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
+/**
+ * An `IHttpServer` that records EVERY way a plugin could put a route on it:
+ * the five verbs, middleware, and the raw-app escape hatch.
+ */
 function createMockHttpServer() {
-  const routes = new Map<string, RouteHandler>();
+  const rawApp = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(), all: vi.fn(), use: vi.fn(), route: vi.fn() };
   return {
-    get: vi.fn((path: string, handler: RouteHandler) => { routes.set(`GET:${path}`, handler); }),
+    get: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
     delete: vi.fn(),
     patch: vi.fn(),
     use: vi.fn(),
+    getRawApp: vi.fn(() => rawApp),
     listen: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
-    /** Test helper: retrieve a registered handler */
-    _getHandler(method: string, path: string): RouteHandler | undefined {
-      return routes.get(`${method}:${path}`);
-    },
+    rawApp,
   };
+}
+
+/** Every recorded call that would have registered a route, as `owner.method path`. */
+function registrations(server: ReturnType<typeof createMockHttpServer>): string[] {
+  const out: string[] = [];
+  for (const verb of ['get', 'post', 'put', 'delete', 'patch', 'use'] as const) {
+    for (const call of server[verb].mock.calls) out.push(`server.${verb} ${String(call[0])}`);
+  }
+  for (const [verb, fn] of Object.entries(server.rawApp)) {
+    for (const call of fn.mock.calls) out.push(`rawApp.${verb} ${String(call[0])}`);
+  }
+  return out;
 }
 
 function createMockPluginContext(services: Record<string, any> = {}) {
@@ -43,6 +56,8 @@ function createMockPluginContext(services: Record<string, any> = {}) {
       const handlers = hooks.get(name) ?? [];
       for (const h of handlers) await h(...args);
     }),
+    /** Every lifecycle event a hook could be waiting on. */
+    hookNames: () => [...hooks.keys()],
     logger: {
       info: vi.fn(),
       warn: vi.fn(),
@@ -54,40 +69,15 @@ function createMockPluginContext(services: Record<string, any> = {}) {
   };
 }
 
-function createMockReq(overrides: Partial<IHttpRequest> = {}): IHttpRequest {
-  return {
-    params: {},
-    query: {},
-    headers: {},
-    method: 'GET',
-    path: '/',
-    ...overrides,
-  };
-}
-
-function createMockRes(): IHttpResponse & { _data: any; _status: number } {
-  const res: any = {
-    _data: null,
-    _status: 200,
-    json(data: any) { res._data = data; },
-    send(data: string) { res._data = data; },
-    status(code: number) { res._status = code; return res; },
-    header() { return res; },
-  };
-  return res;
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('I18nServicePlugin', () => {
-  let httpServer: ReturnType<typeof createMockHttpServer>;
   let ctx: ReturnType<typeof createMockPluginContext>;
 
   beforeEach(() => {
-    httpServer = createMockHttpServer();
-    ctx = createMockPluginContext({ 'http-server': httpServer });
+    ctx = createMockPluginContext();
   });
 
   // -- Service registration -------------------------------------------------
@@ -120,183 +110,34 @@ describe('I18nServicePlugin', () => {
     });
   });
 
-  // -- Route self-registration ----------------------------------------------
+  // -- HTTP surface: none (#23347) -------------------------------------------
 
-  describe('route self-registration', () => {
-    it('should register a kernel:ready hook during start', async () => {
+  describe('HTTP surface', () => {
+    // [#23347] The dispatcher bridge is the one owner of `/api/v1/i18n/*`
+    // (ADR-0076 D11; its `/i18n` domain enforces ADR-0056 D2's
+    // authenticated-caller floor). This plugin used to register the same three
+    // patterns again at `kernel:ready`; measured on `objectstack serve` over
+    // the showcase, the dispatcher's registration answered every request, so
+    // the copy was unreachable there and floor-less wherever no dispatcher was
+    // composed. It is retired, and this pins that it stays retired: an HTTP
+    // server IS available under both service names, and every lifecycle event
+    // the plugin hooks is fired, and still nothing lands on it.
+    it('registers the i18n service and mounts no route on the HTTP server it is given', async () => {
+      const server = createMockHttpServer();
+      const pluginCtx = createMockPluginContext({ 'http-server': server, 'http.server': server });
       const plugin = new I18nServicePlugin();
-      await plugin.init!(ctx as any);
-      await plugin.start!(ctx as any);
 
-      expect(ctx.hook).toHaveBeenCalledWith('kernel:ready', expect.any(Function));
-    });
+      await plugin.init!(pluginCtx as any);
+      await plugin.start!(pluginCtx as any);
+      // `kernel:ready` is where the retired mount lived; fire it, then every
+      // other event the plugin hooked, so a mount moved to another phase is
+      // caught too.
+      expect(pluginCtx.hookNames()).toContain('kernel:ready');
+      for (const name of pluginCtx.hookNames()) await pluginCtx.trigger(name);
 
-    it('should register i18n routes when http-server is available', async () => {
-      const plugin = new I18nServicePlugin();
-      await plugin.init!(ctx as any);
-      await plugin.start!(ctx as any);
-
-      // Simulate kernel:ready
-      await ctx.trigger('kernel:ready');
-
-      expect(httpServer.get).toHaveBeenCalledWith('/api/v1/i18n/locales', expect.any(Function));
-      expect(httpServer.get).toHaveBeenCalledWith('/api/v1/i18n/translations/:locale', expect.any(Function));
-      expect(httpServer.get).toHaveBeenCalledWith('/api/v1/i18n/labels/:object/:locale', expect.any(Function));
-    });
-
-    it('should respect custom basePath', async () => {
-      const plugin = new I18nServicePlugin({ basePath: '/custom/i18n' });
-      await plugin.init!(ctx as any);
-      await plugin.start!(ctx as any);
-
-      await ctx.trigger('kernel:ready');
-
-      expect(httpServer.get).toHaveBeenCalledWith('/custom/i18n/locales', expect.any(Function));
-      expect(httpServer.get).toHaveBeenCalledWith('/custom/i18n/translations/:locale', expect.any(Function));
-      expect(httpServer.get).toHaveBeenCalledWith('/custom/i18n/labels/:object/:locale', expect.any(Function));
-    });
-
-    it('should skip route registration when registerRoutes is false', async () => {
-      const plugin = new I18nServicePlugin({ registerRoutes: false });
-      await plugin.init!(ctx as any);
-      await plugin.start!(ctx as any);
-
-      // kernel:ready / metadata:reloaded hooks are still registered for the
-      // authored-translation sync (#2591) — but no HTTP route may land.
-      await ctx.trigger('kernel:ready');
-      expect(httpServer.get).not.toHaveBeenCalled();
-    });
-
-    it('should gracefully skip routes when http-server is not available', async () => {
-      const ctxNoHttp = createMockPluginContext({}); // no http-server
-      const plugin = new I18nServicePlugin();
-      await plugin.init!(ctxNoHttp as any);
-      await plugin.start!(ctxNoHttp as any);
-
-      await ctxNoHttp.trigger('kernel:ready');
-
-      expect(ctxNoHttp.logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('No HTTP server available'),
-      );
-    });
-  });
-
-  // -- Route handler behavior -----------------------------------------------
-
-  describe('route handlers', () => {
-    async function setupPlugin(options: ConstructorParameters<typeof I18nServicePlugin>[0] = {}) {
-      const plugin = new I18nServicePlugin(options);
-      await plugin.init!(ctx as any);
-      // Load some translations after init so the service has data
-      const i18n = ctx.registerService.mock.calls[0][1];
-      // Nested `objects.` data — the shape every producer actually writes and
-      // every resolver reads. The flat `o.account.fields.name` key this
-      // fixture used before was a dialect nothing emitted (#3778).
-      const accountName = (label: string) => ({
-        objects: { account: { fields: { name: { label } } } },
-      });
-      i18n.loadTranslations('en', { greeting: 'Hello', ...accountName('Account Name') });
-      i18n.loadTranslations('zh-CN', { greeting: '你好', ...accountName('账户名称') });
-      await plugin.start!(ctx as any);
-      await ctx.trigger('kernel:ready');
-      return { plugin, i18n };
-    }
-
-    it('GET /locales should return all available locales', async () => {
-      await setupPlugin();
-
-      const handler = httpServer._getHandler('GET', '/api/v1/i18n/locales')!;
-      expect(handler).toBeDefined();
-
-      const req = createMockReq();
-      const res = createMockRes();
-      await handler(req, res);
-
-      expect(res._data).toEqual({
-        success: true,
-        data: {
-          locales: [
-            { code: 'en', label: 'en', isDefault: true },
-            { code: 'zh-CN', label: 'zh-CN', isDefault: false },
-          ],
-        },
-      });
-    });
-
-    it('GET /translations/:locale should return translations for the given locale', async () => {
-      await setupPlugin();
-
-      const handler = httpServer._getHandler('GET', '/api/v1/i18n/translations/:locale')!;
-      expect(handler).toBeDefined();
-
-      const req = createMockReq({ params: { locale: 'en' } });
-      const res = createMockRes();
-      await handler(req, res);
-
-      expect(res._data).toEqual({
-        success: true,
-        data: {
-          locale: 'en',
-          translations: {
-            greeting: 'Hello',
-            objects: { account: { fields: { name: { label: 'Account Name' } } } },
-          },
-        },
-      });
-    });
-
-    it('GET /translations/:locale should return 400 when locale is missing', async () => {
-      await setupPlugin();
-
-      const handler = httpServer._getHandler('GET', '/api/v1/i18n/translations/:locale')!;
-      const req = createMockReq({ params: {} });
-      const res = createMockRes();
-      await handler(req, res);
-
-      expect(res._status).toBe(400);
-      expect(res._data).toEqual({
-        success: false,
-        error: { code: 'INVALID_REQUEST', message: 'Missing locale parameter' },
-      });
-    });
-
-    it('GET /labels/:object/:locale should derive field labels from translation bundle', async () => {
-      await setupPlugin();
-
-      const handler = httpServer._getHandler('GET', '/api/v1/i18n/labels/:object/:locale')!;
-      expect(handler).toBeDefined();
-
-      const req = createMockReq({ params: { object: 'account', locale: 'en' } });
-      const res = createMockRes();
-      await handler(req, res);
-
-      // Each entry is an object, not a bare string: that is what
-      // `GetFieldLabelsResponseSchema` has always declared, and emitting a
-      // string contradicted it while discarding the `help`/`options` the
-      // bundle carries (#3847).
-      expect(res._data).toEqual({
-        success: true,
-        data: {
-          object: 'account',
-          locale: 'en',
-          labels: { name: { label: 'Account Name' } },
-        },
-      });
-    });
-
-    it('GET /labels/:object/:locale should return 400 when params are missing', async () => {
-      await setupPlugin();
-
-      const handler = httpServer._getHandler('GET', '/api/v1/i18n/labels/:object/:locale')!;
-      const req = createMockReq({ params: {} });
-      const res = createMockRes();
-      await handler(req, res);
-
-      expect(res._status).toBe(400);
-      expect(res._data).toEqual({
-        success: false,
-        error: { code: 'INVALID_REQUEST', message: 'Missing object or locale parameter' },
-      });
+      expect(pluginCtx.registerService).toHaveBeenCalledWith('i18n', expect.any(Object));
+      expect(registrations(server)).toEqual([]);
+      expect(server.getRawApp).not.toHaveBeenCalled();
     });
   });
 
