@@ -104,7 +104,10 @@ const config = {
     //
     //   1. Coverage. Only the per-page markdown has an HTML twin to point a
     //      canonical at. `/llms.txt` is an index of every page and
-    //      `/llms-full.txt` is all 400+ of them concatenated (8 MB today); there
+    //      `/llms-full.txt` is all 400+ of them concatenated (20 MB in 2026-10, a
+    //      static file `scripts/build-llms-full.mjs` writes into `public/` --
+    //      the header applies there too, since Next checks headers before the
+    //      filesystem); there
     //      is no single HTML URL either one is a duplicate *of*, so a canonical
     //      header cannot say anything honest about them and would leave the two
     //      largest parallel copies on the site undirected. `noindex` states the
