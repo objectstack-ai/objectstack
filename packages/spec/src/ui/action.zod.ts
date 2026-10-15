@@ -962,16 +962,15 @@ const actionObject = () => strictObject({
    * Explanatory line shown in the action's PARAM DIALOG, under the title.
    *
    * The renderer half already exists and predates this key: objectui's
-   * `ActionParamDialog` renders it as the dialog's `DialogDescription`
-   * (`objectui packages/app-shell/src/views/ActionParamDialog.tsx:215`, falling
+   * `ActionParamDialog` renders it as the dialog's `DialogDescription` (falling
    * back to the generic `actionDialog.description` string), fed by
    * `actionDescription(objectName, actionName, action.description)` from two
-   * independent handlers — `useConsoleActionRuntime.tsx:206` and
-   * `RecordDetailView.tsx:586`. The resolver
-   * (`objectui packages/i18n/src/useObjectLabel.ts:463`) reads
-   * `objects.{object}._actions.{action}.description`, falls back to
-   * `globalActions.{action}.description`, then to this literal. Until #7367 no
-   * producer could reach any of it: this shape refused the key.
+   * independent param-collection handlers. The resolver reads the translated
+   * copy at `objects.{object}._actions.{action}.description` for an action bound
+   * to an object, or at `globalActions.{action}.description` for an object-less
+   * one, never both, and falls back to this literal (read points recorded in
+   * `liveness/action.json`, row `description`). Until #7367 no producer could
+   * reach any of it: this shape refused the key.
    *
    * **Use it for the question the dialog is asking.** An action that collects
    * params and ALSO sets `confirmText` shows the user two dialogs for one

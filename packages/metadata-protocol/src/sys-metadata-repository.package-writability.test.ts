@@ -237,7 +237,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
     resetEnvWritableMetadataTypes();
     ObjectStackProtocolImplementation.resetEnvWritableCache();
     engine = makeFakeEngine();
-    repo = new SysMetadataRepository({ engine: engine as never, organizationId: null, orgLabel: 'env' });
+    repo = new SysMetadataRepository({ engine: engine as never, orgLabel: 'env' });
   });
 
   afterEach(() => {
@@ -478,7 +478,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
     it('a package-less hatch write under an ORG kernel lands no per-org override either', async () => {
       openHatch();
       const orgRepo = new SysMetadataRepository({
-        engine: engine as never, organizationId: 'org_acme', orgLabel: 'org_acme',
+        engine: engine as never, orgLabel: 'org_acme',
       });
       const err = await putWith(orgRepo, {
         type: 'permission', name: 'showcase_contributor', intent: 'override-artifact',
@@ -1230,7 +1230,7 @@ describe('#8361 — the create-side hatch clause reaches saveMetaItem', () => {
     // this stays byte-identical.
     const engine = makeFakeEngine();
     const repo = new SysMetadataRepository({
-      engine: engine as never, organizationId: null, orgLabel: 'env',
+      engine: engine as never, orgLabel: 'env',
     });
     const err = await putWith(repo, {
       type: 'job', name: 'nightly_sweep', intent: 'runtime-only', packageId: READ_ONLY_PKG,
@@ -1275,7 +1275,7 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     resetEnvWritableMetadataTypes();
     ObjectStackProtocolImplementation.resetEnvWritableCache();
     engine = makeFakeEngine();
-    repo = new SysMetadataRepository({ engine: engine as never, organizationId: null, orgLabel: 'env' });
+    repo = new SysMetadataRepository({ engine: engine as never, orgLabel: 'env' });
   });
 
   afterEach(() => {

@@ -155,10 +155,10 @@ const actionTranslationSchema = (surface: string) => strictObject({
   },
 }, {
   label: z.string().optional().describe('Translated action label'),
-  // The address `useObjectLabel.actionDescription` already resolves —
-  // `objects.{object}._actions.{action}.description`, falling back to
-  // `globalActions.{action}.description` (objectui
-  // packages/i18n/src/useObjectLabel.ts:463). Declared here with #7367's
+  // The address objectui's `actionDescription` resolver already reads —
+  // `objects.{object}._actions.{action}.description` for an action bound to an
+  // object, `globalActions.{action}.description` for an object-less one (read
+  // points recorded in `liveness/action.json`, row `description`). Declared here with #7367's
   // `ActionSchema.description`: a bundle could not carry the string the
   // resolver was already looking for.
   description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),

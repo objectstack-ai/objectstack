@@ -60,7 +60,11 @@ function makeService(unreadable?: string) {
   const { engine, reads } = makeEngine(tables, unreadable);
   const service = new ApprovalService({ engine: engine as any, logger: { info() {}, warn, error() {}, debug() {} } });
   // `enrichRows` is private; its public callers drag the whole request lifecycle in.
-  const enrich = (rows: Row[]) => (service as unknown as { enrichRows(r: Row[]): Promise<void> }).enrichRows(rows);
+  // [#23594] No field-visibility answer for any object: the reader's served fields
+  // narrow nothing here, as with no security service wired.
+  const enrich = (rows: Row[]) => (service as unknown as {
+    enrichRows(r: Row[], served: ReadonlyMap<string, string[] | undefined>): Promise<void>;
+  }).enrichRows(rows, new Map());
   return { enrich, reads, warn };
 }
 

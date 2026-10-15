@@ -898,6 +898,9 @@ export const REMOTE_FACE_ANSWERS = {
   // Calls `this.analyzeQuery`, which refuses.
   explain: 'inherited',
   introspectSchema: 'refused',
+  // [#23429] The table's physical column names, from the remote catalog
+  // (`pragma_table_info`), which is what the inherited Knex read cannot reach.
+  listPhysicalColumns: 'remote',
   getKnex: 'refused',
   // Schema doors.
   syncSchema: 'remote',
@@ -3878,6 +3881,32 @@ export class TursoDriver extends SqlDriver {
       );
     }
     return super.analyzeQuery(object, query, options);
+  }
+
+  /**
+   * [ADR-0131 D7 · #23429] The physical column names of `object`'s table. The
+   * remote arm asks the remote catalog (`pragma_table_info`): the inherited
+   * read goes through Knex, which a remote face has no connection for. A table
+   * that does not exist answers `[]`, as the local arm does.
+   */
+  override async listPhysicalColumns(object: string, options?: DriverOptions): Promise<string[]> {
+    if (this.isRemote) {
+      this.assertRemoteTransactionUnsupported(options, 'listPhysicalColumns');
+      const table = this.physicalTableByObject[object] ?? object;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) {
+        throw new Error(`listPhysicalColumns: "${table}" is not a table name the remote catalog read can quote.`);
+      }
+      const sql = `SELECT name FROM pragma_table_info('${table}')`;
+      let rows: unknown;
+      try {
+        rows = await this.remoteTransport!.execute(sql);
+      } catch (error) {
+        // One envelope for both transports, as `execute()` declares it.
+        throw this.rawStatementFault(sql, error);
+      }
+      return (Array.isArray(rows) ? rows : []).map((row) => String((row as { name?: unknown }).name ?? ''));
+    }
+    return super.listPhysicalColumns(object, options);
   }
 
   /**

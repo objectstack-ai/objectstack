@@ -81,6 +81,7 @@ import {
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
     anonymousFormIntakeCandidates,
+    // …and whether another body of the same view name withdraws a candidate.
     anonymousFormIntakeWithdrawnIn,
     // [#21476] Whether such a form can take intake on this posture, and why not
     // — the one predicate the runtime authoring gate's advisory reads too.
@@ -305,18 +306,6 @@ export type RestProtocol = DataProtocol & MetadataProtocol;
  * literals is now a compile error instead of a cast-and-hope.
  */
 type TransportScopedMetaRequest<R> = R & { environmentId?: string };
-
-/**
- * [ADR-0131 D6, triage ruling Q3 A] The anonymous form doors' `view` list
- * read: the one metadata read left that reaches a legacy organization's rows.
- * `legacyFormOrganizationId` is not a key of the spec's `GetMetaItemsRequest`
- * — every other read is environment → code — and the protocol honours it for
- * `view` alone: the Default Organization's legacy body is preferred, and a
- * withdrawal in either layer closes the form, fail-closed until the v18
- * migration ceremony (ADR-0131 C7) carries those rows into the environment
- * layer and deletes this read with them.
- */
-type LegacyFormViewsRequest = TransportScopedMetaRequest<GetMetaItemsRequest> & { legacyFormOrganizationId?: string };
 
 // [#23050 slice 1] `ServerScopedDataRequest`, the data doors' request envelope, moved to
 // `data-action-routes.ts` (imported below): exporting it from this file for that module
@@ -1917,13 +1906,6 @@ type MetaReadVerdict =
 // in `@objectstack/metadata-core` (`anonymous-form-intake.ts`): both doors, the
 // admin read below and the runtime authoring gate's save/publish advisory read
 // them from there, so none of the three can disagree with another.
-
-/** [#21331] The organization an anonymous form request reads the form in (`defaultOrgId()`). */
-async function anonymousFormOrganization(tenancy: any): Promise<string | undefined> {
-    if (!tenancy || typeof tenancy.defaultOrgId !== 'function') return undefined;
-    const organizationId = await tenancy.defaultOrgId();
-    return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
-}
 
 /**
  * [#21476] Put the admin read's intake reasons in `_diagnostics.warnings`, where
@@ -9032,8 +9014,18 @@ export class RestServer {
                         // reaching the engine as `data`. Per-field checks stay
                         // downstream (object metadata / validation rules); this
                         // gate is about the SHAPE the contract declares.
+                        //
+                        // [#23574] …the body AS THE CALLER SENT IT. It was
+                        // `req.body ?? {}`, so a JSON `null` body parsed as an
+                        // empty record and created an empty row (`201`). `null`
+                        // is not the record `data` declares, so it is refused
+                        // like an array, a string or a number, and the runtime
+                        // dispatcher's twin (`domains/data.ts`) asks this gate
+                        // over the same assembled request. An empty request
+                        // body is not `null`: the HTTP adapter hands it over
+                        // as `{}`, a record.
                         const { CreateDataRequestSchema } = await import('@objectstack/spec/api');
-                        const createInput = { object: req.params.object, data: req.body ?? {} };
+                        const createInput = { object: req.params.object, data: req.body };
                         const parsedCreate = (CreateDataRequestSchema as any).safeParse(createInput);
                         if (!parsedCreate.success) {
                             res.status(400).json({
@@ -9046,7 +9038,7 @@ export class RestServer {
                         }
                         const createRequest: ServerScopedDataRequest<CreateDataRequest> = {
                             object: req.params.object,
-                            data: req.body ?? {},
+                            data: req.body,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
@@ -9096,11 +9088,21 @@ export class RestServer {
                         // ORIGINAL body is forwarded, not the parse output, so the
                         // schema cannot inject defaults the engine did not receive
                         // before (the analytics-entry precedent, #3878).
+                        //
+                        // [#23574] …the body AS THE CALLER SENT IT. It was
+                        // `req.body ?? {}`, so a JSON `null` body read as no
+                        // query and answered the full record set (`200`).
+                        // `query` declares a QueryAST or nothing, never `null`,
+                        // so `null` is refused like a string or a number, and
+                        // the runtime dispatcher's twin (`domains/data.ts`) now
+                        // asks this gate over the same assembled request. An
+                        // empty request body is not `null`: the HTTP adapter
+                        // hands it over as `{}`, an empty query.
                         const { FindDataRequestSchema } = await import('@objectstack/spec/api');
-                        const rawQuery = req.body ?? {};
+                        const rawQuery = req.body;
                         const query = (rawQuery && typeof rawQuery === 'object' && !Array.isArray(rawQuery))
                             ? { ...rawQuery, object: req.params.object }
-                            : rawQuery; // non-object bodies go to the schema as-is and fail with `query: invalid_type`
+                            : rawQuery; // non-object bodies (`null` included) go to the schema as-is and fail with `query: invalid_type`
                         const findInput = { object: req.params.object, query };
                         const parsedFind = (FindDataRequestSchema as any).safeParse(findInput);
                         if (!parsedFind.success) {
@@ -9789,22 +9791,25 @@ export class RestServer {
         // `sharing.allowAnonymous === true` and a `publicLink` naming the slug.
         //
         // A withdrawal is a kill switch: layering may only narrow anonymous
-        // intake, never re-open it. A candidate is served only when no layer
-        // beneath the read it is found in explicitly withdraws the same form
-        // (`anonymousFormIntakeWithdrawnIn`: the same view name, matched by
-        // slot or by slug, the link kept with a switch set to `false`).
-        // Another view publishing the same slug is a different form and closes
-        // nothing.
+        // intake, never re-open it. The doors read one list, the
+        // environment's (environment → code), which holds one item per
+        // package of a view name, and judge every candidate against that same
+        // list as the layer beneath it: a candidate is served only when no
+        // body of its view name explicitly withdraws the same form
+        // (`anonymousFormIntakeWithdrawnIn`: matched by slot or by slug, the
+        // link kept with a switch set to `false`), so a withdrawal in one
+        // package closes the name's form in every package (a known limit that
+        // fails closed). Another view publishing the same slug is a different
+        // form and closes nothing.
         const findPublicFormView = (
             views: any[],
             slug: string,
-            layers: ReadonlyArray<ReadonlyArray<unknown>>,
         ): { view: any; form: any; object: string } | null => {
             for (const view of views ?? []) {
                 if (!view || typeof view !== 'object') continue;
                 for (const c of anonymousFormIntakeCandidates(view)) {
                     if (c.slug !== slug) continue;
-                    if (layers.some((layer) => anonymousFormIntakeWithdrawnIn(layer, view, c))) continue;
+                    if (anonymousFormIntakeWithdrawnIn(views, view, c)) continue;
                     const objectName = anonymousFormObjectName(view, c.form);
                     if (!objectName) continue;
                     return { view, form: c.form, object: objectName };
@@ -9813,24 +9818,17 @@ export class RestServer {
             return null;
         };
 
-        // [#21331] WHICH organization's metadata an anonymous form request
-        // reads. Before ADR-0131 D6 an administrator's edit of a packaged
-        // form was saved as an overlay of THEIR organization, and an org-less
-        // read missed every such edit, including the one that withdraws the
-        // form from anonymous intake. Since D6 no write lands
-        // organization-scoped and no other read serves such a row; this
-        // `view` read alone keeps the Default Organization's legacy layer
-        // (`legacyFormOrganizationId`, triage ruling Q3 A), fail-closed, until
-        // the v18 migration ceremony (ADR-0131 C7) carries those rows.
+        // [ADR-0131 D6, C7] WHICH metadata an anonymous form request reads:
+        // the environment's, like every other metadata read. Until v18 the
+        // `view` read also kept the Default Organization's legacy layer, so an
+        // organization's withdrawal still closed the form. The v18 ceremony
+        // (`os migrate organization-ownership --apply`, its metadata-promotion
+        // step) carries every organization-layer withdrawal onto the
+        // environment, fail-closed (rulings A on #22008 and #22011), and that
+        // read is deleted with it.
         //
-        // The answer is the tenancy service's `defaultOrgId()`: the
-        // organization a single-posture deployment binds every principal to.
-        // It is the organization the administrator's own session is in, and
-        // the one the engine stamps on the row this request inserts. It is
-        // `undefined` in two cases. Before any organization exists, no
-        // organization overlay can exist either. A walled posture has no
-        // install organization for an org-less request, so the env-wide state
-        // governs there exactly as before.
+        // The tenancy service is still read: it answers the posture the
+        // intake-availability rule judges (#21476).
         //
         // Asked ONCE per request, in `resolveFormBySlug`. Every door below
         // reads the form through that one resolution, so no door keeps its
@@ -9840,7 +9838,7 @@ export class RestServer {
         // Fails CLOSED. A tenancy service that is registered but cannot be
         // reached raises `AuthzStoreUnavailableError`, the classification
         // `classifyAdmissionTenancyPosture` applies to the same seam. The
-        // door then refuses instead of falling back to the env-wide read.
+        // door then refuses instead of judging intake without a posture.
         // Only the registry's own "never registered" brand reads as the
         // supported no-tenancy composition. The wiring mirrors
         // `resolveProtocol`, so the tenancy service and the protocol always
@@ -9853,11 +9851,9 @@ export class RestServer {
             const p = await this.resolveProtocol(environmentId, req);
             if (typeof (p as any).getMetaItems !== 'function') return null;
             const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
-            const organizationId = await anonymousFormOrganization(tenancy);
-            const viewsRequest: LegacyFormViewsRequest = {
+            const viewsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                 type: 'view',
                 ...(environmentId ? { environmentId } : {}),
-                ...(organizationId ? { legacyFormOrganizationId: organizationId } : {}),
             };
             const listOf = (result: any): any[] => (Array.isArray(result?.items)
                 ? result.items
@@ -9865,22 +9861,7 @@ export class RestServer {
                     ? result
                     : []);
             const items = listOf(await p.getMetaItems(viewsRequest));
-            // The organization read prefers the organization's overlay of a
-            // view over the env-wide one, so on its own it cannot see an
-            // env-wide withdrawal that overlay disagrees with. Read the
-            // env-wide layer too, and let its withdrawal of the same form close
-            // it: an organization overlay can narrow intake, never re-open it.
-            // (The read the form is found in holds only that view's own body,
-            // which is open, so it withdraws nothing of its own.)
-            const layers: any[][] = [];
-            if (organizationId) {
-                const envWideRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                    type: 'view',
-                    ...(environmentId ? { environmentId } : {}),
-                };
-                layers.push(listOf(await p.getMetaItems(envWideRequest)));
-            }
-            const match = findPublicFormView(items, slug, layers);
+            const match = findPublicFormView(items, slug);
             if (!match) return null;
             // [#21476] A form that cannot take intake on this posture is not
             // offered: `null` here IS the withdrawn form's answer on both

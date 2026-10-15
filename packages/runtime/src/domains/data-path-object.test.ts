@@ -222,11 +222,18 @@ describe('POST /data/:object/query binds to the object in the path (#3946)', () 
         expect(req.query).toMatchObject({ where: { status: 'open' }, limit: 5 });
     });
 
-    it('still honours an explicit `query` envelope', async () => {
+    // [#23574] Flipped. This pinned the body's `query` key being unwrapped as
+    // the query itself, a second spelling `RestServer` never read (there the
+    // body IS the QueryAST, as the catalog declares) and one the request gate
+    // cannot see: `{ query: { limit: 'ten' } }` would pass the gate and be
+    // served as the full set. The key now reaches the protocol as the field it
+    // names, which the real protocol refuses `400 INVALID_FIELD` on both doors
+    // (`data-write-request-gate.test.ts`, on a real store).
+    it('a body `query` key is the field it names, never a second spelling of the query', async () => {
         const { deps, context, findData } = setup();
         await post(deps, context, 'crm_account/query', { query: { where: { status: 'open' } } });
 
-        expect(findData.mock.calls[0][0].query).toEqual({ where: { status: 'open' } });
+        expect(findData.mock.calls[0][0].query).toEqual({ query: { where: { status: 'open' } } });
     });
 
     it('threads the caller execution context through unchanged', async () => {

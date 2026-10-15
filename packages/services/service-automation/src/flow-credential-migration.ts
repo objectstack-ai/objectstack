@@ -34,6 +34,7 @@
  *    `blocking: 0` (it gates nothing). Its details name flows, never values.
  */
 
+import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { DATA_MIGRATION_FLAG_OBJECT, type DataMigrationFlag } from '@objectstack/spec/system';
 import { explicitFlowCredentials, FLOW_CREDENTIAL_UNAVAILABLE_CODE } from './flow-credential-channel.js';
 import { FLOW_METADATA_TYPE, flowCredentialClassList } from './flow-credential-projection.js';
@@ -53,6 +54,8 @@ export interface FlowCredentialMigrationEngine {
     insert(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
     update(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
     getObject?(name: string): unknown;
+    /** [ADR-0131 D7] The table's driver, through which a legacy organization's rows are told apart. */
+    getDriverForObject?(name: string): unknown;
 }
 
 /** The slice of the metadata protocol the migration re-saves through. */
@@ -168,10 +171,17 @@ export async function migrateFlowCredentialsIntoChannel(deps: {
     const result: FlowCredentialMigrationResult = { status: 'nothing-to-move', found: 0, migrated: [], failed: [] };
 
     let rows: Record<string, unknown>[];
+    // [ADR-0131 D6/D7] The family declares no organization column, so the
+    // engine row never carries one: a legacy organization's row is told apart
+    // off the physical column, on a database the ceremony has not migrated.
+    let legacy: ReadonlyMap<string, string>;
     try {
         rows = rowsOf(
             await engine.find(STORED_ROW_OBJECT, { where: { type: FLOW_METADATA_TYPE }, context: SYSTEM_CONTEXT }),
         );
+        legacy = rows.length === 0
+            ? new Map()
+            : await readLegacyOrganizationRows(engine.getDriverForObject?.(STORED_ROW_OBJECT), STORED_ROW_OBJECT);
     } catch (err) {
         logger.warn(
             '[Automation] the stored flow credential move could not read the stored flow rows; it runs again at the ' +
@@ -194,11 +204,12 @@ export async function migrateFlowCredentialsIntoChannel(deps: {
         // the protocol writes no organization-scoped row, and re-saving it
         // environment-wide would move it — the promotion ceremony's job
         // (ADR-0131 C7). It is reported as not moved, every run, until then.
-        if (typeof row.organization_id === 'string' && row.organization_id !== '') {
+        const organization = legacy.get(String(row.id));
+        if (organization !== undefined) {
             result.failed.push({ flow: name, state, code: 'NOT_OVERRIDABLE' });
             logger.error(
                 `[Automation] flow '${name}' (${state}): its stored row is organization-scoped (organization ` +
-                    `'${row.organization_id}'), and no metadata write lands organization-scoped any more, so its ` +
+                    `'${organization}'), and no metadata write lands organization-scoped any more, so its ` +
                     'credential could not be moved into the write-only flow credential store: that row STILL CARRIES ' +
                     'IT IN CLEARTEXT. The promotion ceremony (ADR-0131 C7) carries the row to the environment layer, ' +
                     'where the next run moves it. Rotate the credential now.',

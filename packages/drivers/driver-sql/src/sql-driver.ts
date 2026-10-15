@@ -15344,6 +15344,33 @@ export class SqlDriver implements IDataDriver {
   // Schema Introspection
   // ===================================
 
+  /**
+   * [ADR-0131 D7 · #23429] The PHYSICAL column names of `object`'s table, as
+   * the catalog holds them — the declared ones and any a past release left
+   * behind. Read-only, one table, through the builder every read uses (so it
+   * resolves a federated object's remote table, and joins
+   * `options.transaction` like any read: a single-connection pool would
+   * otherwise wait on the connection the caller's transaction holds).
+   *
+   * A table that does not exist answers `[]`. It is not `execute()`, so a
+   * declaration boot's write guard has nothing to count: a question every
+   * boot asks (does a retired column still physically exist?) must not cost a
+   * plan its "writes nothing" claim.
+   *
+   * Built on Knex directly, not {@link getBuilder}: it reads the CATALOG and
+   * returns column names, never a row, so the tenant scope a row read must
+   * carry (`check:tenant-chokepoint`) has nothing to scope. The table is
+   * resolved as `getBuilder` resolves it.
+   */
+  async listPhysicalColumns(object: string, options?: DriverOptions): Promise<string[]> {
+    let catalog = this.knex(this.physicalTableByObject[object] ?? object);
+    const remoteSchema = this.physicalSchemaByObject[object];
+    if (remoteSchema) catalog = catalog.withSchema(remoteSchema);
+    if (options?.transaction) catalog = catalog.transacting(options.transaction as Knex.Transaction);
+    const info = (await catalog.columnInfo()) as Record<string, unknown>;
+    return Object.keys(info ?? {});
+  }
+
   async introspectSchema(): Promise<IntrospectedSchema> {
     const tables: Record<string, IntrospectedTable> = {};
     // Stamped BEFORE the reads, not after: a consumer asking "has the remote

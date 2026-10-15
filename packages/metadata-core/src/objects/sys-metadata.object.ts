@@ -149,13 +149,6 @@ export const SysMetadataObject = ObjectSchema.create({
       defaultValue: 'active',
     }),
 
-    /** Organization ID for multi-tenant isolation */
-    organization_id: Field.lookup('sys_organization', {
-      label: 'Organization',
-      required: false,
-      description: 'Organization for multi-tenant isolation.',
-    }),
-
     /**
      * @deprecated ADR-0005 (revised 2026-05): per-env DBs replace per-project
      * isolation. `environment_id` is no longer written by saveMetaItem and not
@@ -165,7 +158,7 @@ export const SysMetadataObject = ObjectSchema.create({
     environment_id: Field.lookup('sys_environment', {
       label: 'Environment (deprecated)',
       required: false,
-      description: 'DEPRECATED. Use organization_id for tenant isolation.',
+      description: 'DEPRECATED. Overlays are environment rows (ADR-0131 D6); no tenant column.',
     }),
 
     /** Version number for optimistic concurrency */
@@ -219,9 +212,18 @@ export const SysMetadataObject = ObjectSchema.create({
     }),
   },
 
+  // [ADR-0131 D6/D7, C7b] Tenant-less: an overlay is the environment's. The
+  // declared organization column is retired (ADR-0087 semantic entry
+  // 18.sys-metadata-organization-column-retired), and `systemFields.tenant: false`
+  // keeps the engine from injecting one back; the v18 ceremony
+  // (`os migrate organization-ownership --apply`) promotes or reports the
+  // legacy organization rows first, then drops the physical column.
+  systemFields: { tenant: false },
+
   indexes: [
-    // ADR-0005 (revised 2026-05) + ADR-0048: overlay uniqueness is scoped by
-    // (type, name, organization_id, package_id, bundle_member). `package_id` is
+    // ADR-0005 (revised 2026-05) + ADR-0048 + ADR-0131 D6: overlay uniqueness
+    // is scoped by (type, name, package_id, bundle_member) — the environment's
+    // key; the organization left it with the column (C7b). `package_id` is
     // part of the discriminator so two installed packages shipping the same
     // `type`/`name` each get their OWN customization row (a package-less /
     // global overlay uses NULL). `bundle_member` is the bundled type's member
@@ -239,7 +241,7 @@ export const SysMetadataObject = ObjectSchema.create({
     //
     // What actually delivers active-row scoping is the runtime layer:
     // `protocol.ts ensureOverlayIndex` issues a DROP-then-CREATE migration for
-    // `CREATE UNIQUE INDEX … ON sys_metadata (type, name, organization_id,
+    // `CREATE UNIQUE INDEX … ON sys_metadata (type, name,
     // COALESCE(package_id,''), COALESCE(bundle_member,'')) WHERE state =
     // 'active'` — which additionally fixes NULL-distinctness for package-less
     // rows and canonical members, something this declaration could not
@@ -249,10 +251,9 @@ export const SysMetadataObject = ObjectSchema.create({
     // with archived/reset rows.
     {
       name: 'idx_sys_metadata_overlay_active',
-      fields: ['type', 'name', 'organization_id', 'package_id', 'bundle_member'],
+      fields: ['type', 'name', 'package_id', 'bundle_member'],
       unique: 'global',
     },
-    { name: 'idx_sys_metadata_org_type', fields: ['organization_id', 'type'] },
     { fields: ['type', 'scope'] },
     { fields: ['package_version_id'] },
     { fields: ['state'] },

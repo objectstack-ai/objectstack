@@ -2982,13 +2982,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           deprecated: "Obsoleto"
         }
       },
-      organization_id: {
-        label: "Organización",
-        help: "Organización para el aislamiento multi-tenant."
-      },
       environment_id: {
         label: "Entorno (obsoleto)",
-        help: "OBSOLETO. Use organization_id para el aislamiento del tenant."
+        help: "OBSOLETO. Las personalizaciones son filas del entorno (ADR-0131 D6); no hay columna de tenant."
       },
       version: {
         label: "Versión"
@@ -3082,10 +3078,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       source: {
         label: "Origen"
       },
-      organization_id: {
-        label: "Organización",
-        help: "Organización para el aislamiento multi-tenant."
-      },
       recorded_by: {
         label: "Registrado por",
         help: "Usuario que realizó este cambio. NULL = iniciado por el sistema (sincronización al arrancar, migración, tarea programada); nunca una cadena centinela."
@@ -3118,9 +3110,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Nombre"
-      },
-      organization_id: {
-        label: "Organización"
       },
       operation: {
         label: "Operación",

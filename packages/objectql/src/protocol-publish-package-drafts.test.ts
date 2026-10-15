@@ -61,7 +61,7 @@ function makeCaptureEngine(activeRows: ActiveRow[] = []) {
       const hit = activeRows.find(
         (r) => r.type === where.type
           && r.name === where.name
-          && (r.organizationId ?? null) === (where.organization_id ?? null),
+          && !('organization_id' in where),
       );
       // Explicitly `null`, never `undefined`-by-omission — see the docblock.
       return hit ? { version: hit.version } : null;
@@ -155,9 +155,9 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
     // one per draft, in draft order, each in the draft's own scope. (Reads
     // after these belong to the ADR-0038 L3 probes, which run post-commit.)
     expect(captureReads.slice(0, 3)).toEqual([
-      { organization_id: null, type: 'object', name: 'course', state: 'active' },
-      { organization_id: null, type: 'object', name: 'student', state: 'active' },
-      { organization_id: null, type: 'view', name: 'course_list', state: 'active' },
+      { type: 'object', name: 'course', state: 'active' },
+      { type: 'object', name: 'student', state: 'active' },
+      { type: 'view', name: 'course_list', state: 'active' },
     ]);
     expect(promote).toHaveBeenCalledTimes(3);
     expect((promote.mock.calls[0][0] as any)).toMatchObject({ type: 'object', name: 'course' });
@@ -205,8 +205,8 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
     // The capture ran for both items, in their own scope — this is what makes
     // the values below evidence rather than defaults.
     expect(captureReads.slice(0, 2)).toEqual([
-      { organization_id: null, type: 'object', name: 'course', state: 'active' },
-      { organization_id: null, type: 'object', name: 'student', state: 'active' },
+      { type: 'object', name: 'course', state: 'active' },
+      { type: 'object', name: 'student', state: 'active' },
     ]);
     // One commit, carrying one entry per promoted item, each with the state
     // that was actually READ.

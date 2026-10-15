@@ -192,7 +192,7 @@
     "step": {
       "status": "live",
       "verifiedAt": "2026-08-08",
-      "note": "CAVEAT — RENDERER-only: objectui SliderField.tsx:14 reads `field.step ?? 1`; the write path never validates the grid (record-validator.ts's numeric branch enforces min/max for slider and reads step nowhere). Ruled UI-only and deliberately unenforced 2026-08-08 (#6514) — see docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field) and the comment beside the declaration in src/data/field.zod.ts."
+      "note": "CAVEAT — RENDERER-only: objectui @b9814b334 packages/fields/src/widgets/SliderField.tsx#SliderField reads `sliderField?.step ?? 1` and hands it to the Slider (re-read 2026-10-15; first cited by line, sha-less, here and in packages/spec/src/data/field.zod.ts beside the declaration — moved out of spec source, #23434); the write path never validates the grid (record-validator.ts's numeric branch enforces min/max for slider and reads step nowhere). Ruled UI-only and deliberately unenforced 2026-08-08 (#6514) — see docs/audits/2026-06-dead-surface-disposition-plan.md (P2 field) and the comment beside the declaration in src/data/field.zod.ts."
     },
     "group": {
       "status": "live",
@@ -329,7 +329,7 @@
     },
     "dimensions": {
       "status": "live",
-      "note": "vector field — objectui VectorField.tsx:11 reads the flat `dimensions` prop. The live authoring path; `Field.vector(n)` emits this. (The dead nested `vectorConfig` block was removed in 16.0, #2377.)"
+      "note": "vector field — objectui @b9814b334 packages/fields/src/widgets/VectorField.tsx#VectorField reads the flat `dimensions` prop (`vectorField?.dimensions`, the value's length when unset; re-read 2026-10-15; first cited by line, sha-less, here and in packages/spec/src/data/field.zod.ts beside the declaration — moved out of spec source, #23434). The live authoring path; `Field.vector(n)` emits this. (The dead nested `vectorConfig` block was removed in 16.0, #2377.)"
     },
     "inlineTitle": {
       "status": "live",

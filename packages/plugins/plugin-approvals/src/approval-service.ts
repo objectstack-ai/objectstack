@@ -1534,8 +1534,37 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * [#10749 / #23594] The subject fields the READING caller may be served, per
+   * subject object of `rows`: {@link resolveReadableSnapshotFields}' answer
+   * (readable, and not masked for this caller), asked as the caller.
+   *
+   * It is the ONE answer both serve-time narrowings of a row read: the payload
+   * snapshot ({@link ApprovalService.redactPayloads}) and the subject's title
+   * ({@link ApprovalService.resolveSubjectDisplays}). One ask per object covers
+   * a whole page of same-object requests, and the two can never disagree about
+   * what a reader may see. `undefined` for an object is that seam's deliberate
+   * pass-through, and it passes the title through exactly as it passes the
+   * snapshot.
+   */
+  private async servedSubjectFields(
+    rows: readonly ApprovalRequestRow[],
+    context: ExecutionContext,
+  ): Promise<Map<string, string[] | undefined>> {
+    const served = new Map<string, string[] | undefined>();
+    for (const r of rows) {
+      const object = String((r as any).object_name ?? '');
+      if (served.has(object)) continue;
+      served.set(object, await resolveReadableSnapshotFields(
+        this.fieldVisibility, object, context, this.logger,
+      ));
+    }
+    return served;
+  }
+
+  /**
    * [#10749] Redact each row's payload snapshot down to the fields the READING
-   * caller may see on that row's subject object.
+   * caller may see on that row's subject object — `served`, from
+   * {@link ApprovalService.servedSubjectFields}.
    *
    * Runs BEFORE {@link ApprovalService.enrichRows}, and that ordering is
    * load-bearing rather than incidental: `enrichRows` derives `payload_display`
@@ -1544,30 +1573,15 @@ export class ApprovalService implements IApprovalService {
    * SNAPSHOT'S OWN KEYS. Redact first and both derived maps are clean for free;
    * redact after and a restricted field's name, its authored label and the
    * title of the record it points at all still ship — the value would be gone
-   * and the disclosure would not.
-   *
-   * Rows are grouped by subject object so one `getReadableFields` call covers a
-   * whole page of same-object requests.
+   * and the disclosure would not. The snapshot is also where the title falls
+   * back to for a deleted subject, so that fallback is narrowed here too.
    */
-  private async redactPayloads(rows: ApprovalRequestRow[], context: ExecutionContext): Promise<void> {
-    const withPayload = rows.filter((r: any) => r?.payload != null);
-    if (withPayload.length === 0) return;
-    const byObject = new Map<string, ApprovalRequestRow[]>();
-    for (const r of withPayload) {
-      const key = String((r as any).object_name ?? '');
-      let list = byObject.get(key);
-      if (!list) { list = []; byObject.set(key, list); }
-      list.push(r);
-    }
-    for (const [object, group] of byObject) {
-      const readable = await resolveReadableSnapshotFields(
-        this.fieldVisibility, object, context, this.logger,
-      );
+  private redactPayloads(rows: ApprovalRequestRow[], served: ReadonlyMap<string, string[] | undefined>): void {
+    for (const r of rows as any[]) {
+      if (r?.payload == null) continue;
+      const readable = served.get(String(r.object_name ?? ''));
       if (readable === undefined) continue;
-      for (const r of group as any[]) {
-        const { payload } = redactSnapshot(r.payload, readable);
-        r.payload = payload;
-      }
+      r.payload = redactSnapshot(r.payload, readable).payload;
     }
   }
 
@@ -6706,15 +6720,25 @@ export class ApprovalService implements IApprovalService {
    * Batched: one read per object. Best-effort — an unregistered object or a
    * failed read leaves its entries unset.
    *
-   * [#23594] The read runs under the system context, so no reader's
-   * field-level security narrows the title it finds. Narrowing it per reader
-   * is a change to THIS function — the one place the inbox's subject title is
-   * resolved. The `approval.requested` body ({@link ApprovalService.nameSubjectRecord})
-   * withholds the title until then, because notification text is stored and
-   * may be e-mailed, so a title sent cannot be withdrawn by a later fix.
+   * [#23594] Narrowed by the READER, with the answer that narrows the payload
+   * snapshot (`served`, {@link ApprovalService.servedSubjectFields}). The record
+   * is read under the system context — the approver routinely has no read on
+   * the subject object at all (#7497 ruling C: record access stays with object
+   * permissions, sharing and row-level rules) — so the read itself narrows
+   * nothing. The title is therefore picked from the record AS SERVED to this
+   * reader: `redactSnapshot` keeps exactly the fields the snapshot keeps, the
+   * snapshot fallback already picks from the redacted snapshot, and a display
+   * field the reader may not read, or is served masked, gives no title — the
+   * shape the redaction gives that field in the payload. A field the reader
+   * may be served still names the record. This narrows only; nothing here
+   * grants a reader anything.
+   *
+   * The `approval.requested` body ({@link ApprovalService.nameSubjectRecord})
+   * does not read this: it has no reader to narrow for.
    */
   private async resolveSubjectDisplays(
     byObject: ReadonlyMap<string, ReadonlySet<string>>,
+    served: ReadonlyMap<string, string[] | undefined>,
   ): Promise<{ titles: Map<string, string>; objectLabels: Map<string, string> }> {
     const titles = new Map<string, string>();
     const objectLabels = new Map<string, string>();
@@ -6723,12 +6747,14 @@ export class ApprovalService implements IApprovalService {
       if (label) objectLabels.set(object, label);
       const ids = Array.from(idSet);
       const displayField = this.resolveDisplayField(object);
+      const readable = served.get(object);
       try {
         const recs = await this.engine.find(object, {
           where: { id: { $in: ids } }, limit: ids.length, context: SYSTEM_CTX,
         });
         for (const rec of (recs ?? []) as any[]) {
-          const title = ApprovalService.pickTitle(rec, displayField);
+          const asServed = readable === undefined ? rec : redactSnapshot(rec, readable).payload;
+          const title = ApprovalService.pickTitle(asServed, displayField);
           if (rec?.id && title) titles.set(`${object} ${rec.id}`, title);
         }
       } catch { /* object may be unregistered — the caller's fallback applies */ }
@@ -6776,8 +6802,13 @@ export class ApprovalService implements IApprovalService {
    * payload snapshot, and any failure leaves the field unset rather than
    * failing the list. [#22738] A referenced object whose declared exposure
    * does not serve `get` is not read ({@link servesPayloadDisplayTarget}).
+   * [#23594] `record_title` is narrowed by the reader's `served` fields, the
+   * answer the payload was redacted by ({@link resolveSubjectDisplays}).
    */
-  private async enrichRows(rows: ApprovalRequestRow[]): Promise<void> {
+  private async enrichRows(
+    rows: ApprovalRequestRow[],
+    served: ReadonlyMap<string, string[] | undefined>,
+  ): Promise<void> {
     if (!rows.length) return;
 
     // Record titles + object labels, batched per object.
@@ -6788,7 +6819,7 @@ export class ApprovalService implements IApprovalService {
       if (!set) { set = new Set(); byObject.set(r.object_name, set); }
       set.add(r.record_id);
     }
-    const { titles, objectLabels } = await this.resolveSubjectDisplays(byObject);
+    const { titles, objectLabels } = await this.resolveSubjectDisplays(byObject, served);
 
     // Lookup foreign keys inside payload snapshots → referenced record titles.
     const lookupFieldsByObject = new Map<string, Array<{ key: string; reference: string }>>();
@@ -7495,9 +7526,11 @@ export class ApprovalService implements IApprovalService {
 
     const rows = await this.engine.find('sys_approval_request', findOpts);
     const list = Array.isArray(rows) ? rows.map(rowFromRequest) : [];
-    // [#10749] Redact before enrichment — see `redactPayloads`.
-    await this.redactPayloads(list, context);
-    await this.enrichRows(list);
+    // [#10749] Redact before enrichment — see `redactPayloads`. [#23594] The
+    // snapshot and the subject title are narrowed by ONE answer for the reader.
+    const served = await this.servedSubjectFields(list, context);
+    this.redactPayloads(list, served);
+    await this.enrichRows(list, served);
     this.attachViewers(list, context, caller);
     return list;
   }
@@ -7606,9 +7639,11 @@ export class ApprovalService implements IApprovalService {
       if (visible && !visible.has(String(raw.id))) return null;
     }
     const row = rowFromRequest(raw);
-    // [#10749] Redact before enrichment — see `redactPayloads`.
-    await this.redactPayloads([row], context);
-    await this.enrichRows([row]);
+    // [#10749] Redact before enrichment — see `redactPayloads`. [#23594] The
+    // snapshot and the subject title are narrowed by ONE answer for the reader.
+    const served = await this.servedSubjectFields([row], context);
+    this.redactPayloads([row], served);
+    await this.enrichRows([row], served);
     await this.attachFlowSteps(row);
     await this.attachDecisionProgress(row, raw);
     this.attachViewers([row], context, caller);

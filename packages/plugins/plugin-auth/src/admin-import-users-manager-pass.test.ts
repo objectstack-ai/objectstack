@@ -42,6 +42,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { runAdminImportUsers, type IdentityImportDeps } from './admin-import-users.js';
+import { settleImportResetDelivery } from './account-invitation-marker.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS, SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
 import type { AdminActor } from './admin-user-endpoints.js';
 
@@ -122,8 +123,17 @@ function makeHarness(opts: {
     });
     return { user: { id, email: body.email, name: body.name } };
   });
-  const requestPasswordReset = vi.fn(async () => {
-    if (opts.resetFails) throw new Error('smtp down');
+  // [#23598] better-auth's real shape: the send settles the import's receipt
+  // inside `runInBackgroundOrAwait`, which swallows its throw, and the reset
+  // answers `{ status: true }` regardless.
+  const requestPasswordReset = vi.fn(async ({ body }: any) => {
+    try {
+      await settleImportResetDelivery(body.email, undefined, async () => {
+        if (opts.resetFails) throw new Error('smtp down');
+      });
+    } catch {
+      /* better-auth logs it */
+    }
     return { status: true };
   });
 

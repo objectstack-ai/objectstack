@@ -322,3 +322,22 @@ export function describeOccupancy(occupancy: SqliteOccupancy): string {
     : '';
   return `${occupancy.filename} is in use — ${occupancy.detail}${sidecars}.`;
 }
+
+/**
+ * What a read-only run still changes on a SQLite file, said beside every claim
+ * that such a run writes no row: a dry run, a preview, `os migrate plan` and
+ * the ownership ceremony's plan.
+ *
+ * Their boot is read-only (no DDL, no seed, no file brought into existence),
+ * but the SQL driver's connect still reads the file's journal mode and
+ * switches it when the file answers differently from the mode the driver asks
+ * for — WAL, unless the datasource or `OS_DATABASE_SQLITE_JOURNAL_MODE` in
+ * this process's environment asks for `delete` (`SqlDriver.applySqliteJournalMode`,
+ * one rule for every connect, read-only boots included). Measured on a file
+ * on a rollback journal, after a clean close: header bytes 18 and 19 (the
+ * journal mode), 24-27 (the change counter) and 92-95 change, and nothing
+ * else in the file does. So "writes nothing" is false for such a file, and
+ * "writes no row or table" plus this note is true for every journal mode.
+ */
+export const JOURNAL_MODE_SWITCH_NOTE =
+  'Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only.';

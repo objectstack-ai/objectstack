@@ -2982,13 +2982,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           deprecated: "非推奨"
         }
       },
-      organization_id: {
-        label: "組織",
-        help: "マルチテナント分離のための組織。"
-      },
       environment_id: {
         label: "環境（非推奨）",
-        help: "非推奨。テナント分離には organization_id を使用してください。"
+        help: "非推奨。オーバーレイは環境の行です（ADR-0131 D6）。テナント列はありません。"
       },
       version: {
         label: "バージョン"
@@ -3082,10 +3078,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       source: {
         label: "ソース"
       },
-      organization_id: {
-        label: "組織",
-        help: "マルチテナント分離のための組織。"
-      },
       recorded_by: {
         label: "記録者",
         help: "この変更を行ったユーザー。NULL = システムによる変更（起動時の同期、マイグレーション、スケジュールジョブ）— センチネル文字列は使いません。"
@@ -3118,9 +3110,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "名前"
-      },
-      organization_id: {
-        label: "組織"
       },
       operation: {
         label: "操作",

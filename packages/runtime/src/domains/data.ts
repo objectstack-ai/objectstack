@@ -40,7 +40,8 @@ import { assertFilterParamSuppliedOnce, repeatedQueryParamMessage } from '@objec
 // assembled protocol request does not parse returns the same way.
 import { validationFailure, fieldsFromZodIssues, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 // [#23491] The request contracts `RestServer`'s twin routes validate (#3899).
-import { CreateDataRequestSchema, UpdateDataRequestSchema } from '@objectstack/spec/api';
+// [#23574] …the query's too.
+import { CreateDataRequestSchema, FindDataRequestSchema, UpdateDataRequestSchema } from '@objectstack/spec/api';
 
 /**
  * [#23265] The request's `If-Match`, from either header shape a host hands
@@ -104,15 +105,20 @@ function versionTokenRefusal(token: unknown, spelling: string): string | undefin
  * created rows. RETURNED, not thrown, for the reason `versionTokenRefusal`'s
  * refusal is: a throw out of `dispatch()` reaches a `createHonoApp` host's
  * catch-all, which renders only some declared statuses.
+ *
+ * [#23574] …and the `POST /data/:object/query` read's
+ * (`FindDataRequestSchema`), which had no gate either. Every caller asks the
+ * object's API exposure first ({@link actionExec.refuseUnexposedDataAction}),
+ * so this refusal never answers for an object the caller may not address.
  */
-function writeRequestRefusal(
+function requestSchemaRefusal(
     deps: DomainHandlerDeps,
-    write: 'update' | 'create',
+    request: 'update' | 'create' | 'query',
     issues: Array<{ path: Array<string | number | symbol>; code: string; message: string }>,
     input: unknown,
 ): HttpDispatcherResult {
     const fields = fieldsFromZodIssues(issues, input);
-    const message = `Invalid ${write} request: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`;
+    const message = `Invalid ${request} request: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`;
     return {
         handled: true,
         response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS),
@@ -210,7 +216,47 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // data (`data: body`, `query: normalized`) instead of splatting it,
             // and the GET-by-id branch even allowlists its query params against
             // exactly this kind of parameter pollution.
-            const result = await actionExec.callData(deps, _context, 'query', { ...body, object: objectName }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            //
+            // [#23574] The assembled request is validated as
+            // `FindDataRequestSchema`, the gate `RestServer`'s twin has asked
+            // since #3899, over the request that twin assembles, statement for
+            // statement: a record body is the query, the path object written
+            // into it last; any other body is the query as sent. This branch
+            // had no gate, so a mistyped clause (`limit: "ten"`) or the retired
+            // `joins` reached the engine, which dropped it and answered `200`
+            // with the full record set; a number or a JSON `null` spread to no
+            // query at all, another full read; and a string or an array was
+            // spread into numbered keys the engine refused as unknown fields.
+            // `RestServer` refused all of these `400 VALIDATION_FAILED`, and
+            // both doors now do; `null` is refused like the rest, on both
+            // (`query` declares a QueryAST or nothing, never `null`).
+            //
+            // The object's API exposure is asked first, as the twin's
+            // `enforceApiAccess` is: a caller the object refuses is answered
+            // that refusal, never a verdict on the shape of its body.
+            await actionExec.refuseUnexposedDataAction(deps, _context, 'query', objectName, _context.environmentId, _context.executionContext);
+            const query = (body && typeof body === 'object' && !Array.isArray(body))
+                ? { ...body, object: objectName }
+                : body;
+            const findInput = { object: objectName, ...(query !== undefined ? { query } : {}) };
+            const parsedFind = FindDataRequestSchema.safeParse(findInput);
+            if (!parsedFind.success) return requestSchemaRefusal(deps, 'query', parsedFind.error.issues, findInput);
+            // What is forwarded is the query the gate parsed (never the parse
+            // output, as on the twin), handed to `callData` as `query`, the
+            // path object riding as the request's `object` and not inside it:
+            // the engine fallback (no protocol registered) serves a query's
+            // clauses only. A body that passes the gate is a record (or
+            // absent), and its clauses reach the engine exactly as they did
+            // before. One body does not: a `query` key used to be unwrapped
+            // here as the query itself (`callData` reads `params.query`
+            // first), a second spelling the gate above never sees, so
+            // `{ query: { limit: "ten" } }` would pass it and be read as the
+            // full set. The catalog declares the body to be the QueryAST, so
+            // a `query` key is the field it names, refused by the engine as
+            // it is through `RestServer`.
+            const { object: _pathObject, ...clauses } = (query ?? {}) as Record<string, unknown>;
+            const result = await actionExec.callData(deps, _context, 'query', { object: objectName, query: clauses },
+                _context.dataDriver, _context.environmentId, _context.executionContext);
             return { handled: true, response: deps.success(result) };
         }
 
@@ -282,6 +328,14 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // declares no room for was forwarded and judged `409`.
             // `versionTokenRefusal` above already refuses it, so what reaches
             // this gate and the forward below is a non-blank string.
+            //
+            // [#23574] The object's API exposure is asked before this gate,
+            // where the twin asks `enforceApiAccess`: between its token
+            // refusal and its request gate. This gate used to run first, so
+            // on an object whose exposure denies the update a body that is not
+            // a record answered `400` here and `404` / `405` there, telling a
+            // caller the object refuses how its ingress reads a body.
+            await actionExec.refuseUnexposedDataAction(deps, _context, 'update', objectName, _context.environmentId, _context.executionContext);
             const updateInput = {
                 object: objectName,
                 id,
@@ -289,7 +343,7 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
                 ...(expectedVersion != null ? { expectedVersion } : {}),
             };
             const parsedUpdate = UpdateDataRequestSchema.safeParse(updateInput);
-            if (!parsedUpdate.success) return writeRequestRefusal(deps, 'update', parsedUpdate.error.issues, updateInput);
+            if (!parsedUpdate.success) return requestSchemaRefusal(deps, 'update', parsedUpdate.error.issues, updateInput);
             // Spec: returns UpdateDataResponse = { object, id, record }
             const result = await actionExec.callData(deps, _context, 'update', updateInput,
                 _context.dataDriver, _context.environmentId, _context.executionContext);
@@ -389,12 +443,19 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             // row (`201`), and a string answered the engine's own unknown-field
             // `400`; `RestServer`'s twin refused all three `400
             // VALIDATION_FAILED` (#3899). The assembled request is the twin's,
-            // statement for statement, `null` read as `{}` included: both doors
-            // answer a JSON `null` create alike (an empty row), and that
-            // leniency is retired on both at once or not at all.
-            const createInput = { object: objectName, data: body ?? {} };
+            // statement for statement.
+            //
+            // [#23574] …the body AS THE CALLER SENT IT. Both doors read a JSON
+            // `null` as `{}` (`body ?? {}`) and created an empty row (`201`);
+            // `data` declares a record, so `null` is refused like an array, a
+            // string or a number, on both doors at once. An empty request body
+            // is not `null`: every host hands it over as `{}`, a record. And
+            // the object's API exposure is asked before this gate, as the
+            // twin's `enforceApiAccess` is (see the `PATCH` above).
+            await actionExec.refuseUnexposedDataAction(deps, _context, 'create', objectName, _context.environmentId, _context.executionContext);
+            const createInput = { object: objectName, data: body };
             const parsedCreate = CreateDataRequestSchema.safeParse(createInput);
-            if (!parsedCreate.success) return writeRequestRefusal(deps, 'create', parsedCreate.error.issues, createInput);
+            if (!parsedCreate.success) return requestSchemaRefusal(deps, 'create', parsedCreate.error.issues, createInput);
             // Spec: returns CreateDataResponse = { object, id, record }
             const result = await actionExec.callData(deps, _context, 'create', createInput, _context.dataDriver, _context.environmentId, _context.executionContext);
             const res = deps.success(result);
