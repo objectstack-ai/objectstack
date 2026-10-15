@@ -211,7 +211,7 @@
       "title": "Search honors RLS both ways: a restricted member gets no hits — and no total leakage — from rows they cannot see; the entitled persona finds the same rows",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the contributor position via the qa-contributor-bound-member recipe (invoice_own_rows RLS: owner == current_user.email) — ⛔ NOT one of the seeded demo personas: Mei holds no position (PERMISSION_DENIED, object gate) and Ada holds auditor with viewAllRecords (all 12). See the recipe."],
@@ -245,9 +245,9 @@
           "evidence": "the paired responses + premise read"
         },
         {
-          "clause": "no count leakage: a searched list's total/hasMore derive from the caller-scoped result set — with `search` present the protocol computes a page-local total from the RLS-filtered find (it never runs a raw count for searched lists), and engine.count itself rides the same read middleware (#2737)",
+          "clause": "no count leakage: a searched list's total/hasMore derive from the caller-scoped result set — with `search` present the protocol COUNTS the searched set (engine.count is handed the query's search and searchFields and expands them through the one expander find runs, #22790), and engine.count rides the same read middleware as find (#2737), so the total is the number of matching rows the caller can read",
           "oracle": "api",
-          "verify": "the member's paged totals reconcile exactly with the rows they can enumerate WHILE skip <= their visible count — the total is computed page-locally from the RLS-filtered find, so a skip past the visible set has no page to count and the reconciliation stops being the right question there; no response reveals the true seeded population (12 rows, plus whatever the run itself created — read the count from the seed rather than from this clause)",
+          "verify": "the member's paged total is the same number on every page and equals the matching rows they can enumerate across all pages, and hasMore is true on every page but the last; since #22790 the total is counted rather than estimated page-locally, so it reconciles at every skip, a skip past the visible set included; no response reveals the true seeded population (12 rows, plus whatever the run itself created — read the count from the seed rather than from this clause)",
           "evidence": "the paged responses + reconciliation table"
         },
         {
@@ -272,7 +272,7 @@
         "examples/app-showcase/src/security/permission-sets.ts#invoice_own_rows (invoice_own_rows: owner == current_user.email, positions ['contributor'])",
         "examples/app-showcase/src/data/seed/index.ts (INV-1001..1012 owner spread; 'ada sees INV-1001/1002's lines but never linus's INV-1003')",
         "packages/objectql/src/engine.ts#expandSearchOnAst (expandSearchOnAst ANDs into ast.where; count() rides the read middleware — the #2737 total-leak fix)",
-        "packages/metadata-protocol/src/protocol.ts#countable (searched lists: countable = search == null → page-local total from the scoped find)"
+        "packages/metadata-protocol/src/protocol.ts#findData (the paged arm counts a searched list: engine.count is handed the query's search and searchFields, so total is the counted number of matches and hasMore agrees with it; the `countable` exception and its page-local estimate were deleted by #22790, PR #22857) + packages/rest/src/list-search-total-door.test.ts ('[#22790] a paged search reports the counted total', including 'a member counts only the matches it can read')"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: RLS × $search both-personas contract; total-leakage clause grounded in the protocol's page-local total for searched lists and the #2737 count middleware fix, persona provisioning gap recorded honestly", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -295,6 +295,12 @@
           "date": "2026-08-24",
           "change": "pins the second knownGaps correction on the area recipe this item `use`s, for the same reason revision 5 pinned the first: area-level recipes carry no revision/history of their own, so the revision of a consuming item is the only thing a run record can hold that text against (#10885 tracks giving recipes their own, and is deliberately not pre-empted here). qa-contributor-bound-member's first knownGap said records-forms.crud-roundtrip ⛔ CANNOT `use` this recipe because no cross-area spelling existed — true when written, false since the maintainer ruled option A on 2026-08-22 (#10593 gap 2): `provisioning.use` now also accepts `<area>:<recipe>`, and that item opts in as `search:qa-contributor-bound-member`. The note now describes a recipe with consumers in two areas, both machine-resolved. THIS item's own reference is untouched and still the bare same-area `qa-contributor-bound-member` — every existing spelling stays valid, which is part of the ruling. Steps, clauses, personas, fixtures and provisioning are all unchanged and no run verdict is invalidated",
           "ref": "#10593"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-15",
+          "change": "clause 2's mechanism re-authored to the behaviour on main, and its source anchor re-pointed. #22790 (PR #22857, 55382dc02) deleted protocol.ts's `countable` exception and its page-local estimate: a paged search now runs engine.count with the query's search and searchFields, through the same expander find runs and the same read middleware, so `total` is the counted number of matches the caller can read. The clause said the protocol never counts a searched list, and revision 3 bounded the reconciliation to skip <= the visible count because the estimate had no page to count past it; both were true of the deleted arm and are false now, so the verify now asks for one total on every page that equals the enumerable matches, at any skip. The source anchor on protocol.ts named countable and no longer resolved (check:platform-checklist ABSENT SYMBOL); it now names findData, which holds the counting arm, plus the door pin that measures a member's searched total. The security property is unchanged: no response may reveal a row the caller cannot read. Clauses 1, 3 and 4, the steps, the personas and the fixtures are unchanged",
+          "ref": "#23593"
         }
       ]
     },

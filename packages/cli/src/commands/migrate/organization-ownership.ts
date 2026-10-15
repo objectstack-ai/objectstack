@@ -28,7 +28,7 @@ import {
   OrganizationOwnershipPlanRefusal,
   columnListSql,
   columnNameOf,
-  dialectOf,
+  ceremonyDialectOf,
   type OrganizationOwnershipPlan,
 } from '../../utils/organization-ownership-plan.js';
 import {
@@ -86,6 +86,12 @@ async function confirm(question: string): Promise<boolean> {
  * platform table the inventory names no fate for, a database that is not an
  * ObjectStack one) refuses the whole plan, naming it — exit 1 and no file. ⛔
  * Never a table reported as empty.
+ *
+ * The SQL dialect is read once, off the stack's driver, before either arm
+ * runs a statement (`ceremonyDialectOf`, the resolver `@objectstack/metadata-core`
+ * shares): `dialectName` first, then a recognised `config.client` string. A
+ * driver whose dialect that cannot name is refused, naming the driver, exit 1
+ * — ⛔ never read as SQLite.
  *
  * ## Why a subcommand, not a flag on `os migrate`
  *
@@ -346,11 +352,15 @@ export default class MigrateOrganizationOwnership extends Command {
         );
         return;
       }
+      // The dialect, once, before the first statement: an unresolved one is
+      // refused here, naming the driver, and never read as SQLite.
+      const dialect = ceremonyDialectOf(stack.driver);
       const { normalizeRows } = await import('@objectstack/metadata-protocol');
       const client = (stack.driver.config as { client?: unknown } | undefined)?.client;
       plan = await buildOrganizationOwnershipPlan({
         reader: {
-          client: client === undefined ? undefined : String(client),
+          dialect,
+          ...(typeof client === 'string' ? { client } : {}),
           query: async (sql, params) => normalizeRows(await exec(sql, params ? [...params] : [])),
         },
         posture,
@@ -517,6 +527,9 @@ export default class MigrateOrganizationOwnership extends Command {
         );
         return;
       }
+      // The dialect, once, before the first statement: an unresolved one is
+      // refused here, naming the driver, and never read as SQLite.
+      const dialect = ceremonyDialectOf(stack.driver);
       if (stack.tableAbsent('sys_migration')) {
         await refuse(
           { reason: 'ledger-absent', table: 'sys_migration', detail: 'the deployment ledger the ceremony checkpoints into does not exist' },
@@ -542,7 +555,8 @@ export default class MigrateOrganizationOwnership extends Command {
       });
       const client = (stack.driver.config as { client?: unknown } | undefined)?.client;
       const executor: ApplyExecutor = {
-        client: client === undefined ? undefined : String(client),
+        dialect,
+        ...(typeof client === 'string' ? { client } : {}),
         query: async (sql, params) => normalizeRows(await exec(sql, params ? [...params] : [])),
         execute: async (sql, params) => {
           await exec(sql, params ? [...params] : []);
@@ -619,7 +633,7 @@ export default class MigrateOrganizationOwnership extends Command {
           // overwrite), then what the registry serves for the bundle member.
           find: async (name, locale) => {
             // Once column-drops has run, every row is the environment's (C7b).
-            const scoped = (await executor.query(columnListSql(dialectOf(executor.client) ?? 'sqlite'), ['sys_metadata']))
+            const scoped = (await executor.query(columnListSql(executor.dialect), ['sys_metadata']))
               .some((row) => columnNameOf(row) === 'organization_id');
             const stored = await executor.query(
               `SELECT metadata FROM sys_metadata WHERE type = ? AND name = ? AND state = ?${scoped ? ' AND organization_id IS NULL' : ''} ` +

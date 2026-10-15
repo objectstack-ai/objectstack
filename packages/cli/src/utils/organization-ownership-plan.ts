@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { emailTemplateDefinitionFromRow } from '@objectstack/core';
+import { dialectOfDriver } from '@objectstack/metadata-core';
 import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import {
   APPLICATION_OBJECT_FATE,
@@ -54,8 +55,14 @@ export type PlanDialect = 'sqlite' | 'postgres' | 'mysql';
 
 /** The one seam the plan reads through. Rows already normalized across dialects. */
 export interface PlanReader {
-  /** The knex client spelling of the connected driver. */
-  client: string | undefined;
+  /**
+   * The dialect every statement is written in: resolved ONCE from the stack's
+   * driver by {@link ceremonyDialectOf}, before the first statement, and never
+   * re-derived or defaulted here.
+   */
+  dialect: PlanDialect;
+  /** The knex client spelling, when the driver's `config.client` is a string: recorded in the plan file, never read for the dialect. */
+  client?: string;
   query(sql: string, params?: readonly unknown[]): Promise<Record<string, unknown>[]>;
 }
 
@@ -413,12 +420,42 @@ const DEFAULT_ORGANIZATION_SLUG = 'default';
 /** A name the plan may interpolate as a quoted identifier. */
 export const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-export function dialectOf(client: string | undefined): PlanDialect | null {
-  const c = String(client ?? '').toLowerCase();
-  if (['sqlite3', 'sqlite', 'better-sqlite3'].includes(c)) return 'sqlite';
-  if (['postgres', 'pg', 'postgresql', 'pgnative'].includes(c)) return 'postgres';
-  if (['mysql', 'mysql2'].includes(c)) return 'mysql';
-  return null;
+/**
+ * The ceremony's SQL dialect, read off the stack's driver once, before the
+ * first statement, or a `driver-unsupported` refusal that names the driver.
+ *
+ * The one resolver `@objectstack/metadata-core`'s legacy-row reader uses
+ * (`dialectOfDriver`): the driver's `dialectName` first (the only answer that
+ * names `SqliteWasmDriver`, whose knex `client` is a dialect CLASS), then a
+ * recognised `config.client` string. Everything else is refused, never read
+ * as SQLite: a client class with no `dialectName`, an unrecognised spelling,
+ * `dialectName: 'unknown'`, or a driver with no SQL dialect at all. A
+ * statement written for the wrong dialect either fails mid-ceremony or runs
+ * against the database with the wrong quoting.
+ */
+export function ceremonyDialectOf(driver: unknown): PlanDialect {
+  const named = driver as { dialectName?: unknown; config?: { client?: unknown } } | null | undefined;
+  const dialect = dialectOfDriver(named);
+  if (dialect === 'sqlite' || dialect === 'postgres' || dialect === 'mysql') return dialect;
+  throw new OrganizationOwnershipPlanRefusal(
+    'driver-unsupported',
+    `The connected driver (${describeDriver(driver)}) names no SQL dialect the ceremony can write statements for, so ` +
+      'none was run. The ceremony supports SQLite, PostgreSQL and MySQL, read from the driver\'s dialectName, or from ' +
+      'its config.client when that is a recognised client string; a client class is read only through dialectName.',
+  );
+}
+
+/** The driver, as the refusal names it: its name, its `dialectName`, its client. A client class is named, never printed. */
+function describeDriver(driver: unknown): string {
+  const d = driver as { name?: unknown; dialectName?: unknown; config?: { client?: unknown } } | null | undefined;
+  const parts = [typeof d?.name === 'string' && d.name ? d.name : 'unnamed driver'];
+  if (typeof d?.dialectName === 'string') parts.push(`dialectName ${JSON.stringify(d.dialectName)}`);
+  const client = d?.config?.client;
+  if (typeof client === 'string') parts.push(`client ${JSON.stringify(client)}`);
+  else if (typeof client === 'function') parts.push(`client class ${client.name || '(anonymous)'}`);
+  else if (client === undefined || client === null) parts.push('no client');
+  else parts.push(`client of type ${typeof client}`);
+  return parts.join(', ');
 }
 
 /** sha256 over the inventory, so a plan names the table it was computed from. */
@@ -568,12 +605,12 @@ interface Catalog {
 }
 
 async function readCatalog(sql: Sql, reader: PlanReader, inventoried: ReadonlySet<string>): Promise<Catalog> {
-  const listSql = physicalTableListSql(reader.client);
+  const listSql = physicalTableListSql(sql.dialect);
   if (!listSql) {
     throw new OrganizationOwnershipPlanRefusal(
       'driver-unsupported',
-      `The connected driver (${reader.client ?? 'unknown client'}) has no catalog statement this plan can run, so ` +
-        'no table can be enumerated. The ceremony supports SQLite, PostgreSQL and MySQL.',
+      `The ${sql.dialect} dialect has no catalog statement this plan can run, so no table can be enumerated. ` +
+        'The ceremony supports SQLite, PostgreSQL and MySQL.',
     );
   }
   let rows: Record<string, unknown>[];
@@ -1075,15 +1112,9 @@ export async function buildOrganizationOwnershipPlan(opts: {
   onAttribution?: AttributionSink;
 }): Promise<OrganizationOwnershipPlan> {
   const inventory = opts.inventory ?? ORGANIZATION_OWNERSHIP_INVENTORY;
-  const dialect = dialectOf(opts.reader.client);
-  if (!dialect) {
-    throw new OrganizationOwnershipPlanRefusal(
-      'driver-unsupported',
-      `The connected driver (${opts.reader.client ?? 'unknown client'}) has no catalog statement this plan can run, so ` +
-        'no table can be enumerated. The ceremony supports SQLite, PostgreSQL and MySQL.',
-    );
-  }
-  const sql = new Sql(opts.reader, dialect);
+  // The reader's dialect was resolved from the driver before this call
+  // (`ceremonyDialectOf`, which refuses an unresolved one).
+  const sql = new Sql(opts.reader, opts.reader.dialect);
   const byObject = new Map(inventory.map((e) => [e.object, e]));
   const catalog = await readCatalog(sql, opts.reader, new Set(byObject.keys()));
 
