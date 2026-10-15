@@ -26,6 +26,9 @@ import { resolvePlannedDriverExec } from '../../utils/unmanaged-tables.js';
 import {
   buildOrganizationOwnershipPlan,
   OrganizationOwnershipPlanRefusal,
+  columnListSql,
+  columnNameOf,
+  dialectOf,
   type OrganizationOwnershipPlan,
 } from '../../utils/organization-ownership-plan.js';
 import {
@@ -615,8 +618,11 @@ export default class MigrateOrganizationOwnership extends Command {
           // The environment's own row first (it is what a promotion must never
           // overwrite), then what the registry serves for the bundle member.
           find: async (name, locale) => {
+            // Once column-drops has run, every row is the environment's (C7b).
+            const scoped = (await executor.query(columnListSql(dialectOf(executor.client) ?? 'sqlite'), ['sys_metadata']))
+              .some((row) => columnNameOf(row) === 'organization_id');
             const stored = await executor.query(
-              'SELECT metadata FROM sys_metadata WHERE type = ? AND name = ? AND state = ? AND organization_id IS NULL ' +
+              `SELECT metadata FROM sys_metadata WHERE type = ? AND name = ? AND state = ?${scoped ? ' AND organization_id IS NULL' : ''} ` +
                 'AND (bundle_member = ? OR (bundle_member IS NULL AND ? = ?))',
               ['email_template', name, 'active', locale, locale, 'en-US'],
             );

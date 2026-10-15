@@ -122,7 +122,23 @@ function makeEngine(opts: { items?: unknown[]; rows?: Row[] } = {}) {
                         if ((r as any)[k] !== v) return false;
                     }
                     return true;
-                });
+                // [ADR-0131 D7] The engine shapes a read to the declared
+                // columns: the family declares no `organization_id`.
+                }).map(({ organization_id: _physical, ...declared }: any) => declared);
+            },
+            // The physical column a database the ceremony has not migrated
+            // still holds, read through the table's driver.
+            getDriverForObject(table: string) {
+                if (table !== 'sys_metadata') return undefined;
+                return {
+                    dialectName: 'sqlite',
+                    async execute(sql: string) {
+                        return /column_name/.test(sql)
+                            ? [{ column_name: 'id' }, { column_name: 'organization_id' }]
+                            : (opts.rows ?? []).filter((r: any) => r.organization_id != null && r.organization_id !== '')
+                                .map((r: any) => ({ id: r.id, organization_id: r.organization_id }));
+                    },
+                };
             },
             async findOne(object: string, query?: EngineFindOneQueryInput) {
                               assertEngineFindOnePredicate(object, query); return null; },

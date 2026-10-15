@@ -6,10 +6,13 @@
 // in a legacy organization's layer was restored, served by both doors and
 // pooled, while the boot report named it as served by no read.
 //
-// Pinned: neither door serves the legacy row and no pool opens from it; the
-// environment row is served; the boot report still names the legacy row, and
-// it stays at rest; the by-name reads behind the plugin's writes never reach
-// it. The routes are mounted the way `packages/cli/src/commands/serve.ts` does.
+// [ADR-0131 D6/D7] The `sys_metadata` family now declares no organization
+// column, so no row can sit in an organization's layer (and the runtime refuses
+// to boot on a database still holding one). Pinned: the environment row is
+// restored across the restart, served by both doors and pooled; the by-name
+// reads behind the plugin's writes address the environment's rows; the boot
+// prints no legacy-organization line. The routes are mounted the way
+// `packages/cli/src/commands/serve.ts` does.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { registerDatasourceAdminRoutes } from '@objectstack/service-datasource';
@@ -19,11 +22,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/** A fixture datasource stored in a legacy organization's layer. */
-const LEGACY = 'dogfood_legacy_ds_22835';
-const LEGACY_ORG = 'org_dogfood_legacy_22835';
-const LEGACY_LABEL = 'Legacy organization row 22835';
-/** A fixture datasource stored in the environment's layer: the control. */
+/** A datasource name with no stored row, written through the doors below. */
+const FRESH = 'dogfood_fresh_ds_22835';
+/** A fixture datasource stored in the environment's layer. */
 const ENV = 'dogfood_env_ds_22835';
 
 const SYS = { isSystem: true, positions: [], permissions: [] };
@@ -37,8 +38,6 @@ describe('[#22835] the datasource-admin plugin reads environment rows only (show
   let dir: string;
   /** Every `console.warn` line the measured boot printed. */
   let bootWarnings: string[] = [];
-  /** The legacy row as it was stored, before the measured boot. */
-  let plantedLegacy: Row | undefined;
 
   const routes = () => ({
     name: 'dogfood.datasource-admin-routes',
@@ -79,27 +78,21 @@ describe('[#22835] the datasource-admin plugin reads environment rows only (show
     };
     return connection.listConnectionStates().some((s) => s.name === name);
   };
-  const legacyRows = async () => (await storedRows(LEGACY)).filter((r) => r.organization_id === LEGACY_ORG);
-  const environmentRows = async (name: string) => (await storedRows(name)).filter((r) => r.organization_id == null);
+  const environmentRows = async (name: string) => storedRows(name);
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'dogfood-22835-'));
     await boot();
-    // The rows an earlier release left, written with system context the way
-    // that release's store held them: one in a legacy organization's layer,
-    // one in the environment's.
+    // The environment's row, written with system context the way the store
+    // holds it.
     const now = new Date().toISOString();
-    for (const [name, organizationId, label] of [
-      [LEGACY, LEGACY_ORG, LEGACY_LABEL],
-      [ENV, null, 'Environment row 22835'],
-    ] as const) {
-      await ql().insert('sys_metadata', {
-        type: 'datasource', name, organization_id: organizationId, package_id: null, scope: 'platform',
-        state: 'active', version: 1, checksum: null, created_at: now, updated_at: now,
-        metadata: JSON.stringify({ name, label, driver: 'sqlite', config: { filename: join(dir, `${name}.db`) } }),
-      }, { context: SYS });
-    }
-    [plantedLegacy] = await legacyRows();
+    await ql().insert('sys_metadata', {
+      type: 'datasource', name: ENV, package_id: null, scope: 'platform',
+      state: 'active', version: 1, checksum: null, created_at: now, updated_at: now,
+      metadata: JSON.stringify({
+        name: ENV, label: 'Environment row 22835', driver: 'sqlite', config: { filename: join(dir, `${ENV}.db`) },
+      }),
+    }, { context: SYS });
     await stack.stop();
 
     const warn = vi.spyOn(console, 'warn');
@@ -116,20 +109,17 @@ describe('[#22835] the datasource-admin plugin reads environment rows only (show
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('premise: both rows are at rest, and the boot report names the legacy one', async () => {
-    expect(plantedLegacy).toBeDefined();
-    expect(await environmentRows(ENV)).toHaveLength(1);
-    const report = bootWarnings.filter((line) => line.includes('[metadata_org_scoped_unserved]'));
-    expect(report).toHaveLength(1);
-    expect(report[0]).toContain(`${LEGACY}@${LEGACY_ORG}`);
+  it('premise: the environment row is at rest, carries no organization column, and the boot names no legacy row', async () => {
+    const rows = await environmentRows(ENV);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toHaveProperty('organization_id');
+    expect(bootWarnings.filter((line) => line.includes('[metadata_org_scoped_unserved]'))).toEqual([]);
   });
 
-  it('neither door serves the legacy row, and no pool is opened from it; the environment row is served', async () => {
-    expect((await call('GET', `/datasources/${LEGACY}`)).status).toBe(404);
-    expect((await call('GET', `/meta/datasource/${LEGACY}`)).status).toBe(404);
-    expect(await adminNames()).not.toContain(LEGACY);
-    expect(await metaNames()).not.toContain(LEGACY);
-    expect(pooled(LEGACY)).toBe(false);
+  it('the environment row is served by both doors and pooled; a name with no row is served by neither', async () => {
+    expect((await call('GET', `/datasources/${FRESH}`)).status).toBe(404);
+    expect((await call('GET', `/meta/datasource/${FRESH}`)).status).toBe(404);
+    expect(pooled(FRESH)).toBe(false);
 
     expect((await call('GET', `/datasources/${ENV}`)).status).toBe(200);
     expect((await call('GET', `/meta/datasource/${ENV}`)).status).toBe(200);
@@ -138,27 +128,26 @@ describe('[#22835] the datasource-admin plugin reads environment rows only (show
     expect(pooled(ENV)).toBe(true);
   });
 
-  it('the writes\' by-name reads never reach the legacy row, and the row is kept as it was', async () => {
-    // An admin create under the legacy row's name writes an environment row of
-    // its own; its remove takes that row away again.
+  it('the writes\' by-name reads address the environment\'s rows', async () => {
+    // An admin create writes an environment row; its remove takes that row
+    // away again.
     const created = await call('POST', '/datasources', {
-      name: LEGACY, label: 'Admin create 22835', driver: 'sqlite', config: { filename: join(dir, 'admin.db') },
+      name: FRESH, label: 'Admin create 22835', driver: 'sqlite', config: { filename: join(dir, 'admin.db') },
     });
     expect(created.status, JSON.stringify(created.json)).toBe(201);
-    expect(await environmentRows(LEGACY)).toHaveLength(1);
-    expect((await call('DELETE', `/datasources/${LEGACY}`)).status).toBe(204);
-    expect(await environmentRows(LEGACY)).toHaveLength(0);
+    expect(await environmentRows(FRESH)).toHaveLength(1);
+    expect((await call('DELETE', `/datasources/${FRESH}`)).status).toBe(204);
+    expect(await environmentRows(FRESH)).toHaveLength(0);
 
     // A `/meta` save under the name: the admin door serves the saved body.
-    const saved = await call('PUT', `/meta/datasource/${LEGACY}`, {
-      name: LEGACY, label: 'Meta save 22835', driver: 'sqlite', config: { filename: join(dir, 'meta.db') },
+    const saved = await call('PUT', `/meta/datasource/${FRESH}`, {
+      name: FRESH, label: 'Meta save 22835', driver: 'sqlite', config: { filename: join(dir, 'meta.db') },
     });
     expect(saved.status, JSON.stringify(saved.json)).toBe(200);
-    const served = await call('GET', `/datasources/${LEGACY}`);
+    const served = await call('GET', `/datasources/${FRESH}`);
     expect(served.status, JSON.stringify(served.json)).toBe(200);
     expect(served.json.data?.datasource?.label).toBe('Meta save 22835');
 
-    // Neither deleted nor rewritten.
-    expect(await legacyRows()).toEqual([plantedLegacy]);
+    expect(await environmentRows(FRESH)).toHaveLength(1);
   });
 });

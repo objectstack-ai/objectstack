@@ -62,11 +62,11 @@
  * [ADR-0131 D6] What remains
  * ---------------------------------------------------------------------------
  * An organization-scoped duplicate is now refused (403 NOT_OVERRIDABLE), and
- * the scan reads ENVIRONMENT rows only (`organization_id IS NULL`), so the two
- * tiers no longer meet here and the cross-tier dedup above is gone with them.
- * The cases that drove it are deleted; what this file still pins is that every
- * environment bundle member is copied, a legacy organization-scoped row is
- * not, and another package's row is never scanned.
+ * every row the scan reads is the environment's (ADR-0131 D7: no organization
+ * column), so the two tiers no longer meet here and the cross-tier dedup above
+ * is gone with them. The cases that drove it are deleted; what this file still
+ * pins is that every environment bundle member is copied, and another
+ * package's row is never scanned.
  */
 import { describe, expect, it, vi } from 'vitest';
 // [#7774] The identity table's home is `@objectstack/metadata-core`, not the
@@ -118,7 +118,6 @@ function matches(r: Record<string, any>, where: Record<string, unknown>): boolea
 function makeProtocol(rows: Array<Record<string, any>>) {
     const seeded = rows.map((r, i) => ({
         id: `r_${i + 1}`,
-        organization_id: null,
         package_id: SRC,
         state: 'active',
         checksum: `sha256:seed_${i + 1}`,
@@ -172,17 +171,12 @@ describe('[#7932] duplicatePackage keeps every i18n bundle member', () => {
             expect(Object.keys(ITEM_KEY_DISCRIMINATORS)).toEqual(['email_template']);
         });
 
-        it('copies every environment bundle member, and never a legacy organization-scoped row', async () => {
-            // [ADR-0131 D6] The scan is `organization_id IS NULL`: both env-wide
-            // members are copied verbatim (no dedup collapses them), and the
-            // legacy org row waits for the promotion ceremony (ADR-0131 C7).
+        it('copies every environment bundle member', async () => {
+            // [ADR-0131 D6/D7] Every row is the environment's: both members
+            // are copied verbatim (no dedup collapses them).
             const { protocol, saveMetaItem } = makeProtocol([
                 { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', 'en-US') },
                 { type: 'email_template', name: 'auth.welcome', metadata: tpl('auth.welcome', 'ja-JP') },
-                {
-                    type: 'email_template', name: 'auth.welcome', organization_id: ORG,
-                    metadata: tpl('auth.welcome', 'zh-CN'),
-                },
             ]);
 
             const res = await duplicate(protocol);

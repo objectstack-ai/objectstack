@@ -170,7 +170,6 @@ describe('SysMetadataRepository', () => {
         engine = makeFakeEngine();
         repo = new SysMetadataRepository({
             engine,
-            organizationId: 'org_alpha',
             orgLabel: 'org_alpha',
         });
     });
@@ -480,8 +479,8 @@ describe('SysMetadataRepository', () => {
             parentVersion: null, actor: 'studio', source: 'studio',
         });
         expect(engine.historyRows).toHaveLength(1);
+        expect(engine.historyRows[0]).not.toHaveProperty('organization_id');
         expect(engine.historyRows[0]).toMatchObject({
-            organization_id: 'org_alpha',
             type: 'view',
             name: 'case_grid',
             operation_type: 'create',

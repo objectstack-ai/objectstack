@@ -83,9 +83,11 @@
  *     and if a helper is ever wanted the answer is an EXEMPT entry with a
  *     reason, not a looser rule.
  *   - Raw `this.knex(...)` construction that bypasses `getBuilder` entirely.
- *     Out of reach of this criterion by construction. Nothing in the family
- *     does it today on a read path; if that changes, this gate cannot see it,
- *     and the honest place to record that limit is here.
+ *     Out of reach of this criterion by construction. One read path does it,
+ *     and it returns no row: `SqlDriver.listPhysicalColumns` (#23429) reads a
+ *     table's CATALOG (column names) on Knex directly, so it has no rows to
+ *     scope. Any other such read path is invisible to this gate, and the
+ *     honest place to record that limit is here.
  *   - **WHERE the call sits.** This is the important one, and it is measured
  *     rather than assumed. The gate asserts the call EXISTS on that binding,
  *     never its position — so a call moved below `builder.toSQL()`, or below

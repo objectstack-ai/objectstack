@@ -102,8 +102,10 @@ interface Captured {
 
 /**
  * A manager over a driver stub that records the filter each call site builds.
- * `HistoryCleanupManager` reads `driver`, `historyTableName` and
- * `organizationId` off the loader by property, so a plain object is enough.
+ * `HistoryCleanupManager` reads `driver` and `historyTableName` off the loader
+ * by property, so a plain object is enough. `organizationId` is planted to
+ * prove it scopes nothing (ADR-0131 D6/D7: the family declares no
+ * organization column).
  */
 function managerFor(
   policy: MetadataHistoryRetentionPolicy,
@@ -317,13 +319,13 @@ describe('#15824 fences — retention did not become timezone-aware', () => {
 });
 
 describe('#15824 fences — the rest of both filters is untouched', () => {
-  it('the delete filter still scopes by organization and excludes executionPinned types', async () => {
+  it('the delete filter names no organization and excludes executionPinned types', async () => {
     const captured: Captured = {};
     await at('America/New_York', '2026-03-08T07:00:00.000Z', () =>
       managerFor({ maxAgeDays: 1 }, captured, 'org_42').runCleanup(),
     );
     const filter = captured.deleteFilter!;
-    expect(filter.organization_id).toBe('org_42');
+    expect(filter).not.toHaveProperty('organization_id');
     expect((filter.type as { $nin: string[] }).$nin.length).toBeGreaterThan(0);
     expect(filter.recorded_at).toEqual({ $lt: utcWindowStart('2026-03-08T07:00:00.000Z', 1) });
   });
@@ -334,7 +336,7 @@ describe('#15824 fences — the rest of both filters is untouched', () => {
       managerFor({ maxAgeDays: 1 }, captured, 'org_42').getCleanupStats(),
     );
     const where = captured.countWhere!;
-    expect(where.organization_id).toBe('org_42');
+    expect(where).not.toHaveProperty('organization_id');
     expect((where.type as { $nin: string[] }).$nin.length).toBeGreaterThan(0);
     expect(where.recorded_at).toEqual({ $lt: utcWindowStart('2026-10-03T15:30:00.000Z', 1) });
   });

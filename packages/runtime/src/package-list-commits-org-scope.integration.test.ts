@@ -94,7 +94,6 @@ const PKG = 'com.repro.commits';
 const OTHER_PKG = 'com.other.commits';
 const PLATFORM_PKG = '@objectstack/platform-objects';
 const ACTIVE_ORG = 'org_active';
-const OTHER_ORG = 'org_other';
 
 /**
  * [commit 13a6cb4ad] Every publish this fixture makes runs the metadata-protocol build
@@ -186,13 +185,13 @@ const viewBody = (name: string, label: string) => ({
 
 /**
  * Author one draft and publish it, which is what records ONE commit row,
- * env-wide. [ADR-0131 D6] The protocol refuses an organization-scoped publish,
- * so an `organizationId` here plants a LEGACY organization commit: the
- * env-wide commit row is re-stamped at rest, the way an older release left it.
+ * env-wide. [ADR-0131 D6/D7] The protocol refuses an organization-scoped
+ * publish, and the commit ledger declares no organization column, so every
+ * commit is the environment's.
  */
 async function publishOne(
   protocol: any,
-  args: { view: string; packageId: string; organizationId?: string; message: string },
+  args: { view: string; packageId: string; message: string },
 ): Promise<string> {
   await protocol.saveMetaItem({
     type: 'view',
@@ -207,14 +206,6 @@ async function publishOne(
   });
   expect(res.success).toBe(true);
   expect(res.commitId).toBeTruthy();
-  if (args.organizationId) {
-    // `isSystem`: the column is `readonly`, and only a system write may set it.
-    await protocol.engine.update(
-      'sys_metadata_commit',
-      { id: res.commitId, organization_id: args.organizationId },
-      { context: { isSystem: true } },
-    );
-  }
   return res.commitId as string;
 }
 
@@ -232,21 +223,17 @@ async function seed(protocol: any) {
     view: 'commits_env', packageId: PKG, message: 'env-wide publish',
   });
   await tick();
-  // The caller's OWN org — the only rows the strict equality ever found.
-  const own = await publishOne(protocol, {
-    view: 'commits_own', packageId: PKG, organizationId: ACTIVE_ORG, message: 'own-org publish',
+  // A second publish of the same package — published by an org-active
+  // session, which lands env-wide like every write.
+  const second = await publishOne(protocol, {
+    view: 'commits_second', packageId: PKG, message: 'second publish',
   });
   await tick();
-  // Negative 1 — same package, ANOTHER organization. Must stay invisible.
-  const foreign = await publishOne(protocol, {
-    view: 'commits_foreign', packageId: PKG, organizationId: OTHER_ORG, message: 'other-org publish',
-  });
-  await tick();
-  // Negative 2 — ANOTHER package, env-wide. Must never appear.
+  // The negative — ANOTHER package, env-wide. Must never appear.
   const otherPkg = await publishOne(protocol, {
     view: 'commits_other_pkg', packageId: OTHER_PKG, message: 'other package publish',
   });
-  return { envWide, own, foreign, otherPkg };
+  return { envWide, second, otherPkg };
 }
 
 const idsOf = (commits: any[]): string[] => commits.map((c) => c.id).sort();
@@ -258,44 +245,25 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
       view: 'commits_env', packageId: PKG, message: 'env-wide publish',
     });
 
-    // Straight out of SQLite: the column really is NULL, so the strict
-    // equality below really has nothing to match.
+    // Straight out of SQLite: the ledger carries no organization column at
+    // all (ADR-0131 D7), so no equality on one has anything to match.
     const rows = (await engine.find('sys_metadata_commit', { where: {} })) as any[];
-    expect(rows.map((r) => ({ id: r.id, org: r.organization_id ?? null }))).toEqual([
-      { id, org: null },
+    expect(rows.map((r) => ({ id: r.id, org: 'organization_id' in r }))).toEqual([
+      { id, org: false },
     ]);
   });
 
-  it('[ADR-0131 D6] returns the env-wide commits to a caller naming an organization — and not its legacy organization commit', async () => {
+  it('[ADR-0131 D6] returns the environment\'s commits to a caller naming an organization', async () => {
     const { protocol } = await boot();
-    const { envWide, own } = await seed(protocol as any);
+    const { envWide, second } = await seed(protocol as any);
 
     const commits = await (protocol as any).listCommits({
       packageId: PKG,
       organizationId: ACTIVE_ORG,
     });
 
-    // The env-wide commit is the timeline (#7779 closed its absence). The
-    // caller's legacy organization commit is reported at boot, never served:
-    // the timeline holds exactly the commits whose changes the reads serve.
-    expect(idsOf(commits)).toEqual([envWide]);
-    expect(idsOf(commits)).not.toContain(own);
-    expect(commits.map((c: any) => c.message)).toEqual(['env-wide publish']);
-  });
-
-  it('does NOT surface another organization’s commits', async () => {
-    const { protocol } = await boot();
-    const { foreign } = await seed(protocol as any);
-
-    const commits = await (protocol as any).listCommits({
-      packageId: PKG,
-      organizationId: ACTIVE_ORG,
-    });
-
-    // The direction that must not widen. A commit timeline that leaked
-    // another tenant's authoring history would be a worse defect than the
-    // under-reporting this closes.
-    expect(idsOf(commits)).not.toContain(foreign);
+    // The env-wide commits are the timeline (#7779 closed their absence).
+    expect(idsOf(commits)).toEqual([envWide, second].sort());
   });
 
   it('does NOT surface another package’s commits', async () => {
@@ -310,19 +278,13 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
     expect(idsOf(commits)).not.toContain(otherPkg);
   });
 
-  it('[ADR-0131 D6] a caller with NO org sees the environment\'s timeline — no organization\'s legacy commits', async () => {
+  it('[ADR-0131 D6] a caller with NO org sees the same timeline', async () => {
     const { protocol } = await boot();
-    const { envWide, own, foreign } = await seed(protocol as any);
+    const { envWide, second } = await seed(protocol as any);
 
-    // The no-org branch used to be left package-wide, so an org-active
-    // operator on the packages door saw every organization's legacy commits.
-    // The ledger is deployment-level (ADR-0131 D7) and the legacy rows are
-    // reported at boot, not served — the same rule as the metadata rows.
     const commits = await (protocol as any).listCommits({ packageId: PKG });
 
-    expect(idsOf(commits)).toEqual([envWide]);
-    expect(idsOf(commits)).not.toContain(own);
-    expect(idsOf(commits)).not.toContain(foreign);
+    expect(idsOf(commits)).toEqual([envWide, second].sort());
   });
 
   it('the timeline the rollback planner reads now contains the env-wide commit', async () => {
@@ -330,13 +292,8 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
     const p = protocol as any;
 
     // [ADR-0131 D6] C1 and C2, both env-wide (every publish is), C2 strictly
-    // newer; plus a legacy organization commit between them, which the
-    // timeline does not show and the planner therefore never reverts.
+    // newer.
     const c1 = await publishOne(p, { view: 'roll_a', packageId: PKG, message: 'c1' });
-    await tick();
-    const legacy = await publishOne(p, {
-      view: 'roll_legacy', packageId: PKG, organizationId: ACTIVE_ORG, message: 'legacy',
-    });
     await tick();
     const c2 = await publishOne(p, { view: 'roll_b', packageId: PKG, message: 'c2' });
 
@@ -347,7 +304,6 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
     // performed, with C2's changes still live.
     const commits = await p.listCommits({ packageId: PKG });
     expect(idsOf(commits)).toEqual([c1, c2].sort());
-    expect(idsOf(commits)).not.toContain(legacy);
 
     // [#7819 tier 1] ⭐ THE GAP THIS SUITE HANDED ON IS NOW CLOSED — these
     // lines are the handoff, and they changed exactly as it predicted.
