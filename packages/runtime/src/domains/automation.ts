@@ -1627,9 +1627,9 @@ const FLOW_META_ITEM_ROUTE = '/api/v1/meta/flow';
 const FLOW_PACKAGES_SHOWN = 5;
 
 /**
- * ADR-0112 envelope of that refusal: the status the protocol's refusal carries,
- * whose code (`RESOURCE_CONFLICT`) `deps.error` derives from it — the same
- * `409 RESOURCE_CONFLICT`, only its remedy says what works from this door.
+ * ADR-0112 envelope of that refusal: the code and status the protocol's refusal
+ * carries — the same `409 RESOURCE_CONFLICT`, only its remedy says what works
+ * from this door.
  */
 const FLOW_PACKAGE_REFUSAL_STATUS = 409;
 
@@ -1712,6 +1712,38 @@ function flowPackageRefusalMessage(verb: 'save' | 'delete', name: string, packag
 }
 
 /**
+ * [#23501] The refusal a definition door answers for a write the store refused:
+ * the store's own, as it was thrown, unless {@link flowPackagesRefusingWrite}
+ * reads it as a name two or more packages hold — then this door's own
+ * `409 RESOURCE_CONFLICT`, whose remedy is one its caller can follow:
+ *
+ *  - `'definition'` (`POST /`, `PUT /:name`) and `'delete'` (`DELETE /:name`):
+ *    the metadata door's `?package=` route, {@link flowPackageRefusalMessage};
+ *  - `'clone'`: the clone door's own taken-name refusal. A name two packages
+ *    hold is taken, and a clone takes a NEW name (ADR-0126 §7.1) — writing the
+ *    copy into one package's row would be the same-name shadow that refusal
+ *    exists to stop.
+ *
+ * A VALUE, never an answer: every catch that asks it answers through
+ * `deps.errorFromThrown`, so each path out of the catch hands the failure to
+ * the caller the one way the durability log-level guard reads
+ * (`FAILURE_PROPAGATION_CALLEES`).
+ */
+async function flowWriteRefusal(
+    store: Partial<Pick<MetadataProtocol, 'getMetaItems'>> | undefined,
+    refusal: unknown,
+    name: string,
+    door: 'definition' | 'clone' | 'delete',
+): Promise<unknown> {
+    const packageIds = await flowPackagesRefusingWrite(store, refusal, name);
+    if (!packageIds) return refusal;
+    const [message, status] = door === 'clone'
+        ? [flowCloneNameTakenMessage(name), FLOW_CLONE_NAME_TAKEN_STATUS]
+        : [flowPackageRefusalMessage(door === 'delete' ? 'delete' : 'save', name, packageIds), FLOW_PACKAGE_REFUSAL_STATUS];
+    return Object.assign(new Error(message), { code: 'RESOURCE_CONFLICT', status });
+}
+
+/**
  * [#20862, #20761, ADR-0126 §2, ADR-0131 D6] THE ONE PERSISTENCE PATH for this
  * domain's definition writes — `POST /`, `PUT /:name` and the copy
  * `POST /:name/clone` writes: register the definition in the engine, then save
@@ -1744,7 +1776,7 @@ function flowPackageRefusalMessage(verb: 'save' | 'delete', name: string, packag
  *  - **That `409` names a remedy this door's caller can follow** [#23501].
  *    The protocol's own remedy ("on the REST door add ?package=") is for the
  *    doors that read `?package=`, and this one does not, so it is not relayed
- *    as it is ({@link flowPackagesRefusingWrite}). `door` says which answer:
+ *    as it is ({@link flowWriteRefusal}). `door` says which answer:
  *    `'definition'` (`POST /`, `PUT /:name`) sends the save to the metadata
  *    door's `PUT /meta/flow/:name?package=`; `'clone'` answers the clone
  *    door's own taken-name refusal, because a name two packages hold is taken
@@ -1792,12 +1824,9 @@ async function registerAndSaveFlow(
             await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition });
         } catch (e) {
             restoreFlowRegistration(automationService, name, held);
-            const packageIds = await flowPackagesRefusingWrite(store, e, name);
-            if (!packageIds) return { refused: { handled: true, response: deps.errorFromThrown(e) } };
-            const response = door === 'clone'
-                ? deps.error(flowCloneNameTakenMessage(name), FLOW_CLONE_NAME_TAKEN_STATUS)
-                : deps.error(flowPackageRefusalMessage('save', name, packageIds), FLOW_PACKAGE_REFUSAL_STATUS);
-            return { refused: { handled: true, response } };
+            return {
+                refused: { handled: true, response: deps.errorFromThrown(await flowWriteRefusal(store, e, name, door)) },
+            };
         }
     }
     return { registered };
@@ -1833,7 +1862,7 @@ type FlowRemovalService =
  *    store (the delete names no package, as the save does), and answered with
  *    a remedy this door's caller can follow [#23501]: the metadata door's
  *    `DELETE /meta/flow/:name?package=`, which removes that one package's row
- *    ({@link flowPackagesRefusingWrite}). That delete is `RestServer`'s
+ *    ({@link flowWriteRefusal}). That delete is `RestServer`'s
  *    (`@objectstack/rest`), the `/meta` door `os serve` mounts; the
  *    dispatcher's own `/meta` arm serves no `DELETE` (`domains/meta.ts`).
  *
@@ -1855,12 +1884,7 @@ async function unregisterAndDeleteFlow(
             await store.deleteMetaItem({ type: FLOW_METADATA_TYPE, name });
         } catch (e) {
             if (held) automationService.registerFlow?.(name, held);
-            const packageIds = await flowPackagesRefusingWrite(store, e, name);
-            if (!packageIds) return { handled: true, response: deps.errorFromThrown(e) };
-            return {
-                handled: true,
-                response: deps.error(flowPackageRefusalMessage('delete', name, packageIds), FLOW_PACKAGE_REFUSAL_STATUS),
-            };
+            return { handled: true, response: deps.errorFromThrown(await flowWriteRefusal(store, e, name, 'delete')) };
         }
     }
     return undefined;
