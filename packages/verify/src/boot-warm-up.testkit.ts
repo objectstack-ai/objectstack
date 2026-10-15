@@ -20,8 +20,8 @@
  * entries are `import()`ed lazily from inside the boot, sql.js compiles its
  * WASM, and every path runs cold. Without this, that cost lands in whichever
  * `beforeAll` or `it` boots first, and the hourly timing table charges it to
- * the file. Measured over the 24 files of `@objectstack/verify` that the
- * table listed: 1.2 to 3.8 s of each file's clocked time, isolated.
+ * the file. A warm-up took 1.2 to 3.8 s off the clocked time of each of the 24
+ * files of this package that the table listed (isolated, one run each).
  *
  * Why a WHOLE throwaway boot rather than a list of module-top imports: the
  * lazily loaded modules (`@objectstack/driver-sql`,

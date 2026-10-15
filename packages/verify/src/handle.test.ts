@@ -73,7 +73,8 @@ afterAll(async () => {
  * original. `vi.resetModules()` would also give a fresh instance, but it drops
  * the whole registry, so the re-import re-evaluated the fixture's entire graph
  * (`@objectstack/spec` and the rest) and the boot after it re-loaded every
- * module it imports lazily: about 1.8 s per call, inside the case's clock.
+ * module it imports lazily: 1.2 to 1.6 s more per call, isolated, inside the
+ * case's clock.
  */
 let freshInstances = 0;
 async function freshHandleFixtureStack(): Promise<typeof handleFixtureStack> {
