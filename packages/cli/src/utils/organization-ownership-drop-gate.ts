@@ -6,35 +6,50 @@
  * ceremony verified on this database?
  *
  * A v18 runtime declares no organization column on the ceremony's
- * column-drop tables (the D7 tables and the `sys_metadata` family), so the
- * drift report lists each physical one as an unmapped, destructive column and
+ * column-drop tables (the D7 tables, the platform's and the ones a deployment
+ * declares platform-global, and the `sys_metadata` family), so the drift
+ * report lists each physical one as an unmapped, destructive column and
  * names `os migrate apply --allow-destructive` as its remedy. Applied ahead of
  * the ceremony, that drop skips its promotion and report steps, turns every
  * legacy organization row into an environment row, and leaves no physical
  * column for the v18 boot refusal to find — so the server starts with the
  * marker never written. D10 item 5 forbids exactly that escape hatch. So the
- * drop of `organization_id` on any table in the ceremony's inventory waits for
- * the ceremony's verified marker, as `sys_account.issuer` (#17440) and
+ * drop of `organization_id` on any table the ceremony plans waits for the
+ * ceremony's verified marker, as `sys_account.issuer` (#17440) and
  * `sys_comment.reactions` (#23281) wait for theirs. ⛔ No flag stands it down.
+ *
+ * ## Which tables: every `organization_id` drop the drift offers (#23684)
+ *
+ * The ceremony's table set is the database's, not a list's: its plan meets
+ * every physical table that carries `organization_id`, with the platform
+ * inventory's row, a host fate supplement's row, the application-object fate,
+ * or a refusal by name (`organization-ownership-plan.ts`). The drift can offer
+ * to drop only a column that is physically there. So every `organization_id`
+ * drop it offers is on a table the ceremony plans, and this gate holds back
+ * every one: the platform inventory's tables, the objects a deployment
+ * declares platform-global (ADR-0131 D7), and the objects a host's fate
+ * supplement names, a file `os migrate apply` is never handed. The v18 boot
+ * refusal judges the same population, every object that declares no
+ * organization column, not the inventory.
+ *
+ * Reading the drift rather than a composed table list keeps one source: no
+ * second copy of the ceremony's inventory composition, and no part of the
+ * answer this command could fail to read.
  */
 
 import type { MigrationFlagEngine } from '@objectstack/platform-objects/system';
 import type { DataMigrationFlag } from '@objectstack/spec/system';
-import { ORGANIZATION_OWNERSHIP_INVENTORY } from './organization-ownership-inventory.js';
 
 /** The column the ceremony owns the drop of. */
 export const ORGANIZATION_COLUMN = 'organization_id';
 
-/** Every table the ceremony's inventory names. */
-const CEREMONY_TABLES: ReadonlySet<string> = new Set(ORGANIZATION_OWNERSHIP_INVENTORY.map((entry) => entry.object));
-
-/** The tables whose `organization_id` drop is among `intended`, sorted. */
+/** The tables whose `organization_id` drop is among `intended`, sorted: every one, since the ceremony plans each table that carries the column. */
 export function ceremonyOrganizationColumnDrops(
   intended: ReadonlyArray<{ table: string; op?: { type?: string; column?: string } }>,
 ): string[] {
   const tables = new Set<string>();
   for (const d of intended) {
-    if (d.op?.type === 'drop_column' && d.op.column === ORGANIZATION_COLUMN && CEREMONY_TABLES.has(d.table)) tables.add(d.table);
+    if (d.op?.type === 'drop_column' && d.op.column === ORGANIZATION_COLUMN) tables.add(d.table);
   }
   return [...tables].sort();
 }
