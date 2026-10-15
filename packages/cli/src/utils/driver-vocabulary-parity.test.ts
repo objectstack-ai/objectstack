@@ -372,3 +372,117 @@ describe('fork 2: no local default + no URL is refused on BOTH sides — all 8 c
     expect(resolveStorageDefinition(kind, { isDev: false })!.driverId).toBe(kind);
   });
 });
+
+/**
+ * The URL door: one verdict per `OS_DATABASE_URL`, on both hosts, in dev AND
+ * production.
+ *
+ * The rows above vary the DRIVER spelling. These vary the URL with no driver
+ * named, which is the question `inferDriverTypeFromUrl` (CLI host) and
+ * `detectDriverFromUrl` (runtime host) both answer. Before this block the CLI
+ * answered '' for every URL its regexes missed: `redis://…` booted `serve --dev`
+ * on the SQLite `:memory:` default in silence and met the no-storage refusal in
+ * production, while the runtime host refused the scheme by name; and `pg://…`
+ * and a scheme-less path, which the runtime host accepts, got the same silent
+ * `:memory:` from the CLI.
+ *
+ * An accepted row asserts the definition was built FROM THE URL
+ * (`displayUrl === url`), not just that a driver id came back: the dev default
+ * is a `sqlite` definition too, so a bare driver-id check would read `:memory:`
+ * as an agreement about `./data/app`.
+ */
+describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and prod', () => {
+  const saved: Record<string, string | undefined> = {};
+  const ENV_KEYS = [
+    'OS_DATABASE_DRIVER', 'OS_DATABASE_URL', 'DATABASE_URL', 'TURSO_DATABASE_URL', 'OS_HOME',
+  ];
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
+    for (const key of ENV_KEYS) delete process.env[key];
+    process.env.OS_HOME = mkdtempSync(join(tmpdir(), 'os-url-door-parity-'));
+  });
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key]!;
+    }
+  });
+
+  /** The CLI host's verdict for a URL with no driver named — serve.ts's own two calls. */
+  function cliUrlVerdict(url: string, isDev: boolean):
+    | { accepted: true; driverId: string; displayUrl: string | undefined }
+    | { accepted: false; error: unknown } {
+    try {
+      const definition = resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev });
+      return definition
+        ? { accepted: true, driverId: definition.driverId, displayUrl: definition.displayUrl }
+        : { accepted: false, error: null };
+    } catch (error) {
+      return { accepted: false, error };
+    }
+  }
+
+  /** The runtime host's verdict for the same URL, from `OS_DATABASE_URL`. */
+  function runtimeUrlVerdict(url: string): { accepted: true; driverId: string } | { accepted: false; message: string } {
+    process.env.OS_DATABASE_URL = url;
+    try {
+      return { accepted: true, driverId: resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' }).driver };
+    } catch (err) {
+      return { accepted: false, message: (err as Error).message };
+    }
+  }
+
+  // Every spelling the runtime host's arms accept, each with the kind it means.
+  // ⛔ The CLI never refuses one of these.
+  it.each([
+    ['postgres://u:p@localhost:5432/db', 'postgres'],
+    ['postgresql://u:p@localhost:5432/db', 'postgres'],
+    ['pg://u:p@localhost:5432/db', 'postgres'],
+    ['PG://u:p@localhost:5432/db', 'postgres'],
+    ['mysql://u:p@localhost:3306/db', 'mysql'],
+    ['mysql2://u:p@localhost:3306/db', 'mysql'],
+    ['mongodb://localhost:27017/db', 'mongodb'],
+    ['mongodb+srv://cluster.example.net/db', 'mongodb'],
+    ['libsql://my-db.turso.io', 'turso'],
+    ['https://my-db.turso.io', 'turso'],
+    ['wasm-sqlite://data.db', 'sqlite-wasm'],
+    ['./local.wasm.db', 'sqlite-wasm'],
+    ['file:./data/app.db', 'sqlite'],
+    ['sqlite:./data/app.db', 'sqlite'],
+    [':memory:', 'sqlite'],
+    ['./data/app.db', 'sqlite'],
+    ['data/app.sqlite3', 'sqlite'],
+    ['./data/app', 'sqlite'],
+    ['/var/lib/objectstack/app', 'sqlite'],
+  ])('both hosts ACCEPT %s as %s, and the CLI builds it from that URL in dev and prod', (url, kind) => {
+    expect(runtimeUrlVerdict(url), `the runtime host refused ${url}`).toEqual({ accepted: true, driverId: kind });
+    for (const isDev of [false, true]) {
+      expect(cliUrlVerdict(url, isDev), `the CLI host (isDev=${isDev}) did not build ${url}`)
+        .toEqual({ accepted: true, driverId: kind, displayUrl: url });
+    }
+  });
+
+  // A `<scheme>://` neither host recognises: refused by both, the CLI's refusal
+  // being the typed one serve.ts makes fatal, in dev as in production.
+  it.each([
+    ['redis://127.0.0.1:6399/0', 'redis://'],
+    ['rediss://cache.example.com:6380', 'rediss://'],
+    ['https://db.example.com/app', 'https://'],
+    ['mssql://h/db', 'mssql://'],
+    ['redis://h/app.db', 'redis://'],
+  ])('both hosts REFUSE %s, in dev AND in prod', (url, scheme) => {
+    const runtime = runtimeUrlVerdict(url);
+    expect(runtime.accepted, `the runtime host accepted ${url}`).toBe(false);
+    for (const isDev of [false, true]) {
+      const cli = cliUrlVerdict(url, isDev);
+      expect(cli.accepted, `the CLI host (isDev=${isDev}) accepted ${url}`).toBe(false);
+      const error = (cli as { error: unknown }).error;
+      expect(error, `the CLI host (isDev=${isDev}) did not refuse ${url} by type`).toBeInstanceOf(UnsupportedDriverError);
+      expect((error as UnsupportedDriverError).recognized).toBe(false);
+      expect((error as Error).message).toContain(`"${scheme}"`);
+      expect((error as Error).message).toContain('OS_DATABASE_URL');
+    }
+  });
+});
