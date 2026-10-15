@@ -48,11 +48,8 @@ Earlier entries say a `createHonoApp` host still renders the `/data` version
 refusals as `500`. This change ends that: they are answered `409` and `400` as
 declared.
 
-⚠️ **Known gap, stated rather than left silent.** The `409 CONCURRENT_UPDATE`
-this host now answers carries `code` and `message`, but not the
-`currentVersion` and `currentRecord` that the standalone REST server's `409`
-carries. The recogniser forwards only the `details` a producer declares, and
-those two fields are own properties of the error. That gap is outside this
-change.
+The `409 CONCURRENT_UPDATE` this host now answers carries `currentVersion` and
+`currentRecord` in `error.details`, the two fields the standalone REST server's
+`409` carries; `currentRecord` is the row as the caller reads it.
 
 Clause-②: yes (widening)
