@@ -2414,7 +2414,7 @@
       "source": [
         "objectui: packages/plugin-detail/src/ConcurrentUpdateDialog.tsx (Reload/Overwrite UX), packages/plugin-form/src/occSave.tsx (If-Match → 409, conflict dialog, re-key overwrite)",
         "objectui: packages/plugin-detail/src/InlineEditSaveBar.tsx + packages/react/src/context/InlineEditContext.tsx (one save bar, changed-keys draft, ifMatch)",
-        "framework: packages/rest/src/rest-server.ts#mapping (CONCURRENT_UPDATE → 409 mapping), packages/metadata-protocol/src/protocol.ts#updateData updateData (If-Match / expectedVersion)",
+        "framework: packages/rest/src/approvals-routes.ts#mapping (CONCURRENT_UPDATE → 409 mapping), packages/metadata-protocol/src/protocol.ts#updateData updateData (If-Match / expectedVersion)",
         "PENDING-GAPS §C concurrent-edit-conflict + §E1 inline-edit atomic two-surface (objectui#2542/2549/2604); cross-ref records-forms.crud-roundtrip"
       ],
       "history": [

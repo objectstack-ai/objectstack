@@ -338,7 +338,9 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // ── runtime-pinned: an interpolated family, checked where it can be ─────
     {
         code: 'APPROVAL_*_FAILED',
-        file: 'packages/rest/src/rest-server.ts',
+        // [#23050 slice 3] Re-pointed, not re-judged: the three factories moved,
+        // unedited, with `RestServer#registerApprovalsEndpoints`' body.
+        file: 'packages/rest/src/approvals-routes.ts',
         shape: 'objlittemplate',
         door: 'rest',
         verdict: 'runtime-pinned',

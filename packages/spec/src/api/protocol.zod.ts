@@ -1038,14 +1038,20 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
   packageId: z.string().nullable().optional().describe(
     'ADR-0048 — the software package the draft being promoted was listed '
     + 'under, when the caller has one to state (`?package=<id>` on the REST '
-    + 'door). ⚠️ `null` is NOT the same as absent, and the '
-    + 'difference is load-bearing: the implementation branches on the KEY '
-    + 'BEING PRESENT, so an ABSENT key keeps the historical "match any '
-    + 'package" resolution while `null` pins the lookup to the '
-    + 'package-UNBOUND row. Spread it in conditionally; a '
-    + 'present-and-`undefined` key coerces to `null` downstream and makes a '
-    + 'package-bound draft unfindable — a silent `no_draft` on the untouched '
-    + 'path.',
+    + 'door). Named, the publish promotes that package\'s draft and no other. '
+    + 'ABSENT names no package: the publish promotes the draft a draft save '
+    + 'that names no package writes — the draft of the one package the '
+    + 'item\'s active rows are bound to, else its package-unbound draft, '
+    + 'promoted into that package — and answers `404 NO_DRAFT` when neither '
+    + 'exists, as the strict draft read does. For an item never published into '
+    + 'a package it is the package-unbound draft, else the one package\'s '
+    + 'draft. It is refused `409 RESOURCE_CONFLICT` when the active rows (or, '
+    + 'with none, the drafts) are bound to two or more packages. ⚠️ `null` is '
+    + 'NOT the same as absent: the implementation branches on the KEY BEING '
+    + 'PRESENT, and `null` pins the lookup to the package-UNBOUND row. Spread '
+    + 'it in conditionally; a present-and-`undefined` key coerces to `null` '
+    + 'downstream and makes a package-bound draft unfindable — a silent '
+    + '`no_draft`.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
 }));
@@ -1517,11 +1523,15 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
     + '`all` and an empty value name no package), as a save names the row it '
     + 'writes. Named, the delete removes that package\'s row and no other; a '
     + 'package that holds no row removes nothing. Absent or `null` names no '
-    + 'package: the delete then removes the row of the one package the '
-    + 'item\'s rows at the deleted `state` are bound to, is refused `409 '
+    + 'package: the delete of the `active` row then removes the row of the '
+    + 'one package the item\'s active rows are bound to, is refused `409 '
     + 'RESOURCE_CONFLICT` when they are bound to two or more, and with none '
-    + 'removes the env-local row (no package stamp). That row is the one '
-    + '`parentVersion` is judged against. When another row of the item is '
+    + 'removes the env-local row (no package stamp); the discard of the '
+    + '`draft` removes the draft a draft save naming no package writes, the '
+    + 'one the per-item publish naming none promotes, and is refused where '
+    + 'that publish is (see `PublishMetaItemRequestSchema.packageId`). That '
+    + 'row is the one `parentVersion` is judged against. When another row of '
+    + 'the item is '
     + 'still stored afterwards, the receipt `message` names it.',
   ),
 }));

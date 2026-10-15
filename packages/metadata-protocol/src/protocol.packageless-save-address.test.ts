@@ -46,6 +46,12 @@
  *    steps, both storage orders (the plain and the layered read), the draft
  *    reads and their corner, the stand-in for another package, and an item
  *    another package holds too.
+ *  - [#23495] the per-item publish and the draft discard naming no package act
+ *    on the draft the draft save naming none writes: the card's two states in
+ *    both storage orders, the package-unbound draft of a package's item
+ *    (promoted into the package), two packages (refused), and an item never
+ *    published into a package; the draft save's receipt names the package it
+ *    inherits.
  *
  * Refusals are asserted as the envelope an HTTP boundary answers with
  * (`resolveThrownHttpError`): `code` and `status`, never a bare throw.
@@ -957,5 +963,276 @@ describe('[#23291] an object\'s destructive-change check judges the row the save
         })));
         expect(envelope).toMatchObject({ status: 409, code: 'DESTRUCTIVE_CHANGE' });
         expect(secondRows('object', `${name}_2`).map((r) => [r.package_id ?? null, fieldsOf(r)])).toEqual(secondBefore);
+    });
+});
+
+/**
+ * [#23495, ADR-0048, ADR-0070 TL;DR 1] The draft doors that name no package
+ * act on ONE draft: the one the draft save naming no package writes.
+ *
+ * The draft save inherits the package of the item's active rows (#11087), and
+ * since #23291 the strict draft read and the preview follow it. The per-item
+ * publish took the first draft row a package-agnostic `findOne` met, and the
+ * draft discard read its address from the draft rows alone. Measured on a real
+ * stack (better-sqlite3, the real routes) before the fix, over an item whose
+ * active rows are bound to `P`:
+ *
+ *  - drafts `[package-unbound, P]`: the save, the read and the discard named
+ *    `P`'s draft; the publish promoted the package-unbound draft into a
+ *    package-less active row, which no read naming no package serves;
+ *  - the only draft bound to `Q`: the read answered `404 NO_DRAFT` and the
+ *    save wrote `P`'s draft; the publish promoted `Q`'s draft into a second
+ *    package's active row, and the discard removed it.
+ *
+ * Every door below is driven on its own fixture, built through the save door,
+ * in both storage orders where a package-agnostic read could tell them apart,
+ * and the draft each one acts on is compared with the draft the save writes.
+ */
+describe('[#23495] the draft doors naming no package act on the draft the draft save writes', () => {
+    const P = WRITABLE;
+    const Q = OTHER_WRITABLE;
+    const R = 'com.qa.thirdapp';
+    type Fixture = ReturnType<typeof makeProtocol> & { name: string };
+
+    /** `label@binding` of every row of the item at one state, in storage order. */
+    const stored = (f: Fixture, state: 'active' | 'draft') =>
+        f.rows('app', f.name, state).map((r) => `${JSON.parse(r.metadata).label}@${r.package_id ?? 'null'}`);
+
+    const saveDraft = (f: Fixture, label: string) =>
+        f.protocol.saveMetaItem({ type: 'app', name: f.name, item: app(f.name, { label }), mode: 'draft' });
+    const publish = (f: Fixture) => f.protocol.publishMetaItem({ type: 'app', name: f.name });
+    const discard = (f: Fixture) => f.protocol.deleteMetaItem({ type: 'app', name: f.name, state: 'draft' });
+
+    /** The binding of the draft row that changed between two readings: the draft a door acted on. */
+    const actedOn = (before: string[], after: string[]): string[] =>
+        [...before.filter((r) => !after.includes(r)), ...after.filter((r) => !before.includes(r))]
+            .map((r) => r.slice(r.lastIndexOf('@') + 1))
+            .filter((binding, i, all) => all.indexOf(binding) === i);
+
+    /**
+     * Drafts `[package-unbound, P]` over an active row bound to `P`, reached
+     * through the save door in either storage order: a package-less draft
+     * saved before the item had an active row stays package-unbound.
+     */
+    async function stateOne(name: string, unboundFirst: boolean): Promise<Fixture> {
+        const f = { ...makeProtocol(), name };
+        if (unboundFirst) {
+            await saveDraft(f, 'stale');
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live' }), packageId: P });
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pending' }), packageId: P, mode: 'draft' });
+        } else {
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pending' }), packageId: P, mode: 'draft' });
+            await saveDraft(f, 'stale');
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live' }), packageId: P });
+        }
+        return f;
+    }
+
+    /** The active row bound to `P`, the only draft bound to `Q` (reached through `?mode=draft&package=Q`). */
+    async function stateTwo(name: string): Promise<Fixture> {
+        const f = { ...makeProtocol(), name };
+        await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live' }), packageId: P });
+        await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other' }), packageId: Q, mode: 'draft' });
+        return f;
+    }
+
+    for (const unboundFirst of [true, false]) {
+        const order = unboundFirst ? 'the package-unbound draft stored first' : 'P\'s draft stored first';
+
+        it(`drafts [package-unbound, P] over P (${order}): the read, the publish and the discard act on the draft the save writes`, async () => {
+            const name = `s1_${unboundFirst ? 'unbound_first' : 'pkg_first'}`;
+            const precondition = await stateOne(name, unboundFirst);
+            expect(stored(precondition, 'draft')).toEqual(unboundFirst ? ['stale@null', `pending@${P}`] : [`pending@${P}`, 'stale@null']);
+            expect(stored(precondition, 'active')).toEqual([`live@${P}`]);
+
+            // The reference: the draft the save naming no package writes, and its receipt.
+            const s = await stateOne(name, unboundFirst);
+            const before = stored(s, 'draft');
+            const saved = await saveDraft(s, 'saved');
+            const saveAddress = actedOn(before, stored(s, 'draft'));
+            expect(saveAddress).toEqual([P]);
+            expect(saved.message).toBe(`Saved app '${name}' (env-wide, package=${P}, state=draft) [seq=${saved.seq}]`);
+
+            // The strict draft read serves it.
+            const r = await stateOne(name, unboundFirst);
+            expect((await r.protocol.getMetaItem({ type: 'app', name, state: 'draft' })).item.label).toBe('pending');
+
+            // The publish promotes it into P's active row, and the package-unbound draft stays.
+            const p = await stateOne(name, unboundFirst);
+            const published = await publish(p);
+            expect(published.success).toBe(true);
+            expect(actedOn(before, stored(p, 'draft'))).toEqual(saveAddress);
+            expect(stored(p, 'active')).toEqual([`pending@${P}`]);
+            expect(stored(p, 'draft')).toEqual(['stale@null']);
+            expect((await p.protocol.getMetaItem({ type: 'app', name })).item.label).toBe('pending');
+
+            // The discard removes it, and the package-unbound draft stays.
+            const d = await stateOne(name, unboundFirst);
+            expect((await discard(d)).reset).toBe(true);
+            expect(actedOn(before, stored(d, 'draft'))).toEqual(saveAddress);
+            expect(stored(d, 'draft')).toEqual(['stale@null']);
+        });
+    }
+
+    it('the active row bound to P, the only draft bound to Q: the publish answers 404 NO_DRAFT and the discard removes nothing, as the read finds no draft', async () => {
+        const name = 's2_other_pkg_draft';
+
+        // The reference: the save writes P's draft, beside Q's.
+        const s = await stateTwo(name);
+        await saveDraft(s, 'saved');
+        expect(stored(s, 'draft')).toEqual(['other@' + Q, `saved@${P}`]);
+
+        // The read answers 404 NO_DRAFT (#23291).
+        const r = await stateTwo(name);
+        expect(resolveThrownHttpError(await refusalOf(() => r.protocol.getMetaItem({ type: 'app', name, state: 'draft' }))))
+            .toMatchObject({ status: 404, code: 'NO_DRAFT' });
+
+        // The publish answers the same, names Q's draft and the request that reaches it, and writes nothing.
+        const p = await stateTwo(name);
+        const err = await refusalOf(() => publish(p));
+        expect(resolveThrownHttpError(err)).toMatchObject({ status: 404, code: 'NO_DRAFT' });
+        expect(err.message).toContain(`'${Q}'`);
+        expect(err.message).toContain('?package=');
+        expect(stored(p, 'active')).toEqual([`live@${P}`]);
+        expect(stored(p, 'draft')).toEqual([`other@${Q}`]);
+        expect(p.metadataWrites().filter((w) => w.op === 'insert' || w.op === 'update')).toHaveLength(2);
+
+        // The discard removes nothing and says Q's draft remains.
+        const d = await stateTwo(name);
+        const receipt = await discard(d);
+        expect(receipt).toMatchObject({ success: true, reset: false });
+        expect(receipt.message).toContain(`'${Q}'`);
+        expect(stored(d, 'draft')).toEqual([`other@${Q}`]);
+
+        // CONTROL: naming Q reaches Q's draft on both doors.
+        const pq = await stateTwo(name);
+        await pq.protocol.publishMetaItem({ type: 'app', name, packageId: Q });
+        expect(stored(pq, 'active')).toEqual([`live@${P}`, `other@${Q}`]);
+        const dq = await stateTwo(name);
+        expect((await dq.protocol.deleteMetaItem({ type: 'app', name, state: 'draft', packageId: Q })).reset).toBe(true);
+        expect(stored(dq, 'draft')).toEqual([]);
+    });
+
+    it('the only draft of an item bound to P is package-unbound: the publish promotes it INTO P\'s active row, as the save adopts it', async () => {
+        const name = 's3_unbound_draft';
+        const build = async (): Promise<Fixture> => {
+            const f = { ...makeProtocol(), name };
+            await saveDraft(f, 'stale');
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live' }), packageId: P });
+            return f;
+        };
+
+        // The reference: the save writes that draft and adopts it into P; the read serves it.
+        const s = await build();
+        await saveDraft(s, 'saved');
+        expect(stored(s, 'draft')).toEqual([`saved@${P}`]);
+        const r = await build();
+        expect((await r.protocol.getMetaItem({ type: 'app', name, state: 'draft' })).item.label).toBe('stale');
+
+        // The publish promotes it into P's active row, the row the read naming no package serves next.
+        const p = await build();
+        await publish(p);
+        expect(stored(p, 'active')).toEqual([`stale@${P}`]);
+        expect(stored(p, 'draft')).toEqual([]);
+        expect((await p.protocol.getMetaItem({ type: 'app', name })).item).toMatchObject({ label: 'stale', _packageId: P });
+
+        // The discard removes it.
+        const d = await build();
+        expect((await discard(d)).reset).toBe(true);
+        expect(stored(d, 'draft')).toEqual([]);
+    });
+
+    it('the active rows bound to two packages: the publish and the discard are refused 409 RESOURCE_CONFLICT, as the draft save is, and change nothing', async () => {
+        const name = 's7_two_packages';
+        const build = async (): Promise<Fixture> => {
+            const f = { ...makeProtocol(), name };
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live P' }), packageId: P });
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live Q' }), packageId: Q });
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pending' }), packageId: P, mode: 'draft' });
+            return f;
+        };
+
+        const s = await build();
+        expect(resolveThrownHttpError(await refusalOf(() => saveDraft(s, 'saved')))).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+
+        for (const [door, run] of [['publish', publish], ['discard', discard]] as const) {
+            const f = await build();
+            const err = await refusalOf(() => run(f));
+            expect(resolveThrownHttpError(err), door).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+            expect(err.message, door).toContain(`'${P}'`);
+            expect(err.message, door).toContain(`'${Q}'`);
+            expect(err.message, door).toContain('?package=');
+            expect(stored(f, 'active'), door).toEqual([`live P@${P}`, `live Q@${Q}`]);
+            expect(stored(f, 'draft'), door).toEqual([`pending@${P}`]);
+        }
+
+        // Naming the package publishes its draft.
+        const named = await build();
+        await named.protocol.publishMetaItem({ type: 'app', name, packageId: P });
+        expect(stored(named, 'active')).toEqual([`pending@${P}`, `live Q@${Q}`]);
+    });
+
+    describe('an item never published into a package: the package-unbound draft the save writes, else the one package\'s draft', () => {
+        for (const unboundFirst of [true, false]) {
+            it(`drafts [package-unbound, Q], ${unboundFirst ? 'the package-unbound one' : 'Q\'s'} stored first: both doors act on the package-unbound draft`, async () => {
+                const name = `s4_${unboundFirst ? 'unbound_first' : 'pkg_first'}`;
+                const build = async (): Promise<Fixture> => {
+                    const f = { ...makeProtocol(), name };
+                    if (unboundFirst) await saveDraft(f, 'unbound');
+                    await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other' }), packageId: Q, mode: 'draft' });
+                    if (!unboundFirst) await saveDraft(f, 'unbound');
+                    return f;
+                };
+
+                const s = await build();
+                const before = stored(s, 'draft');
+                const saved = await saveDraft(s, 'saved');
+                expect(actedOn(before, stored(s, 'draft'))).toEqual(['null']);
+                // CONTROL: no package to inherit, so the receipt reads as before.
+                expect(saved.message).toBe(`Saved app '${name}' (env-wide, state=draft) [seq=${saved.seq}]`);
+
+                const p = await build();
+                await publish(p);
+                expect(stored(p, 'active')).toEqual(['unbound@null']);
+                expect(stored(p, 'draft')).toEqual([`other@${Q}`]);
+
+                const d = await build();
+                await discard(d);
+                expect(stored(d, 'draft')).toEqual([`other@${Q}`]);
+            });
+        }
+
+        it('only Q\'s draft: both doors act on it (the draft the read naming no package serves)', async () => {
+            const name = 's6_only_pkg_draft';
+            const build = async (): Promise<Fixture> => {
+                const f = { ...makeProtocol(), name };
+                await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other' }), packageId: Q, mode: 'draft' });
+                return f;
+            };
+            const r = await build();
+            expect((await r.protocol.getMetaItem({ type: 'app', name, state: 'draft' })).item.label).toBe('other');
+            const p = await build();
+            await publish(p);
+            expect(stored(p, 'active')).toEqual([`other@${Q}`]);
+            const d = await build();
+            expect((await discard(d)).reset).toBe(true);
+            expect(stored(d, 'draft')).toEqual([]);
+        });
+
+        it('drafts bound to two packages and none package-unbound: both doors are refused 409 RESOURCE_CONFLICT', async () => {
+            const name = 's8_two_pkg_drafts';
+            const build = async (): Promise<Fixture> => {
+                const f = { ...makeProtocol(), name };
+                await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other' }), packageId: Q, mode: 'draft' });
+                await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'third' }), packageId: R, mode: 'draft' });
+                return f;
+            };
+            for (const [door, run] of [['publish', publish], ['discard', discard]] as const) {
+                const f = await build();
+                expect(resolveThrownHttpError(await refusalOf(() => run(f))), door).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+                expect(stored(f, 'active'), door).toEqual([]);
+                expect(stored(f, 'draft'), door).toEqual([`other@${Q}`, `third@${R}`]);
+            }
+        });
     });
 });

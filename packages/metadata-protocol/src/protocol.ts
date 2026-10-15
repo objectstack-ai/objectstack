@@ -1218,6 +1218,33 @@ function remainingRowsPhrase(packageIds: readonly string[], unbound: boolean, no
 }
 
 /**
+ * [#23495, ADR-0048] The `404 NO_DRAFT` of a per-item publish that names no
+ * package, of an item bound to package `P` that holds no draft at `P`'s
+ * address ({@link ObjectStackProtocolImplementation.packagelessDraftAddress})
+ * while drafts bound to other packages are stored. The code and status are the
+ * promotion's own, the ones the strict draft read naming no package answers
+ * in the same state; the sentence names the drafts that remain and the
+ * request that reaches them, prescription first (a 4xx message crosses the
+ * REST boundary bounded at 500 characters).
+ */
+function packagelessPublishNoDraftRefusal(
+    type: string,
+    name: string,
+    packageId: string,
+    otherPackageIds: readonly string[],
+): Error & { code: 'NO_DRAFT'; status: 404 } {
+    const err = new Error(
+        'Name the package of the draft to publish, then send it again: on the REST door add ?package= with the '
+        + `package id, in process pass packageId. Nothing was published. ${type} '${name}' has no pending draft `
+        + `bound to package '${packageId}', the package its published rows are bound to and the draft a publish `
+        + `that names no package promotes, and ${remainingRowsPhrase(otherPackageIds, false, 'draft')}.`,
+    ) as Error & { code: 'NO_DRAFT'; status: 404 };
+    err.code = 'NO_DRAFT';
+    err.status = 404;
+    return err;
+}
+
+/**
  * One entry of the `422 INVALID_METADATA` envelope's `issues[]` — the shape
  * Studio's designer keys on to highlight the offending form control.
  *
@@ -9436,6 +9463,37 @@ export class ObjectStackProtocolImplementation implements
      * `degraded` must be the verdict of the WHOLE lookup: a first read that
      * failed is not made trustworthy by an alternate spelling that cleanly
      * missed.
+     *
+     * ## [#23645] A tenant-authored OBJECT body is not a code layer
+     *
+     * Every caller reads this as the CODE layer: the delete heal's baseline
+     * ({@link restoreArtifactRegistryView}, tier 2), the by-name read's step 2,
+     * the layered read's `code` layer and the carry-forward's code layer. For
+     * an `object` the service can also hold a copy of a stored row. On a kernel
+     * with no `environmentId`, ObjectQL's boot bridge
+     * (`bridgeObjectsToMetadataService`) copies every object the registry holds
+     * into the service, so every runtime object hydrated from `sys_metadata`
+     * lands there too, stamped `_provenance: 'org'`. Nothing removes that copy
+     * when the row is deleted. Measured on a real `ObjectKernel` with
+     * `MetadataPlugin` and `ObjectQLPlugin`: after `DELETE` of a boot-hydrated
+     * runtime object answered "it no longer exists", tier 2 found the copy,
+     * re-registered it and returned before tier 3's `unregisterObject`. The
+     * owner, the data plane and `getMetaItem` (step 2, the same copy) all kept
+     * serving the deleted definition until a restart. An object saved in the
+     * same process was never copied, so its delete worked.
+     *
+     * So an `object` body stamped tenant-authored answers here as a clean miss.
+     * This is the discriminator {@link getMetaItemLayered} already applies to
+     * the registry's plain key ([#21059]): the ADR-0010 marker the hydrator
+     * writes, read through `isTenantAuthored`. ⛔ No new marker. A stored row is
+     * read from the store, never from this code-layer read. A miss here is not
+     * degraded, because the service answered.
+     *
+     * ⛔ `object` only. The security catalog's echo (`plugin-security`)
+     * registers stored `permission` and `position` rows in the service on
+     * purpose, stamped the same way. It keeps them current on every mutation,
+     * and this read serves them as the code layer by design: its own pins read
+     * the layered `code` layer as the echo.
      */
     private async readItemFromMetadataService(
         type: string,
@@ -9452,15 +9510,21 @@ export class ObjectStackProtocolImplementation implements
         // occupant of the `metadata` slot makes of a third argument today is
         // unchanged by which of the two methods answers.
         const read = async (t: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }> => {
+            let answer: { data: unknown; degraded: boolean; errors: string[] };
             if (typeof metadataService.getDiagnosed === 'function') {
                 const diagnosed = await metadataService.getDiagnosed(t, name, packageId);
-                return {
+                answer = {
                     data: diagnosed?.data,
                     degraded: diagnosed?.degraded === true,
                     errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
                 };
+            } else {
+                answer = { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
             }
-            return { data: await metadataService.get(t, name, packageId), degraded: false, errors: [] };
+            // [#23645] A stored object row's copy is not a code layer. See the header.
+            return canonicalMetaType(t) === 'object' && isTenantAuthored(answer.data)
+                ? { ...answer, data: undefined }
+                : answer;
         };
 
         const primary = await read(type);
@@ -9986,6 +10050,14 @@ export class ObjectStackProtocolImplementation implements
             const metadataService = services?.get('metadata');
             if (metadataService && typeof metadataService.list === 'function') {
                 let runtimeItems = await metadataService.list(request.type);
+                // [#23645] The service's copy of a stored object row is not the
+                // base this merge lays the stored rows over: the rows above
+                // already serve every live one, and a copy of a deleted one
+                // would list it until a restart. `object` only, as in
+                // {@link readItemFromMetadataService}.
+                if (request.type === 'object' && Array.isArray(runtimeItems)) {
+                    runtimeItems = runtimeItems.filter((item: unknown) => !isTenantAuthored(item));
+                }
                 // When filtering by packageId, only include runtime items that
                 // belong to the requested package. MetadataService.list() returns
                 // items from ALL packages, so we must filter here to respect the
@@ -18987,9 +19059,12 @@ export class ObjectStackProtocolImplementation implements
      * The one resolution its three readers take, so they cannot disagree:
      * {@link saveMetaItem}'s direct (active) save, which then writes as a save
      * naming that package does; {@link deleteMetaItem}, which then removes as a
-     * delete naming that package does, its draft discard reading the draft
-     * rows; and {@link readVersionToken}, whose `version` a save or a delete at
-     * the same address accepts.
+     * delete naming that package does; and {@link readVersionToken}, whose
+     * `version` a save or a delete at the same address accepts. [#23495] The
+     * draft doors' address is {@link packagelessDraftAddress}, which reads it
+     * at both states: the draft discard used to read it from the draft rows
+     * alone, so it removed another package's draft than the one the draft
+     * save writes.
      *
      * Why the package's row: a write addresses exactly one
      * `(org, type, name, package_id)` row, and the item read that names no
@@ -19051,6 +19126,77 @@ export class ObjectStackProtocolImplementation implements
         }
         const candidates = [...bindings].sort();
         return { packageId: candidates.length === 1 ? candidates[0] ?? null : null, candidates, unbound };
+    }
+
+    /**
+     * [#23495, ADR-0048, ADR-0070 TL;DR 1] THE package-less DRAFT address:
+     * which draft of an item a draft door that names no package acts on. The
+     * per-item publish ({@link promoteDraftForPublish}) and the draft discard
+     * ({@link deleteMetaItem} with `state: 'draft'`) take it, so they act on
+     * the draft the draft save naming no package writes (#11087,
+     * `SysMetadataRepository.resolveWriteHead`) and the draft read naming no
+     * package serves (#23291, {@link packagelessReadAddress}).
+     *
+     * The address is the draft save's, read from the item's ACTIVE rows
+     * ({@link packagelessAddress}):
+     *
+     *  - bound to one package `P`: `P`'s draft, else the package-unbound draft,
+     *    which the draft save adopts into `P` on its next write and the read
+     *    serves in `P`'s place (ADR-0048 prefer-local). A publish promotes such
+     *    a draft INTO `P` (`into`), the row the read naming no package serves
+     *    next. Neither present: no draft (`none`), whatever other packages'
+     *    drafts are stored; the strict draft read answers `404 NO_DRAFT` here
+     *    too, and those drafts are addressed by naming their package.
+     *  - bound to two or more packages: `ambiguous`, refused by both doors
+     *    with the refusal the draft save answers
+     *    ({@link packagelessAddressAmbiguityRefusal}, `409 RESOURCE_CONFLICT`).
+     *  - bound to none (an item never published into a package): the
+     *    package-unbound draft, the one the draft save writes. With no such
+     *    draft, the one package's draft when exactly one package holds a draft
+     *    (the only draft the read naming no package can serve); two or more
+     *    is `ambiguous`; none at all is `none`.
+     *
+     * Every row is read in full, never sampled: a package-agnostic `findOne`
+     * over two drafts is a driver-order coin toss (#8907). The per-item publish
+     * took the first draft row that `findOne` met, and the discard read the
+     * draft rows alone. Over an item bound to `P` both acted on another
+     * package's draft than the one the save writes, and the publish could
+     * promote a package-unbound draft into an active row no read naming no
+     * package serves.
+     *
+     * `key` is the stored binding of the draft row acted on (`null` for the
+     * package-unbound draft), `into` the package its promotion is written
+     * under, and `drafts` the bindings of every draft row of the item, which
+     * the doors' receipts name.
+     */
+    private async packagelessDraftAddress(
+        type: string,
+        name: string,
+        /** [#22877] The bundle member the door addresses; omitted, the canonical one. */
+        member?: string,
+    ): Promise<
+        | { kind: 'ambiguous'; candidates: readonly string[] }
+        | {
+            kind: 'draft' | 'none';
+            key: string | null;
+            into: string | null;
+            drafts: { packageId: string | null; candidates: readonly string[]; unbound: boolean };
+        }
+    > {
+        const active = await this.packagelessAddress(type, name, member, 'active');
+        if (active.candidates.length > 1) return { kind: 'ambiguous', candidates: active.candidates };
+        const drafts = await this.packagelessAddress(type, name, member, 'draft');
+        const own = active.packageId;
+        if (own !== null) {
+            if (drafts.candidates.includes(own)) return { kind: 'draft', key: own, into: own, drafts };
+            if (drafts.unbound) return { kind: 'draft', key: null, into: own, drafts };
+            return { kind: 'none', key: own, into: own, drafts };
+        }
+        if (drafts.unbound) return { kind: 'draft', key: null, into: null, drafts };
+        if (drafts.candidates.length > 1) return { kind: 'ambiguous', candidates: drafts.candidates };
+        const only = drafts.candidates[0];
+        if (only !== undefined) return { kind: 'draft', key: only, into: only, drafts };
+        return { kind: 'none', key: null, into: null, drafts };
     }
 
     /**
@@ -20473,6 +20619,12 @@ export class ObjectStackProtocolImplementation implements
      *     MetadataService baseline (FilesystemLoader-sourced types) and
      *     re-register it, preserving the historical refresh behaviour
      *     for items the SchemaRegistry never held as artifacts.
+     *     [#23645] A tenant-authored object body is no baseline: on a kernel
+     *     with no `environmentId` the service holds a copy of every object
+     *     hydrated at boot, which is the deleted row itself. The read
+     *     answers it as a miss ({@link readItemFromMetadataService}), so the
+     *     walk reaches step 3 for a runtime object, as for one saved in the
+     *     same process.
      *     [#22057] Tier 1 also declines when there is no plain-key entry,
      *     which is what a VIEW row bound to one package leaves under a name
      *     another package ships ({@link hydrateOverlayIntoRegistry}). So a
@@ -22952,6 +23104,11 @@ export class ObjectStackProtocolImplementation implements
             org: 'env',
         } as Parameters<typeof repo.put>[0];
         let parentVersion: string | null;
+        // [#23495] The package a draft save naming no package writes into, as
+        // the repository resolves it (#11087: the package of the item's active
+        // rows), read off the same head read the parent comes from; the
+        // receipt names it, as the direct save's names its package (#23165).
+        let inheritedDraftPackageId: string | null = null;
         if (request.storedParentVersion !== undefined) {
             // [#21207] An in-process caller that read the stored hash itself.
             parentVersion = request.storedParentVersion;
@@ -22963,15 +23120,20 @@ export class ObjectStackProtocolImplementation implements
             // package the upsert targets so a collision's other-package
             // row is never read as this item's parent.
             // [#22114] The head the item read's `version` is the keyed form of
-            // — one read for both halves ({@link storedHeadAt}). [#22128] The
+            // — one read for both halves (`repo.headAt`, the read
+            // {@link storedHeadAt} makes for the item read). [#22128] The
             // row the repository's `put` resolves for this address and locks
-            // against, the inherited draft binding included.
-            const currentStored = await this.storedHeadAt(
-                repo, ref, mode === 'draft' ? 'draft' : 'active', request.packageId ?? null,
+            // against, the inherited draft binding included. [#23495] Read
+            // whole here, since its `packageId` is the receipt's too.
+            const writeHead = await repo.headAt(ref, {
+                state: mode === 'draft' ? 'draft' : 'active',
+                packageId: request.packageId ?? null,
                 // [#22877] The write's bundle member, from the body it writes —
                 // the member the repository's `put` keys this save by.
-                itemDiscriminator(singularTypeForRepo, request.item),
-            );
+                member: itemDiscriminator(singularTypeForRepo, request.item),
+            });
+            const currentStored = writeHead.head?.hash ?? null;
+            if (mode === 'draft' && request.packageId == null) inheritedDraftPackageId = writeHead.packageId;
             if (request.parentVersion === undefined) {
                 parentVersion = currentStored;
             } else {
@@ -23115,9 +23277,10 @@ export class ObjectStackProtocolImplementation implements
                 // [#22877] The saved body's member — the row this save wrote.
                 ...mutationEventMemberOfBody(singularTypeForRepo, request.item),
             });
-            const receiptPackage = typeof request.packageId === 'string' && request.packageId !== ''
-                ? `, package=${request.packageId}`
-                : '';
+            const receiptPackageId = typeof request.packageId === 'string' && request.packageId !== ''
+                ? request.packageId
+                : inheritedDraftPackageId;
+            const receiptPackage = receiptPackageId ? `, package=${receiptPackageId}` : '';
             return {
                 success: true,
                 // [#21207] The version token: the keyed form of the stored
@@ -23177,8 +23340,10 @@ export class ObjectStackProtocolImplementation implements
                 // [#23165] …and it names the package whose row this save wrote,
                 // when the save's address names one: the package the caller
                 // named, or the one a direct save naming none resolved to
-                // ({@link packagelessAddress}). A save into the
-                // package-unbound row reads exactly as it did.
+                // ({@link packagelessAddress}), or [#23495] the one a draft
+                // save naming none inherits from the item's active rows
+                // (#11087). A save into the package-unbound row reads exactly
+                // as it did.
                 message: artifactBacked
                     ? `Saved customization overlay (env-wide${receiptPackage}, state=${mode === 'draft' ? 'draft' : 'active'}) — type=${request.type}, name=${request.name} [seq=${result.seq}]`
                     : `Saved ${singularTypeForRepo} '${request.name}' (env-wide${receiptPackage}, state=${mode === 'draft' ? 'draft' : 'active'}) [seq=${result.seq}]`,
@@ -23902,8 +24067,12 @@ export class ObjectStackProtocolImplementation implements
          * ⚠️ `null` is NOT the same as absent, and the difference is load
          * bearing the whole way down: {@link promoteDraftForPublish} branches on
          * the KEY BEING PRESENT (`'packageId' in request`), so an ABSENT key
-         * keeps the historical "match any package" resolution while `null` pins
-         * the lookup to the UNBOUND row. Spread it in conditionally; never write
+         * names no package while `null` pins the lookup to the UNBOUND row.
+         * [#23495] Naming no package is no longer "match any package": the
+         * publish promotes the draft a draft save naming no package writes
+         * ({@link packagelessDraftAddress}), and is refused `409
+         * RESOURCE_CONFLICT` when the item's active rows are bound to two or
+         * more packages. Spread it in conditionally; never write
          * `packageId: maybeUndefined`, which arrives as a present-and-undefined
          * key, coerces to `null` downstream, and makes a package-bound draft
          * unfindable — a silent `no_draft` on the untouched path.
@@ -24199,8 +24368,10 @@ export class ObjectStackProtocolImplementation implements
          * `repo.promoteDraft` so the promotion resolves the draft under the
          * SAME key it was listed by.
          *
-         * `undefined` (any caller with no binding to state) keeps the
-         * historical "match any package" resolution. `null` pins the lookup to
+         * `undefined` (any caller with no binding to state) names no package:
+         * [#23495] the draft the draft save naming no package writes
+         * ({@link packagelessDraftAddress}), never the first draft row a
+         * package-agnostic read meets. `null` pins the lookup to
          * the unbound row — so the field is passed through only when the caller
          * actually has a binding to state. [commit 490879ad0] That parenthetical used to
          * read "the `publishMetaItem` path, which names no package"; since
@@ -24271,37 +24442,49 @@ export class ObjectStackProtocolImplementation implements
         // of the same name in one org, and a read without the package
         // dimension picks either. The key is the caller's stated binding
         // (spelled exactly as `repo.promoteDraft` receives it); with none
-        // stated, the binding of the draft row this promotion resolves, read
-        // once and then stated to the lock lookup, the read and the promotion.
-        let draftKey: string | null | undefined = 'packageId' in request ? (request.packageId ?? null) : undefined;
-        if (draftKey === undefined) {
+        // stated, the key of the draft this promotion resolves, read once and
+        // then stated to the lock lookup, the read and the promotion.
+        //
+        // [#23495, ADR-0048, ADR-0070 TL;DR 1] With none stated, the draft the
+        // draft save naming no package writes ({@link packagelessDraftAddress}).
+        // It used to be the binding of whichever draft row a package-agnostic
+        // `findOne` met first, so over an item bound to package `P` the publish
+        // promoted the package-unbound draft beside `P`'s, into a package-less
+        // active row no read naming no package serves, or another package's
+        // draft, into a second package's active row, while the read, the save
+        // and the token named `P`'s draft. `promoteInto` is the package the
+        // active row is written under: the key, or for an unbound draft of an
+        // item bound to `P`, `P` (the adoption the draft save performs).
+        let draftKey: string | null;
+        let promoteInto: string | null;
+        // Answered below the `_lock` gate, which judges the item rather than
+        // its row, as the save and the delete order their address refusals.
+        let addressRefusal: Error | undefined;
+        if ('packageId' in request) {
+            draftKey = request.packageId ?? null;
+            promoteInto = draftKey;
+        } else {
             // [#21934] Read ahead of the lock check, so a store that cannot be
             // read is answered here as the lock read answers it (#5706): an
             // unprovisioned `sys_metadata` holds no draft, and any other failure
-            // is the 503 the lock read raised before this read moved above it.
-            let draftRow: unknown;
-            try {
-                // [#21908, ADR-0096 D5] The explicit system opt-in: a platform
-                // store read, which no caller's grants scope. The publish door
-                // already authorized the caller, the request carries no
-                // execution context to forward (only its `actor`), and the
-                // protocol scopes the row itself ({@link findEnvironmentRow}),
-                // exactly as its sibling store reads do. Principal-less, the
-                // engine now refuses it.
-                draftRow = await this.findEnvironmentRow('sys_metadata', {
-                    where: {
-                        type: singularType, name: request.name, state: 'draft',
-                        // [#22877] The addressed member's draft (the canonical
-                        // one when none was named) — the one `repo.get` /
-                        // `repo.promoteDraft` below address.
-                        ...overlayMemberWhere(singularType, request.member),
-                    },
-                    context: { isSystem: true },
-                });
-            } catch (error) {
-                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            // is the 503 the lock read raised before this read moved above it
+            // ({@link packagelessAddress} discriminates both).
+            const address = await this.packagelessDraftAddress(singularType, request.name, request.member);
+            if (address.kind === 'ambiguous') {
+                draftKey = null;
+                promoteInto = null;
+                addressRefusal = packagelessAddressAmbiguityRefusal('publish', request.type, request.name, address.candidates);
+            } else {
+                draftKey = address.key;
+                promoteInto = address.into;
+                // No draft at the address while another package's draft is
+                // stored: the promotion's `NO_DRAFT`, naming the drafts that
+                // remain and the request that reaches them.
+                const others = address.drafts.candidates.filter((id) => id !== address.key);
+                if (address.kind === 'none' && address.into !== null && others.length > 0) {
+                    addressRefusal = packagelessPublishNoDraftRefusal(request.type, request.name, address.into, others);
+                }
             }
-            if (draftRow) draftKey = (draftRow as { package_id?: string | null }).package_id ?? null;
         }
         // ADR-0010 L3 — lock blocks publish too (publishing is a write).
         //
@@ -24314,8 +24497,10 @@ export class ObjectStackProtocolImplementation implements
             // [#21761] The promotion's address carries its package, as the read's does.
             // [#21934] It is the key resolved above, the one the gate reads the
             // draft under and the promotion writes under: the caller's stated
-            // binding, else the resolved draft row's own.
-            ...(draftKey ? { packageId: draftKey } : {}),
+            // binding, else the resolved draft's. [#23495] The package the
+            // promotion writes under, which for an adopted unbound draft is the
+            // item's package.
+            ...(promoteInto ? { packageId: promoteInto } : {}),
             operation: 'publish',
             ...(request.actor ? { actor: request.actor } : {}),
             source: 'protocol.publishMetaItem',
@@ -24323,9 +24508,10 @@ export class ObjectStackProtocolImplementation implements
         if (_publishLockRefusal) {
             throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
         }
+        if (addressRefusal) throw addressRefusal;
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
-            { state: 'draft', ...(draftKey !== undefined ? { packageId: draftKey } : {}), ...memberOption(request.member) },
+            { state: 'draft', packageId: draftKey, ...memberOption(request.member) },
         );
         // [#21470] …and the divergent `name` refusal, on the same body and for
         // the same reason: a draft stored before `saveMetaItem` judged every
@@ -24339,15 +24525,16 @@ export class ObjectStackProtocolImplementation implements
             if (nameRefusal) throw nameRefusal;
         }
         // [ADR-0086 D3] …and a permission-set draft whose body `packageId`
-        // disagrees with the package it is promoted into: the key resolved
-        // above, the one `repo.promoteDraft` writes under. A draft stored
+        // disagrees with the package it is promoted into: the package resolved
+        // above, the one `repo.promoteDraft` writes under ([#23495] the item's
+        // package for an adopted unbound draft). A draft stored
         // before the save door judged the key can carry one, and promoting it
         // would make it active with an owner nobody reads. Refused with the
         // save door's judge and envelope, so a batch publish aborts on it as
         // on the name refusal. See {@link permissionSetOwnerBindingRefusal}.
         if (draftForGate) {
             const ownerRefusal = permissionSetOwnerBindingRefusal(
-                singularType, draftForGate.body, request.name, draftKey ?? null, 'publish',
+                singularType, draftForGate.body, request.name, promoteInto, 'publish',
             );
             if (ownerRefusal) throw ownerRefusal;
         }
@@ -24463,14 +24650,17 @@ export class ObjectStackProtocolImplementation implements
                 // audit writer. This door's default says what happened without it.
                 message: request.message || 'publish draft',
                 intent,
-                // [#8907] Spread: `null` is a meaningful scope (the unbound
-                // row), so the key is ABSENT rather than present-and-undefined
-                // when there is none. The key the gated draft was read under (see `draftForGate`):
-                // the stated binding, or the resolved row's own when none was
-                // stated, so the promotion cannot pick a different package's
-                // draft than the one judged above. Absent only when no draft
-                // was found, where the promotion answers `NO_DRAFT` as before.
-                ...(draftKey !== undefined ? { packageId: draftKey } : {}),
+                // [#8907] `null` is a meaningful scope (the unbound row). The
+                // key the gated draft was read under (see `draftForGate`): the
+                // stated binding, or the resolved draft's when none was stated,
+                // so the promotion cannot pick a different package's draft than
+                // the one judged above. [#23495] Always stated now: with no
+                // draft at the resolved address the promotion answers
+                // `NO_DRAFT` at that address, never another package's draft.
+                packageId: draftKey,
+                // [#23495] …and an unbound draft of an item bound to a package
+                // is promoted into that package, as its draft save adopts it.
+                ...(draftKey === null && promoteInto !== null ? { adoptInto: promoteInto } : {}),
                 // [#21934] …and the promotion writes only the draft the gate
                 // judged: the judged draft's hash (`null` when the gate found
                 // none), so a draft saved after the gate's read is refused as a
@@ -29062,6 +29252,9 @@ export class ObjectStackProtocolImplementation implements
          * item's rows at its state are bound to, is refused `409
          * RESOURCE_CONFLICT` when they are bound to two or more, and with none
          * removes the package-unbound row ({@link packagelessAddress}).
+         * [#23495] A draft discard naming none removes the draft a draft save
+         * naming none writes ({@link packagelessDraftAddress}), the one the
+         * per-item publish naming none promotes.
          */
         packageId?: string | null;
     }): Promise<{
@@ -29266,22 +29459,43 @@ export class ObjectStackProtocolImplementation implements
                 // reads the draft rows, so it removes the draft that exists,
                 // wherever the draft save put it (#11087).
                 //
+                // [#23495] …except that is not where the draft save puts it: a
+                // draft save naming no package writes the draft of the package
+                // the item's ACTIVE rows are bound to, so over an item bound to
+                // `P` whose only draft is another package's, the discard
+                // removed that draft while the save, the read and the token
+                // named `P`'s. A draft discard naming no package takes the
+                // draft address instead ({@link packagelessDraftAddress}), the
+                // one the per-item publish takes: refused when the item's
+                // active rows are bound to two or more packages, as the draft
+                // save is.
+                //
                 // Resolved here, below every door that judges the item rather
                 // than its row (the organization refusal, the packaged-base
                 // door, the creatable check and the `_lock` gate), as the save
                 // door orders it. The rows read here are also what the receipt
                 // below tells the truth about: what is still stored, and so
                 // still served, once this row is gone.
-                const rowsAtAddress = await this.packagelessAddress(
+                const draftAddress = request.packageId == null && targetState === 'draft'
+                    ? await this.packagelessDraftAddress(singularTypeForRepo, request.name, member)
+                    : undefined;
+                if (draftAddress?.kind === 'ambiguous') {
+                    addressRefusal = packagelessAddressAmbiguityRefusal(
+                        'delete', request.type, request.name, draftAddress.candidates,
+                    );
+                    throw addressRefusal;
+                }
+                const rowsAtAddress = draftAddress?.drafts ?? await this.packagelessAddress(
                     singularTypeForRepo, request.name, member, targetState,
                 );
-                if (request.packageId == null && rowsAtAddress.candidates.length > 1) {
+                if (request.packageId == null && draftAddress === undefined && rowsAtAddress.candidates.length > 1) {
                     addressRefusal = packagelessAddressAmbiguityRefusal(
                         'delete', request.type, request.name, rowsAtAddress.candidates,
                     );
                     throw addressRefusal;
                 }
-                const packageId: string | null = request.packageId ?? rowsAtAddress.packageId;
+                const packageId: string | null = request.packageId
+                    ?? (draftAddress !== undefined ? draftAddress.key : rowsAtAddress.packageId);
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
                 const current = await repo.get(ref, { state: targetState, packageId, ...memberOption(member) });
@@ -29304,6 +29518,18 @@ export class ObjectStackProtocolImplementation implements
                         message: targetState === 'draft'
                             ? `No pending draft of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
                             : `No row of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
+                    };
+                }
+                // [#23495] …and a draft discard naming no package, of an item
+                // bound to a package that holds no draft at that package's
+                // address while other packages' drafts are stored: nothing is
+                // discarded, and the receipt names what remains rather than
+                // claiming no draft exists.
+                if (!current && draftAddress?.kind === 'none' && draftAddress.into !== null && rowsAtAddress.candidates.length > 0) {
+                    return {
+                        success: true,
+                        reset: false,
+                        message: `No pending draft of ${request.type}/${request.name} is bound to package '${draftAddress.into}', the package its published rows are bound to and the draft a discard that names no package removes, so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`,
                     };
                 }
                 if (!current) {

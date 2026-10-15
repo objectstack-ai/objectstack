@@ -42,6 +42,14 @@
  * runtime dispatcher's `/meta` door asks too, after its write-capability gate.
  * Its behaviour is held by `meta-compound-save-mode-parity.test.ts` and by both
  * doors' rows in `packages/runtime/src/domains/meta-save-preconditions-parity.test.ts`.
+ *
+ * [#23050 slice 3] The walk covers every file on THE list of the files
+ * `RestServer`'s registrars live in (`rest-server-registrar-files.ts`), not
+ * `rest-server.ts` alone: the split moves registrar bodies into modules of
+ * their own, and a door that reads a draft is no less a door there. A site's
+ * key names its route or function, never its file, so the ledger is the same
+ * ledger. The node helpers below read each node's OWN source file for that
+ * reason. The census's last case pins the list's length and its sum over it.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -49,19 +57,22 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { REST_SERVER_REGISTRAR_FILES } from './rest-server-registrar-files.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE_FILE = 'rest-server.ts';
 const sf = ts.createSourceFile(
     SOURCE_FILE, readFileSync(resolve(HERE, SOURCE_FILE), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS,
 );
+const SOURCE_FILES: readonly ts.SourceFile[] = REST_SERVER_REGISTRAR_FILES.map((file) => (file === SOURCE_FILE ? sf
+    : ts.createSourceFile(file, readFileSync(resolve(HERE, file), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)));
 
 const collapse = (text: string): string => text.replace(/\s+/g, ' ').trim();
 const unquote = (text: string): string => text.replace(/^[`'"]|[`'"]$/g, '');
 
 function propertyInitializer(literal: ts.ObjectLiteralExpression, name: string): ts.Expression | undefined {
     for (const property of literal.properties) {
-        if (ts.isPropertyAssignment(property) && property.name.getText(sf) === name) return property.initializer;
+        if (ts.isPropertyAssignment(property) && property.name.getText() === name) return property.initializer;
     }
     return undefined;
 }
@@ -73,11 +84,11 @@ function anchorOf(node: ts.Node): string {
             const method = propertyInitializer(at, 'method');
             const path = propertyInitializer(at, 'path');
             if (method && path && propertyInitializer(at, 'handler')) {
-                return `${unquote(method.getText(sf))} ${unquote(path.getText(sf))}`;
+                return `${unquote(method.getText())} ${unquote(path.getText())}`;
             }
         }
         if ((ts.isFunctionDeclaration(at) || ts.isMethodDeclaration(at)) && at.name) {
-            return `${ts.isFunctionDeclaration(at) ? 'function' : 'method'} ${at.name.getText(sf)}`;
+            return `${ts.isFunctionDeclaration(at) ? 'function' : 'method'} ${at.name.getText()}`;
         }
     }
     return 'module scope';
@@ -90,7 +101,7 @@ const isDraftSite = (n: ts.Node): boolean =>
     || (ts.isPropertyAccessExpression(n) && ['previewDrafts', 'listDrafts'].includes(n.name.text));
 
 const isAdmission = (n: ts.Node): boolean =>
-    ts.isCallExpression(n) && n.expression.getText(sf) === 'mayReadPendingDrafts';
+    ts.isCallExpression(n) && n.expression.getText() === 'mayReadPendingDrafts';
 
 function contains(root: ts.Node, pred: (n: ts.Node) => boolean): boolean {
     let hit = false;
@@ -116,7 +127,7 @@ function admittedInDeclaration(site: ts.Node): boolean {
 function behindRefusal(site: ts.Node): boolean {
     for (let child: ts.Node = site, at = site.parent; at; child = at, at = at.parent) {
         if (!ts.isBlock(at)) continue;
-        const before = at.statements.filter((s) => s.end <= child.getStart(sf));
+        const before = at.statements.filter((s) => s.end <= child.getStart());
         if (before.some((s) => ts.isIfStatement(s)
             && ts.isPrefixUnaryExpression(s.expression) && s.expression.operator === ts.SyntaxKind.ExclamationToken
             && isAdmission(s.expression.operand))) return true;
@@ -124,19 +135,22 @@ function behindRefusal(site: ts.Node): boolean {
     return false;
 }
 
-interface Site { readonly key: string; readonly node: ts.Node; readonly line: number }
+interface Site { readonly key: string; readonly node: ts.Node; readonly file: string; readonly line: number }
 const SITES: Site[] = [];
-const visit = (n: ts.Node): void => {
-    if (isDraftSite(n)) {
-        SITES.push({
-            key: `${anchorOf(n)} » ${collapse(n.getText(sf))}`,
-            node: n,
-            line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1,
-        });
-    }
-    ts.forEachChild(n, visit);
-};
-visit(sf);
+for (const file of SOURCE_FILES) {
+    const visit = (n: ts.Node): void => {
+        if (isDraftSite(n)) {
+            SITES.push({
+                key: `${anchorOf(n)} » ${collapse(n.getText(file))}`,
+                node: n,
+                file: file.fileName,
+                line: file.getLineAndCharacterOfPosition(n.getStart(file)).line + 1,
+            });
+        }
+        ts.forEachChild(n, visit);
+    };
+    visit(file);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The ledger — every draft switch in `rest-server.ts`, classified
@@ -202,14 +216,14 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         for (const site of SITES) {
             const row = LEDGER.find((r) => r.site === site.key);
             if (row?.disposition !== 'read') continue;
-            expect(admittedInDeclaration(site.node), `${SOURCE_FILE}:${site.line} ${row.door}`).toBe(true);
+            expect(admittedInDeclaration(site.node), `${site.file}:${site.line} ${row.door}`).toBe(true);
         }
     });
 
     it('the listing sits behind its refusal', () => {
         const listing = SITES.filter((s) => LEDGER.find((r) => r.site === s.key)?.disposition === 'listing');
         expect(listing.length).toBeGreaterThan(0);
-        for (const site of listing) expect(behindRefusal(site.node), `${SOURCE_FILE}:${site.line}`).toBe(true);
+        for (const site of listing) expect(behindRefusal(site.node), `${site.file}:${site.line}`).toBe(true);
     });
 
     it('mayReadPendingDrafts is a bare delegation to isObjectSchemaMaskExempt — the one predicate, never a second rule', () => {
@@ -220,5 +234,15 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         const [param] = fns[0].parameters;
         expect(collapse(fns[0].body?.statements.map((s) => s.getText(sf)).join(' ') ?? ''))
             .toBe(`return isObjectSchemaMaskExempt(${param.name.getText(sf)});`);
+    });
+
+    it('[#23050 slice 3] walks every file on the registrar list — its length and this sum are pinned', () => {
+        // A module added to the list makes this re-read its number rather than
+        // widening unnoticed. 8 switches, all in `rest-server.ts` (the `/meta`
+        // and analytics doors); the data-action, batch and approval bodies read
+        // no draft.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(4);
+        expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
+        expect(SITES).toHaveLength(8);
     });
 });

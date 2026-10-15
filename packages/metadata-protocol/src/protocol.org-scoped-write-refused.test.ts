@@ -523,9 +523,9 @@ describe('a publish promotes only the draft its gate judged', () => {
 
 // The lock a publish consults is the one at the address it promotes: the
 // package key the publish resolved (the caller's stated binding, else the
-// draft row's own), not only the package the request stated. With two
-// packages' env-wide rows of one view both locked, the refusal carries the
-// lock of the package whose draft is being promoted.
+// draft address it resolves), not only the package the request stated. With
+// two packages' env-wide rows of one view both locked, the refusal of a
+// publish naming its package carries that package's lock.
 describe('a publish consults the lock of the package key it resolved', () => {
     const locked = (pkg: string) => ({ ...VIEW, _lock: 'full', _lockReason: `${pkg} keeps this view as shipped` });
 
@@ -543,10 +543,20 @@ describe('a publish consults the lock of the package key it resolved', () => {
         return { protocol, draftsOf };
     }
 
-    it('a publish that states no package consults the lock of the draft row\'s own package', async () => {
+    // [#23495] Replaced, not respelled: this case pinned a publish naming no
+    // package consulting the lock of the draft row a package-agnostic read met
+    // (`pkg_b`), over an item whose active rows two packages hold. Naming no
+    // package, the publish now takes the draft save's address, and an item two
+    // packages hold has none: the publish is judged by the lock the draft save
+    // naming no package is judged by, and answers what that save answers.
+    it('a publish that states no package, of an item two packages hold, is judged by the lock the draft save naming none is', async () => {
         const { protocol, draftsOf } = await seedLockedRowsAndDraft('pkg_b');
+        const saveRefusal = await protocol.saveMetaItem({
+            type: 'view', name: VIEW.name, item: { ...VIEW, label: 'Org grid (edited)' }, mode: 'draft',
+        }).then(() => undefined, (e: any) => e);
+        expect(saveRefusal).toMatchObject({ code: 'ITEM_LOCKED', status: 403, lock: 'full' });
         await expect(protocol.publishMetaItem({ type: 'view', name: VIEW.name }))
-            .rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403, lock: 'full', lockReason: 'pkg_b keeps this view as shipped' });
+            .rejects.toMatchObject({ code: 'ITEM_LOCKED', status: 403, lock: 'full', lockReason: saveRefusal.lockReason });
         expect(draftsOf()).toEqual(['pkg_b']);
     });
 

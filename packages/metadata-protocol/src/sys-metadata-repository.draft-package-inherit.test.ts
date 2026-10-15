@@ -288,3 +288,48 @@ describe('[#23297] SysMetadataRepository draft inheritance reads every active ro
     });
   }
 });
+
+/**
+ * [#23495] `promoteDraft`'s `adoptInto`: the package a package-UNBOUND draft is
+ * promoted into, the package its draft save naming no package would adopt it
+ * into (the orphan adoption above). Stated by the per-item publish naming no
+ * package, for an item bound to one package whose only draft at that address is
+ * the unbound one. A draft bound to a package keeps its own binding.
+ */
+describe('[#23495] SysMetadataRepository.promoteDraft adoptInto', () => {
+  const active = (pkg: string | null, label: string) => ({
+    type: REF.type, name: REF.name, state: 'active', package_id: pkg,
+    metadata: JSON.stringify({ label }), checksum: `sha-active-${label}`, version: 1,
+  });
+  const draft = (pkg: string | null, label: string) => ({
+    type: REF.type, name: REF.name, state: 'draft', package_id: pkg,
+    metadata: JSON.stringify({ label }), checksum: `sha-draft-${label}`, version: 2,
+  });
+  const activeRows = (engine: ReturnType<typeof makeFakeEngine>) => engine.rows
+    .filter((r) => r.state === 'active')
+    .map((r) => [r.package_id ?? null, JSON.parse(String(r.metadata)).label]);
+
+  it('an unbound draft is promoted into the package\'s active row, never a package-less one', async () => {
+    const engine = makeFakeEngine([active('app.k9qk', 'live'), draft(null, 'orphan')]);
+    const repo = makeRepo(engine);
+    const result = await repo.promoteDraft(REF, { actor: 't', packageId: null, adoptInto: 'app.k9qk' });
+    expect(result.packageId).toBe('app.k9qk');
+    expect(activeRows(engine)).toEqual([['app.k9qk', 'orphan']]);
+  });
+
+  it('a draft bound to a package keeps its own binding, whatever adoptInto says', async () => {
+    const engine = makeFakeEngine([active('app.k9qk', 'live'), draft('app.other', 'other')]);
+    const repo = makeRepo(engine);
+    const result = await repo.promoteDraft(REF, { actor: 't', packageId: 'app.other', adoptInto: 'app.k9qk' });
+    expect(result.packageId).toBe('app.other');
+    expect(activeRows(engine)).toEqual([['app.k9qk', 'live'], ['app.other', 'other']]);
+  });
+
+  it('control: omitted, an unbound draft is promoted package-unbound, as before', async () => {
+    const engine = makeFakeEngine([active('app.k9qk', 'live'), draft(null, 'orphan')]);
+    const repo = makeRepo(engine);
+    const result = await repo.promoteDraft(REF, { actor: 't', packageId: null });
+    expect(result.packageId).toBeNull();
+    expect(activeRows(engine)).toEqual([['app.k9qk', 'live'], [null, 'orphan']]);
+  });
+});

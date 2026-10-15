@@ -247,14 +247,13 @@ serves `/data`:
 | Code | In `error.details` on a Hono door |
 |---|---|
 | `DELETE_RESTRICTED` | `developerMessage`, `dependentObject`, and `dependentCount` when the flat door would send it |
-| `CONCURRENT_UPDATE` | `currentVersion` |
+| `CONCURRENT_UPDATE` | `currentVersion`, `currentRecord` (the row as the caller reads it) |
 | `INVALID_FIELD` | `field`, `object` |
 | `OBJECT_NOT_FOUND` | `object` |
 | `VALIDATION_FAILED` | `fields` |
 | `FEEDS_DISABLED`, `FILES_DISABLED`, `ATTACHMENT_PARENT_ACCESS`, `ATTACHMENT_DELETE_DENIED`, `RECORD_NOT_ACCESSIBLE` | `object` |
 
-⛔ What a Hono door never sends: `httpStatus`; `CONCURRENT_UPDATE`'s `currentRecord`,
-which the flat door sends; and an `object` the flat door takes from the request's route
+⛔ What a Hono door never sends: `httpStatus`, and an `object` the flat door takes from the request's route
 (on `DELETE_RESTRICTED`, `CONCURRENT_UPDATE` and `VALIDATION_FAILED`). The `message` is the
 thrown one and can differ from the flat door's `error`: an unregistered object reads
 `Object 'ghost' not found` here and `Object 'ghost' is not registered` there.
