@@ -38,6 +38,8 @@
  *    object saved in this process and for one hydrated at boot;
  *  - a save naming Q after the adoption goes live;
  *  - a boot after that agrees;
+ *  - an adopted draft object row registers nothing, as the boot registers
+ *    none;
  *  - CONTROL: an adoption of non-object items leaves the object registry
  *    untouched, and the view write-through follows the view as before;
  *  - CONTROL: a package-less row of an object another package's row owns is
@@ -261,6 +263,27 @@ describe('#23646 — an orphan adoption moves an adopted object\'s registry owne
             owner: Q, dataPlaneLabel: 'Gadget Q', dataPlanePackage: Q, metaReadLabel: 'Gadget Q', records: 3,
         });
         expect(drops).toEqual([]);
+    });
+
+    it('an adopted DRAFT object row is rebound in storage only: a draft never reaches the registry', async () => {
+        const stores: Stores = new Map();
+        const drops: string[] = [];
+        const k = await boot(stores, drops);
+        // A package-less draft, as a pre-package-first stopgap left it.
+        await k.engine.insert('sys_metadata', {
+            type: 'object', name: NAME, state: 'draft', package_id: null,
+            metadata: JSON.stringify(gadgetBody('Gadget draft')),
+        }, { context: { isSystem: true } } as any);
+        const registerObject = vi.spyOn(k.engine.registry, 'registerObject');
+        const registerItem = vi.spyOn(k.engine.registry, 'registerItem');
+
+        const adopted = await k.protocol.reassignOrphanedMetadata({ targetPackageId: Q });
+
+        expect(adopted).toMatchObject({ reassignedCount: 1, reassigned: [{ type: 'object', name: NAME }] });
+        expect(storedBindings(stores)).toEqual([Q]);
+        expect(registerObject).not.toHaveBeenCalled();
+        expect(registerItem.mock.calls.filter(([type]) => type === 'object')).toEqual([]);
+        expect(k.engine.registry.getObject(NAME)).toBeUndefined();
     });
 
     it('CONTROL: an adoption of non-object items leaves the object registry untouched, and the view follows as before', async () => {

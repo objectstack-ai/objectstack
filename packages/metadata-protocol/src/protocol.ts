@@ -27573,8 +27573,10 @@ export class ObjectStackProtocolImplementation implements
      * So the sentinel's contribution leaves the registry first
      * ({@link releaseAdoptedObjectOwner}), and the row registers at its new
      * binding through the same write-through, in the same request; the next
-     * boot registers the same owner. Rows of other types are rebound in
-     * storage only, as before.
+     * boot registers the same owner. Only an ACTIVE object row is registered,
+     * the rows the boot registers: an adopted draft is rebound in storage
+     * only, because a draft never reaches the runtime. Rows of other types are
+     * rebound in storage only, as before.
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;
@@ -27660,8 +27662,14 @@ export class ObjectStackProtocolImplementation implements
                 console.warn(`[Protocol] registry write-through failed for ${type}/${row.name}: ${err?.message ?? err}`);
                 continue;
             }
-            // [#23646] An object's one registry owner moves with its row.
-            if (type === 'object' && !this.releaseAdoptedObjectOwner(rebound.name, rebound.data, request.targetPackageId)) {
+            // [#23646] An object's one registry owner moves with its row. Only
+            // an active row's: the boot registers no other ({@link
+            // loadMetaFromDb}), and a draft never reaches the runtime.
+            if (
+                type === 'object'
+                && (row.state !== 'active'
+                    || !this.releaseAdoptedObjectOwner(rebound.name, rebound.data, request.targetPackageId))
+            ) {
                 continue;
             }
             await this.applyRegistryWriteThrough({
