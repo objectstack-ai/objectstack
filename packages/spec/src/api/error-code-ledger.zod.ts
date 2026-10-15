@@ -476,6 +476,17 @@ export const ERROR_CODE_LEDGER = {
     // rows for the addressed object. Provenance, not identity (see above).
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // [ADR-0131 D10 item 5, ruling 6163114098 Q3 A] The v18 boot refusal
+    // (`OrganizationOwnershipBootGuardPlugin`, `organization-ownership-boot-
+    // guard.ts`): `os serve` refuses to start against a database still in the
+    // v17 shape — a table whose object declares no organization column still
+    // carries a physical `organization_id` — while the organization-ownership
+    // ceremony's `sys_migration` marker is not verified. Thrown from the
+    // plugin's `kernel:ready` hook, before `kernel:listening` opens the socket,
+    // so no request is ever served (`door: 'none'`, the
+    // WALLED_MEMBERSHIP_POLICY_UNDECLARED precedent); the `code` lets a host
+    // discriminate the refusal structurally. No escape hatch exists (D10).
+    'ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED',
     // [#7557] `DELETE /packages/:id` on the DISPATCHER door — per-item failures
     // used to ride inside a 200 with a hardcoded `success: true`. Second
     // EMITTER of the code `@objectstack/rest` already registers for the
@@ -692,6 +703,17 @@ export const ERROR_CODE_LEDGER = {
     'WRITABLE_PACKAGE_REQUIRED',
   ],
   '@objectstack/metadata-core': [
+    // [ADR-0131 D6/D7, #23429] `readLegacyOrganizationRows`
+    // (`legacy-organization-row.ts`, `LegacyOrganizationRowsUnreadable`) could
+    // not tell a `sys_metadata`-family table's legacy organization rows from
+    // the environment's: the driver's raw seam returned no result set, its SQL
+    // dialect resolved to none, or the column list came back empty for a table
+    // that exists. Refused, never read as "none" — that answer would serve,
+    // list or delete one organization's rows as the environment's. It reaches a
+    // door only on a database the organization-ownership ceremony has not
+    // migrated (which `os serve` refuses), so the remedy it names is the
+    // ceremony.
+    'LEGACY_ORGANIZATION_ROWS_UNREADABLE',
     'METADATA_BRANCH',
     'METADATA_CONFLICT',
     'METADATA_NOT_FOUND',

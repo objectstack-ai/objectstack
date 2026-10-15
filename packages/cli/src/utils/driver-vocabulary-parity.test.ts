@@ -266,12 +266,28 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
     expect(resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' }).driver).toBe('sqlite');
   });
 
-  it('`mongo` and `mongodb` both select the renamed canonical id on both hosts', () => {
+  // `mongo` was retired as a value at 18 (#23543 F1): it left the selection
+  // face, so both hosts refuse it alike, each enumerating `mongodb` among the
+  // spellings that work. It stays on the CONTRACT face only, so a stored legacy
+  // `datasource.driver: 'mongo'` row keeps its contract and its redaction.
+  it('`mongodb` selects the canonical id on both hosts; the retired `mongo` is refused by both, naming `mongodb`', () => {
     const url = URL_FOR.mongodb!;
-    for (const spelling of ['mongo', 'mongodb']) {
-      expect(cliVerdict(spelling, url)).toEqual({ accepted: true, driverId: 'mongodb' });
-      expect(standaloneVerdict(spelling, url)).toEqual({ accepted: true, driverId: 'mongodb' });
+    expect(cliVerdict('mongodb', url)).toEqual({ accepted: true, driverId: 'mongodb' });
+    expect(standaloneVerdict('mongodb', url)).toEqual({ accepted: true, driverId: 'mongodb' });
+
+    expect(cliVerdict('mongo', url)).toEqual({ accepted: false });
+    expect(standaloneVerdict('mongo', url)).toEqual({ accepted: false });
+    const cli = refusalMessage(() => resolveStorageDefinition(resolveDriverType('mongo', url), { databaseUrl: url, isDev: false }));
+    process.env.OS_DATABASE_DRIVER = 'mongo';
+    process.env.OS_DATABASE_URL = url;
+    const standalone = refusalMessage(() => resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' }));
+    for (const [host, message] of [['os start', cli], ['os migrate', standalone]] as const) {
+      expect(message, host).toContain('"mongo"');
+      expect(message, host).toMatch(/Supported drivers: [^.]*\bmongodb\b/);
+      expect(message, host).not.toMatch(/Supported drivers: [^.]*\bmongo\b(?!db)/);
     }
+
+    expect(resolveDatabaseDriverId('mongo')).toBeUndefined();
     expect(resolveDriverId('mongo')).toBe('mongodb');
   });
 });

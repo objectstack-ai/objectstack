@@ -239,6 +239,12 @@ const NOT_A_STAND_IN = {
   fillRelationalRefs:
     'takes one `CrudCase` derived by `deriveCrudCases` — a data record this package built, with no ' +
     'external implementer.',
+  warmUpBoot:
+    'takes the same `BootOptions` that `bootStack` in this same package takes, and hands them straight ' +
+    'to it. It is test scaffolding (`boot-warm-up.testkit.ts`): `index.ts` does not re-export it and it ' +
+    'is absent from `dist`. It CHECKS nothing — a throwaway boot, sign-in and sign-up paid at a test ' +
+    "file's module scope — so no conformance's compile-time half lives in that parameter, and an " +
+    'assertion at a call site would delete no check.',
 };
 
 /** True when `node` is, or wraps, any type assertion. Mirrors the ESLint rule. */

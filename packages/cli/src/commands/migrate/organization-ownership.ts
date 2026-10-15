@@ -21,10 +21,14 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_STOP_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { resolvePlannedDriverExec } from '../../utils/unmanaged-tables.js';
 import {
   buildOrganizationOwnershipPlan,
   OrganizationOwnershipPlanRefusal,
+  columnListSql,
+  columnNameOf,
+  dialectOf,
   type OrganizationOwnershipPlan,
 } from '../../utils/organization-ownership-plan.js';
 import {
@@ -71,9 +75,9 @@ async function confirm(question: string): Promise<boolean> {
  * The boot is the family's read-only boot (`deferSchemaDdl` + `readOnlyProbe`:
  * no DDL, no seed, no database file brought into existence), and the plan
  * itself issues SELECT statements only (`../../utils/organization-ownership-plan.ts`).
- * The one thing it writes is the plan FILE, on the operator's disk, which the
- * ADR asks for: "the plan is written to a file the operator keeps". It never
- * overwrites one — a kept plan is evidence.
+ * It writes no row or table; the one thing it writes is the plan FILE, on the
+ * operator's disk, which the ADR asks for: "the plan is written to a file the
+ * operator keeps". It never overwrites one — a kept plan is evidence.
  *
  * ## Refusal
  *
@@ -269,8 +273,9 @@ export default class MigrateOrganizationOwnership extends Command {
     // command's own envelope, with one difference: the ceremony takes no
     // `--force` (no flag skips its reviewed plan or its backup either), so
     // `--apply` beside a holder is refused outright and the refusal names the
-    // stop remedy alone. The plan writes nothing and warns, as every sibling's
-    // read-only arm does.
+    // stop remedy alone. The plan writes no row or table and warns, as every
+    // sibling's read-only arm does, saying what its connect can still change
+    // on a SQLite file (`JOURNAL_MODE_SWITCH_NOTE`).
     const occupancy = await probeMigrationTarget(flags['database-url']);
     if (occupancy.status === 'busy' && flags.apply) {
       await refuse(
@@ -286,7 +291,7 @@ export default class MigrateOrganizationOwnership extends Command {
       return;
     }
     if (occupancy.status === 'busy' && !json) {
-      printWarning(`${describeOccupancy(occupancy)} The plan below writes nothing, but --apply will refuse until the database is free.`);
+      printWarning(`${describeOccupancy(occupancy)} The plan below writes no row or table, but --apply will refuse until the database is free. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
     if (occupancy.status === 'unknown' && !json) {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
@@ -423,7 +428,10 @@ export default class MigrateOrganizationOwnership extends Command {
     if (summary.unattributableRows > 0) {
       printWarning(`${summary.unattributableRows} row(s) whose owner cannot be derived are listed by id in the plan file.`);
     }
-    printSuccess(`Plan written to ${target} — nothing in the database was changed.`);
+    // The occupancy probe answered `not_applicable` for a target that is no
+    // SQLite file (PostgreSQL, MySQL, `:memory:`): no file header to switch.
+    const sqliteFile = occupancy.status !== 'not_applicable';
+    printSuccess(`Plan written to ${target} — no row or table in the database was changed.${sqliteFile ? ` ${JOURNAL_MODE_SWITCH_NOTE}` : ''}`);
     console.log(chalk.dim(`  ${timer.display()}`));
   }
 
@@ -610,8 +618,11 @@ export default class MigrateOrganizationOwnership extends Command {
           // The environment's own row first (it is what a promotion must never
           // overwrite), then what the registry serves for the bundle member.
           find: async (name, locale) => {
+            // Once column-drops has run, every row is the environment's (C7b).
+            const scoped = (await executor.query(columnListSql(dialectOf(executor.client) ?? 'sqlite'), ['sys_metadata']))
+              .some((row) => columnNameOf(row) === 'organization_id');
             const stored = await executor.query(
-              'SELECT metadata FROM sys_metadata WHERE type = ? AND name = ? AND state = ? AND organization_id IS NULL ' +
+              `SELECT metadata FROM sys_metadata WHERE type = ? AND name = ? AND state = ?${scoped ? ' AND organization_id IS NULL' : ''} ` +
                 'AND (bundle_member = ? OR (bundle_member IS NULL AND ? = ?))',
               ['email_template', name, 'active', locale, locale, 'en-US'],
             );

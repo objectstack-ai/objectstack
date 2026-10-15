@@ -313,6 +313,184 @@ describe('[#23531] a stale If-Match on a direct-mount route: the 409 carries cur
   });
 });
 
+/**
+ * [#23587] The rest of `RestServer`'s structured arms, on a direct-mount route.
+ * A refusal that classification answers with structured fields carries them
+ * in `error.details`, as the `409 CONCURRENT_UPDATE` above carries
+ * `currentVersion`. The measured case is `409 DELETE_RESTRICTED`, which reached
+ * a caller of these doors with `code` and `message` only.
+ *
+ * Each producer below is shaped exactly like the real one (its `code`,
+ * `status` and own properties, as the real throw carries them on a composed
+ * host), because this package depends on none of them. Each row asserts the
+ * status, the code and `error.details` EXACTLY, so a field the door invents or
+ * drops turns it red. The composed-host twin, over the REAL engine and
+ * protocol, is `hono-declared-envelope.conformance.test.ts` in
+ * `packages/qa/http-conformance`.
+ *
+ * `object` is absent from the `DELETE_RESTRICTED` and `METADATA_CONFLICT`
+ * answers: those arms add the object the ROUTE named, and the recogniser has
+ * no route. The error's own `object` is not substituted for it (a cascade's
+ * restrict names the child it was deleting, not the route's object).
+ */
+describe('[#23587] a structured refusal on a direct-mount route carries RestServer’s fields in `error.details`', () => {
+  function throwingServer(method: 'get' | 'delete', path: string, thrown: () => unknown): HonoHttpServer {
+    const s = server();
+    s[method](path, async () => { throw thrown(); });
+    return s;
+  }
+
+  /** The engine's referential restrict, as `ObjectQL.delete` throws it. */
+  function deleteRestricted(dependentCount?: number) {
+    const counted = dependentCount !== undefined;
+    return Object.assign(
+      new Error(counted
+        ? 'This Account is still referenced by 2 Contact record(s) through “Account”. Delete or reassign them first.'
+        : 'This Account is still referenced by Contact records through “Account”. Delete or reassign them first.'),
+      {
+        developerMessage: counted
+          ? "Cannot delete account (acc_1): 2 dependent contact record(s) reference it via account. Delete or reassign them first, or set deleteBehavior:'cascade' on contact.account."
+          : "Cannot delete account (acc_1): dependent contact record(s) reference it via account. Delete or reassign them first, or set deleteBehavior:'cascade' on contact.account.",
+        code: 'DELETE_RESTRICTED',
+        status: 409,
+        httpStatus: 409,
+        object: 'account',
+        dependentObject: 'contact',
+        ...(counted ? { dependentCount } : {}),
+      },
+    );
+  }
+
+  it('409 DELETE_RESTRICTED: developerMessage, dependentObject and dependentCount, as the producer stated them', async () => {
+    const thrown = deleteRestricted(2);
+    const res = await call(throwingServer('delete', '/api/v1/data/account/:id', () => thrown), '/api/v1/data/account/acc_1', { method: 'DELETE' });
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('DELETE_RESTRICTED');
+    // The end user's sentence stays the envelope's `message`, unchanged.
+    expect(body.error.message).toBe(thrown.message);
+    expect(body.error.details).toEqual({
+      developerMessage: thrown.developerMessage,
+      dependentObject: 'contact',
+      dependentCount: 2,
+    });
+  });
+
+  it('409 DELETE_RESTRICTED with the count withheld by the producer: no count, and none invented', async () => {
+    // The engine withholds the count when the caller's own identity would not
+    // see the same rows (`dependentCountIsDisclosable`). The door relays that
+    // narrowing as it stands: each field only when the producer stated it.
+    const thrown = deleteRestricted();
+    const res = await call(throwingServer('delete', '/api/v1/data/account/:id', () => thrown), '/api/v1/data/account/acc_1', { method: 'DELETE' });
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body.error.code).toBe('DELETE_RESTRICTED');
+    expect(body.error.details).toEqual({ developerMessage: thrown.developerMessage, dependentObject: 'contact' });
+  });
+
+  it('409 DELETE_RESTRICTED stating none of the fields (the subflow guard’s shape) keeps the two-key envelope', async () => {
+    // `service-automation`'s packaged-subflow guard throws this code with
+    // `subflowCallers` only, which the arm does not carry; the REST door's body
+    // adds nothing for it either.
+    const res = await call(throwingServer('delete', '/api/v1/flows/:name', () => Object.assign(
+      new Error("Flow 'sub' cannot be removed while 1 packaged flow still calls it as a subflow."),
+      { code: 'DELETE_RESTRICTED', status: 409, subflowCallers: ['caller'] },
+    )), '/api/v1/flows/sub', { method: 'DELETE' });
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body.error.code).toBe('DELETE_RESTRICTED');
+    expect(Object.keys(body.error).sort()).toEqual(['code', 'message']);
+  });
+
+  it.each([
+    ['a version token', 'hmac-sha256:842021a1'],
+    ['null, the answer "no row"', null],
+  ])('409 METADATA_CONFLICT: currentVersion as %s', async (_label, currentVersion) => {
+    const res = await call(throwingServer('get', '/api/v1/meta/view/:name', () => Object.assign(
+      new Error('view/case_grid has been modified since you loaded it.'),
+      { code: 'METADATA_CONFLICT', status: 409, actualHead: currentVersion, currentVersion },
+    )), '/api/v1/meta/view/case_grid');
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body.error.code).toBe('METADATA_CONFLICT');
+    expect(body.error.details).toEqual({ currentVersion });
+  });
+
+  it('400 INVALID_FIELD: the field and the object it names', async () => {
+    const res = await call(throwingServer('get', '/api/v1/data/task', () => Object.assign(
+      new Error("Unknown field 'nosuchfield' on object 'task'."),
+      { code: 'INVALID_FIELD', status: 400, field: 'nosuchfield', fields: ['nosuchfield'], object: 'task' },
+    )), '/api/v1/data/task?nosuchfield=1');
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(400);
+    expect(body.error.code).toBe('INVALID_FIELD');
+    expect(body.error.details).toEqual({ field: 'nosuchfield', object: 'task' });
+  });
+
+  it('404 OBJECT_NOT_FOUND: the object it names, and the producer’s own sentence', async () => {
+    const res = await call(throwingServer('get', '/api/v1/data/ghost', () => Object.assign(
+      new Error("Object 'ghost' not found"),
+      { code: 'OBJECT_NOT_FOUND', status: 404, object: 'ghost' },
+    )), '/api/v1/data/ghost');
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(404);
+    expect(body.error.code).toBe('OBJECT_NOT_FOUND');
+    expect(body.error.message).toBe("Object 'ghost' not found");
+    expect(body.error.details).toEqual({ object: 'ghost' });
+  });
+
+  it.each([
+    'FEEDS_DISABLED',
+    'FILES_DISABLED',
+    'ATTACHMENT_PARENT_ACCESS',
+    'ATTACHMENT_DELETE_DENIED',
+    'RECORD_NOT_ACCESSIBLE',
+  ])('403 %s: the object the refusal names', async (code) => {
+    const res = await call(throwingServer('get', '/api/v1/data/sys_comment', () => Object.assign(
+      new Error('access refused'),
+      { code, status: 403, object: 'account' },
+    )), '/api/v1/data/sys_comment');
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body.error.code).toBe(code);
+    expect(body.error.details).toEqual({ object: 'account' });
+  });
+
+  it('an arm whose status differs from the declared one is not consulted', async () => {
+    const res = await call(throwingServer('delete', '/api/v1/data/account/:id', () => Object.assign(
+      new Error('refused'),
+      { code: 'DELETE_RESTRICTED', status: 400, developerMessage: 'dev text', dependentObject: 'contact', dependentCount: 1 },
+    )), '/api/v1/data/account/acc_1', { method: 'DELETE' });
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(400);
+    expect(body.error.code).toBe('DELETE_RESTRICTED');
+    expect(Object.keys(body.error).sort()).toEqual(['code', 'message']);
+  });
+
+  it('an arm whose code differs from the declared one is not consulted', async () => {
+    // The arm keys this class by its NAME and answers `CONCURRENT_UPDATE`; the
+    // throw declares a different registered code, which stays the answer.
+    const res = await call(throwingServer('get', '/api/v1/data/task', () => Object.assign(
+      new Error('conflict'),
+      { name: 'ConcurrentUpdateError', code: 'RESOURCE_CONFLICT', status: 409, currentVersion: 'v2' },
+    )), '/api/v1/data/task');
+    const body = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body.error.code).toBe('RESOURCE_CONFLICT');
+    expect(Object.keys(body.error).sort()).toEqual(['code', 'message']);
+  });
+});
+
 describe('an escaped throw that is NOT such an envelope keeps today’s behaviour exactly', () => {
   it('a plain Error answers the byte-identical 500 with no cause in the body', async () => {
     const s = server();

@@ -89,7 +89,6 @@ function overlayRow(type: string, name: string, lock: string) {
         type,
         name,
         state: 'active',
-        organization_id: null,
         package_id: null,
         checksum: 'sha256:stored-head',
         metadata: JSON.stringify({ name, _lock: lock, _lockReason: 'governed by ops' }),
@@ -203,8 +202,8 @@ describe('[#9009] getEffectiveLock resolves the overlay row under the canonical 
             type: 'view',
             name: 'v1',
             state: 'active',
-            organization_id: null,
         });
+        expect(h.overlayQueries[0]).not.toHaveProperty('organization_id');
     });
 
     it('finds the lock for a manifest-ABSENT plural (`translations`) too', async () => {

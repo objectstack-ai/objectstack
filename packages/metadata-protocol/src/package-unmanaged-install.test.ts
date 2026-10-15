@@ -571,7 +571,7 @@ describe('planUnmanagedImport — the locks it strips', () => {
 });
 
 describe('importUnmanagedPackage — the verb', () => {
-    it('copies every item into a NEW base: package_id = the base, organization_id NULL, nothing under the source id', async () => {
+    it('copies every item into a NEW base: package_id = the base, no organization column, nothing under the source id', async () => {
         const { protocol, table, packages } = makeProtocol();
         const result = await protocol.importUnmanagedPackage({ manifest: crmBody() });
 
@@ -586,10 +586,10 @@ describe('importUnmanagedPackage — the verb', () => {
             // The package locks nothing, so the copy dropped nothing.
             strippedLocks: [],
         });
-        const rows = table('sys_metadata').map((r) => `${r.type}/${r.name}@${r.package_id}|org=${r.organization_id}|${r.state}`);
+        const rows = table('sys_metadata').map((r) => `${r.type}/${r.name}@${r.package_id}|org=${'organization_id' in r}|${r.state}`);
         expect(rows.sort()).toEqual([
-            'object/crm_lead@com.example.crm-copy|org=null|active',
-            'view/crm_lead_open@com.example.crm-copy|org=null|active',
+            'object/crm_lead@com.example.crm-copy|org=false|active',
+            'view/crm_lead_open@com.example.crm-copy|org=false|active',
         ]);
         // The base: scope-less (writable), the source namespace, a new id.
         expect(packages.get('com.example.crm-copy')?.manifest).toMatchObject({ id: 'com.example.crm-copy', namespace: 'crm' });
@@ -607,8 +607,8 @@ describe('importUnmanagedPackage — the verb', () => {
         expect(result.copied).toContainEqual({ type: 'translation', name: 'crm_zh_cn' });
         const row = table('sys_metadata').find((r) => r.type === 'translation' && r.name === 'crm_zh_cn' && r.state === 'active');
         expect(row).toBeDefined();
-        expect({ package_id: row!.package_id, organization_id: row!.organization_id ?? null })
-            .toEqual({ package_id: 'com.example.crm-copy', organization_id: null });
+        expect({ package_id: row!.package_id, organization: 'organization_id' in row! })
+            .toEqual({ package_id: 'com.example.crm-copy', organization: false });
         expect(JSON.parse(row!.metadata)).toMatchObject({ locale: 'zh-CN', objects: { crm_lead: { label: '线索' } } });
     });
 

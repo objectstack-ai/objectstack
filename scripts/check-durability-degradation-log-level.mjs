@@ -318,6 +318,14 @@ const READ_INVENTION_BASELINE_PATH = join(
  * choice is between paying for those 36 and giving this map a per-site scope
  * the way `FAILURE_PROPAGATION_SITES` already scopes the other vocabulary. That
  * is a design call, and it is deliberately not taken here.
+ *
+ * ## A second reader: the dispatch derivation (#23584)
+ *
+ * `scripts/pm/dispatch-gates.mjs` reads this table's KEYS, by its name, to tell
+ * a card whose file holds a catch and one of these callees to run this gate
+ * (`guardsADurabilityCriticalCall`). A key added here reaches that lead with
+ * nothing else to edit. Renaming the table, or spelling a key as anything but
+ * a quoted word, makes that tool refuse loudly until its reader moves too.
  */
 const DURABILITY_CRITICAL_CALLEES = new Map([
     [
@@ -407,10 +415,6 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
     [
         'persistLedgerDecisionRow',
         "A one-time membership decision (the ADR-0093 D6 backfill, or the default organization's owner bind) was carried out but its `sys_migration` record was never written. Every log line reads clean and the memberships it wrote stand, while the record that makes the decision ONE-TIME is absent, so the next boot decides it again — re-deciding membership for users whose membership was already decided at creation (ADR-0093 D7).",
-    ],
-    [
-        'persistGrantNameBackfillRecord',
-        "The one-time grant-name backfill (ADR-0131 D4) named the grants it could, but its `sys_migration` verdict row was never written. Every log line reads clean and the names it wrote stand, while the record that makes the pass ONE-TIME is absent, so every later boot scans the whole grant table again and re-reports the grants it cannot name.",
     ],
     [
         'runWideningAlters',

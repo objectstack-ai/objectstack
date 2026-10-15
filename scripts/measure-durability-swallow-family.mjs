@@ -331,7 +331,6 @@ const WRITE_SHAPED_CALLEES = new Map([
   ['persistPackageCommitRow', 'gate-vocabulary'],
   ['persistSeedTenancyReceiptRow', 'gate-vocabulary'],
   ['persistLedgerDecisionRow', 'gate-vocabulary'],
-  ['persistGrantNameBackfillRecord', 'gate-vocabulary'],
   ['recordLog', 'gate-vocabulary'],
   ['runWideningAlters', 'gate-vocabulary'],
   ['applyConfigPatch', 'gate-vocabulary'],

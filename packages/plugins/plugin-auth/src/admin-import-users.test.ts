@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { runAdminImportUsers, IMPORT_USERS_MAX_ROWS, type IdentityImportDeps } from './admin-import-users.js';
+import { settleImportResetDelivery } from './account-invitation-marker.js';
 import type { AdminActor } from './admin-user-endpoints.js';
 
 const ACTOR: AdminActor = { id: 'admin-1', email: 'admin@example.com' };
@@ -26,7 +27,10 @@ function makeDeps(opts: {
   phoneEnabled?: boolean;
   emailAvailable?: boolean;
   smsInviteAvailable?: boolean;
+  /** The send (inside the reset) fails — better-auth swallows it. */
   resetFails?: boolean;
+  /** [#23598] The reset request itself refuses, before any send, with this message. */
+  resetRequestThrows?: string;
   smsFails?: boolean;
   /** [#23152] When set, the deps carry `consoleResetPasswordUrl` answering it. */
   setPasswordPageUrl?: string;
@@ -36,8 +40,20 @@ function makeDeps(opts: {
   const createUser = vi.fn(async ({ body }: any) => ({
     user: { id: `u-${nextId++}`, email: body.email, name: body.name },
   }));
-  const requestPasswordReset = vi.fn(async () => {
-    if (opts.resetFails) throw new Error('smtp down');
+  // [#23598] better-auth's real shape: the reset runs `sendResetPassword`
+  // (whose body settles the import's receipt) inside `runInBackgroundOrAwait`,
+  // which CATCHES what the send throws, and answers `{ status: true }`
+  // regardless. A fake that throws on a failed send is the shape the real API
+  // never produces — it is what kept the import's dead failure path green.
+  const requestPasswordReset = vi.fn(async ({ body }: any) => {
+    if (opts.resetRequestThrows) throw new Error(opts.resetRequestThrows);
+    try {
+      await settleImportResetDelivery(body.email, undefined, async () => {
+        if (opts.resetFails) throw new Error('smtp down');
+      });
+    } catch {
+      /* better-auth: logger.error('Failed to run background task') */
+    }
     return { status: true };
   });
   const find = vi.fn(async (_obj: string, q: any) => {
@@ -359,11 +375,49 @@ describe('runAdminImportUsers — invite policy', () => {
       makeRequest({ passwordPolicy: 'invite', format: 'json', rows: [{ email: 'a@x.co' }] }),
       ACTOR,
     );
-    const row = (res.body.data as any).rows[0];
-    expect(row.ok).toBe(true);
-    expect(row.action).toBe('created');
+    const data = res.body.data as any;
+    const row = data.rows[0];
+    // [#23598] Reported failed although better-auth swallowed the send's throw.
+    expect(row.delivery).toBeUndefined();
     expect(row.code).toBe('INVITE_EMAIL_FAILED');
-    expect((res.body.data as any).summary.created).toBe(1);
+    expect(row.error).toContain('smtp down');
+    expect(row.ok).toBe(false);
+    expect(row.action).toBe('created');
+    expect(data.summary.created).toBe(1);
+    expect(data.summary.errors).toBe(1);
+    expect(data.summary.delivery).toEqual({ emailInvite: 0, smsInvite: 0, temporary: 0 });
+  });
+
+  it('[#23598] a reset request that refuses before any send is a failed invitation too', async () => {
+    const m = makeDeps({ resetRequestThrows: 'Invalid redirectURL' });
+    const res = await runAdminImportUsers(
+      m.deps,
+      makeRequest({ passwordPolicy: 'invite', format: 'json', rows: [{ email: 'a@x.co' }] }),
+      ACTOR,
+    );
+    const data = res.body.data as any;
+    expect(data.rows[0]).toMatchObject({ ok: false, action: 'created', code: 'INVITE_EMAIL_FAILED' });
+    expect(data.rows[0].error).toContain('Invalid redirectURL');
+    expect(data.rows[0].delivery).toBeUndefined();
+    expect(data.summary.errors).toBe(1);
+  });
+
+  it('[#23598] a reset that answers without running the send is never reported delivered', async () => {
+    const m = makeDeps();
+    // better-auth answers `{ status: true }` without calling `sendResetPassword`
+    // for an address it finds no account behind.
+    m.requestPasswordReset.mockImplementation(async () => ({ status: true }));
+    const res = await runAdminImportUsers(
+      m.deps,
+      makeRequest({ passwordPolicy: 'invite', format: 'json', rows: [{ email: 'a@x.co' }] }),
+      ACTOR,
+    );
+    const data = res.body.data as any;
+    expect(data.rows[0]).toMatchObject({ ok: false, action: 'created', code: 'INVITE_EMAIL_FAILED' });
+    expect(data.rows[0].error).toContain('never confirmed');
+    expect(data.rows[0].delivery).toBeUndefined();
+    expect(data.summary.errors).toBe(1);
+    expect(data.summary.delivery.emailInvite).toBe(0);
   });
 
   // #2780 — SMS invite variant for phone-only rows.
@@ -402,11 +456,17 @@ describe('runAdminImportUsers — invite policy', () => {
       makeRequest({ passwordPolicy: 'invite', format: 'json', rows: [{ phone_number: '+8613800000003' }] }),
       ACTOR,
     );
-    const row = (res.body.data as any).rows[0];
-    expect(row.ok).toBe(true);
-    expect(row.action).toBe('created');
+    const data = res.body.data as any;
+    const row = data.rows[0];
+    // [#23598] The same stamp as a failed email: not delivered, not ok, counted.
+    expect(row.delivery).toBeUndefined();
     expect(row.code).toBe('INVITE_SMS_FAILED');
-    expect((res.body.data as any).summary.created).toBe(1);
+    expect(row.error).toContain('sms provider down');
+    expect(row.ok).toBe(false);
+    expect(row.action).toBe('created');
+    expect(data.summary.created).toBe(1);
+    expect(data.summary.errors).toBe(1);
+    expect(data.summary.delivery).toEqual({ emailInvite: 0, smsInvite: 0, temporary: 0 });
   });
 
   it('with SMS but no email service: phone-only rows invite, email rows fail per-row', async () => {
@@ -545,12 +605,14 @@ describe('runAdminImportUsers — auto policy (default)', () => {
       ACTOR,
     );
     const row = (res.body.data as any).rows[0];
-    expect(row.ok).toBe(true);
+    expect(row.ok).toBe(false);
     expect(row.action).toBe('created');
     expect(row.code).toBe('INVITE_EMAIL_FAILED');
-    expect(row.delivery).toBe('email');
+    // [#23598] Nothing was delivered, so the row does not say `email`.
+    expect(row.delivery).toBeUndefined();
     // A failed invite is NOT silently downgraded to a temporary password.
     expect(row.temporaryPassword).toBeUndefined();
+    expect((res.body.data as any).summary.errors).toBe(1);
   });
 
   it('writes nothing on dryRun but still projects the per-row plan', async () => {

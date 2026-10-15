@@ -299,6 +299,16 @@ export default defineConfig({
               find: /^@objectstack\/cloud-connection$/,
               replacement: path.resolve(__dirname, '../../cloud-connection/src/index.ts'),
             },
+            // [ADR-0131 D10 item 5] `organization-ownership-boot-refusal-order.dogfood.test.ts`
+            // mounts `OrganizationOwnershipBootGuardPlugin` on a real boot; the
+            // refusal is the pin's subject, so the verdict is aliased to THIS
+            // checkout's source, not to the last `pnpm build`. The refusal is
+            // discriminated structurally (its `code`), so the harness's own
+            // built runtime instance beside it changes no verdict.
+            {
+              find: /^@objectstack\/runtime$/,
+              replacement: path.resolve(__dirname, '../../runtime/src/index.ts'),
+            },
             // [#21788] `external-import-saves-like-meta.dogfood.test.ts` mounts
             // `ExternalDatasourceServicePlugin` on a real boot (the harness
             // does not) and drives the import door. The plugin's save path is

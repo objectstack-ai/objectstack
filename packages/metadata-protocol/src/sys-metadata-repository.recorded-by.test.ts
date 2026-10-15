@@ -113,7 +113,7 @@ describe('#4556 — recorded_by holds a user id or NULL, never a sentinel', () =
 
   beforeEach(() => {
     engine = makeFakeEngine();
-    repo = new SysMetadataRepository({ engine, organizationId: 'org_alpha', orgLabel: 'org_alpha' });
+    repo = new SysMetadataRepository({ engine, orgLabel: 'org_alpha' });
   });
 
   it('put with actor: null writes SQL NULL — not "system", not any other string', async () => {

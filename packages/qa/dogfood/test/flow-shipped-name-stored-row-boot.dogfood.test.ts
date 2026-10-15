@@ -27,13 +27,12 @@
 // and that the trigger which fires is bound to the armed body. A stored row is
 // only read back by a cold boot, so the stack is booted twice on one file.
 //
-// ## What each case pins (the triage direction's four pins)
+// ## What each case pins
 //
 //   - a shipped name with a stored row arms and executes the loader's body;
 //   - the receipt and the armed body agree, and the stored row is its own
 //     contender in it, never the package;
 //   - a shipped name with no stored row is unchanged (the control);
-//   - an organization-scoped row stays out of reach.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
@@ -57,8 +56,6 @@ const SUBJECT = 'showcase_urgent_task_alert';
 /** A shipped flow given no stored row at all: the control. */
 const CONTROL = 'showcase_task_completed';
 /** A shipped flow given an ORGANIZATION-scoped row only. */
-const ORG_SUBJECT = 'showcase_task_assigned_notify';
-const ORG_ID = 'org_dogfood_20913';
 
 /** The node id the stored body renames the subject's notify node to. */
 const STORED_NODE = 'stored_alert_20913';
@@ -127,16 +124,15 @@ describe('a stored row under a shipped flow name is reported, never armed, acros
         stack = await boot(dbFile);
         const first = await engine();
         const store = await ql();
-        for (const name of [SUBJECT, CONTROL, ORG_SUBJECT]) {
+        for (const name of [SUBJECT, CONTROL]) {
             const flow = await first.getFlow(name);
             loaderLabels[name] = flow?.label;
             loaderNodes[name] = nodeIds(flow);
         }
         const now = new Date().toISOString();
-        const row = (name: string, organizationId: string | null) => ({
+        const row = (name: string) => ({
             type: 'flow',
             name,
-            organization_id: organizationId,
             package_id: null,
             state: 'active',
             version: 1,
@@ -145,15 +141,9 @@ describe('a stored row under a shipped flow name is reported, never armed, acros
             updated_at: now,
         });
         const subjectLoader = (await first.getFlow(SUBJECT)) as unknown as Record<string, unknown>;
-        const orgLoader = (await first.getFlow(ORG_SUBJECT)) as unknown as Record<string, unknown>;
         await store.insert(
             'sys_metadata',
-            { ...row(SUBJECT, null), metadata: JSON.stringify(storedBodyFrom(subjectLoader, STORED_NODE)) },
-            { context: SYSTEM_CTX },
-        );
-        await store.insert(
-            'sys_metadata',
-            { ...row(ORG_SUBJECT, ORG_ID), metadata: JSON.stringify(storedBodyFrom(orgLoader, STORED_NODE)) },
+            { ...row(SUBJECT), metadata: JSON.stringify(storedBodyFrom(subjectLoader, STORED_NODE)) },
             { context: SYSTEM_CTX },
         );
         await stack.stop();
@@ -173,9 +163,8 @@ describe('a stored row under a shipped flow name is reported, never armed, acros
             where: { type: 'flow', state: 'active' },
             context: SYSTEM_CTX,
         });
-        const names = rows.map((r) => `${String(r.name)}@${String(r.organization_id ?? '')}`);
+        const names = rows.map((r) => `${String(r.name)}@`);
         expect(names).toContain(`${SUBJECT}@`);
-        expect(names).toContain(`${ORG_SUBJECT}@${ORG_ID}`);
     });
 
     it('a shipped name with a stored row arms the loader\'s body after both boot steps', async () => {
@@ -236,11 +225,4 @@ describe('a stored row under a shipped flow name is reported, never armed, acros
         expect(e.getShadowedFlows().find((r) => r.name === CONTROL)).toBeUndefined();
     });
 
-    it('an organization-scoped row stays out of reach: the loader\'s body, no receipt', async () => {
-        const e = await engine();
-        const armed = await e.getFlow(ORG_SUBJECT);
-        expect(armed?.label).toBe(loaderLabels[ORG_SUBJECT]);
-        expect(nodeIds(armed)).toEqual(loaderNodes[ORG_SUBJECT]);
-        expect(e.getShadowedFlows().find((r) => r.name === ORG_SUBJECT)).toBeUndefined();
-    });
 });

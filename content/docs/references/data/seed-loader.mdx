@@ -163,6 +163,7 @@ Result of loading a single dataset
 | **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
 | **referencesDropped** | `integer` | optional (default: `0`) | Reference fields dropped from records that were still written |
 | **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
+| **landedIds** | `string[]` | optional (default: `[]`) | Ids of the stored rows this dataset landed on: inserted, updated, or matched on replay |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
 
 ### Nested Shape: `SeedLoadResult.errors[number]`
@@ -298,6 +299,7 @@ Result of loading a single dataset
 | **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
 | **referencesDropped** | `integer` | optional (default: `0`) | Reference fields dropped from records that were still written |
 | **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
+| **landedIds** | `string[]` | optional (default: `[]`) | Ids of the stored rows this dataset landed on: inserted, updated, or matched on replay |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
 
 ### Nested Shape: `SeedLoaderResult.errors[number]`

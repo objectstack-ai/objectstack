@@ -204,10 +204,11 @@ describe('opening an approval step tells each resolved approver, once (approval.
   });
 
   it('[#23594] a record whose title resolves is still named by label and id — no title reaches the body', async () => {
-    // The inbox's subject title is not yet narrowed by its reader's field-level
-    // security (#23594), and notification text is stored and may be e-mailed,
-    // so the body withholds the title from EVERY source: the live record's and
-    // the submit snapshot's (which differ here, so either leak is told apart).
+    // The inbox narrows the subject title by its reader's field-level security
+    // (#23594), but a notification has no reader to narrow for, and its text is
+    // stored and may be e-mailed, so the body withholds the title from EVERY
+    // source: the live record's and the submit snapshot's (which differ here,
+    // so either leak is told apart).
     const LIVE_TITLE = 'Acme renewal';
     const SNAPSHOT_TITLE = 'Snapshot-only title';
     await engine.insert('crm_deal', { id: 'D_titled', title: LIVE_TITLE }, { context: SYSTEM } as any);

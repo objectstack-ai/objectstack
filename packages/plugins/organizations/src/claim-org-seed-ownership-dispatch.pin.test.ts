@@ -9,10 +9,12 @@
  * `claimOrgSeedOwnership` re-owns an organization's seeded rows to its owner.
  * That is attribution, the step that completes the seed, not a user event, so
  * its write runs under `{ isSystem: true, skipAutomations: true }`. Since
- * [#23054] that write is a PREDICATE write (`multi: true`), paged only when the
- * engine refuses it for its per-row hook budget. This file pins what that
- * context reaches on the engine along that path, because a flag that is
- * silently dropped on the way would read as green in every double:
+ * [#23054] that write is a PREDICATE write (`multi: true`); since [#23354] it
+ * names the seeded ids (`id IN (chunk)`), so it re-owns only the rows the
+ * organization's seed replay reported and leaves a guest's or a form's unowned
+ * row unowned (ADR-0138 D1). This file pins what that context reaches on the
+ * engine along that path, because a flag that is silently dropped on the way
+ * would read as green in every double:
  *
  *  1. **the metadata-hook filter** — a hook bound through the real binder
  *     (`bindHooksToEngine`, which is what stamps `entry.meta`) does not fire,
@@ -32,12 +34,11 @@
  * that was never bound.
  *
  * [#23054] And it pins the claim's reach past the per-row hook ceiling: 10 500
- * owner-less rows of one object in one organization are ALL owned after one
- * pass. The flag does not exempt the write from that ceiling (code-registered
- * hooks still cover the object), so the whole-set write is refused and the
- * claim pages; the page read is a plain system read, so the metadata hook,
- * bound on `beforeFind`/`afterFind` too, sees it — the in-run positive control
- * of that case.
+ * seeded owner-less rows of one object in one organization are ALL owned after
+ * one pass. The flag does not exempt a write from that ceiling (code-registered
+ * hooks still cover the object), which is why every claim write carries at
+ * most half the ceiling's worth of ids: each is under it, none is refused, and
+ * the claim reads nothing.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -46,6 +47,9 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE, MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 
 import { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
+
+/** [#23354] The organization's seed replay reported landing on these rows. */
+const seededAre = (ids: string[]) => (object: string): readonly string[] => (object === OBJECT ? ids : []);
 
 const SYS = { context: { isSystem: true } } as const;
 const ORG = 'org_alpha';
@@ -167,9 +171,14 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
       // Out of the claim's scope: owned already, and another organization's row.
       { id: 'owned', name: 'Owned', stage: 'open', organization_id: ORG, owner_id: SOMEONE },
       { id: 'foreign', name: 'Foreign', stage: 'open', organization_id: OTHER_ORG, owner_id: null },
+      // [#23354] Unowned and in scope, but never reported by the seed: a
+      // guest's or a public form's row keeps no owner (ADR-0138 D1).
+      { id: 'guest', name: 'Guest enquiry', stage: 'new', organization_id: ORG, owner_id: null },
     ]);
 
-    const result = await claimOrgSeedOwnership(engine, ORG, OWNER);
+    const result = await claimOrgSeedOwnership(engine, ORG, OWNER, {
+      seededRecordIds: seededAre([...claimed, 'owned', 'foreign']),
+    });
     // Taken before any read of the test's own: `ownersOf` is a `find` too.
     const metadataSeen = [...metadataHook];
     const codeSeen = [...codeHook];
@@ -179,6 +188,7 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
     for (const id of claimed) expect(owners.get(id)).toBe(OWNER);
     expect(owners.get('owned')).toBe(SOMEONE);
     expect(owners.get('foreign')).toBeNull();
+    expect(owners.get('guest')).toBeNull();
 
     // ⭐ 1 — the metadata-hook filter: not one dispatch, before or after. Under
     // the ceiling the claim is one predicate write and reads nothing, so the
@@ -219,17 +229,18 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
   it('a second run claims nothing and dispatches no write hook of either kind', async () => {
     const { engine, metadataHook, codeHook } = await boot();
     await seed(engine, [{ id: 'd0', name: 'Deal 0', stage: 'open', organization_id: ORG, owner_id: null }]);
+    const seededRecordIds = seededAre(['d0']);
 
-    expect(await claimOrgSeedOwnership(engine, ORG, OWNER)).toEqual([{ object: OBJECT, count: 1 }]);
+    expect(await claimOrgSeedOwnership(engine, ORG, OWNER, { seededRecordIds })).toEqual([{ object: OBJECT, count: 1 }]);
     metadataHook.length = 0;
     codeHook.length = 0;
 
-    expect(await claimOrgSeedOwnership(engine, ORG, OWNER)).toEqual([]);
+    expect(await claimOrgSeedOwnership(engine, ORG, OWNER, { seededRecordIds })).toEqual([]);
     expect(writeEvents(metadataHook)).toEqual([]);
     expect(codeHook).toEqual([]);
   }, 120_000);
 
-  it('[#23054] 10 500 owner-less rows are all owned after one pass: refused whole under the flag, then paged to every row', async () => {
+  it('[#23054] 10 500 seeded owner-less rows are all owned after one pass, in chunk writes none of which is refused', async () => {
     const { engine, metadataHook, codeHook } = await boot();
     const N = 10_500;
     expect(N, 'the fixture must be past the per-row hook ceiling').toBeGreaterThan(MAX_BULK_PER_ROW_HOOK_ROWS);
@@ -240,9 +251,10 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
       { id: 'foreign', name: 'Foreign', stage: 'open', organization_id: OTHER_ORG, owner_id: null },
     ]);
 
-    // The measurement the paging rests on: with metadata hooks switched off,
-    // code-registered hooks still cover the object, so the ceiling still
-    // applies and refuses the whole-set write — nothing written, no hook run.
+    // The measurement the chunk size rests on: with metadata hooks switched
+    // off, code-registered hooks still cover the object, so the ceiling still
+    // applies and refuses an unbounded whole-set write — nothing written, no
+    // hook run.
     await expect(
       (engine as any).update(OBJECT, { owner_id: OWNER }, {
         where: { organization_id: ORG, owner_id: null },
@@ -254,7 +266,7 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
     expect(codeHook).toEqual([]);
     metadataHook.length = 0;
 
-    const result = await claimOrgSeedOwnership(engine, ORG, OWNER);
+    const result = await claimOrgSeedOwnership(engine, ORG, OWNER, { seededRecordIds: seededAre(claimed) });
     const metadataSeen = [...metadataHook];
     const codeSeen = [...codeHook];
 
@@ -265,14 +277,10 @@ describe('[#23008] the organization seed-ownership claim dispatches no metadata-
     expect(owners.get('owned')).toBe(SOMEONE);
     expect(owners.get('foreign')).toBeNull();
 
-    // ⭐ 1 on every landed write, page or whole set; the page read is the
-    // in-run positive control: a plain system read the metadata hook sees.
-    expect(writeEvents(metadataSeen), 'a metadata-bound hook fired on a claim write').toEqual([]);
-    expect(metadataSeen.map((s) => s.event)).toEqual(['beforeFind', 'afterFind']);
-    for (const s of metadataSeen) {
-      expect(s.isSystem).toBe(true);
-      expect(s.skipAutomations).toBeUndefined();
-    }
+    // ⭐ 1 on every chunk write — and the claim issued no read at all: every
+    // chunk landed whole, so nothing was paged (the hook is bound on the read
+    // events too).
+    expect(metadataSeen, 'a metadata-bound hook fired for the claim').toEqual([]);
     // ⭐ 2 and 3: one dispatch per claimed row and phase, every one flagged.
     for (const event of ['beforeUpdate', 'afterUpdate']) {
       expect(codeSeen.filter((s) => s.event === event), `${event} per claimed row`).toHaveLength(N);

@@ -3,8 +3,11 @@
 /**
  * `os migrate meta` on a COMPOSED project —
  * `composeStacks([defineStack(…), …], { manifest: 'preserve' })` — whose
- * package body carries a spelling the load still converts
- * (`datasources[].driver: 'mongo'`) (#22256, the composed half).
+ * package body carries a spelling the load still converts (a flow-level retry
+ * policy's `retryDelayMs`, renamed `backoffMs` by `retry-policy-converged`)
+ * (#22256, the composed half). It was measured on `datasources[].driver:
+ * 'mongo'`, until that spelling was retired as a value at 18 and its
+ * conversion left the load path (#23543 F1).
  *
  * ## The defect
  *
@@ -153,7 +156,7 @@ const json = (run: Run): any => JSON.parse(run.stdout);
 const sites = (list: Array<{ conversionId: string; path: string; from?: string; to?: string }>) =>
   list.map(({ conversionId, path, from, to }) => ({ conversionId, path, from, to }));
 const conversionIds = (list: readonly { conversionId: string }[]) => list.map((c) => c.conversionId);
-const bodyDriver = (config: any): string => config.packages[0].manifest.datasources[0].driver;
+const bodyErrorHandling = (config: any): Record<string, unknown> => config.packages[0].manifest.flows[0].errorHandling;
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-migrate-meta-composed-load-conversions-'));
@@ -171,9 +174,10 @@ afterAll(() => {
 
 /**
  * The service package: a stack the current schema accepts, whose one
- * non-canonical spelling is a datasource driver id the load still converts
- * (`retiredFromLoadPath: false`); the `url` is what makes a mongo datasource
- * valid, so the call is accepted.
+ * non-canonical spelling is a key the load still converts (`retiredFromLoadPath`
+ * unset): the flow-level retry policy's `retryDelayMs`, which
+ * `retry-policy-converged` renames `backoffMs` before the parse, so the call is
+ * accepted.
  */
 const SERVICE_STACK = `import { defineStack } from '@objectstack/spec';
 
@@ -188,7 +192,16 @@ export const ServiceStack = defineStack({
       },
     },
   ],
-  datasources: [{ name: 'docs', label: 'Docs', driver: 'mongo', config: { url: 'mongodb://mongo.internal:27017/docs' } }],
+  flows: [
+    {
+      name: 'probe_sync',
+      label: 'Sync',
+      type: 'autolaunched',
+      errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 },
+      nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+      edges: [{ id: 'e1', source: 'start', target: 'end' }],
+    },
+  ],
 });
 `;
 
@@ -213,13 +226,15 @@ const composed = (service: string): Record<string, string> => ({
   'src/app.stack.ts': APP_STACK,
 });
 
-const MONGO_CONVERSION = 'datasource-driver-mongo-to-mongodb';
-const MONGO_BODY_SITE = {
-  conversionId: MONGO_CONVERSION,
-  path: 'packages[0].manifest.datasources[0].driver',
-  from: 'mongo',
-  to: 'mongodb',
+const RETRY_CONVERSION = 'retry-policy-converged';
+const RETRY_BODY_SITE = {
+  conversionId: RETRY_CONVERSION,
+  path: 'packages[0].manifest.flows[0].errorHandling.backoffMs',
+  from: 'retryDelayMs',
+  to: 'backoffMs',
 };
+const AUTHORED_DELAY = 'retryDelayMs: 2000';
+const CANONICAL_DELAY = 'backoffMs: 2000';
 const TIME_BODY_SITE = {
   conversionId: 'time-default-utc-suffix-dropped',
   path: 'packages[0].manifest.objects[0].fields.starts_at.defaultValue',
@@ -235,16 +250,16 @@ describe('an accepted input: the chain reads the package body as the author wrot
     // The control for the last reading below: today the strict load converts it.
     const strictBefore = await quietLoad(dir);
     expect(strictBefore.stackProvenance).toBe(true);
-    expect(conversionIds(strictBefore.stackConversions)).toEqual([MONGO_CONVERSION]);
+    expect(conversionIds(strictBefore.stackConversions)).toEqual([RETRY_CONVERSION]);
 
     const dry = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(dry.applied)).toEqual([MONGO_BODY_SITE]);
+    expect(sites(dry.applied)).toEqual([RETRY_BODY_SITE]);
     expect(dry.schemaValid).toBe(true);
 
     const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
     expect(run.exitCode, run.stdout + run.stderr).toBeUndefined();
     const out = json(run);
-    expect(sites(out.applied)).toEqual([MONGO_BODY_SITE]);
+    expect(sites(out.applied)).toEqual([RETRY_BODY_SITE]);
     expect(out.write.status).toBe('written');
     expect(out.write.files).toEqual([{ file: 'src/service.stack.ts', sites: 1 }]);
     expect(out.write.manual).toEqual([]);
@@ -253,7 +268,7 @@ describe('an accepted input: the chain reads the package body as the author wrot
     // The site and nothing else: every other file keeps its bytes.
     expect(snapshot(dir)).toEqual({
       ...before,
-      'src/service.stack.ts': edit(before['src/service.stack.ts']!, "driver: 'mongo'", "driver: 'mongodb'"),
+      'src/service.stack.ts': edit(before['src/service.stack.ts']!, AUTHORED_DELAY, CANONICAL_DELAY),
     });
 
     const again = json(await runMeta(dir, ['--from', '16', '--json']));
@@ -270,11 +285,13 @@ describe('an accepted input: the chain reads the package body as the author wrot
     const dir = writeProject(composed(SERVICE_STACK));
 
     const authored = await quietLoad(dir, true);
-    expect(bodyDriver(authored.config)).toBe('mongo');
+    expect(bodyErrorHandling(authored.config)).toMatchObject({ retryDelayMs: 2000 });
+    expect(bodyErrorHandling(authored.config)).not.toHaveProperty('backoffMs');
     expect(authored.stackProvenance).toBe(true);
 
     const strict = await quietLoad(dir);
-    expect(bodyDriver(strict.config)).toBe('mongodb');
+    expect(bodyErrorHandling(strict.config)).toMatchObject({ backoffMs: 2000 });
+    expect(bodyErrorHandling(strict.config)).not.toHaveProperty('retryDelayMs');
   }, RUN_TIMEOUT);
 
   it('an input defined twice starts from the innermost argument, and is listed once', async () => {
@@ -284,7 +301,7 @@ describe('an accepted input: the chain reads the package body as the author wrot
       '\n}));\n',
     )));
     const out = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(out.applied)).toEqual([MONGO_BODY_SITE]);
+    expect(sites(out.applied)).toEqual([RETRY_BODY_SITE]);
     expect(out.schemaValid).toBe(true);
   }, RUN_TIMEOUT);
 });
@@ -292,8 +309,8 @@ describe('an accepted input: the chain reads the package body as the author wrot
 describe('a refused input the shim produces again, carrying a load-path spelling too', () => {
   // The `time` default with the UTC suffix is refused by the current schema,
   // so the shim hands the call's argument through and produces it again in
-  // `strict: false` mode for the composer; the driver id is the input's one
-  // load-path conversion.
+  // `strict: false` mode for the composer; the flow's retry delay key is the
+  // input's one load-path conversion.
   const MIXED = edit(
     SERVICE_STACK,
     "        name: { type: 'text', label: 'Name' },\n",
@@ -305,20 +322,20 @@ describe('a refused input the shim produces again, carrying a load-path spelling
     const before = snapshot(dir);
 
     const dry = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(dry.applied)).toEqual([MONGO_BODY_SITE, TIME_BODY_SITE]);
+    expect(sites(dry.applied)).toEqual([RETRY_BODY_SITE, TIME_BODY_SITE]);
 
     const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
     expect(run.exitCode, run.stdout + run.stderr).toBeUndefined();
     const out = json(run);
-    expect(sites(out.applied)).toEqual([MONGO_BODY_SITE, TIME_BODY_SITE]);
+    expect(sites(out.applied)).toEqual([RETRY_BODY_SITE, TIME_BODY_SITE]);
     expect(out.write.status).toBe('written');
     expect(out.write.files).toEqual([{ file: 'src/service.stack.ts', sites: 2 }]);
     expect(snapshot(dir)).toEqual({
       ...before,
       'src/service.stack.ts': edit(
         edit(MIXED, "defaultValue: '10:00Z'", "defaultValue: '10:00'"),
-        "driver: 'mongo'",
-        "driver: 'mongodb'",
+        AUTHORED_DELAY,
+        CANONICAL_DELAY,
       ),
     });
 
@@ -332,7 +349,7 @@ describe('a refused input the shim produces again, carrying a load-path spelling
 });
 
 describe('control: an already-canonical composed project', () => {
-  const CANONICAL = edit(SERVICE_STACK, "driver: 'mongo'", "driver: 'mongodb'");
+  const CANONICAL = edit(SERVICE_STACK, AUTHORED_DELAY, CANONICAL_DELAY);
 
   it('writes nothing, and its --json summary is the one the built composition gives', async () => {
     const dir = writeProject(composed(CANONICAL));

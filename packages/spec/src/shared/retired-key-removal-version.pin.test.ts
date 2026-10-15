@@ -86,7 +86,9 @@ import {
 } from '../automation/builtin-node-config.zod';
 import { NotifyConfigSchema } from '../automation/io-node-config.zod';
 import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemaless-node-config.zod';
+import { AdminScopeSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
+import { DatasourceSchema } from '../data/datasource.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
@@ -228,6 +230,10 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'category'),
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'isSystem'),
   ],
+  'permission-admin-scope-binding-authoring-removed': [
+    tombstone(AdminScopeSchema, 'permission.adminScope', 'manageBindings'),
+    tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
+  ],
   'manifest-permissions-string-list-removed': [
     refusal('manifest.permissions as a list of strings', () => ManifestPermissionsSchema.safeParse(['system.user.read'])),
   ],
@@ -294,6 +300,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   'sharing-rule-access-level-full-to-edit': [
     refusal("sharing-rule accessLevel 'full'", () => SharingLevel.safeParse('full')),
+  ],
+  // #23543 F1: an open-namespace value retired by name (`DriverType`); the
+  // config is a valid mongodb config, so `driver` is the only issue.
+  'datasource-driver-mongo-to-mongodb': [
+    refusal(
+      "datasource driver 'mongo'",
+      () => DatasourceSchema.safeParse({ name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' } }),
+      'driver',
+    ),
   ],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.
   'page-header-breadcrumb-removed': [tombstone(PageHeaderProps, 'page:header', 'breadcrumb')],

@@ -21,8 +21,11 @@ describe('AdminScopeSchema (ADR-0090 D12)', () => {
     expect(scope.businessUnit).toBe('east');
     expect(scope.includeSubtree).toBe(true); // default: whole subtree
     expect(scope.manageAssignments).toBe(false);
-    expect(scope.manageBindings).toBe(false);
-    expect(scope.authorEnvironmentSets).toBe(false);
+    // #23488: the two retired rights materialize no default any more — the
+    // parsed scope carries neither key (their refusal is pinned in
+    // `admin-scope-binding-authoring-retirement.test.ts`).
+    expect(scope).not.toHaveProperty('manageBindings');
+    expect(scope).not.toHaveProperty('authorEnvironmentSets');
     expect(scope.assignablePermissionSets).toEqual([]);
   });
 

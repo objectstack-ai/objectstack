@@ -40,7 +40,6 @@ interface Row {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     checksum: string | null;
@@ -77,7 +76,6 @@ function makeStubEngine(
         'sys_metadata',
         seedRows.map((r) => ({
             id: `r_${++nextId}`,
-            organization_id: null,
             package_id: null,
             state: 'active',
             checksum: `sha256:seed_${nextId}`,
@@ -278,20 +276,31 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
         expect(metaRows(tables)[0]!.state).toBe('draft');
     });
 
-    it('walks every org, not just the env-wide bucket — and REPORTS the org-scoped residue it cannot rewrite', async () => {
-        // The walk is what this case is named for, and the walk is unchanged:
-        // both buckets are scanned. What changed is the org row's OUTCOME.
-        //
-        // [ADR-0131 D6] Environment metadata has no per-organization layer, so
-        // the pass never re-saves an org-scoped row (that would move it — the
-        // promotion ceremony's job, ADR-0131 C7). The row is NON-DESTRUCTIVE
-        // residue: reported `skipped` with the reason, its bytes untouched —
-        // which keeps this pass a SECOND residue detector alongside the
-        // cold-boot warn (PR #6600).
-        const { engine, tables } = makeStubEngine([
-            legacyObjectRow,
-            { ...legacyActionRow, organization_id: 'org_a' },
-        ]);
+    /**
+     * [ADR-0131 D6/D7] The real engine shapes every read to the declared
+     * columns, and the family declares no `organization_id`: no row the pass
+     * reads carries the key. On a database the ceremony has not migrated the
+     * physical column still holds the organization, so the stub's driver seam
+     * answers the catalog and the legacy select the way a v17-shape SQLite
+     * file does. The real-engine pin over such a file is in `@objectstack/cli`
+     * (`meta-stored-legacy-organization.integration.test.ts`).
+     */
+    function withPhysicalOrganizationColumn(engine: any, legacy: Record<string, string>): void {
+        engine.getDriverForObject = (objectName: string) => objectName !== 'sys_metadata' ? undefined : {
+            dialectName: 'sqlite',
+            async execute(sql: string) {
+                return /column_name/.test(sql)
+                    ? [{ column_name: 'id' }, { column_name: 'organization_id' }]
+                    : Object.entries(legacy).map(([id, organization_id]) => ({ id, organization_id }));
+            },
+        };
+    }
+
+    it('a legacy organization row — told apart by the PHYSICAL column, not the engine row — is reported, never re-saved', async () => {
+        const { engine, tables } = makeStubEngine([legacyObjectRow, legacyActionRow]);
+        const actionRow = metaRows(tables).find((r) => r.type === 'action')!;
+        expect(actionRow).not.toHaveProperty('organization_id');
+        withPhysicalOrganizationColumn(engine, { [actionRow.id]: 'org_a' });
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         const report = await protocol.migrateStoredMetadata({ apply: true });
@@ -302,12 +311,22 @@ describe('migrateStoredMetadata — apply (#4327)', () => {
         expect(report.failed).toBe(0);
 
         const orgReport = report.rows.find((r: any) => r.type === 'action')!;
-        expect(orgReport.outcome).toBe('skipped');
+        expect(orgReport).toMatchObject({ outcome: 'skipped', organizationId: 'org_a' });
         expect(orgReport.reason).toContain('promotion ceremony (ADR-0131 C7)');
 
         // Non-destructive: the stored bytes are exactly as they were.
-        const orgRow = metaRows(tables).find((r) => r.organization_id === 'org_a')!;
-        expect(JSON.parse(orgRow.metadata).execute).toBe('convertHandler');
+        const stored = metaRows(tables).find((r) => r.id === actionRow.id)!;
+        expect(JSON.parse(stored.metadata).execute).toBe('convertHandler');
+    });
+
+    it('a driver seam that cannot answer refuses the pass before any row is written', async () => {
+        const { engine, tables } = makeStubEngine([legacyObjectRow]);
+        engine.getDriverForObject = () => ({ dialectName: 'sqlite', async execute() { return null; } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const before = JSON.stringify(metaRows(tables));
+
+        await expect(protocol.migrateStoredMetadata({ apply: true })).rejects.toThrow(/legacy organization rows/);
+        expect(JSON.stringify(metaRows(tables))).toBe(before);
     });
 
     it('leaves archived rows alone — they are a record of what was, not served metadata', async () => {

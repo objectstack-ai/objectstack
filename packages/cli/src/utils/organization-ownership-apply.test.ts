@@ -1979,7 +1979,7 @@ describe('ADR-0131 D10 --apply — the grant\'s retired id column (C7b, seat ans
     expect(idColumn()).toEqual([]);
   });
 
-  it('a second platform-wide grant (organization NULL) is a duplicate too: GROUP BY keys NULLs together, unlike the index', async () => {
+  it('a second platform-wide grant (organization NULL) is a duplicate too: GROUP BY keys NULLs together, as the index\'s NULL-safe organization key part does', async () => {
     await onlyTemplates(`('tpl_none', NULL, 'crm.none', 'en-US', 'x', 0, 'package')`, async () => {
       db.exec(`
         CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT,

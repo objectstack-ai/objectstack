@@ -2,6 +2,7 @@
 
 import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
+import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
@@ -9,10 +10,6 @@ import { resolveArtifactPackageOrder, artifactPackageId, readDeploymentOrgScopin
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
 import { unclaimedTopLevel } from '@objectstack/metadata';
-// [ADR-0131 D6] The one row-value test for a legacy organization's
-// `sys_metadata` row: no metadata read serves one, so the authored hook and
-// action binders skip it too.
-import { isLegacyOrganizationRow } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -2548,17 +2545,30 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * [ADR-0131 D6/D7] The ids of a legacy organization's `sys_metadata` rows,
+   * read off the physical column through the table's driver — empty on a
+   * migrated or fresh database. Throws when the read cannot answer.
+   */
+  private async legacyOrganizationRowIds(): Promise<ReadonlySet<string>> {
+    const driver = (this.ql as { getDriverForObject?: (objectName: string) => unknown } | undefined)
+      ?.getDriverForObject?.('sys_metadata');
+    return new Set((await readLegacyOrganizationRows(driver)).keys());
+  }
+
+  /**
    * Read the ACTIVE runtime-authored hook rows from `sys_metadata`.
    *
    * Reads the table directly (like `protocol.getMetaItems` does) instead of
    * going through the metadata service, because env-scoped kernels have no
    * DatabaseLoader so the service never surfaces these rows.
    *
-   * [ADR-0131 D6] The environment's rows only (`organization_id IS NULL`),
-   * the rule every metadata read follows: a legacy organization-scoped hook
-   * row is not bound — the protocol's boot report
-   * (`reportUnhydratableOrgScopedRows`) names it, and the v18 migration
-   * ceremony carries it.
+   * [ADR-0131 D6/D7] The environment's rows only: a legacy
+   * organization-scoped hook row is not bound, and the v18 migration ceremony
+   * carries it. The family declares no organization column, so the engine row
+   * never carries one; on a database the ceremony has not migrated (which
+   * `os serve` refuses, but an `os migrate` boot binds on) the legacy rows are
+   * told apart by the physical column ({@link legacyOrganizationRowIds}). A
+   * read of it that cannot answer is a failed read (`null`) like any other.
    *
    * Returns `null` when the read failed (e.g. no sys_metadata table on this
    * kernel) — callers must treat that as "couldn't read", NOT "zero hooks",
@@ -2587,10 +2597,11 @@ export class ObjectQLPlugin implements Plugin {
           context: { isSystem: true },
         })) ?? [];
       }
+      const legacy = await this.legacyOrganizationRowIds();
       const hooks: any[] = [];
       for (const row of rows) {
-        // [ADR-0131 D6] The environment's rows only — see the TSDoc.
-        if (isLegacyOrganizationRow(row)) continue;
+        // [ADR-0131 D6/D7] The environment's rows only — see the TSDoc.
+        if (legacy.has(String(row.id))) continue;
         try {
           const data = this.convertStoredRow(
             ctx,
@@ -2775,9 +2786,11 @@ export class ObjectQLPlugin implements Plugin {
           context: { isSystem: true },
         })) ?? [];
       }
+      // [ADR-0131 D6/D7] The environment's rows only — see readAuthoredHookRows.
+      const legacy = await this.legacyOrganizationRowIds();
       const actions: any[] = [];
       for (const row of rows) {
-        if (isLegacyOrganizationRow(row)) continue; // [ADR-0131 D6]
+        if (legacy.has(String(row.id))) continue;
         const data = parseRow(row, 'action');
         if (data && typeof data.name === 'string') actions.push(data);
       }
@@ -2790,7 +2803,7 @@ export class ObjectQLPlugin implements Plugin {
         context: { isSystem: true },
       })) ?? [];
       for (const row of objectRows) {
-        if (isLegacyOrganizationRow(row)) continue; // [ADR-0131 D6]
+        if (legacy.has(String(row.id))) continue; // [ADR-0131 D6/D7]
         const obj = parseRow(row, 'object');
         if (!obj || typeof obj.name !== 'string' || !Array.isArray(obj.actions)) continue;
         for (const action of obj.actions) {

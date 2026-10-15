@@ -107,7 +107,7 @@ const body = (locale: string | undefined, subject: string): Record<string, unkno
 });
 
 function makeRepo(engine: ReturnType<typeof makeFakeEngine>) {
-  return new SysMetadataRepository({ engine: engine as never, organizationId: null, orgLabel: 'env' } as never);
+  return new SysMetadataRepository({ engine: engine as never, orgLabel: 'env' } as never);
 }
 
 /** Last-write-wins, the way the save door's unpinned save resolves its parent. */

@@ -40,7 +40,7 @@ import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js
 import { absentTableReads } from '../../utils/absent-table-reads.js';
 import type { StoredMigrationReport } from '@objectstack/metadata-protocol';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { checkProtocolCompat, type ProtocolHandshakeManifest } from '@objectstack/metadata-core';
 import {
   planAuthoredSourceWrite,
@@ -1439,8 +1439,8 @@ export default class MigrateMeta extends Command {
     if (occupancy.status === 'busy' && !flags.json) {
       printWarning(apply
         ? `--force: ${describeOccupancy(occupancy)} Rewriting anyway — the live process may save metadata mid-run.`
-        : `${describeOccupancy(occupancy)} The preview below writes nothing, but a live process may `
-          + 'be saving metadata while it runs.');
+        : `${describeOccupancy(occupancy)} The preview below writes no row or table, but a live process may `
+          + `be saving metadata while it runs. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
     if (occupancy.status === 'unknown' && !flags.json) {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
@@ -1486,7 +1486,7 @@ export default class MigrateMeta extends Command {
       // takes. A plain boot runs schema sync and the artifact's inline seed
       // loader, and the seed upserts every seeded row of the app's tables
       // (`updated_at` bumped, `organization_id` stamped, relative-date values
-      // re-evaluated) before the report says "writes nothing". `deferSchemaDdl`
+      // re-evaluated) before the report says "writes no row". `deferSchemaDdl`
       // holds the DDL back and suppresses the seed; `readOnlyProbe` keeps a
       // missing sqlite file from being created. `--apply` keeps the plain boot:
       // it is the writing mode, and its behaviour is unchanged.

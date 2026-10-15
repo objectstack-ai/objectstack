@@ -56,10 +56,12 @@ export const permissionForm = defineForm({
         // administration could only be written in source. `json`, the hint every
         // structured row on this form carries. `json` is not a registered
         // widget, so the renderer derives the face from the node: this one is an
-        // object with properties, so it renders its six keys as a nested form
+        // object with properties, so it renders its keys as a nested form
         // whose edits merge into the stored scope — no key an author did not
-        // touch is rewritten.
-        { field: 'adminScope', widget: 'json', helpText: 'Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments, manageBindings and authorEnvironmentSets default to false; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing.' },
+        // touch is rewritten. #23488: the help text names the scope's four
+        // live keys only; `manageBindings` and `authorEnvironmentSets` are
+        // retired tombstones, not rights a set can grant.
+        { field: 'adminScope', widget: 'json', helpText: 'Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments defaults to false and lets the holder assign people to positions, and grant sets directly, inside that subtree; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing.' },
       ],
     },
     {

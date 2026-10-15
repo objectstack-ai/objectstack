@@ -26,7 +26,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation, SysMetadataRepository } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
 
 const META = '/api/v1/meta';
@@ -55,9 +55,6 @@ const MARKER = 'AUTHORED_AT_RUNTIME';
 
 /** The second revision's marker — two PUTs, two history events. */
 const MARKER_2 = 'AUTHORED_AT_RUNTIME_REV2';
-
-/** The label a planted LEGACY organization-scoped row carries. */
-const LEGACY_MARKER = 'LEGACY_ORG_ROW';
 
 /**
  * A SPEC-VALID body per type, carrying `label` as the marker the reads assert
@@ -337,17 +334,6 @@ function boot() {
     return {
         rows,
         historyRows,
-        /**
-         * Plant a LEGACY organization-scoped row (and its change log) at rest,
-         * as a door wrote it before ADR-0131 D6 — the protocol now refuses an
-         * organization-scoped write (`403 NOT_OVERRIDABLE`).
-         */
-        plantLegacyOrgRow: async (type: string, name: string, label = LEGACY_MARKER, organizationId = ORG_A) => {
-            const repo = new SysMetadataRepository({ engine, organizationId, orgLabel: organizationId });
-            const ref = { org: organizationId, type, name } as Parameters<typeof repo.get>[0];
-            const head = await repo.get(ref);
-            return repo.put(ref, bodyFor(type, name, label), { parentVersion: head?.hash ?? null, actor: null });
-        },
         as(tenantId: string | undefined) {
             session = tenantId === undefined
                 ? { userId: 'u1', systemPermissions: ['manage_metadata'] }
@@ -398,18 +384,6 @@ function storedRowsFor<T extends { type: string; name: string; organization_id: 
     return Array.from(rows.values()).filter(
         (r) => r.type === type && r.name === name && (r.organization_id ?? null) === org,
     );
-}
-
-/** An `object`-typed SOURCE: a lookup field naming `target`. */
-function objectReferencing(name: string, target: string): Record<string, unknown> {
-    return {
-        // [ADR-0090 D1] `sharingModel` is required at the write door; without
-        // it this fixture fails on the WRITE and never reaches the read.
-        name,
-        label: MARKER,
-        sharingModel: 'private',
-        fields: { task_ref: { type: 'lookup', label: 'Task', reference: target } },
-    };
 }
 
 /** The item an operator is about to delete — what `bodyFor('view', …)` binds to. */
@@ -488,31 +462,6 @@ describe('#9454 · ADR-0131 D6 every REST /meta read door serves what the write 
         });
     });
 
-    describe('⭐ a LEGACY organization-scoped row is served by no read door (environment → code)', () => {
-        it.each([CACHED_ARM, UNCACHED_ARM])('%s: shadowed by nothing — its own organization is served the environment row', async (type) => {
-            // Fixture proof first: the legacy row really is org-scoped.
-            await b.put(type, 'legacy_item');
-            await b.plantLegacyOrgRow(type, 'legacy_item');
-            expect(storedRowsFor(b.rows, type, 'legacy_item', ORG_A).length, 'the legacy row was not planted').toBe(1);
-            expect(storedRowsFor(b.rows, type, 'legacy_item', null).length).toBe(1);
-
-            const read = await b.get(type, 'legacy_item');
-            expect(read.status).toBe(200);
-            expect(
-                servedDocument(read.body)?.label,
-                'a legacy org row shadowed the environment save — the writes-first hazard',
-            ).toBe(MARKER);
-        });
-
-        it.each([CACHED_ARM, UNCACHED_ARM])('%s: alone, it is not served or listed to its own organization', async (type) => {
-            await b.plantLegacyOrgRow(type, 'legacy_only');
-            expect(storedRowsFor(b.rows, type, 'legacy_only', ORG_A).length, 'the legacy row was not planted').toBe(1);
-
-            const read = await b.get(type, 'legacy_only');
-            expect(servedDocument(read.body)?.label, 'a legacy org row was served').not.toBe(LEGACY_MARKER);
-            expect(listedNames((await b.list(type)).body)).not.toContain('legacy_only');
-        });
-    });
 });
 
 // ── the history seams of this harness ─────────────────────────────────────
@@ -543,14 +492,6 @@ describe('#13764 · ADR-0131 D6 the history seams serve the environment change l
         }
     });
 
-    it('⭐ does not serve a legacy organization-scoped change log, not even to its own organization', async () => {
-        await b.plantLegacyOrgRow(UNCACHED_ARM, 'legacy_logged');
-        expect(b.historyRowsFor(UNCACHED_ARM, 'legacy_logged', ORG_A).length, 'no legacy log was planted').toBe(1);
-
-        const read = await b.history(UNCACHED_ARM, 'legacy_logged');
-        expect(read.status).toBe(200);
-        expect(read.body?.events ?? [], 'a legacy org change log was served').toEqual([]);
-    });
 });
 
 // ── [#13753 · #15622] `GET /meta/diagnostics` ──────────────────────────────
@@ -587,41 +528,6 @@ describe('#13753 · ADR-0131 D6 GET /meta/diagnostics sweeps the environment par
             expect((await b.diagnostics({ type: UNCACHED_ARM })).body?.stats?.[UNCACHED_ARM]?.count, `typed, ${who ?? 'none'}`).toBe(1);
             expect((await b.diagnostics()).body?.stats?.[UNCACHED_ARM]?.count, `untyped, ${who ?? 'none'}`).toBe(1);
         }
-    });
-
-    it('⭐ a legacy organization-scoped item is not swept, not even for its own organization, on either arm', async () => {
-        await b.plantLegacyOrgRow(CACHED_ARM, 'legacy_only');
-        expect(storedRowsFor(b.rows, CACHED_ARM, 'legacy_only', ORG_A).length, 'the legacy row was not planted').toBe(1);
-
-        const typed = await b.diagnostics({ type: CACHED_ARM });
-        expect(typed.status).toBe(200);
-        expect(typed.body?.stats?.[CACHED_ARM]?.count ?? 0).toBe(0);
-        const untyped = await b.diagnostics();
-        expect(untyped.status).toBe(200);
-        expect(untyped.body?.scannedTypes, 'the untyped arm did not sweep the registry').toBeGreaterThan(1);
-        expect(untyped.body?.stats?.[CACHED_ARM]?.count ?? 0).toBe(0);
-    });
-
-    it('?type=object does not resurrect a pre-#6190 phantom org row either', async () => {
-        const written = await b.put(NON_OVERRIDABLE, 'accounts');
-        expect(written.status, 'the control never wrote').toBe(200);
-        b.rows.set(
-            keyOf({ type: NON_OVERRIDABLE, name: 'phantom_orders', organization_id: ORG_A, state: 'active' }),
-            {
-                id: 'phantom_1',
-                type: NON_OVERRIDABLE,
-                name: 'phantom_orders',
-                organization_id: ORG_A,
-                package_id: null,
-                state: 'active',
-                metadata: JSON.stringify(bodyFor(NON_OVERRIDABLE, 'phantom_orders')),
-            },
-        );
-        expect(storedRowsFor(b.rows, NON_OVERRIDABLE, 'phantom_orders', ORG_A).length).toBe(1);
-
-        const swept = await b.diagnostics({ type: NON_OVERRIDABLE });
-        expect(swept.status).toBe(200);
-        expect(swept.body?.stats?.[NON_OVERRIDABLE]?.count).toBe(1);
     });
 
     it('the response is the SAME wire shape — no new key, and 200 either way', async () => {
@@ -666,39 +572,6 @@ describe('#13753 · ADR-0131 D6 GET /meta/:type/:name/references sweeps the envi
             expect(used.status).toBe(200);
             expect(namesOf(used.body, CACHED_ARM), `caller ${who ?? 'none'}`).toContain('task_list');
         }
-    });
-
-    it('a legacy organization-scoped source is not swept', async () => {
-        await b.plantLegacyOrgRow(CACHED_ARM, 'legacy_task_list');
-        expect(storedRowsFor(b.rows, CACHED_ARM, 'legacy_task_list', ORG_A).length, 'the legacy row was not planted').toBe(1);
-        const used = await b.references(NON_OVERRIDABLE, TARGET_OBJECT);
-        expect(used.status).toBe(200);
-        expect(namesOf(used.body, CACHED_ARM)).not.toContain('legacy_task_list');
-    });
-
-    it('a non-overridable SOURCE stays env-wide — no phantom row is resurrected', async () => {
-        const written = await b.put(NON_OVERRIDABLE, 'env_orders');
-        expect(written.status, 'the control never wrote').toBe(200);
-        const envRow = storedRowsFor(b.rows, NON_OVERRIDABLE, 'env_orders', null);
-        expect(envRow.length).toBe(1);
-        envRow[0].metadata = JSON.stringify(objectReferencing('env_orders', TARGET_OBJECT));
-
-        b.rows.set(
-            keyOf({ type: NON_OVERRIDABLE, name: 'phantom_orders', organization_id: ORG_A, state: 'active' }),
-            {
-                id: 'phantom_ref_1',
-                type: NON_OVERRIDABLE,
-                name: 'phantom_orders',
-                organization_id: ORG_A,
-                package_id: null,
-                state: 'active',
-                metadata: JSON.stringify(objectReferencing('phantom_orders', TARGET_OBJECT)),
-            },
-        );
-        const used = await b.references(NON_OVERRIDABLE, TARGET_OBJECT);
-        expect(used.status).toBe(200);
-        expect(namesOf(used.body, NON_OVERRIDABLE), 'the env-wide source was not swept').toContain('env_orders');
-        expect(namesOf(used.body, NON_OVERRIDABLE)).not.toContain('phantom_orders');
     });
 
     it('the response is the SAME wire shape — one `references` key, no new field', async () => {

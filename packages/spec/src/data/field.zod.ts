@@ -1812,9 +1812,10 @@ export const FieldSchema = lazySchema(() => {
   language: z.string().optional().describe('Programming language for syntax highlighting (e.g., javascript, python, sql)'),
   // `step` is the slider's **UI increment** and deliberately NOT a stored-value constraint —
   // ADR-0049's "ledger" half, ruled 2026-08-08 (#6514). Note it is renderer-LIVE, not dead,
-  // which is why it is NOT in the pruned list above and never joins it: objectui's
-  // `packages/fields/src/widgets/SliderField.tsx:14` reads it (`field.step ?? 1`) and hands it
-  // to the Slider, and `packages/spec/liveness/field.json` ledgers it `live` on that evidence.
+  // which is why it is NOT in the pruned list above and never joins it: objectui's slider
+  // widget reads it (`step ?? 1`) and hands it to the Slider, and
+  // `packages/spec/liveness/field.json` ledgers it `live` on that evidence (row `step`, which
+  // records the read point).
   // What it does not do is BIND the written value: the numeric branch of
   // `packages/objectql/src/validation/record-validator.ts` enforces `min`/`max` for `slider`
   // and reads `step` nowhere. The settings-side ruling (#6199 / PR #6501, which DID enforce a
@@ -1832,7 +1833,8 @@ export const FieldSchema = lazySchema(() => {
   currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode.'),
 
   // Vector field — flat dimensionality (the live authoring path).
-  // The renderer reads this flat sibling (objectui VectorField.tsx:11).
+  // The renderer reads this flat sibling (read point recorded in
+  // `liveness/field.json`, row `dimensions`).
   dimensions: z.number().int().min(1).max(10000).optional().describe('Vector dimensionality (e.g., 1536 for OpenAI embeddings)'),
 
   /**

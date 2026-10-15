@@ -88,9 +88,12 @@ export interface DelegableAdminScope {
   /** `sys_business_unit.name` of the delegation root. */
   businessUnit: string;
   includeSubtree: boolean;
+  /**
+   * The scope's one action right. `manageBindings` and
+   * `authorEnvironmentSets` were retired from `AdminScopeSchema` (#23488) and
+   * left this report with them: neither right had a door to honour it.
+   */
   manageAssignments: boolean;
-  manageBindings: boolean;
-  authorEnvironmentSets: boolean;
   /** Permission-set names the delegate may hand out. */
   assignablePermissionSets: string[];
   /** Resolved subtree — root plus descendants when `includeSubtree`. */

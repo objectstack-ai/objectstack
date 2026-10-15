@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { hashSpec, isLegacyOrganizationRow } from '@objectstack/metadata-core';
+import { hashSpec, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { registerMetadataTypeActions } from '@objectstack/spec/kernel';
 import type {
@@ -68,7 +68,7 @@ interface MetadataServiceLike {
  * dropped rather than moved so there is one declaration of them, not two.
  */
 type DataEngineLike = Partial<
-  Pick<IDataEngine, 'find' | 'insert' | 'update' | 'delete'>
+  Pick<IDataEngine, 'find' | 'insert' | 'update' | 'delete' | 'getDriverForObject'>
 >;
 
 /**
@@ -116,8 +116,8 @@ function newMetaId(): string {
  * one, or one name's. EVERY read below of a stored datasource row goes through
  * here: the boot restore, the by-name read behind convergence and the `/meta`
  * projection, and the existence probes behind this plugin's own writes. A row
- * stored in a legacy organization's layer ({@link isLegacyOrganizationRow},
- * the one test the metadata reads apply) is therefore never restored, served,
+ * stored in a legacy organization's layer (its physical `organization_id`,
+ * {@link readLegacyOrganizationRows}) is therefore never restored, served,
  * pooled, updated or deleted here; the boot report names it, and it stays at
  * rest. A `find` filtered here, never a `findOne`: a single row picked by the
  * store could be the legacy one while the environment's row exists.
@@ -129,7 +129,13 @@ async function findEnvironmentRows(
   if (!engine?.find) return [];
   const where = { type: DS_META_TYPE, ...(name === undefined ? {} : { name }), state: 'active' };
   const rows = await engine.find(SYS_METADATA, { where }, { context: SYSTEM_CTX });
-  return (rows ?? []).filter((row) => !isLegacyOrganizationRow(row));
+  if (!rows || rows.length === 0) return [];
+  // [ADR-0131 D7] The family declares no organization column, so the engine
+  // row never carries one: a legacy organization's row is told apart by the
+  // physical column, on a database the ceremony has not migrated. A read that
+  // cannot answer throws — never "every row is the environment's".
+  const legacy = await readLegacyOrganizationRows(engine.getDriverForObject?.(SYS_METADATA));
+  return rows.filter((row) => !legacy.has(String(row.id)));
 }
 
 /**

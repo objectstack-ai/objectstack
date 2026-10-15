@@ -25,7 +25,7 @@ import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
-import { declareSeedSource } from './seed-settlement.js';
+import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
@@ -1699,6 +1699,11 @@ export class AppPlugin implements Plugin {
                          },
                      });
                      const result = await seedLoader.load(request);
+                     // [#23354] The rows this replay landed on, for the
+                     // organization's owner-bind claim (`seededRecordIds` with
+                     // this organization): it hands over these rows and no
+                     // other unowned row of the organization (ADR-0138 D1).
+                     recordOrganizationReplay(ctx, organizationId, result.results);
                      return {
                          inserted: result.summary.totalInserted,
                          updated: result.summary.totalUpdated,
@@ -1784,6 +1789,12 @@ export class AppPlugin implements Plugin {
                           },
                       });
                       const result = await seedLoader.load(request);
+                      // [#23354] Publish the rows this seed landed on BEFORE the
+                      // source settles, so the seed-ownership claim that runs on
+                      // `app:seeded` reads them: it hands over these rows and no
+                      // other unowned row (ADR-0138 D1). A replay on a later
+                      // boot reports the rows an earlier boot wrote, too.
+                      seedSource.publishLanded(result.results);
                       const { totalInserted, totalUpdated, totalSkipped, totalErrored } = result.summary;
                       // "Wrote the row, lost the link" (#3932): a reference field
                       // dropped from a row that WAS written moves none of the row
@@ -1845,30 +1856,42 @@ export class AppPlugin implements Plugin {
                   } else {
                       // Fallback: basic insert when metadata service is not available
                       ctx.logger.debug('[Seeder] No metadata service; using basic insert fallback');
+                      const landed: SeedLandingReport[number][] = [];
                       for (const dataset of normalizedDatasets) {
                           ctx.logger.info(`[Seeder] Seeding ${dataset.records.length} records for ${dataset.object}`);
+                          const landedIds: string[] = [];
                           for (const record of dataset.records) {
                               try {
-                                  await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
+                                  const row: any = await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
+                                  if (row?.id != null) landedIds.push(String(row.id));
                               } catch (err: any) {
                                   ctx.logger.warn(`[Seeder] Failed to insert ${dataset.object} record:`, { error: err.message });
                               }
                           }
+                          landed.push({ object: dataset.object, landedIds });
                       }
+                      // [#23354] Still this source's rows: published like the loader's.
+                      seedSource.publishLanded(landed);
                       ctx.logger.info('[Seeder] Data seeding complete.');
                   }
               } catch (err: any) {
                   // If SeedLoaderService fails (e.g., metadata not available), fall back to basic insert
                   ctx.logger.warn('[Seeder] SeedLoaderService failed, falling back to basic insert', { error: err.message });
+                  const landed: SeedLandingReport[number][] = [];
                   for (const dataset of normalizedDatasets) {
+                      const landedIds: string[] = [];
                       for (const record of dataset.records) {
                           try {
-                              await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
+                              const row: any = await ql.insert(dataset.object, record, SEED_WRITE_OPTIONS as any);
+                              if (row?.id != null) landedIds.push(String(row.id));
                           } catch (insertErr: any) {
                               ctx.logger.warn(`[Seeder] Failed to insert ${dataset.object} record:`, { error: insertErr.message });
                           }
                       }
+                      landed.push({ object: dataset.object, landedIds });
                   }
+                  // [#23354] Still this source's rows: published like the loader's.
+                  seedSource.publishLanded(landed);
                   ctx.logger.info('[Seeder] Data seeding complete (fallback).');
               }
              })();

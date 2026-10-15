@@ -7,8 +7,10 @@
  *
  * ## The population
  *
- * Every active, environment-wide `sys_metadata` row (`organization_id IS NULL`,
- * `state = 'active'`) of type `permission` or `position` — the legacy plurals
+ * Every active environment `sys_metadata` row (`state = 'active'`; on a
+ * database the organization-ownership ceremony has not migrated, a row whose
+ * physical `organization_id` holds a value is a legacy organization's and is
+ * left out, ADR-0131 D6/D7) of type `permission` or `position` — the legacy plurals
  * `permissions` / `positions` included, which the boot's load folds to the same
  * types — whose name a configured package holds. That is exactly what the cold
  * boot's catalog check refuses (ADR-0048 N.3): the check meets the package-held
@@ -89,6 +91,7 @@ const SYSTEM = { context: { isSystem: true } } as const;
 interface EngineLike {
   registry: unknown;
   find(object: string, query: Record<string, unknown>, options?: Record<string, unknown>): Promise<any[]>;
+  getDriverForObject?(objectName: string): unknown;
 }
 
 function engineOf(kernel: { getService(name: string): unknown }): EngineLike {
@@ -102,11 +105,11 @@ function engineOf(kernel: { getService(name: string): unknown }): EngineLike {
   return engine;
 }
 
-/** Every active environment-wide row of one stored spelling, ordered by name then id. */
+/** Every active row of one stored spelling, ordered by name then id. */
 async function storedRows(engine: EngineLike, storedType: string): Promise<any[]> {
   const rows = await engine.find(
     'sys_metadata',
-    { where: { type: storedType, organization_id: null, state: 'active' } },
+    { where: { type: storedType, state: 'active' } },
     SYSTEM,
   );
   return [...rows].sort((a, b) =>
@@ -119,9 +122,12 @@ async function storedRows(engine: EngineLike, storedType: string): Promise<any[]
  *
  * @param kernel a kernel booted with the deployment's composition and WITHOUT
  *   `sys_metadata` hydration, its packages registered.
+ * @param driver the stack's SQL driver, through which a legacy organization's
+ *   rows are told apart on a database not yet migrated.
  */
 export async function listSecurityCatalogOverlayRows(
   kernel: { getService(name: string): unknown },
+  driver?: unknown,
 ): Promise<SecurityCatalogOverlayRow[]> {
   const engine = engineOf(kernel);
   const { findPackageHeldSecurityCatalogNames } = await import('@objectstack/objectql');
@@ -131,9 +137,15 @@ export async function listSecurityCatalogOverlayRows(
   }
   if (held.size === 0) return [];
 
+  // [ADR-0131 D6/D7] On a database the ceremony has not migrated, a legacy
+  // organization's rows are told apart by the physical column (the engine can
+  // no longer name it); an unanswered read refuses the step.
+  const { readLegacyOrganizationRows } = await import('@objectstack/metadata-core');
+  const legacy = await readLegacyOrganizationRows(engine.getDriverForObject?.('sys_metadata') ?? driver);
   const listed: SecurityCatalogOverlayRow[] = [];
   for (const [storedType, catalogType] of STORED_TYPE_SPELLINGS) {
     for (const row of await storedRows(engine, storedType)) {
+      if (legacy.has(String(row.id))) continue;
       const name = String(row.name);
       const heldBy = held.get(`${catalogType}|${name}`);
       if (!heldBy) continue;
@@ -160,7 +172,7 @@ export async function listSecurityCatalogOverlayRows(
 async function stillStored(engine: EngineLike, storedType: string, name: string, ids: readonly string[]): Promise<Set<string>> {
   const rows = await engine.find(
     'sys_metadata',
-    { where: { type: storedType, name, organization_id: null, state: 'active' } },
+    { where: { type: storedType, name, state: 'active' } },
     SYSTEM,
   );
   const present = new Set(rows.map((r: any) => String(r.id)));
@@ -236,7 +248,7 @@ export async function deleteSecurityCatalogOverlayRows(
   const plural = rows.filter((row) => row.storedType !== row.catalogType);
   if (plural.length > 0) {
     const { SysMetadataRepository } = await import('@objectstack/metadata-protocol');
-    const repository = new SysMetadataRepository({ engine: engine as never, organizationId: null, orgLabel: 'env' });
+    const repository = new SysMetadataRepository({ engine: engine as never, orgLabel: 'env' });
     for (const row of plural) {
       try {
         await repository.delete(

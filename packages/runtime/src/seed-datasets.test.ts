@@ -25,7 +25,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Part B plumbing: capture what the replayer feeds the seed loader ──────────
 let loadCalls: any[] = [];
-let seedResult: any = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
+/**
+ * What the real `SeedLoaderService.load()` resolves, reduced to the keys AppPlugin
+ * reads: `summary`, `errors` and `results`. `results` is REQUIRED by the contract
+ * (`SeedLoaderResultSchema`: one entry per dataset, `[]` when nothing loaded; the real
+ * loader returns it on every path, the empty one included), and the replayer hands it
+ * to the seed-settlement tracker (#23354) — a fake without it answers a shape the
+ * producer never does.
+ */
+const loaderResult = (summary: { totalInserted: number; totalUpdated: number; totalSkipped: number }) => ({
+    summary,
+    errors: [] as unknown[],
+    results: [] as unknown[],
+});
+let seedResult: any = loaderResult({ totalInserted: 0, totalUpdated: 0, totalSkipped: 0 });
 
 vi.mock('./seed-loader.js', () => ({
     SeedLoaderService: class {
@@ -143,7 +156,7 @@ describe('AppPlugin per-org replayer replays the live union (#3453 seam)', () =>
 
     beforeEach(() => {
         loadCalls = [];
-        seedResult = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
+        seedResult = loaderResult({ totalInserted: 0, totalUpdated: 0, totalSkipped: 0 });
         process.env.OS_MULTI_ORG_ENABLED = 'true'; // per-org replay path; skip inline seed
     });
     afterEach(() => {
@@ -193,7 +206,7 @@ describe('AppPlugin per-org replayer replays the live union (#3453 seam)', () =>
         expect(typeof replayer).toBe('function');
 
         // A brand-new org is created → the middleware invokes the replayer.
-        seedResult = { summary: { totalInserted: 3, totalUpdated: 0, totalSkipped: 0 }, errors: [] };
+        seedResult = loaderResult({ totalInserted: 3, totalUpdated: 0, totalSkipped: 0 });
         const result = await replayer('org_fresh');
 
         // The replayer fed the loader the FULL union in source order — the crux of
