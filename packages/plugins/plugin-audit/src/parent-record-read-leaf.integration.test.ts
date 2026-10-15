@@ -396,10 +396,6 @@ class RefusingDriver extends SqliteWasmDriver {
     this.refuse(query);
     return super.find(object, query, options);
   }
-  override async findOne(object: string, query: any, options?: any) {
-    this.refuse(query);
-    return super.findOne(object, query, options);
-  }
   override async count(object: string, query?: any, options?: any) {
     this.refuse(query);
     return super.count(object, query, options);

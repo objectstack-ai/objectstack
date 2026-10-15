@@ -368,7 +368,7 @@ function installClassifying(opts: {
 }) {
   let mw!: Mw;
   const calls = { scans: [] as any[], probes: [] as Array<{ object: string; ids: string[]; context: any }> };
-  const engine: ParentRecordGateEngine = {
+  const base: CommentAccessEngine = {
     registerHook: () => {},
     registerMiddleware: (fn) => {
       mw = fn as Mw;
@@ -384,10 +384,13 @@ function installClassifying(opts: {
       return ids.filter((id) => list.includes(id)).map((id) => ({ id })) as any;
     },
     findOne: async () => null,
+  };
+  // The classifying questions, over the comment-gate double above.
+  const engine: ParentRecordGateEngine = Object.assign(base, {
     registry: (opts.registry ?? { getAllObjects: () => opts.objects.map((name) => ({ name })) }) as any,
     hasObjectMiddleware: (object: string) => (opts.middleware ?? []).includes(object),
     resolveEffectiveDatasource: (object: string) => opts.datasource?.[object],
-  };
+  });
   // A security service that answers `canReadObject` unless the case says otherwise:
   // without it the gate writes no leaf (see the `no-object-admission` case).
   installActivityReadVisibility(

@@ -287,23 +287,31 @@ describe('installAuditLogReadVisibility — the bounded probe (an engine that ca
 });
 
 /** A stand-in engine that answers the three questions the gate classifies a parent by. */
-function installClassifying(objects: string[]) {
-  let mw!: Mw;
-  const calls = { scans: [] as any[] };
-  const engine: ParentRecordGateEngine = {
+/** The comment-gate engine double, recording its middleware and its reads. */
+function baseEngine(onMiddleware: (fn: Mw) => void, onFind: (object: string, options: any) => void): CommentAccessEngine {
+  return {
     registerHook: () => {},
-    registerMiddleware: (fn) => {
-      mw = fn as Mw;
-    },
+    registerMiddleware: (fn) => onMiddleware(fn as Mw),
     find: async (object: string, options: any) => {
-      calls.scans.push({ object, options });
+      onFind(object, options);
       return [];
     },
     findOne: async () => null,
-    registry: { getAllObjects: () => objects.map((name) => ({ name })) } as any,
-    hasObjectMiddleware: () => false,
-    resolveEffectiveDatasource: () => undefined,
   };
+}
+
+function installClassifying(objects: string[]) {
+  let mw!: Mw;
+  const calls = { scans: [] as any[] };
+  // The classifying questions, over the comment-gate double.
+  const engine: ParentRecordGateEngine = Object.assign(
+    baseEngine((fn) => (mw = fn), (object, options) => calls.scans.push({ object, options })),
+    {
+      registry: { getAllObjects: () => objects.map((name) => ({ name })) } as any,
+      hasObjectMiddleware: () => false,
+      resolveEffectiveDatasource: () => undefined,
+    },
+  );
   installAuditLogReadVisibility(engine, silentLogger(), () => ({ canReadObject: async () => true }));
   return { mw, calls };
 }
@@ -334,17 +342,10 @@ describe('[ADR-0139 D4] the ledger on the leaf path', () => {
   it('the exemption is decided before anything is enumerated', async () => {
     const getAllObjects = vi.fn(() => [{ name: 'crm_case' }]);
     let mw!: Mw;
-    const engine: ParentRecordGateEngine = {
-      registerHook: () => {},
-      registerMiddleware: (fn) => {
-        mw = fn as Mw;
-      },
-      find: async () => [],
-      findOne: async () => null,
-      registry: { getAllObjects } as any,
-      hasObjectMiddleware: () => false,
-      resolveEffectiveDatasource: () => undefined,
-    };
+    const engine: ParentRecordGateEngine = Object.assign(
+      baseEngine((fn) => (mw = fn), () => {}),
+      { registry: { getAllObjects } as any, hasObjectMiddleware: () => false, resolveEffectiveDatasource: () => undefined },
+    );
     installAuditLogReadVisibility(engine, silentLogger(), () => undefined);
     const existing = { action: 'delete' };
     const { where } = await read(mw, {
