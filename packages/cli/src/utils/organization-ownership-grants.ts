@@ -59,7 +59,11 @@ export interface GrantRewritePlan {
   reasons: Record<UnnamedReason, string[]>;
 }
 
-/** The unique key of a grant; a NULL organization is one key, as the write door keys it. */
+/**
+ * The unique key of a grant; a NULL organization is one key, as the grant's
+ * `unique: 'organization'` index keys it (its organization key part is
+ * NULL-safe, ADR-0120 D3).
+ */
 export function grantKey(userId: string | null, name: string, organizationId: string | null): string {
   return JSON.stringify([userId, name, organizationId]);
 }
