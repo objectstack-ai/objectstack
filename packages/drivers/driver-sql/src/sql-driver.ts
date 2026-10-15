@@ -155,6 +155,7 @@ import {
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
+import { makeDatabaseDirectory, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
@@ -7001,6 +7002,16 @@ export class SqlDriver implements IDataDriver {
       // let the step-down message that follows explain the outcome. Any OTHER
       // PRAGMA failure keeps the full warning (with stack) as before.
       const code = (e as { code?: string } | null | undefined)?.code;
+      // The file itself cannot be opened or created (#23696): a directory that
+      // exists but refuses the file, a path SQLite cannot open. Every later
+      // statement would answer the same, so the connect fails here, naming the
+      // file — before, it logged and resolved, and the datasource counted as
+      // connected while it could not answer one query.
+      if (code === 'SQLITE_CANTOPEN') {
+        const declared = (this.config as any).connection;
+        const filename = this.sqliteFilename() ?? String(typeof declared === 'string' ? declared : declared?.filename);
+        throw new SqliteDatabaseFileError(filename, 'cannot be opened or created', e);
+      }
       const msg = e instanceof Error ? e.message : String(e);
       const isNativeLoadFailure =
         code === 'ERR_DLOPEN_FAILED' ||
@@ -20105,15 +20116,20 @@ export class SqlDriver implements IDataDriver {
 
   protected async ensureDatabaseExists() {
     // SQLite auto-creates database files but NOT parent directories.
-    // Ensure the directory exists so better-sqlite3 can create the file.
+    // Ensure the directory exists so better-sqlite3 can create the file — with
+    // a bounded walk, never Node's recursive mkdir, which loops forever on a
+    // path like `/proc/x/` (#23696, see `makeDatabaseDirectory`).
     if (this.isSqlite) {
       const filename = this.sqliteFilename();
       if (filename) {
         const { dirname } = await import('node:path');
-        const { mkdir } = await import('node:fs/promises');
         const dir = dirname(filename);
         if (dir && dir !== '.') {
-          await mkdir(dir, { recursive: true });
+          try {
+            await makeDatabaseDirectory(dir);
+          } catch (e) {
+            throw new SqliteDatabaseFileError(filename, `cannot be created: its directory '${dir}' could not be made`, e);
+          }
         }
       }
       return;

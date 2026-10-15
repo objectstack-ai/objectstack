@@ -42,6 +42,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEV_SOURCE = readFileSync(resolve(HERE, 'dev.ts'), 'utf8');
 
 const bannerOpts: Omit<ServerReadyOptions, 'externalBaseOrigin'> = {
+  httpServer: 'composed',
   configFile: 'objectstack.config.ts',
   isDev: true,
   pluginCount: 1,
