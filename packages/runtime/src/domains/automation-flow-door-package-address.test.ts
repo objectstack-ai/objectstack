@@ -38,6 +38,30 @@
  *    the engine is put back as it was (the definition it held re-registered,
  *    or the new name withdrawn).
  *
+ * ## [#23501] The 409's remedy is one this door's caller can follow
+ *
+ * The protocol's refusal prescribes "on the REST door add ?package=", and this
+ * door reads no `?package=`: relayed verbatim, it sent a caller who followed
+ * it back here to the identical `409`. The door now answers the same
+ * `409 RESOURCE_CONFLICT` with a remedy that works from here, and the last
+ * describe block below follows each one AS PRINTED — the method and route are
+ * read out of the answer and sent, never restated by the test:
+ *
+ *  - `PUT /:name` and `POST /` name the metadata door's
+ *    `PUT /api/v1/meta/flow/:name?package=`, followed on both `/meta`
+ *    transports (`RestServer`, and the dispatcher's own `/meta` arm that the
+ *    `@objectstack/hono` catch-all reaches);
+ *  - `DELETE /:name` names the metadata door's
+ *    `DELETE /api/v1/meta/flow/:name?package=`, followed on `RestServer`, the
+ *    one `/meta` transport that serves a `DELETE` (the dispatcher's `/meta`
+ *    arm answers it `405`, `domains/meta.ts`);
+ *  - the clone answers its own taken-name refusal, because a name two
+ *    packages hold is taken (ADR-0126 §7.1), and is followed with the new
+ *    name it suggests.
+ *
+ * Only the envelope (`code` + `status`), the door the remedy names, and the
+ * packages it states are asserted — never the sentence.
+ *
  * ## The rig
  *
  * A REAL store: better-sqlite3 `:memory:`, the real `ObjectQL` engine with the
@@ -49,7 +73,10 @@
  * step the one stubbed seam (as `meta-save-actor.test.ts` drives it). The
  * automation engine is a map, as in the sibling door suites: the engine's
  * validation is not the subject, and its double arms the contender the boot
- * bind arms (the first one the protocol's execution view lists).
+ * bind arms (the first one the protocol's execution view lists). `RestServer`
+ * (`@objectstack/rest`) is mounted over the same protocol for the `/meta`
+ * routes a remedy names, its route handlers called directly, as
+ * `meta-save-actor.test.ts` calls them.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -57,6 +84,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
+import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
@@ -77,6 +105,21 @@ afterEach(async () => {
 });
 
 interface Answer { status: number | undefined; code: unknown }
+/** An answer with the text a caller reads its remedy from. */
+interface Refusal extends Answer { message: string }
+
+/** The `RestServer` route-handler double of a framework response. */
+function makeRes() {
+    const res: any = { statusCode: 200, body: undefined };
+    res.status = (code: number) => { res.statusCode = code; return res; };
+    res.json = (body: unknown) => { res.body = body; return res; };
+    res.send = () => res;
+    res.end = () => res;
+    res.header = () => res;
+    res.setHeader = () => {};
+    res.write = () => true;
+    return res;
+}
 
 async function boot() {
     const engine = new ObjectQL();
@@ -113,6 +156,31 @@ async function boot() {
         const res = await dispatcher.dispatch(method, path, body, query, { request: { headers: {} } } as any);
         return { status: res.response?.status, code: res.response?.body?.error?.code };
     };
+    /** The same request, answered with the text a caller reads its remedy from. */
+    const refusal = async (method: string, path: string, body?: unknown): Promise<Refusal> => {
+        const res = await dispatcher.dispatch(method, path, body, {}, { request: { headers: {} } } as any);
+        const error = res.response?.body?.error;
+        return { status: res.response?.status, code: error?.code, message: String(error?.message) };
+    };
+
+    // The `/meta` item routes `os serve` mounts, over the same protocol.
+    const noop = () => {};
+    const server = { get: noop, post: noop, put: noop, delete: noop, patch: noop, use: noop, listen: async () => {}, close: async () => {} };
+    const rest: any = new RestServer(server as any, protocol as any, { api: { requireAuth: false } } as any);
+    rest.resolveExecCtx = async () => ({ ...AUTHOR });
+    rest.registerRoutes();
+    /** `METHOD /api/v1/meta/:type/:name?package=` on `RestServer`, its handler called directly. */
+    const restMeta = async (method: 'PUT' | 'DELETE', path: string, packageId: string, body?: unknown): Promise<Answer> => {
+        const [type, name] = path.slice('/api/v1/meta/'.length).split('/');
+        const route = rest.getRoutes().find((r: any) => r.method === method && r.path === '/api/v1/meta/:type/:name');
+        if (!route) throw new Error(`${method} /api/v1/meta/:type/:name is not registered`);
+        const res = makeRes();
+        await route.handler({ method, path, params: { type, name }, headers: {}, query: { package: packageId }, body }, res);
+        return { status: res.statusCode, code: res.body?.code ?? res.body?.error?.code };
+    };
+    /** The same `/meta` route on the dispatcher's own arm — the `@objectstack/hono` catch-all's transport. */
+    const dispatcherMeta = (method: string, path: string, packageId: string, body?: unknown): Promise<Answer> =>
+        call(method, path.slice('/api/v1'.length), body, { package: packageId });
 
     /** Every stored row of a flow, read back from the store, ordered by its package binding. */
     const rows = async (name: string): Promise<Array<Record<string, unknown>>> => {
@@ -139,7 +207,7 @@ async function boot() {
         return { armed: contenders[0], contenders };
     };
 
-    return { call, rows, bindings, labelIn, armFromStore, flows, registerFlow, unregisterFlow };
+    return { call, refusal, restMeta, dispatcherMeta, rows, bindings, labelIn, armFromStore, flows, registerFlow, unregisterFlow };
 }
 
 type Rig = Awaited<ReturnType<typeof boot>>;
@@ -243,6 +311,105 @@ for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
             expect(await rig.rows(SHARED)).toEqual(before);
             expect(rig.unregisterFlow).toHaveBeenCalledWith(SHARED);
             expect(rig.flows.has(SHARED)).toBe(false);
+        }, 60_000);
+    });
+}
+
+/**
+ * The `?package=` route a refusal prescribes, read out of its text the way a
+ * caller reads it: the method, and the route to send it to.
+ */
+function printedPackageRoute(message: string): { method: string; path: string } {
+    const printed = /\b(PUT|DELETE) (\/api\/v1\/[^\s?]+)\?package=/.exec(message);
+    expect(printed, `a ?package= route in: ${message}`).not.toBeNull();
+    return { method: printed![1]!, path: printed![2]! };
+}
+
+for (const order of [[ALPHA, BETA], [BETA, ALPHA]] as const) {
+    describe(`[#23501] a flow two packages hold (saved into ${order[0]}, then ${order[1]}): the 409's remedy, followed as printed, does not loop`, () => {
+        it('PUT /:name names the metadata door\'s PUT ?package=, which saves that package\'s row on both /meta transports', async () => {
+            const rig = await twoPackageFlow(order);
+            await rig.armFromStore(SHARED);
+            const edited = flowOf(SHARED, 'Edited at the door');
+
+            const answer = await rig.refusal('PUT', `/automation/${SHARED}`, edited);
+
+            expect({ status: answer.status, code: answer.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+            const route = printedPackageRoute(answer.message);
+            expect(route).toEqual({ method: 'PUT', path: `/api/v1/meta/flow/${SHARED}` });
+            for (const packageId of [ALPHA, BETA]) expect(answer.message).toContain(`'${packageId}'`);
+            // The remedy it replaced: this door reads no `?package=`, so the same save comes back the same 409.
+            expect(await rig.call('PUT', `/automation/${SHARED}`, edited, { package: ALPHA }))
+                .toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+
+            // Followed as printed, naming each package it states in turn.
+            expect(await rig.restMeta(route.method as 'PUT', route.path, ALPHA, flowOf(SHARED, 'Saved through RestServer')))
+                .toEqual({ status: 200, code: undefined });
+            expect(await rig.dispatcherMeta(route.method, route.path, BETA, flowOf(SHARED, 'Saved through the dispatcher')))
+                .toEqual({ status: 200, code: undefined });
+            expect(await rig.bindings(SHARED)).toEqual([ALPHA, BETA]);
+            expect(await rig.labelIn(SHARED, ALPHA)).toBe('Saved through RestServer');
+            expect(await rig.labelIn(SHARED, BETA)).toBe('Saved through the dispatcher');
+        }, 60_000);
+
+        it('POST / names the same PUT ?package= route, which saves that package\'s row', async () => {
+            const rig = await twoPackageFlow(order);
+
+            const answer = await rig.refusal('POST', '/automation', flowOf(SHARED, 'Posted at the door'));
+
+            expect({ status: answer.status, code: answer.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+            const route = printedPackageRoute(answer.message);
+            expect(route).toEqual({ method: 'PUT', path: `/api/v1/meta/flow/${SHARED}` });
+            for (const packageId of [ALPHA, BETA]) expect(answer.message).toContain(`'${packageId}'`);
+
+            expect(await rig.restMeta(route.method as 'PUT', route.path, BETA, flowOf(SHARED, 'Posted, then saved')))
+                .toEqual({ status: 200, code: undefined });
+            expect(await rig.bindings(SHARED)).toEqual([ALPHA, BETA]);
+            expect(await rig.labelIn(SHARED, BETA)).toBe('Posted, then saved');
+        }, 60_000);
+
+        it('POST /:name/clone answers the clone door\'s taken-name refusal, and the name it suggests clones', async () => {
+            const rig = await twoPackageFlow(order);
+            rig.flows.set('source_flow', flowOf('source_flow', 'Source'));
+            const before = await rig.rows(SHARED);
+
+            const answer = await rig.refusal('POST', '/automation/source_flow/clone', { name: SHARED, label: 'The clone' });
+
+            expect({ status: answer.status, code: answer.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+            // A clone takes a NEW name (ADR-0126 §7.1): no package route is prescribed.
+            expect(answer.message).not.toContain('?package=');
+            const suggested = [...answer.message.matchAll(/'([a-z_][a-z0-9_]*)'/g)]
+                .map((match) => match[1]!)
+                .filter((candidate) => candidate !== SHARED);
+            expect(suggested).toHaveLength(1);
+
+            const followed = await rig.call('POST', '/automation/source_flow/clone', { name: suggested[0], label: 'The clone' });
+
+            expect(followed).toEqual({ status: 200, code: undefined });
+            expect(await rig.bindings(suggested[0]!)).toEqual([null]);
+            expect(await rig.rows(SHARED)).toEqual(before);
+        }, 60_000);
+
+        it('DELETE /:name names the metadata door\'s DELETE ?package=, which removes that package\'s row and keeps the other', async () => {
+            const rig = await twoPackageFlow(order);
+            const { armed } = await rig.armFromStore(SHARED);
+
+            const answer = await rig.refusal('DELETE', `/automation/${SHARED}`);
+
+            expect({ status: answer.status, code: answer.code }).toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+            // Refused before anything changed: both rows stay, and the engine has its flow back.
+            expect(await rig.bindings(SHARED)).toEqual([ALPHA, BETA]);
+            expect(rig.flows.get(SHARED)).toBe(armed);
+            const route = printedPackageRoute(answer.message);
+            expect(route).toEqual({ method: 'DELETE', path: `/api/v1/meta/flow/${SHARED}` });
+            for (const packageId of [ALPHA, BETA]) expect(answer.message).toContain(`'${packageId}'`);
+            // The remedy it replaced: this door reads no `?package=`, so the same delete comes back the same 409.
+            expect(await rig.call('DELETE', `/automation/${SHARED}`, undefined, { package: ALPHA }))
+                .toEqual({ status: 409, code: 'RESOURCE_CONFLICT' });
+
+            // Followed as printed, on the `/meta` transport that serves a delete.
+            expect(await rig.restMeta(route.method as 'DELETE', route.path, ALPHA)).toEqual({ status: 200, code: undefined });
+            expect(await rig.bindings(SHARED)).toEqual([BETA]);
         }, 60_000);
     });
 }
