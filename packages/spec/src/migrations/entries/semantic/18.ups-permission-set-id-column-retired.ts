@@ -21,10 +21,11 @@ export const entry: SemanticMigration = {
   replacement:
     '`permission_set`, the machine name of the permission set the grant holds (ADR-0131 D4). Delete '
     + 'the key from any authored `sys_user_permission_set` seed row or data-door write that still '
-    + 'carries it, and name the set instead. Existing databases: run the v18 ceremony, '
-    + '`os migrate organization-ownership --apply`, whose verified rewrite names every grant from the '
-    + 'column and whose column-drops step then drops the two retired indexes and then the column; '
-    + 'restart the server afterwards',
+    + 'carries it, and name the set instead. Existing databases: run the v18 ceremony. Plan it first, '
+    + '`os migrate organization-ownership --out plan.json`, and review the file it writes; then '
+    + '`os migrate organization-ownership --apply --plan-file plan.json` executes that plan: its verified '
+    + 'rewrite names every grant from the column and its column-drops step then drops the two retired '
+    + 'indexes and then the column. Restart the server afterwards',
   reason:
     'ADR-0131 D4 makes every reference to a catalog item a name, and D3 retired the permission-set '
     + 'catalog rows the id pointed at. Since then no writer fills the column and no reader confers '
