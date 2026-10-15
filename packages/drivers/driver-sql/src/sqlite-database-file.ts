@@ -15,15 +15,18 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 export class SqliteDatabaseFileError extends Error {
   readonly code: string | undefined;
   readonly filename: string;
+  /** The error the operating system or SQLite answered. */
+  readonly cause: unknown;
 
   constructor(filename: string, detail: string, cause: unknown) {
     const reason = cause instanceof Error ? cause.message : String(cause);
     const code = (cause as { code?: unknown } | null | undefined)?.code;
     const where = isAbsolute(filename) ? `'${filename}'` : `'${filename}' (resolved: '${resolve(filename)}')`;
-    super(`SQLite database file ${where} ${detail}: ${reason}`, { cause });
+    super(`SQLite database file ${where} ${detail}: ${reason}`);
     this.name = 'SqliteDatabaseFileError';
     this.code = typeof code === 'string' ? code : undefined;
     this.filename = filename;
+    this.cause = cause;
   }
 }
 
