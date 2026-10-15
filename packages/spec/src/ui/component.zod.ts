@@ -2618,27 +2618,22 @@ const RECORD_LINE_ITEMS_HISTORY =
 /**
  * `record:line_items` (#21142) — the inline-editable child grid bound to the
  * record the page shows (objectui ADR-0001). Measured by the renderer
- * read-point method at the `.objectui-sha` pin `31971ff1e28f`: objectui
- * registers it in `plugin-form/src/index.tsx:579` and renders it through
- * `LineItemsPanel` (`plugin-form/src/LineItemsPanel.tsx`), and `SchemaRenderer`
- * hoists `properties` onto the schema that component reads. Its fifteen
- * `schema.<key>` reads are the key set, and a key nobody reads is not declared:
+ * read-point method (read points recorded in `liveness/page.json`, row
+ * `regions`): objectui registers it and renders it through `LineItemsPanel`,
+ * and `SchemaRenderer` hoists `properties` onto the schema that component
+ * reads. Its fifteen `schema.<key>` reads are the key set, and a key nobody
+ * reads is not declared:
  *
- *  - `childObject` `:327`, `:516`, `:673`, `:778`; `relationshipField` `:515`,
- *    `:674`; `columns` `:702`;
- *  - `parentObject` `:221`; `parentId` / `recordId` `:228` (`parentId` wins,
- *    then `recordId`, then the record on the page);
- *  - `amountField` `:669`, `:703`; `totalField` `:667`, `:669`, `:703`;
- *  - `title` `:722`; `readonly` `:706`, `:707`, `:723`, `:810`; `minRows`
- *    `:704`; `maxRows` `:705`;
- *  - `filter` `:366`; `sort` `:368`, `:377`; `limit` `:341`, `:437`.
+ *  - `childObject`, `relationshipField`, `columns`;
+ *  - `parentObject`; `parentId` / `recordId` (`parentId` wins, then
+ *    `recordId`, then the record on the page);
+ *  - `amountField`, `totalField`;
+ *  - `title`, `readonly`, `minRows`, `maxRows`;
+ *  - `filter`, `sort`, `limit`.
  *
- * The wrapper adds no key: `ElementDataSourceGate`
- * (`react/src/element-data-source/ElementDataSourceGate.tsx`) reads the
- * node-level `dataSource` and the same `filter` / `sort` / `limit` (`:421`,
- * `:434`, `:445`), and the block's mapping writes the binding's `object` onto
- * `childObject` (`plugin-form/src/index.tsx:556`). The read set is unchanged on
- * objectui `main` at `d59f11c0d3dc`.
+ * The wrapper adds no key: `ElementDataSourceGate` reads the node-level
+ * `dataSource` and the same `filter` / `sort` / `limit`, and the block's
+ * mapping writes the binding's `object` onto `childObject`.
  *
  * `filter` declares the one orthography every `filter` door in this map
  * shares, the ViewFilterRule array — the `record:related_list.filter`
@@ -2649,12 +2644,11 @@ const RECORD_LINE_ITEMS_HISTORY =
  * field's `inlineColumns`, a form view's `subforms[].columns` and an
  * `object-master-detail-form` detail entry's `columns` take, not a copy: the
  * panel hands its columns to the same objectui grid (`GridField`, whose
- * `GridColumn` declares exactly that schema's twenty keys at the pin and IS
- * the spec's type by reference on objectui `main`). One difference is the
+ * `GridColumn` declares exactly that schema's twenty keys and IS the spec's
+ * type by reference). One difference is the
  * carrier's, not the column's, and the `describe()` says it: this panel does
  * NOT hydrate a column from the child object's field — it passes `columns`
- * straight through the field-security pass to the grid (`:702`) — so a
- * column draws exactly what it declares, and an identity-only `{ name }`
+ * straight through the field-security pass to the grid — so a column draws exactly what it declares, and an identity-only `{ name }`
  * column is a text cell headed by its name. For the same reason
  * `defineStack`'s identity-only check (`collectHydratedInlineColumnErrors` in
  * `stack.zod.ts`) does not reach this block: there is no hydrated type to
@@ -2686,11 +2680,11 @@ export const RecordLineItemsProps = lazySchema(() => strictObject({
   guidance: {
     // The four detail-entry keys this panel does not read — the spellings an
     // author moving a child collection over from `object-master-detail-form`
-    // carries along. Measured at the `.objectui-sha` pin `9dfaca654311`: the
-    // panel hands the grid no `addLabel` / `sortField` and no `onRowExpand`
-    // (`plugin-form/src/LineItemsPanel.tsx:696-720`, `:816-827`). The grid's
-    // own keys are camelCase there (objectstack-ai/objectui#11610); earlier
-    // pins measured the same absence under `add_label` / `sort_field`.
+    // carries along. Measured on the panel (read points recorded in
+    // `liveness/page.json`, row `regions`): it hands the grid no `addLabel` /
+    // `sortField` and no `onRowExpand`. The grid's own keys are camelCase
+    // (objectstack-ai/objectui#11610); earlier measurements found the same
+    // absence under `add_label` / `sort_field`.
     // `sortField` has since left the detail entry too (#21589, a tombstone
     // there): the line-position field is derived from the child object and
     // never authored, so its answer names no child-record block that takes it.
@@ -2750,29 +2744,25 @@ export type RecordLineItemsPropsParsed = z.infer<typeof RecordLineItemsProps>;
 /**
  * `record:approvals` (#22537): the record page's approval timeline, which
  * shows the step the record's approval sits at, who it waits on and what has
- * been decided. Measured by the renderer read-point method at the
- * `.objectui-sha` pin `47b1f0bb71`. objectui registers it in
- * `app-shell/src/views/record-approvals-renderer.tsx:80` (namespace `record`)
- * and draws it through `RecordApprovalsPanel`, and `SchemaRenderer` hoists
- * `properties` onto the schema that renderer reads. It reads two
- * `schema.<key>`s, and both are the HOST's runtime channel, the
+ * been decided. Measured by the renderer read-point method (read points
+ * recorded in `liveness/page.json`, row `regions`). objectui registers it
+ * (namespace `record`) and draws it through `RecordApprovalsPanel`, and
+ * `SchemaRenderer` hoists `properties` onto the schema that renderer reads. It
+ * reads two `schema.<key>`s, and both are the HOST's runtime channel, the
  * `record:history` `entries` / `loading` class:
  *
- *  - `approvals` (`:61`): the default record page threads its LIVE approvals
- *    read through it (`RecordDetailView.tsx:2492-2501`, emitted by
- *    `buildDefaultPageSchema({ approvals })`, `plugin-detail/src/synth/
- *    buildDefaultPageSchema.ts:931`), the same read behind the record's
- *    decision actions. With no host payload the renderer self-fetches the
- *    record's requests from the record context (`:64-68`).
- *  - `currentUserId` (`:71`): the host passes the signed-in user's id, which
- *    the panel's Remind gate falls back to (`RecordApprovalsPanel.tsx:287`).
- *    Without it the renderer reads the signed-in user itself.
+ *  - `approvals`: the default record page threads its LIVE approvals read
+ *    through it (emitted by `buildDefaultPageSchema({ approvals })`), the same
+ *    read behind the record's decision actions. With no host payload the
+ *    renderer self-fetches the record's requests from the record context.
+ *  - `currentUserId`: the host passes the signed-in user's id, which the
+ *    panel's Remind gate falls back to. Without it the renderer reads the
+ *    signed-in user itself.
  *
  * Neither is authorable surface, so the accepted key set is EMPTY and both
  * keys are refused with their prescription. Studio's page create never writes
- * either: it seeds from `buildDefaultPageSchema(objectDef)` with no options
- * (`app-shell/src/views/metadata-admin/anchors.ts:208`), and so never emits
- * this node at all. `className` and the designer attributes the renderer
+ * either: it seeds from `buildDefaultPageSchema(objectDef)` with no options,
+ * and so never emits this node at all. `className` and the designer attributes the renderer
  * reads are node-level, never `properties`.
  *
  * Not exported, like the {@link emptyProps} rows it matches in contract: with
@@ -2806,10 +2796,11 @@ export const PageAccordionProps = strictObject({
       /**
        * ⚠️ NOT declared, deliberately, and the measurement is why: objectui's
        * Studio block designer publishes `value` as an accordion item input
-       * (`previews/block-config.ts`, `page:accordion.items.itemFields`), but
-       * the renderer OVERWRITES it — `containers.tsx:793` maps every item to
-       * `{ ...it, value: \`panel-${idx}\` }` before rendering, so an authored
-       * `value` reaches the Radix item as a discarded key.
+       * (`page:accordion.items.itemFields`), but the renderer OVERWRITES it
+       * (read points recorded in `liveness/page.json`, row `regions`) — it
+       * maps every item to `{ ...it, value: \`panel-${idx}\` }` before
+       * rendering, so an authored `value` reaches the Radix item as a
+       * discarded key.
        *
        * That is the difference between this key and `page:tabs`'s `value`, one
        * component over, where the renderer really does read what is authored
@@ -2834,114 +2825,18 @@ export const PageAccordionProps = strictObject({
      * is the rider that records the liveness here so the next sweep cannot
      * re-derive the same false candidate).
      *
-     * The key is LIVE at objectui `b9814b334` (re-read there 2026-10-14:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
-     * `1fb1ced36`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-     * `7578323a5`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-     * `9646e2ed2`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-     * `088e0f705`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-     * `e5311165a`, re-read there 2026-10-12:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-     * `499799502`, re-read there 2026-10-11:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-     * `0df67f237`, re-read there 2026-10-11:
-     * every objectui file this record cites is byte-identical across the hop from
-     * `20c6d351a` (`git diff --quiet`), so every anchor held unmoved. At
-     * `20c6d351a`, re-read there 2026-10-10:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
-     * `47b1f0bb7`, re-read there 2026-10-09:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
-     * `f0268ad78`, re-read there 2026-10-09:
-     * `containers.tsx` changed across the hop from `a58626c88` (+92/-6,
-     * objectui#11811: a record action disabled by its predicate says why, in the
-     * `page:header` renderer), every hunk at `:1512` or below, so both anchors
-     * were re-READ in place and NEITHER moved, each byte-identical;
-     * `lib/lazy-icon.tsx` is byte-identical (`git diff --quiet`). At `a58626c88`,
-     * re-read there 2026-10-06:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
-     * At `0abd4f9f8`, re-read there 2026-10-05:
-     * every objectui file this record cites is byte-identical across the hop
-     * from `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-     * At `9dfaca654`; re-derived at that pin 2026-10-05 —
-     * `containers.tsx` changed across the hop from `2e818d0b5` (89 insertions,
-     * 0 deletions: objectui#11619's record picture in the record chrome — three
-     * import lines at the top of the file, and the `recordPictureUrl` helpers
-     * and the `page:header` picture read below both anchors), so both anchors
-     * were re-READ rather than carried, and BOTH MOVED down three lines with
-     * their text byte-identical: the icon block `1170-1176` -> `1173-1179` and the input
-     * `1219` -> `1222`; `lib/lazy-icon.tsx` is byte-identical. At `2e818d0b5`,
-     * re-derived there 2026-10-04 —
-     * every objectui file this record cites is byte-identical across the hop
-     * from `ab1879721` (`git diff --quiet`), so both anchors held unmoved. At
-     * `ab1879721`, re-derived there 2026-10-03, `containers.tsx` changed
-     * across the hop from `89cad75d5` (23 insertions,
-     * 27 deletions: objectui#11445's i18next count family for the `page:tabs`
-     * count badge, and objectui#11438 dropping the `page:header`
-     * registration's inert `breadcrumb` input below both anchors), so both
-     * anchors were re-READ rather than carried, and BOTH MOVED up one line with
-     * their text byte-identical (the tab-count translation table above them
-     * lost a net line): `1171-1177` -> `1170-1176`, `1220` -> `1219`. At
-     * `89cad75d5` (2026-10-02) `containers.tsx` was byte-identical across the
-     * hop from `31971ff1e` (`git diff --quiet`), so both anchors were re-READ in
-     * place, each still the read point this record names: `1171-1177` and
-     * `1220`. At `31971ff1e`
-     * (2026-10-01) `containers.tsx` was byte-identical across the hop from
-     * `e420df310` (`git diff --quiet`), so both anchors were re-READ in place,
-     * each still the read point this record names: `1171-1177` and `1220`. At `e420df310`
-     * (2026-09-30) `containers.tsx` changed again across the hop from
-     * `db11afd49` (40
-     * insertions, 26 deletions: objectui#11166's `page:header` breadcrumb slot
-     * and objectui#11212's fail-closed permission gates), every hunk at `:1286`
-     * or below, so both anchors were re-READ in place and NEITHER moved, each
-     * byte-identical: `1171-1177` and `1220`. At `db11afd49` (2026-09-29)
-     * `containers.tsx` changed again across the hop from `dd3f7e1be` (46
-     * insertions, 6 deletions: objectui `0ecaa7dbb`'s block-level nested `aria`
-     * bags and comment re-citations), so both anchors were re-READ rather than
-     * carried, and BOTH MOVED with their text byte-identical, the icon block by
-     * 32 and the registration input by 34: `1139-1145` -> `1171-1177`, `1186` ->
-     * `1220`. At `dd3f7e1be` (2026-09-28)
-     * `containers.tsx` changed across the hop from `f8a9d0fb0` (120
-     * insertions, 63 deletions, objectui `3261e6479`, `f5178a272`,
-     * `e32dae160` and `1dae95a41`: the shared title interpolator, spec action
-     * params and two comment sweeps), so both anchors were re-READ rather than carried, and
-     * BOTH MOVED by 70 with their text byte-identical, the net +70 all landing
-     * above them: `1069-1075` -> `1139-1145`, `1116` -> `1186`. On the hop
-     * onto `f8a9d0fb0` (36 insertions, 7 deletions, objectui `ba0b61a60`: one
-     * import line and the `page:header` title) both were re-READ and NEITHER
-     * moved: `1069-1075` and `1116` were byte-identical to their `62597c588`
-     * and `87af769e9` text. The same held on the hop onto
-     * `62597c588` (74 insertions, 16 deletions, objectui `4c6f549ef`). The hop before, off
-     * `53ded82bf`, moved the icon block `919-925` -> `1069-1075` with its seven
-     * lines byte-identical and the registration input `966` -> `1116` with its
-     * LINE rewritten — it declares `of: 'object'` and carries a longer
-     * description — while the member list this record cites stayed
-     * unchanged): `containers.tsx:1173-1179`
-     * renders
-     * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
-     * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
-     * span, and the renderer's registration publishes the key to the Studio
-     * block designer at `:1222` (the `items` input, documented as
+     * The key is LIVE (read points recorded in `liveness/page.json`, row
+     * `regions`): the accordion renders `{item.icon && <LazyIcon name={item.icon}
+     * …/>}` inside the `AccordionTrigger`, grouped with the label in the
+     * trigger's one wrapping span, and the renderer's registration publishes
+     * the key to the Studio block designer (the `items` input, documented as
      * `[{ label, icon?, collapsed?, children }]`).
      *
      * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
-     * (`lib/lazy-icon.tsx` — kebab-case or PascalCase, normalised to
-     * kebab-case, with a fallback when the name is not a real Lucide icon), the
-     * same slot every other authorable icon on this surface uses. Contrast the
-     * item `value` prescribed against above: the same renderer OVERWRITES that
+     * (kebab-case or PascalCase, normalised to kebab-case, with a fallback when
+     * the name is not a real Lucide icon), the same slot every other authorable
+     * icon on this surface uses. Contrast the item `value` prescribed against
+     * above: the same renderer OVERWRITES that
      * one, and a read point is precisely what separates the two verdicts.
      */
     icon: z.string().optional().describe(
@@ -2957,8 +2852,9 @@ export const PageAccordionProps = strictObject({
    * `card` hands the border to whatever each panel contains, so a panel holding
    * a `page:card` does not get a second frame around the first.
    *
-   * Declared here because the renderer has always read it — `containers.tsx:734`
-   * resolves `schema?.variant ?? schema?.properties?.variant ?? 'flush'`, and
+   * Declared here because the renderer has always read it — it resolves
+   * `schema?.variant ?? schema?.properties?.variant ?? 'flush'` (read points
+   * recorded in `liveness/page.json`, row `regions`), and
    * its own comment invites authors in ("Authors opt in by setting
    * `variant: 'card'`"). The difference is visible on screen, so this was an
    * author-facing option that `PageAccordionProps` simply never declared.
@@ -2988,9 +2884,9 @@ export const PageAccordionProps = strictObject({
 // so `tsc` refuses them, and the parse answers each with the prescription
 // below instead of zod's anonymous enum message. The ruled hints are
 // `heading` → `h2` and `subheading` → `h3`, or the level the author means: each
-// is the heading ELEMENT the value always rendered (objectui
-// `renderers/basic/elements.tsx` `VARIANT_TAG`, measured at the `.objectui-sha`
-// pin `89cad75d55`), while the size changes — `heading` drew `h3`'s style and
+// is the heading ELEMENT the value always rendered (objectui's `VARIANT_TAG`;
+// read points recorded in `liveness/page.json`, row `regions`), while the size
+// changes — `heading` drew `h3`'s style and
 // `subheading` a medium-weight `text-lg`, and `h2` / `h3` draw their own. The
 // ADR-0087 conversion `element-text-variant-heading-levels` rewrites stored
 // rows and lists the edit for existing sources. No ADR is cited in the text:
@@ -3285,147 +3181,45 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * recorded it for the accordion and tab items. This is the same record for
    * the button.
    *
-   * The key is LIVE at objectui `b9814b334` (re-read there 2026-10-14:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `1fb1ced36` (`git diff --quiet`), so every anchor held unmoved. At
-   * `1fb1ced36`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
-   * `7578323a5`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
-   * `9646e2ed2`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
-   * `088e0f705`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `e5311165a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `e5311165a`, re-read there 2026-10-12:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `499799502` (`git diff --quiet`), so every anchor held unmoved. At
-   * `499799502`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
-   * `0df67f237`, re-read there 2026-10-11:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `20c6d351a` (`git diff --quiet`), so every anchor held unmoved. At
-   * `20c6d351a`, re-read there 2026-10-10:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `47b1f0bb7` (`git diff --quiet`), so every anchor held unmoved. At
-   * `47b1f0bb7`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
-   * `f0268ad78`, re-read there 2026-10-09:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `a58626c88` (`git diff --quiet`), so every anchor held unmoved. At
-   * `a58626c88`, re-read there 2026-10-06:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `0abd4f9f8` (`git diff --quiet`), so every anchor held unmoved.
-   * At `0abd4f9f8`, re-read there 2026-10-05:
-   * every objectui file this record cites is byte-identical across the hop from
-   * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
-   * At `9dfaca654`; re-derived at that pin 2026-10-05 —
-   * `button.tsx` (both the `renderers/form` registration and the `ui`
-   * primitive), `lib/lazy-icon.tsx`, `renderers/action/resolve-icon.ts` and
-   * the generated `lucide-record-icon-names.ts` are all byte-identical to
-   * `2e818d0b5` (`git diff --quiet`) across the hop onto this pin, so every
-   * anchor below holds unmoved; at `2e818d0b5`, re-derived there 2026-10-04,
-   * they were all byte-identical to `ab1879721`
-   * (`git diff --quiet`) across the hop onto that pin, so every anchor below
-   * holds unmoved; at `ab1879721`, re-derived there 2026-10-03, they were
-   * all byte-identical to `89cad75d5`
-   * across the hop onto that pin, so every anchor below holds unmoved and was
-   * re-checked in place; they were byte-identical to `31971ff1e` across the hop
-   * onto `89cad75d5` (2026-10-02), byte-identical to `e420df310` across the hop
-   * onto `31971ff1e` (2026-10-01), byte-identical to `db11afd49` across the hop
-   * onto `e420df310` (2026-09-30), and byte-identical to `dd3f7e1be` across the hop
-   * onto `db11afd49` (2026-09-29) as well. At `dd3f7e1be` (2026-09-28)
-   * `button.tsx` and `lib/lazy-icon.tsx` are byte-identical to `f8a9d0fb0`
-   * (`git diff --quiet`); `resolve-icon.ts` changed on this hop (+42/-17,
-   * objectui `fb336df01`, the lucide-react 1.31.0 -> 1.43.0 bump: the glyph
-   * class names and the lazy module's path-data export, neither on the
-   * resolution path), so its four anchors were re-READ — the rename map and
-   * `toPascalCase` did not move, and `describeIconLookup` `302-305` ->
-   * `327-330` and `resolveIcon` `322-328` -> `347-353` MOVED by 25 with their
-   * text byte-identical. On the hop onto `f8a9d0fb0`, `resolve-icon.ts` and
-   * `lib/lazy-icon.tsx` were byte-identical to `62597c588` and `87af769e9`,
-   * and `button.tsx` changed only inside its registration's input list
-   * (objectui `5ea623eab`, objectui#9910, below), so the render-path anchors
-   * did not move; `button.tsx` too was byte-identical across the hop onto
-   * `62597c588`. The hop onto `87af769e9` (re-derived 2026-09-20) is the
-   * one that moved both files: `resolve-icon.ts` +203/-7 and
-   * `button.tsx` +6/-11 against `53ded82bf`, so NO anchor below was carried
-   * there and every one was re-READ. Four moved with their cited text byte-identical
-   * (`describeIconLookup`, `toPascalCase`, the rename map, `getLazyIcon`);
-   * `resolveIcon` itself was REWRITTEN — its tail no longer indexes
-   * `lucide-react` directly — and the registration's two ranges both moved and
-   * SHRANK, the input list having lost its per-input `label` and
-   * `defaultValue` members. What each anchor asserts is re-stated below from
-   * the new tree, never inferred from the old one — the re-READ discipline
-   * this block records, and which the later paragraph below still cites by
-   * number. ⚠️ That number does NOT resolve: objectstack issue 10274 was probed
-   * 2026-09-20 with `scripts/check-issue-citations.mjs --probe-cause` and came
-   * back minted, gone from the board and 404 on the web endpoint too — DELETED,
-   * not transferred. ⛔ No replacement number is guessed here: the live record
-   * of the discipline is THIS BLOCK. The read point
-   * first MOVED rather than died on the earlier hop onto `9602dc820`, which is
-   * why the anchors span a second
-   * file):
-   * `components/src/renderers/form/
-   * button.tsx:43` resolves `schema.icon` through the shared `resolveIcon`,
-   * and `:72` / `:74` render it on either side of the label per
-   * `iconPosition` (`mr-2 h-4 w-4` left, `ml-2 h-4 w-4` right), both
-   * suppressed while `loading`.
+   * The key is LIVE (read points recorded in `liveness/page.json`, row
+   * `regions`; the read point once MOVED rather than died, which is why it
+   * spans a second file): the button renderer resolves `schema.icon` through
+   * the shared `resolveIcon`, and renders it on either side of the label per
+   * `iconPosition` (`mr-2 h-4 w-4` left, `ml-2 h-4 w-4` right), both suppressed
+   * while `loading`.
    *
    * ⚠️ The resolution path is NOT `LazyIcon`, the slot the container icons on
    * this surface use — it is the `action:*` resolver, and the two accept
    * different spellings:
-   *   - here: `resolveIcon`
-   *     (`components/src/renderers/action/resolve-icon.ts:347-353`) delegates
-   *     to `describeIconLookup` (`:327-330`), which PascalCases through
-   *     `toPascalCase` (`:153-158`) and then applies a one-entry rename map
-   *     (`Home` becomes `House`, `:143-145`) before the lookup. ⚠️ That last
-   *     step is what the hop onto `87af769e9` rewrote: the resolver no longer indexes
-   *     `lucide-react`'s `icons` record itself — it asks `recordIconName` for
-   *     the kebab-case name and hands the pair to `lazyIconComponent`, so the
-   *     glyph now arrives lazily. The accept/reject behaviour is unchanged.
-   *     ⚠️ The tokeniser splits on hyphen, underscore OR
-   *     whitespace (`/[-_\s]+/`) as of this pin; this record previously said
-   *     "splits on `-` only", which was true when written and is not now — a
-   *     re-READ caught it, a line-number refresh would not have. An unknown
-   *     name still resolves to `null` and the button renders with NO icon and
-   *     no diagnostic anywhere.
-   *   - `LazyIcon` / `getLazyIcon` (`components/src/lib/lazy-icon.tsx:98-124`):
-   *     normalises to kebab-case, checks the name against Lucide's own name
-   *     list, and degrades an unknown name to the `Database` glyph.
+   *   - here: `resolveIcon` delegates to `describeIconLookup`, which
+   *     PascalCases through `toPascalCase` and then applies a one-entry rename
+   *     map (`Home` becomes `House`) before the lookup. The resolver does not
+   *     index `lucide-react`'s `icons` record itself — it asks `recordIconName`
+   *     for the kebab-case name and hands the pair to `lazyIconComponent`, so
+   *     the glyph arrives lazily. The tokeniser splits on hyphen, underscore OR
+   *     whitespace (`/[-_\s]+/`). An unknown name resolves to `null` and the
+   *     button renders with NO icon and no diagnostic anywhere.
+   *   - `LazyIcon` / `getLazyIcon`: normalises to kebab-case, checks the name
+   *     against Lucide's own name list, and degrades an unknown name to the
+   *     `Database` glyph.
    *   So a spelling that draws an icon in a tab trigger can draw nothing here.
    *
-   * That the resolver is SHARED is what this record most recently had to be
-   * corrected for: until objectui#5993 `button.tsx` carried its own
-   * `toPascalCase` + `iconNameMap` + `icons` index — the same algorithm, but
-   * not the same function, so a rename added to `resolve-icon.ts` to absorb a
-   * lucide retirement (objectui#5586, objectui#5622) reached every `action:*`
-   * site and silently missed this one. Removing the duplicate changed where
-   * the algorithm lives, not what an author may write: the accept/reject
-   * behaviour promised above is the same on both sides of that move.
+   * That the resolver is SHARED is what this record once had to be corrected
+   * for: until objectui#5993 the button carried its own `toPascalCase` +
+   * `iconNameMap` + `icons` index — the same algorithm, but not the same
+   * function, so a rename added to the shared resolver to absorb a lucide
+   * retirement (objectui#5586, objectui#5622) reached every `action:*` site
+   * and silently missed this one. Removing the duplicate changed where the
+   * algorithm lives, not what an author may write: the accept/reject behaviour
+   * promised above is the same on both sides of that move.
    *
-   * Also measured at the same pin: the renderer's registration publishes no
-   * `icon` input (`button.tsx:85-105` lists `label`, `variant`, `size`,
-   * `className` and `children`; `:106-110` is `defaultProps`), so the Studio
-   * block designer does not offer the key. The inputs GREW on the hop onto
-   * `f8a9d0fb0` — `85-97` -> `85-105`, `defaultProps` `98-102` -> `106-110` —
-   * because objectui#9910 declared the label slot's rich form as a
-   * `{ name: 'children', type: 'slot' }` input; re-read, it is still not an
-   * `icon` input, so the absence holds. Both ranges SHRANK on the hop onto `87af769e9` — the inputs went
-   * `85-102` -> `85-97` and `defaultProps` `103-107` -> `98-102`, because each
-   * input dropped its `label` and `defaultValue` members; the four input names
-   * and the absence of an `icon` input are what was re-read, and both hold.
-   * They read `70-87` / `88-92` until the
-   * `a472b0716` re-measure: wrong since written rather than shifted —
-   * `button.tsx` was byte-identical at `00d3f09c5` and `a472b0716`, so only a
-   * re-READ could find them and a line-number refresh never would (commit d1ba685ec). Unpublished is not unread — the header `icon`
-   * above is refused for the second, not the first, and this docblock exists
-   * to hold them apart.
+   * Also measured: the renderer's registration publishes no `icon` input (it
+   * lists `label`, `variant`, `size`, `className` and `children` — objectui#9910
+   * declared the label slot's rich form as a `{ name: 'children', type: 'slot' }`
+   * input — beside its `defaultProps`), so the Studio block designer does not
+   * offer the key. Unpublished is not unread — the header `icon` above is
+   * refused for the second, not the first, and this docblock exists to hold
+   * them apart.
    */
   icon: z.string().optional().describe(
     'Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`\'s `icons` map via the shared `resolveIcon` helper every `action:*` site uses (a PascalCase normaliser plus a one-entry rename map), NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph.',
@@ -3775,190 +3569,8 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * objectui's ADR-0080 curated public vocabulary carries six blocks this map
  * had no row for — `action:button`, `action:group`, `action:menu`,
  * `action:icon`, `element:definition-list`, `element:repeater`
- * (`core/src/registry/public-blocks.ts:117-122` at objectui `b9814b334`, re-read there 2026-10-14:
- * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
- * the four `action-*.tsx` renderers, `basic/data-list.tsx` and
- * `previews/block-config.ts` are byte-identical across the hop from `1fb1ced36`
- * (`git diff --quiet`), so their anchors held unmoved; and
- * `data-objectstack/src/index.ts` changed (+185/-71: objectui#12318,
- * objectui#12295 and objectui#12300, the adapter's connect and write-outcome
- * paths) between the two cited reads without touching either, which left
- * `serializeOrderBy` `869-895` unmoved and MOVED the `translateFilterArray` arm
- * `5066-5077` -> `5180-5191`, byte-identical. At `1fb1ced36`, re-read there
- * 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `7578323a5` (`git diff --quiet`), so every anchor held unmoved. At
- * `7578323a5`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `9646e2ed2` (`git diff --quiet`), so every anchor held unmoved. At
- * `9646e2ed2`, re-read there 2026-10-12:
- * every objectui file this record cites is byte-identical across the hop from
- * `088e0f705` (`git diff --quiet`), so every anchor held unmoved. At
- * `088e0f705`, re-read there 2026-10-12:
- * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
- * the four `action-*.tsx` renderers, `basic/data-list.tsx` and
- * `previews/block-config.ts` are byte-identical across the hop from
- * `e5311165a` (`git diff --quiet`), so their anchors held unmoved; and
- * `data-objectstack/src/index.ts` changed (+33 at `:5335`, objectui#12175,
- * objectui `088e0f705`: the adapter's `listMetadataItems`, which the
- * registry-name pickers read) below both cited reads, which left
- * `serializeOrderBy` `869-895` and the `translateFilterArray` arm `5066-5077`
- * unmoved. At `e5311165a`, re-read there 2026-10-12:
- * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
- * the four `action-*.tsx` renderers, `basic/data-list.tsx` and
- * `previews/block-config.ts` are byte-identical across the hop from
- * `499799502` (`git diff --quiet`), so their anchors held unmoved; and
- * `data-objectstack/src/index.ts` changed (+59/-13, objectui#12112, objectui
- * `43e150518`: a refused dashboard or list view opened by URL says it was
- * refused) in a type declaration between the two cited reads and in the
- * adapter's meta-item probe below both, which left `serializeOrderBy`
- * `869-895` unmoved and MOVED the `translateFilterArray` arm `5051-5062` ->
- * `5066-5077` byte-identical; each moved anchor is cited below at this pin. At
- * `499799502`, re-read there 2026-10-11:
- * every objectui file this record cites is byte-identical across the hop from
- * `0df67f237` (`git diff --quiet`), so every anchor held unmoved. At
- * `0df67f237`, re-read there 2026-10-11:
- * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
- * the four `action-*.tsx` renderers and `previews/block-config.ts` are
- * byte-identical across the hop from `20c6d351a` (`git diff --quiet`), so
- * their anchors held unmoved; `data-objectstack/src/index.ts` changed in one
- * import line and two lines of `createQuietHttpLogger` (+5/-2, objectui#6349
- * batch 10, objectui `12ff25631`: `ConnectionState` declared once, in
- * `@object-ui/types`), which MOVED `serializeOrderBy` `868-894` -> `869-895`
- * and the `translateFilterArray` arm `5048-5059` -> `5051-5062`, both
- * byte-identical; and `basic/data-list.tsx` changed for objectui#12085
- * (objectui `ce991bd70`, +17/-26): every `element:definition-list` anchor and
- * the repeater's `readProps` span held unmoved, one comment line added in the
- * repeater's binding note MOVED every repeater read point from `:172` on by 1
- * with its text byte-identical, and the repeater's registration no longer
- * publishes the flat `object` / `filter` / `sort` / `limit` inputs — the
- * binding is its one published query input — so the row's two sentences that
- * named those published inputs (the required `object` input at `:320-326`, and
- * the binding published "beside these keys") are false at this pin and are
- * rewritten where they stand; the renderer still READS the four as the
- * binding's fallback, byte-identical. Each moved anchor is cited below at this
- * pin. At `20c6d351a`, re-read there 2026-10-10:
- * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`, `ui/button.tsx`,
- * the four `action-*.tsx` renderers and `basic/data-list.tsx` are
- * byte-identical across the hop from `47b1f0bb7` (`git diff --quiet`), so
- * their anchors held unmoved; `data-objectstack/src/index.ts` changed in three
- * docblocks above the `translateFilterArray` arm (+15/-9, objectui#5144,
- * objectui `3c3115e38`: the inline-edit toggle no longer writes `inlineEdit`),
- * which MOVED `5042-5053` -> `5048-5059` byte-identical and left
- * `serializeOrderBy` (`868-894`) unmoved; and `previews/block-config.ts`
- * changed below the `columns` control (+10/-4, objectui#12056, objectui
- * `2a48bd408`: the repeater's inspector rows write the node-level
- * `dataSource`), which did not move from `335`. At `47b1f0bb7`, re-read there
- * 2026-10-09:
- * every objectui file this record cites is byte-identical across the hop from
- * `f0268ad78` (`git diff --quiet`), so every anchor held unmoved. At
- * `f0268ad78`, re-read there 2026-10-09:
- * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts` and `ui/button.tsx`
- * are byte-identical across the hop from `a58626c88` (`git diff --quiet`), so
- * their anchors held unmoved. All four `action-*.tsx` renderers changed for
- * objectui#11839 (objectui `cef0eeec0`: a predicate-disabled control says why,
- * through a reason hook in each renderer and a wrapper around the drawn control),
- * and `action-button.tsx` also for objectui#11168 (objectui `f0496bdf1`: an
- * `undoable` update of the record in scope carries that record as its Undo
- * baseline, and the input is published), +95/-9, +22/-0, +23/-2 and +10/-1; so
- * every action anchor MOVED with its cited line byte-identical — by 57 to 80 in
- * `action-button.tsx`, by 1 to 22 in `action-icon.tsx`, by 6 to 21 in
- * `action-group.tsx` and by 1 to 9 in `action-menu.tsx` (the `objectName`
- * forwards `318` -> `389`, `211` -> `218`, `373` -> `394`, `320` -> `329`) —
- * except where objectui rewrote a line around the same read, each range re-read:
- * the button's `params` statement (`180-183` -> `247-254`, now wrapped in
- * `withUndoBaseline`), and the members' drawn label (a `<span>` became
- * `DisabledReasonMenuLabel`, still `action.label || action.name`) in the group's
- * dropdown item (`205-243` -> `219-264`) and the menu item (`108-147` ->
- * `109-156`), the group's inline member growing `114-171` -> `120-184`. Two row
- * sentences turned false and are rewritten where they stand: `action:button` now
- * publishes and delivers `undoable`, and `action:icon` reads `label` six times.
- * `basic/data-list.tsx` changed for objectui#11880's repeater half (objectui
- * `aaba8655a`, +99/-16): every `element:definition-list` anchor MOVED by 10 with
- * its text byte-identical; the repeater's display anchors MOVED by 19 to 83, and
- * its query reads were rewritten to take the node-level `dataSource` binding
- * first, so the row's "NOT read at the pin" sentence is false at this pin and is
- * rewritten there. `data-objectstack/src/index.ts` (+51/-9, objectui#11699) moved
- * the `translateFilterArray` arm `5000-5011` -> `5042-5053` and left
- * `serializeOrderBy` (`868-894`) unmoved; `previews/block-config.ts` (+33/-13,
- * objectui#11880's designer rows and the `@objectstack/*` 17.7.0 moves) moved the
- * `columns` control `320` -> `335`. Each moved anchor is cited below at this pin.
- * At `a58626c88`, re-read there 2026-10-06:
- * `public-blocks.ts`, `auto-trigger.ts`, `action-button.tsx`,
- * `action-icon.tsx`, `basic/data-list.tsx` and `ui/button.tsx` are
- * byte-identical across the hop from `0abd4f9f8` (`git diff --quiet`), so their
- * anchors held unmoved; `action-group.tsx` (+10/-18) and `action-menu.tsx`
- * (+11/-18) changed for objectui#11638, which retires the two containers' read
- * of a member's `properties.params` (`readMemberStaticParamValues`, deleted
- * from `static-params.ts` with both calls) and the `useConfigBagEvaluator()`
- * call that served it, so every container anchor below that call MOVED: by 3
- * down to the member forward, and from the forward on by 8 in
- * `action-group.tsx` and by 7 in `action-menu.tsx` (the `objectName` forward
- * `381` -> `373` and `327` -> `320`), each cited line byte-identical except the
- * forward's `params` construction, which objectui#11638 rewrote. `static-params.ts`
- * gained 7 lines above `readStaticParamValues`, and
- * `data-objectstack/src/index.ts` changed only below both of its cited lines.
- * Each moved anchor is cited below at this pin.
- * A correction, measured at this pin: anchors in three cited files had moved
- * under the hop notes below, which recorded them as held or re-read.
- * `basic/data-list.tsx` changed at `31971ff1e` (objectui#11168 slice 2 rewrote
- * both list registrations), which that hop's note omits, so every
- * `element:repeater` anchor has cited a line 28 above its read point since.
- * `previews/block-config.ts` changed at the same hop (+13 above the cited
- * `columns` control). In `data-objectstack/src/index.ts` the
- * `translateFilterArray` arm has moved since `db11afd49` and `serializeOrderBy`
- * since `e420df310`. Each is cited below at this pin.
- * At `0abd4f9f8`, re-read there 2026-10-05:
- * every objectui file this record cites is byte-identical across the hop from
- * `9dfaca654` (`git diff --quiet`), so every anchor held unmoved.
- * At `9dfaca654`; first measured at `.objectui-sha`
- * pin `f8a9d0fb0`, every read point below re-derived at that pin
- * 2026-10-05: every objectui file this record cites is byte-identical across
- * the hop from `2e818d0b5` (`git diff --quiet`), so every anchor held
- * unmoved. At `2e818d0b5`, 2026-10-04: every objectui file this record cites
- * is byte-identical across
- * the hop from `ab1879721` (`git diff --quiet`), so every anchor held
- * unmoved. At `ab1879721`, 2026-10-03: `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`,
- * `basic/data-list.tsx` and `ui/button.tsx` are byte-identical to `89cad75d5`
- * (`git diff --quiet`), so their anchors held unmoved and were re-read in
- * place, and all four `action-*.tsx` renderers changed in one way:
- * objectui#11344 forwards the spec's `outcomeMessages` to the runner beside
- * `successMessage` (+7 in `action-button.tsx`'s forward, +3 in each of the
- * other three), and `action-button.tsx` / `action-icon.tsx` record in a
- * registration comment why the input stays unpublished, and reword the
- * `successMessage` input's description (+14/-1 and +7/-2 in all). So every
- * anchor below the inserted forward line MOVED with its cited text
- * byte-identical — by 7 then 13 in `action-button.tsx`, by 3 then 5 in
- * `action-icon.tsx`, by 3 in `action-group.tsx` and `action-menu.tsx` — and
- * every anchor above it held; each is cited below at this pin, and the one
- * read the range added, `outcomeMessages`, is recorded on the rows. At
- * `89cad75d5` (2026-10-02): `public-blocks.ts`, `auto-trigger.ts`,
- * `static-params.ts`, all four `action-*.tsx` renderers,
- * `basic/data-list.tsx` and `ui/button.tsx` are byte-identical to `31971ff1e`
- * (`git diff --quiet`), so every anchor below held unmoved and was re-read in
- * place. At `31971ff1e` (2026-10-01):
- * `public-blocks.ts`, `auto-trigger.ts`, `static-params.ts`,
- * `action-group.tsx`, `action-menu.tsx` and `action-icon.tsx` are
- * byte-identical to `e420df310`, so their anchors held unmoved, and
- * `action-button.tsx` changed only inside its registration (+9/-1,
- * objectui#11168 slice 2: the `size` input now publishes the five sizes its
- * row declares, where it published `sm` / `md` / `lg`), so every read point
- * in it held unmoved and the `inputs` range grew `414-551` -> `414-559`. At
- * `e420df310` (2026-09-30): `public-blocks.ts`, `auto-trigger.ts` and `static-params.ts` are
- * byte-identical to `db11afd49`, and all four `action-*.tsx` renderers changed
- * — objectui#11168 slice 1 rewrote every registration's `inputs` to publish
- * the keys the block path honours, objectui#11212 made each `visible` gate
- * fail CLOSED on a faulting predicate, objectui#11182 made `action:group` and
- * `action:menu` consume the host's evaluated `disabled` verdict, and
- * objectui#11073 renamed the renderers' React prop types — so every anchor was
- * re-READ at this pin and the rows below cite it here. Every declared key is
- * still read where its row cites it; what changed is what the registrations
- * publish, one read count on `action:icon`, the fault policy of the `visible`
- * gates, and a host `disabled` verdict the two containers now consume — each
- * said where it is written. At
- * `db11afd49` (2026-09-29) `public-blocks.ts` and `auto-trigger.ts` were
- * byte-identical to `dd3f7e1be`, and the four renderers changed only in comment
- * lines that re-qualify an objectstack card number, none of them a cited line).
+ * (objectui's `PUBLIC_BLOCKS`; read points recorded in `liveness/page.json`,
+ * row `regions`).
  * The missing row failed in two different ways:
  *
  *  - The four `action:*` types sit outside every namespace the
@@ -3977,7 +3589,7 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  * the map rows below, as the vocabulary's string-arm ledger asks of every
  * type that enters it without an enum member.
  *
- * KEY SETS ARE MEASURED FROM THE RENDERERS' READ POINTS at that pin — the
+ * KEY SETS ARE MEASURED FROM THE RENDERERS' READ POINTS — the
  * #7751 / #8691 / #8744 method — never transcribed from objectui's
  * `UIActionSchema`, from the registrations' `inputs`, or from this package's
  * object-metadata `ActionSchema` (a different declaration: a registered action
@@ -3999,20 +3611,18 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
  *  - `enabled` — the renderers' legacy fallback beside `disabled`: a
  *    back-compat read for stored documents, not a second authorable spelling
  *    (the #5775 `body` precedent). Refused with a prescription.
- *  - `autoTrigger` — a host transport flag; `auto-trigger.ts:18-19` says it is
- *    "NOT persisted metadata" and "hosts its only producers". Refused with a
+ *  - `autoTrigger` — a host transport flag; objectui's auto-trigger module
+ *    says it is "NOT persisted metadata" and "hosts its only producers". Refused with a
  *    prescription.
  *  - `data` / `context` — the host's row and execute-context channels (React
  *    props the renderers take by name), not authorable surface.
  *  - `onClick` — a function; only a code-composed schema can carry one.
  *
  * `objectName` IS declared on `action:button` / `action:icon`: absent at the
- * first measurement, it is forwarded to the runner at the current pin
- * (`action-button.tsx:389`, `action-icon.tsx:218`), and the console resolves
+ * first measurement, it is forwarded to the runner, and the console resolves
  * its dispatch target as `action.objectName || <page object>`. On
- * `action:group` / `action:menu` the forward is the MEMBER's
- * (`action-group.tsx:394`, `action-menu.tsx:329`), so it rides each member
- * object and the container rows gain no key.
+ * `action:group` / `action:menu` the forward is the MEMBER's, so it rides each
+ * member object and the container rows gain no key.
  */
 
 /** What an undeclared key on one of the four `action:*` blocks met before its row. */
@@ -4039,7 +3649,7 @@ const actionCondition = () =>
     error: (issue) => evaluatedExpressionUnionRefusal(issue.input),
   });
 
-/** objectui's `Button` primitive vocabulary (`ui/button.tsx:19-35` at the pin). */
+/** objectui's `Button` primitive vocabulary (its read point is recorded in `liveness/page.json`, row `regions`). */
 const BUTTON_PRIMITIVE_VARIANTS = ['default', 'destructive', 'outline', 'secondary', 'ghost', 'link'] as const;
 const BUTTON_PRIMITIVE_SIZES = ['default', 'sm', 'lg', 'icon'] as const;
 
