@@ -275,8 +275,11 @@ describe('organization-ownership --apply: the report file', () => {
       error: 'apply_report_unwritable',
       reason: 'report-write-failed',
       file: out,
+      standing: 'removed',
       executed: true,
     });
+    // A lost reservation is not an OS error: no errno code is invented for it.
+    expect(payload.code).toBeUndefined();
     expect(payload.report).toMatchObject({ kind: 'organization-ownership-apply', migrationId: ORGANIZATION_OWNERSHIP_MIGRATION_ID });
     expect(payload.report.steps.length).toBeGreaterThan(0);
     expect(exitCode).toBe(1);

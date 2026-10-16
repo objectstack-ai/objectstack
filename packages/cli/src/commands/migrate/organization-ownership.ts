@@ -91,6 +91,17 @@ async function writeWholeFile(handle: FileHandle, text: string): Promise<void> {
 }
 
 /**
+ * The reserved path no longer names the file this run created: it was removed
+ * or replaced while the ceremony ran. Not an OS error, so it carries no errno
+ * `code`; what became of the file is its `standing`.
+ */
+class ReportFileLost extends Error {
+  constructor(readonly file: string, readonly standing: 'removed' | 'replaced') {
+    super(`${file} no longer names the file this run reserved: it was ${standing} while the ceremony ran`);
+  }
+}
+
+/**
  * [#23826] The apply report's file, reserved before the apply boots: created
  * exclusively (never opened over an existing file), so an `--out` the run
  * cannot write refuses before anything executes, and no concurrent creator can
@@ -123,12 +134,7 @@ class ReportFileReservation {
   /** Write the report over the reservation text; throws when it cannot be kept at {@link file}. */
   async keep(text: string): Promise<void> {
     const standing = await this.standing();
-    if (standing !== 'held') {
-      throw Object.assign(
-        new Error(`${this.file} no longer names the file this run reserved: it was ${standing} while the ceremony ran`),
-        { code: standing === 'removed' ? 'ENOENT' : 'EEXIST' },
-      );
-    }
+    if (standing !== 'held') throw new ReportFileLost(this.file, standing);
     await writeWholeFile(this.handle, text);
     await this.handle.close();
   }
@@ -848,7 +854,15 @@ export default class MigrateOrganizationOwnership extends Command {
       // The ceremony executed: never the pre-write refusal's code (#23826).
       const message = String((error as Error)?.message ?? error);
       await refuse(
-        { reason: 'report-write-failed', file: reportFile, ...errorCodeFields(error), detail: message, executed: true, report },
+        {
+          reason: 'report-write-failed',
+          file: reportFile,
+          // An OS error keeps its own code; a lost reservation says what became of the file.
+          ...(error instanceof ReportFileLost ? { standing: error.standing } : errorCodeFields(error)),
+          detail: message,
+          executed: true,
+          report,
+        },
         `The ceremony ran (${report.complete ? 'every step finished' : 'it stopped at a blocker'}), and its report could ` +
           `not be written to ${reportFile}: ${message}. Every finished step is checkpointed in the deployment ledger; ` +
           're-run --apply with a new --out to write the report (it resumes, and finished steps are not repeated).',
