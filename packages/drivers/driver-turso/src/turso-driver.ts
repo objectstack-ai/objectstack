@@ -34,6 +34,7 @@ import {
   applyIndexKeyParts,
   isIndexDriftOp,
   parseIndexDdl,
+  type DriftOp,
   type IntrospectedColumn,
   type IntrospectedSchema,
   type ManagedDriftEntry,
@@ -600,6 +601,12 @@ function refuseRemoteDeferredDdl(): never {
  * gone, or the index present with the uniqueness and the key columns, in
  * order, the entry asked for.
  *
+ * [#23925] Which op is which is declared ONCE, in {@link REMOTE_DRIFT_OP_ANSWERS}:
+ * the apply door sends only its `applied` rows, and
+ * {@link TursoDriver.driftApplyLimit} answers `os migrate plan` from the same
+ * rows, so the plan lists a tightening with this transport's limit instead of
+ * a remedy the apply then reports it could not perform.
+ *
  * # What this face does NOT claim: a boot may not act on its report
  *
  * The report is accurate about the database, but not every finding is real
@@ -627,6 +634,59 @@ const REMOTE_DRIFT_REPORT_CAVEAT =
   'those and names the rest as not applied). The report is for reading; nothing is ' +
   'applied or refused on it unattended. To review the drift, run `os migrate plan` against a local SQLite ' +
   'copy of this database (a `file:` URL)';
+
+/** [#23925] How the REMOTE face's apply door answers one drift op the shared differ emits. */
+export type RemoteDriftOpAnswer =
+  /** Sent through the libSQL client, and reported applied once a read-back shows its target state. */
+  | 'applied'
+  /**
+   * Needs the SQLite table rebuild, which this transport does not run: skipped,
+   * logged, and declared by {@link TursoDriver.driftApplyLimit}, so `os migrate
+   * plan` says so before the apply.
+   */
+  | 'needs-table-rebuild'
+  /**
+   * Report only on EVERY face: no apply door performs it, and its finding
+   * names its own remedy (a metadata edit, a conversion by hand). Skipped here
+   * as on the local face, and no limit of this transport.
+   */
+  | 'report-only';
+
+/**
+ * [#23925] Every drift op the shared differ emits, and how the REMOTE face's
+ * apply door answers it: the one declaration of what this transport can apply.
+ * {@link TursoDriver.applyMigrationEntries} sends only the `applied` rows, and
+ * {@link TursoDriver.driftApplyLimit} answers `os migrate plan` from the same
+ * rows, so the plan and the apply cannot disagree about an entry.
+ *
+ * The `satisfies` clause is the pin, as for {@link REMOTE_FACE_ANSWERS}: an op
+ * added to `DriftOp` fails this package's typecheck and build until its remote
+ * answer is decided here. Of these, the SQLite differ emits `relax_not_null`,
+ * `tighten_not_null`, `drop_column_default`, `drop_column` and the index ops;
+ * the two varchar widths and the two `manual_*` findings are PostgreSQL /
+ * MySQL only, and answered here for completeness.
+ */
+export const REMOTE_DRIFT_OP_ANSWERS = {
+  drop_column: 'applied',
+  drop_index: 'applied',
+  create_index: 'applied',
+  recreate_index: 'applied',
+  replace_unique_index: 'applied',
+  relax_not_null: 'needs-table-rebuild',
+  tighten_not_null: 'needs-table-rebuild',
+  widen_varchar: 'needs-table-rebuild',
+  narrow_varchar: 'needs-table-rebuild',
+  drop_column_default: 'needs-table-rebuild',
+  manual_column_type_change: 'report-only',
+  manual_widen_varchar_to_text: 'report-only',
+  unbuildable_index: 'report-only',
+} as const satisfies Record<DriftOp['type'], RemoteDriftOpAnswer>;
+
+/**
+ * [#23925] Why the REMOTE face does not apply a `needs-table-rebuild` op: the
+ * clause its apply door logs and `os migrate plan` shows beside the finding.
+ */
+const REMOTE_TABLE_REBUILD_LIMIT = 'it needs the SQLite table rebuild, which the Turso REMOTE transport does not run';
 
 /**
  * One `pragma_table_info` row as Knex's SQLite `columnInfo()` reports it — the
@@ -4419,6 +4479,27 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
+   * [#23925] Why this face's {@link applyMigrationEntries} does not apply a drift
+   * op of this type although the SQL driver's apply door does, or `null` when
+   * it answers the op as that door does.
+   *
+   * `null` on the local and embedded-replica faces, whose apply door IS the SQL
+   * driver's. On the REMOTE face, read from {@link REMOTE_DRIFT_OP_ANSWERS}, the
+   * table that apply door dispatches by: a `needs-table-rebuild` op answers the
+   * limit, an `applied` op `null`, and a `report-only` op `null` as well, since
+   * no face applies it and its finding already names its remedy.
+   *
+   * `os migrate plan` reads this, through the stack that knows which driver
+   * reported each entry, so it lists such an entry with this limit instead of
+   * offering `os migrate apply --allow-destructive`. It never guesses from the
+   * dialect or the URL.
+   */
+  driftApplyLimit(opType: DriftOp['type']): string | null {
+    if (!this.isRemote) return null;
+    return REMOTE_DRIFT_OP_ANSWERS[opType] === 'needs-table-rebuild' ? REMOTE_TABLE_REBUILD_LIMIT : null;
+  }
+
+  /**
    * Apply drift entries. [#23816] On the REMOTE face, through the libSQL
    * client: the index entries and `drop_column`, each in one `write` batch so
    * it lands whole or not at all, and each reported `applied` only once a
@@ -4428,6 +4509,11 @@ export class TursoDriver extends SqlDriver {
    * entries run before index entries, and an entry this transport cannot
    * perform, or whose DDL fails, is reported `skipped` and logged. The option
    * parameter repeats the base's declared shape (`check:object-def-param-keys`).
+   *
+   * [#23925] Which entries this transport can perform is
+   * {@link REMOTE_DRIFT_OP_ANSWERS}: only its `applied` rows are sent, and every
+   * other entry is skipped before any DDL, the declaration that
+   * {@link driftApplyLimit} reads for `os migrate plan`.
    */
   override async applyMigrationEntries(
     entries: ManagedDriftEntry[],
@@ -4452,6 +4538,18 @@ export class TursoDriver extends SqlDriver {
       ...candidates.filter((d) => isIndexDriftOp(d.op)),
     ];
     for (const d of ordered) {
+      // [#23925] The declaration decides, before any DDL: an op this transport
+      // does not apply is skipped here, in the words the plan showed for it.
+      const answer: RemoteDriftOpAnswer | undefined = REMOTE_DRIFT_OP_ANSWERS[d.op.type];
+      if (answer !== 'applied') {
+        const limit = this.driftApplyLimit(d.op.type);
+        this.logger.warn(
+          `[schema-drift] ${d.op.type} on ${d.table}.${d.column ?? ''} is unsupported on the Turso REMOTE transport — ` +
+            `skipped${limit === null ? '' : `: ${limit}`}`,
+        );
+        skipped.push(d);
+        continue;
+      }
       try {
         const ok = isIndexDriftOp(d.op) ? await this.applyRemoteIndexDriftOp(d.op) : await this.applyRemoteColumnDriftOp(d.op);
         (ok ? applied : skipped).push(d);
@@ -4473,17 +4571,13 @@ export class TursoDriver extends SqlDriver {
    * refuses to drop (a primary key, a UNIQUE or foreign-key constraint, a
    * view or trigger that names it) fails the batch, which rolls the dropped
    * indexes back with it. Every other column entry needs the SQLite table
-   * rebuild, which this transport does not run, so it is skipped.
+   * rebuild, which this transport does not run, so it is skipped: by
+   * {@link applyMigrationEntries}, which sends here only the `applied` rows of
+   * {@link REMOTE_DRIFT_OP_ANSWERS} [#23925]. The guard below narrows the type.
    */
   private async applyRemoteColumnDriftOp(op: ManagedDriftEntry['op']): Promise<boolean> {
     const column = (op as { column?: string }).column;
-    if (op.type !== 'drop_column' || !column) {
-      this.logger.warn(
-        `[schema-drift] ${op.type} on ${op.table}.${column ?? ''} is unsupported on the Turso REMOTE transport — ` +
-          'skipped: it needs the SQLite table rebuild, which this transport does not run',
-      );
-      return false;
-    }
+    if (op.type !== 'drop_column' || !column) return false;
     const hasColumn = async () => (await this.remoteLiveColumns(op.table)).some((c) => c.name === column);
     if (!(await hasColumn())) return false;
     const keyed = (await this.remoteLiveIndexes(op.table)).filter(
@@ -4564,7 +4658,8 @@ export class TursoDriver extends SqlDriver {
         return (await built(op.createIndexName, op.createColumns, true)) && op.dropIndexNames.every((n) => !after.has(n));
       }
       default:
-        // `unbuildable_index` is report-only: no column to build it over.
+        // `unbuildable_index` is report-only: no column to build it over. It is
+        // skipped before this call [#23925]; this arm narrows the type.
         return false;
     }
   }

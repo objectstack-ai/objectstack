@@ -38,6 +38,7 @@ import dotenvFlow from 'dotenv-flow';
 import type {
   ManagedDriftEntry,
   DriftCategory,
+  DriftOp,
   MediaColumnMoveScan,
   PendingSchemaWork,
 } from '@objectstack/driver-sql';
@@ -87,6 +88,15 @@ export interface SqlDriverLike {
    * which then neither applies nor refuses on the report.
    */
   readonly driftReportCaveat?: string | null;
+  /**
+   * [#23925] Why this driver's {@link applyMigrationEntries} cannot perform a
+   * drift op the SQL driver's apply door performs, or `null` when it can.
+   * Absent means the driver declares no such limit: its apply door applies
+   * what the differ means it to. `TursoDriver`'s REMOTE face declares one (it
+   * runs no SQLite table rebuild). Read by `os migrate plan` through
+   * {@link SchemaStack.driftApplyLimit}, never guessed from the dialect.
+   */
+  driftApplyLimit?: (opType: DriftOp['type']) => string | null;
   /** Deferred-DDL surface (#3917) — optional, so a driver without it still boots. */
   setDeferredDdl?: (deferred: boolean) => void;
   previewDeferredSchemaWork?: () => Promise<PendingSchemaWork[]>;
@@ -135,6 +145,14 @@ export interface SchemaStack {
     entries: ManagedDriftEntry[],
     opts: { allowDestructive?: boolean },
   ) => Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }>;
+  /**
+   * [#23925] Why {@link applyMigrationEntries} cannot perform `entry` on the
+   * database that reported it, as that database's driver declares it
+   * ({@link SqlDriverLike.driftApplyLimit}), or `null` when it can. Asked of
+   * the driver that reported the entry, the same one the apply hands it to.
+   * Refuses an entry this stack did not detect: no driver reported it.
+   */
+  driftApplyLimit: (entry: ManagedDriftEntry) => string | null;
   /**
    * [#22581] Who named the database {@link dbLabel} describes: `--database-url`,
    * a variable from this process's environment, one from the project's `.env*`
@@ -1195,6 +1213,17 @@ export async function bootSchemaStack(
       }
       return { applied, skipped };
     },
+    driftApplyLimit: (entry: ManagedDriftEntry): string | null => {
+      const owner = driftOwners.get(entry);
+      if (!owner) {
+        throw new Error(
+          `No driver reported the drift entry on ${entry.table} (${entry.op.type}): only an entry this migration detected `
+          + 'has a database whose apply limit can be read.',
+        );
+      }
+      // A driver that declares nothing applies what the differ means it to.
+      return owner.driftApplyLimit ? owner.driftApplyLimit(entry.op.type) : null;
+    },
     managedTableCount,
     kernel,
     pendingSchemaWork,
@@ -1345,7 +1374,15 @@ export function driftTarget(d: ManagedDriftEntry): string {
   return indexName ? `${d.table} [${indexName}]` : `${d.table}.${d.column ?? ''}`;
 }
 
-export function renderPlan(drift: ManagedDriftEntry[]): void {
+export function renderPlan(
+  drift: ManagedDriftEntry[],
+  /**
+   * [#23925] The line under each entry: its message, unless the caller knows
+   * better. `os migrate plan` passes one for a database whose driver declares
+   * it cannot apply an entry (the finding with that limit, not the remedy).
+   */
+  describe: (d: ManagedDriftEntry) => string = (d) => d.message,
+): void {
   const grouped = groupByCategory(drift);
   for (const cat of CATEGORY_ORDER) {
     const items = grouped[cat];
@@ -1354,7 +1391,7 @@ export function renderPlan(drift: ManagedDriftEntry[]): void {
     console.log(`  ${chalk.bold(meta.label)}`);
     for (const d of items) {
       console.log(`    ${meta.color(meta.icon)} ${meta.color(driftTarget(d))} ${chalk.dim(`[${d.op.type}]`)}`);
-      console.log(`        ${chalk.dim(d.message)}`);
+      console.log(`        ${chalk.dim(describe(d))}`);
     }
     console.log('');
   }
