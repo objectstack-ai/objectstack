@@ -66,19 +66,19 @@ describe('InstalledPackageSchema.source', () => {
 
 describe('InstalledPackageSchema', () => {
   it('should accept minimal installed package', () => {
-    const pkg = { manifest: validManifest };
+    const pkg = { manifest: validManifest, source: 'code' };
     expect(() => InstalledPackageSchema.parse(pkg)).not.toThrow();
   });
 
   it('should apply default values', () => {
-    const parsed = InstalledPackageSchema.parse({ manifest: validManifest });
+    const parsed = InstalledPackageSchema.parse({ manifest: validManifest, source: 'code' });
     expect(parsed.status).toBe('installed');
     expect(parsed.enabled).toBe(true);
   });
 
   it('should accept full installed package', () => {
     const pkg = {
-      manifest: validManifest,
+      manifest: validManifest, source: 'code',
       status: 'disabled' as const,
       enabled: false,
       installedAt: '2025-01-15T10:00:00Z',
@@ -96,7 +96,7 @@ describe('InstalledPackageSchema', () => {
 
   it('should accept installed package with upgrade history', () => {
     const pkg = {
-      manifest: validManifest,
+      manifest: validManifest, source: 'code',
       upgradeHistory: [
         {
           fromVersion: '1.0.0',
@@ -121,7 +121,7 @@ describe('InstalledPackageSchema', () => {
 
   it('should accept upgrade history with failed/rolled_back status', () => {
     const pkg = {
-      manifest: validManifest,
+      manifest: validManifest, source: 'code',
       upgradeHistory: [
         {
           fromVersion: '1.0.0',
@@ -145,7 +145,7 @@ describe('InstalledPackageSchema', () => {
 
   it('should reject invalid datetime for installedAt', () => {
     expect(() => InstalledPackageSchema.parse({
-      manifest: validManifest,
+      manifest: validManifest, source: 'code',
       installedAt: 'not-a-date',
     })).toThrow();
   });
@@ -177,7 +177,7 @@ describe('ListPackagesRequestSchema', () => {
 describe('ListPackagesResponseSchema', () => {
   it('should accept valid response', () => {
     const response = {
-      packages: [{ manifest: validManifest }],
+      packages: [{ manifest: validManifest, source: 'code' }],
       total: 1,
     };
     const parsed = ListPackagesResponseSchema.parse(response);
@@ -204,7 +204,7 @@ describe('GetPackageRequestSchema', () => {
 
 describe('GetPackageResponseSchema', () => {
   it('should accept valid response', () => {
-    const response = { package: { manifest: validManifest } };
+    const response = { package: { manifest: validManifest, source: 'code' } };
     expect(() => GetPackageResponseSchema.parse(response)).not.toThrow();
   });
 });
@@ -256,7 +256,7 @@ describe('InstallPackageRequestSchema', () => {
 describe('InstallPackageResponseSchema', () => {
   it('should accept valid response', () => {
     const response = {
-      package: { manifest: validManifest },
+      package: { manifest: validManifest, source: 'code' },
       message: 'Installed successfully',
     };
     expect(() => InstallPackageResponseSchema.parse(response)).not.toThrow();
@@ -301,7 +301,7 @@ describe('EnablePackageRequestSchema', () => {
 describe('EnablePackageResponseSchema', () => {
   it('should accept valid response', () => {
     const response = {
-      package: { manifest: validManifest },
+      package: { manifest: validManifest, source: 'code' },
       message: 'Enabled',
     };
     expect(() => EnablePackageResponseSchema.parse(response)).not.toThrow();
@@ -318,7 +318,7 @@ describe('DisablePackageRequestSchema', () => {
 describe('DisablePackageResponseSchema', () => {
   it('should accept valid response', () => {
     const response = {
-      package: { manifest: validManifest },
+      package: { manifest: validManifest, source: 'code' },
       message: 'Disabled',
     };
     expect(() => DisablePackageResponseSchema.parse(response)).not.toThrow();
@@ -394,7 +394,7 @@ describe('NamespaceConflictErrorSchema', () => {
 describe('InstalledPackageSchema - registeredNamespaces', () => {
   it('should accept package with registered namespaces', () => {
     const pkg = {
-      manifest: validManifest,
+      manifest: validManifest, source: 'code',
       registeredNamespaces: ['crm', 'crm_ext'],
     };
     const parsed = InstalledPackageSchema.parse(pkg);
@@ -402,7 +402,7 @@ describe('InstalledPackageSchema - registeredNamespaces', () => {
   });
 
   it('should accept package without registered namespaces (backward compatible)', () => {
-    const pkg = { manifest: validManifest };
+    const pkg = { manifest: validManifest, source: 'code' };
     const parsed = InstalledPackageSchema.parse(pkg);
     expect(parsed.registeredNamespaces).toBeUndefined();
   });
@@ -411,7 +411,7 @@ describe('InstalledPackageSchema - registeredNamespaces', () => {
 describe('InstallPackageResponseSchema - dependencyResolution', () => {
   it('should accept response with dependency resolution', () => {
     const response = {
-      package: { manifest: validManifest },
+      package: { manifest: validManifest, source: 'code' },
       message: 'Installed successfully',
       dependencyResolution: {
         dependencies: [
@@ -433,7 +433,7 @@ describe('InstallPackageResponseSchema - dependencyResolution', () => {
 
   it('should accept response without dependency resolution (backward compatible)', () => {
     const response = {
-      package: { manifest: validManifest },
+      package: { manifest: validManifest, source: 'code' },
     };
     const parsed = InstallPackageResponseSchema.parse(response);
     expect(parsed.dependencyResolution).toBeUndefined();

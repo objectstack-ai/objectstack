@@ -56,7 +56,6 @@ import type { IDataDriver } from './data-driver';
 import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-function.zod';
 import type { ServiceObject } from '../data/object.zod';
 import type { BaseEngineOptions, EngineQueryOptions } from '../data/data-engine.zod';
-import type { InstalledPackageSource } from '../kernel/package-registry.zod';
 
 /**
  * The engine's schema-registry view — the members reached through the
@@ -114,9 +113,13 @@ export interface EngineSchemaRegistryView {
     /**
      * Register a package manifest in the in-memory registry. `source` is the
      * caller's statement of where the package came from, stamped on the row; a
-     * value outside the closed set is refused.
+     * value outside the closed set is refused. The union is
+     * `InstalledPackageSource` (`kernel/package-registry.zod`), spelled here
+     * rather than imported so this contract module does not pull the manifest
+     * schema graph into its importers; `objectql-engine.test.ts`
+     * holds the two equal.
      */
-    installPackage(manifest: unknown, source: InstalledPackageSource, settings?: Record<string, unknown>): unknown;
+    installPackage(manifest: unknown, source: 'code' | 'marketplace' | 'authored', settings?: Record<string, unknown>): unknown;
     /** Drop a package from the registry; `false` when no package had that id. */
     uninstallPackage(id: string): boolean;
     /** Flip a package to enabled; `undefined` when no package had that id. */

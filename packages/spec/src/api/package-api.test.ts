@@ -206,6 +206,7 @@ describe('PackageInstallResponseSchema', () => {
       data: {
         package: {
           manifest: { id: 'com.acme.crm', name: 'acme_crm', version: '1.0.0', type: 'plugin' },
+          source: 'authored',
           status: 'installed',
           enabled: true,
         },
@@ -231,6 +232,7 @@ describe('PackageInstallResponseSchema', () => {
       data: {
         package: {
           manifest: { id: 'com.acme.crm', name: 'acme_crm', version: '1.0.0', type: 'plugin' },
+          source: 'authored',
           status: 'installed',
           enabled: true,
         },

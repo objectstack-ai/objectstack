@@ -5,6 +5,7 @@
 '@objectstack/runtime': patch
 '@objectstack/service-package': patch
 '@objectstack/cloud-connection': patch
+'@objectstack/client': patch
 ---
 
 feat(spec): every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
