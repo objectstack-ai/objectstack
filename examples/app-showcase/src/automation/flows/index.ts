@@ -2010,8 +2010,8 @@ export const allFlows = [
   // #3447 P2 dogfood: expression approvers + decision outputs, end to end.
   DynamicApprovalFlow,
   // #3508 dogfood: one approval node per record-backed approver kind, so the
-  // designer's Value control has a specimen for each. Draft on purpose — see
-  // the module docstring.
+  // designer's Value control has a specimen for each. Obsolete on purpose
+  // (loaded, never armed) — see the module docstring.
   ApproverBindingsFlow,
   // The recalc behind the two `api` actions, served by the declared
   // `showcase_recalc_estimates_api` endpoint (src/system/apis/).

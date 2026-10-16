@@ -7786,13 +7786,24 @@ export class AutomationEngine implements IAutomationService {
             // which of the three causes it was, verbatim on the wire. A distinct
             // code would be vocabulary nothing reads — add one the day a caller
             // needs to branch on the difference.
+            //
+            // [#23963] And the verdict is carried onto the RUN, not only onto
+            // the answer: both exits go through
+            // {@link settleUnresumableSuspension}, which moves the parked row to
+            // `failed` with this same text in `error`. Answering "gone for
+            // good" while the row kept `status: 'paused'` left it resumable on
+            // every surface that reads the row, and outside retention, whose
+            // scope is terminal statuses only.
             const flow = this.flows.get(run.flowName);
             if (!flow) {
-                return { success: false, code: 'RUN_NOT_FOUND', error: `Flow '${run.flowName}' not found for run '${runId}'` };
+                return this.settleUnresumableSuspension(run, `Flow '${run.flowName}' not found for run '${runId}'`);
             }
             const node = flow.nodes.find(n => n.id === run.nodeId);
             if (!node) {
-                return { success: false, code: 'RUN_NOT_FOUND', error: `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'` };
+                return this.settleUnresumableSuspension(
+                    run,
+                    `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'`,
+                );
             }
 
             // #4354 — up-bubble: the child that just finished did work this run
@@ -8954,6 +8965,108 @@ export class AutomationEngine implements IAutomationService {
             steps: run.steps,
             error,
         }, run.context, consumed?.run);
+    }
+
+    /**
+     * [#23963] Answer a resume refused as GONE FOR GOOD, and settle the run it
+     * names in the same act.
+     *
+     * {@link resumeInternal} reaches this from its two never-dispatched exits:
+     * the run's flow is no longer registered, or the node it parked on was
+     * edited away. Both are the terminal `RUN_NOT_FOUND` class (#8684). The
+     * answer is unchanged, and the run now moves to the state the answer
+     * describes: the parked row is consumed and a `failed` history row records
+     * `cause`, the same text the caller is answered. `failed` and not
+     * `cancelled`, for {@link failSuspendedRun}'s reason: nobody decided to end
+     * this run (ADR-0044's `cancelled`, which a restore refuses as a deliberate
+     * act). It can never continue, and `error` is the column that says why.
+     * Retention's `onlyWhen` scope already holds `failed`, so the row ages out
+     * like any other history row and nothing there changes.
+     *
+     * Three guards, each against a different way the verdict could be wrong:
+     *
+     *  - **The boot is still filling the flow registry.** Before the host
+     *    seals the boot, an absent flow means "not registered YET": the plugin
+     *    re-arms overdue wait timers in its `start()`, and those resume runs
+     *    before its `kernel:ready` handler binds the inline app flows they
+     *    belong to. Recording the verdict there would kill a run whose flow
+     *    arrives a moment later (AGENTS.md "Startup registry reads"). The host
+     *    declares the boot complete with {@link sealNodeTypeVocabulary}, which
+     *    `AutomationServicePlugin` calls at `kernel:bootstrapped`, strictly
+     *    after every flow bind of the boot. Before the seal this answers the
+     *    refusal and records nothing, which is exactly what shipped before.
+     *    After it, a flow can leave only by an explicit withdrawal. An
+     *    embedded host that never seals keeps the pre-#23963 behaviour.
+     *  - **Another consumer got there first.** The row is consumed through
+     *    {@link claimAdvance}, the compare-and-set the resume path takes: the
+     *    store removes the row only while it is still parked where this
+     *    replica read it. `lost` means a concurrent resume or cancel already
+     *    consumed it and wrote its own outcome, so nothing is written here.
+     *    The answer stays the refusal this replica reached.
+     *  - **The store cannot say whether the row was consumed.** A claim that
+     *    throws answers `STORE_UNAVAILABLE`, as the resume path's claim does.
+     *    That tells the caller the row may still read `paused`, and a retry
+     *    settles it. Answering `RUN_NOT_FOUND` there would tell the caller the
+     *    matter is closed while the row it describes stayed parked.
+     *
+     * The history write is guarded the way the completion paths guard theirs
+     * (#16274): the run is already consumed when it runs, so a throw out of
+     * it must not turn the refusal into a rejected promise.
+     */
+    private async settleUnresumableSuspension(run: SuspendedRun, cause: string): Promise<AutomationResult> {
+        const refusal: AutomationResult = { success: false, code: 'RUN_NOT_FOUND', error: cause };
+        if (!this.nodeTypeVocabularySealed) return refusal;
+        const claim = await this.claimAdvance(run);
+        if (claim.kind === 'lost') {
+            // [#15832] The store answered and holds no row where this replica
+            // read one, so whatever snapshot this process still holds is stale.
+            this.evictConsumedSuspension(run.runId);
+            return refusal;
+        }
+        if (claim.kind === 'unavailable') {
+            return {
+                success: false,
+                code: 'STORE_UNAVAILABLE',
+                error:
+                    `Run '${run.runId}' can never continue (${cause}), but the durable suspended-run store was ` +
+                    `unreachable while settling it, and whether the store consumed the suspension is UNKNOWN (a ` +
+                    `failure can arrive after a committed delete), so its record may still read paused. Retry once ` +
+                    `the store is available: a retry that finds the run still parked settles it, and one that finds ` +
+                    `the suspension gone answers RUN_NOT_FOUND: ${claim.message}`,
+            };
+        }
+        await this.forgetSuspendedRun(run, 'failed', claim.kind === 'claimed');
+        try {
+            this.recordLog({
+                id: run.runId,
+                flowName: run.flowName,
+                flowVersion: run.flowVersion,
+                status: 'failed',
+                startedAt: run.startedAt,
+                completedAt: new Date().toISOString(),
+                durationMs: Date.now() - run.startTime,
+                trigger: buildRunTrigger(run.context),
+                steps: run.steps,
+                error: cause,
+            }, run.context);
+        } catch (bookkeeping) {
+            // #4632 verdict: DURABILITY, so `error`. The suspension is consumed
+            // and the caller is answered the truthful refusal, so nothing reads
+            // as wrong from the outside. But the `failed` row that says why
+            // never landed, and nothing retries it. Same sink and same level as
+            // the #16274 completion guard. THIRD argument per
+            // `error(message, error?, meta?)`; the `Error` slot stays empty
+            // (#5575) and the thrown text rides the structured slot (#6499).
+            this.logger.error(
+                `[Automation] run '${run.runId}' of flow '${run.flowName}' can never continue and its suspension ` +
+                    `was consumed, but recording its terminal 'failed' history threw, so no history row says why: ` +
+                    `the caller was answered RUN_NOT_FOUND, the run no longer reads as paused, and nothing retries ` +
+                    `the write. Fix the history failure in this record's meta.`,
+                undefined,
+                describeThrownForLog(bookkeeping),
+            );
+        }
+        return refusal;
     }
 
     /**
