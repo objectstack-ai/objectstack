@@ -1,5 +1,75 @@
 # @objectstack/service-mailbox
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- b60eb78: Inbound mail reads a forward quoted inline in the body: a message an organization user forwards inline from Gmail, Outlook or Apple Mail now associates with the records its original participants match
+  
+  Clause-②: no
+  
+  - **What is read.** The "Forwarded message" block each of the three clients writes into the text/plain body, with its English labels: Gmail's `---------- Forwarded message ---------` block (From, Date, Subject, To, Cc), the block Outlook on the web and Microsoft 365 write under a line of 32 underscores (From, Sent, To, Cc, Subject), and Apple Mail's `Begin forwarded message:` block (From, Subject, Date, To, Cc, Reply-To). Its From, Reply-To, To and Cc addresses join the participant set in `match_addresses` under the source `inline`, after the outer and attachment entries. `rematch` replays them with the rest of the stored set and never reads the body again.
+  - **Only an organization user's forward is read.** The block is read only when the message's From names one address and that address is the email of a user (`sys_user`, ASCII case-insensitive) who is a member (`sys_member`) of the mailbox's organization. A forward from anyone else, a member of another organization included, is matched on its own headers only. Where the identity objects are not registered (no auth plugin is composed), no inline forward is read, and the first message that carries one says so in the log.
+  - **An unrecognised block pools.** A block the parser does not recognise is not guessed at: labels of another client or locale (Gmail in German writes `Von:`), a header line wrapped onto two lines, a block with no date line, a forward quoted by a reply, or a message with an HTML body only. The message is matched on its other participants, so a forward whose only match was in the block waits in the pool. Only the first block in the body is read; a forward quoted inside that forward is not.
+- 05e3b8e: Inbound mail stores its attachments: each attachment of an ingested message, and each message it forwards as an attachment as an `.eml` file, is stored through the `file-attachments` service as a file of the message's `sys_mail_message` row
+  
+  Clause-②: no
+  
+  - **What is stored, and where.** Every part of a stored message besides its text and HTML bodies (inline parts included, and each forwarded `message/rfc822` or `message/global` part as the `.eml` file it travels as) becomes one `sys_file` and one `sys_attachment` whose parent is the message's own `sys_mail_message` row, written by `IFileAttachmentService.attachFile` in the mailbox's organization after the row, and only for a message the call stored, so a re-delivered copy adds no attachment.
+  - **Without the storage capability.** A kernel that composes no `file-attachments` service (registered by `@objectstack/service-storage`) stores each message without its attachments, and says so once in the log.
+  - **Refused attachments.** A part the service refuses, such as one over the `max_upload_mb` upload size limit, is logged at `error` with its file name and the refusal, and the message and its other attachments are still stored.
+  - **For a host that constructs `MailIngestService` itself.** It takes the service as the optional `attachments` resolver (`MailboxServicePlugin` supplies it), and its `MailIngestLogger` now needs `error`, as `MailSyncLogger` already does.
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+  - @objectstack/connector-imap@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

@@ -520,10 +520,11 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'terminator spelling), PLUS `registerPerItemRoute(` call sites; counted over this file AND every ' +
       'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
       '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts`, `sharing-routes.ts`, ' +
-      '`analytics-routes.ts` and `security-routes.ts`, the modules the bodies of `registerDataActionEndpoints`, ' +
-      '`registerBatchEndpoints`, `registerApprovalsEndpoints`, `registerSharingEndpoints`, ' +
-      '`registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, `registerSecurityExplainEndpoints` and ' +
-      '`registerSecurityEndpoints` moved to; ' +
+      '`analytics-routes.ts`, `security-routes.ts` and `discovery-routes.ts`, the modules the bodies of ' +
+      '`registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
+      '`registerSharingEndpoints`, `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, ' +
+      '`registerSecurityExplainEndpoints`, `registerSecurityEndpoints`, `registerDiscoveryEndpoints` and ' +
+      '`registerOpenApiEndpoints` moved to; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -717,16 +718,32 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // slice's seam, the same two spellings TWICE, because the module carries
     // two registrars (two host literals' forwarders, four; two host
     // interfaces' members, four). No call site was added.
+    // [#23050 slice 7] 70 / 19 / 51 UNCHANGED, the same measurement again:
+    // `registerDiscoveryEndpoints`' and `registerOpenApiEndpoints`' bodies
+    // (four registration sites, two and two — the API root and `/discovery`,
+    // `/openapi.json` and `/docs` — all outside `registerMetadataEndpoints`, so
+    // all four in the blind spot) moved to `discovery-routes.ts`, which joins
+    // the list (length 7 -> 8) with its own control.
+    // `this.routeManager.register(` stays 63 over the eight files
+    // (23 here + 9 + 5 + 7 + 8 + 1 + 6 + 4), `private register*Endpoints(`
+    // stays 16 (both registrars are still declared here), and `enforceAuth`
+    // 92 -> 96 is RE-ANCHORED, not relaxed: the OpenAPI pair's two call sites
+    // moved with their routes and are counted in both readings; the four new
+    // occurrences are this slice's seam, the two spellings ONCE, because only
+    // the OpenAPI body reads `enforceAuth` (its host literal's forwarder, two;
+    // its host interface's member, two) — the discovery document is served to
+    // anyone, so its literal forwards no `enforceAuth`. No call site was added.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 7,
+      'registrar list length': 8,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
       'sharing-routes.ts: this.routeManager.register(': 8,
       'analytics-routes.ts: this.routeManager.register(': 1,
       'security-routes.ts: this.routeManager.register(': 6,
+      'discovery-routes.ts: this.routeManager.register(': 4,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -734,7 +751,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 92,
+      enforceAuth: 96,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +

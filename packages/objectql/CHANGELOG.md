@@ -1,5 +1,233 @@
 # @objectstack/objectql
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 584e737: A hook can now tell a child delete that a parent's cascade issues from a hand delete: `HookContext.referentialCascadeDelete`, the delete twin of `referentialFieldClear`
+  
+  Clause-②: yes
+  
+  When a record is deleted and a relation whose `deleteBehavior` resolves to `cascade` (a `master_detail` unless it declares `restrict`, or a `lookup` / `tree` that declares `cascade`) removes its children, the engine deletes each child as the calling user. The child's `beforeDelete` and `afterDelete` hooks therefore saw the same `ctx.user`, `ctx.session` and `ctx.input` as a user deleting that one child by hand. A guard that freezes settled records, such as a quote's lines once the quote is accepted, could refuse both deletes or neither, and refusing both made the parent, and every record whose cascade reaches it, undeletable.
+  
+  - **What the key means.** `ctx.referentialCascadeDelete === true` exactly on a delete the engine's cascade issued: the child delete, in both phases, at any depth (a grandchild that the child's own cascade removes is marked too). It is absent, never `false`, on every other delete: the delete the caller asked for, a user's hand delete of the same child, and any write a hook issues through `ctx.api` during a cascade, deletes included. The `set_null` cleanup update keeps `referentialFieldClear` and never carries this key, and a cascade child delete never carries `referentialFieldClear`.
+  - **The guard idiom.** Refuse a hand delete of a frozen line and yield to the cascade:
+  
+    ```ts
+    if (ctx.referentialCascadeDelete !== true && ctx.previous?.locked === true) {
+      throw new Error('This line belongs to a settled quote and cannot be deleted.');
+    }
+    ```
+  
+  - **Only the declared key is the contract.** There is no operation-private (`__`-prefixed) spelling of this fact on the execution context. The engine recognises the delete its cascade issued through an engine-private record keyed on that child's object and id, so nothing on `ctx.api`, `ctx.transaction` or any `__` key can stand in for it. Read `ctx.referentialCascadeDelete`.
+  - **In a sandboxed hook body.** The key is carried across the QuickJS boundary by contract, so a lowered `*.hook.ts` body reads `ctx.referentialCascadeDelete` exactly as an in-process handler does.
+  - **spec (minor):** `HookContextSchema` declares `referentialCascadeDelete` (boolean, optional). One optional engine-produced key on the non-strict runtime hook context; nothing previously valid changes meaning.
+  - **objectql (minor):** `delete()`'s hook-context assembly sets the key on the delete the cascade walk issues. The walk still hands the child the caller's context unchanged, so no other hook-context member moves.
+  - **runtime (minor):** `buildSandboxContext` and `installCtx` carry the key into the VM.
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+- cd86e41: fix(objectql,runtime): a stack's `datasourceMapping` is installed before the engine's first schema sync, and the datasources it routes platform objects to are connected then, so a served boot keeps every object in the store its rule names (#23649)
+  
+  Clause-②: yes
+  
+  A mapping rule is routing, not a hint (ADR-0062, the `datasourceMapping` half of D2): every object it matches resolves to the datasource it names. `AppPlugin.start()` installed the rules late. By then `ObjectQLPlugin.start()` had schema-synced every registered object onto the host's default store, and the auth plugin had written the Default Organization there. A host config declaring `datasourceMapping: [{ default: true, datasource: 'primary' }]` over a declared `primary` reached `Server is ready` with `OS_DATABASE_URL` set (or under `--dev`), and every platform read then failed with `no such table`, because the platform tables and the organization were in the URL store and `primary` had neither. `os start` with `OS_DATABASE_URL` set to a different database than the rule names behaved the same way. A rule that routes platform objects only (`objectPattern: 'sys_*'`) also left its datasource unconnected, because the connect gate counted the app's own objects only. Every platform read then failed with "mapped for object … is not registered".
+  
+  **What changes**
+  
+  The public surface widens by one export and one event: `@objectstack/objectql` now exports `OBJECTQL_DRIVERS_READY_HOOK`, and `ObjectQLPlugin.start()` triggers the kernel event it names, `objectql:drivers-ready`, which any plugin can subscribe to.
+  
+  - **`@objectstack/objectql`.** `ObjectQLPlugin.start()` triggers the kernel event `objectql:drivers-ready` (exported as `OBJECTQL_DRIVERS_READY_HOOK`), with the engine as its argument. It fires once per boot, after the boot drivers are adopted and connected and before the first schema sync, the `sys_metadata` hydration or any read or write. A handler that throws fails the boot.
+  - **`@objectstack/runtime`.** `AppPlugin` handles that event. It installs the stack's `datasourceMapping`, then connects every declared datasource the rules route an already-registered object to, platform objects included. The connect is the same `connectDeclared` `start()` uses, with the same fail-fast verdict. The first DDL, the hydration and the Default Organization then land on the mapped datasource. On a composition whose engine never fires the event, `start()` installs the rules as before.
+  
+  **Unchanged**
+  
+  - A config with no `datasourceMapping`, and a rule naming the host's `default`.
+  - The engine's default driver. The mapped datasource connects after the engine has adopted its `driver.*` services, so it never takes the default slot from a stack plugin's driver.
+  - Where an object's rows live after boot. The rules were already in force once `start()` had run.
+  - `os start` on the config-declared default (`datasourceMapping` `{ default: true }` and no URL). The resolver points the host default at the same database, so everything was already in one file, and still is.
+  - A rule routing only the app's own objects. Their rows were already written to the mapped datasource. The only difference is that the first sync no longer creates an empty copy of their tables in the default store.
+  
+  **Refused at boot, as documented.** The docs already say a rule that routes objects to a datasource that cannot be connected fails the boot. A rule that routed only platform objects to such a datasource used to reach `Server is ready` with every platform read failing. It now fails the boot with the connect error and the objects routed to the datasource. The remedy is to make the datasource reachable, or to remove the rule.
+  
+  **Still on the default store:** the package registry's own `sys_packages` table. It is not an object, so no rule routes it, and the package service creates and reads it on the engine's default driver.
+
+### Patch Changes
+
+- 086fa46: feat(cli,plugin-dev): an app under `os serve` or `DevPlugin` that declares its own `sys_organization` default record page boots, and its page is the only default
+  
+  Clause-②: yes (widening)
+  
+  A deployment holds at most one `isDefault: true` record page per object, and a second one is refused at registration with `DEFAULT_RECORD_PAGE_CONFLICT`. `plugin-auth` registers `sys_organization_detail` as the default record page of `sys_organization` unless it is constructed with `registerOrganizationRecordPage: false`. `os serve` and `DevPlugin` construct `AuthPlugin` themselves and never passed that option, so an app served by either one that shipped its own default page for `sys_organization` was refused at boot, with no switch to set.
+  
+  - **What changes.** Both roots now read the app's own pages before they construct `AuthPlugin`. When the app declares an `isDefault: true` record page for `sys_organization`, they pass `registerOrganizationRecordPage: false`, and the app's page is the only default. When it does not, `plugin-auth`'s page registers as before. There is no new configuration key: the page the author already wrote is the switch. Plugin order and precedence rules play no part.
+  - **One rule for both roots.** The reading is `stackDeclaresOrganizationRecordPage(stack, plugins?)`, a new export of `@objectstack/core`. It reads the stack's `pages` (or each package body's, for a multi-package stack) and the bundle of each app plugin already in `plugins`, and judges each page with `defaultRecordPageObject` from `@objectstack/spec/ui`, the reading the registration refusal uses.
+  - **The refusal's remedy (`@objectstack/objectql`).** `DEFAULT_RECORD_PAGE_CONFLICT`'s message now says to set `isDefault: false` on one of the two pages, "or compose the deployment without the other package's page". It said to compose the deployment without the other package, which a host cannot do when that package is the platform's auth plugin. The code, the `422` status and the named pages are unchanged.
+  - **Nothing to adopt.** An app that ships its own `sys_organization` default record page boots under `os serve` and `DevPlugin` with no further change. A deployment that composes its own kernel still sets `registerOrganizationRecordPage: false` on `AuthPlugin` itself.
+- 989aa48: fix(objectql): an uninstall refused because another package extends one of its objects answers `409 RESOURCE_CONFLICT` with the way out, instead of `500 INTERNAL_ERROR` (ADR-0029)
+  
+  Clause-②: no
+  
+  `SchemaRegistry.assertPackageUninstallable` refuses to uninstall a package while another package extends an object it owns (a manifest's `objectExtensions`, ADR-0029). `unregisterObjectsByPackage` and `uninstallPackage` raise the same refusal, because they ask it. When the refusal happens does not change, and a refused uninstall still removes nothing. Only the error it throws changes.
+  
+  **FROM.** The error was a bare `Error` with no `code` and no `status`. Its message, `Cannot uninstall package "P": object "O" is extended by E. Uninstall extenders first.`, named only the first extended object. `DELETE /api/v1/packages/P` answered `500 INTERNAL_ERROR`, a server failure, although the caller can change the state that blocks the uninstall.
+  
+  **TO.** The error carries `code: 'RESOURCE_CONFLICT'` and `status: 409` (and `httpStatus: 409`), so `DELETE /api/v1/packages/P` answers `409 RESOURCE_CONFLICT`. The message starts with the way out: `Uninstall the package that extends an object of "P" first (E), then uninstall "P" again: …`. It then names every extended object with the packages that extend it: the first five objects, then a count of the rest. The thrown error also carries `packageId`, `extendedObjects` and `extenders`.
+  
+  **Unchanged.** A package is refused in the same cases as before. A refused uninstall changes nothing: the `sys_packages` row, the registry entry, the stored metadata rows and the disable record all stay. `unregisterObjectsByPackage(id, true)` still does not ask.
+  
+  **If you matched the old text.** Match `error.code === 'RESOURCE_CONFLICT'` (HTTP `409`) instead. The message still contains `Cannot uninstall package "P": object "O" is extended by E`, after the way out. The closing `Uninstall extenders first.` is gone.
+- 30c33e3: fix(objectql): the boot hydration ERROR names the storage remedies when no datasource is declared and no driver is registered, instead of sending the operator to a datasource nobody configured
+  
+  Clause-②: no
+  
+  When `sys_metadata` cannot be read at boot, objectql logs one `error` line that says what was not restored and what to fix. The fix half was always "check the datasource behind sys_metadata — connection, credentials, and that the table exists". On a deployment with no datasource declared and no driver registered (a production `os serve` with no `OS_DATABASE_URL`, for one) there is no datasource to check and no credential to fix.
+  
+  - **Before.** `ERROR sys_metadata could NOT be read at boot — persisted metadata was NOT restored, … Fix: check the datasource behind sys_metadata — connection, credentials, and that the table exists — then restart.`
+  - **After, when nothing serves `sys_metadata`.** `ERROR sys_metadata could NOT be read at boot — no storage is configured: no datasource is declared and no driver is registered, so nothing serves sys_metadata. Persisted metadata was NOT restored, … Fix: set OS_DATABASE_URL (e.g. file:./data/app.db, or a postgres:// or mysql:// URL); mount a storage driver in the stack's plugins (e.g. new DriverPlugin(driver) from @objectstack/runtime); or run with --dev (an in-memory SQLite store, for development) — then restart.` The three fixes are the ones the CLI's `⚠ No storage:` line names.
+  - **Unchanged.** The level stays `error`, and the consequence sentence is the same word for word. The datasource remedy stays for every case where a datasource exists: a registered driver whose read failed, `sys_metadata` bound to a named datasource with no driver, and a declared datasource the connection layer could not use. Which line prints is read from the engine's routing, not from the text of the error the read raised.
+- 3bc407d: fix(objectql): the metadata service's copy of a runtime-authored object follows its saves and deletes after boot, so the MCP stdio door enforces an object's current API exposure and no longer lists a deleted object
+  
+  Clause-②: no
+  
+  On a kernel whose `ObjectQLPlugin` has no `environmentId` (the CLI host-config boot, the kernel factory, a control plane), the plugin copies every registry object into the `metadata` service once, at boot, and no authoring door wrote to that service afterwards. For a runtime-authored object (one saved through Studio, the REST metadata door or an AI author) the service's answer was therefore the boot body, or no body at all:
+  
+  - **An object saved after boot had no copy.** The MCP stdio door gates every data verb on the copy's `enable.apiEnabled` and reads an absent copy as no declaration, so `query_records` was served on an object saved with `apiEnabled: false`.
+  - **An object re-saved after boot kept its boot copy**, so when its exposure was turned off `query_records` and `create_record` were served on it, and the create wrote a row.
+  - **A deleted object kept its copy**, so `list_objects` and `describe_object` still named it. Its data verbs were already refused by the engine.
+  
+  The copy now follows the registry on the same signal every authoring door already emits (`onMetadataMutation`, which also reaches a cluster peer once its registry has converged):
+  
+  - **A save refreshes the copy before the save returns**, through `registerInMemory` (synchronous, no persistence, no announce): the object's current `enable` is what the exposure gate reads. An object created after boot gets a copy.
+  - **A delete removes the copy**, once the stored row is gone and the registry no longer serves the name. If the object is created again while the removal is still running, the new copy is put back.
+  - **A code package's copy is never touched.** Only a copy of a runtime-authored object (the registry's owner row for the name is tenant-authored, or the copy already says so) follows the registry; the package copies the protocol restores baselines from stay exactly as the boot bridge made them.
+  - **A refresh that cannot land is logged at `error`**, naming the object, the consequence (readers of the metadata service keep the previous definition) and the way out.
+  
+  Every other reader of `IMetadataService.getObject` and `listObjects` on such a kernel sees the same current definition. The runtime dispatcher's exposure gate (`refuseUnexposedDataAction`, which the HTTP MCP door's data verbs run through) is one: it allowed an object saved with `apiEnabled: false` after boot, and refuses it now. A project-scoped kernel (one built with an `environmentId`) does not run the boot bridge and is unchanged.
+- 76560a1: fix(objectql): on a kernel with an `environmentId` (`os dev`, `os serve`, `os start`, the cloud single-environment runtime), a runtime-authored object now has a metadata-service copy, so both MCP doors refuse an object whose API exposure is off
+  
+  Clause-②: no
+  
+  On a kernel built with an `environmentId`, the `metadata` service is sourced from the artifact and the boot bridge does not run. Until now, the copy follow that keeps a runtime-authored object's copy current also returned early on that shape. So the service held **no** copy of **any** object saved through Studio, the REST metadata door or an AI author, and the MCP exposure gates read that absence as "no declaration". Measured on the real `os dev` (`env_local`), where the REST data door refused the same objects with `OBJECT_API_DISABLED`:
+  
+  - **Saved with `apiEnabled: false`, or turned off after a save.** The HTTP MCP door served `query_records` and `create_record`, and the create wrote a row. The MCP stdio door did the same.
+  - **Saved with `apiEnabled: false`, then a restart.** Still served: the hydrated object had no copy, and no save fired after boot.
+  - **Exposed objects.** `list_objects` did not name them, and `describe_object` answered "not found".
+  
+  The fix is at the copy's producer, and it bounds what is written the same way the no-`environmentId` shape already does:
+  
+  - **The copy follow runs on every kernel shape.** A save refreshes the copy before it returns, through `registerInMemory` (in memory, no persistence, no announce). A delete removes it once the stored row is gone and the registry no longer serves the name.
+  - **A kernel that hydrates its own `sys_metadata` (`hydrateMetadataFromDb`) copies its hydrated runtime-authored objects once at boot.** That option is set only on a kernel whose registry is its own. Only objects whose registry owner row is tenant-authored are copied, so a code package's objects still reach the service from the artifact alone. The full boot bridge stays off on this shape.
+  - **A boot copy that cannot land is logged at `error`.** The line names the objects, the consequence (the MCP exposure gates serve them even when their exposure is off) and the way out.
+  
+  Both exposure gates read this service: the MCP stdio door's `enforceApiExposure`, and `refuseUnexposedDataAction`, which the HTTP MCP data verbs run through. Both now answer `OBJECT_API_DISABLED` / 404 for such an object, which is what `apiEnabled: false` declares. Neither gate's fall-open rule for an absent definition changes. The kernel shape without an `environmentId` is unchanged.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [47d569e]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [3b28905]
+- Updated dependencies [1baf976]
+- Updated dependencies [222293f]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [7cb33cf]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [56147a8]
+- Updated dependencies [23e689d]
+- Updated dependencies [a869ea6]
+- Updated dependencies [7b64a3d]
+- Updated dependencies [8226755]
+- Updated dependencies [cdc42eb]
+- Updated dependencies [7ffc578]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [7dc7d22]
+- Updated dependencies [954bf72]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cad343e]
+- Updated dependencies [cbe7712]
+- Updated dependencies [c03077e]
+- Updated dependencies [9bb9370]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/metadata-protocol@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/metadata@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

@@ -1,5 +1,118 @@
 # @objectstack/dogfood
 
+## 0.0.48-next.2
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [cb9841a]
+- Updated dependencies [584e737]
+- Updated dependencies [be16feb]
+- Updated dependencies [3d231ba]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [94924e0]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [c245986]
+- Updated dependencies [0be162c]
+- Updated dependencies [fc1a55a]
+- Updated dependencies [fc1a55a]
+- Updated dependencies [b1e9280]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [c980d11]
+- Updated dependencies [0ecac96]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [0d784da]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [650933e]
+- Updated dependencies [d1e2841]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [57994c3]
+- Updated dependencies [70d4c06]
+- Updated dependencies [989aa48]
+- Updated dependencies [b1cfa3d]
+- Updated dependencies [23e689d]
+- Updated dependencies [0fb55fc]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c263588]
+- Updated dependencies [a6d0715]
+- Updated dependencies [c2bb302]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [9f81260]
+- Updated dependencies [e611e2b]
+- Updated dependencies [b513343]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [30c33e3]
+- Updated dependencies [7e6e4e1]
+- Updated dependencies [462dff3]
+- Updated dependencies [cd86e41]
+- Updated dependencies [c03077e]
+- Updated dependencies [3bc407d]
+- Updated dependencies [69351e9]
+- Updated dependencies [395ca21]
+- Updated dependencies [76560a1]
+- Updated dependencies [4c21e57]
+- Updated dependencies [9e0945c]
+- Updated dependencies [069fd40]
+- Updated dependencies [6ee483c]
+- Updated dependencies [941c78a]
+  - @objectstack/plugin-security@18.0.0-next.2
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/runtime@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/verify@18.0.0-next.2
+  - @objectstack/plugin-audit@18.0.0-next.2
+  - @objectstack/plugin-auth@18.0.0-next.2
+  - @objectstack/plugin-sharing@18.0.0-next.2
+  - @objectstack/service-datasource@18.0.0-next.2
+  - @objectstack/service-storage@18.0.0-next.2
+  - @objectstack/plugin-email@18.0.0-next.2
+  - @objectstack/mcp@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/metadata@18.0.0-next.2
+  - @objectstack/plugin-approvals@18.0.0-next.2
+  - @objectstack/plugin-webhooks@18.0.0-next.2
+  - @objectstack/service-messaging@18.0.0-next.2
+  - @objectstack/example-crm@4.0.100-next.2
+  - @objectstack/example-multi-package@0.0.7-next.2
+  - @objectstack/example-showcase@0.3.22-next.2
+  - @objectstack/connector-mcp@18.0.0-next.2
+  - @objectstack/connector-openapi@18.0.0-next.2
+  - @objectstack/connector-rest@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/service-analytics@18.0.0-next.2
+  - @objectstack/trigger-record-change@18.0.0-next.2
+  - @objectstack/trigger-schedule@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+  - @objectstack/plugin-pinyin-search@18.0.0-next.2
+
 ## 0.0.48-next.1
 
 ### Patch Changes
