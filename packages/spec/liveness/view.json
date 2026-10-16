@@ -389,7 +389,7 @@
     "formViews": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/rest/src/form-routes.ts#findPublicFormView (`const formViews = view.formViews` — every named form view is a public-link candidate); packages/spec/src/ui/view.zod.ts#expandViewContainerWithDiagnostics (flattens them into independent ViewItems)",
+      "evidence": "packages/spec/src/ui/anonymous-form-intake.ts#anonymousFormIntakeCandidates (`const formViews = view.formViews` — every named form view is a public-link candidate); packages/spec/src/ui/view.zod.ts#expandViewContainerWithDiagnostics (flattens them into independent ViewItems)",
       "note": "Named form views. Framework: public-form slug resolution scans form + every formViews entry (rest-server.ts:4384-4405); expandViewContainer flattens them. objectui: MetadataProvider routes viewKind:'form' items into objectDef.formViews (never into the list switcher). Same inner shape as `form`; per-key classification lives under form.children. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED — `:4384` had rotted onto the same `api`-only comment its sibling `form.sharing` cited; the note's `rest-server.ts:4384-4405` range went with it. Re-closed by hand against 8cb96ec41."
     }
   }
