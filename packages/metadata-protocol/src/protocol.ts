@@ -177,7 +177,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
-import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { ALL_CONVERSIONS, applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel, defaultRecordPageObject } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -6612,6 +6612,32 @@ export class ObjectStackProtocolImplementation implements
      *
      * Read with no `try`/`catch`, as the lock family's baseline is: a stored row
      * that could not be read is not an absent one.
+     *
+     * [#23903, ruling B′] A re-save is authored input too where its body NEWLY
+     * INTRODUCES a retired spelling — an author or an AI adding a node with an
+     * old spelling to a legacy flow. The rule compares conversion hits: a
+     * retired entry that fires on the request at a site where it does not fire
+     * on a stored row answers `false`, exactly as a new flow does; a request
+     * whose every retired hit a stored row carries keeps the full chain, so a
+     * served legacy body re-saves and is healed as before.
+     *
+     * A hit is one firing of a retired entry, named by the entry, the spelling
+     * it rewrote (the notice's `from`) and its site: the notice's `path`, with
+     * each array element on the way that carries an `id` (a node, a region's
+     * node, an edge) named by that id instead of its index. So the same retired
+     * spelling on a node the stored row does not have is a new hit even when
+     * another node carries it, and adding, removing or moving a node never turns
+     * a carried hit into a new one. Both bodies are scanned by the spec's own
+     * pass (`applyConversionsToFlow`, the full chain minus
+     * {@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}), never by the engine, so a
+     * host with no automation service reaches the same answer (#21982).
+     *
+     * The rows that may carry a hit are the save's baseline above, and for a
+     * DRAFT save the active row the draft overlays even when a draft row
+     * exists. Studio keeps its buffer after a draft save: on an engine host the
+     * first save heals the draft row, so the next autosave re-sends spellings
+     * only the active row still carries, and judged against the draft row
+     * alone Studio's second save of a legacy flow would be refused.
      */
     private async flowSaveReplaysRetired(request: {
         name: string;
@@ -6622,14 +6648,57 @@ export class ObjectStackProtocolImplementation implements
     }, mode: 'draft' | 'publish'): Promise<boolean> {
         if (request.source !== undefined) return true;
         if (request.writeFace === 'package-duplicate' || request.writeFace === 'package-unmanaged-import') return true;
+        const retired = new Set(ALL_CONVERSIONS.filter((c) => c.retiredFromLoadPath).map((c) => c.id));
+        // The site of a notice's path, ids standing in for the indexes of the
+        // array elements that carry one, read on the converted body it names.
+        const siteOf = (root: unknown, path: string): string => {
+            let at: unknown = root;
+            let site = '';
+            for (const [, key, index] of path.matchAll(/([^.[\]]+)|\[(\d+)\]/g)) {
+                if (key !== undefined) {
+                    site += site === '' ? key : `.${key}`;
+                    at = at !== null && typeof at === 'object' ? (at as Record<string, unknown>)[key] : undefined;
+                    continue;
+                }
+                const element: unknown = Array.isArray(at) ? at[Number(index)] : undefined;
+                const id = element !== null && typeof element === 'object' ? (element as { id?: unknown }).id : undefined;
+                site += typeof id === 'string' && id !== '' ? `[#${id}]` : `[${index}]`;
+                at = element;
+            }
+            return site;
+        };
+        const retiredHits = (body: unknown): Set<string> => {
+            const fired: ConversionNotice[] = [];
+            const converted = applyConversionsToFlow(body, {
+                includeRetired: true,
+                excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
+                onNotice: (n) => { if (retired.has(n.conversionId)) fired.push(n); },
+            });
+            const root = { flows: [converted] };
+            return new Set(fired.map((n) => `${n.conversionId}|${n.from}|${siteOf(root, n.path)}`));
+        };
+        // The request's retired hits; each one a stored row carries is struck off.
+        const uncarried = retiredHits(request.item);
+        const strikeCarried = (body: unknown): void => {
+            if (uncarried.size === 0) return;
+            for (const hit of retiredHits(body)) uncarried.delete(hit);
+        };
         const repo = this.getOverlayRepo();
         const ref = { type: 'flow', name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
         const member = itemDiscriminator('flow', request.item);
         const state: 'active' | 'draft' = mode === 'draft' ? 'draft' : 'active';
         const target = await repo.headAt(ref, { state, packageId: request.packageId ?? null, member });
-        if (target.head) return true;
-        if (state !== 'draft') return false;
-        return (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head !== null;
+        if (target.head) {
+            strikeCarried(target.head.body);
+            if (uncarried.size === 0) return true;
+            if (state !== 'draft') return false;
+        } else if (state !== 'draft') {
+            return false;
+        }
+        const active = (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
+        if (!active) return false;
+        strikeCarried(active.body);
+        return uncarried.size === 0;
     }
 
     /**
@@ -23025,6 +23094,12 @@ export class ObjectStackProtocolImplementation implements
         // so a spelling retired from the authoring funnel (#23487, #23543) is
         // not lifted here either and meets the parse refusal below, with the
         // prescription `os validate` prints, on both hosts alike.
+        //
+        // [#23903, ruling B′] So does a re-save whose body NEWLY INTRODUCES a
+        // retired spelling — a retired entry firing at a site where no stored
+        // row carries it (a node added with an old spelling): authored input,
+        // judged whole without the retired entries. A re-save whose retired
+        // hits the stored row all carries keeps the full chain, as above.
         let flowGateVerdictBody: unknown;
         // [#4580, #23775] The fallback's warning, said once the gate below has
         // accepted the body it falls back to — never for a save it refuses.
@@ -23034,8 +23109,9 @@ export class ObjectStackProtocolImplementation implements
             // No automation service reachable (control-plane / metadata-only
             // host): the fallback below judges the body and it is saved as
             // written — a host must not start refusing flow writes it accepted
-            // yesterday, save the retired spelling on a new flow (#23775), which
-            // an engine host refuses too.
+            // yesterday, save the retired spelling on a new flow (#23775) or one
+            // a re-save newly introduces (#23903), which an engine host refuses
+            // too.
             const canonicalizeFlow = this.resolveFlowCanonicalizer();
             let canonicalized = false;
             if (canonicalizeFlow) {

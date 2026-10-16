@@ -37,7 +37,7 @@ import {
   assertEngineDeleteDispatch,
   assertEngineUpdateDispatch, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
-import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, applyConversionsToFlow, normalizeStackInput } from '@objectstack/spec';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /** A flow body that passes `saveMetaItem`'s schema gate. */
@@ -660,5 +660,189 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
                 expect(storedFlow(rows)!.body.nodes[0].config).toHaveProperty('filters');
             });
         }
+    });
+});
+
+/**
+ * [#23903, ruling B′] A re-save whose body NEWLY INTRODUCES a retired spelling
+ * is authored input, refused like a new flow's: a retired entry that fires on
+ * the request at a site where no stored row carries it ⇒ the save is judged
+ * without the retired entries and meets the parse refusal (`422
+ * INVALID_METADATA`, located, the key the spelling moved to). A request whose
+ * retired hits the stored row all carries keeps the full chain.
+ *
+ * The spellings are two of the seven #23487 retired, neither moved by F5-http:
+ * a `delete_record` node's `config.filters` (`flow-node-crud-filter-alias`,
+ * refused at the key, naming `filter`) and a `wait` node's loose
+ * `config.duration` beside its block (`flow-node-wait-event-config-lift`,
+ * refused at the key, naming `waitEventConfig.timerDuration`). No node TYPE is
+ * retired at this base: the one type rename, the callout rename, is what
+ * F5-http retires.
+ *
+ * Pinned on both hosts. The engine is the spec's own pass behind the
+ * canonicalizer's option (`includeRetired`), so a carried re-save is healed and
+ * stored canonical, as `AutomationEngine.canonicalizeStoredFlow` stores it. With
+ * the window closed it hands the retired spelling back and the gate refuses it;
+ * the real engine's strict parse throws first, and the door's fallback verdict
+ * refuses the same body with the same issues.
+ */
+describe('[#23903] a re-save that newly introduces a retired spelling is judged as authored input', () => {
+    const specCanonicalizer = (_name: string, body: unknown, options: { includeRetired?: boolean } = {}) => {
+        const notices: unknown[] = [];
+        const storable = applyConversionsToFlow(body, {
+            includeRetired: options.includeRetired ?? true,
+            excludeConversionIds: ['flow-decision-mode-inclusive-explicit'],
+            onNotice: (n) => notices.push(n),
+        });
+        return { storable, notices, conflicts: [] };
+    };
+    const hosts = {
+        'an automation service': () => new Map([['automation', { canonicalizeStoredFlow: specCanonicalizer }]]),
+        'no automation service': () => new Map(),
+    } as const;
+
+    const purge = (id: string, config: Record<string, unknown>) =>
+        ({ id, type: 'delete_record', label: `Purge ${id}`, config });
+    const hold = (id: string) => ({
+        id, type: 'wait', label: `Hold ${id}`,
+        waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+        config: { duration: 'PT9M' },
+    });
+    const flowOf = (nodes: unknown[], label = 'Purge Stale Leads') =>
+        ({ name: 'purge_flow', label, type: 'autolaunched', status: 'active', nodes, edges: [] });
+    const legacyNode = (id: string) => purge(id, { objectName: 'lead', filters: { status: 'stale' } });
+    const canonicalNode = (id: string) => purge(id, { objectName: 'lead', filter: { status: 'stale' } });
+
+    const refusalOf = async (promise: Promise<unknown>) => {
+        try {
+            await promise;
+        } catch (err) {
+            return err as { code?: unknown; status?: unknown; issues?: Array<{ path: string; message: string }> };
+        }
+        throw new Error('expected the save to be refused');
+    };
+    /** The ADR-0112 `code` and status, and the issue at `path`, which must name `key`. */
+    const expectRefusedAt = (
+        err: { code?: unknown; status?: unknown; issues?: Array<{ path: string; message: string }> },
+        path: string,
+        key: string,
+    ) => {
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = (err.issues ?? []).find((i) => i.path === path);
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        expect(issue!.message).toContain(key);
+    };
+
+    for (const [host, services] of Object.entries(hosts)) {
+        it(`${host}: adding a node with a retired spelling the stored row does not carry is refused 422 at the new node's key, naming the new key; the stored row is untouched`, async () => {
+            const { protocol, rows, engine } = makeProtocol(services());
+            const stored = flowOf([legacyNode('n1')]);
+            await seedStoredFlow(engine, stored);
+
+            const err = await refusalOf(save(protocol, flowOf([legacyNode('n1'), hold('h1')])));
+
+            expectRefusedAt(err, 'nodes.1.config.duration', '`waitEventConfig.timerDuration`');
+            expect(storedFlow(rows)!.body).toEqual(stored);
+        });
+
+        it(`${host}: the stored row carrying the SAME retired spelling on another node does not carry the added node's: refused at the new node's key`, async () => {
+            const { protocol, rows, engine } = makeProtocol(services());
+            const stored = flowOf([legacyNode('n1')]);
+            await seedStoredFlow(engine, stored);
+
+            const err = await refusalOf(save(protocol, flowOf([legacyNode('n1'), legacyNode('n2')])));
+
+            expectRefusedAt(err, 'nodes.1.config.filters', '`filter`');
+            expect(storedFlow(rows)!.body).toEqual(stored);
+        });
+
+        it(`${host}: a retired spelling newly written on a node the stored row already has is refused at that key`, async () => {
+            const { protocol, rows, engine } = makeProtocol(services());
+            const stored = flowOf([canonicalNode('n1'), legacyNode('n2')]);
+            await seedStoredFlow(engine, stored);
+
+            const err = await refusalOf(save(protocol, flowOf([legacyNode('n1'), legacyNode('n2')])));
+
+            expectRefusedAt(err, 'nodes.0.config.filters', '`filter`');
+            expect(storedFlow(rows)!.body).toEqual(stored);
+        });
+
+        it(`${host}: draft mode with no draft row yet — the active row it overlays is the baseline — refuses the added node`, async () => {
+            const { protocol, rows, engine } = makeProtocol(services());
+            await seedStoredFlow(engine, flowOf([legacyNode('n1')]), 'active');
+
+            const err = await refusalOf(save(protocol, flowOf([legacyNode('n1'), legacyNode('n2')]), { mode: 'draft' }));
+
+            expectRefusedAt(err, 'nodes.1.config.filters', '`filter`');
+            expect(storedFlow(rows, 'draft')).toBeUndefined();
+        });
+
+        it(`${host}: draft mode over a stored draft row refuses the added node`, async () => {
+            const { protocol, rows, engine } = makeProtocol(services());
+            const draft = flowOf([legacyNode('n1')], 'Purge Stale Leads (draft)');
+            await seedStoredFlow(engine, draft, 'draft');
+
+            const err = await refusalOf(save(protocol, flowOf([legacyNode('n1'), hold('h1')]), { mode: 'draft' }));
+
+            expectRefusedAt(err, 'nodes.1.config.duration', '`waitEventConfig.timerDuration`');
+            expect(storedFlow(rows, 'draft')!.body).toEqual(draft);
+        });
+
+        it(`${host}: re-saving the served legacy body unchanged saves, healed as before`, async () => {
+            const { protocol, rows, engine } = makeProtocol(services());
+            await seedStoredFlow(engine, flowOf([legacyNode('n1'), hold('h1')]));
+            const served = (await protocol.getMetaItem({ type: 'flow', name: 'purge_flow' }) as any).item;
+
+            const result = await save(protocol, served);
+
+            expect(result.success).toBe(true);
+            const body = storedFlow(rows)!.body;
+            if (host === 'an automation service') {
+                expect(body.nodes[0].config).toEqual({ objectName: 'lead', filter: { status: 'stale' } });
+                expect(body.nodes[1].config ?? {}).not.toHaveProperty('duration');
+            } else {
+                // No canonicalizer here: judged converted, stored as written.
+                expect(body).toEqual(served);
+            }
+        });
+
+        it(`${host}: a canonical node added in front of a carried one keeps it carried — the site is the node's id, not its index`, async () => {
+            const { protocol, rows, engine } = makeProtocol(services());
+            await seedStoredFlow(engine, flowOf([legacyNode('n1')]));
+
+            const result = await save(protocol, flowOf([canonicalNode('n0'), legacyNode('n1')]));
+
+            expect(result.success).toBe(true);
+            expect(storedFlow(rows)!.body.nodes.map((n: { id: string }) => n.id)).toEqual(['n0', 'n1']);
+        });
+
+        it(`${host}: Studio's draft autosaves of a legacy flow keep saving after the first one healed the draft row — the active row still carries the spelling — and an added node is still refused`, async () => {
+            const { protocol, rows, engine } = makeProtocol(services());
+            await seedStoredFlow(engine, flowOf([legacyNode('n1')]), 'active');
+
+            // Studio's buffer is the served legacy body; a save does not replace it.
+            expect((await save(protocol, flowOf([legacyNode('n1')], 'First'), { mode: 'draft' })).success).toBe(true);
+            if (host === 'an automation service') {
+                expect(storedFlow(rows, 'draft')!.body.nodes[0].config).toEqual({ objectName: 'lead', filter: { status: 'stale' } });
+            }
+            expect((await save(protocol, flowOf([legacyNode('n1')], 'Second'), { mode: 'draft' })).success).toBe(true);
+            expect(storedFlow(rows, 'draft')!.body.label).toBe('Second');
+
+            const err = await refusalOf(save(protocol, flowOf([legacyNode('n1'), legacyNode('n2')], 'Third'), { mode: 'draft' }));
+            expectRefusedAt(err, 'nodes.1.config.filters', '`filter`');
+            expect(storedFlow(rows, 'draft')!.body.label).toBe('Second');
+        });
+    }
+
+    it('the canonicalizer is asked for the authoring posture when a re-save introduces a retired spelling, and for the full chain when the stored row carries it', async () => {
+        const spy = vi.fn(specCanonicalizer);
+        const { protocol, engine } = makeProtocol(new Map([['automation', { canonicalizeStoredFlow: spy }]]));
+        await seedStoredFlow(engine, flowOf([legacyNode('n1')]));
+
+        await refusalOf(save(protocol, flowOf([legacyNode('n1'), legacyNode('n2')])));
+        expect(spy.mock.lastCall?.[2]).toEqual({ includeRetired: false });
+
+        await save(protocol, flowOf([legacyNode('n1')], 'Edited'));
+        expect(spy.mock.lastCall?.[2]).toEqual({ includeRetired: true });
     });
 });
