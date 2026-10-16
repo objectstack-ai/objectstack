@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 90 — spawns the real producer once per single-cause fixture: each case runs one of the three real dist-reading gates (check-dual-source-exports, check-exported-any, check-skill-examples) in its own sandbox tree holding exactly one dist state or flag; slowest CI reading 71.4 s (hourly run 38798542648) x 1.25, rounded up
 //
 // The three gates that adopted #7122's dist precondition (#7181), pinned end to
 // end: `check:dual-source-exports`, `check:exported-any`, `check:skill-examples`.

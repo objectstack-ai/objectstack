@@ -122,6 +122,7 @@
     "ui/PagePrint",
     "ui/PageRegion",
     "ui/PageTabsProps",
+    "ui/PageTemplate",
     "ui/PageType",
     "ui/PageVariable",
     "ui/PaginationConfig",

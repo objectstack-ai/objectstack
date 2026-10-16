@@ -1,5 +1,91 @@
 # @objectstack/client
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 361a1c4: feat(client): `meta.publishItem` can name the package whose pending draft it promotes (`packageId`, sent as `?package=`), so a caller can follow the `?package=` remedy the per-item publish door prescribes when it refuses a publish that names no package (#23658)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** `meta.publishItem`'s options gain `packageId?: string`, sent as `?package=<id>` on `POST /api/v1/meta/:type/:name/publish`. The name, the query key and the omission rule are the ones `saveItem`'s and `deleteItem`'s `packageId` already use: only a non-empty id reaches the wire, and `undefined` and `''` send nothing.
+  
+  **Why.** A metadata item can hold one row per package (ADR-0048). A per-item publish that names no package promotes the draft a draft save naming no package writes, and the door refuses it in two states, each with `?package=` as the remedy and nothing published: `409 RESOURCE_CONFLICT` when two or more packages hold the item, and `404 NO_DRAFT` when the item's one package holds no draft and another package's draft is stored. This client had no option for it, so an SDK caller (an agent, the CLI, an app) could not do what the refusal said.
+  
+  FROM → TO:
+  
+  ```ts
+  // FROM: refused 409 RESOURCE_CONFLICT when two packages hold the item, with no way to name one
+  await client.meta.publishItem('view', 'shared_grid');
+  
+  // TO: promotes com.acme.crm's pending draft into com.acme.crm's active row, and no other package's draft
+  await client.meta.publishItem('view', 'shared_grid', { packageId: 'com.acme.crm' });
+  ```
+  
+  **Unchanged.** A publish without `packageId` sends the same request as before: no query string, and the body `{ message }` when a message is given, `{}` otherwise. `packageId` combines with `message`, which still rides the body. The environment-scoped `client.environment(id).meta` declares no `publishItem`, and this release adds none.
+
+### Patch Changes
+
+- a1285f2: feat(cli): `os meta delete` and `os meta register` take `--package <id>`, so a CLI user can follow the `409 RESOURCE_CONFLICT` remedy the metadata doors prescribe for an item two packages hold (#23350)
+  
+  Clause-②: yes (widening)
+  
+  **What is new.** Both commands declare an optional `--package` flag, a package id such as `com.acme.crm`, and forward it verbatim as the SDK's `packageId`, sent as `?package=<id>`:
+  
+  ```bash
+  os meta delete view shared_grid --package com.acme.crm              # removes com.acme.crm's row of the item, no other package's row
+  os meta register view --data view-def.json --package com.acme.crm   # writes com.acme.crm's row of the item
+  ```
+  
+  **Why.** A metadata item can hold one row per package (ADR-0048). When two or more packages hold an item, the reset door `DELETE /api/v1/meta/:type/:name` and the save door `PUT /api/v1/meta/:type/:name` both refuse a request that names no package, with `409 RESOURCE_CONFLICT`. The refusal names the packages and prescribes `?package=`. Neither command could send it, so a CLI user was told to do something the CLI could not do.
+  
+  **Unchanged.** Without `--package`, both commands send the same request as before: `os meta delete` adds no query string unless `--draft` is given, and `os meta register` saves active with no query string. `--package` combines with `--draft` and `--if-match` on `os meta delete`. An empty `--package` (for example `--package "$PKG"` with `PKG` unset) is refused before anything is sent, as an empty `--if-match` already is, because a package-less request is not always refused: the server may resolve it to a row the operator did not mean.
+  
+  **`@objectstack/client` (patch).** The `DeleteMetaItemOptions` docblock now names the reset door's carriers (`If-Match`, `state`, `package`, `dropStorage`, `member`) instead of stating a count that had gone stale. No type or behavior changes.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

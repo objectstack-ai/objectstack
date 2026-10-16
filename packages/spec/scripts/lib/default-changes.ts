@@ -620,4 +620,27 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + '`visibility: \'private\'` (on the CLI, `--visibility private`).',
     },
   ],
+  18: [
+    {
+      key: 'ui/FormSection:columns',
+      from: '1',
+      to: '(none)',
+      reason:
+        'A RULED declaration change (maintainer ruling record 6204264665: 「不用决策卡，我同意 b) '
+        + '改协议（推荐）： 去掉分节 columns 的 default(1)」). A form section\'s `columns` now has two '
+        + 'meanings and no default: DECLARED, it is the author\'s ceiling — at most that many fields '
+        + 'per row where the container is wide enough, collapsed by the renderer on narrow '
+        + 'containers; UNDECLARED, the density is the renderer\'s choice by available width. The old '
+        + '`default(1)` materialised an authored-looking `columns: 1` onto every silent section, so '
+        + 'after parse a renderer could not tell "the author asked for one column" from "the author '
+        + 'said nothing" — on a wide dialog the second drew one long column, while the form body\'s '
+        + 'own `FormViewSchema.columns` was already optional with no default. What moves for a '
+        + 'consumer: a parsed section that omits `columns` no longer carries the key, so a reader of '
+        + 'the parsed value sees `1 | 2 | 3 | 4 | undefined`, where `undefined` means "the renderer '
+        + 'decides". To keep a section single-column on a wide container, write `columns: 1`. No '
+        + '`semantic` migration entry accompanies this: materialising `columns: 1` onto stored '
+        + 'sections would re-create exactly the reading the ruling removed, and every declared value '
+        + 'keeps its meaning.',
+    },
+  ],
 };

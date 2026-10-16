@@ -69,11 +69,13 @@ import {
 // place a manifest's default record pages are read from (module doc).
 import {
   declaredDefaultRecordPages,
+  misplacedDefaultPages,
+  type MisplacedDefaultPage,
   defaultRecordPageHolderKey,
   describeDefaultRecordPageHolder,
   type DefaultRecordPageHolder,
 } from './default-record-page.js';
-import { defaultRecordPageObject } from '@objectstack/spec/ui';
+import { defaultRecordPageObject, misplacedDefaultPageRefusal } from '@objectstack/spec/ui';
 // [#14553] The ONE resolution of "does this nav group id exist?" and the ONE
 // wording of the diagnostic when it does not. `os build` calls the same two
 // (`checkNavContributionGroups`), so the compile-time door and this read-time
@@ -1794,6 +1796,51 @@ export class DefaultRecordPageConflictError extends Error {
 }
 
 /**
+ * {@link MisplacedDefaultPageError}'s code — `INVALID_METADATA`, already this
+ * package's spelling for "a programmatically supplied metadata body does not
+ * satisfy the spec schema" (see {@link OBJECT_FIELD_TYPE_REFUSED_CODE}): the
+ * page parse refuses the same body at `os validate` and at save. ⛔ Not a new
+ * code. The condition is named by the error's `name`.
+ */
+export const MISPLACED_DEFAULT_PAGE_CODE = 'INVALID_METADATA' as const;
+
+/**
+ * Raised when a package registers a page declaring `isDefault: true` that is
+ * not a record page bound to an object (maintainer ruling A on
+ * objectstack#23610, record 6190536588). Nothing reads the flag there — an app
+ * opens on its first navigation item and the root landing follows the app's
+ * own `isDefault` — so the registry refuses it as the page parse does, with
+ * the parse's own sentence (`misplacedDefaultPageRefusal`,
+ * `@objectstack/spec/ui`). A package's pages reach the registry without a
+ * parse, which is why this door needs its own throw.
+ *
+ * The ADR-0112 envelope (`code` + `status: 422`). Every misplaced page the
+ * registration carries is listed — `pages` — so one boot reports all of them.
+ */
+export class MisplacedDefaultPageError extends Error {
+  readonly code = MISPLACED_DEFAULT_PAGE_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  /** The package whose registration this refusal stopped. */
+  readonly packageId: string | undefined;
+  /** Every misplaced page, in declaration order. */
+  readonly pages: readonly MisplacedDefaultPage[];
+
+  constructor(packageId: string | undefined, pages: readonly MisplacedDefaultPage[]) {
+    const owner = packageId === undefined ? 'a package' : `package "${packageId}"`;
+    super(
+      pages
+        .map(({ page, refusal }) => `Page "${page ?? '(unnamed)'}" of ${owner}: ${refusal}`)
+        .join(' '),
+    );
+    this.name = 'MisplacedDefaultPageError';
+    this.packageId = packageId;
+    this.pages = pages;
+  }
+}
+
+/**
  * Every package-held position and permission-set name the environment catalog
  * also holds, read off `registry` — the conflicts the engine plugin's cold-boot
  * check refuses the boot with (`ObjectQLPlugin`, right after `sys_metadata`
@@ -2662,6 +2709,12 @@ export class SchemaRegistry {
    *   pages of each conflict.
    */
   private refuseDefaultRecordPageConflicts(manifest: ObjectStackManifest, selfId: string | undefined): void {
+    // `isDefault: true` on a page that is not a record page bound to an object
+    // is refused on its own account first (maintainer ruling A on
+    // objectstack#23610) — whatever the package's identity, since the page
+    // itself, not a holder, is what is wrong.
+    const misplaced = misplacedDefaultPages(manifest);
+    if (misplaced.length > 0) throw new MisplacedDefaultPageError(selfId, misplaced);
     if (selfId === undefined) return;
     const conflicts: DefaultRecordPageConflict[] = [];
     // object → the first page this manifest declares for it.
@@ -4591,6 +4644,12 @@ export class SchemaRegistry {
     // judged here: the metadata save door refuses a second default before it
     // is stored.
     if (packageId && type === 'page') {
+      // A page declaring `isDefault: true` that is not a record page bound to
+      // an object is refused before it is judged as a holder (maintainer
+      // ruling A on objectstack#23610) — the same sentence the page parse
+      // prints at `os validate` and at save.
+      const refusal = misplacedDefaultPageRefusal(item);
+      if (refusal !== undefined) throw new MisplacedDefaultPageError(packageId, [{ page: baseName, refusal }]);
       const object = defaultRecordPageObject(item);
       if (object !== undefined) {
         const holders = this.otherDefaultRecordPageHolders(object, baseName, packageId);

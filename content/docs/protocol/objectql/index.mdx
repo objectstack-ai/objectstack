@@ -118,7 +118,7 @@ ObjectQL provides 20+ field types that encode business semantics:
 | `lookup` | Relationship | `account_id` references `account` |
 | `formula` | Calculated value | `total = quantity * price` |
 | `summary` | Aggregate children | `total_opportunities` counts child records |
-| `currency` | Money with exchange rates | `{amount: 1000, currency: 'USD'}` |
+| `currency` | Money, in the field's fixed currency or the tenant default | `1000` (a bare number) |
 | `address` | Geocoding & distance | `{street, city, lat, lng}` |
 
 See [Types Reference](/docs/protocol/objectql/types) for complete list.

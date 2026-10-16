@@ -97,6 +97,12 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  * [#23050 slice 6] …and `registerSecurityExplainEndpoints`' and
  * `registerSecurityEndpoints`' bodies to `security-routes.ts`, with their five
  * (two and three) — the second module on the list to carry TWO registrars.
+ *
+ * [#23050 slice 7] …and `registerDiscoveryEndpoints`' and
+ * `registerOpenApiEndpoints`' bodies to `discovery-routes.ts`, with their two
+ * (none and two) — the third module to carry TWO registrars, and the first
+ * moved registrar whose body reads no `resolveExecCtx` at all (the discovery
+ * document resolves no caller).
  */
 const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
@@ -109,14 +115,16 @@ const siteKey = (file: string, line: number) => `${file}:${line}`;
  * moved registrar (`registerDataActionEndpoints`, `registerBatchEndpoints`,
  * `registerApprovalsEndpoints`, `registerSharingEndpoints`,
  * `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`,
- * `registerSecurityExplainEndpoints`, `registerSecurityEndpoints`) hands
- * its moved body forwards each member to the server with
- * `(...a) => this.<member>(...a)`, so a moved site's stack shows that forwarder
- * above the site itself. The site is the first censused frame that is not one.
- * Found by their spelling, and §2 pins ONE per moved REGISTRAR — one per moved
- * module, plus {@link EXTRA_MOVED_REGISTRARS} — so a respelt forwarder — or a
- * module moved without joining `SITE_FILES` — is a control failure there rather
- * than every moved site silently attributed to it.
+ * `registerSecurityExplainEndpoints`, `registerSecurityEndpoints`,
+ * `registerOpenApiEndpoints`) hands its moved body forwards each member to the
+ * server with `(...a) => this.<member>(...a)`, so a moved site's stack shows
+ * that forwarder above the site itself. The site is the first censused frame
+ * that is not one. Found by their spelling, and §2 pins ONE per moved REGISTRAR
+ * whose body reads the seam — one per moved module, plus
+ * {@link EXTRA_MOVED_REGISTRARS}, less {@link MOVED_REGISTRARS_READING_NO_EXECCTX}
+ * — so a respelt forwarder — or a module moved without joining `SITE_FILES` —
+ * is a control failure there rather than every moved site silently attributed
+ * to it.
  */
 const FORWARDER_LINES = SOURCE.split('\n').flatMap((l, i) =>
     l.includes('resolveExecCtx: (...a) => this.resolveExecCtx(...a),') ? [i + 1] : []);
@@ -127,10 +135,28 @@ const FORWARDERS = new Set(FORWARDER_LINES.map((line) => siteKey('rest-server.ts
  * own host literal and so through its own forwarder.
  *
  * [#23050 slice 6] `security-routes.ts` carries two as well, on the same terms.
+ *
+ * [#23050 slice 7] So does `discovery-routes.ts` (the discovery and OpenAPI
+ * bodies), each handed over by its own host literal — but see
+ * {@link MOVED_REGISTRARS_READING_NO_EXECCTX}: only one of its two literals
+ * carries the forwarder.
  */
 const EXTRA_MOVED_REGISTRARS: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
     'sharing-routes.ts': 1,
     'security-routes.ts': 1,
+    'discovery-routes.ts': 1,
+};
+/**
+ * [#23050 slice 7] The moved registrars whose bodies read no `resolveExecCtx`,
+ * so whose host literals hand over no forwarder — measured by the AST walk of
+ * the body, not assumed. `registerDiscoveryEndpoints`' body resolves no caller
+ * (the discovery document is served to anyone), so its host literal names no
+ * `resolveExecCtx` member; its module's other registrar, the OpenAPI pair,
+ * reads it twice and carries the forwarder. A body that starts reading the
+ * seam gains a forwarder, and §2's exact count reds until this entry goes.
+ */
+const MOVED_REGISTRARS_READING_NO_EXECCTX: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
+    'discovery-routes.ts': 1,
 };
 
 /** A stack frame in any censused file, as `<file>:<line>:<column>`. */
@@ -616,13 +642,27 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // members, four). Eight forwarders now, one per moved registrar:
         // (7 - 1) + 2, the second module carrying two registrars counted in
         // `EXTRA_MOVED_REGISTRARS`.
-        expect(SITE_FILES).toHaveLength(7);
+        //
+        // [#23050 slice 7] 62 sites UNCHANGED / 109 → 113 mentions — the same MOVE.
+        // `registerOpenApiEndpoints`' body left for `discovery-routes.ts` with its
+        // two BARE sites (the document and its viewer), and
+        // `registerDiscoveryEndpoints`' with none: 25 + 9 + 5 + 7 + 8 + 1 + 5 + 2
+        // = 62 sites. The four new mentions are this slice's seam, the two
+        // spellings ONCE (one host literal's forwarder, two; one host
+        // interface's member, two): `rest-server.ts` stays at 57 (two sites
+        // out, one forwarder's two mentions in). Nine forwarders now:
+        // (8 - 1) + 3 - 1 — the third module carrying two registrars counted in
+        // `EXTRA_MOVED_REGISTRARS`, and the discovery registrar, which reads no
+        // `resolveExecCtx`, in `MOVED_REGISTRARS_READING_NO_EXECCTX`.
+        expect(SITE_FILES).toHaveLength(8);
         expect(SITES.length).toBe(62);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(109);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(113);
         const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
-        expect(extraMovedRegistrars).toBe(2);
-        expect(FORWARDER_LINES, 'one host-literal resolveExecCtx forwarder per moved registrar: one was respelt or removed, or a module moved without joining SITE_FILES')
-            .toHaveLength(SITE_FILES.length - 1 + extraMovedRegistrars);
+        expect(extraMovedRegistrars).toBe(3);
+        const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);
+        expect(registrarsReadingNoExecCtx).toBe(1);
+        expect(FORWARDER_LINES, 'one host-literal resolveExecCtx forwarder per moved registrar whose body reads it: one was respelt or removed, or a module moved without joining SITE_FILES')
+            .toHaveLength(SITE_FILES.length - 1 + extraMovedRegistrars - registrarsReadingNoExecCtx);
     });
 
     it('the split is 16 locally caught / 46 bare — NOT 12 / 46, which does not add to 62', () => {

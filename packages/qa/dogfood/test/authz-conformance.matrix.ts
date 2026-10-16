@@ -295,7 +295,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // #22430 — the API-description endpoints, under the ruling recorded on #22146
   // (the API-description endpoints refuse an anonymous caller with 401).
   { id: 'anonymous-deny-api-description', summary: 'anonymous-deny on the API-description endpoints (the document and its viewer)', state: 'enforced',
-    enforcement: 'rest/rest-server.ts registerOpenApiEndpoints — BOTH handlers (the document and its viewer page, on every base the server mounts) open with enforceAuth (→ shouldDenyAnonymous) as their first act, ahead of the bundled-artifact load and the protocol resolution, so a refused request does no work and does not reveal whether a document is bundled; an anonymous caller gets the REST seam\'s flat 401 UNAUTHENTICATED, a signed-in caller is served as before, and a session held by the ADR-0069 auth-policy gate gets that gate\'s 403',
+    enforcement: 'rest/discovery-routes.ts registerOpenApiEndpoints — BOTH handlers (the document and its viewer page, on every base the server mounts) open with enforceAuth (→ shouldDenyAnonymous) as their first act, ahead of the bundled-artifact load and the protocol resolution, so a refused request does no work and does not reveal whether a document is bundled; an anonymous caller gets the REST seam\'s flat 401 UNAUTHENTICATED, a signed-in caller is served as before, and a session held by the ADR-0069 auth-policy gate gets that gate\'s 403',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     // The REST family at ledger granularity. The family is exactly these two
     // routes and both handlers open with the floor, which is the property a

@@ -356,6 +356,14 @@ const MODULES = {
     // `error` body (every arm there emits the nested `{ error: { code, message } }`
     // through its family's one emitter), so this count does not move and that
     // module declares 0 below; the sum is unchanged (17 + 13 + 8 + 1 + 0 + 0 + 0 = 39).
+    //
+    // 17 → 17 (#23050 slice 7): the discovery and OpenAPI bodies left this file
+    // for `discovery-routes.ts` carrying NO literal string `error` body (the
+    // discovery handler's one refusal path is the shared `handleRouteError`, and
+    // the OpenAPI document's one hand-built refusal is the nested
+    // `{ error: { code, message } }`), so this count does not move and that
+    // module declares 0 below; the sum is unchanged
+    // (17 + 13 + 8 + 1 + 0 + 0 + 0 + 0 = 39).
     stringError: 17,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
@@ -422,9 +430,14 @@ const MODULES = {
     //
     // 17 → 17 (#23050 slice 6): the security-explain and suggested-binding
     // bodies left this file for `security-routes.ts` carrying NO `{ code, error }`
-    // body — the two arms #7981 and #8073 converted are the ones counted above
+    // body — the four arms #7981 and #8073 converted are the ones counted above
     // as 77 → 73 — so this count does not move and that module declares 0 below;
     // the sum is unchanged (17 + 15 + 8 + 9 + 4 + 1 + 0 = 54).
+    //
+    // 17 → 17 (#23050 slice 7): the discovery and OpenAPI bodies left this file
+    // for `discovery-routes.ts` carrying NO `{ code, error }` body, so this
+    // count does not move and that module declares 0 below; the sum is
+    // unchanged (17 + 15 + 8 + 9 + 4 + 1 + 0 + 0 = 54).
     siblingCode: 17,
   },
 
@@ -567,6 +580,25 @@ const MODULES = {
   'packages/rest/src/security-routes.ts': {
     dialectOnly:
       'moved out of `rest-server.ts` by #23050 slice 6 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
+  },
+
+  // [#23050 slice 7] `RestServer#registerDiscoveryEndpoints`' and
+  // `#registerOpenApiEndpoints`' bodies — the discovery document (the API root
+  // and `/discovery`) and the OpenAPI pair (`/openapi.json` and the `/docs`
+  // viewer) — moved out of `rest-server.ts` whole, into ONE module, on exactly
+  // slice 1's terms above: a MOVE, no wire answer changed, so it inherits
+  // `dialectOnly` and the two dialect facts, and no write-site count. Both
+  // counts were measured on the moved file and equal what left `rest-server.ts`
+  // in the same PR (stringError 17 → 17, siblingCode 17 → 17: none), so each
+  // sum is unchanged. Both only ever tick down. Discovered by the `*-routes.ts`
+  // convention and declared in the same PR that created the module, so the gap
+  // never exists.
+  'packages/rest/src/discovery-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 7 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 0,
     siblingCode: 0,
