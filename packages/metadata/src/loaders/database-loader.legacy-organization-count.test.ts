@@ -11,6 +11,7 @@
  * CONTROL), whose answers are the ones the loader always gave.
  */
 import { describe, expect, it } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { DatabaseLoader } from './database-loader.js';
 
 type Row = Record<string, unknown>;
@@ -45,7 +46,10 @@ function engineOver(seed: Record<string, Row[]>, legacyShape: boolean) {
   };
   return {
     async find(t: string, q?: any) { return select(t, q); },
-    async findOne(t: string, q?: any) { return select(t, q)[0] ?? null; },
+    async findOne(t: string, q?: any) {
+      assertEngineFindOnePredicate(t, q);
+      return select(t, q)[0] ?? null;
+    },
     async count(t: string, q?: any) { return rowsOf(t).filter((r) => matches(r, q?.where)).length; },
     getDriverForObject(t: string) {
       return {
