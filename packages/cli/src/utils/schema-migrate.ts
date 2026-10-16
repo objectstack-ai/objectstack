@@ -724,6 +724,19 @@ export function describeTelemetryDatabase(file: string): string {
   )}`;
 }
 
+/**
+ * [#23848] What a boot whose schema sync was SKIPPED ({@link SchemaStack.schemaSync}
+ * `'skipped'`, the `deferredDdlUnsupported: 'skip-schema-sync'` answer) did not
+ * examine, as `os migrate plan` / `apply` print it under the database. Their
+ * `--json` documents carry `schemaSync: 'skipped'` for the same fact, so an
+ * empty `pending` there reads as "not examined", never as "nothing to create".
+ */
+export const SKIPPED_SCHEMA_SYNC_NOTE =
+  'Additive schema work was NOT examined: this database\'s transport (the Turso REMOTE transport) cannot hold '
+  + 'schema DDL back for a preview, so this run reads and applies drift only. A table or column the metadata '
+  + 'declares and the database lacks is neither listed nor created here; on this transport the serving boot '
+  + '(os serve / os start) creates it.';
+
 /** Boot the schema stack. Caller MUST call `shutdown()` when done. */
 export async function bootSchemaStack(
   opts: {
@@ -812,9 +825,9 @@ export async function bootSchemaStack(
      * resolved), whose driver refuses the deferral.
      *
      *  - `'refuse'` (the default): arm the deferral anyway, so the boot fails
-     *    with the driver's own refusal. Right for every command whose dry run
-     *    lists the held-back work (`os migrate plan` / `apply`): a boot that
-     *    holds nothing back cannot list it.
+     *    with the driver's own refusal. Right for a command whose answer reads
+     *    the held-back work or a table its boot measured absent: a boot that
+     *    holds nothing back can list neither.
      *  - `'skip-schema-sync'`: boot with schema sync SKIPPED instead
      *    (`skipSchemaSync`, the posture `OS_SKIP_SCHEMA_SYNC=1` names). No DDL is
      *    held back because none is attempted, and each object is told to its
@@ -822,9 +835,15 @@ export async function bootSchemaStack(
      *    diffs the declared set. The boot reports it ({@link SchemaStack.schemaSync}),
      *    {@link SchemaStack.pendingSchemaWork} is `[]` and
      *    {@link SchemaStack.tableAbsent} measures nothing. Only a command that
-     *    needs no table this release would CREATE may ask for it; today that is
+     *    needs no table this release would CREATE may ask for it, or one that
+     *    says, in both faces, that it did not examine that work. Today:
      *    `os migrate organization-ownership`, which runs against an environment
-     *    whose own boot has already run the additive sync.
+     *    whose own boot has already run the additive sync; and [#23848]
+     *    `os migrate plan` / `apply`, which on such a boot read and apply drift
+     *    only and print {@link SKIPPED_SCHEMA_SYNC_NOTE} (`--json`:
+     *    `schemaSync: 'skipped'`). On this transport the serving boot creates
+     *    what they do not, and their drift half is the only remedy a
+     *    destructive entry has there.
      *
      * Decided from the resolved URL before anything connects, never by catching
      * the driver's refusal, and only for the primary: any other datasource the

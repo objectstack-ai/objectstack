@@ -286,8 +286,8 @@ output at all. Spawn with an `ipc` channel and wait for a message:
 
 | Message | Sent by | Means |
 |---|---|---|
-| `objectstack:listening` | `os serve` | The HTTP server is bound. Carries `{ port, url }` — the port actually bound, which in dev may differ from the one requested. |
-| `objectstack:seed-settled` | `os serve` | Nothing is still seeding. Carries `{ ok, suppressed, sources }`. Sent once per boot, always **after** `objectstack:listening`. |
+| `objectstack:listening` | `os serve` | The HTTP server is bound. Carries `{ port, url }` — the port actually bound, which in dev may differ from the one requested. Not sent by a boot that binds no HTTP server (`--no-server` with no transport composed). |
+| `objectstack:seed-settled` | `os serve` | Nothing is still seeding. Carries `{ ok, suppressed, sources }`. Sent once per boot, always **after** `objectstack:listening`; on a boot that binds no HTTP server it is still sent, and is the only message. |
 
 ```js
 import { spawn } from 'node:child_process';
