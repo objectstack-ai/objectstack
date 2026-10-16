@@ -15,7 +15,8 @@
  * This is an ENGINE reading, not a reading of the `status` literal. A literal
  * check stays green on any spelling, including one the engine happens not to
  * disable, which is exactly how `draft` shipped. So the shipped definition —
- * imported from `src/automation/flows/index.ts`, not a copy — is registered on
+ * the module's own export, which the first case proves is the very object
+ * `allFlows` loads, not a copy — is registered on
  * a real `AutomationEngine` with a recording `record_change` trigger standing
  * in for `@objectstack/trigger-record-change` (whose `start()` is what
  * subscribes a flow to the object's write hooks), and the pin asserts what the
@@ -36,7 +37,8 @@ import { describe, it, expect } from 'vitest';
 import { AutomationEngine } from '@objectstack/service-automation';
 import type { FlowTrigger, FlowTriggerBinding } from '@objectstack/service-automation';
 
-import { ApproverBindingsFlow, allFlows } from '../src/automation/flows/index.js';
+import { ApproverBindingsFlow } from '../src/automation/flows/approver-bindings.flow.js';
+import { allFlows } from '../src/automation/flows/index.js';
 
 const SPECIMEN = 'showcase_approver_bindings';
 
