@@ -26,8 +26,8 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import * as specRoot from '@objectstack/spec';
-import * as specData from '@objectstack/spec/data';
+import { defineStack } from '@objectstack/spec';
+import { ObjectSchema } from '@objectstack/spec/data';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 // The package's own node_modules link — the same one these sources resolve.
@@ -44,13 +44,13 @@ function nativeEsmEntry(subpath: '.' | './data'): Record<string, unknown> {
 describe('@objectstack/spec is loaded by Node, not inlined by vite', () => {
   it('the root entry is the native module instance', () => {
     const native = nativeEsmEntry('.');
-    expect(typeof specRoot.defineStack).toBe('function');
-    expect(specRoot.defineStack).toBe(native.defineStack);
+    expect(typeof defineStack).toBe('function');
+    expect(defineStack).toBe(native.defineStack);
   });
 
   it('a subpath entry is the native module instance', () => {
     const native = nativeEsmEntry('./data');
-    expect(specData.ObjectSchema).toBeDefined();
-    expect(specData.ObjectSchema).toBe(native.ObjectSchema);
+    expect(ObjectSchema).toBeDefined();
+    expect(ObjectSchema).toBe(native.ObjectSchema);
   });
 });
