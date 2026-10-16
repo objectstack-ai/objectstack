@@ -398,7 +398,10 @@ posture, the platform operator. This has three author-visible consequences:
 An older database keeps the `sys_permission_set` table and its rows, and
 nothing serves or reads them. `os migrate organization-ownership --apply`
 (ADR-0131 D10) converts the sets an organization authored in Setup into
-environment metadata under `single` and deletes the seeded copies.
+environment metadata under `single` and deletes the seeded copies. The shipped
+sets that an install created before 2026-08-15 stored as `managed_by: 'admin'`
+count as seeded copies too. The ceremony warns about each one before it writes
+anything, and then the shipped definition applies.
 
 A cross-package job function needs no hand-authored cross-package set: bind
 each package's own sets to one **position** (the union model adds). Where a
