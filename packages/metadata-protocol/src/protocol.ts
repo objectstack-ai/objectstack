@@ -2159,6 +2159,14 @@ interface UnboundOwnerRefusalState {
      */
     adoptedDraft?: boolean;
     /**
+     * [#23712] A DRAFT save naming no package (with `namedNoPackage`): the
+     * packages whose drafts of the object are stored with no package-unbound
+     * draft beside them. Once the rows are deleted, the draft address is the
+     * one package's draft (`packagelessDraftAddress`), so each is discarded
+     * by naming its package before the save writes the package-less draft.
+     */
+    strandedDrafts?: readonly string[];
+    /**
      * Where the refusal is raised: the save door (default), a draft promotion
      * (the per-item publish and `publish-drafts`), or a registration of a
      * stored row (boot, write-through).
@@ -19725,6 +19733,7 @@ export class ObjectStackProtocolImplementation implements
      * | a DRAFT save naming `Q`, no package's row stored | the same delete, then a PUBLISH-mode save naming `Q` (it serves the object at once), then draft as before. A draft save registers nothing, so a draft sent right after the delete leaves the object unserved until it is published |
      * | rows bound to packages (`Q` or any other) are already stored beside the package-less one (the rows the save door wrote before this refusal existed) | delete each of them by naming its package, then the package-less definition, then a publish-mode save naming `Q`. Each row is named because a delete naming no package resolves to the one binding present, or is refused `409` over two ({@link packagelessAddress}), never to the package-less definition |
      * | one such row, a publish save naming NO package | it is addressed to that row ({@link packagelessAddress}); delete the row, then the same save edits the package-less definition. Over two bindings the save is refused `409` before this refusal |
+     * | [#23712] a DRAFT save naming NO package, whose draft address ({@link packagelessDraftAddress}) is a package `Q`'s: one row bound to `Q`, or no such row and a lone draft bound to `Q` | delete the row by naming its package, and with no package-unbound draft stored, discard each package's draft by naming its package (`?state=draft&package=`), then the same save writes the package-less draft. Deleting the row alone leaves `Q`'s draft, which the address then still names |
      * | a promotion of `Q`'s draft (the per-item publish, `publish-drafts`), a draft stored before the package-less row or by a draft save the door addressed to `Q` | the deletes above for the state, then the same publish: the draft stays stored, and its promotion registers it |
      * | a publish naming no package of a draft bound to NO package, which the address adopts into the one stored binding `P` | no publish moves that draft into `P` (measured: with `P`'s row gone it promotes into the package-less definition; one naming `P` answers `NO_DRAFT`). Delete `P`'s row, publish again (it updates the package-less definition), then the package-less DELETE and a publish-mode save naming `P` move the object |
      *
@@ -19769,6 +19778,25 @@ export class ObjectStackProtocolImplementation implements
                 + `addressed into '${q}', whose row is never served. DELETE ${path}?package=${q}, then publish again: `
                 + `the draft lands in the package-less definition. To move it into '${q}' then: the same DELETE with no `
                 + `package and no dropStorage (records stay), then save it naming '${q}' in publish mode.` + tail;
+        } else if (state.mode === 'draft' && state.namedNoPackage && state.at !== 'promote') {
+            // [#23712] A draft save naming no package writes the package's
+            // draft the address names. Each step names its package: a delete
+            // or discard naming none resolves by the rows the earlier steps
+            // leave. With the rows and the package drafts gone, the address is
+            // the package-unbound draft (`packagelessDraftAddress`).
+            const drafts = [...new Set(state.strandedDrafts ?? [])].sort();
+            const list = (pkgs: readonly string[]) => pkgs.map((pkg) => `'${pkg}'`).join(', ');
+            const what = [
+                ...(rows.length > 0 ? [`delete its row${rows.length > 1 ? 's' : ''} bound to ${list(rows)}`] : []),
+                ...(drafts.length > 0 ? [`discard its draft${drafts.length > 1 ? 's' : ''} bound to ${list(drafts)}`] : []),
+            ].join(' and ');
+            const steps = [
+                ...rows.map((pkg) => `DELETE ${path}?package=${pkg}`),
+                ...drafts.map((pkg) => `DELETE ${path}?state=draft&package=${pkg}`),
+            ].join(', then ');
+            message = `A draft save naming no package of object '${name}' writes a draft bound to '${q}', which no `
+                + 'publish can serve: the object is served by its definition bound to no package. First '
+                + `${what} (REST: ${steps}), then send this save again: it then writes the package-less draft.` + tail;
         } else if (rows.length > 0 && state.namedNoPackage) {
             // A save naming no package is addressed to the one binding present.
             message = `A save naming no package of object '${name}' is addressed to its stored definition bound to `
@@ -22579,8 +22607,28 @@ export class ObjectStackProtocolImplementation implements
         // owns (the `'sys_metadata'` sentinel): a save naming a package beside
         // it is refused here, with the move-into-a-package prescription
         // ({@link unboundOwnerPackageRefusal}).
+        //
+        // [#23712] …asked of the package the write lands in. A draft save
+        // naming no package keeps `packageId` empty (the repository resolves
+        // its binding, #11087), but it writes the draft
+        // {@link packagelessDraftAddress} names, which over a row bound to
+        // `Q`, or a lone draft bound to `Q`, is `Q`'s: judged with the
+        // request's empty package, the sentinel owner read `own` and the save
+        // answered `200` for a draft no publish can serve. An ambiguous
+        // address is left to the repository's `409`, as before.
         if (singularType === 'object') {
-            const layer = this.classifyObjectContribution(request.name, request.packageId);
+            const draftAddress = mode === 'draft'
+                && request.packageId == null
+                && request.source === undefined
+                && request.writeFace !== 'package-duplicate'
+                ? await this.packagelessDraftAddress(
+                    singularType, request.name, itemDiscriminator(singularType, request.item),
+                )
+                : undefined;
+            const writtenPackage = draftAddress && draftAddress.kind !== 'ambiguous'
+                ? draftAddress.into
+                : request.packageId;
+            const layer = this.classifyObjectContribution(request.name, writtenPackage);
             if (layer.kind === 'mismatch') {
                 // [#23514] For a sentinel owner the way out depends on the
                 // state: the mode, whether the caller named a package, and
@@ -22589,9 +22637,15 @@ export class ObjectStackProtocolImplementation implements
                 const storedPackages = layer.ownerPackageId === 'sys_metadata'
                     ? (await this.packagelessAddress(singularType, request.name)).candidates
                     : [];
+                // [#23712] With no package-unbound draft stored, the address
+                // is a package's draft once the rows are gone (`409` over
+                // two), so each such draft is discarded by its package too.
+                const strandedDrafts = draftAddress && draftAddress.kind !== 'ambiguous' && !draftAddress.drafts.unbound
+                    ? draftAddress.drafts.candidates
+                    : [];
                 throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
                     request.name, layer.packageId, layer.ownerPackageId,
-                    { mode, storedPackages, namedNoPackage },
+                    { mode, storedPackages, namedNoPackage, strandedDrafts },
                 );
             }
         }
