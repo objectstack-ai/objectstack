@@ -38,7 +38,44 @@ import {
   ObjectStackDefinitionSchema,
   type ObjectStackDefinition,
 } from './stack.zod';
-import { CONVERSION_NOTICE_CODE, type ConversionNotice } from './conversions/types';
+import { CONVERSION_NOTICE_CODE, type ConversionNotice, type MetadataConversion } from './conversions/types';
+
+/**
+ * The subject is the record the load-time pass leaves, not any one entry, so
+ * the page vehicle is a conversion this file owns: a live copy of the page
+ * component `visibility` → `visibleWhen` rename, appended to the table the pass
+ * reads. It was the real entry `page-component-visibility-to-visibleWhen` until
+ * #23543 F4 retired it with its key, and the one entry still live on the load
+ * path, the callout rename below, retires in the same card. A probe nobody
+ * retires keeps this file about the record, not about whichever entry happens to
+ * be live. (`toMajor: 15`, the real entry's, keeps every pinned `retiresIn: 16`.)
+ *
+ * `vi.mock` replaces the registry module for the whole file, so `apply.ts`
+ * (which `defineStack` calls) reads the extended table; nothing outside this
+ * file sees the probe.
+ */
+const PROBE = 'stack-conversions-record-probe';
+
+vi.mock('./conversions/registry', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./conversions/registry')>();
+  const { mapPageComponents, renameKey } = await import('./conversions/walk');
+  const probe: MetadataConversion = {
+    id: 'stack-conversions-record-probe',
+    toMajor: 15,
+    surface: 'page.component.visibility (test probe)',
+    summary: 'test-only probe: a live load-path rename for the conversion-record pins',
+    apply(stack, emit) {
+      return mapPageComponents(stack, (component, path) => {
+        const renamed = renameKey(component, 'visibility', 'visibleWhen');
+        if (renamed === null) return component;
+        emit({ from: 'visibility', to: 'visibleWhen', path: `${path}.visibleWhen` });
+        return renamed;
+      });
+    },
+    fixture: { before: {}, after: {}, expectedNotices: 0 },
+  };
+  return { ...original, ALL_CONVERSIONS: [...original.ALL_CONVERSIONS, probe] };
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -46,9 +83,9 @@ afterEach(() => {
 
 /**
  * A stack with one `page:header` component whose visibility predicate is
- * authored under `headerKey` — `visibility` is the alias the live conversion
- * `page-component-visibility-to-visibleWhen` rewrites to `visibleWhen`;
- * `visibleWhen` is canonical. (The vehicle used to be the header's
+ * authored under `headerKey` — `visibility` is the spelling the live
+ * {@link PROBE} rewrites to `visibleWhen` (its tombstone would refuse it
+ * otherwise); `visibleWhen` is canonical. (The vehicle used to be the header's
  * `description` → `subtitle` alias, until that conversion retired from the
  * load path at 18 — any live page conversion carries what is pinned here.)
  * No standalone actions, so the same built stack can be composed twice.
@@ -90,7 +127,7 @@ const substance = (n: ConversionNotice) => ({
 
 const HEADER_NOTICE = {
   code: CONVERSION_NOTICE_CODE,
-  conversionId: 'page-component-visibility-to-visibleWhen',
+  conversionId: PROBE,
   path: HEADER_PATH,
   from: 'visibility',
   to: 'visibleWhen',
@@ -150,7 +187,7 @@ describe('defineStack records the conversions it applied', () => {
       expect(hasStackProvenance(built), '`[]` here must not be the unmarked answer').toBe(true);
       expect(stackConversionsOf(built)).toEqual([]);
     }
-    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("conversion 'page-component-visibility-to-visibleWhen'"));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining(`conversion '${PROBE}'`));
   });
 
   it('is not subject to the stderr warn-once: a second build of the same source carries the record too', () => {
@@ -160,7 +197,7 @@ describe('defineStack records the conversions it applied', () => {
     const second = defineStack(source(ns, 'visibility') as never);
     const lines = warn.mock.calls
       .map((c) => String(c[0]))
-      .filter((l) => l.includes("conversion 'page-component-visibility-to-visibleWhen'") && l.includes(HEADER_PATH));
+      .filter((l) => l.includes(`conversion '${PROBE}'`) && l.includes(HEADER_PATH));
     // stderr says it at most once per process (an earlier test may have said it already)…
     expect(lines.length).toBeLessThanOrEqual(1);
     // …while each built stack keeps its own record.
@@ -204,7 +241,7 @@ describe('the record is invisible to every data reader, and frozen', () => {
   it('never reaches JSON, and the strict stack schema neither sees nor refuses it', () => {
     const stack = built();
     expect(stackConversionsOf(stack), 'anti-vacuity: there IS a record to leak').toHaveLength(1);
-    expect(JSON.stringify(stack)).not.toContain('page-component-visibility-to-visibleWhen');
+    expect(JSON.stringify(stack)).not.toContain(PROBE);
     expect(ObjectStackDefinitionSchema.safeParse(stack).success).toBe(true);
   });
 });
@@ -306,7 +343,7 @@ function thrown(run: () => unknown): Error & { code?: string; status?: number; i
 const ownRecord = (value: object) => Object.getOwnPropertyDescriptor(value, Symbol.for('objectstack.stack.conversions'));
 
 describe('a refusing producer carries the conversions it applied on its refusal', () => {
-  it("⭐ triage pin: a convert-then-refuse call's error answers page-component-visibility-to-visibleWhen", () => {
+  it("⭐ triage pin: a convert-then-refuse call's error answers the page probe", () => {
     quiet();
     const error = thrown(() =>
       defineStack({ ...source('rf', 'visibility'), requires: ['no-such-capability'] } as never),
@@ -406,7 +443,7 @@ describe('a refusing producer carries the conversions it applied on its refusal'
       }
     };
     const headerLines = (lines: string[]) =>
-      lines.filter((l) => l.includes("conversion 'page-component-visibility-to-visibleWhen'") && l.includes(HEADER_PATH));
+      lines.filter((l) => l.includes(`conversion '${PROBE}'`) && l.includes(HEADER_PATH));
 
     // A and B author the same notice path, so their warn-once key is one key.
     const error = thrown(() =>
