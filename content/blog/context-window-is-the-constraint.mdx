@@ -38,18 +38,24 @@ a dashboard, a lead-conversion flow, permission sets, an action, translations.
 
 | | |
 | :--- | :--- |
-| Files | 31 |
-| Lines | 1,929 |
-| Approximate tokens | ~18,500 |
+| Files | 30 |
+| Lines | 1,844 |
+| Approximate tokens | ~17,500 |
 
 That's the **whole example app**. Not a module of it — the data model, the
 UI, the automation, the access rules, all of it. It fits in about 9% of a
 200k-token context window.
 
-The Todo example is ~24.5k tokens. The kitchen-sink showcase app — which
-deliberately exercises every metadata type in the protocol, 91 files of it — is
-~174k. Even that one, the maximalist case, still fits in a 200k-token window —
+The Todo example is ~25k tokens. The kitchen-sink showcase app — which
+deliberately exercises every metadata type in the protocol, 90 files of it — is
+~175k. Even that one, the maximalist case, still fits in a 200k-token window —
 about 87% of it, leaving about 13% free for the actual work.
+
+These figures were measured at commit
+[`7a6ba0310`](https://github.com/objectstack-ai/objectstack/tree/7a6ba03109dbb7e91359eb0f7f3e64dd1263bca8/examples)
+over the non-test `.ts` files in each example's `src/`, with tokens estimated
+at four bytes each. The examples keep changing, so today's counts will differ a
+little.
 
 Measure your own:
 
