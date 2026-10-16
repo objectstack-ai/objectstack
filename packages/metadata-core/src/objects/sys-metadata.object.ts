@@ -158,7 +158,8 @@ export const SysMetadataObject = ObjectSchema.create({
     environment_id: Field.lookup('sys_environment', {
       label: 'Environment (deprecated)',
       required: false,
-      description: 'DEPRECATED. Overlays are environment rows (ADR-0131 D6); no tenant column.',
+      // ADR-0131 D6 — overlays are environment rows.
+      description: 'DEPRECATED. Overlays are environment rows; no tenant column.',
     }),
 
     /** Version number for optimistic concurrency */

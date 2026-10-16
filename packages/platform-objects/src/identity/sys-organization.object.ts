@@ -334,7 +334,7 @@ export const SysOrganization = ObjectSchema.create({
       required: false,
       group: 'Group Structure',
       description:
-        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6).',
+        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference.',
     }),
 
     sort_order: Field.number({

@@ -761,8 +761,9 @@ export const SysUser = ObjectSchema.create({
       readonly: true, // ADR-0092 — never the edit form; no writer since #9968 (platform admin: `sys_user_permission_set` / `admin_full_access`)
       maxLength: 64,
       group: 'Admin',
+      // ADR-0068 D2 stopped writing this scalar; the reference stays here, not in the copy.
       description:
-        'Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2). To grant platform-admin standing, list the user\'s verified email in `OS_PLATFORM_OWNER_EMAIL`; under the `single` tenancy posture an unscoped `admin_full_access` assignment in `sys_user_permission_set` also confers it.',
+        'Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it. To grant platform-admin standing, list the user\'s verified email in `OS_PLATFORM_OWNER_EMAIL`; under the `single` tenancy posture an unscoped `admin_full_access` assignment in `sys_user_permission_set` also confers it.',
     }),
 
     banned: Field.boolean({
@@ -975,7 +976,8 @@ export const SysUser = ObjectSchema.create({
       required: false,
       readonly: true, // ADR-0092 — drives own_and_reports RLS scope; org-structure maintenance is its own surface
       group: 'Organization',
-      description: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise).",
+      // ADR-0057 / @objectstack/security-enterprise walk this chain.
+      description: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks.",
     }),
 
     primary_business_unit_id: Field.lookup('sys_business_unit', {
@@ -983,7 +985,8 @@ export const SysUser = ObjectSchema.create({
       required: false,
       readonly: true, // ADR-0092 — denormalised projection maintained by plugin-sharing; never hand-edited
       group: 'Organization',
-      description: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership.",
+      // ADR-0057 addendum D12 — the projection's design reference.
+      description: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing. Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership.",
     }),
 
     // ── System (auto-managed, hidden from create/edit forms) ─────

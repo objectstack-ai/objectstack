@@ -45,7 +45,8 @@ export const SysMetadataAuditObject = ObjectSchema.create({
     retention: { maxAge: '365d' },
     archive: { after: '365d', to: 'archive' },
   },
-  description: 'Append-only audit trail of metadata write decisions (ADR-0010).',
+  // ADR-0010 — the reference lives in the docblock above, not in the copy.
+  description: 'Append-only audit trail of metadata write decisions.',
 
   fields: {
     /** Primary Key (UUID) */
