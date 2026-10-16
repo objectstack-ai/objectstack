@@ -39,7 +39,8 @@
  * ## The goldens
  *
  * The census and the write ledger: no boot writes a `sys_position` row in any
- * scenario, and an existing database keeps exactly the rows it had. Since
+ * scenario, and an existing database keeps exactly the rows it had — while
+ * the catalog read answers the declarations' text, not those rows'. Since
  * stage 6b-2 no boot writes a `sys_permission_set` row either, and the grant
  * golden holds without one. The census
  * instrument is proven able to see a row by a positive control (one
@@ -66,6 +67,7 @@ import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/pl
 import { SecurityPlugin } from './security-plugin.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { securityObjects, SECURITY_PLUGIN_ID } from './manifest.js';
+import { securityBuiltinPositions } from './builtin-positions.js';
 import { withLegacyCatalogTables } from './__tests__/legacy-catalog-objects.testkit.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
@@ -482,6 +484,25 @@ for (const name of Object.keys(SCENARIOS) as ScenarioName[]) {
       expect(await positionCensus(engine)).toEqual(census);
     });
 
+    // What an upgraded tenant's administrator reads. Setup's Positions page
+    // lists the declared positions (the metadata door), never a `sys_position`
+    // row: an existing database keeps the older audience-anchor text a retired
+    // seeder stamped, untouched by the boot, and the catalog read answers the
+    // declaration's text for both anchors.
+    if (scenario.existingRows) {
+      it('answers the declared audience-anchor copy, not the older text the existing rows hold', async () => {
+        const { engine, metadata, census } = booted.get(name)!;
+        const reader = createSecurityCatalogReader({ registry: engine.registry as any, metadata: metadata as any });
+        for (const anchor of LEGACY_ANCHOR_NAMES) {
+          const declared = securityBuiltinPositions.find((p) => p.name === anchor)!.description;
+          const stored = LEGACY_ROWS.find((r) => r.name === anchor)!.description;
+          expect(stored, `${anchor}: the stored row holds the older text`).not.toBe(declared);
+          expect(census.find((line) => line.startsWith(`${anchor} |`))?.endsWith(`| ${stored}`), `${anchor}: row untouched`).toBe(true);
+          expect((await reader.resolve('position', anchor))?.definition.description, `${anchor}: catalog read`).toBe(declared);
+        }
+      });
+    }
+
     // [C3 stage 6b-2] The catalog seeders are retired: no boot writes a
     // `sys_permission_set` row — not the platform defaults, not a package's
     // sets, not an organization's copies (the late organization included) —
@@ -549,7 +570,10 @@ const REFUSAL_GOLDEN: Record<string, WriteOutcome> = {
  * The rows the retired seeders wrote — the six built-ins (`platform`) and the
  * stack's declared `field_rep` — as an existing database holds them: one
  * organization-less set under `single`, the organization's own set under a
- * wall. The text is what those seeders stamped from the same declarations.
+ * wall. The text is what those seeders stamped from the declarations of their
+ * release — for `everyone` and `guest` the older copy that still carried
+ * design-record ids, which the declarations have since dropped. No boot
+ * rewrites it, and no catalog read answers it ({@link LEGACY_ANCHOR_NAMES}).
  */
 const LEGACY_ROWS: ReadonlyArray<{ name: string; label: string; description: string; managed_by?: string }> = [
   { name: 'field_rep', label: 'Field Rep', description: 'Works the territory' },
@@ -572,6 +596,9 @@ const LEGACY_ROWS: ReadonlyArray<{ name: string; label: string; description: str
     managed_by: 'platform',
   },
 ];
+
+/** The audience anchors whose {@link LEGACY_ROWS} text is older than their declaration. */
+const LEGACY_ANCHOR_NAMES = ['everyone', 'guest'] as const;
 
 /** {@link LEGACY_ROWS} as the census spells them, for a scenario's posture. */
 function legacyCensus(scenario: Scenario): string[] {
