@@ -18,6 +18,9 @@ import { retiredKey } from '../shared/retired-key';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
+// [#23809] The single-option-code types — the only ones whose options take a
+// lifecycle `kind`, and so the only option fields a `stageField` may name.
+import { SINGLE_OPTION_TYPES } from './field-value.zod';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
@@ -1934,6 +1937,104 @@ function refuseDishonestReferenceDeletedWhen(
 }
 
 /**
+ * [#23809, maintainer ruling on the card: 「同意」] The field an object's
+ * `stageField` names declares a `kind` on EVERY option — `open`, `won` or
+ * `lost` (`SelectOptionKindSchema`). Every renderer of the stage field (the
+ * record path, the kanban column order, the "closed" filters, the won / lost
+ * measures) reads that kind to tell the steps from the two ends, so an option
+ * without one would be drawn by the old guess from its spelling — the defect
+ * this key exists to end. There is deliberately no default here: on a plain
+ * select an absent kind reads as `open`, but under `stageField` that reading
+ * would hand an AI that forgot the key the same wrong path, only declared.
+ *
+ * Refused, judged against the AUTHORED field map:
+ *
+ *  - one located issue per option without `kind`, at
+ *    `['fields', <field>, 'options', <i>, 'kind']`, naming the field and the
+ *    option;
+ *  - at `['stageField']`, a stage field whose options are not declared on this
+ *    object (a `picklist`-backed select): its options cannot be judged here,
+ *    and this is the one door every save passes, so it is refused rather than
+ *    let through unjudged;
+ *  - at `['stageField']`, a stage field that carries options but holds no
+ *    single option code per record (a multi-value choice, a `multiple: true`
+ *    select): a record stands at one stage.
+ *
+ * Unchanged, on purpose: `stageField: false`, a `stageField` naming no declared
+ * field (the lint `semantic-roles` rule reports it), and one naming a field
+ * with no options at all.
+ *
+ * Judged at parse, beside {@link refuseDishonestReferenceDeletedWhen}, so every
+ * door — `defineStack`, a raw `.parse()`, the metadata save door — refuses it.
+ */
+function refuseStageFieldWithoutKinds(
+  ownName: unknown,
+  stageField: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (typeof stageField !== 'string') return;
+  if (fields === null || typeof fields !== 'object') return;
+  const fieldMap = fields as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(fieldMap, stageField)) return;
+  const def = fieldMap[stageField] as
+    | { type?: unknown; multiple?: unknown; options?: unknown; picklist?: unknown }
+    | null
+    | undefined;
+  if (def === null || typeof def !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const type = typeof def.type === 'string' ? def.type : String(def.type);
+  const hasOptionSource = Array.isArray(def.options) || typeof def.picklist === 'string';
+  const prescription =
+    'A stage field is a single-value `select` (or `radio`) whose inline `options` each declare `kind`: '
+    + "`'open'` for a step on the way, `'won'` for the successful end, `'lost'` for the unsuccessful end "
+    + "(e.g. `{ label: 'Closed Won', value: 'closed_won', kind: 'won' }`). Or set `stageField: false` if "
+    + 'this object has no linear lifecycle.';
+
+  if (!SINGLE_OPTION_TYPES.has(type) || def.multiple === true) {
+    if (!hasOptionSource) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['stageField'],
+      message:
+        `Object \`${objectName}\` declares \`stageField: '${stageField}'\`, a \`${type}\` field`
+        + `${def.multiple === true ? ' with `multiple: true`' : ''} that holds no single option code per `
+        + `record, so it cannot be a lifecycle stage. ${prescription}`,
+    });
+    return;
+  }
+
+  if (!Array.isArray(def.options)) {
+    if (typeof def.picklist !== 'string') return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['stageField'],
+      message:
+        `Object \`${objectName}\` declares \`stageField: '${stageField}'\`, a field that takes its options from `
+        + `\`picklist: '${def.picklist}'\`. Those options are not declared on this object, so whether each `
+        + `declares its lifecycle \`kind\` cannot be checked here. Declare the stage field's options inline on `
+        + `\`${stageField}\` instead of the picklist. ${prescription}`,
+    });
+    return;
+  }
+
+  def.options.forEach((option, index) => {
+    const rec = option as { value?: unknown; kind?: unknown } | null;
+    if (rec === null || typeof rec !== 'object' || rec.kind !== undefined) return;
+    const value = typeof rec.value === 'string' ? rec.value : String(rec.value);
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fields', stageField, 'options', index, 'kind'],
+      message:
+        `Option '${value}' of field \`${stageField}\` declares no \`kind\`, and object \`${objectName}\` names `
+        + `\`${stageField}\` as its \`stageField\`: every option of a stage field declares its lifecycle kind, `
+        + `so the record path can tell the steps from the two ends. Add \`kind: 'open'\` (a step on the way), `
+        + `\`kind: 'won'\` (the successful end) or \`kind: 'lost'\` (the unsuccessful end) to '${value}'.`,
+    });
+  });
+}
+
+/**
  * The machine-name grammar an attached block and its leaves share with field
  * names — they are keys on the same served row (`record.<block>.<leaf>`).
  */
@@ -2783,8 +2884,14 @@ const ObjectSchemaBase = strictObject(
    * a stage field (status/stage/state/phase). Consumed by the record-detail
    * path/stepper today; kanban default grouping, list badges and report
    * bucketing are natural future consumers.
+   *
+   * [#23809] The named field is a single-value `select` / `radio` whose inline
+   * options EACH declare their lifecycle `kind` (`open` / `won` / `lost`), so
+   * those consumers tell the steps from the two ends by declaration, not by
+   * the value's spelling. Refused at parse otherwise — see
+   * `refuseStageFieldWithoutKinds`.
    */
-  stageField: z.union([z.string(), z.literal(false)]).optional().describe('[ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed.'),
+  stageField: z.union([z.string(), z.literal(false)]).optional().describe("[ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. The named field is a single-value `select` / `radio` with inline `options`, and every option declares its `kind` ('open' / 'won' / 'lost'); refused otherwise."),
 
   /**
    * Cross-renderer EDIT-INTERACTION intent: whether a record of this object is
@@ -3044,6 +3151,10 @@ const ObjectSchemaBase = strictObject(
   // predicate names a declared single-value `select` sibling and one of its
   // options — the same door: only the object holds the sibling map.
   refuseDishonestReferenceDeletedWhen(object.name, object.fields, ctx);
+  // [#23809] Every option of the field `stageField` names declares its
+  // lifecycle `kind` — the same door: only the object knows which field is
+  // its stage.
+  refuseStageFieldWithoutKinds(object.name, object.stageField, object.fields, ctx);
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
