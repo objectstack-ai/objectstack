@@ -288,7 +288,9 @@ quantity:
 ---
 
 #### `currency`
-Money amount with currency code.
+Money amount, stored as a bare number. The currency is field configuration,
+never stored per value: `defaultCurrency` under `currencyMode: fixed`, or the
+tenant default currency under `dynamic`, the default.
 
 ```yaml
 annual_revenue:
