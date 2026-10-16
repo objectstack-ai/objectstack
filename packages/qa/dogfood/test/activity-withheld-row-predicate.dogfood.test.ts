@@ -32,7 +32,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { defineStack } from '@objectstack/spec';
-import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { ObjectSchema, Field, isReadableIds } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { assertArmed, armedWhen } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
@@ -100,7 +100,11 @@ describe('[ADR-0139 E6] the withheld-row rule is a predicate: every row a reader
   /** The bulk row ids, by class. */
   const bulk = { served: [] as string[], withheld: [] as string[], other: [] as string[] };
   /** Every read of the activity stream, with whether it ran as the system. */
-  const activityReads: Array<{ method: string; system: boolean; fields: string }> = [];
+  const activityReads: Array<{ method: string; system: boolean; fields: string; leaf: boolean }> = [];
+  /** Whether a WHERE carries a `ReadableIds` leaf anywhere. */
+  const hasLeaf = (node: unknown): boolean =>
+    isReadableIds(node) ||
+    (Array.isArray(node) ? node.some(hasLeaf) : !!node && typeof node === 'object' && Object.values(node).some(hasLeaf));
 
   const list = async (who: keyof typeof token, query: string) => {
     const res = await stack.apiAs(token[who], 'GET', `/data/${ACTIVITY}?${query}`);
@@ -176,7 +180,12 @@ describe('[ADR-0139 E6] the withheld-row rule is a predicate: every row a reader
       vi.spyOn(ql, method).mockImplementation(async (...args: any[]) => {
         if (args[0] === ACTIVITY) {
           const ctx = args[1]?.context ?? args[2]?.context;
-          activityReads.push({ method, system: ctx?.isSystem === true, fields: JSON.stringify(args[1]?.fields ?? null) });
+          activityReads.push({
+            method,
+            system: ctx?.isSystem === true,
+            fields: JSON.stringify(args[1]?.fields ?? null),
+            leaf: hasLeaf(args[1]?.where),
+          });
         }
         return original(...args);
       });
@@ -248,11 +257,16 @@ describe('[ADR-0139 E6] the withheld-row rule is a predicate: every row a reader
     expect(total).toBeGreaterThan(2 * OLD_WINDOW);
   });
 
-  it('no read of the activity stream runs as the system while a member or an administrator is served it', async () => {
+  it('no SYSTEM read of the stream reads a row\'s change, and none carries a leaf, while a member or an administrator is served it', async () => {
     activityReads.length = 0;
     await list('member', `$filter=${filterOf({ object_name: OBJ })}&$top=20`);
     await list('admin', '$orderby=timestamp%20desc&$top=20');
-    expect(activityReads.length).toBeGreaterThan(0);
-    expect(activityReads.filter((r) => r.system)).toEqual([]);
+    const system = activityReads.filter((r) => r.system);
+    expect(activityReads.length).toBeGreaterThan(system.length);
+    // The only SYSTEM read left is the read gate's bounded probe for ADR-0139
+    // D5's classes, which reads the parent pair and nothing else; the
+    // withheld-row rule reads no row at all.
+    expect(system.filter((r) => r.fields !== JSON.stringify(['object_name', 'record_id']))).toEqual([]);
+    expect(system.filter((r) => r.leaf)).toEqual([]);
   });
 });
