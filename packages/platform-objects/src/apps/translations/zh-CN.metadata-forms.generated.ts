@@ -2332,10 +2332,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "默认权限集",
         helpText: "通过内置的 everyone 岗位，把这个权限集授予每一位登录用户。应用自身声明的权限集在启动时授予；已安装包中的权限集则成为一条建议，由管理员在 Setup 中确认。含高权限的权限集不会以这种方式授予。默认 false。"
       },
-      managedBy: {
-        label: "归属来源",
-        helpText: "这个权限集归谁所有：Package 表示它随包分发，包升级时会更新它；Platform 和 User 表示它在本环境中创建，升级不会改动它。"
-      },
       packageId: {
         label: "所属包 ID",
         helpText: "分发这个权限集的包；填写其他包的 id 会被拒绝。在本环境中创建的权限集请留空。"

@@ -208,7 +208,7 @@ Keep them pure, dependency-free, and AI-readable.
 | Binding | Source | Available in |
 |:---|:---|:---|
 | `record` | the row being evaluated | formulas, validation, sharing, visibility |
-| `previous` | row before update — on a `multi: true` write, that row's own pre-write state, in `before*` and `after*` hooks alike and in record-change triggers: since ADR-0058 Addendum II both phases dispatch once per matched row | hooks, validation on update |
+| `previous` | the row before the update — on a `multi: true` write, that row's own pre-write state, in `before*` and `after*` hooks alike and in record-change triggers: since ADR-0058 Addendum II both phases dispatch once per matched row. `null` on insert, so `previous == null` judges an insert; a column read off it there (`previous.status`) has no value and faults | validation, hook conditions and flows — `null` on insert |
 | `input` | hook payload | hooks |
 | `current_user` | the authenticated subject — the canonical binding (ADR-0068). `user`, `ctx.user` and `os.user` are aliases of the **same** object | predicates with identity |
 | `os.user` | alias of `current_user` | seed, predicates with identity |

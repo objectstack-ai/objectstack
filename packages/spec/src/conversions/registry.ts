@@ -45,6 +45,7 @@ import {
   type ViewFilterOperator,
 } from '../ui/view.zod.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod.js';
+import { misplacedDefaultPageRefusal } from '../ui/default-record-page.js';
 import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
 import { CONNECTOR_CONFIG_LOOSE_KEYS, WAIT_EVENT_CONFIG_LOOSE_KEYS } from '../automation/flow-sibling-block-loose-keys.js';
 import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types.js';
@@ -6878,6 +6879,76 @@ const fieldMalformedScalePrecisionRemoved: MetadataConversion = {
 };
 
 /**
+ * Permission-set `managedBy` removed (protocol 18, #23891 — ADR-0049
+ * enforce-or-remove; the liveness ledger's `dead` verdict of 2026-10-11).
+ *
+ * The key was the AUTHORED per-record provenance of ADR-0086 D3
+ * (`package | platform | user`), and nothing ever read it: the retired
+ * `bootstrapDeclaredPermissions` seeder stamped the `sys_permission_set.managed_by`
+ * COLUMN and never read `ps.managedBy`, and the packaged-set lock decides
+ * provenance from the package's artifact. Setup's form row nevertheless
+ * promised that package upgrades update a `package` set and leave a
+ * `platform` / `user` set alone. The tombstone on `PermissionSetSchema`
+ * refuses it at parse (`PERMISSION_SET_MANAGED_BY_REMOVED` in
+ * `security/permission.zod.ts`). The column is a different surface and is
+ * untouched.
+ *
+ * ## Why a D2 strip
+ *
+ * Setup's form row wrote the key into stored `permission` rows, and a 17.x
+ * build carried whatever an author wrote into its artifact. After the
+ * tombstone the boot door and the metadata save door refuse such a set, and
+ * only the D2 table is replayed at the rehydration seams
+ * (`applyArtifactForwardConversions`, `applyConversionsToStoredItem`), so a
+ * stored row or an installed package's artifact loads only through this
+ * entry. The key leaves whatever it holds: the tombstone refuses every value,
+ * so a strip that kept one would leave a set that cannot load. The strip is
+ * lossless — no grant, owner or upgrade read the value; what an admin believed
+ * it did is the D3 record, the semantic entry `permission-set-managed-by-retired`.
+ * The emitted path names the set, as
+ * `permission-admin-scope-binding-authoring-removed` does.
+ */
+const permissionSetManagedByRemoved: MetadataConversion = {
+  id: 'permission-set-managed-by-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'permission.managedBy',
+  summary:
+    "permission-set key 'managedBy' removed (ADR-0049 enforce-or-remove — nothing ever read the authored "
+    + "provenance: a set's provenance is the package that ships it, decided from that package's artifact and "
+    + 'recorded as packageId; the sys_permission_set.managed_by column is unaffected. Delete the key)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'permissions', (ps, path) => {
+      // Name the set, not just its index: the notice is the only record an
+      // upgrading author gets of WHICH set lost the key.
+      const where = typeof ps.name === 'string' ? `${path}(${ps.name})` : path;
+      return stripKeys(ps, ['managedBy'], emit, where);
+    });
+  },
+  fixture: {
+    before: {
+      permissions: [
+        // What Setup's form row wrote into a stored row.
+        { name: 'crm_sales_rep', label: 'Sales Rep', packageId: 'crm', managedBy: 'package' },
+        { name: 'env_reviewer', label: 'Env Reviewer', managedBy: 'user' },
+        // Already canonical: rides through untouched, by reference.
+        { name: 'env_reader', label: 'Env Reader' },
+      ],
+    },
+    after: {
+      permissions: [
+        { name: 'crm_sales_rep', label: 'Sales Rep', packageId: 'crm' },
+        { name: 'env_reviewer', label: 'Env Reviewer' },
+        { name: 'env_reader', label: 'Env Reader' },
+      ],
+    },
+    // One per set carrying the key.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * `record:chatter` / `record:discussion` `position` converges on the
  * renderer's vocabulary (protocol 18, #8762 — maintainer ruling 2026-08-15:
  * one vocabulary, no mapping layer).
@@ -11195,6 +11266,84 @@ const pageHeaderShowStarRemoved: MetadataConversion = {
 };
 
 /**
+ * `page.isDefault` removed from a page that is not a record page bound to an
+ * object (protocol 18). The #23610 ruling (A on Q1, record 6190536588) refused
+ * the flag there at every door; this entry is the data-at-rest half the P0 that
+ * followed it added: an installed or stored page still carrying the flag
+ * converts at load instead of stopping the environment's kernel build.
+ *
+ * `isDefault` has one meaning — the default record page of the object a record
+ * page binds — and on every other page nothing read it: the console opens an
+ * app on its first navigation item and the root landing follows the app's own
+ * `isDefault`. Deleting the flag from a `home`, `app`, `utility` or `list`
+ * page, or from a record page with no `object`, therefore changes nothing a
+ * page does — a pure lossless delete. The ONE judge of "misplaced" is the
+ * parse's own, `misplacedDefaultPageRefusal` (`ui/default-record-page.ts`), so
+ * this conversion strips exactly the pages `checkPageDefaultPlacement` and the
+ * registry door refuse, and nothing else: a default record page bound to an
+ * object keeps its flag.
+ *
+ * **Retired from the authoring surface from the day it lands.** A live author
+ * meets the parse's refusal, which names where a landing is really set (the
+ * app's navigation) — that decision is the author's, and the refusal is how
+ * they are taught it. Data at rest has no author to teach: `sys_metadata` rows
+ * replay this on read, a compiled artifact replays it inside the window its
+ * manifest opens, and the kernel's package registration door
+ * (`ObjectQL.registerApp`, `@objectstack/objectql`) replays it for a package
+ * body that declares its protocol range — the seam a hosted environment's
+ * installed packages reach without a parse. The paired D3 entry is
+ * `page-is-default-off-record-page-refused`.
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}), the
+ * collection every door reads a package's pages from. A nested `plugins[]`
+ * entry's pages are code (`ObjectQL.registerPlugin`), never data at rest, and
+ * keep meeting the registry's refusal.
+ */
+const pageIsDefaultOffRecordPageRemoved: MetadataConversion = {
+  id: 'page-is-default-off-record-page-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.isDefault',
+  summary:
+    "page key 'isDefault' removed from a page that is not a record page bound to an object (a "
+    + 'home, app, utility or list page, or a record page with no object): it marks the default '
+    + 'record page of an object and nothing read it on any other page — an app opens on its first '
+    + 'navigation item, so the flag decided nothing',
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      if (page.isDefault !== true || misplacedDefaultPageRefusal(page) === undefined) return page;
+      return stripKeys(page, ['isDefault'], emit, path);
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        // The shipped shape: a home page marked as a landing that never landed.
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', isDefault: true, regions: [] },
+        // A record page bound to no object — the flag places nothing here either.
+        { name: 'draft_record', label: 'Draft', type: 'record', isDefault: true },
+        // A default record page bound to an object keeps its flag: that is the
+        // one meaning the key has.
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', isDefault: true },
+        // `isDefault: false` says nothing and is left as authored.
+        { name: 'team_home', label: 'Team Home', type: 'home', isDefault: false },
+      ],
+    },
+    after: {
+      pages: [
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', regions: [] },
+        { name: 'draft_record', label: 'Draft', type: 'record' },
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', isDefault: true },
+        { name: 'team_home', label: 'Team Home', type: 'home', isDefault: false },
+      ],
+    },
+    // One notice per stripped flag: the home page and the unbound record page.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * `page.requires` removed from the page kinds whose source is never compiled at
  * save — `react`, `full` and `slotted`, a page that omits `kind` included
  * (protocol 18, #21459; ruling record 5964312254, letter A).
@@ -11262,6 +11411,67 @@ const pageRequiresNonCompiledKindRemoved: MetadataConversion = {
     // One per stripped key: the react, slotted and kind-less pages. The html
     // page emits none.
     expectedNotices: 3,
+  },
+};
+
+/**
+ * `page.template: 'full-width'` → `'default'` (protocol 18). The #23610 ruling
+ * (A on Q2, record 6190536588) closed the template set and retired `full-width`
+ * by name; this entry is the data-at-rest half the P0 that followed it added.
+ *
+ * `full-width` was a second name for `default`: the console's template
+ * registry mapped both names to the one `FullWidthTemplate` component
+ * (objectui `renderers/layout/page.tsx`, read at the `.objectui-sha` pin), so
+ * the re-spelling draws the page exactly as before — the enum re-spelling D2
+ * was written for. The parse refuses the retired name with that prescription
+ * (`PageTemplateSchema`); an installed or stored page still carrying it
+ * converts here on read instead of failing the strict parse at an artifact
+ * door or on a stored-row read.
+ *
+ * **Retired from the authoring surface from the day it lands**, like its
+ * sibling `page-is-default-off-record-page-removed`: the authoring door keeps
+ * the one-word refusal, data at rest replays this. Only the retired SPELLING
+ * converts — an unregistered template name (`centered`, `two-column`) is not a
+ * shape this entry positively recognizes and stays with the parse, and a
+ * region a template does not place has no lossless rewrite at all (the D3
+ * entry `page-template-closed-region-unplaced-refused` names the hand edit).
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}).
+ * `template` is a top-level `PageSchema` key with no nested spelling.
+ */
+const pageTemplateFullWidthToDefault: MetadataConversion = {
+  id: 'page-template-full-width-to-default',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.template',
+  summary:
+    "page template 'full-width' → 'default' (a second name for the same layout: the console drew "
+    + 'both with one template component, so the page renders exactly as before)',
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      if (page.template !== 'full-width') return page;
+      emit({ from: 'full-width', to: 'default', path: `${path}.template` });
+      return { ...page, template: 'default' };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [] },
+        // A registered template is left as authored; so is a page with none.
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', template: 'three-column', regions: [] },
+        { name: 'team_home', label: 'Team Home', type: 'home' },
+      ],
+    },
+    after: {
+      pages: [
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'default', regions: [] },
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', template: 'three-column', regions: [] },
+        { name: 'team_home', label: 'Team Home', type: 'home' },
+      ],
+    },
+    expectedNotices: 1,
   },
 };
 
@@ -13974,13 +14184,13 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
         // The authored shape: a page whose author believed the list gated it.
         { name: 'deal_desk', label: 'Deal Desk', assignedProfiles: ['admin', 'sales_manager'] },
         // A page with nothing to strip keeps its identity (copy-on-write).
-        { name: 'team_home', label: 'Team Home', isDefault: true },
+        { name: 'team_home', label: 'Team Home' },
       ],
     },
     after: {
       pages: [
         { name: 'deal_desk', label: 'Deal Desk' },
-        { name: 'team_home', label: 'Team Home', isDefault: true },
+        { name: 'team_home', label: 'Team Home' },
       ],
     },
     expectedNotices: 1,
@@ -16835,10 +17045,13 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: pageComponentResponsiveRemoved, order: 13 },
   { conversion: pageHeaderBreadcrumbRemoved, order: 49 },
   { conversion: pageHeaderShowStarRemoved, order: 66 },
+  { conversion: pageIsDefaultOffRecordPageRemoved, order: 67 },
   { conversion: pageRequiresNonCompiledKindRemoved, order: 58 },
+  { conversion: pageTemplateFullWidthToDefault, order: 67 },
   { conversion: permissionAdminScopeBindingAuthoringRemoved, order: 65 },
   { conversion: permissionAllowRestorePurgeRemoved, order: 16 },
   { conversion: permissionRlsTagsRemoved, order: 42 },
+  { conversion: permissionSetManagedByRemoved, order: 67 },
   { conversion: recordChatterPositionVocabulary, order: 2 },
   { conversion: recordHighlightsFieldIconRemoved, order: 10 },
   { conversion: reportJoinedChartRemoved, order: 38 },

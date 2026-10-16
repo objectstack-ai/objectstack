@@ -429,7 +429,7 @@ it was copied from, so changes to the source never reach the copy.
 - **Every permission facet is copied** — `objects`, `fields`,
   `systemPermissions`, `tabPermissions`, `rowLevelSecurity`, `description`.
 - **The server drops a declared set of keys**: the package provenance
-  (`packageId`, `managedBy`, `protection` and the internal protection envelope),
+  (`packageId`, `protection` and the internal protection envelope),
   and two privilege decisions — `adminScope` (delegated administration) and
   `isDefault` (the `everyone` suggestion). Grant either deliberately on the copy
   if it needs one. The response, `{ permissionSet, notice }`, says what was not

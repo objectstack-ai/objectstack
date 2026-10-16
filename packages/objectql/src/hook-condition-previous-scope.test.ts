@@ -20,14 +20,17 @@
  *   - an UNDECLARED key stays unevaluable, so typos remain reportable;
  *   - copied, never mutated in place — the after-hooks that run next observe
  *     the engine's own `ctx.previous`;
- *   - absent (unbound identifier) whenever the prior state is not in hand:
- *     insert, and a predicate bulk update.
+ *   - `null` on an insert event (#23910): there is no prior row, so
+ *     `previous == null` judges the insert, and a column read off it
+ *     (`previous.done`) still faults loudly;
+ *   - absent (unbound identifier) on any other context whose prior state is
+ *     not in hand — an unknown row is never bound as `null`.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { bindHooksToEngine } from './hook-binder.js';
-import { wrapDeclarativeHook } from './hook-wrappers.js';
+import { wrapDeclarativeHook, HookConditionError } from './hook-wrappers.js';
 import type { Hook, HookContext } from '@objectstack/spec/data';
 
 /** `archived` is declared but never written by any test here — the
@@ -150,27 +153,55 @@ describe('[#4784] hook condition binds `previous` alongside `record`', () => {
     expect((ctx.previous as any).archived).toBeUndefined();
   });
 
-  it('leaves `previous` UNBOUND on insert — verbatim the validation side', async () => {
+  it('binds `previous` to NULL on insert — the validation side\'s rule — so `previous == null` judges the insert', async () => {
+    const calls: string[] = [];
+    const { logger, conditionWarnings } = captureLogger();
+    // [#23910] An insert has no prior row, and that is a fact the condition
+    // may read: `previous` is bound to `null` on an insert event, exactly as a
+    // validation rule's scope and a flow's create leg bind it. Until then it
+    // was unbound, so `previous == null` faulted `Unknown variable: previous`
+    // and #4775 aborted the insert.
+    const wrapped = wrapDeclarativeHook(
+      makeHook('previous == null && record.done == true', ['beforeInsert', 'afterInsert']),
+      (async () => { calls.push('ran'); }) as any,
+      { logger },
+    );
+
+    const before = makeCtx({ event: 'beforeInsert', previous: undefined, input: { data: { done: true } } } as any);
+    await wrapped(before);
+    await wrapped(makeCtx({ event: 'afterInsert', previous: undefined, input: { data: { done: true } } } as any));
+    expect(calls).toEqual(['ran', 'ran']);
+    expect(conditionWarnings()).toEqual([]);
+    // Only the CEL binding is null: the engine's own `ctx.previous`, which the
+    // after-hooks observe, is untouched.
+    expect(before.previous).toBeUndefined();
+  });
+
+  it('NEGATIVE — a COLUMN read off the null `previous` on insert still faults loudly, naming the read', async () => {
     const calls: string[] = [];
     const { logger } = captureLogger();
-    // `rule-validator.ts` binds `previous` only for `mode: 'update'` with a
-    // prior record in hand; on insert it passes `undefined`, which omits the
-    // identifier from the CEL scope. Referencing it on an insert event is
-    // therefore an author error, reported — not silently answered.
     const wrapped = wrapDeclarativeHook(
       makeHook(TRANSITION, ['beforeInsert']),
       (async () => { calls.push('ran'); }) as any,
       { logger },
     );
 
-    // #4775: an unbound `previous` is unevaluable, and unevaluable rejects the
-    // insert rather than being swallowed into `false`.
-    await expect(wrapped(makeCtx({
-      event: 'beforeInsert',
-      previous: undefined,
-      input: { data: { done: true } },
-    } as any))).rejects.toThrow(/Unknown variable: previous/);
+    // #4775: unevaluable rejects the insert rather than being swallowed into
+    // `false` — `previous` has no columns on an insert.
+    let err: any = null;
+    try {
+      await wrapped(makeCtx({
+        event: 'beforeInsert',
+        previous: undefined,
+        input: { data: { done: true } },
+      } as any));
+    } catch (e) {
+      err = e;
+    }
 
+    expect(err).toBeInstanceOf(HookConditionError);
+    expect(err.reason).toBe('unevaluable');
+    expect(String(err.message)).toContain("'previous.done'");
     expect(calls).toEqual([]);
   });
 

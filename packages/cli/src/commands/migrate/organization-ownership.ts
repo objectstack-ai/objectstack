@@ -257,7 +257,9 @@ class ReportFileReservation {
  * row {@link ORGANIZATION_OWNERSHIP_MIGRATION_ID}) so an interrupted run
  * resumes where it stopped, and ends with the post-check. The ledger row is
  * the ceremony's marker: `applied_at` once every step has finished,
- * `verified_at` when the post-check also reads zero discrepancies. A report
+ * `verified_at` when the post-check also reads zero discrepancies (a departure
+ * this release cannot perform — the declared sharing-rule mirrors its own boot
+ * keeps seeding — is reported as advisory, not as a discrepancy). A report
  * file is written beside the plan's, never over an existing one: it is reserved
  * (created exclusively) before the boot, so an `--out` that cannot be written
  * is refused before anything executes (`apply_refused`), and a report that
@@ -972,7 +974,11 @@ export default class MigrateOrganizationOwnership extends Command {
           `${table.remaining ? chalk.red(`remaining ${table.remaining}`) : ''}`,
       );
       for (const departure of table.departures) {
-        console.log(chalk.yellow(`      ${departure.rows} row(s) still to leave by a step not yet run — ${departure.label}`));
+        console.log(chalk.yellow(
+          departure.advisory
+            ? `      ${departure.rows} row(s) advisory, not held against certification — ${departure.label}: ${departure.advisory}`
+            : `      ${departure.rows} row(s) still to leave by a step not yet run — ${departure.label}`,
+        ));
       }
       for (const conflict of table.templateConflicts ?? []) {
         console.log(chalk.yellow(
@@ -983,8 +989,17 @@ export default class MigrateOrganizationOwnership extends Command {
       }
     }
     console.log('');
-    if (report.advisory > 0) {
-      printWarning(`${report.advisory} row(s) whose owner cannot be derived stay NULL; they are listed by id in the report file.`);
+    // `advisory` counts two populations; each is said in its own terms.
+    const unattributable = report.tables.reduce((n, t) => n + t.unattributable.length, 0);
+    const held = report.tables.reduce((n, t) => n + t.departures.reduce((m, d) => m + (d.advisory ? d.rows : 0), 0), 0);
+    if (unattributable > 0) {
+      printWarning(`${unattributable} row(s) whose owner cannot be derived stay NULL; they are listed by id in the report file.`);
+    }
+    if (held > 0) {
+      printWarning(
+        `${held} row(s) of a departure this release cannot perform stay NULL and are reported as advisory, not as ` +
+          'discrepancies; each is named above with what removes it.',
+      );
     }
     if (verdictCode === 0) {
       printSuccess(`The ceremony is complete; recorded as ${ORGANIZATION_OWNERSHIP_MIGRATION_ID}. Report: ${target}`);

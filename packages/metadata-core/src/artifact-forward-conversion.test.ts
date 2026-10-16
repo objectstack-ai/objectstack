@@ -223,6 +223,30 @@ describe('applyArtifactForwardConversions — the versioned window (#12772)', ()
     expect(grant).not.toHaveProperty('allowRestore');
   });
 
+  it('reads a FLAT package body\'s range off the body itself — the shape `registerApp` and the marketplace ledger hold', () => {
+    // The same bytes as `legacyPermissionDefinition`, flattened the way
+    // `normalizeBundle` and a package body inside `packages[]` spell them: the
+    // manifest half beside the collections, no `manifest` key.
+    const nested = legacyPermissionDefinition('^17.1.0');
+    const { manifest, ...collections } = nested;
+    const flat = { ...manifest, ...collections };
+    const fromFlat = applyArtifactForwardConversions(flat, { runtimeSpecVersion: '17.2.0' });
+    const fromNested = applyArtifactForwardConversions(nested, { runtimeSpecVersion: '17.2.0' });
+    expect(fromFlat.verdict).toBe('converted-forward');
+    expect(fromFlat.authoredFloor).toBe('17.1.0');
+    expect([fromFlat.verdict, fromFlat.authoredFloor]).toEqual([fromNested.verdict, fromNested.authoredFloor]);
+    expect((fromFlat.definition as typeof flat).permissions[0]!.objects.crm_ticket).not.toHaveProperty('allowPurge');
+    // A flat body authored at a current-or-newer floor is NOT the undeclared
+    // amnesty: the strict parse stays its authority.
+    const current = applyArtifactForwardConversions({ ...flat, engines: { protocol: '>=99.0.0' } }, { runtimeSpecVersion: '17.2.0' });
+    expect(current.verdict).toBe('authored-current');
+    expect(current.authoredFloor).toBe('99.0.0');
+    // A `manifest` object, when present, is still the only place the range is read.
+    const both = applyArtifactForwardConversions({ ...nested, engines: { protocol: '>=99.0.0' } }, { runtimeSpecVersion: '17.2.0' });
+    expect(both.verdict).toBe('converted-forward');
+    expect(both.authoredFloor).toBe('17.1.0');
+  });
+
   it('closes the window when the runtime spec version cannot be resolved — amnesty needs positive version evidence', () => {
     const def = legacyPermissionDefinition('^17.1.0');
     const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: null });

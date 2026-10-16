@@ -179,7 +179,7 @@ describe('#22782 — an aborting after* hook rolls its write back', () => {
  * condition can abort its write too, and the door's unit rolls the row back.
  */
 describe('#22856 — an after* hook carrying a condition rolls its write back when the condition cannot be evaluated', () => {
-  /** `previous` is unbound on an insert, so this condition cannot be evaluated there. */
+  /** `previous` is `null` on an insert, so a column read off it cannot be evaluated there. */
   const unbindable = 'previous.name != record.name';
   /** A key `case` does not declare: unevaluable on every event. */
   const undeclared = 'record.stauts == "x"';

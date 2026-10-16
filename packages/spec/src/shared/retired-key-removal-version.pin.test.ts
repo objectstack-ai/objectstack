@@ -86,7 +86,7 @@ import {
 } from '../automation/builtin-node-config.zod';
 import { NotifyConfigSchema } from '../automation/io-node-config.zod';
 import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemaless-node-config.zod';
-import { AdminScopeSchema } from '../security/permission.zod';
+import { AdminScopeSchema, PermissionSetSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { PageComponentSchema, PageSchema } from '../ui/page.zod';
@@ -247,6 +247,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(AdminScopeSchema, 'permission.adminScope', 'manageBindings'),
     tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
   ],
+  'permission-set-managed-by-removed': [tombstone(PermissionSetSchema, 'permission', 'managedBy')],
   'manifest-permissions-string-list-removed': [
     refusal('manifest.permissions as a list of strings', () => ManifestPermissionsSchema.safeParse(['system.user.read'])),
   ],
@@ -334,6 +335,28 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   // #23650: retired after 17.7.0, so the v18 train's major.
   'page-header-show-star-removed': [tombstone(PageHeaderProps, 'page:header', 'showStar')],
+  // #23904: the two data-at-rest halves of the #23610 page refusals, retired
+  // after 17.7.0; each prescription is the parse's own refusal at its key — the
+  // one sentence the registry door prints too — and names the release.
+  'page-is-default-off-record-page-removed': [
+    refusal(
+      "isDefault: true on a type 'home' page",
+      () => PageSchema.safeParse({ name: 'sales_home_page', label: 'Sales Home', type: 'home', isDefault: true, regions: [] }),
+      'isDefault',
+    ),
+    refusal(
+      'isDefault: true on a record page bound to no object',
+      () => PageSchema.safeParse({ name: 'draft_record', label: 'Draft', type: 'record', isDefault: true, regions: [] }),
+      'isDefault',
+    ),
+  ],
+  'page-template-full-width-to-default': [
+    refusal(
+      "page template 'full-width'",
+      () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [{ name: 'main', components: [] }] }),
+      'template',
+    ),
+  ],
   // #23543 F3: a loose `config` key under a sibling-block node type, refused by
   // the flow parse; the node's block is complete, so the key is the only issue.
   'flow-node-wait-event-config-lift': [

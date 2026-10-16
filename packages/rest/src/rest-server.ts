@@ -147,8 +147,9 @@ import type {
     HistoryMetaItemRequest,
     SaveMetaItemRequest,
     DeleteMetaItemRequest,
-    GetUiViewRequest,
 } from '@objectstack/spec/api';
+// `GetUiViewRequest`, the UI view door's declared request, moved with that door to
+// `ui-routes.ts` (#23050 slice 10).
 // [#15866] The same discipline for the DATA doors. Every literal these routes
 // assemble is now compiled against the declared request type through
 // `ServerScopedDataRequest` below, so a member the contract does not declare is
@@ -257,46 +258,10 @@ import { sendError as sendEnvelopeError } from '@objectstack/types';
  */
 export type RestProtocol = DataProtocol & MetadataProtocol;
 
-/**
- * [commit 2a29caa53] Typed TRANSPORT envelope for the meta-read doors.
- *
- * `environmentId` is the multi-kernel routing key, and it is OUT of the
- * protocol request shape **by explicit maintainer decision** (ruling recorded
- * 2026-08-18, landed as commit 2a29caa53): `resolveProtocol(environmentId)` selects the target
- * kernel *before* the protocol call, and the implementation's parameter types
- * (`@objectstack/metadata-protocol`) never read it off the request — the spec
- * schemas (`protocol.zod.ts`) record the same exclusion schema-side. The doors
- * here still spread it into the outgoing payload (long-standing wire shape,
- * deliberately unchanged by the ruling), so this alias declares that one
- * transport-level member on top of the declared request type. The point is
- * what it makes the compiler do: every OTHER key in a door's request literal
- * is now checked against the spec contract — an undeclared member is a compile
- * error at the call site, not a cast-and-hope. Never add protocol members
- * here; a key that belongs to the request belongs in the spec schema.
- *
- * [commit 45862a53d] The same typing now covers the NON-door `getMetaItems` helper call
- * sites in this file (the object, book, doc, view and dataset listings). Two
- * spellings those sites carry deliberately SURVIVE the tightening, because
- * retiring either would change behaviour rather than typing:
- *
- *   - The OPTIONAL CALL (`getMetaItems?.(…)`) and the
- *     `typeof … === 'function'` guards. `getMetaItems` is a REQUIRED
- *     `MetadataProtocol` member, so these are not feature detection in the
- *     type sense — but a host may occupy the protocol slot with an object
- *     that does not implement the whole surface, which is the measured reason
- *     they exist (`metaTypeIsLive` documents the same deliberate spelling for
- *     `getMetaTypes`). Retiring one turns a tolerated absence into a
- *     `TypeError`.
- *   - The RESULT handling. `getMetaItems` is declared to return
- *     `{ type, items }`, while these sites also tolerate the bare-array shape
- *     older hosts and stubs return (see `metaItemsArray`), so the response
- *     stays runtime-shaped on purpose.
- *
- * The REQUEST is what is fully typeable today, and the request is what is
- * typed — which is the whole point: an undeclared key in one of these
- * literals is now a compile error instead of a cast-and-hope.
- */
-type TransportScopedMetaRequest<R> = R & { environmentId?: string };
+// [#23050 slice 10] `TransportScopedMetaRequest`, the meta doors' request envelope, moved to
+// `ui-routes.ts` (imported below) with the UI view door's body, its first reader outside this
+// file: exporting it from here changed the published `dist/*.d.ts` by one line, and a second
+// copy is not an option.
 
 // [#23050 slice 1] `ServerScopedDataRequest`, the data doors' request envelope, moved to
 // `data-action-routes.ts` (imported below): exporting it from this file for that module
@@ -343,6 +308,8 @@ import {
 import { registerEmailEndpoints, type EmailRouteHost } from './email-routes.js';
 // [#23050 slice 9] The global search route's body moved to its own module — see its header.
 import { registerSearchEndpoints, type SearchRouteHost } from './search-routes.js';
+// [#23050 slice 10] The UI view route's body moved to its own module — see its header.
+import { registerUiEndpoints, type TransportScopedMetaRequest, type UiRouteHost } from './ui-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -8311,66 +8278,19 @@ export class RestServer {
      * mismatch {@link enforceEnvironmentOwnership} exists to catch.
      */
     private registerUiEndpoints(basePath: string): void {
-        const uiPath = `${basePath}/ui`;
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        // GET /ui/view/:object/:type - Resolve view for object
-        this.routeManager.register({
-            method: 'GET',
-            path: `${uiPath}/view/:object/:type`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const routeEnvironmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [commit cc837dbfe] THE environment decision for this request, taken
-                    // once through the shared entry point and then reused — so
-                    // the identity below, the ownership comparison and the
-                    // protocol that answers cannot be about three different
-                    // environments.
-                    const environmentId = await this.resolveRequestEnvironmentId(routeEnvironmentId, req);
-                    // A BARE site, deliberately, and the census in
-                    // `execctx-consumer-census.test.ts` is what makes that a
-                    // decision rather than an omission: the 52 sites whose very
-                    // next statement is the shared anonymous floor carry no
-                    // local `.catch`, because `computeExecCtx` already converts
-                    // every fault except an authz-store outage into `undefined`
-                    // and re-raises that one — which this handler's own
-                    // `try/catch` turns into the declared fault response. A
-                    // local `.catch(rethrowAuthzStoreUnavailable)` here would be
-                    // behaviourally identical and would make this the only site
-                    // that is both locally caught AND behind the floor, which is
-                    // exactly the split that census asserts does not exist.
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    if (this.enforceEnvironmentOwnership(req, res, environmentId, context)) return;
-                    const p = await this.resolveProtocol(environmentId, req);
-                    if (p.getUiView) {
-                        const viewRequest: TransportScopedMetaRequest<GetUiViewRequest> = {
-                            object: req.params.object,
-                            type: req.params.type,
-                            // [commit cc837dbfe] `routeEnvironmentId`, NOT the resolved id.
-                            // The gate above changed WHO may reach the producer;
-                            // it deliberately did not change WHAT the producer is
-                            // told. This key has only ever been present on the
-                            // scoped mount, and the shipped `getUiView` declares
-                            // `{ object, type }` alone — widening the argument on
-                            // the unscoped mount would be an unrelated behaviour
-                            // change riding on a security fix.
-                            ...(routeEnvironmentId ? { environmentId: routeEnvironmentId } : {}),
-                        };
-                        const view = await p.getUiView(viewRequest);
-                        res.json(view);
-                    } else {
-                        res.status(501).json({ error: 'UI View resolution not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
-                    }
-                } catch (error: any) {
-                    handleRouteError(res, error, req.params?.object);
-                }
-            },
-            metadata: {
-                summary: 'Resolve UI View for object',
-                tags: ['ui'],
-            },
-        });
+        // [#23050 slice 10] The body moved to `ui-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `UiRouteHost`, and that module's header for why no
+        // member is a getter).
+        const host: UiRouteHost = {
+            routeManager: this.routeManager,
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceEnvironmentOwnership: (...a) => this.enforceEnvironmentOwnership(...a),
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+        };
+        registerUiEndpoints.call(host, basePath);
     }
     
     /**

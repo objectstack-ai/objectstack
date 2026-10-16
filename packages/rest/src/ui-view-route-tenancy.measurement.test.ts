@@ -109,6 +109,10 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 // reverse checks pin the list's length.
 const REGISTRAR_SOURCES = REST_SERVER_REGISTRAR_FILES
     .map((file) => (file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'))).join('\n');
+// [#23050 slice 10] `registerUiEndpoints`' BODY moved to `ui-routes.ts`; the
+// class keeps the private method as a host literal that forwards members and
+// calls none of them in a route. The sliced reading below reads the body there.
+const UI_SOURCE = readFileSync(resolve(HERE, 'ui-routes.ts'), 'utf8');
 
 const BASE = '/api/v1';
 const UI_ROUTE = `GET ${BASE}/ui/view/:object/:type`;
@@ -1083,11 +1087,19 @@ describe('[#13214] §4 preconditions', () => {
         // The source half of the mechanism, scoped to the registrar so a
         // neighbour's code cannot satisfy it. ⚠️ Inverted: the two `false`
         // assertions here were the card's source-level finding.
-        const start = SOURCE.indexOf('private registerUiEndpoints(');
-        const end = SOURCE.indexOf('private registerCrudEndpoints(');
+        //
+        // [#23050 slice 10] The body moved to `ui-routes.ts`, so it is sliced
+        // there: from the moved function's signature to its own closing brace
+        // (the first column-0 brace after it), so neither the module header nor
+        // a later declaration can satisfy it. Sliced in `rest-server.ts`, the
+        // private method is now a host literal whose forwarders spell the four
+        // terms the ORDER assertions compare, in that same order, while calling
+        // none of them in a route — a slice there would pass those vacuously.
+        const start = UI_SOURCE.indexOf('export function registerUiEndpoints(');
+        const end = UI_SOURCE.indexOf('\n}\n', start);
         expect(start).toBeGreaterThan(0);
         expect(end).toBeGreaterThan(start);
-        const body = SOURCE.slice(start, end);
+        const body = UI_SOURCE.slice(start, end);
 
         expect(body).toContain("const isScoped = basePath.includes('/environments/:environmentId')");
         // The environment is decided ONCE, through the shared entry point, and
@@ -1124,12 +1136,24 @@ describe('[#13214] §4 preconditions', () => {
         // that slice's forwarder; the ownership guard still 1.
         // [#23050 slice 9] 9 → 10 (`search-routes.ts`): 58 and 73, +1 each for
         // that slice's forwarder; the ownership guard still 1.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
+        // [#23050 slice 10] 10 → 11 (`ui-routes.ts`): 59 and 74, +1 each for
+        // that slice's forwarder (the two call sites moved with the body and are
+        // counted in both readings).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
         // ...and the ownership guard is NOT sprayed across the file — it is a
         // single new call site plus its definition.
-        expect(REGISTRAR_SOURCES.split('this.enforceEnvironmentOwnership(').length - 1).toBe(1);
+        // [#23050 slice 10] Over the list the spelling now reads 2: the ONE call
+        // site, which moved with its route to `ui-routes.ts`, plus this slice's
+        // seam — the host literal's forwarder in `rest-server.ts`, which hands
+        // the guard to the moved body and calls it in no route. Both halves are
+        // pinned exactly, so the call-site count is still 1 and a second
+        // forwarder reds as loudly as a second call site.
+        const ownershipSpellings = REGISTRAR_SOURCES.split('this.enforceEnvironmentOwnership(').length - 1;
+        const ownershipForwarders = REGISTRAR_SOURCES.split('(...a) => this.enforceEnvironmentOwnership(...a)').length - 1;
+        expect(ownershipForwarders).toBe(1);
+        expect(ownershipSpellings - ownershipForwarders).toBe(1);
     });
 });
 

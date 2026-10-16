@@ -1,19 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Admin-facing copy of the security objects and the shipped permission sets
- * carries no design-record vocabulary.
+ * Admin-facing copy of the security objects, the shipped permission sets and
+ * the built-in positions carries no design-record vocabulary.
  *
  * Setup reaches these through Access Control and the user record page: the
- * Permission Sets page lists each shipped set with its `description`, and a
+ * Permission Sets page lists each shipped set with its `description`, the
+ * Positions page lists each built-in position with its `description`, and a
  * user's Positions and Permission Sets lists open the `sys_user_position` and
  * `sys_user_permission_set` forms, where a field's help tooltip is the field's
  * `description`. The generated bundles carry the object copy into every
  * locale. An ADR number, a decision id ("D2"), a review-finding id
  * ("finding F2"), an API call ("emit()") or a runtime internal ("kernel")
  * belongs in the docblock next to the string, never in the string. Every
- * object and permission set this package ships is judged, not only the ones
- * Setup opens today.
+ * object, permission set and built-in position this package ships is judged,
+ * not only the ones Setup opens today.
  *
  * The same rule over the other Setup producers lives in each of them
  * (`@objectstack/platform-objects`' `src/apps/setup-copy-vocabulary.test.ts`,
@@ -25,6 +26,7 @@
 import { describe, expect, it } from 'vitest';
 import * as SecurityObjects from './index.js';
 import { defaultPermissionSets } from './default-permission-sets.js';
+import { securityBuiltinPositions } from '../builtin-positions.js';
 import { enObjects } from '../translations/en.objects.generated.js';
 import { zhCNObjects } from '../translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../translations/ja-JP.objects.generated.js';
@@ -116,6 +118,18 @@ describe('security objects and permission sets: admin-facing copy carries no des
     for (const ps of defaultPermissionSets) {
       if (typeof ps.label === 'string') strings.push([`${ps.name}.label`, ps.label]);
       if (typeof ps.description === 'string') strings.push([`${ps.name}.description`, ps.description]);
+    }
+    expect(offenders(strings)).toEqual([]);
+  });
+
+  it('the label and description of every built-in position this package declares', () => {
+    const names = securityBuiltinPositions.map((p) => p.name);
+    for (const name of ['everyone', 'guest', 'platform_admin', 'org_admin']) {
+      expect(names, `${name} is in the population`).toContain(name);
+    }
+    const strings: Array<[string, string]> = [];
+    for (const position of securityBuiltinPositions) {
+      strings.push([`${position.name}.label`, position.label], [`${position.name}.description`, position.description]);
     }
     expect(offenders(strings)).toEqual([]);
   });

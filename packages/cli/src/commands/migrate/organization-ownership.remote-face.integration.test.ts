@@ -27,7 +27,9 @@
  *  - the plan exits 0 and leaves the database byte-identical (a logical dump of
  *    every catalog row and every table's rows, before and after), and names the
  *    remote database, not the placeholder Knex client;
- *  - the apply completes with `blocking 0`;
+ *  - the apply completes with `blocking 0`, the declared sharing-rule mirrors a
+ *    17.x seeder left reported as advisory (this release's boot still seeds
+ *    them: `DECLARED_SHARING_RULE_SEEDER_RUNS`), not as discrepancies;
  *  - each column and the index keyed on it are gone from the server, the rows
  *    are not, and the `adr-0131-organization-ownership` marker is verified.
  *
@@ -77,6 +79,8 @@ const OVERRIDING_ENV = [
 
 /** `column-drop` tables the 17.x leftovers are put on, when the composition has them. */
 const LEFTOVER_CANDIDATES = ['sys_job', 'sys_metadata_activation', 'sys_presence'] as const;
+/** Declared sharing rules a 17.x seeder wrote organization-less (HotCRM declares eleven). */
+const RULE_MIRRORS = 11;
 
 let dir: string;
 let projectDir: string;
@@ -204,6 +208,15 @@ describe.skipIf(!SQLD)('os migrate organization-ownership on a Turso REMOTE data
       if (leftovers.includes('sys_job')) {
         await exec(`INSERT INTO "sys_job" ("id", "organization_id") VALUES ('job_v17_a', NULL), ('job_v17_b', NULL)`);
       }
+      if (tables.has('sys_sharing_rule')) {
+        for (let i = 1; i <= RULE_MIRRORS; i++) {
+          await exec(
+            `INSERT INTO "sys_sharing_rule" ("id", "name", "object_name", "managed_by", "customized", "organization_id") ` +
+              `VALUES (?, ?, 'crm_deal', 'package', 0, NULL)`,
+            [`rule_v17_${i}`, `share_v17_${i}`],
+          );
+        }
+      }
     });
     expect(leftovers.length).toBeGreaterThan(0);
   }, CASE_TIMEOUT_MS);
@@ -233,6 +246,10 @@ describe.skipIf(!SQLD)('os migrate organization-ownership on a Turso REMOTE data
     ]);
     expect(apply.payload.error, JSON.stringify(apply.payload).slice(0, 800)).toBeUndefined();
     expect([apply.exitCode, apply.payload.report.complete, apply.payload.report.blocking]).toEqual([0, true, 0]);
+    expect(apply.payload.report.tables.find((t: { object: string }) => t.object === 'sys_sharing_rule')).toMatchObject({
+      remaining: 0,
+      departures: [{ id: 'declared-rule-mirrors', rows: RULE_MIRRORS, advisory: expect.any(String) }],
+    });
 
     for (const t of leftovers) expect(await hasOrganizationColumn(t)).toBe(false);
     const after = await secondConnection(async (exec) => ({
@@ -244,7 +261,8 @@ describe.skipIf(!SQLD)('os migrate organization-ownership on a Turso REMOTE data
         [ORGANIZATION_OWNERSHIP_MIGRATION_ID],
       )).map((r) => ({ applied: Number(r.applied), verified: Number(r.verified) })),
       jobs: leftovers.includes('sys_job') ? Number((await exec('SELECT count(*) AS n FROM "sys_job"'))[0]!.n) : 2,
+      rules: Number((await exec('SELECT count(*) AS n FROM "sys_sharing_rule" WHERE "organization_id" IS NULL'))[0]!.n),
     }));
-    expect(after).toEqual({ indexes: [], marker: [{ applied: 1, verified: 1 }], jobs: 2 });
+    expect(after).toEqual({ indexes: [], marker: [{ applied: 1, verified: 1 }], jobs: 2, rules: RULE_MIRRORS });
   }, CASE_TIMEOUT_MS);
 });

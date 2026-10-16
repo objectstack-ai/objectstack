@@ -17,8 +17,7 @@
  *
  * Bookkeeping shapes, pinned below: both refusals are exported object-level
  * checks attached to `PageSchema` (parity in
- * `object-refinement-check-exports.test.ts`); neither has a D2 conversion, so a
- * stored row replays unchanged and the parse still refuses it; each has a D3
+ * `object-refinement-check-exports.test.ts`); each has a D3
  * entry.
  *
  * On the assertion set: a bare `PageSchema` parse raises zod issues, pinned by
@@ -226,16 +225,37 @@ describe('Q2 — a region the template does not place', () => {
   });
 });
 
-describe('the ledger — two D3 entries and no D2 conversion', () => {
-  it.each([Q1_D3, Q2_D3])('step 18 carries `%s`, judging no mechanical edit', (id) => {
+describe('the ledger — two D3 entries, and the retired D2 entries data at rest replays', () => {
+  it.each([Q1_D3, Q2_D3])('step 18 carries `%s`, judging no mechanical edit on the authoring surface', (id) => {
     const entry = MIGRATIONS_BY_MAJOR[18]!.semantic.find((e) => e.id === id);
     expect(entry, id).toBeDefined();
     expect(entry!.conversionIds ?? []).toEqual([]);
   });
 
+  // The shapes with a lossless rewrite: a STORED row converts on read (the
+  // retired D2 entries `page-is-default-off-record-page-removed` and
+  // `page-template-full-width-to-default`, replayed by every data-at-rest
+  // seam), with the named notice, and the converted row parses — while the
+  // authoring door, pinned above, still refuses the row as written.
   it.each([
-    ['a non-record `isDefault`', { name: 'sales_home_page', label: 'Home', type: 'home', isDefault: true, regions: [] }, ['isDefault']],
-    ['the retired `full-width`', { name: 'pg_page', label: 'P', type: 'record', object: 'invoice', template: 'full-width', regions: [region('main')] }, ['template']],
+    ['a non-record `isDefault`', { name: 'sales_home_page', label: 'Home', type: 'home', isDefault: true, regions: [] }, 'page-is-default-off-record-page-removed', 'isDefault', { name: 'sales_home_page', label: 'Home', type: 'home', regions: [] }],
+    ['the retired `full-width`', { name: 'pg_page', label: 'P', type: 'record', object: 'invoice', template: 'full-width', regions: [region('main')] }, 'page-template-full-width-to-default', 'template', { name: 'pg_page', label: 'P', type: 'record', object: 'invoice', template: 'default', regions: [region('main')] }],
+  ])('a STORED row with %s converts on read, with the named notice, and the converted row parses', (_label, row, conversionId, path, converted) => {
+    expect(refusalOf(row).map((i) => i.path.join('.'))).toEqual([path]);
+    const notices: ConversionNotice[] = [];
+    const rehydrated = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) });
+    expect(rehydrated).toEqual(converted);
+    expect(notices.map((n) => [n.conversionId, n.path])).toEqual([[conversionId, `pages[0].${path}`]]);
+    const parsed = PageSchema.safeParse(rehydrated);
+    expect(parsed.success, JSON.stringify(parsed.success ? [] : parsed.error.issues)).toBe(true);
+  });
+
+  // The shapes with NO lossless rewrite: no conversion touches them, and the
+  // parse still refuses them — an unregistered template name is not a shape
+  // any entry positively recognizes, and which slot an unplaced region meant
+  // is the author's call (the D3 entries name the hand edits).
+  it.each([
+    ['an unregistered template', { name: 'pg_page', label: 'P', type: 'app', template: 'centered', regions: [region('main')] }, ['template']],
     ['an unplaced region', { name: 'pg_page', label: 'P', type: 'home', template: 'three-column', regions: [region('main'), region('left_sidebar')] }, ['regions.1.name']],
   ])('a STORED row with %s replays unchanged — no conversion touches it — and the parse still refuses it', (_label, row, paths) => {
     const notices: ConversionNotice[] = [];
