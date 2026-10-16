@@ -83,6 +83,8 @@ describe('print service on a real showcase boot', () => {
   }));
   const renderPdf = vi.fn(async () => PDF);
   let memberToken: string;
+  let auditorToken: string;
+  let adminToken: string;
   let memberEmail: string;
   let ownInvoice: string;
   let othersInvoice: string;
@@ -109,6 +111,12 @@ describe('print service on a real showcase boot', () => {
     // caller's own rows (`owner == current_user.email`).
     const member = await ql.findOne('sys_user', { where: { email: memberEmail } }, { context: SYS });
     await ql.insert('sys_user_permission_set', { user_id: member!.id, permission_set: 'showcase_contributor' }, { context: SYS });
+    adminToken = await stack.signIn();
+    // A reader who may read every invoice and edit none: the app's own `showcase_auditor`.
+    const auditorEmail = 'print-auditor@dogfood.test';
+    auditorToken = await stack.signUp(auditorEmail);
+    const auditor = await ql.findOne('sys_user', { where: { email: auditorEmail } }, { context: SYS });
+    await ql.insert('sys_user_permission_set', { user_id: auditor!.id, permission_set: 'showcase_auditor' }, { context: SYS });
     // Two invoices cloned from a seeded one, differing only in who owns them.
     const [seeded] = await ql.find('showcase_invoice', { limit: 1 }, { context: SYS });
     const invoice = (name: string, owner: string) =>
@@ -199,8 +207,26 @@ describe('print service on a real showcase boot', () => {
       expect(renderPdf).not.toHaveBeenCalled();
     });
 
-    it('archives the PDF on the caller’s own invoice as one committed sys_file and one sys_attachment', async () => {
-      const ctx = await stack.contextFor(memberToken);
+    it('a reader who can read the invoice but may not attach to it: refused with the archive’s own answer, before any mint or render', async () => {
+      const ctx = await stack.contextFor(auditorToken);
+      // Control: the auditor really reads the invoice, so this is the attach rule and not the read.
+      expect(await ql.findOne('showcase_invoice', { where: { id: ownInvoice } }, { context: ctx })).not.toBeNull();
+      mint.mockClear();
+      renderPdf.mockClear();
+      // The showcase grants the auditor no attachment create at all: the insert's
+      // own CRUD answer, asked before the render. (The attach-rule leg,
+      // ATTACHMENT_PARENT_ACCESS, is pinned against the real insert gate in
+      // service-storage's file-attachment-service.test.ts.)
+      expect(await refusalOf(service.printRecordToFile(request(ownInvoice), ctx))).toEqual({
+        code: 'PERMISSION_DENIED',
+        status: 403,
+      });
+      expect(mint).not.toHaveBeenCalled();
+      expect(renderPdf).not.toHaveBeenCalled();
+    });
+
+    it('archives the PDF as one committed sys_file and one sys_attachment, both naming the requester', async () => {
+      const ctx = await stack.contextFor(adminToken);
       mint.mockClear();
       revoke.mockClear();
       const out = await service.printRecordToFile(request(ownInvoice), ctx);
@@ -215,10 +241,13 @@ describe('print service on a real showcase boot', () => {
       expect(file).toMatchObject({ status: 'committed', mime_type: 'application/pdf', size: PDF.byteLength, scope: 'attachments' });
       const attachment = await ql.findOne('sys_attachment', { where: { id: out.attachmentId } }, { context: SYS });
       expect(attachment).toMatchObject({ parent_object: 'showcase_invoice', parent_id: ownInvoice, file_id: out.fileId });
+      // Attached AS THE CALLER: both rows name the requester.
+      expect(file!.owner_id).toBe(ctx.userId);
+      expect(attachment!.uploaded_by).toBe(ctx.userId);
     });
 
     it('with the real auth mint: the render loads as the caller, and the session is gone once the print returns', async () => {
-      const ctx = await stack.contextFor(memberToken);
+      const ctx = await stack.contextFor(adminToken);
       const minter = principalSessionMinterOf(stack.kernel.getService<IAuthService>('auth'));
       expect(minter, 'the auth service implements IAuthService.mintPrincipalSession').toBeDefined();
       const asSession = (cookie: { name: string; value: string }) =>

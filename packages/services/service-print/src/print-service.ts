@@ -5,6 +5,7 @@ import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/a
 import type { EngineSchemaRegistryView, IDataEngine, IFileAttachmentService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
+import type { ICallerFileAttachmentService } from '@objectstack/service-storage';
 import type { ChromiumDriver } from './chromium-driver.js';
 import type { PrintPlacement, PrintPlacementResolution } from './config.js';
 import type { PrincipalSessionMinter, PrintSession } from './principal-session.js';
@@ -34,20 +35,25 @@ import type { PrincipalSessionMinter, PrintSession } from './principal-session.j
  *     a record that does not exist answer the same `RECORD_NOT_FOUND` / `404`,
  *     so the answer says nothing about a record the caller may not see. A user
  *     never archives what they could not read.
- *  5. **The files opt-in.** The record's object must declare
- *     `enable: { files: true }`, the opt-in every attachment of it needs
- *     (`FILES_DISABLED` / `403`), checked here so a refused archive never costs
- *     a render.
+ *  5. **The files opt-in, and the attach rule.** The record's object must
+ *     declare `enable: { files: true }`, the opt-in every attachment of it
+ *     needs (`FILES_DISABLED` / `403`), and the caller must be allowed to
+ *     attach a file to the record, asked of the archive with the insert's own
+ *     answers (`assertMayAttach`): may they create attachments at all
+ *     (`PERMISSION_DENIED` / `403`), and edit access to the record, the attach
+ *     rule (`ATTACHMENT_PARENT_ACCESS` / `403`). All are checked here so a
+ *     refused archive never costs a render.
  *
  * Then the session is minted for the caller's own principal, the page is
  * rendered with it, the PDF is archived through the `file-attachments` service,
  * and the session is revoked in a `finally` — after a failed render or a
  * refused archive as much as after a success.
  *
- * The archive is the one writer of `sys_file` and `sys_attachment`
- * (`IFileAttachmentService.attachFile`, `@objectstack/service-storage`): its
- * size limit, its organization wall and every gate on an attachment insert
- * judge this file exactly as they judge any other.
+ * The archive is the one writer of `sys_file` and `sys_attachment`, run AS
+ * THE CALLER (`attachFileAs`, `@objectstack/service-storage`): its size limit,
+ * its organization wall and every gate on an attachment insert judge this file
+ * for the requesting user exactly as they judge their own upload, and both
+ * rows name that user (`sys_file.owner_id`, `sys_attachment.uploaded_by`).
  */
 
 /** A request to print one record. */
@@ -119,7 +125,7 @@ export interface PrintServiceDeps {
   /** The engine for the configured placement; `null` exactly when none is configured. */
   driver: ChromiumDriver | null;
   getEngine(): PrintEngine | undefined;
-  getAttachments(): IFileAttachmentService | undefined;
+  getAttachments(): (IFileAttachmentService & Partial<ICallerFileAttachmentService>) | undefined;
   getMinter(): PrincipalSessionMinter | undefined;
 }
 
@@ -206,10 +212,18 @@ export class PrintService implements IPrintService {
         "a page cannot be rendered as the requesting user. Compose an auth plugin that provides it."
       );
     }
-    if (!this.deps.getAttachments()) {
+    const attachments = this.deps.getAttachments();
+    if (!attachments) {
       return (
         'No file-attachments service is registered, so a rendered PDF has nowhere to be archived. Compose ' +
         "@objectstack/service-storage's StorageServicePlugin."
+      );
+    }
+    if (typeof attachments.attachFileAs !== 'function' || typeof attachments.assertMayAttach !== 'function') {
+      return (
+        'The registered file-attachments service cannot attach a file as the requesting user (attachFileAs / ' +
+        "assertMayAttach, @objectstack/service-storage's ICallerFileAttachmentService), so a PDF could only be archived " +
+        'as the system. Compose a StorageServicePlugin that provides them.'
       );
     }
     if (!this.deps.getEngine()) return 'No data engine is registered, so a page or a record cannot be read.';
@@ -229,7 +243,7 @@ export class PrintService implements IPrintService {
     }
     const driver = this.deps.driver!;
     const engine = this.deps.getEngine()!;
-    const attachments = this.deps.getAttachments()!;
+    const attachments = this.deps.getAttachments() as IFileAttachmentService & ICallerFileAttachmentService;
     const minter = this.deps.getMinter()!;
     const placement = this.deps.placement as Extract<PrintPlacementResolution, { state: 'configured' }>;
 
@@ -240,8 +254,9 @@ export class PrintService implements IPrintService {
     // ④ The record, read as the caller.
     await this.refuseUnlessReadable(engine, req, context);
 
-    // ⑤ The files opt-in.
+    // ⑤ The files opt-in, and the attach rule for the caller.
     this.refuseUnlessFilesEnabled(engine, req.object);
+    await attachments.assertMayAttach(req.object, req.recordId, context);
 
     // Mint, render, archive — and revoke, whatever happened.
     const filename = req.filename ?? `${req.page}-${req.recordId}.pdf`;
@@ -251,14 +266,17 @@ export class PrintService implements IPrintService {
     const session: PrintSession = await minter.mint(context, PRINT_SESSION_TTL_SECONDS);
     try {
       const pdf = await driver.renderPdf({ url, cookie: session.cookie, timeoutMs: PRINT_RENDER_TIMEOUT_MS });
-      const attached = await attachments.attachFile({
-        parentObject: req.object,
-        parentId: req.recordId,
-        organizationId: nonEmptyString(context.tenantId) ? context.tenantId : null,
-        filename,
-        mimeType: PDF_MIME_TYPE,
-        data: pdf,
-      });
+      const attached = await attachments.attachFileAs(
+        {
+          parentObject: req.object,
+          parentId: req.recordId,
+          organizationId: nonEmptyString(context.tenantId) ? context.tenantId : null,
+          filename,
+          mimeType: PDF_MIME_TYPE,
+          data: pdf,
+        },
+        context,
+      );
       return { fileId: attached.fileId, attachmentId: attached.attachmentId, size: attached.size, filename };
     } finally {
       await session.revoke();

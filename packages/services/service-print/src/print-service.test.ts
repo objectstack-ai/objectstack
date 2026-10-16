@@ -41,6 +41,8 @@ interface Harness {
   mint: ReturnType<typeof vi.fn>;
   revoke: ReturnType<typeof vi.fn>;
   attachFile: ReturnType<typeof vi.fn>;
+  systemAttachFile: ReturnType<typeof vi.fn>;
+  assertMayAttach: ReturnType<typeof vi.fn>;
   findOne: ReturnType<typeof vi.fn>;
   metadataGet: ReturnType<typeof vi.fn>;
 }
@@ -56,6 +58,8 @@ interface Setup {
   attachError?: unknown;
   noMint?: boolean;
   noAttachments?: boolean;
+  noCallerAttach?: boolean;
+  attachRefusal?: Error;
 }
 
 const configured: PrintPlacementResolution = {
@@ -83,9 +87,13 @@ async function harness(setup: Setup = {}): Promise<Harness> {
       return PDF;
     }),
   };
-  const attachFile = vi.fn(async (input: { data: Buffer }) => {
+  const attachFile = vi.fn(async (input: { data: Buffer }, _context?: unknown) => {
     if (setup.attachError) throw setup.attachError;
     return { fileId: 'file_1', attachmentId: 'att_1', size: input.data.byteLength };
+  });
+  const systemAttachFile = vi.fn();
+  const assertMayAttach = vi.fn(async () => {
+    if (setup.attachRefusal) throw setup.attachRefusal;
   });
   const findOne = vi.fn(async () => {
     if (setup.readError) throw setup.readError;
@@ -106,11 +114,16 @@ async function harness(setup: Setup = {}): Promise<Harness> {
           getObject: () => ('object' in setup ? setup.object : { name: 'invoice', enable: { files: true } }),
         },
       }) as never,
-    getAttachments: () => (setup.noAttachments ? undefined : ({ attachFile } as never)),
+    getAttachments: () =>
+      setup.noAttachments
+        ? undefined
+        : ((setup.noCallerAttach
+            ? { attachFile: systemAttachFile }
+            : { attachFile: systemAttachFile, attachFileAs: attachFile, assertMayAttach }) as never),
     getMinter: () => (setup.noMint ? undefined : minter),
   });
   await service.probe();
-  return { service, driver, mint, revoke, attachFile, findOne, metadataGet };
+  return { service, driver, mint, revoke, attachFile, systemAttachFile, assertMayAttach, findOne, metadataGet };
 }
 
 /** The refusal's ADR-0112 envelope: `code` and `status`. */
@@ -129,6 +142,7 @@ function expectNothingStarted(h: Harness): void {
   expect(h.mint).not.toHaveBeenCalled();
   expect(h.driver.renderPdf).not.toHaveBeenCalled();
   expect(h.attachFile).not.toHaveBeenCalled();
+  expect(h.systemAttachFile).not.toHaveBeenCalled();
 }
 
 describe('PrintService — the principal (step ①)', () => {
@@ -280,6 +294,35 @@ describe('PrintService — the files opt-in (step ⑤)', () => {
     expectNothingStarted(h);
   });
 
+  for (const [label, refusal] of [
+    ['the attach rule refuses (no edit access)', ['ATTACHMENT_PARENT_ACCESS', 403]],
+    ['the caller may not create attachments at all', ['PERMISSION_DENIED', 403]],
+  ] as const) {
+    it(`${label}: the archive's own refusal, ${refusal[0]} / ${refusal[1]}, before any mint or render`, async () => {
+      const h = await harness({ attachRefusal: refusalError(refusal[0], refusal[1], label) });
+      const r = await refusalOf(h.service.printRecordToFile(REQUEST, USER));
+      expect([r.code, r.status]).toEqual([...refusal]);
+      expect(h.assertMayAttach).toHaveBeenCalledWith('invoice', 'inv_1', USER);
+      expect(h.assertMayAttach.mock.calls[0]![2]).toBe(USER);
+      expectNothingStarted(h);
+    });
+  }
+
+  it('a files refusal wins over the attach rule (the ruled order)', async () => {
+    const h = await harness({ object: { enable: {} }, attachRefusal: refusalError('ATTACHMENT_PARENT_ACCESS', 403, 'x') });
+    const r = await refusalOf(h.service.printRecordToFile(REQUEST, USER));
+    expect(r.code).toBe('FILES_DISABLED');
+    expect(h.assertMayAttach).not.toHaveBeenCalled();
+  });
+
+  it('an archive that can only attach as the system: unavailable, 503 — never a system-attributed PDF', async () => {
+    const h = await harness({ noCallerAttach: true });
+    expect(h.service.status().reason).toContain('attachFileAs');
+    const r = await refusalOf(h.service.printRecordToFile(REQUEST, USER));
+    expect([r.code, r.status]).toEqual(['SERVICE_UNAVAILABLE', 503]);
+    expectNothingStarted(h);
+  });
+
   it('an unreadable record wins over a files refusal (the ruled order)', async () => {
     const h = await harness({ record: null, object: { enable: {} } });
     const r = await refusalOf(h.service.printRecordToFile(REQUEST, USER));
@@ -302,14 +345,21 @@ describe('PrintService — mint, render, archive, revoke', () => {
       cookie: expect.objectContaining({ value: COOKIE_VALUE }),
       timeoutMs: PRINT_RENDER_TIMEOUT_MS,
     });
-    expect(h.attachFile).toHaveBeenCalledWith({
-      parentObject: 'invoice',
-      parentId: 'inv_1',
-      organizationId: 'org_1',
-      filename: 'invoice_print-inv_1.pdf',
-      mimeType: 'application/pdf',
-      data: PDF,
-    });
+    expect(h.attachFile).toHaveBeenCalledWith(
+      {
+        parentObject: 'invoice',
+        parentId: 'inv_1',
+        organizationId: 'org_1',
+        filename: 'invoice_print-inv_1.pdf',
+        mimeType: 'application/pdf',
+        data: PDF,
+      },
+      USER,
+    );
+    // Archived AS THE CALLER: the caller's own context, and never the system verb.
+    expect(h.attachFile.mock.calls[0]![1]).toBe(USER);
+    expect(h.systemAttachFile).not.toHaveBeenCalled();
+    expect(h.assertMayAttach).toHaveBeenCalledWith('invoice', 'inv_1', USER);
     expect(h.revoke).toHaveBeenCalledTimes(1);
     expect(out).toEqual({ fileId: 'file_1', attachmentId: 'att_1', size: PDF.byteLength, filename: 'invoice_print-inv_1.pdf' });
   });
@@ -327,7 +377,7 @@ describe('PrintService — mint, render, archive, revoke', () => {
   it('a caller with no organization archives in none', async () => {
     const h = await harness();
     await h.service.printRecordToFile({ ...REQUEST, filename: 'copy.pdf' }, { userId: 'usr_alice' } as ExecutionContext);
-    expect(h.attachFile).toHaveBeenCalledWith(expect.objectContaining({ organizationId: null, filename: 'copy.pdf' }));
+    expect(h.attachFile).toHaveBeenCalledWith(expect.objectContaining({ organizationId: null, filename: 'copy.pdf' }), expect.anything());
   });
 
   it('a failed render still revokes the session, and the failure is passed on unchanged', async () => {

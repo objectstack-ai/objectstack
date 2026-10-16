@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import type {
+  ISecurityService,
   AttachFileInput,
   AttachedFile,
   IDataEngine,
@@ -112,8 +113,11 @@ export interface FileAttachmentServiceDeps {
   logger: { warn(message: string): void; debug?(message: string): void };
   /** The sharing service, for the attach rule's verdict ({@link FileAttachmentService.mayAttach}). */
   getSharing?(): AttachmentSharingLike | null | undefined;
-  /** The security service, for the attach rule's master-detail check. */
-  getSecurity?(): AttachmentSecurityLike | null | undefined;
+  /**
+   * The security service: the attach rule's master-detail check, and `explain`
+   * for whether the caller may create an attachment at all.
+   */
+  getSecurity?(): (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'explain'>>) | null | undefined;
 }
 
 /**
@@ -130,11 +134,15 @@ export interface FileAttachmentServiceDeps {
  */
 export interface ICallerFileAttachmentService {
   /**
-   * Would the attach rule let `context` attach a file to the record? The
-   * verdict the `sys_attachment` insert gate itself asks (parent EDIT), with
-   * no write — for a producer to refuse before it spends work on the file.
+   * Refuse, with the answer the `sys_attachment` insert would give, unless
+   * `context` may attach a file to the record — with no write, for a producer
+   * to refuse before it spends work on the file. Two questions, each the
+   * insert's own: may the caller create an attachment at all (the CRUD
+   * middleware's verdict, asked through `ISecurityService.explain`;
+   * `PERMISSION_DENIED` / `403`), and does the attach rule admit them (parent
+   * EDIT, the insert gate's verdict; `ATTACHMENT_PARENT_ACCESS` / `403`).
    */
-  mayAttach(parentObject: string, parentId: string, context: ExecutionContext): Promise<boolean>;
+  assertMayAttach(parentObject: string, parentId: string, context: ExecutionContext): Promise<void>;
   /**
    * {@link IFileAttachmentService.attachFile}, as `context`'s user. Refuses as
    * `attachFile` does, plus: a parent the caller cannot read answers
@@ -171,7 +179,7 @@ function requireUserContext(context: ExecutionContext): ExecutionContext {
     refuse(
       'PERMISSION_DENIED',
       403,
-      'attachFileAs / mayAttach act as a signed-in user: the context carries no user, or is the system context ' +
+      'attachFileAs / assertMayAttach act as a signed-in user: the context carries no user, or is the system context ' +
         '(which attaches through attachFile).',
     );
   }
@@ -211,11 +219,29 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
     return this.attach(input, requireUserContext(context));
   }
 
-  async mayAttach(parentObject: string, parentId: string, context: ExecutionContext): Promise<boolean> {
+  async assertMayAttach(parentObject: string, parentId: string, context: ExecutionContext): Promise<void> {
     const caller = requireUserContext(context);
     const engine = this.deps.getEngine();
     if (!engine) refuse('SERVICE_UNAVAILABLE', 503, NOT_READY_MESSAGE);
-    return mayEditAttachmentParent(
+    let security: ReturnType<NonNullable<FileAttachmentServiceDeps['getSecurity']>>;
+    try {
+      security = this.deps.getSecurity?.();
+    } catch {
+      security = undefined;
+    }
+    // A kernel with no security service enforces no object permission on the
+    // insert either, so there is nothing to ask.
+    if (security && typeof security.explain === 'function') {
+      const decision = await security.explain({ object: 'sys_attachment', operation: 'create' }, caller);
+      if (!decision.allowed) {
+        refuse(
+          'PERMISSION_DENIED',
+          403,
+          'You cannot attach files: your permissions do not allow creating attachments (sys_attachment).',
+        );
+      }
+    }
+    const allowed = await mayEditAttachmentParent(
       {
         getSharing: () => this.deps.getSharing?.(),
         getSecurity: () => this.deps.getSecurity?.(),
@@ -227,6 +253,13 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
       'attach',
       () => engine.findOne(parentObject, { where: { id: parentId } }, { context: caller }),
     );
+    if (!allowed) {
+      refuse(
+        'ATTACHMENT_PARENT_ACCESS',
+        403,
+        `Cannot attach to ${parentObject}/${parentId}: the parent record does not exist or you cannot edit it`,
+      );
+    }
   }
 
   /** The one write path: as the system (`caller` null), or as the caller. */

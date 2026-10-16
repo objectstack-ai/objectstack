@@ -2836,6 +2836,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/service-storage':
+        specifier: workspace:*
+        version: link:../service-storage
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
