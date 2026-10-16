@@ -3114,6 +3114,672 @@
           "ref": "#23169"
         }
       ]
+    },
+    {
+      "id": "access-security.anonymous-floor-v18-doors",
+      "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json and /docs, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "anonymous caller (no cookie, no bearer, no x-api-key)",
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the showcase's stock public form `contact-us` (anon GET /api/v1/forms/contact-us resolves it; fields name/email/company/message)"
+        ],
+        "knownGaps": [
+          "the dispatcher `/ui` domain (also floored by 23225) is NOT mounted over HonoServer on a stock `os dev` / `os serve` — GET /api/v1/ui/... answers 404 ENDPOINT_NOT_FOUND to the admin too — so it is not driven here; it is reachable only on a dispatcher-only (hosted) kernel and is pinned by the dogfood sweep",
+          "the dispatcher mounts only POST /keys on HonoServer (packages/runtime/src/dispatcher-plugin.ts), so a non-POST /keys never reaches the domain's floor on a stock boot: the HonoServer fallback answers it 405 METHOD_NOT_ALLOWED (packages/plugins/plugin-hono-server/src/adapter.ts unmatchedResponse) — run 2026-10-16 measured exactly that; the clause stays as the 23225 contract states it, so a 405 there is a FAIL, not a re-point"
+        ]
+      },
+      "steps": [
+        "with NO credentials call: GET /api/v1/notifications, GET /api/v1/keys, GET /api/v1/share-links, GET /api/v1/openapi.json, GET /api/v1/docs, GET /api/v1/i18n/locales, GET /api/settings/branding",
+        "with no credentials call a token face: GET /api/v1/share-links/BOGUS/resolve",
+        "with no credentials POST /api/v1/forms/contact-us/submit with the four whitelisted fields plus a forged owner_id and a non-whitelisted status",
+        "repeat two of the 401 calls as admin to prove the door itself serves"
+      ],
+      "acceptance": [
+        {
+          "clause": "the anonymous floor is the first statement on every listed v18 door and the form submit answers {id} only — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "every listed door answers the anonymous caller 401 (UNAUTHENTICATED / AUTH_REQUIRED in that family's envelope) — never the 501/405/400 it answered before the floor",
+          "oracle": "api",
+          "verify": "status + error.code per door, anonymous",
+          "evidence": "one status+code line per door"
+        },
+        {
+          "clause": "the share-link token face is NOT behind the floor (it answers its own invalid-token refusal, not 401)",
+          "oracle": "api",
+          "verify": "status + code on the bogus token resolve",
+          "evidence": "the response line"
+        },
+        {
+          "clause": "an anonymous public-form submit answers 201 with a body that is exactly {id} — no stored, default or hook-stamped field echoed",
+          "oracle": "api",
+          "verify": "keys of the response body",
+          "evidence": "the response body"
+        }
+      ],
+      "negative": [
+        "an anonymous 200 from any listed door is a FAIL (and an authorization finding — RUNNER rule 2 carve-out applies to its reproduction)"
+      ],
+      "traps": [
+        "auth-state-leak",
+        "dispatcher-vs-hono-route"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/qa/dogfood/test/anonymous-door-sweep.dogfood.test.ts + packages/rest/src/rest-api-description-anonymous-deny.test.ts + packages/runtime/src/domains/i18n-anonymous-deny.test.ts + packages/services/service-settings/src/settings-routes.anonymous-floor.pin.test.ts + packages/rest/src/public-form-submit-answer.test.ts"
+      },
+      "source": [
+        "packages/core/src/security/anonymous-deny.ts#shouldDenyAnonymous",
+        "packages/rest/src/discovery-routes.ts#registerOpenApiEndpoints",
+        "packages/services/service-settings/src/settings-routes.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23225-domain-floor-anonymous-deny, 23225-ui-data-domain-floor, 22430-api-description-anonymous-deny, 22432-i18n-anonymous-deny, 23142-settings-anonymous-floor, 22437-public-form-submit-answers-id"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; extends access-security.anonymous-deny-surfaces (v15), which enumerates data/meta/actions/automation/batch/security/analytics only",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.walled-environment-metadata-operator-only",
+      "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "org owner holding manage_metadata who is NOT platform admin — walled-posture legs only",
+        "platform operator (holds the platform_admin position) — only for the walled-posture legs",
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
+          "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position"
+        ]
+      },
+      "steps": [
+        "walled boot, as the org owner: PUT /api/v1/meta/object/qa_walled_probe (a minimal object body); PUT /api/v1/meta/permission/showcase_member_access (any body); POST /api/v1/meta/view/SOME_VIEW/publish; DELETE /api/v1/packages/com.example.showcase",
+        "walled boot, as the org owner: POST /api/v1/security/permission-sets/SOME_SET/clone",
+        "walled boot, as the operator: repeat the object PUT and confirm it is admitted (then delete the probe)",
+        "single-posture boot, as admin: the same object PUT is admitted (control)"
+      ],
+      "acceptance": [
+        {
+          "clause": "every environment-metadata and catalog write door refuses a non-operator under a walled posture — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "each org-owner write on the walled boot answers 403 (FORBIDDEN on /meta, PERMISSION_DENIED on the dispatcher /packages and /security doors) and stores nothing (GET of the item afterwards is unchanged/404)",
+          "oracle": "api",
+          "verify": "status + error.code per call + a read-back",
+          "evidence": "one line per call + the read-backs"
+        },
+        {
+          "clause": "the operator's identical write is admitted on the walled boot, and the single-posture admin write is admitted",
+          "oracle": "api",
+          "verify": "status 2xx and read-back present",
+          "evidence": "both write answers"
+        }
+      ],
+      "negative": [
+        "an org owner on a walled boot succeeding at ANY environment-metadata write is a P0 FAIL (cross-tenant blast radius) — authorization carve-out: publish no reproduction"
+      ],
+      "traps": [
+        "wrong-persona",
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/rest/src/meta-migrate-stored-walled-refusal.test.ts + packages/runtime/src/domains/packages-walled-write-refusal.test.ts + packages/runtime/src/domains/automation-walled-definition-write.test.ts + packages/runtime/src/domains/meta-walled-catalog-refusal.test.ts + packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts + packages/qa/dogfood/test/wall-catalog-refusal.dogfood.test.ts + packages/qa/dogfood/test/wall-package-doors-refusal.dogfood.test.ts"
+      },
+      "source": [
+        "packages/metadata-core/src/meta-write-capability.ts#walledCatalogWriteVerdict",
+        "ADR-0131",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23231-walled-environment-metadata-writes, 15204-walled-catalog-refusal, 15204-walled-catalog-package-refusal, 15204-walled-catalog-package-verbs"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.meta-authoring-trail-and-audience-gates",
+      "title": "/meta read gates added on v18: the authoring-trail doors (history / audit / diff / package commits) refuse a setup.access-only caller, and a list view or dashboard carrying requiredPermissions is withheld from a caller without them on EVERY alternate door",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a scratch list view (PUT /api/v1/meta/view/showcase_task.qa_gated_view — view is overlay-allowed on stock showcase; a view name is dotted OBJECT.NAME) with requiredPermissions naming a capability the member lacks",
+          "a member granted setup.access but not studio.access / manage_metadata (a scratch permission set assigned through sys_user_permission_set)"
+        ]
+      },
+      "steps": [
+        "as the setup.access-only member: GET /api/v1/meta/object/showcase_task/history, /audit, /diff; GET /api/v1/packages/com.example.showcase/commits",
+        "as a member without the capability: GET /api/v1/meta/view (list) and GET /api/v1/meta/view/showcase_task.qa_gated_view, plus /published, /layers, ?state=draft, /history",
+        "as admin: the same reads (control); then delete the scratch view"
+      ],
+      "acceptance": [
+        {
+          "clause": "trail doors demand authoring access and the view/dashboard audience gate holds on every alternate door — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the setup.access-only caller gets 403 FORBIDDEN on history/audit/diff and 403 PERMISSION_DENIED on /packages/:id/commits",
+          "oracle": "api",
+          "verify": "status + error.code per door",
+          "evidence": "four status lines"
+        },
+        {
+          "clause": "the gated view is absent from the member's list and every by-name door answers 403 PERMISSION_DENIED; the admin reads it on all of them",
+          "oracle": "api",
+          "verify": "list membership + status per door, both personas",
+          "evidence": "the list ids + per-door lines"
+        }
+      ],
+      "negative": [
+        "a 304 Not Modified replaying the admin's body to the member (stale ETag) is a FAIL of the gate"
+      ],
+      "traps": [
+        "wrong-persona",
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/rest/src/meta-history-diff-authoring-door.test.ts + packages/qa/dogfood/test/wall-authoring-trail-doors.dogfood.test.ts + packages/rest/src/meta-view-dashboard-audience-gate.test.ts"
+      },
+      "source": [
+        "packages/rest/src/meta-item-read-gate.ts#holdsRequiredPermissions",
+        "packages/runtime/src/domains/packages.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23546-trail-doors-setup-access, 22611-list-view-dashboard-required-permissions, 22639-lint-capability-references-list-views, 22639-rest-meta-read-gate-audience, 22639-runtime-meta-legacy-object-exit, 22639-spec-audience-gate-enforced"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.security-catalog-activation-and-clone-doors",
+      "title": "Security-catalog doors new on v18: POST /security/_activation/:type/:name switches a position or permission set off and on (holders lose and regain its grants), and POST /security/permission-sets/:name/clone copies a set with its refusal arms",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)",
+        "anonymous caller (no cookie, no bearer, no x-api-key)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase position the member holds (GET /api/v1/data/sys_user_position as admin)"
+        ]
+      },
+      "steps": [
+        "as admin POST /api/v1/security/_activation/position/POSITION {enabled:false}; as the member re-read GET /api/v1/auth/me/permissions (or a record the position grants)",
+        "POST the same with {enabled:true}; re-read",
+        "POST /api/v1/security/_activation/position/everyone {enabled:false}; and for an unknown name",
+        "POST /api/v1/security/permission-sets/SOURCE/clone {name:\"qa_clone_set\", label:\"QA clone\"}; repeat with the same name; with the source's own name; with a bad body; as the member; anonymously"
+      ],
+      "acceptance": [
+        {
+          "clause": "the activation door and the clone door with every refusal arm — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "disabling a position answers 200, writes a sys_metadata_activation row and removes the holder's grants from it; re-enabling restores them",
+          "oracle": "api",
+          "verify": "activation answer + the member's permissions before/after each switch",
+          "evidence": "the three permission reads"
+        },
+        {
+          "clause": "everyone / guest → 400; an unknown name → 404",
+          "oracle": "api",
+          "verify": "status + code",
+          "evidence": "refusal bodies"
+        },
+        {
+          "clause": "clone → 200 {permissionSet, notice} carrying the facets but not isDefault / adminScope / packageId; name taken (including the source's) → 409; bad body → 400; member without manage_metadata → 403; anonymous → 401",
+          "oracle": "api",
+          "verify": "status + code per arm and the cloned set's keys",
+          "evidence": "one line per arm + the clone body"
+        }
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/runtime/src/domains/catalog-activation-door.test.ts + packages/qa/dogfood/test/catalog-activation-door.dogfood.test.ts + packages/runtime/src/domains/permission-set-clone.test.ts + packages/qa/dogfood/test/permission-set-clone-door.dogfood.test.ts"
+      },
+      "source": [
+        "packages/runtime/src/domains/catalog-activation.ts#handleCatalogActivationWrite",
+        "packages/runtime/src/domains/permission-set-clone.ts#handlePermissionSetCloneWrite",
+        "packages/runtime/src/domains/permission-set-clone.ts#PERMISSION_SET_CLONE_DROPPED_KEYS",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 15204-s2c-catalog-activation-door, 15204-catalog-activation-environment-authored, 15204-s2b-plugin-sharing-ledger-deactivation, 15204-permission-set-clone-door"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.security-catalog-one-holder-and-boot-report",
+      "title": "The security catalog has exactly one holder per name: two packages declaring one permission-set / position name refuse boot (422 NAMESPACE_CONFLICT on install-local), a body packageId that disagrees with its package is refused, `os migrate security-catalog-overlays` clears environment shadows, and boot reports grants naming undefined catalog entries",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a second scratch package declaring a permission set with the same name as a showcase set (for the install-local leg)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/marketplace/install-local with the conflicting package; GET /api/v1/packages afterwards",
+        "PUT /api/v1/meta/permission/SET?package=com.example.showcase with a body whose packageId names another package",
+        "in the scratch app run `os migrate security-catalog-overlays` (preview), then `--apply --yes --json`",
+        "plant a sys_user_permission_set row naming an undefined set (scratch DB), reboot, read the [security] boot line"
+      ],
+      "acceptance": [
+        {
+          "clause": "one-holder refusal, owner binding, the overlay migration and the catalog-reference report — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "install-local of a package redeclaring a catalog name → 422 NAMESPACE_CONFLICT (or PLUGIN_REGISTER_FAILED) with conflicts[], and nothing is recorded as installed",
+          "oracle": "api",
+          "verify": "status + code + conflicts; package list unchanged",
+          "evidence": "refusal body + the list"
+        },
+        {
+          "clause": "a permission-set save whose body packageId disagrees with the target package → 400 VALIDATION_ERROR at packageId",
+          "oracle": "api",
+          "verify": "status + error located path",
+          "evidence": "refusal body"
+        },
+        {
+          "clause": "`os migrate security-catalog-overlays` previews and exits 1 when rows exist; --apply --yes deletes and exits 0; --json reports listed/deleted/rows",
+          "oracle": "build",
+          "verify": "exit codes + JSON",
+          "evidence": "both CLI outputs"
+        },
+        {
+          "clause": "a grant naming an undefined set is listed in the [security] error line at boot (per org, ≤50 names); a clean boot logs one info line",
+          "oracle": "log",
+          "verify": "boot log grep for [security]",
+          "evidence": "the log lines"
+        }
+      ],
+      "traps": [
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/standalone-stack-security-catalog-one-holder.test.ts + packages/qa/dogfood/test/security-catalog-cold-boot-environment-holder.dogfood.test.ts + packages/cli/src/commands/migrate/security-catalog-overlays.integration.test.ts + packages/plugins/plugin-security/src/catalog-reference-report.test.ts + packages/spec/src/security/permission-set-owner-binding.test.ts + packages/objectql/src/permission-set-owner-registration.test.ts"
+      },
+      "source": [
+        "packages/objectql/src/registry.ts#SecurityCatalogNameConflictError",
+        "packages/cli/src/commands/migrate/security-catalog-overlays.ts",
+        "packages/plugins/plugin-security/src/catalog-reference-report.ts#reportCatalogReferences",
+        "packages/spec/src/security/permission-set-owner-binding.ts#judgePermissionSetOwnerBinding",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22135-security-catalog-one-holder, 22307-cold-boot-catalog-refusal, 22371-security-catalog-overlays-step, 15204-s3-boot-report, 23259-permission-set-owner-mismatch-refused, 23312-permission-set-owner-binding-build-and-registration"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.grant-table-write-contract",
+      "title": "Grant-table write contract (sys_user_permission_set / sys_user_position): the retired permission_set_id column is refused, a duplicate grant is 409, an inverted validity window is 400, granted_by is stamped with the caller, and (walled) a grant to a non-member is refused",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the member's user id and a showcase permission-set NAME"
+        ]
+      },
+      "steps": [
+        "as admin POST /api/v1/data/sys_user_permission_set {user_id: MEMBER, permission_set: NAME} (201), then the same body again",
+        "POST with permission_set_id instead of permission_set",
+        "POST with valid_until earlier than valid_from",
+        "POST with granted_by naming the member; read the stored row's granted_by",
+        "walled boot only: as an org admin grant in org A to a user who is not a member of A"
+      ],
+      "acceptance": [
+        {
+          "clause": "the grant-table write contract — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "permission_set_id → 400 INVALID_FIELD; a second identical grant → 409 UNIQUE_VIOLATION",
+          "oracle": "api",
+          "verify": "status + code + located field per arm",
+          "evidence": "two refusal bodies"
+        },
+        {
+          "clause": "an INSERT with valid_until <= valid_from is refused as the rule's VIOLATION: 400 VALIDATION_FAILED at valid_until with constraint.rule validity_window_order, constraint.reason NOT `unevaluable`, and the rule's authored message (\"Valid Until must be later than Valid From …\") — an unevaluable-predicate refusal is a FAIL even though it also answers 400",
+          "oracle": "api",
+          "verify": "fields[0].constraint + message on the inverted-window insert; a valid window inserts 201 (control)",
+          "evidence": "the refusal body + the control"
+        },
+        {
+          "clause": "a non-system insert naming someone else as granted_by stores the CALLER",
+          "oracle": "api",
+          "verify": "read-back of granted_by",
+          "evidence": "the stored row"
+        },
+        {
+          "clause": "walled: a grant to a non-member → 400 VALIDATION_FAILED with fields.user_id reference_not_found",
+          "oracle": "api",
+          "verify": "status + field code",
+          "evidence": "refusal body"
+        }
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/plugins/plugin-security/src/grant-permission-set-name.test.ts + packages/plugins/plugin-security/src/sys-user-permission-set-window-order.test.ts + packages/qa/dogfood/test/permission-set-assignment-window.dogfood.test.ts + packages/plugins/plugin-security/src/granted-by-writer-provenance.test.ts + packages/plugins/plugin-security/src/grant-holder-membership-refusal.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts",
+        "packages/plugins/plugin-security/src/grant-holder-membership-refusal.ts#registerGrantHolderMembershipRefusal",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23430-grant-permission-set-id-retired, 9272-grant-window-order-refused, 9272-user-page-grant-window-columns, 22201-granted-by-provenance, 22226-grant-holder-must-be-organization-member"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.parent-and-organization-write-guards",
+      "title": "Write guards tightened on v18: a walled update cannot null out organization_id, a detail write naming an unreadable header is reference_not_found, a validation rule reading an unreadable header answers like a missing one, and a controlled_by_parent child's attachments / comments / explain follow the master's edit grant",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase controlled_by_parent detail object with a master the member can read but not edit (or a scratch pair in the scratch app)",
+          "for the organization leg: the walled boot"
+        ]
+      },
+      "steps": [
+        "walled: PATCH a record with {organization_id: null}",
+        "as the member POST a detail row naming a header id the member cannot read, and one naming a non-existent id",
+        "as the member POST /api/v1/data/sys_attachment on the child; DELETE another user's file / comment on it",
+        "as the member POST /api/v1/security/explain for an update on the child; compare with the PATCH answer"
+      ],
+      "acceptance": [
+        {
+          "clause": "organization-removal refusal, unreadable-header parity and the cbp attach/comment/explain gates — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "walled: an update leaving organization_id null → 403 PERMISSION_DENIED; an insert with an empty org is still stamped",
+          "oracle": "api",
+          "verify": "status + code; read-back",
+          "evidence": "refusal + stamped row"
+        },
+        {
+          "clause": "an unreadable header and a non-existent header answer the SAME 400 reference_not_found (no existence oracle)",
+          "oracle": "api",
+          "verify": "compare the two bodies field by field",
+          "evidence": "both bodies"
+        },
+        {
+          "clause": "on a cbp child whose master the member cannot edit: attach → 403 ATTACHMENT_PARENT_ACCESS, deleting another's file → 403 ATTACHMENT_DELETE_DENIED, and explain reports not-writable decided by sharing — matching the PATCH",
+          "oracle": "api",
+          "verify": "status + code per call; explain verdict vs PATCH status",
+          "evidence": "per-call lines"
+        }
+      ],
+      "negative": [
+        "an unreadable header answering differently from a missing one is an existence-oracle FAIL — authorization carve-out applies"
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/plugins/plugin-security/src/tenant-wall-organization-removal.test.ts + packages/objectql/src/engine-unreadable-master-detail-header.test.ts + packages/objectql/src/engine-predicate-related-master-detail-header.test.ts + packages/qa/dogfood/test/cbp-parent-attachment-comment-gates.dogfood.test.ts + packages/qa/dogfood/test/cbp-explain-master-write.dogfood.test.ts + packages/plugins/plugin-security/src/controlled-by-parent-chain-middle-master.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin",
+        "packages/services/service-storage/src/attachment-access-hooks.ts",
+        "packages/plugins/plugin-security/src/explain-engine.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22278-tenant-wall-judges-emptied-organization, 22519-unreadable-header-write, 22892-predicate-related-master-detail, 22455-cbp-parent-gates-judge-master, 22455-security-serves-controlled-by-parent-write, 22464-security-service-controlled-by-parent-write, 22514-explain-cbp-update-master-check, 23093-cbp-middle-master-floor"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.deployment-tables-platform-only",
+      "title": "Seven deployment tables (sys_job, sys_job_run, sys_job_queue, sys_flow_dispatch, sys_migration, sys_migration_journal, sys_presence) carry no organization column on v18 and are readable only with manage_platform_settings — an org admin who is not platform admin is refused even on single",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a member promoted to org admin (sys_member role admin) who is not platform admin"
+        ]
+      },
+      "steps": [
+        "as the org admin GET /api/v1/data/sys_job and /api/v1/data/sys_migration",
+        "as the platform admin repeat",
+        "as the platform admin GET /api/v1/data/sys_job?filter=[[\"organization_id\",\"=\",\"x\"]]"
+      ],
+      "acceptance": [
+        {
+          "clause": "the seven tables are platform-level and gated by manage_platform_settings — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the org admin gets 403 PERMISSION_DENIED on each; the platform admin gets 200",
+          "oracle": "api",
+          "verify": "status per persona per table",
+          "evidence": "status lines"
+        },
+        {
+          "clause": "organization_id is an unknown field on these tables (400 INVALID_FIELD on a filter)",
+          "oracle": "api",
+          "verify": "status + code",
+          "evidence": "refusal body"
+        }
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/platform-objects/src/deployment-level-no-tenant-column.test.ts + packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts"
+      },
+      "source": [
+        "packages/platform-objects/src/audit/sys-job.object.ts",
+        "packages/services/service-realtime/src/objects/sys-presence.object.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 15207-deployment-plumbing-no-organization-column"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "access-security.share-link-combined-gates",
+      "title": "Share links with two gates combined: signed_in + password answers an anonymous caller 401 SIGN_IN_REQUIRED whatever password is sent, email + password answers a uniform 404 INVALID_OR_EXPIRED, and /messages answers exactly like /resolve",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "anonymous caller (no cookie, no bearer, no x-api-key)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "two share links minted by admin on a showcase record: (a) audience signed_in + password, (b) audience email + password"
+        ]
+      },
+      "steps": [
+        "anonymously GET /api/v1/share-links/TOKEN_A/resolve with no password, a wrong one, the right one (UTF-8 header form)",
+        "anonymously resolve TOKEN_B with no password and with the right password but no matching email session",
+        "repeat each call on /messages"
+      ],
+      "acceptance": [
+        {
+          "clause": "combined share-link gates and resolve/messages parity — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "link A answers anonymous 401 SIGN_IN_REQUIRED for every password variant (the password is never evaluated first)",
+          "oracle": "api",
+          "verify": "status + code per variant",
+          "evidence": "three lines"
+        },
+        {
+          "clause": "link B answers the same 404 INVALID_OR_EXPIRED body for every non-entitled variant",
+          "oracle": "api",
+          "verify": "byte-compare the bodies",
+          "evidence": "the bodies"
+        },
+        {
+          "clause": "/messages answers identically to /resolve on every call",
+          "oracle": "api",
+          "verify": "status+code pairs",
+          "evidence": "the paired lines"
+        }
+      ],
+      "negative": [
+        "a password-correct anonymous caller reading link A is an authorization FAIL — carve-out applies"
+      ],
+      "automated": {
+        "kind": "conformance",
+        "ref": "packages/plugins/plugin-sharing/src/share-link-eligibility.test.ts + packages/plugins/plugin-sharing/src/share-link-envelope.conformance.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes",
+        "packages/runtime/src/domains/share-links.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23328-share-link-refusal-order, 23372-share-link-email-audience-uniform-refusal, 23371-share-link-messages-audience-inputs"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

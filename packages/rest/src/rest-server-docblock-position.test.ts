@@ -165,6 +165,11 @@ describe('rest-server.ts docblock position', () => {
  * host interfaces' blocks and two functions' (it holds two registrars' bodies).
  * Neither the discovery body nor the OpenAPI body held a TSDoc block of its
  * own, so `rest-server.ts` keeps every block it had (164).
+ *
+ * [#23050 slice 8] `email-routes.ts` carries three, as the batch, approval and
+ * analytics modules do: the module header, the host interface's block and the
+ * function's. The email send body held no TSDoc block of its own, so
+ * `rest-server.ts` keeps every block it had.
  */
 const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
     'data-action-routes.ts': 4,
@@ -174,6 +179,7 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'analytics-routes.ts': 3,
     'security-routes.ts': 8,
     'discovery-routes.ts': 5,
+    'email-routes.ts': 3,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -205,9 +211,10 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // [#23050 slice 5] 4 + 3 + 3 + 8 + 3 = 21 over five, length 5 → 6.
         // [#23050 slice 6] 4 + 3 + 3 + 8 + 3 + 8 = 29 over six, length 6 → 7.
         // [#23050 slice 7] 4 + 3 + 3 + 8 + 3 + 8 + 5 = 34 over seven, length 7 → 8.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(8);
+        // [#23050 slice 8] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 = 37 over eight, length 8 → 9.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(9);
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(34);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(37);
     });
 });

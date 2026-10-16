@@ -14,17 +14,22 @@
  *
  * ADR-0089 makes **`visibleWhen`** the single canonical key across all layers
  * (aligning with the `readonlyWhen` / `requiredWhen` family and the resolved
- * `conditionalRequired → requiredWhen` precedent). `visibleOn` and `visibility`
- * stay accepted as `@deprecated` aliases and are folded into `visibleWhen`
- * **once, at the schema boundary** (a zod `.transform()`), so no renderer or
- * validator has to re-implement the fallback.
+ * `conditionalRequired → requiredWhen` precedent). Through 17, `visibleOn` and
+ * `visibility` stayed accepted as `@deprecated` aliases, folded into
+ * `visibleWhen` at the schema boundary by {@link normalizeVisibleWhen}. At 18
+ * both RETIRED (#23543 F4): each is a `retiredKey()` tombstone naming
+ * `visibleWhen`, and no schema in this package calls the fold any more. A
+ * stored pre-18 document is renamed by the retired ADR-0087 D2 conversions
+ * (`view-visibleOn-to-visibleWhen`, `page-component-visibility-to-visibleWhen`)
+ * that every stored-row rehydration seam replays. The two exports below remain
+ * published, with no caller in this repository.
  *
  * The *binding root* is still determined by the layer — runtime record surfaces
  * bind `record` + `current_user`; metadata-editing forms bind `data` — this
  * unifies the *name*, not the environment.
  */
 
-/** Deprecated alias keys folded into the canonical `visibleWhen`. */
+/** The retired alias keys of the canonical `visibleWhen` (refused by the schemas since 18). */
 export const VISIBILITY_ALIAS_KEYS = ['visibleOn', 'visibility'] as const;
 
 /** Object carrying the canonical key and/or its deprecated aliases. */
@@ -39,13 +44,8 @@ type WithVisibilityAliases = {
  * `visibleWhen` and drop the aliases from the output (ADR-0089 D2). The
  * canonical key wins when present; otherwise the first defined alias is used.
  *
- * Designed to be used as a zod `.transform()` on any object schema that carries
- * a conditional-visibility predicate:
- *
- * ```ts
- * strictObject(VISIBILITY_STRICT_OPTIONS, { ..., visibleWhen: Expr.optional() })
- *   .transform(normalizeVisibleWhen)
- * ```
+ * No schema here uses it since the aliases retired at 18 (#23543 F4): the
+ * view form and page component shapes refuse both keys with a prescription.
  */
 export function normalizeVisibleWhen<T extends WithVisibilityAliases>(
   input: T,

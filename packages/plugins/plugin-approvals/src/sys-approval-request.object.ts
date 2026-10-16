@@ -330,7 +330,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       required: false,
       maxLength: 100,
       readonly: true,
-      description: 'Suspended automation run id this request gates (ADR-0019). The decision resumes it.',
+      description: 'Suspended automation run id this request gates. The decision resumes it.',
       group: 'State',
     }),
 
@@ -339,7 +339,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       required: false,
       maxLength: 100,
       readonly: true,
-      description: 'Approval node id within the flow that opened this request (ADR-0019).',
+      description: 'Approval node id within the flow that opened this request.',
       group: 'State',
     }),
 
@@ -347,7 +347,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       label: 'Node Config',
       required: false,
       readonly: true,
-      description: 'Snapshot of the Approval node config (approvers/behavior) for node-driven requests (ADR-0019).',
+      description: 'Snapshot of the Approval node config (approvers/behavior) for node-driven requests.',
       group: 'State',
     }),
 

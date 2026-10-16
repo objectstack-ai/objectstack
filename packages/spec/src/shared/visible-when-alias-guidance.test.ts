@@ -294,7 +294,7 @@ describe('the two `visibleWhen` shapes the first sweep never enumerated', () => 
     // The judgment call: `visibility` / `visibleOn` are the ADR-0089 spellings
     // this surface's own docblock says are deliberately NOT folded in (the
     // key is new; there is no legacy convention to carry forward here, unlike
-    // the view/page shapes that fold them via `normalizeVisibleWhen`). That
+    // the view/page shapes that folded them until both retired at 18). That
     // sentence is about ACCEPTANCE and an alias row does not disturb it — both
     // stay rejected below. But an author who used the ADR-0089 spelling
     // correctly on a page component or view form and reaches for the same

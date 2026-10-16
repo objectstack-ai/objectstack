@@ -4582,6 +4582,309 @@
           "ref": "#21596"
         }
       ]
+    },
+    {
+      "id": "records-forms.write-time-option-and-element-shape-judgement",
+      "title": "Write-time value judgement on v18: picking an option whose stored visibleWhen cannot be evaluated is refused (reason unevaluable), an import with createMissingOptions keeps an unmatched select value while a later PATCH sending it back is refused, an import dry run admits exactly what the write admits, and a malformed element in a multi-valued lookup is refused with its index",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "in the scratch app: a select field whose option carries a visibleWhen that faults at runtime (stored with OS_ALLOW_UNLINTED_METADATA_WRITES=1 on the scratch boot), and a multiple:true lookup field"
+        ]
+      },
+      "steps": [
+        "POST a row choosing the faulting option",
+        "POST /api/v1/data/OBJ/import with createMissingOptions:true and an unmatched select value; repeat as dryRun; then PATCH another row sending that value",
+        "dry-run import a matched row whose requiredWhen reads an omitted column; compare with the real import",
+        "POST a row with the multi lookup set to [{\"id\":\"x\"}], then [false], then [42]"
+      ],
+      "acceptance": [
+        {
+          "clause": "option-visibility enforcement, kept options, dry-run parity and multi-reference element shape — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "choosing the faulting option → 400 VALIDATION_FAILED rule_violation with constraint.reason unevaluable",
+          "oracle": "api",
+          "verify": "status + reason",
+          "evidence": "the body"
+        },
+        {
+          "clause": "the import stores the unmatched value and its dry run agrees; a later PATCH sending it back → invalid_option",
+          "oracle": "api",
+          "verify": "stored value + dry-run row + PATCH answer",
+          "evidence": "three excerpts"
+        },
+        {
+          "clause": "the dry run admits the matched row exactly where the write admits it",
+          "oracle": "api",
+          "verify": "dry-run row verdict vs import row verdict",
+          "evidence": "both rows"
+        },
+        {
+          "clause": "each malformed multi-lookup element → 400 VALIDATION_FAILED invalid_type naming the index",
+          "oracle": "api",
+          "verify": "status + located index",
+          "evidence": "three bodies"
+        }
+      ],
+      "traps": [
+        "silent-coercion"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/validation/rule-validator.option-visibility.test.ts + packages/objectql/src/engine-field-predicate-fault.test.ts + packages/objectql/src/import-kept-option-values.test.ts + packages/objectql/src/validation/record-validator.kept-option-values.test.ts + packages/objectql/src/validate-update-stored-row.test.ts + packages/objectql/src/validate-preview-parent.test.ts + packages/objectql/src/engine-multi-reference-element-shape.test.ts"
+      },
+      "source": [
+        "packages/objectql/src/validation/rule-validator.ts",
+        "packages/core/src/utils/import-coerce.ts",
+        "packages/objectql/src/validation/record-validator.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22402-option-gate-fails-closed, 22183-import-kept-option-values, 22445-update-preview-stored-row, 22474-preview-binds-parent, 22908-multi-reference-element-shape"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.write-answer-advisories-rollback-and-tree-delete",
+      "title": "Write semantics changed on v18: a warning-severity validation hit comes back in the 2xx write answer as warnings[], a blocking after* hook abort rolls the whole write back, a `tree` field (with or without an explicit reference) honours its deleteBehavior, and a cascade delete is distinguishable to the child hook",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the showcase project object whose severity:\"warning\" rule fires on a health jump (records-forms.validation-rule-type-matrix names it)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "in the scratch app: an object with a referenceless `tree` field per deleteBehavior (set_null / cascade / restrict) and an afterInsert hook that aborts"
+        ]
+      },
+      "steps": [
+        "PATCH a showcase project to trigger the warning rule; read the answer body",
+        "scratch: POST a row on the object whose afterInsert aborts; GET the list afterwards",
+        "scratch: build a parent/child tree and DELETE the parent under each deleteBehavior"
+      ],
+      "acceptance": [
+        {
+          "clause": "advisory write answer, after-hook rollback, tree delete semantics and the cascade signal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the warning-rule PATCH answers 2xx with warnings:[{rule,severity,field,code,message}]; a write with no hit carries no warnings key",
+          "oracle": "api",
+          "verify": "response body keys",
+          "evidence": "both bodies"
+        },
+        {
+          "clause": "the aborting afterInsert refuses the caller AND no row is stored",
+          "oracle": "api",
+          "verify": "status + list count before/after",
+          "evidence": "answer + counts"
+        },
+        {
+          "clause": "tree delete: set_null clears the children, restrict → 409 DELETE_RESTRICTED, cascade removes the subtree",
+          "oracle": "api",
+          "verify": "child reads after each delete",
+          "evidence": "per-behavior lines"
+        }
+      ],
+      "negative": [
+        "an aborted after* write whose row is still readable is a durability FAIL"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/validation/advisory-write-answer.test.ts + packages/objectql/src/engine-after-hook-abort-unit.test.ts + packages/objectql/src/engine-cascade-delete.test.ts + packages/objectql/src/engine-cascade-delete-tree.test.ts + packages/verify/src/delete-behavior-referenceless-tree.test.ts"
+      },
+      "source": [
+        "packages/objectql/src/engine.ts",
+        "packages/spec/src/data/object.zod.ts#materializeTreeSelfReferences",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22726-write-answer-warnings, 22782-objectql-after-hook-abort-rolls-back, 22782-spec-hook-onerror-abort-text, 22856-log-hook-unevaluable-condition, 22957-tree-delete-behavior, 23065-referenceless-tree, 23221-cascade-delete-hook-signal"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; records-forms.validation-rule-type-matrix still says the advisory is server-log only — that clause is stale against 22726 (reported, not edited here)",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.comment-reactions-and-edit-stamps",
+      "title": "Discussion on v18: reactions are their own records (sys_comment_reaction — 201 with user_id forced, duplicate 409, unreadable comment 403, no update, no deleting another member's), the retired sys_comment.reactions column is refused, a comment edit is platform-stamped, and milestone activity is withheld whole from a reader missing a watched field",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase record both personas can read, with one comment by the admin"
+        ]
+      },
+      "steps": [
+        "as the member POST /api/v1/data/sys_comment_reaction {comment_id, emoji, user_id: ADMIN_ID}; read user_id; POST again",
+        "POST a reaction to a comment on a record the member cannot read",
+        "PATCH the member's reaction; DELETE the admin's reaction as the member",
+        "PATCH /api/v1/data/sys_comment/ID with {reactions:[...]}; GET with filter on reactions",
+        "as the admin PATCH the comment body with is_edited:false, edited_at:\"2000-01-01\"; read back"
+      ],
+      "acceptance": [
+        {
+          "clause": "reaction records, retired column, edit stamps and milestone redaction — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a reaction answers 201 with user_id forced to the caller; a duplicate → 409 UNIQUE_VIOLATION; an unreadable comment → 403 RECORD_NOT_ACCESSIBLE; update and foreign delete refused",
+          "oracle": "api",
+          "verify": "status + code per call",
+          "evidence": "per-call lines"
+        },
+        {
+          "clause": "sys_comment.reactions on write or filter → 400 INVALID_FIELD and is absent from reads",
+          "oracle": "api",
+          "verify": "status + read keys",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "a body edit sets is_edited:true and a server edited_at; client-sent values are dropped",
+          "oracle": "api",
+          "verify": "read-back vs sent",
+          "evidence": "the stored row"
+        }
+      ],
+      "traps": [
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.test.ts + packages/plugins/plugin-security/src/comment-reaction-own-record-floor.test.ts + packages/plugins/plugin-audit/src/comment-edit-stamp.integration.test.ts + packages/plugins/plugin-audit/src/sys-comment-reactions-door.integration.test.ts + packages/plugins/plugin-audit/src/activity-field-redaction.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-audit/src/objects/sys-comment-reaction.object.ts",
+        "packages/plugins/plugin-audit/src/comment-access-hooks.ts#installCommentAccessHooks",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22566-comment-reaction-record, 22573-sys-comment-reactions-retired, 23124-comment-edit-stamp, 22771-milestone-activity-kind, 22786-withhold-milestone-row"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.v18-semantic-defaults",
+      "title": "Defaults that changed meaning on v18 (ADR-0087 D3 18.* entries): an omitted list-view page size is 50 (was 25), an omitted editInline means editable in place, an autonumber with no `unique` is unique per organization, and a field-heavy form opens as a bounded modal on desktop",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase list view with no pagination.pageSize and no userActions.editInline (GET /api/v1/meta/view lists them)",
+          "a showcase object with more than 50 rows (or seed scratch rows)",
+          "the console bundle for the browser legs — see knownGaps"
+        ],
+        "knownGaps": [
+          "the browser clauses need the vendored console; at framework 94114c1f the pinned objectui (.objectui-sha daeb77fc) does not build against current spec (MISSING_EXPORT checkPageComponentViewData) — score those clauses blocked(environment) until the pin is bumped"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/meta/view/VIEW and read the resolved pageSize / editInline; open the list in the console and count the first page",
+        "as a member who may update, open the list and confirm the inline-edit affordance; as a read-only member confirm it is absent",
+        "create two rows of an autonumber object in the same org and read their numbers",
+        "open New on a field-heavy object on a desktop viewport, then on a mobile viewport"
+      ],
+      "acceptance": [
+        {
+          "clause": "the semantic defaults at the spec layer — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the first page of a list view with no pageSize shows 50 rows",
+          "oracle": "dom",
+          "verify": "count rendered rows after a screenshot confirms the list painted",
+          "evidence": "row count + one-line screenshot description"
+        },
+        {
+          "clause": "inline edit is offered to an updater and absent for a read-only member with editInline omitted",
+          "oracle": "screenshot",
+          "verify": "per-persona affordance",
+          "evidence": "two one-line descriptions"
+        },
+        {
+          "clause": "the heavy create form is a bounded modal on desktop and full-screen on mobile",
+          "oracle": "screenshot",
+          "verify": "surface shape per viewport",
+          "evidence": "two one-line descriptions"
+        }
+      ],
+      "traps": [
+        "hydration-race",
+        "stale-console-bundle"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/spec/src/data/field-autonumber-default-unique.test.ts + packages/spec/src/ui/view.test.ts + packages/spec/src/data/record-surface.test.ts"
+      },
+      "source": [
+        "packages/spec/src/data/record-surface.ts#deriveRecordFlowSurface",
+        "packages/spec/src/ui/view.zod.ts#UserActionsConfigSchema",
+        "ADR-0087",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22605-spec-list-view-edit-inline-default-on, 23734-heavy-flow-bounded-modal"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; D3 entries: view-pagination-page-size-default-50, list-view-edit-inline-default-on, autonumber-default-unique-organization",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

@@ -416,6 +416,40 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * not record traversals and are unaffected.
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false, or cannot be evaluated — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and every write picking the option would be refused, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference.").meta({ title: 'Visible When' }),
+  /**
+   * The lifecycle category of this option (#23809) — one closed vocabulary for
+   * every object on the platform:
+   *
+   * - `open` — a step on the way (New, Contacted, In Progress, Negotiation).
+   * - `won`  — the SUCCESSFUL end, for every object: a deal's Closed Won, a
+   *   lead's Converted, a task's Done, a case's Resolved.
+   * - `lost` — the UNSUCCESSFUL end, for every object: Closed Lost,
+   *   Unqualified, Cancelled, Closed Unresolved.
+   *
+   * Declared once on the option and read by every renderer of the object's
+   * `stageField` — the record path, the kanban column order, the "closed"
+   * filters, the dashboard won / lost measures — instead of a renderer
+   * guessing a terminus from the value's spelling (`closed_won`). The spelling
+   * is the one the page layer already ships: `record:path` `stages[].terminal`
+   * (`ui/component.zod.ts`) takes `won` / `lost`, and objectui's record path
+   * renderer honours it ahead of its spelling heuristic — one fact, one
+   * vocabulary from the data layer to the page, no conversion between two.
+   *
+   * - On a plain single-choice field the key is optional, and an ABSENT kind
+   *   reads as `open`. Nothing writes that default in at parse: absent stays
+   *   absent, so the stage-field rule can tell "declared open" from "forgot
+   *   the key".
+   * - On the field an object's `stageField` names, EVERY option must declare
+   *   it — `ObjectSchema` refuses the object otherwise, naming the field and
+   *   the option. No default there: a default would draw an AI-authored
+   *   lifecycle that forgot the key as the same wrong path, only declared.
+   * - Only a single-value `select` / `radio` field's options take it (a
+   *   lifecycle is one value per record); `FieldSchema` refuses it on any
+   *   other field's options. A shared `picklist`'s options take it too — the
+   *   same shape, reused verbatim. A form view's option list does not
+   *   (`FormSelectOptionSchema`): the lifecycle is the object field's.
+   */
+  kind: z.enum(['open', 'won', 'lost']).optional().describe("Lifecycle category of this option: 'open' (a step on the way), 'won' (the successful end: a deal's Closed Won, a task's Done, a case's Resolved) or 'lost' (the unsuccessful end: Closed Lost, Cancelled, Unqualified). Absent reads as 'open'. Required on every option of the field an object's `stageField` names. Only on a single-value `select` / `radio` field.").meta({ title: 'Kind' }),
 }));
 
 /**
@@ -1736,19 +1770,21 @@ export const FieldSchema = lazySchema(() => {
    * result from the referenced object's schema when omitted (objectui
    * packages/fields: LookupField / RecordPickerDialog / deriveLookupColumns).
    *
-   * SNAKE_CASE TOLERANCE — measured on the consumer, not assumed. Those
-   * readers accept a snake_case alias for three of the seven keys declared
-   * below, and for three only: `lookupColumns`, `lookupPageSize` and
-   * `allowCreate` are each read as `<snake> ?? <camel>` in LookupField.tsx.
-   * The other four — `displayField`, `descriptionField`, `lookupFilters`
-   * and `dependsOn` — are read camelCase-only, so a snake_case spelling of
-   * any of those four arrives at the picker as nothing at all. Three of them
-   * lost their twin in objectui#7155's LookupFieldMetadata alias sweep (no
-   * deprecation window, no dual read); `dependsOn` lost its own later,
-   * retired under ADR-0049 enforce-or-remove in objectui#7357. The three
-   * aliases that survive are objectui's own back-compat, never a spelling
-   * this schema declares — the camelCase key is the authored one in every
-   * case.
+   * SNAKE_CASE SPELLINGS — measured on the consumer, not assumed. Those
+   * readers accept no snake_case alias for any of the seven keys declared
+   * below: LookupField.tsx reads `displayField`, `descriptionField`,
+   * `lookupColumns`, `lookupPageSize`, `lookupFilters`, `dependsOn` and
+   * `allowCreate` camelCase-only. The twins went in three rounds, each with
+   * no deprecation window and no dual read: three in objectui#7155's
+   * LookupFieldMetadata alias sweep, `dependsOn`'s under ADR-0049
+   * enforce-or-remove in objectui#7357, and the last three
+   * (`lookup_columns`, `lookup_page_size`, `allow_create`) in
+   * objectui#12157. A stored definition that still spells one of these keys
+   * in snake_case is folded onto the declared key when the console ingests
+   * it (`normalizeSchemaReferenceKeys`, objectui `packages/core`), so it
+   * reaches the picker camelCase; one that reaches the picker without that
+   * fold arrives as nothing at all. The camelCase key is the only spelling
+   * this schema declares.
    *
    * The read points, dated, are recorded in `liveness/field.json`, row
    * `lookupColumns`. It is a reading of a foreign tree and no gate here
@@ -1974,7 +2010,12 @@ export const FieldSchema = lazySchema(() => {
    * (`validate-expressions.ts`: it parses, it reads `record.<field>` and never
    * a bare field, and only the roots that family binds). While it holds, no
    * overdue wording or colour applies — "finished" stays local to the deadline
-   * that cares, so no select option carries a terminal marker for it.
+   * that cares. A select option does declare its lifecycle `kind` (`open` /
+   * `won` / `lost`, #23809), but overdue is still judged by `settledWhen`
+   * alone: nothing reads an option's `kind` to settle a deadline. An author
+   * who wants a closed record settled says so in the predicate
+   * (P`record.status in ['done', 'cancelled']`), which may later read a
+   * declared marker without changing this key's meaning.
    *
    * Declared = enforced (ADR-0049), both halves at this seam: either key on a
    * type outside the set is refused, and `settledWhen` without `dueLike: true`
@@ -2433,6 +2474,31 @@ export const FieldSchema = lazySchema(() => {
           "one source. Keep `picklist: '<name>'` and delete `options`: the picklist holds them " +
           '(to offer a new value, add it to the picklist, or through `picklistExtensions` when another ' +
           'package owns it). Or delete `picklist` to keep an inline list of this field\'s own.',
+      });
+    }
+  }
+
+  // [#23809] An option's lifecycle `kind` says where ONE record stands in its
+  // life, so it is honest only on a field holding one option code per record:
+  // a `select` / `radio` that is not `multiple: true`. On any other field's
+  // options (a multi-value choice, a lookup's static options) it would parse
+  // and no stage renderer would ever read it (ADR-0049). One located issue per
+  // offending option.
+  if (Array.isArray(field.options)) {
+    const singleValueChoice = SINGLE_OPTION_TYPES.has(field.type) && field.multiple !== true;
+    if (!singleValueChoice) {
+      field.options.forEach((option, index) => {
+        if (option.kind === undefined) return;
+        ctx.addIssue({
+          code: 'custom',
+          path: ['options', index, 'kind'],
+          message:
+            `Option '${option.value}' declares \`kind: '${option.kind}'\`, but \`kind\` is only valid on the ` +
+            'options of a single-value `select` or `radio` field (this field is ' +
+            `\`${field.type}\`${field.multiple === true ? ' with `multiple: true`' : ''}): it says where one ` +
+            'record stands in its lifecycle, and this field holds no single option code per record. Delete ' +
+            '`kind`, or make the field a single-value `select`.',
+        });
       });
     }
   }
@@ -2924,6 +2990,8 @@ export type FieldParsed = z.infer<typeof FieldSchema>;
 export type SelectOption = z.input<typeof SelectOptionSchema>;
 /** Post-parse shape of {@link SelectOption} — defaults applied, transforms run (ADR-0122). */
 export type SelectOptionParsed = z.infer<typeof SelectOptionSchema>;
+/** The lifecycle category a select option declares (`SelectOption.kind`, #23809). */
+export type SelectOptionKind = NonNullable<SelectOptionParsed['kind']>;
 /** One authored `inlineColumns` entry (#9227) — the strict, name-keyed inline grid column. */
 export type InlineGridColumn = z.input<typeof InlineGridColumnSchema>;
 /** Post-parse shape of {@link InlineGridColumn} — bare-string CEL predicates normalized to Expression envelopes (ADR-0122). */

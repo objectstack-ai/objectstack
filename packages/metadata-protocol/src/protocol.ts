@@ -1873,8 +1873,9 @@ export function graftFoldedFormSections(authored: unknown, parsed: unknown): unk
 /**
  * How many verify-and-restore rounds {@link projectStorableViewBody} may take.
  * One round per level of key-moved nesting is what convergence costs: a
- * `groups` → `sections` fold whose sections carry a `visibleOn` →
- * `visibleWhen` fold is two levels. A `view` body is a bounded document, so a
+ * `groups` → `sections` fold whose sections carried a moved key of their own
+ * (the `visibleOn` → `visibleWhen` fold, until that alias retired at 18) is
+ * two levels. A `view` body is a bounded document, so a
  * body still diverging after this many rounds is not converging at all.
  */
 const STORABLE_VIEW_MAX_ROUNDS = 8;
@@ -1937,7 +1938,7 @@ function soleMovedFrom(dropped: readonly string[], authored: Record<string, unkn
  *   the parse applies it by itself — a schema DEFAULT, left to the parse
  *   (ADR-0087's `storable` rule). If the re-parse did NOT reproduce it, the value
  *   came from something the author wrote under another key — a MOVED key
- *   (`groups` → `sections`, `visibleOn` → `visibleWhen`) — and it is stored,
+ *   (`groups` → `sections`) — and it is stored,
  *   projected against the authored key it moved from when that key is the only
  *   one of its shape, and stored whole otherwise. Once stored it stays stored
  *   in later rounds, so the rounds only ever add.
@@ -1965,9 +1966,9 @@ function buildStorableViewNode(authored: unknown, parsed: unknown, reparsed: unk
             const storedBefore = prev !== undefined && prev[key] !== undefined;
             if (!storedBefore && (r === undefined || storableEqual(r[key], value))) continue;
             // Projected against the key it moved from when that key is the only
-            // one of its shape; otherwise (a `visibleOn` string folded into a
-            // `visibleWhen` expression object) the parsed value is the moved
-            // key's value, and it is stored whole.
+            // one of its shape; otherwise (a string folded into an expression
+            // object, as the retired `visibleOn` → `visibleWhen` fold did) the
+            // parsed value is the moved key's value, and it is stored whole.
             const from = soleMovedFrom(dropped, a, value);
             out[key] = from === undefined ? value : buildStorableViewNode(a[from], value, r?.[key], prev?.[key]);
         }
@@ -1993,8 +1994,9 @@ function buildStorableViewNode(authored: unknown, parsed: unknown, reparsed: unk
  * {@link graftNormalizedOperators} (a value normalised in place) and
  * {@link graftFoldedFormSections} (a key moved). Both are special cases of it:
  * a parsed value is stored for every authored key, and a moved key is found by
- * evidence rather than by name, so `visibleOn` → `visibleWhen` (never grafted)
- * is covered too. Every other type keeps the two grafts over its verbatim body.
+ * evidence rather than by name, so a move no graft names (the
+ * `visibleOn` → `visibleWhen` fold did, until that alias retired at 18) is
+ * covered too. Every other type keeps the two grafts over its verbatim body.
  *
  * ## Why a re-parse, and what it proves
  *
@@ -6555,15 +6557,79 @@ export class ObjectStackProtocolImplementation implements
      * a control-plane or metadata-only host has no automation service — and
      * every caller must decide what it means for them rather than assume a
      * flow was handled.
+     *
+     * [#23775] `options` is handed through as given. Only the save door passes
+     * one ({@link flowSaveReplaysRetired}); every other caller canonicalizes a
+     * row or an artifact at rest and passes none, so the chain it gets replays
+     * the retired entries, as before.
      */
     private resolveFlowCanonicalizer():
-        ((name: string, body: unknown) => StoredFlowCanonicalization) | undefined {
+        ((name: string, body: unknown, options?: { includeRetired?: boolean }) => StoredFlowCanonicalization) | undefined {
         const automation = this.getServicesRegistry?.().get('automation') as
-            | { canonicalizeStoredFlow?: (name: string, definition: unknown) => StoredFlowCanonicalization }
+            | {
+                canonicalizeStoredFlow?: (
+                    name: string, definition: unknown, options?: { includeRetired?: boolean },
+                ) => StoredFlowCanonicalization;
+            }
             | undefined;
         const canonicalize = automation?.canonicalizeStoredFlow;
         if (typeof canonicalize !== 'function') return undefined;
-        return (name, body) => canonicalize.call(automation, name, body);
+        return (name, body, options) => (options === undefined
+            ? canonicalize.call(automation, name, body)
+            : canonicalize.call(automation, name, body, options));
+    }
+
+    /**
+     * [#23775, ADR-0087 addendum 2026-07-31] Does this flow save replay the
+     * conversions retired from the authoring funnel? The predicate of the
+     * maintainer's ruling B: a flow with NO stored row at the save's address is
+     * authored input, judged as `normalizeStackInput` judges it — a retired
+     * spelling stays in place and meets the parse refusal and its prescription
+     * (`422 INVALID_METADATA`, located, the text `os validate` prints) — while a
+     * re-save of a stored row keeps the full chain, so a legacy row stays
+     * editable in Studio. The automation engine's rehydration is not asked.
+     *
+     * "A stored row at the save's address" is the row the save overwrites, as
+     * the repository's `put` resolves it ({@link SysMetadataRepository.headAt}:
+     * the state, the package, the inherited draft binding and the bundle
+     * member), and for a draft save with no draft row yet the ACTIVE row the
+     * draft overlays — the same baseline {@link authoredLockFamily} and
+     * {@link storedBodyForCarryForward} read. The fallback is load-bearing:
+     * Studio's flow designer saves drafts, so its first edit of a stored flow
+     * has no draft row and would otherwise be judged as new. The mode does not
+     * change the predicate, and the refusal it leads to is asked in draft and
+     * publish mode alike. A flow a managed package ships never reaches here (it
+     * is sealed, {@link refusePackagedBaseOverride}), so no code layer is read.
+     *
+     * Server-stated writes answer `true` without a read: their body is a row or
+     * an artifact at rest, never a caller's. `source` set is a rewrite of a row
+     * the store holds (the stored-metadata migration); a package duplicate
+     * copies stored rows and an unmanaged import writes a built package's
+     * flows, both canonicalized by their caller with the full chain first
+     * wherever an engine is reachable. Judging them as authored would refuse,
+     * on a host with no automation service only, the same body an engine host
+     * accepts — the verdict split #21982 closed.
+     *
+     * Read with no `try`/`catch`, as the lock family's baseline is: a stored row
+     * that could not be read is not an absent one.
+     */
+    private async flowSaveReplaysRetired(request: {
+        name: string;
+        item?: unknown;
+        packageId?: string | null;
+        source?: string;
+        writeFace?: MetadataWriteFace;
+    }, mode: 'draft' | 'publish'): Promise<boolean> {
+        if (request.source !== undefined) return true;
+        if (request.writeFace === 'package-duplicate' || request.writeFace === 'package-unmanaged-import') return true;
+        const repo = this.getOverlayRepo();
+        const ref = { type: 'flow', name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
+        const member = itemDiscriminator('flow', request.item);
+        const state: 'active' | 'draft' = mode === 'draft' ? 'draft' : 'active';
+        const target = await repo.headAt(ref, { state, packageId: request.packageId ?? null, member });
+        if (target.head) return true;
+        if (state !== 'draft') return false;
+        return (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head !== null;
     }
 
     /**
@@ -22944,23 +23010,38 @@ export class ObjectStackProtocolImplementation implements
         // here and accepted by `registerFlow`, which the canonicalizer is: a
         // verdict that depended on whether this host runs an automation
         // service. So the fallback replays the chain the canonicalizer replays
-        // — the FULL chain, retired entries included (#23487 retired those
-        // spellings from the authoring funnel, not from this seam), minus the
-        // same default flip ({@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}). No `reservedNodeTypes` (no
+        // FOR THIS SAVE, minus the same default flip
+        // ({@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}). No `reservedNodeTypes` (no
         // engine here): a node-type rename's conflict guard keeps its one home
         // in the engine's canonicalizer, and this converted body is never
         // persisted. A key no conversion rewrites is judged exactly as written.
+        //
+        // [#23775, ADR-0087 addendum 2026-07-31] Which chain that is, is the
+        // ruling's predicate ({@link flowSaveReplaysRetired}). A re-save of a
+        // stored row replays the FULL chain, retired entries included — the
+        // row is data at rest, and a legacy row stays editable. A flow with no
+        // stored row at the save's address is authored input: the
+        // canonicalizer and this fallback both run WITHOUT the retired entries,
+        // so a spelling retired from the authoring funnel (#23487, #23543) is
+        // not lifted here either and meets the parse refusal below, with the
+        // prescription `os validate` prints, on both hosts alike.
         let flowGateVerdictBody: unknown;
+        // [#4580, #23775] The fallback's warning, said once the gate below has
+        // accepted the body it falls back to — never for a save it refuses.
+        let flowCanonicalizeFallback: string | undefined;
         if (singularType === 'flow' && request.item) {
+            const includeRetired = await this.flowSaveReplaysRetired(request, mode);
             // No automation service reachable (control-plane / metadata-only
-            // host): save exactly as today — a host must not start refusing
-            // flow writes it accepted yesterday.
+            // host): the fallback below judges the body and it is saved as
+            // written — a host must not start refusing flow writes it accepted
+            // yesterday, save the retired spelling on a new flow (#23775), which
+            // an engine host refuses too.
             const canonicalizeFlow = this.resolveFlowCanonicalizer();
             let canonicalized = false;
             if (canonicalizeFlow) {
                 let result: StoredFlowCanonicalization | undefined;
                 try {
-                    result = canonicalizeFlow(request.name, request.item);
+                    result = canonicalizeFlow(request.name, request.item, { includeRetired });
                 } catch (e: any) {
                     // `canonicalizeStoredFlow` is STRICTER than the gate below
                     // (strict parse + cycle detection + control-flow region
@@ -22984,16 +23065,12 @@ export class ObjectStackProtocolImplementation implements
                     // Deduped per flow per process, like {@link
                     // storedConversionWarned} — Studio autosave writes the same
                     // draft repeatedly and this must not become a spam loop.
-                    const key = `${singularType}|${request.name}`;
-                    if (!this.flowCanonicalizeFallbackWarned.has(key)) {
-                        this.flowCanonicalizeFallbackWarned.add(key);
-                        console.warn(
-                            `[Protocol] flow/${request.name} was saved WITHOUT canonicalization: `
-                            + `${e?.message ?? String(e)} The body was persisted as submitted, so a `
-                            + `pre-protocol shape in it stays legacy on disk. Run `
-                            + `"os migrate meta --stored" to see the row's status.`,
-                        );
-                    }
+                    //
+                    // [#23775] Said after the schema gate, not here: on a new
+                    // flow the canonicalizer's own throw is often the retired
+                    // spelling's refusal, which the gate then answers with a
+                    // 422, and "was saved" would be false.
+                    flowCanonicalizeFallback = e?.message ?? String(e);
                     result = undefined;
                 }
                 if (result) {
@@ -23023,7 +23100,7 @@ export class ObjectStackProtocolImplementation implements
             }
             if (!canonicalized) {
                 flowGateVerdictBody = applyConversionsToFlow(request.item, {
-                    includeRetired: true,
+                    includeRetired,
                     excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
                 });
             }
@@ -23135,6 +23212,22 @@ export class ObjectStackProtocolImplementation implements
                 // read seam fills the same default for rows stored before this
                 // fix. See {@link withDeclaredPageTypeDefault}.
                 request.item = withDeclaredPageTypeDefault(request.type, request.item);
+            }
+        }
+
+        // [#4580, #23775] The flow canonicalizer's throw-fallback, said now that
+        // the gate it fell back to has accepted the body (see the flow branch
+        // above for why it is not said where the throw is caught).
+        if (flowCanonicalizeFallback !== undefined) {
+            const key = `${singularType}|${request.name}`;
+            if (!this.flowCanonicalizeFallbackWarned.has(key)) {
+                this.flowCanonicalizeFallbackWarned.add(key);
+                console.warn(
+                    `[Protocol] flow/${request.name} was saved WITHOUT canonicalization: `
+                    + `${flowCanonicalizeFallback} The body was persisted as submitted, so a `
+                    + `pre-protocol shape in it stays legacy on disk. Run `
+                    + `"os migrate meta --stored" to see the row's status.`,
+                );
             }
         }
 

@@ -393,8 +393,10 @@ export const SpecifierSchema = lazySchema(() => z.object({
   /**
    * Stable identifier (snake_case) used for i18n translation lookup,
    * action routing, and test selectors. Orthogonal to `key` (which is
-   * the storage path). Recommended for `group` and `action_button`
-   * specifiers so their labels can be translated and so action
+   * the storage path). Recommended for `group`, `info_banner` and
+   * `action_button` specifiers so their text can be translated
+   * (`settings.<namespace>.groups.<id>`, `.banners.<id>` and
+   * `.actions.<id>` in the platform translation bundle) and so action
    * handlers have stable hook keys. Must be unique within a manifest.
    */
   id: SnakeCaseIdentifierSchema.optional().describe('Stable identifier (snake_case)'),

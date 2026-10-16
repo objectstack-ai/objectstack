@@ -246,7 +246,7 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
  *
  * This tier used to be justified as "the rules that need it check keys the
  * parse strips — a flat list view in `views: []`, `userFilters` on an object
- * list view, a `visibleOn` alias — by the time `result.data` exists the
+ * list view, a `visibleOn` alias (retired at 18) — by the time `result.data` exists the
  * evidence is gone". **All three of those examples were measured false**, each
  * for its own reason, and the pins live in `authoring-rule-input-tier.test.ts`:
  *
@@ -271,7 +271,10 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
  *     (`visibility-alias-deprecated`) was retired, since the D2 conversion
  *     notice already covers its whole evidence surface with better wording and
  *     a stated retirement window. The alias-KEY half of premise 3 is therefore
- *     no longer merely false — there is nothing left reading it.
+ *     no longer merely false — there is nothing left reading it. At 18 the
+ *     aliases retired as spec tombstones and the D2 conversions left the load
+ *     path (#23543 F4): the parse now refuses the alias by name before any rule
+ *     runs.
  *
  * ## What it does buy, and why the tier stays
  *
@@ -1520,8 +1523,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // gate and (#6253) the syntax gate. This entry used to read "pre-parse: the
   // schema folds `visibleOn`/`visibility` into `visibleWhen` during parse, so
   // the alias the author wrote is gone from `result.data`". Measured false at
-  // #6073: the ADR-0087 D2 conversions do that fold INSIDE
-  // `normalizeStackInput`, one layer BEFORE this tier, so on every spec-valid
+  // #6073: the ADR-0087 D2 conversions did that fold INSIDE
+  // `normalizeStackInput` (until both aliases retired at 18, #23543 F4), one
+  // layer BEFORE this tier, so on every spec-valid
   // alias site the alias-KEY rule reported zero here too.
   //
   // #6318 closed that: `visibility-alias-deprecated` was RETIRED rather than
@@ -1575,10 +1579,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // when nobody measured, which is the #4409/#4463 defect one layer in.
   //
   // Runtime input tier: the gate hands the rules the body as persisted, without
-  // `normalizeStackInput`, so the ADR-0087 D2 alias fold does NOT run at this
-  // door. That costs the family nothing — `validateVisibilityPredicates` reads
-  // `visibleWhen ?? visibleOn ?? visibility` itself, canonical-first, precisely
-  // so a caller handing it a raw authored object still gets a verdict.
+  // `normalizeStackInput`. That costs the family nothing: the door parses the
+  // body against the spec first (a 422 on refusal), and since the ADR-0089
+  // aliases retired at 18 (#23543 F4) an accepted body spells the predicate
+  // `visibleWhen` only, the one key the family reads.
   {
     name: 'validateVisibilityPredicates',
     tier: 'gating',

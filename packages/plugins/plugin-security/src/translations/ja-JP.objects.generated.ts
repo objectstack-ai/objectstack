@@ -34,7 +34,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       permission_set: {
         label: "権限セット",
-        help: "[ADR-0131 D4] この付与が保持する権限セットのマシン名（セキュリティカタログでの名前）。カタログにない名前は拒否されます。この列が存在する前に書き込まれた付与でのみ NULL です。"
+        help: "この付与が保持する権限セットのマシン名（セキュリティカタログでの名前）。カタログにない名前は拒否されます。この列が存在する前に書き込まれた付与でのみ NULL です。"
       },
       organization_id: {
         label: "組織",
@@ -46,23 +46,23 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "有効開始",
-        help: "[ADR-0091 D1] この時点より前は付与が無効です。Null = 即時有効。解決時にフェイルクローズで適用されます（D2）——バックグラウンドジョブでは行いません。"
+        help: "この時点より前は付与が無効です。Null = 即時有効。解決時にフェイルクローズで適用されます——バックグラウンドジョブでは行いません。"
       },
       valid_until: {
         label: "有効終了",
-        help: "[ADR-0091 D1] この時点以降（当該時点を含む）、付与は無効になります（半開区間 [from, until)、UTC）。null は無期限。ブレークグラス発動（D4）とエージェント付与（D6）では必須。解決時に強制されます（D2）。"
+        help: "この時点以降（当該時点を含む）、付与は無効になります（半開区間 [from, until)、UTC）。null は無期限。ブレークグラス発動とエージェント付与では必須。解決時に強制されます。"
       },
       reason: {
         label: "理由",
-        help: "[ADR-0091 D1] この付与が存在する理由。自由記述。委任（D3）とブレークグラス（D4）の行では必須。エージェント付与はここにタスク／実行の帰属を記録します（D6）。"
+        help: "この付与が存在する理由。自由記述。委任とブレークグラスの行では必須。エージェント付与はここにタスク／実行の帰属を記録します。"
       },
       last_certified_at: {
         label: "最終認証日時",
-        help: "[ADR-0091 D5] 将来のアクセス再認証ワークフロー用に予約された列で、その際にこの付与が最後に証明された日時を記録します。現時点では不活性です。プラットフォームはこの列に書き込まず、読み取るコードもありません。解決経路もゲートも lint も参照せず、「未認証」や「認証が古い」を導出する箇所もありません。したがって Null はワークフローが存在しないことを意味するだけで、この付与が未レビューであることを意味しません。"
+        help: "将来のアクセス再認証ワークフロー用に予約された列で、その際にこの付与が最後に証明された日時を記録します。現時点では不活性です。プラットフォームはこの列に書き込まず、読み取るコードもありません。解決経路もゲートも lint も参照せず、「未認証」や「認証が古い」を導出する箇所もありません。したがって Null はワークフローが存在しないことを意味するだけで、この付与が未レビューであることを意味しません。"
       },
       certified_by: {
         label: "認証者",
-        help: "[ADR-0091 D5] 同じく将来のアクセス再認証ワークフロー用に予約された列で、その際にこの付与を証明したレビュアーを記録します。現時点では不活性で、プラットフォームは書き込みも読み取りも行いません。クライアントがここに書き込んだ値は検証されない注記にすぎず、プラットフォームはそれを検証せず、それを根拠に権限を与えることもありません。"
+        help: "同じく将来のアクセス再認証ワークフロー用に予約された列で、その際にこの付与を証明したレビュアーを記録します。現時点では不活性で、プラットフォームは書き込みも読み取りも行いません。クライアントがここに書き込んだ値は検証されない注記にすぎず、プラットフォームはそれを検証せず、それを根拠に権限を与えることもありません。"
       },
       created_at: {
         label: "作成日時"
@@ -80,7 +80,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_user_position: {
     label: "ユーザーポジション",
     pluralLabel: "ユーザーポジション",
-    description: "ポジションを名前でユーザーに割り当てます。プラットフォーム管理（ADR-0057 D4、ADR-0090 D3）。",
+    description: "各ユーザーが担当するポジション。割り当てごとに 1 行です。",
     fields: {
       id: {
         label: "割り当て ID",
@@ -100,7 +100,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "ビジネスユニット",
-        help: "[ADR-0090 補遺] 割り当てレベルの BU アンカー：このポジション割り当てが適用される範囲。readScope/writeScope の深さアンカー、委任管理の境界（D12）、監査事実として機能します。Null = アンカーなし（レガシー/テナント全体）。委任管理者は割り当てを自身のサブツリー内にアンカーする必要があります。"
+        help: "割り当てレベルの BU アンカー：このポジション割り当てが適用される範囲。readScope/writeScope の深さアンカー、委任管理の境界、監査事実として機能します。Null = アンカーなし（レガシー/テナント全体）。委任管理者は割り当てを自身のサブツリー内にアンカーする必要があります。"
       },
       organization_id: {
         label: "組織",
@@ -112,27 +112,27 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "有効開始",
-        help: "[ADR-0091 D1] この時点より前は付与が無効です。Null = 即時有効。解決時にフェイルクローズで適用されます（D2）——バックグラウンドジョブでは行いません。"
+        help: "この時点より前は付与が無効です。Null = 即時有効。解決時にフェイルクローズで適用されます——バックグラウンドジョブでは行いません。"
       },
       valid_until: {
         label: "有効終了",
-        help: "[ADR-0091 D1] この時点以降は付与が無効です（半開区間 [from, until)、UTC）。Null = 無期限。委任行では必須（D3）。解決時に適用されます（D2）。"
+        help: "この時点以降は付与が無効です（半開区間 [from, until)、UTC）。Null = 無期限。委任行では必須。解決時に適用されます。"
       },
       reason: {
         label: "理由",
-        help: "[ADR-0091 D1] この付与が存在する理由。自由記述。委任（D3）およびブレークグラス（D4）の行では必須。"
+        help: "この付与が存在する理由。自由記述。委任およびブレークグラスの行では必須。"
       },
       delegated_from: {
         label: "委任元",
-        help: "[ADR-0091 D3] この行が担う権限の委任者（職務代理）。delegated_from が設定された行は、それ自体を再委任できず、自己更新もできません——連鎖は双方向で断ち切られます。"
+        help: "この行が担う権限の委任者（職務代理）。delegated_from が設定された行は、それ自体を再委任できず、自己更新もできません——連鎖は双方向で断ち切られます。"
       },
       last_certified_at: {
         label: "最終認証日時",
-        help: "[ADR-0091 D5] 将来のアクセス再認証ワークフロー用に予約された列で、その際にこの付与が最後に証明された日時を記録します。現時点では不活性です。プラットフォームはこの列に書き込まず、読み取るコードもありません。解決経路もゲートも lint も参照せず、「未認証」や「認証が古い」を導出する箇所もありません。したがって Null はワークフローが存在しないことを意味するだけで、この付与が未レビューであることを意味しません。"
+        help: "将来のアクセス再認証ワークフロー用に予約された列で、その際にこの付与が最後に証明された日時を記録します。現時点では不活性です。プラットフォームはこの列に書き込まず、読み取るコードもありません。解決経路もゲートも lint も参照せず、「未認証」や「認証が古い」を導出する箇所もありません。したがって Null はワークフローが存在しないことを意味するだけで、この付与が未レビューであることを意味しません。"
       },
       certified_by: {
         label: "認証者",
-        help: "[ADR-0091 D5] 同じく将来のアクセス再認証ワークフロー用に予約された列で、その際にこの付与を証明したレビュアーを記録します。現時点では不活性で、プラットフォームは書き込みも読み取りも行いません。クライアントがここに書き込んだ値は検証されない注記にすぎず、プラットフォームはそれを検証せず、それを根拠に権限を与えることもありません。"
+        help: "同じく将来のアクセス再認証ワークフロー用に予約された列で、その際にこの付与を証明したレビュアーを記録します。現時点では不活性で、プラットフォームは書き込みも読み取りも行いません。クライアントがここに書き込んだ値は検証されない注記にすぎず、プラットフォームはそれを検証せず、それを根拠に権限を与えることもありません。"
       },
       created_at: {
         label: "作成日時"
@@ -143,7 +143,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       reserved_identity_position: {
-        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are ADR-0068 built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
+        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
       }
     }
   }

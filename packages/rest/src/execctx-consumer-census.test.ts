@@ -103,6 +103,9 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  * (none and two) — the third module to carry TWO registrars, and the first
  * moved registrar whose body reads no `resolveExecCtx` at all (the discovery
  * document resolves no caller).
+ *
+ * [#23050 slice 8] …and `registerEmailEndpoints`' body to `email-routes.ts`,
+ * with its one.
  */
 const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
@@ -116,12 +119,12 @@ const siteKey = (file: string, line: number) => `${file}:${line}`;
  * `registerApprovalsEndpoints`, `registerSharingEndpoints`,
  * `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`,
  * `registerSecurityExplainEndpoints`, `registerSecurityEndpoints`,
- * `registerOpenApiEndpoints`) hands its moved body forwards each member to the
- * server with `(...a) => this.<member>(...a)`, so a moved site's stack shows
- * that forwarder above the site itself. The site is the first censused frame
- * that is not one. Found by their spelling, and §2 pins ONE per moved REGISTRAR
- * whose body reads the seam — one per moved module, plus
- * {@link EXTRA_MOVED_REGISTRARS}, less {@link MOVED_REGISTRARS_READING_NO_EXECCTX}
+ * `registerOpenApiEndpoints`, `registerEmailEndpoints`) hands its moved body
+ * forwards each member to the server with `(...a) => this.<member>(...a)`, so
+ * a moved site's stack shows that forwarder above the site itself. The site is
+ * the first censused frame that is not one. Found by their spelling, and §2
+ * pins ONE per moved REGISTRAR whose body reads the seam — one per moved
+ * module, plus {@link EXTRA_MOVED_REGISTRARS}, less {@link MOVED_REGISTRARS_READING_NO_EXECCTX}
  * — so a respelt forwarder — or a module moved without joining `SITE_FILES` —
  * is a control failure there rather than every moved site silently attributed
  * to it.
@@ -654,9 +657,18 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // (8 - 1) + 3 - 1 — the third module carrying two registrars counted in
         // `EXTRA_MOVED_REGISTRARS`, and the discovery registrar, which reads no
         // `resolveExecCtx`, in `MOVED_REGISTRARS_READING_NO_EXECCTX`.
-        expect(SITE_FILES).toHaveLength(8);
+        //
+        // [#23050 slice 8] 62 sites UNCHANGED / 113 → 117 mentions — the same MOVE.
+        // `registerEmailEndpoints`' body left for `email-routes.ts` with its one
+        // BARE site: 24 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 = 62 sites. The four new
+        // mentions are this slice's seam, the two spellings once (its host
+        // literal's forwarder, two; its host interface's member, two):
+        // `rest-server.ts` goes 57 → 58 (one site out, one forwarder's two
+        // mentions in). Ten forwarders now: (9 - 1) + 3 - 1, the module carrying
+        // one registrar that reads the seam, so neither map gains an entry.
+        expect(SITE_FILES).toHaveLength(9);
         expect(SITES.length).toBe(62);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(113);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(117);
         const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
         expect(extraMovedRegistrars).toBe(3);
         const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);
