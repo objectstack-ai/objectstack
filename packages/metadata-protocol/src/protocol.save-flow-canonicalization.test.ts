@@ -801,8 +801,10 @@ describe('[#23903] a re-save that newly introduces a retired spelling is judged 
                 expect(body.nodes[0].config).toEqual({ objectName: 'lead', filter: { status: 'stale' } });
                 expect(body.nodes[1].config ?? {}).not.toHaveProperty('duration');
             } else {
-                // No canonicalizer here: judged converted, stored as written.
-                expect(body).toEqual(served);
+                // No canonicalizer here: judged converted, stored as written
+                // (the read's own `_diagnostics` envelope is never stored).
+                const { _diagnostics: _served, ...asWritten } = served;
+                expect(body).toEqual(asWritten);
             }
         });
 
