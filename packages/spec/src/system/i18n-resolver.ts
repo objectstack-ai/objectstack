@@ -3676,6 +3676,40 @@ export function resolveSettingsActionSuccess(
   );
 }
 
+/**
+ * Resolve an `info_banner` title under `settings.<namespace>.banners.<bannerId>.title`,
+ * keyed by the specifier's `id`; falls back to the specifier's `label`.
+ */
+export function resolveSettingsBannerTitle(
+  bundle: PlatformTranslationBundle | undefined,
+  namespace: string,
+  bannerId: string,
+  fallback: string,
+  opts?: ResolveOptions,
+): string {
+  return (
+    resolveOptionalString(bundle, namespace, (e) => e.banners?.[bannerId]?.title, opts)
+    ?? fallback
+  );
+}
+
+/**
+ * Resolve an `info_banner` body under `settings.<namespace>.banners.<bannerId>.text`,
+ * keyed by the specifier's `id`; falls back to the specifier's `bannerText`.
+ */
+export function resolveSettingsBannerText(
+  bundle: PlatformTranslationBundle | undefined,
+  namespace: string,
+  bannerId: string,
+  fallback: string | undefined,
+  opts?: ResolveOptions,
+): string | undefined {
+  return (
+    resolveOptionalString(bundle, namespace, (e) => e.banners?.[bannerId]?.text, opts)
+    ?? fallback
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // SettingsCommon — cross-namespace UI strings (source badges, etc.)
 // ────────────────────────────────────────────────────────────────────────────
