@@ -52,7 +52,7 @@
 // This script used to take the union of all three spellings as the failing
 // set, on the theory that the footer under-reports. Read against the job logs
 // of the nights #23880 covers, the "under-reporting" was that interruption
-// every time -- the extra ELIFECYCLE lines land 0.2-0.5 s after the real
+// every time -- the extra ELIFECYCLE lines land 0.1-0.5 s after the real
 // failure's, and one of the interrupted suites logs `Received SIGINT`:
 //
 //   night  pass  turbo's footer (FAILED)   ELIFECYCLE only (INTERRUPTED)
@@ -78,10 +78,12 @@
 //                 stopped at its first failure shows a smaller `M` than one that
 //                 ran to the end (10-14: pass 1 started 143, pass 2 only 49).
 //                 A pass the workflow's time bound stopped exits 124 or 137
-//                 (`timeout`), and turbo may still print a summary on its way
-//                 down, naming every task it killed in its footer; so for such
-//                 a pass the exit code decides, and only a task whose own vitest
-//                 run reported a failed test or suite counts as failed.
+//                 (`timeout`). Measured once, locally: that log ended at
+//                 `Force killed Turborepo tasks: ...` with no summary at all.
+//                 A turbo that did print one on its way down could name the
+//                 tasks the signal killed in its footer, so for such a pass the
+//                 exit code decides, and only a task whose own vitest run
+//                 reported a failed test or suite counts as failed.
 //   RAN           a task that printed vitest's `Test Files` line finished its
 //                 suite in that pass. A pass-1 failure that pass 2 never finished
 //                 was NOT re-measured; it did not "recover".
