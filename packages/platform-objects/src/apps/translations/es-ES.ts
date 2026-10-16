@@ -104,8 +104,6 @@ export const esES: TranslationData = {
         nav_datasources: { label: 'Fuentes de datos' },
 
         nav_oauth_apps: { label: 'Aplicaciones OAuth' },
-        nav_accounts: { label: 'Enlaces de Identidad' },
-        nav_user_preferences: { label: 'Preferencias de Usuario' },
       },
     },
     studio: {

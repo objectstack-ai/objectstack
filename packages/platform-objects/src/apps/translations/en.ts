@@ -155,12 +155,12 @@ export const en: TranslationData = {
         // no browse entry for them (#2266). Nor `nav_jwks` — `sys_jwks` is
         // `apiEnabled: false`, so its list 404s for EVERY persona and the entry
         // was removed (#7544). Nor `nav_metadata` — that entry moved to Studio
-        // as `nav_metadata_directory`. Re-adding a label here means re-adding
-        // the nav item first; the tombstone in
+        // as `nav_metadata_directory`. Nor `nav_accounts` /
+        // `nav_user_preferences` — both left the menu for the User record
+        // page's tabs (#23803). Re-adding a label here means re-adding the nav
+        // item first; the tombstone in
         // `setup-nav-dead-key-tombstone.test.ts` states the whole rule (#6660).
         nav_oauth_apps: { label: 'OAuth Applications' },
-        nav_accounts: { label: 'Identity Links' },
-        nav_user_preferences: { label: 'User Preferences' },
       },
     },
     studio: {

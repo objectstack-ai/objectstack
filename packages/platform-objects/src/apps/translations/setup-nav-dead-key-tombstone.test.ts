@@ -21,11 +21,12 @@
 // deliberately NOT built (#6659's triage): it is a separate maintainer-facing
 // call, not a prerequisite for labelling the ids it cannot see.
 //
-// This file makes no general claim. It pins exactly five ids that were checked
+// This file makes no general claim. It pins exactly seven ids that were checked
 // ONE BY ONE against a repo-wide grep — `id: '<key>'` returned zero hits for
-// each of them on `61282f906` (`nav_jwks` on `68a1edb`), against a control
-// probe (`nav_webhooks`) that returned five — and each of which has a recorded
-// reason to be gone:
+// each of the first five on `61282f906` (`nav_jwks` on `68a1edb`), against a
+// control probe (`nav_webhooks`) that returned five — and each of which has a
+// recorded reason to be gone. The last two rows were measured differently,
+// and say so:
 //
 //   nav_approval_processes  the process engine was retired in favour of the
 //                           approval flow node (#1408, ADR-0019 P4/P5)
@@ -45,11 +46,22 @@
 //                           prune it (#7544)
 //   nav_metadata            moved to Studio as `nav_metadata_directory` when
 //                           the Studio app was split out (482eb67cc)
+//   nav_accounts            "Identity Links" (`sys_account`) and "User
+//   nav_user_preferences    Preferences" (`sys_user_preference`): per-user
+//                           stores, reached from the User record page's
+//                           Linked Accounts and Preferences tabs instead
+//                           (#23803). The objects still list; this is a menu
+//                           decision, not an API one. The grep answers zero
+//                           for `nav_user_preferences` but not for
+//                           `nav_accounts`, which is also some OTHER app's CRM
+//                           entry id (example apps, docs, test fixtures) — so
+//                           for that one the grep is no evidence, and the
+//                           assertions below are the whole claim.
 //
 // ---------------------------------------------------------------------------
 // What to do when this test goes red
 // ---------------------------------------------------------------------------
-// It goes red on exactly one event: one of the five ids comes back. That is not
+// It goes red on exactly one event: one of the seven ids comes back. That is not
 // automatically wrong — re-adding `nav_verifications`, `nav_device_codes` or
 // `nav_jwks` is a deliberate security decision (each requires enabling the read
 // on the object first — for `sys_jwks`, opening a data-API read path onto
@@ -70,10 +82,12 @@ const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES } as const;
 
 /** Removed Setup nav ids. Delete a line here only together with its nav item. */
 const DEAD_SETUP_NAV_IDS = [
+  'nav_accounts',
   'nav_approval_processes',
   'nav_device_codes',
   'nav_jwks',
   'nav_metadata',
+  'nav_user_preferences',
   'nav_verifications',
 ] as const;
 

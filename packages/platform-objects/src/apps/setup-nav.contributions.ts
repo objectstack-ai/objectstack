@@ -183,8 +183,18 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // nav entry for them can only ever render "failed to load". They're
       // reachable by id (get) when needed; no browse menu. (Re-adding requires
       // enabling `list` on the object — a security decision.)
-      { id: 'nav_accounts', type: 'object', label: 'Identity Links', objectName: 'sys_account', viewName: 'all_links', icon: 'link-2' },
-      { id: 'nav_user_preferences', type: 'object', label: 'User Preferences', objectName: 'sys_user_preference', viewName: 'all_preferences', icon: 'sliders' },
+      //
+      // No `nav_accounts` ("Identity Links", `sys_account`) and no
+      // `nav_user_preferences` ("User Preferences", `sys_user_preference`)
+      // either (#23803), for a different reason: both objects list fine, but
+      // each row belongs to one user and is written for that user — identity
+      // links by better-auth at sign-in, preferences by the console as the
+      // user works (`ui.recent`, `ui.favorites`, …). A menu entry listing them
+      // across every user is not a page an administrator works from. Each is
+      // reached from the user it belongs to instead: the User record page's
+      // "Linked Accounts" and "Preferences" tabs (`pages/sys-user.page.ts`),
+      // and the search, which finds the user. The objects, their list views and
+      // their routes are unchanged; only the two menu entries left.
     ],
   },
 ];

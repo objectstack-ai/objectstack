@@ -123,8 +123,6 @@ export const zhCNSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_http_deliveries.label': '340f81dc6ea64987',
   'apps.setup.navigation.nav_datasources.label': '2f0648ce23158e6f',
   'apps.setup.navigation.nav_oauth_apps.label': '1b26cce61a4c10eb',
-  'apps.setup.navigation.nav_accounts.label': '0a7369b6e0a9006d',
-  'apps.setup.navigation.nav_user_preferences.label': '933760250cddbb1e',
   'apps.studio.label': '5aaaaea2294ee893',
   'apps.studio.description': 'c026a5795933995d',
   'apps.studio.navigation.group_overview.label': 'eebdbe1cc7b59cdf',
