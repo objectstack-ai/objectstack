@@ -319,27 +319,49 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
  * life of the request. These are API bodies the old path already buffered
  * whole; nothing here streams.
  *
- * ## A declared JSON body that does not parse is refused (#23914)
+ * ## A declared JSON body that does not parse is refused BY ITS READER (#23914)
  *
  * …and is no longer `{}`. That `{}` reached the data domain as an empty query,
  * so a truncated `POST /data/:object/query` answered `200` with every row the
  * caller could read, and a truncated `PATCH` answered `200` for an update that
- * changed nothing. Now a body whose `Content-Type` declares
- * `application/json` (matched case-insensitively), is not blank, and does not
- * parse throws {@link RequestBodyRefusal}: a declared `400` with the
- * registered code `INVALID_REQUEST`, which both arms that call this answer
- * through `thrownJson` as the ADR-0112 envelope, before `dispatch()` runs.
+ * changed nothing.
+ *
+ * One rule on both Hono transports: the code that READS the parsed body
+ * refuses it, nothing earlier. `@objectstack/plugin-hono-server` does that
+ * with its `req.body` accessor; here the body is a `dispatch()` argument, so
+ * for a body whose `Content-Type` declares `application/json` (matched
+ * case-insensitively), is not blank, and does not parse, the value handed on
+ * is {@link refusedOnRead}'s: any read of it — a property, `in`, its keys, a
+ * spread, `JSON.stringify` — throws {@link RequestBodyRefusal} (a declared
+ * `400` with the registered code `INVALID_REQUEST`) and records that it was
+ * read. Both arms that call this then answer that refusal, through
+ * `thrownJson` as the ADR-0112 envelope, whatever the domain made of the throw
+ * — the same override `plugin-hono-server` applies — and only then.
+ *
+ * Why on read and not before `dispatch()`. A domain that forwards the request
+ * reads its own bytes from it and never reads `body`: `/webhooks/redeliver`
+ * and the inbound automation hooks answer a body that is not JSON with their
+ * own refusal, after their own sign-in or signature check, and the
+ * `/approvals/act` form `POST` reads a form. Refusing before `dispatch()`
+ * pre-empted them at this door only (measured: `/webhooks/redeliver` then
+ * answered this adapter's message where the self-hosted mount answers the
+ * member's, and an anonymous caller got `400` where the mount says `401`).
+ * `dispatch()` itself never reads `body` (its gates read headers and the
+ * path), so the gates still run first, as they do ahead of a route handler on
+ * `plugin-hono-server`. No list of routes is kept here: whether a domain reads
+ * the body is answered by the domain reading it.
+ *
  * `@objectstack/plugin-hono-server` answers the same body with the same `code`
  * and `message` (`hono-body-refusal.test.ts` drives both doors).
  *
  * Every other input is read exactly as before, deliberately:
  * - an empty or whitespace-only body is `{}` (an empty query);
  * - a body that does not declare JSON keeps the content-type-blind parse and
- *   its `{}` on failure, because the domains that forward the request read
- *   their own bytes from it — the `/approvals/act` form `POST` above all — and
- *   this adapter cannot tell them from the domains that read `body`.
+ *   its `{}` on failure;
+ * - the request handed on beside it is unread in every case, so a domain that
+ *   forwards it reads every byte the client sent, a malformed body included.
  */
-async function readDispatchBody(c: Context): Promise<any> {
+async function readDispatchBody(c: Context): Promise<DispatchBody> {
   const declaresJson = (c.req.header('content-type') ?? '').toLowerCase().includes('application/json');
   const raw = c.req.raw;
   let text: string;
@@ -348,19 +370,55 @@ async function readDispatchBody(c: Context): Promise<any> {
     // body cache, which is the only copy left; `text()` reads that cache.
     text = raw.bodyUsed ? await c.req.text() : await raw.clone().text();
   } catch {
-    if (declaresJson) throw new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE);
-    return {};
+    return declaresJson ? refusedOnRead(new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE)) : readable({});
   }
   try {
-    return JSON.parse(text);
+    return readable(JSON.parse(text));
   } catch {
-    if (declaresJson && text.trim() !== '') throw new RequestBodyRefusal(MALFORMED_JSON_BODY_MESSAGE);
-    return {};
+    return declaresJson && text.trim() !== ''
+      ? refusedOnRead(new RequestBodyRefusal(MALFORMED_JSON_BODY_MESSAGE))
+      : readable({});
   }
 }
 
+/** What {@link readDispatchBody} hands an arm: the `body` argument, and whether a refused body was read. */
+interface DispatchBody {
+  /** The `body` argument for `dispatch()` / `handleAuth()`. */
+  readonly value: any;
+  /** The refusal, once something READ a body this adapter could not parse; `undefined` otherwise. */
+  readonly refusalRead: () => RequestBodyRefusal | undefined;
+}
+
+const readable = (value: any): DispatchBody => ({ value, refusalRead: () => undefined });
+
 /**
- * [#23914] The refusal {@link readDispatchBody} throws: a DECLARED ADR-0112
+ * [#23914] A `body` argument whose every READ throws `refusal` and is recorded:
+ * property reads, `in`, key enumeration (and so a spread, `Object.keys`,
+ * `JSON.stringify`), descriptor and prototype lookups, and writes. Holding it
+ * is not a read: `typeof` is `'object'`, `Array.isArray` is `false`, and
+ * passing it along, comparing it or testing it with `??` touch nothing.
+ */
+function refusedOnRead(refusal: RequestBodyRefusal): DispatchBody {
+  let read = false;
+  const refuse = (): never => {
+    read = true;
+    throw refusal;
+  };
+  const value = new Proxy(Object.create(null), {
+    get: refuse,
+    has: refuse,
+    ownKeys: refuse,
+    getOwnPropertyDescriptor: refuse,
+    getPrototypeOf: refuse,
+    set: refuse,
+    defineProperty: refuse,
+    deleteProperty: refuse,
+  });
+  return { value, refusalRead: () => (read ? refusal : undefined) };
+}
+
+/**
+ * [#23914] The refusal a read of {@link refusedOnRead}'s body throws: a DECLARED ADR-0112
  * throw (`status` and the registered `INVALID_REQUEST`), so `thrownJson`
  * renders it through `declaredEnvelopeForThrow`. Module-private, like its twin
  * in `@objectstack/plugin-hono-server` (`src/request-body.ts`); the messages
@@ -779,6 +837,8 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
 
   // --- Auth (needs auth service integration) ---
   app.all(`${authMount}/*`, async (c, next) => {
+    // [#23914] Declared outside the `try` so the catch arm can ask it too.
+    let read: DispatchBody | undefined;
     try {
       const path = c.req.path.substring(authMount.length + 1);
       const method = c.req.method;
@@ -877,10 +937,13 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       }
 
       // Fallback to legacy dispatcher
-      const body = method === 'GET' || method === 'HEAD'
-        ? {}
-        : await readDispatchBody(c);
+      if (method !== 'GET' && method !== 'HEAD') read = await readDispatchBody(c);
+      const body = read ? read.value : {};
       const result = await dispatcher.handleAuth(path, method, body, { request: c.req.raw });
+      // [#23914] A body this adapter could not parse, READ by the domain: the
+      // refusal is the answer, whatever the domain answered (see `readDispatchBody`).
+      const refusal = read?.refusalRead();
+      if (refusal) return thrownJson(c, refusal);
       // `handled: false` is the dispatcher saying no auth domain claimed it —
       // an explicit ownership signal, better than inferring one from a status.
       if (!result.handled) return yieldUnowned(c, next, () => toResponse(c, result));
@@ -890,7 +953,8 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       // in-repo producer was found that reaches this arm with a declared
       // envelope (better-auth answers its own failures as a `Response`), so it
       // takes the rule for uniformity: one rule for both arms, not two.
-      return thrownJson(c, err);
+      // [#23914] …and a refused body that was read is answered as that refusal.
+      return thrownJson(c, read?.refusalRead() ?? err);
     }
   });
 
@@ -921,6 +985,8 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   // ExecutionContext). Revisit only if the gate stages are middleware-ized
   // for an independent reason — reopen conditions are archived on #3608.
   app.all(`${prefix}/*`, async (c) => {
+    // [#23914] Declared outside the `try` so the catch arm can ask it too.
+    let read: DispatchBody | undefined;
     try {
       const subPath = c.req.path.substring(prefix.length);
       const method = c.req.method;
@@ -928,20 +994,24 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       // [#22576] Parsed from a clone: `c.req.raw` reaches the dispatcher with
       // its body unread, so a domain that forwards the request (the
       // `/approvals/act` form POST) still has it. See `readDispatchBody`.
-      let body: any = undefined;
       if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-        body = await readDispatchBody(c);
+        read = await readDispatchBody(c);
       }
 
       // [#23214] A repeated name stays an array (`readDispatchQuery`).
       const queryParams = readDispatchQuery(c);
 
-      const result = await dispatcher.dispatch(method, subPath, body, queryParams, { request: c.req.raw }, prefix);
+      const result = await dispatcher.dispatch(method, subPath, read?.value, queryParams, { request: c.req.raw }, prefix);
+      // [#23914] A body this adapter could not parse, READ by the domain: the
+      // refusal is the answer, whatever the domain answered (see `readDispatchBody`).
+      const refusal = read?.refusalRead();
+      if (refusal) return thrownJson(c, refusal);
       return toResponse(c, result);
     } catch (err: any) {
       // [#23365] A declared ADR-0112 envelope that left `dispatch()` (its foot
       // catch re-raises everything but a denial) is answered as declared.
-      return thrownJson(c, err);
+      // [#23914] …and a refused body that was read is answered as that refusal.
+      return thrownJson(c, read?.refusalRead() ?? err);
     }
   });
 
