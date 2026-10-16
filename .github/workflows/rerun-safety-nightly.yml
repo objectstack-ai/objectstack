@@ -46,6 +46,17 @@
 # Turbo would replay cached results on the second pass and report green without
 # executing anything, which is precisely the wrong answer here. `--force`
 # bypasses the cache so the second pass genuinely re-runs.
+#
+# ## Why `--only` (#23880)
+#
+# `--force` applies to every task in the run, and `test` depends on `^build`, so
+# each pass also re-executed the whole build closure -- 69 `build` tasks and
+# `@objectstack/spec#gen:migration-registry` (`turbo run test --dry=json` at
+# 98ba1bf1d2) -- that `Build packages` had just built. `--only` runs the 83 `test`
+# tasks and nothing they depend on; all 69 of those builds are in `pnpm build`'s
+# own plan, and the spec's `test` script regenerates its migration registry
+# itself. It also stops pass 2 from rebuilding `dist/` over whatever pass 1 left
+# there, which is a working-tree state this job exists to see, not to repair.
 name: Rerun Safety
 
 on:
@@ -77,8 +88,35 @@ jobs:
     # in 15 minutes and never at this number. Raising it can therefore hide no
     # hang; all it stops is a slow-but-live run being reported as a failure of
     # the thing under test.
+    #
+    # ⚠️ 170 no longer holds two full passes, and raising it again is not the
+    # fix (#23880). Measured from the job's own step timestamps: pass 1 took 38
+    # minutes on 2026-09-26 (the last green night), 66 on 10-02, and 97-113 on
+    # every night from 10-12 to 10-16, while the queue-tier suite's measured
+    # task time (scripts/test-shard-timings.json) grew from 124 to 194 minutes
+    # between the 09-28 and 10-13 refreshes, the CLI's alone from 733 to 2206
+    # seconds. Not a hang: on 10-16 pass 2 was still printing when the job
+    # timeout cancelled it 68 minutes in. A night finished at all only because
+    # pass 2 stopped at its first failure; one that did not fail was CANCELLED,
+    # with no verdict and a conclusion the red-card filer does not read.
+    #
+    # So each pass now runs under the time the job has LEFT (JOB_TIMEOUT_MINUTES
+    # below, which must equal this number, minus PASS_RESERVE_MINUTES for the
+    # verdict), and a pass that runs out is stopped by `timeout` instead: the
+    # verdict step still runs, reads a pass log with no turbo summary as
+    # INCOMPLETE -- NOT MEASURED, and the job concludes `failure`, never a silent
+    # `cancelled`. That bound decides only WHO reports a slow night; how two full
+    # passes fit again is a capacity decision recorded on #23880.
     timeout-minutes: 170
+    env:
+      JOB_TIMEOUT_MINUTES: 170
+      # The verdict and the steps after it take seconds; the reserve also covers
+      # `timeout --kill-after=2m`, the grace a pass gets between SIGTERM and SIGKILL.
+      PASS_RESERVE_MINUTES: 5
     steps:
+      - name: Record the job's deadline
+        run: echo "JOB_DEADLINE_EPOCH=$(( $(date +%s) + JOB_TIMEOUT_MINUTES * 60 ))" >> "$GITHUB_ENV"
+
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -142,6 +180,14 @@ jobs:
       # comment in ci.yml): grouped log order flushes a task's output only when
       # the task ends, so a solo tail task longer than the budget reads as
       # frozen while healthy. The guard refuses a turbo run without it.
+      #
+      # The time bound (#23880) sits INSIDE the guard, as the command it wraps:
+      # the guard runs that command in its own process group, so `timeout` is
+      # that group's leader and its SIGTERM reaches turbo, which stops its tasks
+      # ("Shutting down Turborepo tasks...") and prints no `Tasks:` summary --
+      # the absence the verdict reads as a pass that did not finish. Wrapped the
+      # other way round, `timeout` would kill only the guard and leave its
+      # detached group running into pass 2.
       - name: Test suite — pass 1
         run: |
           # Bound vitest's INNER worker pool (#11958). A no-op on a runner with
@@ -151,9 +197,17 @@ jobs:
           # vitest's own "use the default" signal. Needs turbo.json's
           # globalPassThroughEnv entry or turbo strips it — see the script header.
           export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
+          budget=$(( (JOB_DEADLINE_EPOCH - $(date +%s)) / 60 - PASS_RESERVE_MINUTES ))
+          echo "Pass 1 may run ${budget} minutes before the job's own timeout would end it."
           status=0
-          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass1.log" --stall-minutes 15 -- \
-            pnpm turbo run test --concurrency=4 --force --log-order=stream || status=$?
+          if [ "$budget" -lt 1 ]; then
+            : > "$RUNNER_TEMP/rerun-pass1.log"
+            status=124
+          else
+            node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass1.log" --stall-minutes 15 -- \
+              timeout --kill-after=2m "${budget}m" \
+              pnpm turbo run test --only --concurrency=4 --force --log-order=stream || status=$?
+          fi
           echo "PASS1_EXIT=$status" >> "$GITHUB_ENV"
           if [ "$status" -ne 0 ]; then
             echo "::warning::Pass 1 exited $status — the suite is red on main. Recorded as the"
@@ -197,9 +251,18 @@ jobs:
           # vitest's own "use the default" signal. Needs turbo.json's
           # globalPassThroughEnv entry or turbo strips it — see the script header.
           export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
+          # Whatever pass 1 left of the job's time; see pass 1 for the bound.
+          budget=$(( (JOB_DEADLINE_EPOCH - $(date +%s)) / 60 - PASS_RESERVE_MINUTES ))
+          echo "Pass 2 may run ${budget} minutes before the job's own timeout would end it."
           status=0
-          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass2.log" --stall-minutes 15 -- \
-            pnpm turbo run test --concurrency=4 --force --log-order=stream || status=$?
+          if [ "$budget" -lt 1 ]; then
+            : > "$RUNNER_TEMP/rerun-pass2.log"
+            status=124
+          else
+            node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/rerun-pass2.log" --stall-minutes 15 -- \
+              timeout --kill-after=2m "${budget}m" \
+              pnpm turbo run test --only --concurrency=4 --force --log-order=stream || status=$?
+          fi
           echo "PASS2_EXIT=$status" >> "$GITHUB_ENV"
 
       # ⭐ THE VERDICT, and the job's exit status (#18590).

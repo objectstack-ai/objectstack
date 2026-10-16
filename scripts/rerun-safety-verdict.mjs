@@ -77,6 +77,11 @@
 //                 measured. `M` counts the tasks turbo STARTED, so a pass that
 //                 stopped at its first failure shows a smaller `M` than one that
 //                 ran to the end (10-14: pass 1 started 143, pass 2 only 49).
+//                 A pass the workflow's time bound stopped exits 124 or 137
+//                 (`timeout`), and turbo may still print a summary on its way
+//                 down, naming every task it killed in its footer; so for such
+//                 a pass the exit code decides, and only a task whose own vitest
+//                 run reported a failed test or suite counts as failed.
 //   RAN           a task that printed vitest's `Test Files` line finished its
 //                 suite in that pass. A pass-1 failure that pass 2 never finished
 //                 was NOT re-measured; it did not "recover".
@@ -213,12 +218,20 @@ export function readPass(logText) {
     const c = counters.get(id);
     return Boolean(c) && c.failedTests > 0 && c.failedSuites === 0 && c.timeouts === c.failedTests;
   });
+  // Failing tasks whose own vitest run REPORTED a failed test or suite. When a
+  // signal stops the whole run, turbo reports every task it killed as failed;
+  // only these failed on their own.
+  const reported = [...failing].filter((id) => {
+    const c = counters.get(id);
+    return Boolean(c) && c.failedTests + c.failedSuites > 0;
+  });
 
   return {
     failing: [...failing].sort(),
     interrupted: [...elifecycle].filter((id) => !failing.has(id)).sort(),
     ran: [...ran].sort(),
     timeoutOnly: timeoutOnly.sort(),
+    reported: reported.sort(),
     finished: summary !== null,
     started: summary?.started ?? null,
     successful: summary?.successful ?? null,
@@ -305,15 +318,24 @@ export function verdict({ pass1, pass2 }) {
     ]);
   }
 
-  const unfinished = [[1, pass1], [2, pass2]].filter(([, p]) => !p.finished);
+  // A pass stopped by its time budget did not finish even when turbo, on its
+  // way down, printed a summary: the exit code is the authority there.
+  const byBudget = (p) => BUDGET_EXIT_CODES.includes(p.exit);
+  const unfinished = [[1, pass1], [2, pass2]].filter(([, p]) => !p.finished || byBudget(p));
   if (unfinished.length > 0) {
     const named = unfinished.map(([n, p]) =>
-      `Pass ${n} (exit ${p.exit}) printed no turbo summary: it was stopped before it finished` +
-        (BUDGET_EXIT_CODES.includes(p.exit) ? ', by its share of the job\'s time budget.' : ' (budget, job timeout or crash).'),
+      byBudget(p)
+        ? `Pass ${n} (exit ${p.exit}) was stopped by its share of the job's time before it finished.`
+        : `Pass ${n} (exit ${p.exit}) printed no turbo summary: it was stopped before it finished (job timeout or crash).`,
     );
-    const found = [[1, pass1], [2, pass2]]
-      .filter(([, p]) => p.failing.length > 0)
-      .map(([n, p]) => `Failed in pass ${n} before it stopped: ${p.failing.join(', ')}`);
+    const found = [[1, pass1], [2, pass2]].flatMap(([n, p]) => {
+      const own = byBudget(p) ? p.reported : p.failing;
+      const killed = byBudget(p) ? without(p.failing, p.reported) : [];
+      return [
+        ...(own.length > 0 ? [`Failed in pass ${n} before it stopped: ${own.join(', ')}`] : []),
+        ...(killed.length > 0 ? [`Stopped mid-run in pass ${n} by the time bound (unmeasured): ${killed.join(', ')}`] : []),
+      ];
+    });
     return result('INCOMPLETE', 'none', 1, 'INCOMPLETE -- a pass did not finish, so the rerun property was NOT MEASURED', [
       ...named,
       'Running out of time is a capacity reading, not a suite reading: compare the',
@@ -426,6 +448,7 @@ function passLine(n, p) {
       ? `         turbo: ${p.successful} successful of ${p.started} started`
       : '         turbo: no closing summary -- this pass did not finish',
   );
+  if (BUDGET_EXIT_CODES.includes(p.exit)) lines.push('         stopped by its share of the job\'s time');
   return lines;
 }
 
@@ -472,7 +495,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'verdict: both red, pass2 worse -> RERUN_UNSAFE_ON_BROKEN_BASELINE': 1,
   'verdict: a stall in pass 1 -> STALL, NOT MEASURED, exit 75': 1,
   'verdict: a stall in pass 2 -> STALL, NOT MEASURED, exit 75': 1,
-  'verdict: a pass that did not finish -> INCOMPLETE, NOT MEASURED, exit 1': 2,
+  'verdict: a pass that did not finish -> INCOMPLETE, NOT MEASURED, exit 1': 4,
   'verdict: every finished, non-stall verdict reports measured=true': 1,
   'verdict: 2026-10-14 end to end -- no interrupted task is newly failing, coverage PARTIAL': 4,
   'verdict: a pass-1 failure pass 2 never finished is not re-measured, never recovered': 1,
@@ -732,8 +755,35 @@ function selfTest() {
     );
     check(
       'verdict: a pass that did not finish -> INCOMPLETE, NOT MEASURED, exit 1',
-      v.detail.some((d) => d.includes('Pass 2 (exit 124)') && d.includes('time budget')) &&
+      v.detail.some((d) => d.includes('Pass 2 (exit 124)') && d.includes("share of the job's time")) &&
         v.detail.some((d) => d.includes('Failed in pass 1 before it stopped: @objectstack/dogfood#test')),
+      v.detail.join(' | '),
+    );
+  }
+  {
+    // A budget stop that turbo still summarised: every task it killed is in
+    // its footer, and only the one whose vitest run reported a failure failed.
+    const budgetStopped = passOf(
+      124,
+      [
+        failedTestsHeader('@objectstack/core:test:', 1),
+        timedOut('@objectstack/core:test:'),
+        taskError('@objectstack/core'),
+        taskError('@objectstack/runtime'),
+        tasksSummary(40, 42),
+        'Failed:    @objectstack/core#test, @objectstack/runtime#test',
+      ].join('\n'),
+    );
+    const v = verdict({ pass1: passOf(1, NIGHT_1014_PASS1), pass2: budgetStopped });
+    check(
+      'verdict: a pass that did not finish -> INCOMPLETE, NOT MEASURED, exit 1',
+      v.code === 'INCOMPLETE' && v.coverage === 'none',
+      `${v.code} ${v.coverage}`,
+    );
+    check(
+      'verdict: a pass that did not finish -> INCOMPLETE, NOT MEASURED, exit 1',
+      v.detail.includes('Failed in pass 2 before it stopped: @objectstack/core#test') &&
+        v.detail.includes('Stopped mid-run in pass 2 by the time bound (unmeasured): @objectstack/runtime#test'),
       v.detail.join(' | '),
     );
   }

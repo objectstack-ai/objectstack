@@ -72,7 +72,13 @@ on:
   workflow_run:
     # Byte-exact workflow NAMES (the `name:` at the top of each file), not
     # paths. Quoted because `Lint & Type Check` starts a YAML alias unquoted.
-    workflows: ['CI', 'Lint & Type Check']
+    #
+    # `Rerun Safety` (rerun-safety-nightly.yml, #23880) runs once a night, and
+    # its scheduled runs from 2026-09-17 to 10-16 concluded `success` once in
+    # thirty nights with no filer at all. It gets its own card by the same
+    # identity rule. The card body's cadence words ("hourly") are the hourly
+    # runs' and are wrong for it -- #23880 records that follow-up.
+    workflows: ['CI', 'Lint & Type Check', 'Rerun Safety']
     types: [completed]
 
 permissions: {}
