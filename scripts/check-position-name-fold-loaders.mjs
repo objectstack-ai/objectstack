@@ -70,7 +70,7 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -148,21 +148,41 @@ export function classifyReference(relPath) {
  * obeyed.
  *
  * Rule 3 does not count a fully spelled path to ANOTHER package's fixtures
- * directory ({@link OTHER_PACKAGE_FIXTURE_PATH}): `packages/objectql/src/
- * __fixtures__/hotcrm-4.0.1-published-pages.artifact.json` names one file in
- * one other directory and cannot sweep up this artifact, while matching the
- * glob shape would red on it. Only that path is set aside, and the rest of the
- * line is still judged, so a bare glob beside it still counts. A path that
- * climbs (`..`) or carries a glob character is never set aside — either can
- * reach this directory — and this package's own directory is rule 2's, before
- * rule 3 is asked at all.
+ * directory: `packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json`
+ * names one file in one other directory and cannot reach this artifact, while
+ * the glob shape would red on it. The unit judged is a whole PATH TOKEN
+ * ({@link PATH_TOKEN}): it starts with `packages/` at the start of the line or
+ * after a quote, backtick, whitespace, `,`, `[` or `(`, and it runs to the
+ * next quote, backtick, whitespace, `,`, `]`, `)` or the end of the line, so a
+ * glob character or `${` inside it stays part of the token. A token is set
+ * aside only when {@link isOtherPackageFixturePath} says so, which needs all
+ * three:
+ *
+ *   - no `..` segment;
+ *   - after `path.posix.normalize` (so `packages/./metadata/…` and
+ *     `packages/metadata/./src/…` are read as the directories they are), it
+ *     does not lie in this package's fixtures directory;
+ *   - the normalized token is one literal file path, `packages/<dirs>/src/
+ *     __fixtures__/<file>` with only word characters, `.` and `-` in its
+ *     segments — so a token carrying `*`, `?`, `[`, `{` or `${` is never set
+ *     aside.
+ *
+ * Only such a token leaves the line; the rest of the line is still judged, so
+ * a bare glob beside it still counts. This package's own directory, spelled
+ * literally, is rule 2's, before rule 3 is asked at all.
  */
-const OTHER_PACKAGE_FIXTURE_PATH = /packages\/(?:[\w.-]+\/)+src\/__fixtures__\/[\w.-]+(?:\/[\w.-]+)*/g;
+const PATH_TOKEN = /(?<=^|[\s'"`,[(])packages\/[^\s'"`,\])]*/g;
+const LITERAL_OTHER_FIXTURE_FILE = /^packages\/(?:[\w.-]+\/)+src\/__fixtures__\/[\w.-]+(?:\/[\w.-]+)*$/;
+
+export function isOtherPackageFixturePath(token) {
+  if (token.split('/').includes('..')) return false;
+  const normalized = posix.normalize(token);
+  if (normalized === FIXTURES_DIR || normalized.startsWith(`${FIXTURES_DIR}/`)) return false;
+  return LITERAL_OTHER_FIXTURE_FILE.test(normalized);
+}
 
 function withoutOtherPackageFixturePaths(line) {
-  return line.replace(OTHER_PACKAGE_FIXTURE_PATH, (path) => (
-    path.startsWith(`${FIXTURES_DIR}/`) || path.split('/').includes('..') ? path : ''
-  ));
+  return line.replace(PATH_TOKEN, (token) => (isOtherPackageFixturePath(token) ? '' : token));
 }
 
 export function referencesArtifact(text) {
@@ -336,7 +356,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'REVERSE CONTROL. A zero from a scan that cannot report anything is not a': 3,
   'The allowed dispositions, each for its own stated reason.': 5,
-  'The text matcher, both directions. A matcher that never matches turns': 12,
+  'The text matcher, both directions. A matcher that never matches turns': 20,
   'The permission-set extractor, on the real artifact shape.': 2,
 });
 
@@ -453,6 +473,46 @@ function selfTest() {
     'matcher still sees a wildcard package path',
     referencesArtifact("glob('packages/*/src/__fixtures__/*.artifact.json')"),
     true,
+  );
+  check(
+    'matcher still sees a `.`-segment path to this directory, in a template literal',
+    referencesArtifact("readFileSync(`packages/./metadata/src/__fixtures__/hotcrm-17.1-${kind}.artifact.json`)"),
+    true,
+  );
+  check(
+    'matcher still sees a `.`-segment glob into this directory (package segment)',
+    referencesArtifact("glob('packages/./metadata/src/__fixtures__/hotcrm-*.artifact.json')"),
+    true,
+  );
+  check(
+    'matcher still sees a `.`-segment glob into this directory (src segment)',
+    referencesArtifact("glob('packages/metadata/./src/__fixtures__/hotcrm-*.artifact.json')"),
+    true,
+  );
+  check(
+    'matcher still sees another package\'s fixtures path that a glob continues',
+    referencesArtifact("glob('packages/objectql/src/__fixtures__/a*.artifact.json')"),
+    true,
+  );
+  check(
+    'matcher still sees another package\'s fixtures path that a template continues',
+    referencesArtifact("readFileSync(`packages/objectql/src/__fixtures__/${name}.artifact.json`)"),
+    true,
+  );
+  check(
+    'matcher still sees a fixtures path that does not START a token',
+    referencesArtifact("readFileSync('vendor/packages/objectql/src/__fixtures__/hotcrm.artifact.json')"),
+    true,
+  );
+  check(
+    'matcher still sees a `.`-segment LITERAL path into this directory (only normalization reads it)',
+    referencesArtifact("readFileSync('packages/./metadata/src/__fixtures__/hotcrm-17.1-built-bare-root-predicates.artifact.json')"),
+    true,
+  );
+  check(
+    "matcher does NOT count a `.`-segment literal path to another package's fixture",
+    referencesArtifact("      'packages/./objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json',"),
+    false,
   );
 
   // ── The permission-set extractor, on the real artifact shape.
