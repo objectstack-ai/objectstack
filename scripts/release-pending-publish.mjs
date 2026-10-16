@@ -117,9 +117,12 @@
  * minutes later. Pre mode played no part -- @changesets/cli v3 moves what a
  * prerelease pass consumes into `.changeset/pre/`, so the top-level read names
  * the late ones correctly in either mode. What was missing is a check BEFORE the
- * landing: the Version Packages PR is opened with the default `GITHUB_TOKEN`,
- * so it gets no `pull_request` build at all, and the merge-queue build -- the
- * one CI run it does get -- read nothing about changesets.
+ * landing, on the tree that lands. A `pull_request` build cannot be it: a
+ * scheduled refresh starts none (#23825's head `d5c44f86be` carries zero check
+ * runs), and when one runs (#23481's head `958e5b07b7`, after a dispatched
+ * refresh) it judges the PR against the base it was cut from, where it is
+ * current by construction. Only the merge-queue build sees the tree that lands,
+ * and none of its steps read changesets.
  *
  * So this mode judges a merge-queue build. It reads the first-parent commits of
  * `base..head` (`base` = the group's `merge_group.base_sha`, which already
