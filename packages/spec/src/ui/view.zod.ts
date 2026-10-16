@@ -3154,7 +3154,8 @@ export const ListViewSchema = lazySchema(() =>
  * Derived structurally from `SelectOptionSchema.shape` (an Omit, not a copy) so
  * the two faces cannot drift apart key-by-key: every key the object-field
  * option shape gains or loses is gained or lost here too, minus exactly
- * `default`. The alias table is the object face's minus the two rows that
+ * `default` and — since #23809 — `kind`, the object field's lifecycle category,
+ * which no form-view reader has. The alias table is the object face's minus the two rows that
  * pointed at the removed key; those spellings move to `guidance`, because an
  * alias row must name a key the shape accepts (`alias-integrity.test.ts`) and
  * suggesting a key the schema refuses is the `triggerPhrases` failure shape
@@ -3173,7 +3174,11 @@ export const FormSelectOptionSchema = lazySchema(() => {
   // drop exactly `default`. (`.omit()` would also work, but building through
   // `strictObject` is what registers this surface's own aliases/guidance with
   // the alias-integrity audit instead of inheriting the object face's.)
-  const { default: _objectFaceOnly, ...formOptionShape } = SelectOptionSchema.shape;
+  // [#23809] `kind` (the option's lifecycle category) is object-face only as
+  // well: the stage renderers read it off the OBJECT field's options, and a
+  // form view's option list relabels or subsets that field without owning its
+  // lifecycle. It never entered this face, so the guidance below answers it.
+  const { default: _objectFaceOnly, kind: _objectLifecycleOnly, ...formOptionShape } = SelectOptionSchema.shape;
   return strictObject({
     surface: 'this form-view select option',
     history:
@@ -3205,14 +3210,18 @@ export const FormSelectOptionSchema = lazySchema(() => {
         + 'a rename to `default`, which is enforced there. Form-view options accept neither '
         + 'spelling — declare the pre-selected choice on the object definition (field-level '
         + '`defaultValue`, or `default: true` on that field\'s own `options` entry).',
+      kind:
+        '`kind` is not a form-view option key: an option\'s lifecycle category (`open` / `won` / '
+        + '`lost`) belongs to the OBJECT field, where the record path and the other stage renderers '
+        + 'read it. Delete it here and declare `kind` on that field\'s own `options` entry.',
     },
     // Same editability boundary as the object face (#8201): an option is
     // offered or withheld, never shown-but-unselectable.
     guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
   }, formOptionShape).describe(
-    'Form-view select option — the object-field option shape minus the per-option `default` key '
-    + '(declare the pre-selected choice on the object definition: field-level `defaultValue`, or '
-    + "`default: true` on that field's own `options` entry).",
+    'Form-view select option — the object-field option shape minus the per-option `default` and '
+    + '`kind` keys (declare the pre-selected choice on the object definition: field-level '
+    + "`defaultValue`, or `default: true` on that field's own `options` entry; declare `kind` there too).",
   );
 });
 

@@ -167,11 +167,18 @@ describe('the object-field face is untouched', () => {
 // ===========================================================================
 
 describe('FormSelectOptionSchema is an Omit of SelectOptionSchema', () => {
-  it('shape = the object face minus exactly `default`', () => {
+  it('shape = the object face minus exactly `default` and `kind` (#23809)', () => {
     const objectKeys = Object.keys(SelectOptionSchema.shape).sort();
     const formKeys = Object.keys(FormSelectOptionSchema.shape).sort();
     expect(objectKeys).toContain('default');
-    expect(formKeys).toEqual(objectKeys.filter((k) => k !== 'default'));
+    expect(objectKeys).toContain('kind');
+    expect(formKeys).toEqual(objectKeys.filter((k) => k !== 'default' && k !== 'kind'));
+  });
+
+  it('`kind` on a form-view option is refused with a prescription pointing at the object field (#23809)', () => {
+    const m = unknownKeyMessage(FormSelectOptionSchema, { ...OPTION, kind: 'won' });
+    expect(m).toContain('kind');
+    expect(m).toContain('OBJECT field');
   });
 
   it('property schemas are shared BY REFERENCE — an Omit, not a copy', () => {
