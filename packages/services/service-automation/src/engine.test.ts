@@ -3573,6 +3573,8 @@ describe('AutomationEngine - the deployment switch (#17396)', () => {
         expect(row?.reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
         expect(row?.reason).not.toMatch(/binding failed/);
         expect(row?.reason).toContain(SCHEDULED_WORK_ENV);
+        // [#23842] Classified without parsing the sentence: an operator remedy.
+        expect(row?.unboundCause).toBe('deployment_policy');
     });
 
     it('the two doors answer the SAME sentence for the same flow — one computation, no drift', () => {
@@ -3607,6 +3609,10 @@ describe('AutomationEngine - the deployment switch (#17396)', () => {
         // And they really are two different sentences — an identity between two
         // constants would pass vacuously.
         expect(new Set(audit.map((a) => a.reason)).size).toBe(2);
+        // [#23842] ...and two different causes, stamped where each branch is
+        // decided: no `record_change` trigger is registered on this kernel.
+        expect(states.find((s) => s.name === 'digest')?.unboundCause).toBe('deployment_policy');
+        expect(states.find((s) => s.name === 'missing_trigger')?.unboundCause).toBe('missing_trigger');
     });
 
     it('the status row reports what HAPPENED, not what the environment says when it is read', () => {
@@ -3642,6 +3648,8 @@ describe('AutomationEngine - the deployment switch (#17396)', () => {
         const row = engine.getFlowRuntimeStates().find((s) => s.name === 'digest');
         expect(row?.reason).toMatch(/binding failed/);
         expect(row?.reason).not.toBe(SCHEDULED_WORK_DISABLED_REASON);
+        // [#23842] A defect, classified as one — ⛔ never `deployment_policy`.
+        expect(row?.unboundCause).toBe('binding_failure');
     });
 
     it('⭐ DARK: a row with nothing to explain carries NO reason key at all', () => {
@@ -3655,14 +3663,32 @@ describe('AutomationEngine - the deployment switch (#17396)', () => {
         engine.registerTrigger(recordingTrigger('record_change').trigger);
         engine.registerFlow('digest', scheduleFlow('digest'));                                   // bound
         engine.registerFlow('rc_obsolete', { ...recordChangeFlow('rc_obsolete'), status: 'obsolete' }); // disabled
+        engine.registerFlow('by_hand', {                                                         // manual
+            name: 'by_hand',
+            label: 'by_hand',
+            type: 'autolaunched' as const,
+            nodes: [
+                { id: 'start', type: 'start' as const, label: 'Start' },
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        });
 
         const states = engine.getFlowRuntimeStates();
         const bound = states.find((s) => s.name === 'digest');
         const disabled = states.find((s) => s.name === 'rc_obsolete');
+        const manual = states.find((s) => s.name === 'by_hand');
         expect(bound).toMatchObject({ enabled: true, bound: true });
         expect(disabled).toMatchObject({ enabled: false, bound: false });
+        expect(manual, 'control: the manual flow is listed, unbound, with no trigger').toMatchObject({ enabled: true, bound: false });
+        expect(manual?.triggerType).toBeUndefined();
         expect(Object.keys(bound ?? {}), 'a bound flow explains nothing').not.toContain('reason');
         expect(Object.keys(disabled ?? {}), '`enabled: false` already says it').not.toContain('reason');
+        // [#23842] The classifier is paired with the sentence: absent together.
+        for (const row of [bound, disabled, manual]) {
+            expect(Object.keys(row ?? {}), `'${row?.name}' carries no reason`).not.toContain('reason');
+            expect(Object.keys(row ?? {}), `'${row?.name}' carries no unboundCause`).not.toContain('unboundCause');
+        }
         expect(engine.getTriggerBindingAudit(), 'control: the sibling door is empty for the same reason').toHaveLength(0);
     });
 });

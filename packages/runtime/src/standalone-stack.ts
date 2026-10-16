@@ -582,14 +582,31 @@ function refuseRetiredMemoryEngine(
     throw new Error(`[StandaloneStack] ${retiredMemoryEngineMessage(selection)}`);
 }
 
-/** URL→filename for the two sqlite kinds. Throws on a URL that isn't a path. */
-function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
+/**
+ * URL→filename for the two sqlite kinds: the ONE rule both hosts turn a SQLite
+ * database URL into a file with. Throws on a URL that isn't a path.
+ *
+ * Takes the URL as {@link resolveStandaloneDatabase} has it, i.e. after
+ * `normalizeDatabaseUrl` (`sqlite:` / `sqlite://` are already `file:`).
+ * `file:` and `file://` are stripped case-insensitively on BOTH kinds, as
+ * {@link detectDriverFromUrl} classifies them (`/^file:/i`): a prefix the
+ * classifier accepts and this strip kept became part of the filename, so
+ * `FILE:./app.db` opened `./FILE:./app.db` and the boot's directory creation
+ * made a `FILE:.` directory — the "bogus directory from a URL" this module's
+ * header rules out.
+ *
+ * Exported because the CLI host (`resolveStorageDefinition` in
+ * `@objectstack/cli`'s `utils/storage-driver.ts`) calls it rather than keeping
+ * a second copy; its copy stripped only `/^file:/`, so `file://NAME` opened
+ * `//NAME` at the filesystem root there while this host opened `NAME`.
+ */
+export function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
     if (kind === 'sqlite-wasm') {
         return dbUrl
             .replace(/^wasm-sqlite:(\/\/)?/i, '')
             .replace(/^file:(\/\/)?/i, '') || ':memory:';
     }
-    const filename = dbUrl.replace(/^file:(\/\/)?/, '');
+    const filename = dbUrl.replace(/^file:(\/\/)?/i, '');
     const scheme = urlSchemeOf(filename);
     if (!filename || scheme) {
         // Names the scheme, never the URL ({@link urlSchemeOf}). This is the

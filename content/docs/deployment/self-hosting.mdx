@@ -168,7 +168,14 @@ image)? The official image is nothing more than:
 
 ```dockerfile title="Dockerfile (self-built runtime, equivalent)"
 FROM node:22-slim
-RUN npm install -g @objectstack/cli@17.7.0
+# node:22-slim ships npm 10, which fails this install with "reading 'edgesOut'"
+# (see Troubleshooting). Install under a pinned npm 11, deleted in the same layer.
+RUN npm install --prefix /tmp/os-installer-npm --no-save --no-audit --no-fund "npm@11.21.0" \
+ && export PATH="/tmp/os-installer-npm/node_modules/.bin:$PATH" \
+ && test "$(npm --version)" = "11.21.0" \
+ && npm install -g @objectstack/cli@17.7.0 "pg@^8.0.0" "mysql2@^3.0.0" \
+ && npm cache clean --force \
+ && rm -rf /tmp/os-installer-npm
 
 WORKDIR /srv/app
 RUN chown node:node /srv/app
@@ -355,8 +362,14 @@ configuration-management estate already owns process supervision, or when you
 are debugging directly on the box. It needs Node 22+ and the CLI on a Linux
 host, and nothing else.
 
+Install the CLI with npm 11. npm 10, the npm that Node 22 ships, fails with
+`Cannot read properties of null (reading 'edgesOut')`, and a global install
+reads no `overrides`, so upgrading npm is the only fix here
+([Troubleshooting](/docs/deployment/troubleshooting#cannot-read-properties-of-null-reading-edgesout-from-npm-install)).
+
 ```bash
 # On the host — no repo clone, just the CLI and your artifact
+npm install -g npm@11   # npm 11 needs Node 22.9+
 npm install -g @objectstack/cli
 npm install -g pg   # Postgres driver is an optional peer of @objectstack/driver-sql —
                     # install it next to the CLI, or the boot fails loudly (use mysql2 for OS_DATABASE_URL=mysql://…)
