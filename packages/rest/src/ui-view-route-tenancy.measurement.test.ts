@@ -1139,7 +1139,10 @@ describe('[#13214] §4 preconditions', () => {
         // [#23050 slice 10] 10 → 11 (`ui-routes.ts`): 59 and 74, +1 each for
         // that slice's forwarder (the two call sites moved with the body and are
         // counted in both readings).
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
+        // [#23050 slice 11] 11 → 12 (`form-routes.ts`): 59 and 74 unchanged —
+        // the public form body reads neither term, so its literal forwards
+        // neither; the ownership guard still 1 call site and 1 forwarder.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(12);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
         // ...and the ownership guard is NOT sprayed across the file — it is a

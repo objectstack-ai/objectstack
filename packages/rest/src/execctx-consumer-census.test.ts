@@ -112,6 +112,10 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  *
  * [#23050 slice 10] …and `registerUiEndpoints`' body to `ui-routes.ts`, with
  * its one.
+ *
+ * [#23050 slice 11] …and `registerFormEndpoints`' body to `form-routes.ts`,
+ * with none: the public form doors resolve no caller (their authorization is
+ * the form's own declaration).
  */
 const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
@@ -165,9 +169,15 @@ const EXTRA_MOVED_REGISTRARS: Readonly<Partial<Record<(typeof SITE_FILES)[number
  * `resolveExecCtx` member; its module's other registrar, the OpenAPI pair,
  * reads it twice and carries the forwarder. A body that starts reading the
  * seam gains a forwarder, and §2's exact count reds until this entry goes.
+ *
+ * [#23050 slice 11] `registerFormEndpoints`' body reads no `resolveExecCtx`
+ * either (the AST walk of the body finds no read): the public form doors run
+ * as the form grant and resolve no caller, so their host literal names no
+ * `resolveExecCtx` member.
  */
 const MOVED_REGISTRARS_READING_NO_EXECCTX: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
     'discovery-routes.ts': 1,
+    'form-routes.ts': 1,
 };
 
 /** A stack frame in any censused file, as `<file>:<line>:<column>`. */
@@ -695,13 +705,21 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // mentions in). Twelve forwarders now: (11 - 1) + 3 - 1, the module
         // carrying one registrar that reads the seam, so neither map gains an
         // entry.
-        expect(SITE_FILES).toHaveLength(11);
+        //
+        // [#23050 slice 11] 62 sites / 125 mentions UNCHANGED — the same MOVE.
+        // `registerFormEndpoints`' body left for `form-routes.ts` with NO site:
+        // 22 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 = 62 sites. Its host
+        // literal and host interface name no `resolveExecCtx` member, so no
+        // mention moved and `rest-server.ts` stays at 60. Still twelve
+        // forwarders: (12 - 1) + 3 - 2, the module counted in
+        // `MOVED_REGISTRARS_READING_NO_EXECCTX`.
+        expect(SITE_FILES).toHaveLength(12);
         expect(SITES.length).toBe(62);
         expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(125);
         const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
         expect(extraMovedRegistrars).toBe(3);
         const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);
-        expect(registrarsReadingNoExecCtx).toBe(1);
+        expect(registrarsReadingNoExecCtx).toBe(2);
         expect(FORWARDER_LINES, 'one host-literal resolveExecCtx forwarder per moved registrar whose body reads it: one was respelt or removed, or a module moved without joining SITE_FILES')
             .toHaveLength(SITE_FILES.length - 1 + extraMovedRegistrars - registrarsReadingNoExecCtx);
     });

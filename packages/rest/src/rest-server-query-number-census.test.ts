@@ -333,7 +333,10 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // [#23050 slice 10] Nor does the UI view body (`ui-routes.ts`): it reads
         // only the two path parameters, as strings:
         // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 10 → 11.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
+        // [#23050 slice 11] Nor do the public form doors (`form-routes.ts`): they
+        // read only the slug path parameter, as a string:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 11 → 12.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(12);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });
