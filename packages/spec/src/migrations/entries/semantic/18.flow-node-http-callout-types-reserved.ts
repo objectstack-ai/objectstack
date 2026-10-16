@@ -21,12 +21,12 @@ export const entry: SemanticMigration = {
     + '18. ADR-0018 unified `http_request`, `http_call` and `webhook` into the one `http` node, and through 17 '
     + 'the loader rewrote an authored node typed with one of them to `http` with a notice. At 18 the flow parse '
     + "refuses each as a node's `type`, with the prescription naming `http`: at `objectstack validate`, "
-    + '`objectstack build`, `objectstack lint` and `defineStack`, for a node in a loop, parallel or try_catch '
-    + 'region too. The automation engine also refuses to register a node executor under one of the three '
-    + 'names, so a plugin that registered its own executor under one fails at registration and needs a type of '
+    + '`objectstack build`, `objectstack lint`, `defineStack` and the metadata save door (a 422 for a new '
+    + 'flow), for a node in a loop, parallel or try_catch region too. The automation engine also refuses to '
+    + 'register a node executor under one of the three names, so a plugin that registered its own executor under one fails at registration and needs a type of '
     + 'its own. No tool makes the rename for an authored source: the D2 conversion '
     + '`flow-node-http-callout-rename` belongs to protocol 11, below the migration floor, so '
-    + '`os migrate meta --from 17` applies no edit for it and prints each such node among the refusals left '
+    + '`objectstack migrate meta` applies no edit for it and prints each such node among the refusals left '
     + 'after the chain, at `flows.N.nodes.M.type`; change the value by hand. Stored flows need no edit: the '
     + "automation engine's flow rehydration and every stored-row rehydration seam replay the retired "
     + 'conversion, so a `sys_metadata` flow row written with an old name keeps loading as an `http` node. A '

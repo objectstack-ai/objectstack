@@ -30,7 +30,7 @@
  */
 import { createRequire } from 'node:module';
 
-import * as esm from '@objectstack/spec';
+import { ALL_CONVERSIONS as ESM_CONVERSIONS } from '@objectstack/spec';
 
 export const PROBE_CONVERSION_ID = 'cli-live-conversion-probe';
 export const PROBE_OLD_TYPE = 'probe_old_callout';
@@ -62,6 +62,6 @@ const probe = {
 };
 
 const cjs = createRequire(import.meta.url)('@objectstack/spec');
-for (const table of new Set([esm.ALL_CONVERSIONS, cjs.ALL_CONVERSIONS])) {
+for (const table of new Set([ESM_CONVERSIONS, cjs.ALL_CONVERSIONS])) {
   if (!table.some((c) => c.id === PROBE_CONVERSION_ID)) table.push(probe);
 }

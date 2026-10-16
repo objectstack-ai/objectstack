@@ -20,7 +20,7 @@ Clause-②: yes (narrowing)
 
 **The one-line fix:** change the node's `type` to `'http'`; the node's `id`, `label` and `config` stay as they are (the conversion never touched `config`, so the `http` contract judges it as written).
 
-**What an author who still writes it sees.** The parse refuses the node at its own `type` path — a top-level node and a node inside a `loop`, `parallel` or `try_catch` region alike. `defineStack` throws `STACK_SCHEMA_INVALID` (422), and `os validate`, `os build` and `os lint` (whose config calls `defineStack`) print the issue:
+**What an author who still writes it sees.** The parse refuses the node at its own `type` path — a top-level node and a node inside a `loop`, `parallel` or `try_catch` region alike. `defineStack` throws `STACK_SCHEMA_INVALID` (422), `os validate`, `os build` and `os lint` (whose config calls `defineStack`) print the issue, and the metadata save door answers a NEW flow with `422 INVALID_METADATA` at the node's `type`, with or without an automation service, and stores nothing:
 
 > Flow node `type: 'http_request'` was removed in @objectstack/spec 18 (ADR-0087 D2) — it is one of the three callout node types ADR-0018 unified into `http`, the loader rewrote it to `http` until this release, and the name stays reserved inside the open node namespace so no plugin can claim it (ADR-0018). Use `type: 'http'`. Change the value; the conversion never touched the node's `config`, so the `http` contract judges it as written.
 
@@ -28,11 +28,9 @@ The refusal is a `pattern` on `FlowNodeSchema.type`, so the published JSON Schem
 
 **`@objectstack/service-automation`:** `AutomationEngine.registerNodeExecutor` (and `registerNodeAlias`, which calls it) throws when the executor's `type` or its descriptor's `type` is one of the three names, and registers nothing. No node could ever reach such an executor: an authored node with the name is refused at parse, and a stored one is rewritten to `http` before it parses. A plugin that registered its own executor under one of these names fails at that call and needs a type of its own.
 
-**No tool makes the rename.** The conversion belongs to protocol 11, below the migration floor, so `os migrate meta --from 17` applies no edit for it and `--write` writes none: it prints each such node among the refusals the migrated stack still has, at `flows.N.nodes.M.type`, and lists the D3 entry `flow-node-http-callout-types-reserved` as the hand edit.
+**No tool makes the rename.** The conversion belongs to protocol 11, below the migration floor, so `objectstack migrate meta` applies no edit for it and `--write` writes none: it prints each such node among the refusals the migrated stack still has, at `flows.N.nodes.M.type`, and lists the D3 entry `flow-node-http-callout-types-reserved` as the hand edit.
 
 **Stored metadata needs no edit.** Stored-row rehydration, the automation engine's flow rehydration and the artifact-ingestion door inside its window still replay the conversion, so a `sys_metadata` flow row written with an old name keeps loading as an `http` node. The rewrite there is now unconditional: until 18 it skipped a node whose old name a live executor owned and reported a conflict, and the engine no longer lets such an executor exist.
-
-**Not refused yet: a flow saved through the metadata API.** The save door replays every retired flow conversion before it judges a flow body, so a flow saved there with an old name is accepted — stored as `http` when an automation service canonicalizes it, stored as written otherwise and converted on every read. Whether that door should refuse retired flow spellings instead is an open decision covering every retired flow conversion, not this one alone.
 
 ## The retirement kit
 
