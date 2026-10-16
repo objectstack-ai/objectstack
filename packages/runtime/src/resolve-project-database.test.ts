@@ -335,6 +335,36 @@ describe('resolveStandaloneDatabase — #6469 behaviours through the migrate sea
     expect(r.sqliteFile).toBe(join(root, 'a.db'));
   });
 
+  // `file:` is classified case-insensitively, so it is stripped case-insensitively
+  // too: an upper-case prefix the strip kept became part of the file name, and
+  // `FILE:./app.db` made a directory literally named `FILE:.`. Every row names
+  // the file its lower-case spelling names; the lower-case and bare rows are the
+  // CONTROL, unchanged.
+  it.each([
+    ['FILE:./x.db', './x.db', 'sqlite'],
+    ['File:///tmp/x.db', '/tmp/x.db', 'sqlite'],
+    ['FILE://x.db', 'x.db', 'sqlite'],
+    ['file:./x.db', './x.db', 'sqlite'],
+    ['file:///tmp/x.db', '/tmp/x.db', 'sqlite'],
+    ['file://x.db', 'x.db', 'sqlite'],
+    ['./x.db', './x.db', 'sqlite'],
+    ['/tmp/x.db', '/tmp/x.db', 'sqlite'],
+    ['FILE:./x.wasm.db', './x.wasm.db', 'sqlite-wasm'],
+  ])('%s opens the sqlite file %s (%s)', (url, file, driver) => {
+    const r = resolveStandaloneDatabase({ databaseUrl: url });
+    expect(r.driver).toBe(driver);
+    expect(r.sqliteFile).toBe(file);
+  });
+
+  it('an upper-case FILE: that names no file is refused like file:, never opened as a file named "FILE:"', () => {
+    let err: unknown;
+    try { resolveStandaloneDatabase({ databaseUrl: 'FILE:' }); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).constructor).toBe(Error);
+    expect((err as Error).message).toContain('sqlite driver was selected but the URL does not look like a file path');
+    expect((err as Error).message).toContain('it names no file after "file:"');
+  });
+
   it('still refuses a genuinely unsupported scheme, message intact', () => {
     expect(() => resolveStandaloneDatabase({ databaseUrl: 'redis://localhost:6379' }))
       .toThrow(/Unsupported database URL scheme/);

@@ -28,6 +28,15 @@ That's all. A standalone project does **not** need pnpm, TypeScript pre-installe
 or a database server — the default template runs on an in-memory driver, and
 TypeScript comes in as a dev dependency.
 
+<Callout type="warn">
+**npm 10 cannot install the CLI right now.** npm 10, the npm that Node 22 ships,
+fails with `Cannot read properties of null (reading 'edgesOut')`. Upgrade npm
+first with `npm install -g npm@11` (npm 11 needs Node 22.9+), or use pnpm.
+Already scaffolded? Upgrade, then run `npm install` in the project.
+[Troubleshooting](/docs/deployment/troubleshooting#cannot-read-properties-of-null-reading-edgesout-from-npm-install)
+has the other fix.
+</Callout>
+
 ## 1. Scaffold
 
 ```bash

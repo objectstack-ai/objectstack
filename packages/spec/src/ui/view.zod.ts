@@ -190,9 +190,11 @@ export type { HttpMethodSubset } from '../shared/http.zod';
  * `view-data-api-provider-retired` carries the judgement an upgrader owes.
  *
  * A page component whose `data` prop is this schema (`object-grid`,
- * `object-map`, `object-gantt`, `object-tree`) is refused by the page parse
- * with this prescription, read off this union's own issue rather than copied
- * (`checkPageComponentViewData`, `ui/page.zod.ts`, #23357).
+ * `object-map`, `object-gantt`, `object-tree`) meets this prescription through
+ * its `ComponentPropsMap` row: `@objectstack/lint`'s `validateComponentProps`
+ * parses the component's `properties` against that row at the CLI doors and at
+ * the runtime save door, and raises this union's own issue. The page parse
+ * itself leaves `properties` an open record.
  */
 const VIEW_DATA_API_PROVIDER_RETIRED =
   "`view.data.provider: 'api'` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — "
