@@ -270,6 +270,32 @@ describe('[ADR-0139 E7] the parent pair: one planner, stamped on create and on t
     expect(dropped).not.toHaveProperty('object_name');
   });
 
+  it('a multi-row update naming the pair: refused when the rows derive different pairs, passed when they share one', async () => {
+    const registered: Array<{ event: string; handler: (ctx: any) => any }> = [];
+    const engine: any = {
+      registerHook: (event: string, handler: (ctx: any) => any, options: any) => {
+        if (options?.object === 'sys_comment' && event === 'beforeUpdate') registered.push({ event, handler });
+      },
+      getSchema: () => ({ fields: PAIR_FIELDS }),
+    };
+    installCommentAccessHooks(engine, () => null, silentLogger());
+    const dispatchRows = async (threads: string[]) => {
+      const scope = {};
+      const payload: Record<string, unknown> = { object_name: 'vault' };
+      for (const [index, thread] of threads.entries()) {
+        for (const h of registered) {
+          await h.handler({
+            object: 'sys_comment', input: { data: payload, options: {} }, session: { isSystem: true },
+            previous: { thread_id: thread }, dispatch: { mode: 'per-row', index, scope },
+          });
+        }
+      }
+      return payload;
+    };
+    await expect(dispatchRows(['crm_case:c1', 'crm_case:c2'])).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(await dispatchRows(['crm_case:c1', 'crm_case:c1'])).toEqual({ object_name: 'crm_case', record_id: 'c1' });
+  });
+
   it('a sys_comment that declares no pair is never stamped (no unknown column is written)', async () => {
     const run = hooks(false);
     expect(await run('beforeInsert', { thread_id: 'crm_case:c1' })).toEqual({ thread_id: 'crm_case:c1' });

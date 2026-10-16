@@ -364,6 +364,25 @@ describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pai
     expect(await atRest(id)).toMatchObject({ object_name: DOC, record_id: other });
   });
 
+  it('a SYSTEM multi-row update naming the pair over comments on different records is refused whole; over one thread it stores that thread\'s pair', async () => {
+    const [d1, d2] = ((await engine.find(DOC, { limit: 2, context: SYS })) as Row[]).map((r) => String(r.id));
+    const a = String((await engine.insert(COMMENT, commentOn(DOC, d1, 'multi a'), { context: SYS })).id);
+    const b = String((await engine.insert(COMMENT, commentOn(DOC, d2, 'multi b'), { context: SYS })).id);
+    const c = String((await engine.insert(COMMENT, commentOn(DOC, d1, 'multi c'), { context: SYS })).id);
+    const outcome = await engine
+      .update(COMMENT, { object_name: VAULT, record_id: ids.vault }, { multi: true, where: { id: { $in: [a, b] } }, context: SYS } as any)
+      .then((value) => ({ value }), (error) => ({ error }));
+    expect(outcome).toHaveProperty('error');
+    const error = (outcome as { error: any }).error;
+    expect({ code: error.code, status: error.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(await atRest(a)).toMatchObject({ object_name: DOC, record_id: d1 });
+    expect(await atRest(b)).toMatchObject({ object_name: DOC, record_id: d2 });
+    // Rows sharing one thread derive one pair: the write lands, and stores that pair.
+    await engine.update(COMMENT, { object_name: VAULT, record_id: ids.vault }, { multi: true, where: { id: { $in: [a, c] } }, context: SYS } as any);
+    expect(await atRest(a)).toMatchObject({ object_name: DOC, record_id: d1 });
+    expect(await atRest(c)).toMatchObject({ object_name: DOC, record_id: d1 });
+  });
+
   it('D5.2: the reaction gate keeps the bounded probe — a literal comment-id list, no leaf', async () => {
     const reactionWhere: unknown[] = [];
     engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {

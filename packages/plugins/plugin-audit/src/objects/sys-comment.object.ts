@@ -114,6 +114,9 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   names either column without a thread has the pair re-derived from the
  *   row's stored thread — for every caller, because under `preserveAudit` (a
  *   historical import) the engine's update-side strip keeps a readonly value.
+ *   A multi-row update naming the pair without a thread is refused whole
+ *   (`VALIDATION_ERROR` / 400) when its rows' threads name different records:
+ *   one write cannot store each row's own pair.
  * - **Stored rows.** Rows written before the pair existed carry `null` until
  *   `os migrate comment-parent-pair --apply` stamps them; until then the read
  *   gate answers them with the bounded thread probe (fail closed), never a

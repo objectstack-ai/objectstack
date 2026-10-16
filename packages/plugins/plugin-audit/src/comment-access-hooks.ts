@@ -342,12 +342,51 @@ function stampCommentParentPair(row: Record<string, unknown>): void {
  *    writer's value lands, the backfill's included. ⛔ The engine's update-side
  *    `readonly` strip is not the guard here: under `preserveAudit` (a REST
  *    historical import puts it on an ordinary caller's write) it keeps a
- *    readonly value. A predicate update naming the pair re-derives a pair per
- *    row, and one whose rows hold different threads is refused whole by the
- *    engine (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`): one SET clause cannot carry
- *    two pairs. With no stored row to derive from, the pair is dropped from the
- *    write. An update naming none of the three columns stamps nothing.
+ *    readonly value. A predicate update naming the pair without a thread
+ *    re-derives a pair per matched row over one shared payload, and one SET
+ *    clause carries a single pair to every row, so when the matched rows'
+ *    threads name different records the write is refused whole, before
+ *    anything is written ({@link refusePairDivergence}, `VALIDATION_ERROR` /
+ *    400): the engine's own key-set divergence check cannot see it, since
+ *    every row assigns the same two keys. With no stored row to derive from,
+ *    the pair is dropped from the write. An update naming none of the three
+ *    columns stamps nothing.
  */
+/** The catalog member for a request whose shape is refused (ADR-0112). */
+const PAIR_DIVERGENCE_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+
+/** The pair the first row of a predicate update derived, per write (the engine's shared `dispatch.scope`). */
+const pairByWrite = new WeakMap<object, CommentParentPair>();
+
+/**
+ * Refuse a predicate (`per-row`) update whose matched rows derive different
+ * parent pairs: one `SET` clause cannot carry two pairs, and carrying one row's
+ * pair to another row would authorize that comment by a record its thread does
+ * not name. Refused before anything is written (every before-hook runs ahead
+ * of the one write). A by-id update, and a predicate update whose rows share
+ * one thread, pass. `VALIDATION_ERROR` / 400: the request's shape is what is
+ * refused, and the remedy is in the caller's hands.
+ */
+function refusePairDivergence(dispatch: unknown, pair: CommentParentPair): void {
+  const d = dispatch as { mode?: unknown; scope?: unknown } | undefined;
+  if (d?.mode !== 'per-row' || !d.scope || typeof d.scope !== 'object') return;
+  const first = pairByWrite.get(d.scope);
+  if (!first) {
+    pairByWrite.set(d.scope, pair);
+    return;
+  }
+  if (first.object_name === pair.object_name && first.record_id === pair.record_id) return;
+  const err: any = new Error(
+    'Refusing a multi-row update of sys_comment that names object_name / record_id without thread_id: the matched ' +
+      "comments' threads name different records, and one write cannot store each comment's own pair. The pair is " +
+      "derived from thread_id — update the comments one by one, or name thread_id.",
+  );
+  err.code = PAIR_DIVERGENCE_CODE;
+  err.status = 400;
+  err.statusCode = 400;
+  throw err;
+}
+
 function installCommentParentPairStamp(engine: CommentAccessEngine): void {
   engine.registerHook(
     'beforeInsert',
@@ -382,6 +421,12 @@ function installCommentParentPairStamp(engine: CommentAccessEngine): void {
         return;
       }
       const pair = planCommentParentPair(storedThread);
+      // A predicate update dispatches this handler once per matched row over
+      // ONE shared payload, and one SET clause carries the last row's values to
+      // every row. The engine's key-set divergence check cannot see this (every
+      // row assigns the same two keys), so the pair is compared here, across
+      // the call's rows, on the scope object the engine shares between them.
+      refusePairDivergence(ctx?.dispatch, pair);
       payload[COMMENT_PARENT_OBJECT_COLUMN] = pair.object_name;
       payload[COMMENT_PARENT_RECORD_COLUMN] = pair.record_id;
     },
