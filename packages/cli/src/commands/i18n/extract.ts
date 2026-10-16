@@ -6,6 +6,7 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { normalizeStackInput } from '@objectstack/spec';
 import { loadConfig } from '../../utils/config.js';
+import { makeDirectorySync } from '../../utils/make-directory.js';
 import {
   printHeader,
   printSuccess,
@@ -796,7 +797,9 @@ export default class I18nExtract extends Command {
         process.exit(1);
       }
 
-      fs.mkdirSync(resolvedOutDir, { recursive: true });
+      // Bounded (#23858): an `--out` that can never be made is refused at
+      // once with the OS's code and the path, never a loop.
+      makeDirectorySync(resolvedOutDir);
       let written = 0;
       for (const { file, content, keys } of emitted) {
         fs.writeFileSync(file, content, 'utf8');

@@ -509,7 +509,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -532,7 +532,7 @@
         "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
         "GET /api/v1/meta/app with NO query first and record the names actually served — a stock boot answers exactly showcase_app, setup, account. Then GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups). ⚠️ GET /api/v1/meta/app?id=studio answers 200 {\"items\":[]} on every stock boot and that is the expected result (knownGap): record the absence as an assertion and move on — do NOT install @objectstack/studio to make the step runnable",
         "as admin, hand-walk each destination in each app: navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
-        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications / Identity Links / User Preferences render",
+        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user from Users and confirm the user page's Preferences and Linked Accounts tabs render that user's rows",
         "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
         "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 45 Setup destinations for the admin, re-measured 2026-10-01 (GET /api/v1/meta/app leaves; #9453 recorded 43 and 7). Recount from the payload each run",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
@@ -618,6 +618,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 10). The marketplace catalog content was blocked(environment): egress to the catalog was denied. Disposition: recorded knownGap. The existing knownGap now names the environment the leg needs (a boot that reaches DEFAULT_CLOUD_URL or a reachable OS_CLOUD_URL) and that no CI job drives it. No clause changed",
           "ref": "#22017"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-16",
+          "change": "the Setup detail step listed Identity Links and User Preferences among Setup's rendered destinations; #23803 removed both entries from Setup (nav_accounts, nav_user_preferences), and an administrator reaches those rows from the User record page's Linked Accounts and Preferences tabs. The step now drives those two tabs from a user's page instead. The destination count in the Account-detail step is left as it is: it is #23803 item 4's, re-measured by whichever of that card's changes lands last. No acceptance clause changed",
+          "ref": "#23803"
         }
       ]
     },

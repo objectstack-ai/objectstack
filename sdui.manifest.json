@@ -3319,17 +3319,13 @@
           "description": "Set false for the bare h1 header on non-record pages"
         },
         {
-          "name": "showStar",
-          "type": "boolean"
-        },
-        {
           "name": "showCopyId",
           "type": "boolean"
         },
         {
           "name": "maxVisible",
           "type": "number",
-          "description": "How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer — the contract rejects 0 and fractional values. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu."
+          "description": "How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer — the contract rejects 0 and fractional values. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host's own buttons (the record page's Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons."
         },
         {
           "name": "mobileMaxVisible",

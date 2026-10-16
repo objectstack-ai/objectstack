@@ -339,11 +339,30 @@ describe('the merged Setup and Account apps are booted whole', () => {
       'sys_session',
       'sys_oauth_application',
       'sys_account',
-      'sys_user_preference',
     ]) {
       expect(JUDGED_BY_A, `(a) no longer judges ${name}`).toContain(name);
       expect(JUDGED_BY_B.map((e) => e.objectName), `(b) no longer judges an entry naming ${name}`).toContain(name);
     }
+  });
+
+  // One object this family reordered left the population with Setup's
+  // "User Preferences" entry (#23803): no merged entry of either app names it
+  // now, so neither rule reaches it, and (b) has nothing to judge. (a)'s
+  // concern does not leave with the entry — a preference row opened from the
+  // User record page's Preferences tab still has an object breadcrumb, a door
+  // that names no view — so (a) is held for it here, by name, read from the
+  // same two sources the catalogue reads. Should a merged entry name it again,
+  // the first assertion goes red: put it back in the list above.
+  it('holds (a) for sys_user_preference, which no merged entry names any more', () => {
+    expect(NAMED_OBJECTS, 'a merged entry names sys_user_preference again — judge it in the loop above').not.toContain(
+      'sys_user_preference',
+    );
+    const def =
+      (engine.registry.getObject('sys_user_preference') as ObjectDef | undefined) ?? IDENTITY.get('sys_user_preference');
+    expect(def, 'control: neither the composition nor the identity barrel declares sys_user_preference').toBeDefined();
+    const [first, view] = Object.entries(def?.listViews ?? {})[0] ?? [];
+    expect(first).toBeTypeOf('string');
+    expect(isCallerScoped(view), `sys_user_preference declares the caller-scoped list view "${first}" first`).toBe(false);
   });
 
   it('every object an entry names is declared by the composition or by the identity barrel', () => {

@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { createHash } from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
+import { makeDirectorySync } from '../utils/make-directory.js';
 
 // [#16319] `FieldType` is now imported as a VALUE below, beside the other
 // `@objectstack/spec/data` helpers — the enum object carries the type of the
@@ -1800,9 +1801,11 @@ async function runMetadataGeneration(
     // never prints a `Created` line for a file that is no longer there.
     const written: string[] = [];
     try {
-      // `mkdirSync` answers the first directory it created, or `undefined`
-      // when the whole path already existed.
-      createdDir = fs.mkdirSync(fullDir, { recursive: true }) ?? undefined;
+      // `makeDirectorySync` answers the first directory it created, or
+      // `undefined` when the whole path already existed — what the recursive
+      // `mkdirSync` it replaces answered, bounded (#23858): a `--dir` that can
+      // never be made is refused at once instead of looping.
+      createdDir = makeDirectorySync(fullDir);
 
       // Write file — the same `content` the parse check above accepted, ⛔ not
       // a re-render: a second call to `generator.generate` would make the
@@ -2224,7 +2227,7 @@ async function runTypesGeneration(configPath: string | undefined, flags: { outpu
       const outPath = path.resolve(process.cwd(), flags.output);
       const outDir = path.dirname(outPath);
       if (!fs.existsSync(outDir)) {
-        fs.mkdirSync(outDir, { recursive: true });
+        makeDirectorySync(outDir);
       }
       fs.writeFileSync(outPath, content);
       printSuccess(`Generated types at ${flags.output}`);
@@ -2371,7 +2374,7 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
       const outPath = path.resolve(process.cwd(), flags.output);
       const outDir = path.dirname(outPath);
       if (!fs.existsSync(outDir)) {
-        fs.mkdirSync(outDir, { recursive: true });
+        makeDirectorySync(outDir);
       }
       fs.writeFileSync(outPath, content);
       printSuccess(`Generated client SDK at ${flags.output} (${timer.display()})`);
@@ -4003,7 +4006,7 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
       const outPath = path.resolve(process.cwd(), output);
       const outDir = path.dirname(outPath);
       if (!fs.existsSync(outDir)) {
-        fs.mkdirSync(outDir, { recursive: true });
+        makeDirectorySync(outDir);
       }
       fs.writeFileSync(outPath, content);
       printSuccess(`Generated migration at ${output} (${timer.display()})`);

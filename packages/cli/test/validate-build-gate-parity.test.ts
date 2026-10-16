@@ -347,6 +347,12 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
     // build's warning count. It reads no stack and refuses nothing: every row
     // it selects is one `lowerCallables` produced.
     'isExtractionRefusal',
+    // [#23858] Makes the `--output` directory `os build` writes the artifact
+    // into — the bounded stand-in for the `fs.mkdirSync(…, { recursive: true })`
+    // that stood there (`fs` is classified below). It reads no stack and
+    // judges nothing; what it can refuse is a path the operating system
+    // refuses, with that system's own code.
+    'makeDirectorySync',
   ],
   // [commit 8b4890343] Reads a fact about the TOOLCHAIN, not about the input. The
   // ADR-0087 D4 `release` section is computed at publish time from the two

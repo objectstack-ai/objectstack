@@ -9,6 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
+import { makeDirectorySync } from '../utils/make-directory.js';
 import { redirectStdoutToStderr } from '../utils/json-stdout.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
 import { databaseDriverFlag } from '../utils/database-driver-flag.js';
@@ -186,7 +187,10 @@ export default class Start extends Command {
     //         > ~/.objectstack (global mode)
     const homeDir = resolveHome(flags.home, { hasProjectConfig, cwd });
     try {
-      fs.mkdirSync(path.join(homeDir, 'data'), { recursive: true });
+      // Bounded (#23858): a home that can never be made — a name under
+      // `/proc` — is refused here, at once, with the OS's code and the path.
+      // Node's recursive mkdir looped on it in this process, printing nothing.
+      makeDirectorySync(path.join(homeDir, 'data'));
     } catch (err: any) {
       printError(`Cannot create home directory at ${homeDir}: ${err?.message ?? err}`);
       process.exit(1);
@@ -655,7 +659,7 @@ function readOrCreateAuthSecret(homeDir: string): string {
   }
   const secret = crypto.randomBytes(32).toString('hex');
   try {
-    fs.mkdirSync(homeDir, { recursive: true });
+    makeDirectorySync(homeDir);
     fs.writeFileSync(secretPath, secret + '\n', { mode: 0o600 });
   } catch {
     // best-effort persist; secret is still returned for this process

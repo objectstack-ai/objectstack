@@ -129,6 +129,7 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
+import { makeDirectorySync } from '../utils/make-directory.js';
 import {
   getCliVersion,
   NPM_PACKAGE_NAME_MAX_LENGTH,
@@ -726,8 +727,9 @@ export default class Create extends Command {
     console.log('');
     
     try {
-      // Create directory
-      fs.mkdirSync(targetDir, { recursive: true });
+      // Create directory. Bounded (#23858): a `--dir` that can never be made
+      // is refused at once with the OS's code and the path, never a loop.
+      makeDirectorySync(targetDir);
       
       // Create files from template
       for (const [filePath, contentFn] of Object.entries(template.filesFor(placement))) {
