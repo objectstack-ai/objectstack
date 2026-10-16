@@ -46,7 +46,7 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
-import { computeWithheldRowFilter, keptRowsOfParent } from './activity-field-redaction.js';
+import { computeWithheldUpdateFilter, keptRowsOfParent } from './activity-field-redaction.js';
 import { planActivityStamp } from './activity-changed-fields.js';
 
 const ACTIVITY = 'sys_activity';
@@ -54,6 +54,8 @@ const ACTIVITY = 'sys_activity';
 const ITEM = 'awu_item';
 /** A record the member reads with NO field served: every change is withheld. */
 const SEALED = 'awu_sealed';
+/** [ADR-0139 E6] A served field whose name is a prefix of a withheld one: membership, not substring. */
+const PREFIX = 'awu_prefix';
 const HARNESS_PACKAGE = 'com.objectstack.audit.test.activity-withheld-update';
 
 const SYS = { isSystem: true } as const;
@@ -84,6 +86,16 @@ const sealedObject = {
   },
 };
 
+const prefixObject = {
+  name: PREFIX,
+  label: 'Withheld Update Prefix',
+  fields: {
+    name: { name: 'name', label: 'Name', type: 'text' as const },
+    f: { name: 'f', label: 'F', type: 'text' as const },
+    f_secret: { name: 'f_secret', label: 'F Secret', type: 'text' as const },
+  },
+};
+
 type Row = Record<string, any>;
 const meta = (r: Row | undefined) => (typeof r?.metadata === 'string' ? JSON.parse(r.metadata) : null);
 const changeKeys = (r: Row | undefined) => {
@@ -109,6 +121,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
       if (context?.userId === MEMBER.userId) {
         if (object === ITEM) return all.filter((f) => !WITHHELD.has(f));
         if (object === SEALED) return [];
+        if (object === PREFIX) return all.filter((f) => f !== 'f_secret');
       }
       return all;
     },
@@ -154,6 +167,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     engine.registerDriver(driver, true);
     engine.registry.registerObject(itemObject as any, HARNESS_PACKAGE);
     engine.registry.registerObject(sealedObject as any, HARNESS_PACKAGE);
+    engine.registry.registerObject(prefixObject as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
 
     // Every row below is written by the real audit writer's CRUD mirror.
@@ -182,6 +196,14 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     const sealedRows = (await engine.find(ACTIVITY, { where: { object_name: SEALED }, context: SYS })) as Row[];
     rowIds.sealedCreated = String(sealedRows.find((r) => r.type === 'created')?.id ?? '');
     rowIds.sealedUpdated = String(sealedRows.find((r) => r.type === 'updated')?.id ?? '');
+
+    // [ADR-0139 E6] `f` is served, `f_secret` is withheld, and `f` is a prefix of it.
+    ids.prefix = (await engine.insert(PREFIX, { name: 'prefix', f: 'p1', f_secret: 's1' }, { context: SYS })).id;
+    await update(PREFIX, ids.prefix, { f_secret: 's2' }); // withheld whole
+    await update(PREFIX, ids.prefix, { f: 'p2' }); // served whole
+    const prefixRows = (await engine.find(ACTIVITY, { where: { object_name: PREFIX }, context: SYS })) as Row[];
+    rowIds.prefixWithheld = String(prefixRows.find((r) => changeKeys(r).join() === 'f_secret')?.id ?? '');
+    rowIds.prefixServed = String(prefixRows.find((r) => changeKeys(r).join() === 'f')?.id ?? '');
 
     // [ADR-0139 E6] An app's own row, inserted with no stamp of its own: the
     // before-insert hook stamps it `[]` (not a recorded change), so it is kept.
@@ -384,6 +406,20 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     expect(rows.map((r) => r.id)).toEqual([rowIds.withheld]);
   });
 
+  it('[ADR-0139 E6] membership, not substring: an update of only a withheld field stays withheld though a served field\'s name is its prefix', async () => {
+    const atRest = (await engine.find(ACTIVITY, { where: { object_name: PREFIX }, context: SYS })) as Row[];
+    expect(atRest.find((r) => r.id === rowIds.prefixWithheld)?.changed_fields).toEqual(['f_secret']);
+    const served = ((await engine.find(ACTIVITY, {
+      where: scoped(PREFIX, ids.prefix), orderBy: ORDER, context: MEMBER,
+    })) as Row[]).map((r) => r.id);
+    expect(served).not.toContain(rowIds.prefixWithheld);
+    expect(served).toContain(rowIds.prefixServed);
+    expect(await engine.count(ACTIVITY, { where: scoped(PREFIX, ids.prefix) }, { context: MEMBER })).toBe(served.length);
+    // Control: the administrator is served both.
+    const admin = ((await engine.find(ACTIVITY, { where: scoped(PREFIX, ids.prefix), context: ADMIN })) as Row[]).map((r) => r.id);
+    expect(admin).toEqual(expect.arrayContaining([rowIds.prefixWithheld, rowIds.prefixServed]));
+  });
+
   it('a system read is not narrowed', async () => {
     expect((await read(SYS)).map((r) => r.id)).toContain(rowIds.withheld);
   });
@@ -418,7 +454,7 @@ describe('[ADR-0139 E6] planActivityStamp — the one derivation of the stamp', 
   });
 });
 
-describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldRowFilter — a predicate, no row read', () => {
+describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldUpdateFilter — a predicate, no row read', () => {
   const engineWith = (objects: Array<{ name: string; activityMilestones?: unknown }>) => ({
     registry: { getAllObjects: () => objects },
     getSchema: (name: string) => objects.find((o) => o.name === name),
@@ -445,10 +481,10 @@ describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldRowFilter — a predic
   it('a parent the service gives no answer for is kept whole; with no answer for any, no filter at all', async () => {
     const engine = engineWith([{ name: 'a' }, { name: 'b' }]);
     const servedFor = async (o: string) => (o === 'a' ? ['x'] : undefined);
-    expect(await computeWithheldRowFilter(engine, {}, servedFor, { warn: vi.fn() })).toEqual({
+    expect(await computeWithheldUpdateFilter(engine, {}, servedFor, { warn: vi.fn() })).toEqual({
       $or: [keptRowsOfParent('a', ['x'], []), { object_name: 'b' }],
     });
-    expect(await computeWithheldRowFilter(engine, {}, async () => undefined, { warn: vi.fn() })).toBeNull();
+    expect(await computeWithheldUpdateFilter(engine, {}, async () => undefined, { warn: vi.fn() })).toBeNull();
     expect(engine.find).not.toHaveBeenCalled();
   });
 
@@ -456,7 +492,7 @@ describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldRowFilter — a predic
     const engine = engineWith([{ name: 'a' }, { name: 'b' }]);
     const servedFor = vi.fn(async () => ['x']);
     const where = { $and: [{ object_name: 'b' }, { record_id: '1' }] };
-    expect(await computeWithheldRowFilter(engine, { where }, servedFor, { warn: vi.fn() })).toEqual(
+    expect(await computeWithheldUpdateFilter(engine, { where }, servedFor, { warn: vi.fn() })).toEqual(
       keptRowsOfParent('b', ['x'], []),
     );
     expect(servedFor).toHaveBeenCalledTimes(1);
@@ -464,7 +500,7 @@ describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldRowFilter — a predic
 
   it('the audit and activity objects themselves are not enumerated (the read gate excludes their rows)', async () => {
     const engine = engineWith([{ name: 'sys_activity' }, { name: 'sys_audit_log' }, { name: 'a' }]);
-    expect(await computeWithheldRowFilter(engine, {}, async () => ['x'], { warn: vi.fn() })).toEqual(
+    expect(await computeWithheldUpdateFilter(engine, {}, async () => ['x'], { warn: vi.fn() })).toEqual(
       keptRowsOfParent('a', ['x'], []),
     );
   });
@@ -473,10 +509,10 @@ describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldRowFilter — a predic
     const logger = { warn: vi.fn() };
     const find = vi.fn();
     // No registry view: only a row reader, which the rule must not call.
-    const engine = { find } as unknown as Parameters<typeof computeWithheldRowFilter>[0];
-    const filter = await computeWithheldRowFilter(engine, {}, async () => ['x'], logger);
+    const engine = { find } as unknown as Parameters<typeof computeWithheldUpdateFilter>[0];
+    const filter = await computeWithheldUpdateFilter(engine, {}, async () => ['x'], logger);
     expect(filter).toEqual({ id: '__activity_withheld_row_denied__' });
-    await computeWithheldRowFilter(engine, {}, async () => ['x'], logger);
+    await computeWithheldUpdateFilter(engine, {}, async () => ['x'], logger);
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(find).not.toHaveBeenCalled();
   });

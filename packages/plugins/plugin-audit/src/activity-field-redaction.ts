@@ -373,6 +373,32 @@ function currentMilestoneWatched(engine: ActivityRedactionEngine, object: string
 }
 
 /**
+ * [#21388, ADR-0139 D4] The update half of the withheld-row rule — whether a
+ * stamped row is a withheld-only update — as a predicate over `changed_fields`
+ * for a reader served `served`. An update row with a non-empty `changed_fields`
+ * none of whose members this reader is served is withheld; so the predicate is
+ * written as the rows it KEEPS: `changed_fields` is empty (a create, a delete, a
+ * note, an update empty for everyone), or it holds a served field — one
+ * `$contains` per served field. On a multi-value column `$contains` is
+ * MEMBERSHIP (`filter.zod.ts`, the JSON-stored column paragraph), so a served
+ * field whose name is a prefix of a withheld one never keeps the row.
+ *
+ * Written positively, never as a `$not` of the withheld rows: `$not` is
+ * NULL-safe per leaf, so it would re-admit an unstamped row; the stamped
+ * conjunct beside it in {@link keptRowsOfParent} decides those.
+ * Exported for direct testing.
+ */
+export function isWithheldOnlyUpdate(served: readonly string[]): Record<string, unknown> {
+  const members = [...new Set(served)].sort();
+  return {
+    $or: [
+      { [ACTIVITY_CHANGED_FIELDS_COLUMN]: { $empty: true } },
+      ...members.map((f) => ({ [ACTIVITY_CHANGED_FIELDS_COLUMN]: { $contains: f } })),
+    ],
+  };
+}
+
+/**
  * [ADR-0139 D4, E6] The rows of ONE parent object `P` a reader served
  * `served` keeps, as a predicate over the two writer-stamped columns
  * (`activity-changed-fields.ts`):
@@ -380,11 +406,11 @@ function currentMilestoneWatched(engine: ActivityRedactionEngine, object: string
  *  - **stamped** — `changed_fields` is not null. An unstamped row (written
  *    before the column existed and not yet backfilled, or one the planner
  *    could not judge) is withheld: ADR-0139 D4's answer for an unjudged row.
- *  - **the update half** (#21388) — `changed_fields` is empty, or it contains
- *    a field this reader is served: one `$contains` per served field. So an
- *    update whose every recorded key is withheld is withheld, and a create, a
- *    delete, a note, and an update that touched only `internal` fields (empty
- *    for everyone) are kept.
+ *  - **the update half** (#21388, {@link isWithheldOnlyUpdate}) —
+ *    `changed_fields` is empty, or it contains a field this reader is served:
+ *    one `$contains` per served field. So an update whose every recorded key is
+ *    withheld is withheld, and a create, a delete, a note, and an update that
+ *    touched only `internal` fields (empty for everyone) are kept.
  *  - **the milestone half** (#22786, ruled letter B) — `milestone_key` is null
  *    (no milestone fired), or it EQUALS the key of P's current
  *    `activityMilestones` declaration AND this reader is served every field
@@ -400,19 +426,13 @@ export function keptRowsOfParent(
   watched: readonly string[],
 ): Record<string, unknown> {
   const servedSet = new Set(served);
-  const members = [...servedSet].sort();
   const key = milestoneKeyOf(watched);
   const milestoneServed = key !== null && watched.every((f) => servedSet.has(f));
   return {
     $and: [
       { object_name: parent },
       { [ACTIVITY_CHANGED_FIELDS_COLUMN]: { $null: false } },
-      {
-        $or: [
-          { [ACTIVITY_CHANGED_FIELDS_COLUMN]: { $empty: true } },
-          ...members.map((f) => ({ [ACTIVITY_CHANGED_FIELDS_COLUMN]: { $contains: f } })),
-        ],
-      },
+      isWithheldOnlyUpdate(served),
       milestoneServed
         ? { $or: [{ [ACTIVITY_MILESTONE_KEY_COLUMN]: { $null: true } }, { [ACTIVITY_MILESTONE_KEY_COLUMN]: key }] }
         : { [ACTIVITY_MILESTONE_KEY_COLUMN]: { $null: true } },
@@ -439,7 +459,7 @@ export function keptRowsOfParent(
  * nothing can be judged: the read is denied, and that is said once.
  * Exported for direct testing.
  */
-export async function computeWithheldRowFilter(
+export async function computeWithheldUpdateFilter(
   engine: ActivityRedactionEngine,
   ast: Record<string, unknown>,
   servedFor: ServedFor,
@@ -573,7 +593,7 @@ const JUDGED_BY = ['object_name', 'metadata'] as const;
  *
  * [#21388, #22786] Before the read runs, the same middleware ANDs the
  * withheld-row predicate into the WHERE of all four reads
- * (`computeWithheldRowFilter`, ADR-0139 E6). `AuditPlugin` registers it after
+ * (`computeWithheldUpdateFilter`, ADR-0139 E6). `AuditPlugin` registers it after
  * the read gate; the two are independent conjuncts.
  */
 export function installActivityFieldRedaction(
@@ -591,7 +611,7 @@ export function installActivityFieldRedaction(
       const restrictedFor = restrictedPerRead(security);
       if (security && ctx.ast && PARENT_GATE_READ_OPS.has(ctx.operation)) {
         try {
-          const filter = await computeWithheldRowFilter(engine, ctx.ast, servedFor, logger);
+          const filter = await computeWithheldUpdateFilter(engine, ctx.ast, servedFor, logger);
           if (filter) andIntoWhere(ctx, filter);
         } catch (err) {
           // A failure to build the rule must never fall open into the timing leak.

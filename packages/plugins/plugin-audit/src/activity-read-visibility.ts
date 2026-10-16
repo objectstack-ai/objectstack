@@ -63,7 +63,7 @@
  * rows, on the same four reads, so a list's total, its pages and a grouped
  * count agree with the rows served. It judges by the security service's field
  * answer, so it lives with the field redaction (`activity-field-redaction.ts`,
- * `computeWithheldRowFilter`), whose middleware `AuditPlugin` registers after
+ * `computeWithheldUpdateFilter`), whose middleware `AuditPlugin` registers after
  * this one. [ADR-0139 E6] It is a predicate over two writer-stamped columns
  * (`changed_fields`, `milestone_key`), one branch per parent object this gate
  * enumerates ({@link ACTIVITY_GATE}): it reads no row and composes no leaf, so
