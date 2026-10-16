@@ -61,7 +61,7 @@ async function confirm(question: string): Promise<boolean> {
  *
  * Dry run by default, like every other `os migrate` subcommand (#2186): a
  * bare invocation reports how many rows still carry the sentinel and writes
- * nothing. `--apply` runs the conversion through the ADR-0119 D2 migration
+ * no row or table. `--apply` runs the conversion through the ADR-0119 D2 migration
  * journal, so each chunk is one transaction and an interrupted run is
  * recoverable via `os migrate resume`.
  *
