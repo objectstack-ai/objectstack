@@ -105,10 +105,10 @@ function makeHarness(opts: { publish?: (data: unknown) => Promise<unknown> } = {
 }
 
 /** The `[protocol.duplicatePackage]` lines about the copy's package record. */
-function packageRecordLines(warn: ReturnType<typeof vi.spyOn>): string[] {
+function packageRecordLines(warn: { mock: { calls: unknown[][] } }): string[] {
     return warn.mock.calls
-        .map((args) => String(args[0]))
-        .filter((line) => line.startsWith('[protocol.duplicatePackage] package record'));
+        .map((args: unknown[]) => String(args[0]))
+        .filter((line: string) => line.startsWith('[protocol.duplicatePackage] package record'));
 }
 
 describe('[#24041] duplicatePackage reports a refused install of the copy\'s package record', () => {
@@ -144,7 +144,7 @@ describe('[#24041] duplicatePackage reports a refused install of the copy\'s pac
         // The copy still goes on: the item was written, bound to the target.
         expect(res.copied).toEqual([{ type: 'object', name: 'taken_ticket' }]);
         expect(saveMetaItem).toHaveBeenCalledTimes(1);
-        expect((saveMetaItem.mock.calls[0]![0] as any).packageId).toBe(TARGET);
+        expect((saveMetaItem as any).mock.calls[0][0].packageId).toBe(TARGET);
         // …and the target is not an installed package: the refusal preceded
         // every registry write.
         expect(packages.has(TARGET)).toBe(false);
