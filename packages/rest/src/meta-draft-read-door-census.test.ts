@@ -254,7 +254,9 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0, length 8 → 9. [#23050 slice 9]
         // Nor does the global search body (`search-routes.ts`):
         // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0, length 9 → 10.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
+        // [#23050 slice 10] Nor does the UI view body (`ui-routes.ts`):
+        // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0, length 10 → 11.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });
