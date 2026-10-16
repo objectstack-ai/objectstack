@@ -9,7 +9,8 @@
  *   - viewing a record: a routed full page when field-heavy (or on mobile),
  *     otherwise a drawer;
  *   - creating / editing one: always an overlay — a modal when field-heavy
- *     (full-screen on mobile, bounded on desktop), otherwise a drawer.
+ *     or on mobile (full-screen on mobile, bounded on desktop), otherwise a
+ *     drawer.
  *
  * Why the default is a derivation, not an authored object key
  * -----------------------------------------------------------
@@ -18,7 +19,7 @@
  * infer — it is exactly inferable from how heavy the record is. So the
  * platform derives a sensible default here and AI authors write nothing in the
  * common case. The renderer uses this ONLY as the default and lets explicit
- * config win: a view's form/navigation config, an assigned page, and the
+ * config win: a view's navigation config, an assigned page, and the
  * object's `editMode` (`'modal' | 'page'`, declared in `object.zod.ts` by
  * commit f11fc61c5's maintainer ruling as edit-interaction intent, which the
  * renderer applies; nothing in this file reads it).
@@ -156,10 +157,10 @@ export interface RecordFlowSurface {
  *
  * Like the base derivation this is a DEFAULT only, read from `def.fields`,
  * `flow` and `opts` and nothing else: the renderer lets explicit
- * config win over it — `navigation.mode` / `navigation.size`,
- * `FormView.type` / `modalSize`, an assigned page, and the object's
- * `editMode` (`'modal' | 'page'`, declared in `object.zod.ts` as the object's
- * edit-interaction intent, which the renderer applies; not read here).
+ * config win over it — `navigation.mode` / `navigation.size`, an assigned
+ * page, and the object's `editMode` (`'modal' | 'page'`, declared in
+ * `object.zod.ts` as the object's edit-interaction intent, which the renderer
+ * applies; not read here).
  */
 export function deriveRecordFlowSurface(
   def: unknown,
