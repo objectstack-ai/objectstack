@@ -730,16 +730,25 @@ function engineBindsRootOf(ref: string): boolean {
  */
 function textSlotBareDollarHint(outsideHoles: string): string {
   const holes: string[] = [];
-  const refusals: string[] = [];
+  const unbound: string[] = [];
   for (const ref of bareDollarRefsOf(outsideHoles)) {
-    const refusal = textSlotTemplateRefusal(`{{ ${ref} }}`);
-    if (refusal === undefined) holes.push(`\`{{ ${ref} }}\``);
-    else refusals.push(`\`${ref}\` has no hole either: ${refusal}`);
+    if (textSlotTemplateRefusal(`{{ ${ref} }}`) === undefined) holes.push(`\`{{ ${ref} }}\``);
+    else unbound.push(`\`${ref}\``);
   }
-  const parts = ['A text slot renders only `{{ }}` holes, and all other text is literal.'];
+  // [#22161] One remedy line: the hole for each reference the judge admits,
+  // and for the rest the remedy every refusal of an unbound `$` root ends
+  // with. The judge's per-root remedy (the run user's `current_user.id`, the
+  // flow's own variable written without the `$`, the user record a
+  // `get_record` reads) is `os explain flow-bare-dollar-reference`.
+  const parts = ['A text slot renders only `{{ }}` holes.'];
   if (holes.length > 0) parts.push(`Write it as a hole: ${holes.join(', ')}.`);
-  parts.push(...refusals);
-  return parts.join(' ');
+  if (unbound.length > 0) {
+    parts.push(
+      `${unbound.join(', ')} ${unbound.length === 1 ? 'has' : 'have'} no hole: compute the value into a variable ` +
+        'with an `assignment` node and write `{{ v }}`.',
+    );
+  }
+  return withinHintBudget(parts.join(' '), TEXT_SLOT_FALLBACK);
 }
 
 /**
@@ -770,6 +779,55 @@ function valueSlotSpellingAt(at: ValueSlotPosition, text: string): string {
     : message;
 }
 
+/** [#22161] The bound every `fix:` line of the two wrong-syntax rules holds to. */
+const HINT_BUDGET = 200;
+
+/** `hint` when it is one line within {@link HINT_BUDGET}, otherwise `fallback`. */
+function withinHintBudget(hint: string, fallback: string): string {
+  return hint.length <= HINT_BUDGET ? hint : fallback;
+}
+
+/** A CEL value envelope as the spec's value-slot judge writes one in a remedy. */
+const CEL_ENVELOPE = String.raw`\{ dialect: 'cel', source: (?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*") \}`;
+
+/**
+ * [#22161] The judge's remedy, when it opens by spelling the token directly:
+ * `Write `{x}` as ENVELOPE` (a variable path, the run user's id, a date macro,
+ * an expression, a filter operand, a collection), or `` `text` is text with
+ * holes: write it as one CEL concatenation, ENVELOPE``. Every other opening
+ * (a string inside an object or list literal, a legacy `assignment` shape, a
+ * `$User` path that never resolved) means an envelope at the string's place
+ * would not evaluate, so no one-line spelling is taken from it.
+ */
+const DIRECT_SPELLING = new RegExp(
+  '^(?:Write (`[^`]+`) as|(`[^`]+`) is text with holes: write it as one CEL concatenation,) (' + CEL_ENVELOPE + ')',
+);
+
+/**
+ * [#22161] `TOKEN as ENVELOPE`, the judge's own spelling of `text` at `at`
+ * when its remedy opens with one ({@link DIRECT_SPELLING}), or `undefined`.
+ * Read out of the judge's words, never re-spelled here.
+ */
+function directSpellingAt(at: ValueSlotPosition, text: string): string | undefined {
+  const m = DIRECT_SPELLING.exec(valueSlotSpellingAt(at, text));
+  return m ? `${m[1] ?? m[2]} as ${m[3]}` : undefined;
+}
+
+/** [#22161] A value slot's bare-`$` `fix:` line where no direct spelling fits in one line. */
+const VALUE_SLOT_BARE_DOLLAR_FALLBACK =
+  "A value slot stores a bare `$` reference as written: compute it in a CEL value envelope, `{ dialect: 'cel', "
+  + "source: '…' }`, spelled as `os explain flow-bare-dollar-reference` says for this position.";
+
+/** [#22161] A value slot's double-brace `fix:` line where no direct spelling fits in one line. */
+const VALUE_SLOT_DOUBLE_BRACE_FALLBACK =
+  "A value slot reads no `{{ }}` template: compute the value in a CEL value envelope, `{ dialect: 'cel', "
+  + "source: '…' }`; the build's value-slot refusal names the spelling at this position.";
+
+/** [#22161] A text slot's bare-`$` `fix:` line where the references do not fit in one line. */
+const TEXT_SLOT_FALLBACK =
+  'A text slot renders only `{{ }}` holes: write each reference as a hole over a variable the run binds '
+  + '(`os explain flow-bare-dollar-reference`).';
+
 /**
  * [#19939] The hint for bare `$name.path` references in a VALUE slot's string.
  * A value slot reads the CEL value envelope, so each reference is prescribed
@@ -788,22 +846,21 @@ function valueSlotSpellingAt(at: ValueSlotPosition, text: string): string {
  *    written without the `$` (`$source.id` names `{source.id}`).
  */
 function valueSlotBareDollarHint(text: string, at: ValueSlotPosition): string {
-  const parts = [
-    'A value slot reads a CEL value envelope, `{ dialect: \'cel\', source: \'…\' }`: a string in it is the literal '
-    + 'text it spells, so a bare `$` reference is stored as written.',
-  ];
+  const spellings: string[] = [];
   for (const ref of bareDollarRefsOf(text)) {
     const ownVariable = !isRunUserRef(ref) && !engineBindsRootOf(ref);
-    const root = ref.split('.')[0]!;
-    const token = ownVariable ? `{${ref.slice(1)}}` : `{${ref}}`;
-    parts.push(
-      ownVariable
-        ? `\`${ref}\` names \`${root}\`, which is not one of the flow engine's own \`$\` variables, so it reads `
-          + `as the flow's own variable, written without the \`$\`: ${valueSlotSpellingAt(at, token)}`
-        : `\`${ref}\` reads as \`${token}\`: ${valueSlotSpellingAt(at, token)}`,
-    );
+    const spelling = directSpellingAt(at, ownVariable ? `{${ref.slice(1)}}` : `{${ref}}`);
+    if (spelling === undefined) return VALUE_SLOT_BARE_DOLLAR_FALLBACK;
+    spellings.push(spelling);
   }
-  return parts.join(' ');
+  // [#22161] One remedy line: the judge's own spelling of each reference.
+  // What else the judge says at the position (a guard for a value that may
+  // be absent, what a callee or the client is handed) is
+  // `os explain flow-bare-dollar-reference`.
+  return withinHintBudget(
+    `A value slot stores a bare \`$\` reference as written: write ${spellings.join('; ')}.`,
+    VALUE_SLOT_BARE_DOLLAR_FALLBACK,
+  );
 }
 
 /** Every `{{ path }}` hole in a string — what {@link valueSlotDoubleBraceHint} reads as the author's intent. */
@@ -820,13 +877,13 @@ const DOUBLE_BRACE_HOLES = /\{\{\s*([\w$][\w$.\s]*?)\s*\}\}/g;
  */
 function valueSlotDoubleBraceHint(text: string, at: ValueSlotPosition): string {
   const meant = text.replace(DOUBLE_BRACE_HOLES, (_hole, path: string) => `{${path}}`);
-  return (
-    'A value slot reads a CEL value envelope, `{ dialect: \'cel\', source: \'…\' }`, and no template: a string in it '
-    + 'is the literal text it spells, and `{{ }}` is no hole — the value-slot refusal reads its outer braces as '
-    + `literal text. Written as the holes it means: ${valueSlotSpellingAt(at, meant)} Double-brace \`{{ }}\` is the `
-    + 'template dialect of the text slots only — a notify `title` / `message` / `actionUrl`, an http `url` and '
-    + '`headers` values, a screen `title` / `description`, an `end` `message`.'
-  );
+  const spelling = directSpellingAt(at, meant);
+  // [#22161] One remedy line: the judge's own spelling of the holes it means.
+  // That the value-slot refusal reads the outer braces as literal text, and
+  // which slots read `{{ }}`, is `os explain flow-double-brace-interpolation`.
+  return spelling === undefined
+    ? VALUE_SLOT_DOUBLE_BRACE_FALLBACK
+    : withinHintBudget(`A value slot reads no \`{{ }}\` template: write ${spelling}.`, VALUE_SLOT_DOUBLE_BRACE_FALLBACK);
 }
 
 /** Config keys whose string values are CEL predicates, not interpolated templates. */
@@ -860,21 +917,23 @@ const LITERAL_KEYS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 const ELSEWHERE_HINT =
   'This flow node value is read as written: neither `{var}` nor `{{ }}` resolves here, and nothing evaluates a '
   + 'reference, braced or bare. Write the value itself.';
+// [#22161] Which slots read `{{ }}` left the double-brace finding's line here;
+// it is `os explain flow-double-brace-interpolation`.
 
 /** The hint of either finding at a node's literal, by node type: nothing resolves a reference there. */
 const LITERAL_HINTS: ReadonlyMap<string, string> = new Map([
+  // [#22161] One remedy line each; that a brace token in one is refused at
+  // `objectstack validate` and `registerFlow` (and in `signingSecret` by the
+  // executor's parse) is each rule's `os explain` entry.
   [
     'notify',
-    'A notify node\'s `sourceObject`, `actorId` and `payload` are literals the executor reads as written: neither '
-      + '`{var}` nor `{{ }}` resolves there, and nothing evaluates a reference, braced or bare — a brace token in one '
-      + 'is refused at `objectstack validate` and `registerFlow`. Write the value itself.',
+    'A notify node\'s `sourceObject`, `actorId` and `payload` are literals: neither `{var}` nor `{{ }}` resolves '
+      + 'there. Write the value itself.',
   ],
   [
     'http',
-    'An http node\'s `method`, `durable`, `timeoutMs` and `signingSecret` are literals the executor reads as '
-      + 'written: neither `{var}` nor `{{ }}` resolves there, and nothing evaluates a reference, braced or bare — a '
-      + 'brace token in one is refused at `objectstack validate` and `registerFlow`, and in `signingSecret`, whose '
-      + 'secret the flow credential store may hold, by the executor\'s parse. Write the value itself.',
+    'An http node\'s `method`, `durable`, `timeoutMs` and `signingSecret` are literals: neither `{var}` nor `{{ }}` '
+      + 'resolves there. Write the value itself.',
   ],
 ]);
 
@@ -2040,11 +2099,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
               message: valueSlot === undefined
                 ? `double-brace interpolation \`${str.trim().slice(0, 80)}\` — nothing renders a template here: this flow node value is read as written.`
                 : `double-brace interpolation \`${str.trim().slice(0, 80)}\` — the ${valueSlot} reads a CEL value envelope, not a template.`,
-              hint: valueSlot === undefined
-                ? `${ELSEWHERE_HINT} Double-brace \`{{ }}\` is ` +
-                  `the template dialect of the text slots only — a notify \`title\` / \`message\` / \`actionUrl\`, an http \`url\` and \`headers\` values, a screen ` +
-                  `\`title\` / \`description\`, an \`end\` \`message\`.`
-                : valueSlotDoubleBraceHint(str, at),
+              hint: valueSlot === undefined ? ELSEWHERE_HINT : valueSlotDoubleBraceHint(str, at),
               rule: FLOW_DOUBLE_BRACE_INTERP,
             });
           }
