@@ -8,8 +8,9 @@ import type { SemanticMigration } from '../../types.js';
 // snake_case. The maintainer ruled on #21704 (fork 2, letter B) that the spec
 // declares a closed runtime form field of the members the form draws, in
 // camelCase, keyed by `name`. D3 only: page-component `properties` is not
-// parsed on the metadata save or load path, so a stored page is never refused at load;
-// and the authored census, with every inline option list evaluated, found no
+// parsed on the metadata load path, so a stored page is never refused at load
+// (its next save meets the component-props gate at the metadata save door); and
+// the authored census, with every inline option list evaluated, found no
 // working member to respell — the refused values are a type-level test's
 // `visibleOn` and a fixture pinning that an inline `defaultValue` seeds
 // nothing. The shipped object-manager dialog's options (`{ label: 'Box', value:

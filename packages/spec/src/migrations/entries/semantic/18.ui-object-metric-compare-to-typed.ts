@@ -6,13 +6,14 @@ import type { SemanticMigration } from '../../types.js';
 // although the tile reads it with one shape, so a bare kind string, a kind
 // outside the two or a `dimension` passed the component-props gate, and the
 // tile compared against the previous period, or shifted its own filter's window
-// rather than the dimension named, in silence. It now takes the tile's read:
-// `{ kind }`, with `kind` the dashboard widget comparison's own vocabulary by
+// rather than the dimension named, in silence. It now takes the tile's read: `{
+// kind }`, with `kind` the dashboard widget comparison's own vocabulary by
 // reference, and `dimension` refused by name with a prescription (the inline
 // tile shifts the date macros in its own `filter` and never reads a dataset
 // time dimension). D3 only: page-component `properties` is not parsed on the
-// metadata save or load path, so a stored page is never refused at load; a `dimension`
-// has no rewrite that keeps the window the author meant; and the authored census
+// metadata load path, so a stored page is never refused at load (its next save
+// meets the component-props gate at the metadata save door); a `dimension` has
+// no rewrite that keeps the window the author meant; and the authored census
 // found no authored value to respell — the one refused value is a fixture
 // probing that the tile does not read `dimension`.
 export const entry: SemanticMigration = {

@@ -80,18 +80,19 @@ describe('PageHeaderProps', () => {
   });
 });
 
-// #6776 — the three record-chrome switches objectui's header renderer has always
+// #6776 — the record-chrome switches objectui's header renderer has always
 // read (read points recorded in `liveness/page.json`, row `regions`) and
 // `PageHeaderProps` never declared. Until
 // this declaration objectui's published manifest called them legal while
 // `validateComponentProps` (#5068) called them undeclared — two platform
 // authorities disagreeing about one key (#5435), with the renderer siding with
-// the author.
-describe('PageHeaderProps recordChrome / showStar / showCopyId — declared because the header renderer reads them', () => {
-  it('defaults all three ON — an unauthored header keeps the record chrome', () => {
+// the author. The third switch, `showStar`, was retired at 18 (#23650): its
+// default-on and accepts-`false` pins left with the key, and its refusal is
+// pinned in `page-header-show-star-retirement.test.ts`.
+describe('PageHeaderProps recordChrome / showCopyId — declared because the header renderer reads them', () => {
+  it('defaults both ON — an unauthored header keeps the record chrome', () => {
     const result = PageHeaderProps.parse({ title: 'Lead' });
     expect(result.recordChrome).toBe(true);
-    expect(result.showStar).toBe(true);
     expect(result.showCopyId).toBe(true);
   });
 
@@ -102,17 +103,16 @@ describe('PageHeaderProps recordChrome / showStar / showCopyId — declared beca
     expect(result.recordChrome).toBe(false);
   });
 
-  it('accepts the star and copy-id switches independently', () => {
-    const result = PageHeaderProps.parse({ title: 'Lead', showStar: false, showCopyId: false });
-    expect(result.showStar).toBe(false);
+  it('accepts the copy-id switch on its own', () => {
+    const result = PageHeaderProps.parse({ title: 'Lead', showCopyId: false });
     expect(result.showCopyId).toBe(false);
-    // Still a record header — only the two chips inside it are off.
+    // Still a record header — only the chip inside it is off.
     expect(result.recordChrome).toBe(true);
   });
 
   it('rejects a non-boolean rather than silently stripping it', () => {
     expect(() => PageHeaderProps.parse({ title: 'Lead', recordChrome: 'false' })).toThrow();
-    expect(() => PageHeaderProps.parse({ title: 'Lead', showStar: 'no' })).toThrow();
+    expect(() => PageHeaderProps.parse({ title: 'Lead', showCopyId: 'no' })).toThrow();
   });
 });
 
