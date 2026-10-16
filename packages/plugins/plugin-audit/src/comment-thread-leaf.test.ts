@@ -22,6 +22,20 @@ const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), debug: vi.fn() });
 
 const PAIR_FIELDS = { thread_id: {}, body: {}, object_name: {}, record_id: {} };
 
+/**
+ * What the stand-in answers: the comments with no stamped pair (the only rows
+ * this gate pre-scans), or the requested parent ids the caller may read.
+ */
+function standInRows(
+  opts: { comments?: Array<Record<string, unknown>>; readable?: Record<string, string[]> },
+  object: string,
+  requested: unknown,
+): Array<Record<string, unknown>> {
+  if (object === 'sys_comment') return (opts.comments ?? []).filter((r) => r.object_name == null);
+  const ids = Array.isArray(requested) ? requested.map(String) : [];
+  return ids.filter((id) => (opts.readable?.[object] ?? []).includes(id)).map((id) => ({ id }));
+}
+
 type Mw = (ctx: CommentReadMiddlewareCtx, next: () => Promise<void>) => Promise<void>;
 
 /** A stand-in engine: one registry, the D5 questions answered by name, every find recorded. */
@@ -50,13 +64,7 @@ function standIn(opts: {
         : undefined,
     find: async (object: string, options: any) => {
       finds.push({ object, options });
-      const rows =
-        object === 'sys_comment'
-          ? (opts.comments ?? []).filter((r) => r.object_name == null)
-          : ((options?.where?.id?.$in ?? []) as unknown[])
-              .map(String)
-              .filter((id) => (opts.readable?.[object] ?? []).includes(id))
-              .map((id) => ({ id }));
+      const rows = standInRows(opts, object, options?.where?.id?.$in);
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
   };
