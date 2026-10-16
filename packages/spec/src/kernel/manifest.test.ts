@@ -430,7 +430,7 @@ describe('contributes dead-member retirement (ADR-0049 — tombstoned, not delet
   });
 });
 
-describe('contributes.routes retirement (ADR-0049 — removed for the `http.server` mount, maintainer-ruled 2026-08-22)', () => {
+describe('contributes.routes retirement (ADR-0049 — removed; apps declare `apis:`, never an `http.server` mount)', () => {
   // The one `contributes` member split onto its own card: zero readers like
   // its nine siblings retired by commit be21955ba (that commit's controlled census, cloud leg closed
   // clean on 2026-08-24), but four published surfaces taught it as THE way to
@@ -439,7 +439,9 @@ describe('contributes.routes retirement (ADR-0049 — removed for the `http.serv
   // the since-closed block's bare unknown-key refusal would not); the pin
   // asserts the SPECIFIC zod
   // issue — located at the key, carrying the removal record and the
-  // imperative `http.server` fix — never just "it threw".
+  // app-author rule (declare `apis:`, compute in a flow, register code as a
+  // stack function or connector; never mount on `http.server`) — never just
+  // "it threw".
   const base = { id: 'com.example.routes', version: '1.0.0', type: 'plugin', name: 'Routes' };
 
   it('REJECTS an authored `contributes.routes` with the prescription as the issue', () => {
@@ -454,8 +456,10 @@ describe('contributes.routes retirement (ADR-0049 — removed for the `http.serv
     );
     expect(issue).toBeDefined();
     expect(issue!.message).toMatch(
-      /manifest\.contributes\.routes.*removed in @objectstack\/spec 17.*Delete the key.*http\.server/s,
+      /manifest\.contributes\.routes.*removed in @objectstack\/spec 17.*Delete the key.*does not mount routes on `http\.server`.*defineStack\(\{ apis \}\).*flow.*defineStack\(\{ functions \}\).*connector/s,
     );
+    // The retired advice — an app mounting a handler on `kernel:ready` — must not come back.
+    expect(issue!.message).not.toMatch(/kernel:ready|mounted imperatively/);
   });
 
   it('still parses the surviving `kinds` member with `routes` simply absent', () => {
