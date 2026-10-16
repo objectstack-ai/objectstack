@@ -43,7 +43,15 @@ export const InvoiceDocumentPage = definePage({
     {
       name: 'main',
       components: [
-        { type: 'record:details' },
+        {
+          type: 'record:details',
+          properties: {
+            sections: [
+              { name: 'invoice', label: 'Invoice', columns: 2, fields: ['name', 'status', 'account', 'contact', 'issued_on', 'paid_on'] },
+              { name: 'amounts', label: 'Amounts', columns: 2, fields: ['tax_rate', 'total'] },
+            ],
+          },
+        },
         {
           type: 'record:line_items',
           properties: {
