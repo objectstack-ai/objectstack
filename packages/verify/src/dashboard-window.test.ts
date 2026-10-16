@@ -34,16 +34,10 @@ import {
   formatDashboardWindowReport,
   type DashboardWindowReport,
 } from './dashboard-window.js';
-import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
 const RUN_TIMEOUT = 240_000;
-
-// The boot's first load, paid during collection rather than in the first
-// `beforeAll` (see `boot-warm-up.testkit.ts`). Every boot below uses the
-// default options.
-await warmUpBoot();
 
 const ticket = {
   name: 'wnd_ticket',

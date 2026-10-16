@@ -37,12 +37,6 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack } from './harness.js';
-import { warmUpBoot } from './boot-warm-up.testkit.js';
-
-// The boot's first load, paid during collection rather than in the
-// `beforeAll` below (see `boot-warm-up.testkit.ts`): the default options, as
-// that boot uses.
-await warmUpBoot();
 
 const app = {
   manifest: {
