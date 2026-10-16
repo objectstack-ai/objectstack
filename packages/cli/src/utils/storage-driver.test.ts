@@ -61,10 +61,15 @@ describe('inferDriverTypeFromUrl', () => {
 
   // The in-memory (mingo) engine's schemes are REFUSED at inference: the engine
   // is no longer a boot store. Asserted on the error's TYPE and on what it names
-  // (the URL and the two SQLite replacements), never on its prose.
-  it.each(['memory://', 'memory://ignored-host', 'mingo://', 'MINGO://x'])(
-    'refuses %s at inference, naming the SQLite replacements',
-    (url) => {
+  // (the variable, the scheme and the two SQLite replacements), never on its prose.
+  it.each([
+    ['memory://', 'memory://'],
+    ['memory://ignored-host', 'memory://'],
+    ['mingo://', 'mingo://'],
+    ['MINGO://x', 'MINGO://'],
+  ])(
+    'refuses %s at inference, naming its scheme and the SQLite replacements',
+    (url, scheme) => {
       let err: unknown;
       try {
         inferDriverTypeFromUrl(url);
@@ -75,11 +80,61 @@ describe('inferDriverTypeFromUrl', () => {
       const refusal = err as UnsupportedDriverError;
       // Not a kind this resolver produces — the allowlist pin's oracle reads this.
       expect(refusal.recognized).toBe(false);
-      expect(refusal.message).toContain(`"${url}"`);
+      expect(refusal.driverType).toBe(scheme);
+      expect(refusal.message).toContain('OS_DATABASE_URL');
+      expect(refusal.message).toContain(`"${scheme}"`);
       expect(refusal.message).toContain('--fresh');
       expect(refusal.message).toContain(':memory:');
     },
   );
+
+  // The refusal is printed to the console on the way out, and both schemes take
+  // anything after the `//`: a `user:password@` and an `?authToken=` ride along.
+  // It names the scheme, never the URL — in the message AND in the field a
+  // caller may log. Placeholder credentials only.
+  const PLACEHOLDERS = ['PLACEHOLDER-USER', 'PLACEHOLDER-SECRET', 'PLACEHOLDER-TOKEN'] as const;
+  const CREDENTIALED_TAIL = 'PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN';
+  it.each(['memory://', 'mingo://'])(
+    'refuses a %s URL carrying a user, password and token, naming the scheme and none of the three',
+    (scheme) => {
+      const url = `${scheme}${CREDENTIALED_TAIL}`;
+      let err: unknown;
+      try {
+        inferDriverTypeFromUrl(url);
+      } catch (e) {
+        err = e;
+      }
+      expect(err, `inferDriverTypeFromUrl accepted ${scheme}…`).toBeInstanceOf(UnsupportedDriverError);
+      const refusal = err as UnsupportedDriverError;
+      expect(refusal.recognized).toBe(false);
+      expect(refusal.driverType).toBe(scheme);
+      expect(refusal.message).toContain(`"${scheme}"`);
+      expect(refusal.message).toContain('--fresh');
+      expect(refusal.message).toContain(':memory:');
+      for (const placeholder of PLACEHOLDERS) {
+        expect(refusal.message, `the refusal prints ${placeholder}`).not.toContain(placeholder);
+        expect(refusal.driverType, `driverType carries ${placeholder}`).not.toContain(placeholder);
+      }
+      expect(refusal.message).not.toContain('127.0.0.1');
+    },
+  );
+
+  // CONTROL: the same credentialed tail under every other scheme classifies as
+  // before — the redaction is scoped to the retired engine's arm, not to URLs
+  // that carry credentials.
+  it.each([
+    ['postgres://', 'postgres'],
+    ['postgresql://', 'postgres'],
+    ['pg://', 'postgres'],
+    ['mysql://', 'mysql'],
+    ['mysql2://', 'mysql'],
+    ['mongodb://', 'mongodb'],
+    ['mongodb+srv://', 'mongodb'],
+    ['libsql://', 'turso'],
+    ['wasm-sqlite://', 'sqlite-wasm'],
+  ])('classifies a %s URL carrying the same user, password and token as %s', (scheme, kind) => {
+    expect(inferDriverTypeFromUrl(`${scheme}${CREDENTIALED_TAIL}`)).toBe(kind);
+  });
 
   // The sqlite `:memory:` PSEUDO-FILE is SQLite's own in-memory mode — NOT the
   // mingo engine. It stays `sqlite`, and it is the replacement the refusal names.

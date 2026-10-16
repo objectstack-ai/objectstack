@@ -257,6 +257,28 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
     },
   );
 
+  // The URL door's refusal is printed on the way out, and both schemes take a
+  // `user:password@` and an `?authToken=`. Both hosts name the SCHEME, never the
+  // URL, in the same words: the CLI host's refusal is the runtime host's minus
+  // its `[StandaloneStack]` tag. Placeholder credentials only.
+  it.each(['memory://', 'mingo://'])(
+    'both hosts refuse a credentialed %s OS_DATABASE_URL in the same words, and neither prints the credentials',
+    (scheme) => {
+      const url = `${scheme}PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN`;
+      const cli = refusalMessage(() => resolveDriverType(undefined, url));
+      process.env.OS_DATABASE_URL = url;
+      const standalone = refusalMessage(() => resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' }));
+      for (const [host, message] of [['os start', cli], ['os migrate', standalone]] as const) {
+        expect(message, `${host} accepted ${scheme}…`).not.toBeNull();
+        expect(message, host).toContain(`"${scheme}"`);
+        for (const placeholder of ['PLACEHOLDER-USER', 'PLACEHOLDER-SECRET', 'PLACEHOLDER-TOKEN']) {
+          expect(message, `${host} prints ${placeholder}`).not.toContain(placeholder);
+        }
+      }
+      expect(cli).toBe(standalone!.replace(/^\[StandaloneStack\] /, ''));
+    },
+  );
+
   // The control on the URL door: the replacement the refusals name is accepted
   // by both hosts, as SQLite — so the refusal is scoped to the engine, not to
   // the word "memory".
