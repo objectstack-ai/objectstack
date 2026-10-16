@@ -326,8 +326,11 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // the discovery and OpenAPI bodies (`discovery-routes.ts`):
         // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0, length 7 → 8. [#23050 slice 8] Nor
         // does the email send body (`email-routes.ts`):
-        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 8 → 9.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(9);
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 8 → 9. [#23050 slice 9]
+        // Nor does the global search body (`search-routes.ts`): it READS its two
+        // caps through `readDeclaredQueryNumber`, never coerces one:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 9 → 10.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });
