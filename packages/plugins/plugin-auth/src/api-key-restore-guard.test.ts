@@ -323,6 +323,7 @@ describe('auth-plugin registers the guard on `kernel:ready`, after the ADR-0092 
     } as unknown as PluginContext;
     const plugin = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' });
     await plugin.init(ctx);
+    await plugin.start(ctx);
     for (const handler of ready) {
       try { await handler(); } catch { /* other kernel:ready work needs services this double does not offer */ }
     }
