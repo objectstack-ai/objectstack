@@ -172,6 +172,12 @@ export const SysInvitation = ObjectSchema.create({
       filter: [{ field: 'status', operator: 'equals', value: 'pending' }],
       sort: [{ field: 'expires_at', order: 'asc' }],
       pagination: { pageSize: 50 },
+      // A view-filtered empty state names its view: "No invitations" here
+      // would read as "nobody was ever invited" on the page Setup opens first.
+      emptyState: {
+        title: 'No pending invitations',
+        message: 'An invitation stays here until it is accepted, declined or canceled, or until it expires.',
+      },
     },
     accepted: {
       type: 'grid',
@@ -182,6 +188,10 @@ export const SysInvitation = ObjectSchema.create({
       filter: [{ field: 'status', operator: 'equals', value: 'accepted' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No accepted invitations',
+        message: 'An invitation moves here when the person accepts it and joins the organization.',
+      },
     },
     expired: {
       type: 'grid',
@@ -192,6 +202,10 @@ export const SysInvitation = ObjectSchema.create({
       filter: [{ field: 'status', operator: 'in', value: ['expired', 'rejected', 'canceled'] }],
       sort: [{ field: 'expires_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No expired or canceled invitations',
+        message: 'Invitations that expired, were declined or were canceled are kept here.',
+      },
     },
     all_invitations: {
       type: 'grid',
@@ -201,6 +215,10 @@ export const SysInvitation = ObjectSchema.create({
       columns: ['email', 'status', 'role', 'organization_id', 'inviter_id', 'created_at'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No invitations yet',
+        message: 'Every invitation to join an organization is listed here, whatever its status.',
+      },
     },
   },
   
