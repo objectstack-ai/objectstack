@@ -229,7 +229,6 @@ describe('form.sections — the field-group reference form, members derived from
     ['label', 'Contact'],
     ['description', 'How to reach them'],
     ['visibleWhen', "record.type == 'person'"],
-    ['visibleOn', "record.type == 'person'"],
     ['collapsible', true],
     ['collapsed', true],
   ])('refuses `%s` beside `group` — the group owns it', (key, value) => {
@@ -240,12 +239,14 @@ describe('form.sections — the field-group reference form, members derived from
     expect(issue.message).toContain('`fieldGroups` entry for `contact_info`');
   });
 
-  it('refuses `visibleOn` beside `group` at ITS OWN path, before the fold renames it', () => {
-    // The deprecated spelling folds onto `visibleWhen` in a `.transform` that
-    // runs AFTER this refinement. Naming only the canonical key would leave
-    // `visibleOn` as the one way to smuggle a section predicate past the rule.
-    const paths = formIssues(formWith([{ group: 'contact_info', visibleOn: 'true' }])).map(i => i.path);
-    expect(paths).toContainEqual(['sections', 0, 'visibleOn']);
+  it('a retired `visibleOn` beside `group` meets its tombstone, once, at its own path (#23543 F4)', () => {
+    // Until 18 the deprecated spelling folded onto `visibleWhen` in a
+    // `.transform` that ran AFTER this refinement, so the rule had to name it.
+    // The tombstone now refuses it at the key and the refinement never runs on
+    // the section: one issue, the retirement's.
+    const issues = formIssues(formWith([{ group: 'contact_info', visibleOn: 'true' }]));
+    expect(issues.map(i => i.path)).toEqual([['sections', 0, 'visibleOn']]);
+    expect(issues[0]!.message).toMatch(/was removed in @objectstack\/spec 18.*Use `visibleWhen`/s);
   });
 
   it('accepts an authored `collapsible: false` beside `group` — indistinguishable from the default', () => {

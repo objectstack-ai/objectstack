@@ -89,7 +89,8 @@ import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemales
 import { AdminScopeSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
-import { PageSchema } from '../ui/page.zod';
+import { PageComponentSchema, PageSchema } from '../ui/page.zod';
+import { FormFieldSchema, FormSectionSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
@@ -372,6 +373,13 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       'retryPolicy',
     ),
   ],
+  // #23543 F4: two protocol-15 renames retired with their keys — the three
+  // tombstones naming `visibleWhen`, at each declared position.
+  'view-visibleOn-to-visibleWhen': [
+    tombstone(FormFieldSchema, 'view.form.sections[].fields[]', 'visibleOn'),
+    tombstone(FormSectionSchema, 'view.form.sections[]', 'visibleOn'),
+  ],
+  'page-component-visibility-to-visibleWhen': [tombstone(PageComponentSchema, 'page.components[]', 'visibility')],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.
   'page-header-breadcrumb-removed': [tombstone(PageHeaderProps, 'page:header', 'breadcrumb')],
   'object-grid-default-sort-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultSort')],

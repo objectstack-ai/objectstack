@@ -1196,7 +1196,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 672 since the field form offers the `referenceDeletedWhen` composite
       // beside `referenceVia`, with its `field` and `value` sub-rows — three new
       // row labels, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(672);
+      // 674 since #23809: the options repeaters gain `kind`, the option's
+      // lifecycle category — one row label on the field form, one on the
+      // object form, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(674);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

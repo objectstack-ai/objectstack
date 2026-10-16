@@ -202,7 +202,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       thread_id: {
         label: "Hilo",
-        help: "Identificador del hilo; por convención `{object}:{record_id}` (p. ej. `sys_user:abc123`)."
+        help: "Identificador del hilo; por convención `{object}:{record_id}` (p. ej. `account:9001`)."
       },
       parent_id: {
         label: "Comentario principal",

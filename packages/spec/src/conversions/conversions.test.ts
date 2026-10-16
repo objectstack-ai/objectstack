@@ -393,8 +393,10 @@ describe('conversion layer (ADR-0087 D2)', () => {
     /**
      * The family closed at 18 (#23487): every entry whose window ran out
      * before 18 has a verdict. Seven left the load path (with #23421's two,
-     * nine of the family); the eight below stay, each with the reason written
-     * into its own docblock and what would have to change for it to retire.
+     * nine of the family); eight stayed, each with the reason written into its
+     * own docblock and what would have to change for it to retire. The
+     * #23543 rulings retired seven of those eight (F1–F4, listed below); the
+     * one still kept retires with F5-http.
      * A new entry below 18 that is neither retired nor listed here is an
      * entry nobody judged.
      */
@@ -402,8 +404,6 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const kept = ALL_CONVERSIONS.filter((c) => c.toMajor < 18 && !c.retiredFromLoadPath).map((c) => c.id).sort();
       expect(kept).toEqual([
         'flow-node-http-callout-rename',
-        'page-component-visibility-to-visibleWhen',
-        'view-visibleOn-to-visibleWhen',
       ]);
       for (const id of [
         'flow-node-crud-filter-alias',
@@ -424,6 +424,10 @@ describe('conversion layer (ADR-0087 D2)', () => {
         // #23543 F2: retired once the job parse refused a `retryPolicy` block
         // whose `maxRetries` is omitted or 0.
         'retry-policy-converged',
+        // #23543 F4: retired once the view form's `visibleOn` and the page
+        // component's `visibility` were themselves retired as keys.
+        'view-visibleOn-to-visibleWhen',
+        'page-component-visibility-to-visibleWhen',
       ]) {
         expect(ALL_CONVERSIONS.find((c) => c.id === id), id).toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
       }
@@ -455,20 +459,16 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(issues[0]!.message).toContain('Use `objectName`');
     });
 
-    it('a live-window conversion still applies at load (protocol-15 aliases)', () => {
+    // Re-pointed by #23543 F4, whose two protocol-15 entries were this case's
+    // subject: the callout rename is the one entry still live, and F5-http,
+    // which retires it next, inherits this case with its two siblings above.
+    it('a live-window conversion still applies at load (the protocol-11 callout rename)', () => {
       const { stack, notices } = collectConversionNotices({
-        pages: [
-          {
-            name: 'p',
-            regions: [{ name: 'main', components: [{ type: 'record:list', visibility: 'true' }] }],
-          },
-        ],
+        flows: [{ name: 'f', nodes: [{ id: 'n1', type: 'http_request', config: { url: 'https://example.com' } }] }],
       });
-      const component = (stack.pages as any[])[0].regions[0].components[0];
-      expect(component.visibleWhen).toBe('true');
-      expect(component.visibility).toBeUndefined();
+      expect((stack.flows as any[])[0].nodes[0].type).toBe('http');
       expect(notices).toHaveLength(1);
-      expect(notices[0]!.conversionId).toBe('page-component-visibility-to-visibleWhen');
+      expect(notices[0]!.conversionId).toBe('flow-node-http-callout-rename');
     });
   });
 

@@ -132,7 +132,10 @@ export const FLS_CONTRACT_OBJECT = {
         salary_grade: {
             type: 'select',
             label: 'Salary Grade',
-            options: [{ value: 'band_a', label: 'Band A' }, { value: 'band_b', label: 'Band B' }],
+            // `kind` on both: the object names this field its `stageField`, and
+            // `ObjectSchema` requires every stage option to declare one. A salary
+            // band is a step on no road to an end, so both are `open`.
+            options: [{ value: 'band_a', label: 'Band A', kind: 'open' }, { value: 'band_b', label: 'Band B', kind: 'open' }],
             requiredPermissions: ['view_compensation'],
         },
         bonus_formula: {

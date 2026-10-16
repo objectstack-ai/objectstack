@@ -702,6 +702,7 @@
     "SeedParsed": "src/data/seed.zod.ts#SeedParsed (type)",
     "SeedSchema": "src/data/seed.zod.ts#SeedSchema (const)",
     "SelectOption": "src/data/field.zod.ts#SelectOption (type)",
+    "SelectOptionKind": "src/data/field.zod.ts#SelectOptionKind (type)",
     "SelectOptionParsed": "src/data/field.zod.ts#SelectOptionParsed (type)",
     "SelectOptionSchema": "src/data/field.zod.ts#SelectOptionSchema (const)",
     "ServiceObject": "src/data/object.zod.ts#ServiceObject (type)",
