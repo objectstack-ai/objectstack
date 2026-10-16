@@ -11,6 +11,7 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
 import { cwdConfigJoinsBoot } from '../utils/artifact-precedence.js';
@@ -1094,7 +1095,12 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
           resolveObjectStackHome(),
           runtimeStateFileName(environmentId, servedAppRootOrCwd()),
         );
-        fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
+        // Bounded (#23858): an `OS_HOME` that can never be made — a name under
+        // `/proc` — is refused here at once, and the best-effort catch below
+        // lets the boot go on without the file. Node's recursive mkdir looped
+        // on it after the bind and before the banner, holding the event loop,
+        // so the server never announced itself.
+        makeDirectorySync(path.dirname(runtimeFile));
         fs.writeFileSync(runtimeFile, JSON.stringify({
           pid: process.pid,
           port,
