@@ -53,12 +53,6 @@ export interface StoredFlowCanonicalization {
     message: string;
   }>;
   /**
-   * Renames the guard REFUSED because the old token is a live name owned by
-   * something else. A non-empty list fails the row loudly — rewriting would
-   * clobber that owner, and skipping quietly would hide it.
-   */
-  conflicts: Array<{ conversionId: string; token: string; path: string; message: string }>;
-  /**
    * Sites the chain left as stored because no lossless rewrite exists (#23269)
    * — above all a value slot carrying a `{…}` template token, which
    * `registerFlow` refuses although the parse accepts the flow — and every

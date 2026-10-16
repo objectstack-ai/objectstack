@@ -251,66 +251,83 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // one witness per glob no literal path on this package's roster holds.
       // src/ui/view-data-api-provider-retirement.test.ts (the view-level
       // `api` data-source retirement) walks the SAME five roots with the same
-      // per-extension rule, so it is the second witness on every row.
+      // per-extension rule, so it is the second witness on every row, and
+      // src/conversions/conversion-conflict-channel-retirement.test.ts (the
+      // conversion-conflict channel's retirement) the third, for the same reason.
       'packages/**/*.mts': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.cts': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.js': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.mjs': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.cjs': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.json': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.md': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.mdx': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.yaml': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.yml': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.json': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.md': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.mdx': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.yaml': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.yml': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
     },
   },

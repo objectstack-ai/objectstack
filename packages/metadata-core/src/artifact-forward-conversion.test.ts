@@ -1087,4 +1087,23 @@ describe('parseRangeFloor — the range spellings artifacts actually carry', () 
     expect(parseRangeFloor('latest')).toBeNull();
     expect(parseRangeFloor('x'.repeat(200))).toBeNull();
   });
+
+  it('[#24029] a `||` union floors at its lowest alternative, in whatever order it is written', () => {
+    expect(parseRangeFloor('^17.1.0 || ^18.0.0')).toEqual([17, 1, 0]);
+    expect(parseRangeFloor('^18.0.0 || ^17.1.0')).toEqual([17, 1, 0]);
+    expect(parseRangeFloor('>=17.2 <18 || ^17.1.0')).toEqual([17, 1, 0]);
+  });
+
+  it('[#24029] a union with an alternative it cannot read has no known floor: null, like an undeclared range', () => {
+    expect(parseRangeFloor('^17 || workspace:*')).toBeNull();
+    expect(parseRangeFloor('^17 ||')).toBeNull();
+  });
+
+  it('[#24029] the window opens for a descending union exactly as for the same range written ascending', () => {
+    for (const range of ['^17.1.0 || ^18.0.0', '^18.0.0 || ^17.1.0']) {
+      const result = applyArtifactForwardConversions(legacyPermissionDefinition(range), { runtimeSpecVersion: '18.0.0' });
+      expect(result.verdict).toBe('converted-forward');
+      expect(result.authoredFloor).toBe('17.1.0');
+    }
+  });
 });

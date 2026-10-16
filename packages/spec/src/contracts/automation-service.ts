@@ -17,7 +17,7 @@ import type { FlowParsed } from '../automation/flow.zod';
 import type { ExecutionLog, ExecutionStatus, FlowRunSummary } from '../automation/execution.zod';
 import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor } from '../integration/connector-descriptor';
-import type { ConversionNotice, ConversionConflictNotice, ConversionTodoNotice } from '../conversions/types';
+import type { ConversionNotice, ConversionTodoNotice } from '../conversions/types';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
 import type { FlowRegistration } from '../api/protocol.zod';
 
@@ -831,11 +831,12 @@ export interface IAutomationService {
      * `os migrate meta --stored` rewriting stored `sys_metadata` rows is the
      * reason this is on the contract rather than only on the implementation.
      *
-     * Only an implementation holding the live executor registry can offer this:
-     * flow-node conversions carry ADR-0078's open-namespace conflict guard, and
-     * deciding a rename from a clobber requires knowing which node types are
-     * actually owned here. Hence optional — a caller falls back to leaving flow
-     * rows alone rather than guessing.
+     * Only the implementation that registers flows can offer this: the
+     * `todos` preview is {@link registerFlow}'s own verdict, judged by the
+     * engine that holds the judges. Hence optional — a caller falls back to
+     * leaving flow rows alone rather than guessing. [#24001] There is no
+     * conflict list: protocol 18 reserves the old node types a rename reads,
+     * so no conversion can collide with a live executor any more.
      *
      * @param name - Flow name (snake_case), used for diagnostics
      * @param definition - The stored/authored flow body
@@ -843,7 +844,7 @@ export interface IAutomationService {
      *   `storable` (persistence shape — conversions plus the schema's
      *   `condition` envelopes, deliberately WITHOUT schema defaults, so a
      *   written-back row is not frozen on today's default values), plus the
-     *   conversions applied, any rewrite the guard refused, and (`todos`) the
+     *   conversions applied, and (`todos`) the
      *   sites left as stored for want of a lossless rewrite, and the sites
      *   {@link registerFlow} refuses once the parse has accepted the flow.
      * @throws when the definition cannot be canonicalized at all (a strict-schema
@@ -854,7 +855,6 @@ export interface IAutomationService {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
-        conflicts: ConversionConflictNotice[];
         /**
          * The sites the conversion chain left as stored because no lossless
          * rewrite exists — a value slot carrying a `{…}` token among them, which

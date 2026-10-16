@@ -316,3 +316,84 @@ describe('[#21762] protocolIncompatibleAnswer: the one answer every HTTP door gi
     expect(details).not.toHaveProperty('message');
   });
 });
+
+describe('[#24029] a `||` union admits a major when any alternative admits it', () => {
+  const compat = (range: string, major: number) =>
+    checkProtocolCompat({ id: 'p', engines: { protocol: range } }, `${major}.0.0`);
+
+  it('the range bridging 17 to 18 admits both majors and refuses 19', () => {
+    expect(compat('^17.7.0 || ^18.0.0', 18).status).toBe('ok');
+    expect(compat('^17.7.0 || ^18.0.0', 17).status).toBe('ok');
+    expect(compat('^17.7.0 || ^18.0.0', 19).status).toBe('incompatible');
+  });
+
+  it('a union none of whose alternatives admits the major refuses it', () => {
+    expect(rangeAdmitsMajor('^16 || ^17', 18)).toBe(false);
+    expect(compat('^16 || ^17', 18).status).toBe('incompatible');
+  });
+
+  it('an alternative the parser cannot read, beside one that refuses, answers unparsed-range in either order', () => {
+    expect(compat('^16 || workspace:*', 18).status).toBe('unparsed-range');
+    expect(compat('workspace:* || ^16', 18).status).toBe('unparsed-range');
+    // An alternative that admits outranks an unreadable one.
+    expect(compat('workspace:* || ^18', 18).status).toBe('ok');
+  });
+
+  it('each alternative reads with the single-range grammar: hyphen, comparators, x and *', () => {
+    expect(rangeAdmitsMajor('15 - 16 || ^18', 18)).toBe(true);
+    expect(rangeAdmitsMajor('^18 || 15 - 16', 16)).toBe(true);
+    // A hyphen range first: its upper bound is `18`, never the text after it.
+    expect(rangeAdmitsMajor('17 - 18 || ^20', 20)).toBe(true);
+    expect(rangeAdmitsMajor('17 - 18 || ^20', 19)).toBe(false);
+    expect(rangeAdmitsMajor('>=17 <18 || ^19', 19)).toBe(true);
+    expect(rangeAdmitsMajor('>=17 <18 || ^19', 18)).toBe(false);
+    expect(rangeAdmitsMajor('^16 || 18.x', 18)).toBe(true);
+    expect(rangeAdmitsMajor('^16 || *', 18)).toBe(true);
+    expect(rangeAdmitsMajor('^16 || x', 18)).toBe(true);
+    expect(rangeAdmitsMajor('^17||^18', 18)).toBe(true);
+  });
+
+  it('CONTROL: a range with no `||` reads as it always has (caret, hyphen, x and *)', () => {
+    expect(rangeAdmitsMajor('^18', 18)).toBe(true);
+    expect(rangeAdmitsMajor('^18', 17)).toBe(false);
+    expect(rangeAdmitsMajor('17.0.0 - 18.0.0', 18)).toBe(true);
+    expect(rangeAdmitsMajor('16 - 17', 18)).toBe(false);
+    expect(rangeAdmitsMajor('x', 18)).toBe(true);
+    expect(rangeAdmitsMajor('*', 18)).toBe(true);
+    expect(rangeAdmitsMajor('17.x', 18)).toBe(false);
+  });
+
+  it('an empty alternative is unrecognized, never a refusal', () => {
+    expect(rangeAdmitsMajor('^17 ||', 18)).toBeNull();
+    expect(rangeAdmitsMajor('^17 ||', 17)).toBe(true);
+    expect(rangeAdmitsMajor('|| ^18', 18)).toBe(true);
+    expect(rangeAdmitsMajor('|| ^18', 17)).toBeNull();
+    expect(rangeAdmitsMajor('||', 18)).toBeNull();
+  });
+
+  it('a refused union targets its lowest alternative, in whatever order it is written', () => {
+    for (const range of ['^16 || ^17', '^17 || ^16']) {
+      const r = compat(range, 18);
+      expect(r.status).toBe('incompatible');
+      if (r.status !== 'incompatible') continue;
+      expect(r.diagnostic.targetMajor).toBe(16);
+      expect(r.diagnostic.migrateCommand).toBe('objectstack migrate meta --from 16');
+    }
+  });
+
+  it('at the boundary: the bridging range loads silently on 18 and is refused with the 422 envelope on 19', () => {
+    const warn = vi.fn();
+    expect(() => assertProtocolCompat({ id: 'p', engines: { protocol: '^17.7.0 || ^18.0.0' } }, '18.0.0', warn)).not.toThrow();
+    expect(warn).not.toHaveBeenCalled();
+
+    let thrown: unknown;
+    try {
+      assertProtocolCompat({ id: 'p', engines: { protocol: '^17.7.0 || ^18.0.0' } }, '19.0.0', warn);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isProtocolIncompatibleError(thrown)).toBe(true);
+    expect((thrown as ProtocolIncompatibleError).code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+    expect((thrown as ProtocolIncompatibleError).status).toBe(422);
+  });
+});

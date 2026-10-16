@@ -639,19 +639,10 @@ export const ERROR_CODE_LEDGER = {
     // string is spelled in each). Served by the `/meta` write doors through
     // `errorFromThrown`.
     'DEFAULT_RECORD_PAGE_CONFLICT',
-    // [#9567] ADR-0078's rename guard refuses a metadata write whose `type`/
-    // `name` token is already a LIVE name owned by something else in the
-    // environment — persisting the un-renamed body would mint exactly the row
-    // that guard exists to prevent (`saveMetaItem`, `protocol.ts`, same posture
-    // as `duplicatePackage` / #4454). 409, not 422: the body may be perfectly
-    // valid — the refusal comes from environment state, so resubmitting the
-    // same body cannot help. Surfaced by the widened
-    // `check:dispatcher-error-vocabulary` scan (#9460, half 1); NOTE the
-    // producer's message prefix spells the code lowercase
-    // (`[flow_conversion_conflict]`) while the wire stamp is SCREAMING_SNAKE —
-    // a human-log inconsistency worth a glance, left as-is because the
-    // producer is outside this ledger's surface.
-    'FLOW_CONVERSION_CONFLICT',
+    // [#24001] The flow save door's 409 for a refused conversion rename came
+    // out with its last producer (this header's "Retiring a code"): protocol
+    // 18 reserved the old HTTP-callout node types, so no live owner can
+    // collide with a rename and no conversion reports a conflict.
     'INVALID_METADATA',
     'INVALID_REQUEST',
     'ITEM_LOCKED',                // _lock refuses the write/delete (ADR-0010 §3.3)
@@ -725,7 +716,7 @@ export const ERROR_CODE_LEDGER = {
     // never satisfy, and the remedy is a body change
     // (`objectstack migrate meta --from N`). It matches this package's own
     // METADATA_SCHEMA_INVALID. It is not 409, which this ledger keeps for
-    // refusals from environment state (FLOW_CONVERSION_CONFLICT). The two HTTP
+    // refusals from environment state (CONCURRENT_UPDATE). The two HTTP
     // doors that reach the throw, `POST /api/v1/packages` and (since #21805)
     // `POST /api/v1/marketplace/install-local`, answer the same bytes through
     // the shared `protocolIncompatibleAnswer`, carrying `requiredRange`,

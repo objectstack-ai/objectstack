@@ -15,10 +15,8 @@
 import { ALL_CONVERSIONS } from './registry.js';
 import { reportRefusedStoredShapes } from './refused-shapes.js';
 import {
-  CONVERSION_CONFLICT_CODE,
   CONVERSION_NOTICE_CODE,
   CONVERSION_TODO_CODE,
-  type ConversionConflictNotice,
   type ConversionContext,
   type ConversionNotice,
   type ConversionTodoNotice,
@@ -63,12 +61,6 @@ export interface ApplyConversionsOptions {
    */
   includeRetired?: boolean;
   /**
-   * Sink for each structured **conflict** — a rename refused because its old
-   * token is a live name in this environment (see {@link ConversionContext}).
-   * Populated by the runtime load seam; absent on the build/validate seam.
-   */
-  onConflict?: (notice: ConversionConflictNotice) => void;
-  /**
    * Sink for each structured **TODO** — a site a conversion recognised as a
    * pre-protocol shape and left as stored, because no lossless rewrite exists
    * for it (ADR-0087 D3's model: convert where lossless, a structured TODO
@@ -88,12 +80,6 @@ export interface ApplyConversionsOptions {
    * nothing of it runs, and in either case nothing is rewritten.
    */
   onTodo?: (todo: ConversionTodoNotice) => void;
-  /**
-   * Node types that are live in this environment. Supplied by the runtime load
-   * seam so open-namespace renames can detect a collision with a live owner
-   * rather than silently clobber it.
-   */
-  reservedNodeTypes?: ReadonlySet<string>;
   /**
    * Conversion ids this seam refuses to replay, whatever `includeRetired`
    * says. Empty/absent by default: every seam replays the whole window it
@@ -136,7 +122,7 @@ export function applyConversions(
   stack: Record<string, unknown>,
   options: ApplyConversionsOptions = {},
 ): Record<string, unknown> {
-  const { onNotice, onConflict, onTodo, reservedNodeTypes, includeRetired = false, excludeConversionIds } = options;
+  const { onNotice, onTodo, includeRetired = false, excludeConversionIds } = options;
   const excluded = excludeConversionIds && excludeConversionIds.length > 0
     ? new Set(excludeConversionIds)
     : null;
@@ -156,18 +142,6 @@ export function applyConversions(
     if (conversion.retiredFromLoadPath && !includeRetired) continue;
     const retiresIn = conversion.toMajor + 1;
     const context: ConversionContext = {
-      reservedNodeTypes,
-      reportConflict: onConflict
-        ? (detail) =>
-            onConflict({
-              code: CONVERSION_CONFLICT_CODE,
-              conversionId: conversion.id,
-              surface: conversion.surface,
-              token: detail.token,
-              path: detail.path,
-              message: `[protocol] ${detail.reason} (ADR-0087 conversion '${conversion.id}').`,
-            })
-        : undefined,
       reportTodo: onTodo
         ? (detail) =>
             onTodo({
@@ -236,10 +210,7 @@ export function applyConversions(
  * This is the runtime load seam ADR-0087 D2 calls for: a stored flow authored
  * against an old shape (e.g. a `delete_record` node with `config.filters`, or a
  * `webhook` callout node) is canonicalized on rehydration, so the executor only
- * ever sees the canonical shape. Callers pass `reservedNodeTypes` (their live
- * executor registry) so an open-namespace rename over a live custom node becomes
- * a reported conflict, not a silent clobber. Non-object input is returned
- * unchanged.
+ * ever sees the canonical shape. Non-object input is returned unchanged.
  */
 export function applyConversionsToFlow<T>(flow: T, options: ApplyConversionsOptions = {}): T {
   if (flow == null || typeof flow !== 'object' || Array.isArray(flow)) return flow;

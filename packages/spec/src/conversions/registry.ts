@@ -80,10 +80,11 @@ import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types
  * `flow-node-http-callout-types-reserved`, states the edit for authored sources.
  *
  * The rewrite is unconditional. Until 18 it skipped a node whose old name a
- * live executor owned and reported a conflict instead (ADR-0078's guard,
- * through `ConversionContext.reservedNodeTypes`); the engine now refuses that
- * registration, so no live executor can own a reserved name and the guard had
- * no case left to judge.
+ * live executor owned and reported a conflict instead (ADR-0078's guard); the
+ * engine now refuses that registration, so no live executor can own a reserved
+ * name and the guard had no case left to judge. Protocol 18 removed the
+ * conflict channel itself with it (#24001, D3 entry
+ * `conversion-conflict-channel-removed`).
  */
 const flowNodeHttpRename: MetadataConversion = {
   id: 'flow-node-http-callout-rename',
