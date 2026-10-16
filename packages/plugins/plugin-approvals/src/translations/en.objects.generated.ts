@@ -83,15 +83,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       flow_run_id: {
         label: "Flow Run",
-        help: "Suspended automation run id this request gates (ADR-0019). The decision resumes it."
+        help: "Suspended automation run id this request gates. The decision resumes it."
       },
       flow_node_id: {
         label: "Flow Node",
-        help: "Approval node id within the flow that opened this request (ADR-0019)."
+        help: "Approval node id within the flow that opened this request."
       },
       node_config_json: {
         label: "Node Config",
-        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests (ADR-0019)."
+        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."
       },
       completed_at: {
         label: "Completed At"
@@ -315,7 +315,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
+    description: "While someone is away, approvals assigned to them personally go to their delegate.",
     fields: {
       id: {
         label: "Delegation ID"
@@ -334,7 +334,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive (ADR-0091 D2 predicate) — never by a background job."
+        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive — never by a background job."
       },
       valid_until: {
         label: "Valid Until",
