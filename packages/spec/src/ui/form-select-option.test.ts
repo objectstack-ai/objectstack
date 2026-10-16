@@ -167,11 +167,18 @@ describe('the object-field face is untouched', () => {
 // ===========================================================================
 
 describe('FormSelectOptionSchema is an Omit of SelectOptionSchema', () => {
-  it('shape = the object face minus exactly `default`', () => {
+  it('shape = the object face minus exactly `default` and `kind` (#23809)', () => {
     const objectKeys = Object.keys(SelectOptionSchema.shape).sort();
     const formKeys = Object.keys(FormSelectOptionSchema.shape).sort();
     expect(objectKeys).toContain('default');
-    expect(formKeys).toEqual(objectKeys.filter((k) => k !== 'default'));
+    expect(objectKeys).toContain('kind');
+    expect(formKeys).toEqual(objectKeys.filter((k) => k !== 'default' && k !== 'kind'));
+  });
+
+  it('`kind` on a form-view option is refused with a prescription pointing at the object field (#23809)', () => {
+    const m = unknownKeyMessage(FormSelectOptionSchema, { ...OPTION, kind: 'won' });
+    expect(m).toContain('kind');
+    expect(m).toContain('OBJECT field');
   });
 
   it('property schemas are shared BY REFERENCE — an Omit, not a copy', () => {
@@ -201,8 +208,9 @@ describe('FormSelectOptionSchema is an Omit of SelectOptionSchema', () => {
     );
     expect(formDecl!.options.aliases).toEqual(expectedFormAliases);
 
-    // The removed key and its two spellings are all answered by guidance.
-    expect(Object.keys(formDecl!.options.guidance ?? {}).sort()).toEqual(['default', 'isDefault', 'selected']);
+    // The removed key and its two spellings are all answered by guidance, and
+    // so is `kind`, the object field's lifecycle category (#23809).
+    expect(Object.keys(formDecl!.options.guidance ?? {}).sort()).toEqual(['default', 'isDefault', 'kind', 'selected']);
   });
 
   it('the editability boundary rides along (one vocabulary, per-shape answer)', () => {

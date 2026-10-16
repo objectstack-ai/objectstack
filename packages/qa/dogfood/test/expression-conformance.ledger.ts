@@ -269,12 +269,11 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'ui/action.zod.ts:ActionParamSchema.visible',
       'ui/app.zod.ts:BaseNavItemSchema.visible',
       // ADR-0089: `visibleWhen` is the canonical conditional-visibility key on
-      // page components and view form sections/fields; `visibility` (page) and
-      // `visibleOn` (view) stay accepted as deprecated aliases, normalized to
-      // `visibleWhen` at parse. Both spellings are live CEL surfaces until the
-      // aliases are removed in a future major, so both carry a ledger row.
+      // page components and view form sections/fields. The deprecated aliases
+      // `visibility` (page) and `visibleOn` (view) retired at 18 (#23543 F4):
+      // each is a retiredKey() tombstone now, no ExpressionInputSchema member
+      // left in source, so their covers are deleted rather than re-pointed.
       'ui/page.zod.ts:PageComponentSchema.visibleWhen',
-      'ui/page.zod.ts:PageComponentSchema.visibility',
       // [#22228] The conditional formatting rule's `condition`. Declared inline
       // in `ListViewSchema` (`ui/view.zod.ts:ListViewShapeSchema.condition`)
       // until it moved to its own module so a field definition could mount the
@@ -291,7 +290,6 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       // `conditionalFormatting` (`planned`) is where its state is recorded.
       'shared/conditional-formatting.zod.ts:ConditionalFormattingRuleSchema.condition',
       'ui/view.zod.ts:FormFieldBaseSchema.visibleWhen', 'ui/view.zod.ts:FormSectionSchema.visibleWhen',
-      'ui/view.zod.ts:FormFieldBaseSchema.visibleOn', 'ui/view.zod.ts:FormSectionSchema.visibleOn',
       // `ui/component.zod.ts:onSubmit` (element:form's submit CEL) sat here
       // until #9249 retired the whole `element:form` element under ADR-0049
       // (no renderer ever shipped, so nothing ever evaluated the predicate).

@@ -235,18 +235,18 @@ describe('no acceptance change', () => {
       collapsible: true,
       collapsed: false,
       columns: 2,
-      visibleOn: 'record.type == "customer"',
+      visibleWhen: 'record.type == "customer"',
       fields: ['amount', { field: 'currency', readonly: true }],
     };
     const r = FormSectionSchema.safeParse(authored);
     expect(r.success).toBe(true);
-    // The ADR-0089 fold still runs, and the field-level `readonly` inside is
-    // still the accepted way to say what `disabled` on the section cannot.
-    // `ExpressionInputSchema` normalizes the authored string to a
-    // `{ dialect, source }` pair; the fold is about WHICH KEY carries it.
+    // The field-level `readonly` inside is still the accepted way to say what
+    // `disabled` on the section cannot. `ExpressionInputSchema` normalizes the
+    // authored string to a `{ dialect, source }` pair. (Written with the
+    // canonical key since the `visibleOn` alias retired, #23543 F4.)
     expect((r.data as { visibleWhen?: { source?: string } }).visibleWhen?.source)
       .toBe('record.type == "customer"');
-    expect((r.data as { visibleOn?: unknown }).visibleOn).toBeUndefined();
+    expect(r.data).not.toHaveProperty('visibleOn');
   });
 
   it('a representative page component that parsed before still parses, unchanged in output', () => {
@@ -256,13 +256,13 @@ describe('no acceptance change', () => {
       label: 'Details',
       properties: { columns: 2 },
       className: 'p-4',
-      visibility: 'current_user.is_admin',
+      visibleWhen: 'current_user.is_admin',
     };
     const r = PageComponentSchema.safeParse(authored);
     expect(r.success).toBe(true);
     expect((r.data as { visibleWhen?: { source?: string } }).visibleWhen?.source)
       .toBe('current_user.is_admin');
-    expect((r.data as { visibility?: unknown }).visibility).toBeUndefined();
+    expect(r.data).not.toHaveProperty('visibility');
   });
 
   it.each(VISIBILITY_ONLY)('%s keeps its bare message for a key in no family at all', (_n, schema, base) => {

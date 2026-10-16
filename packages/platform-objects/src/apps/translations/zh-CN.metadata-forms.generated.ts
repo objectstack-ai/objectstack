@@ -204,6 +204,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.description": {
         label: "描述"
       },
+      "fields.options.kind": {
+        label: "类型",
+        helpText: "生命周期类别(仅限单值下拉 / 单选):进行中的一步、成功的终点或失败的终点。阶段字段的每个选项都必须声明。"
+      },
       "fields.reference": {
         label: "引用对象",
         helpText: "目标对象名称。tree 字段可省略；若填写，必须是本对象自身（树是同一对象内部的层级 — 链接到其他对象请用 lookup）"
@@ -677,6 +681,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "options.visibleWhen": {
         label: "可见条件"
+      },
+      "options.kind": {
+        label: "类型"
       },
       reference: {
         label: "引用对象",

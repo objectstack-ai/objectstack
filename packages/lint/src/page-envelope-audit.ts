@@ -79,7 +79,10 @@
  * MATERIALIZES (defaults) are absent from the authored side and so are never
  * flagged. The deprecated-alias case is caught too: when the parse consumed
  * an authored key and re-homed its value under the canonical name, the
- * finding reports both.
+ * finding reports both. (The one such alias on a page, the page component's
+ * `visibility` → `visibleWhen`, retired at 18 as a refused key, #23543 F4: a
+ * page that still writes it fails the parse, which this audit reports on its
+ * precondition channels below, not as a finding.)
  *
  * ## Preconditions are REPORTED, never assumed
  *
@@ -238,7 +241,8 @@ export function collectBare(
       const counterpart = parsed[key];
 
       // Deprecated-alias case: the parse consumed this key and re-homed its
-      // value under the canonical name (`visibility` -> `visibleWhen`). A
+      // value under the canonical name (the page component's `visibility` ->
+      // `visibleWhen` was one, until that key retired at 18). A
       // key-parallel walk alone would see `undefined` on the parsed side and
       // move on, so the value is looked up by its own source text instead.
       if (counterpart === undefined && typeof value === 'string' && value.length > 0) {

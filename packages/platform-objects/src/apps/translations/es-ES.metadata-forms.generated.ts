@@ -204,6 +204,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.description": {
         label: "Descripción"
       },
+      "fields.options.kind": {
+        label: "Tipo",
+        helpText: "Categoría del ciclo de vida (solo selección / radio de un único valor): un paso intermedio, el final con éxito o el final sin éxito. Obligatoria en cada opción del campo de etapa."
+      },
       "fields.reference": {
         label: "Referencia",
         helpText: "Nombre del objeto de destino. En un campo tree es opcional y, si se indica, debe ser este mismo objeto (un árbol es una jerarquía dentro de su propio objeto — para enlazar con otro objeto, usa un lookup)"
@@ -677,6 +681,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "options.visibleWhen": {
         label: "Condición de visibilidad"
+      },
+      "options.kind": {
+        label: "Tipo"
       },
       reference: {
         label: "Referencia",

@@ -35,10 +35,12 @@ export const SemanticZoo = ObjectSchema.create({
     name: Field.text({ label: 'Name', required: true }),
     status: Field.select({
       label: 'Status',
+      // `stageField: 'status'` below makes `kind` mandatory on every option
+      // (#23809): `done` is the successful end, drawn on the forward path.
       options: [
-        { label: 'Draft', value: 'draft', default: true },
-        { label: 'Active', value: 'active' },
-        { label: 'Done', value: 'done' },
+        { label: 'Draft', value: 'draft', default: true, kind: 'open' },
+        { label: 'Active', value: 'active', kind: 'open' },
+        { label: 'Done', value: 'done', kind: 'won' },
       ],
       group: 'basics',
     }),

@@ -204,6 +204,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.description": {
         label: "説明"
       },
+      "fields.options.kind": {
+        label: "種別",
+        helpText: "ライフサイクル区分(単一値の選択 / ラジオのみ):途中の段階、成功の終点、または不成功の終点。ステージ項目のすべての選択肢で必須です。"
+      },
       "fields.reference": {
         label: "参照",
         helpText: "対象オブジェクト名。tree フィールドでは省略可能で、指定する場合はこのオブジェクト自身でなければなりません（ツリーは同一オブジェクト内の階層です — 別のオブジェクトへリンクする場合は lookup を使います）"
@@ -677,6 +681,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "options.visibleWhen": {
         label: "表示条件"
+      },
+      "options.kind": {
+        label: "種別"
       },
       reference: {
         label: "参照",

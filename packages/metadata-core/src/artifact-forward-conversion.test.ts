@@ -441,23 +441,23 @@ describe('the artifact door never turns an authored `hidden: true` into an unpub
 
   /**
    * ⭐ FIRING CONTROL 1 — a NON-RETIRED conversion still fires in the subject's
-   * own window. `page-component-visibility-to-visibleWhen` is not retired, so a
-   * door that had stopped converting anything would fail here. (The subject was
-   * `page-kind-jsx-to-html` until `jsx` retired as a page kind at 18.)
+   * own window. `flow-node-http-callout-rename` is not retired, so a door that
+   * had stopped converting anything would fail here. (The subject was
+   * `page-kind-jsx-to-html` until `jsx` retired as a page kind at 18, then
+   * `page-component-visibility-to-visibleWhen` until that key retired too,
+   * #23543 F4. The callout rename is the last live entry, and the family that
+   * retires it inherits this control.)
    */
   it('still applies a non-retired conversion in that same window', () => {
-    const header = { type: 'page:header', properties: { title: 'Hi' }, visibility: "page.mode != 'edit'" };
     const def = {
       ...hiddenAppDefinition('^17.0.0'),
-      pages: [{ name: 'landing', regions: [{ name: 'main', components: [header] }] }],
+      flows: [{ name: 'notify', nodes: [{ id: 'n1', type: 'http_request', config: { url: 'https://example.com' } }] }],
     };
     const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
     expect(result.verdict).toBe('converted-forward');
-    expect(result.notices.map((n) => n.conversionId)).toContain('page-component-visibility-to-visibleWhen');
-    const converted = (result.definition as { pages: { regions: { components: Record<string, unknown>[] }[] }[] })
-      .pages[0]!.regions[0]!.components[0]!;
-    expect(converted.visibleWhen).toBe("page.mode != 'edit'");
-    expect('visibility' in converted).toBe(false);
+    expect(result.notices.map((n) => n.conversionId)).toContain('flow-node-http-callout-rename');
+    const converted = (result.definition as { flows: { nodes: Record<string, unknown>[] }[] }).flows[0]!.nodes[0]!;
+    expect(converted.type).toBe('http');
     // …and the app in the SAME artifact still keeps its authored key.
     expect((result.definition as { apps: Record<string, unknown>[] }).apps[0]!.hidden).toBe(true);
   });
