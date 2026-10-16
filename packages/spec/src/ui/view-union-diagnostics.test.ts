@@ -244,7 +244,9 @@ describe('diagnoseViewMetadata names the failing branch', () => {
 // parse output re-measured, and the unbound original moves to REFUSED so the
 // flip itself is pinned rather than silently absorbed.
 describe('the acceptance face of ViewMetadataSchema — frozen by the diagnostics work; every move since is deliberate and pinned', () => {
-  const SECTION = { label: 'Main', collapsible: false, collapsed: false, columns: 1, fields: ['name'] };
+  // A section's `columns` has no default: an undeclared density is the renderer's,
+  // so the parse adds no `columns` key (it added `columns: 1` before the default was dropped).
+  const SECTION = { label: 'Main', collapsible: false, collapsed: false, fields: ['name'] };
   /** [#7741] The binding pair the write path inherits onto a shadowing overlay. */
   const BOUND_LIST = { object: 'crm_lead', viewKind: 'list' } as const;
   const BOUND_FORM = { object: 'crm_lead', viewKind: 'form' } as const;
