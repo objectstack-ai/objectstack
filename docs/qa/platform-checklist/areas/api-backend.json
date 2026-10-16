@@ -2504,6 +2504,320 @@
           "ref": "#14961"
         }
       ]
+    },
+    {
+      "id": "api-backend.second-object-exposure-and-internal-fields",
+      "title": "Every read that reaches a NON-addressed object asks that object's own `enable` block (nested-relation filter → 404/405, $expand withheld to the bare id, search skips it), and an `internal: true` field is refused 400 INVALID_FIELD in every evaluate position (filter, sort, groupBy, aggregate, $expand where/orderBy)",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "in the scratch app: an object T with apiEnabled:false (and a second with apiMethods:[\"get\"]), a lookup from a showcase-shaped object S into T, and an internal:true field on S; boot the scratch app"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/data/S?filter=[[\"t_ref.name\",\"=\",\"x\"]] (nested-relation filter into T)",
+        "GET /api/v1/data/S/ID?$expand=t_ref",
+        "GET /api/v1/search?q=TERM and confirm T never appears",
+        "GET /api/v1/data/S?filter=[[\"internal_f\",\"=\",\"x\"]], ?sort=internal_f, POST /api/v1/data/S/query with groupBy / aggregate on internal_f",
+        "repeat as admin AND member — the answers must be identical (exposure is not a permission)"
+      ],
+      "acceptance": [
+        {
+          "clause": "second-object exposure and internal-field refusal at the protocol and engine — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a nested-relation filter into an apiEnabled:false target → 404 OBJECT_API_DISABLED naming where.t_ref (405 OBJECT_API_METHOD_NOT_ALLOWED for a whitelist without the verb), for admin and member alike",
+          "oracle": "api",
+          "verify": "status + code + located path, both personas",
+          "evidence": "the four lines"
+        },
+        {
+          "clause": "$expand into the unexposed target returns the bare id, not the record",
+          "oracle": "api",
+          "verify": "shape of t_ref in the response",
+          "evidence": "the response excerpt"
+        },
+        {
+          "clause": "every evaluate position on the internal field → 400 INVALID_FIELD naming object+field (never 500, never a filtered answer that leaks its value)",
+          "oracle": "api",
+          "verify": "status + code per position",
+          "evidence": "one line per position"
+        }
+      ],
+      "negative": [
+        "a 200 whose row count differs between filter-on-internal and no-filter is an oracle leak — FAIL (silent-coercion)"
+      ],
+      "traps": [
+        "silent-coercion",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/metadata-protocol/src/protocol.relation-condition-target-exposure.test.ts + packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts + packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts + packages/objectql/src/internal-field-positions.test.ts"
+      },
+      "source": [
+        "packages/spec/src/data/api-derivation.ts#canServeApiOperation",
+        "packages/spec/src/data/api-derivation.ts#apiExposureDenialReason",
+        "packages/metadata-protocol/src/protocol.ts#assertNoInternalFieldEvaluated",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22640-search-api-exposure, 22661-second-object-exposure, 22737-relation-condition-target-exposure, 22737-spec-ledger-metadata-protocol-exposure-codes, 22737-types-exposure-arm-names-target, 22777-core-relation-condition-sites, 22777-mcp-stdio-relation-condition-target-exposure, 22823-calldata-fallback-relation-exposure, 22823-spec-ledger-runtime-exposure-codes, 22738-lookup-title-exposure, 22739-import-reference-target-exposure, 22785-import-user-field-target, 22800-identity-import-exposure, 22646-internal-field-data-door-positions"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.data-request-shape-and-query-arity",
+      "title": "Request-shape gates on v18: a /data write with a null / array / scalar body or an empty version token is refused 400 (never an unguarded 200), a repeated single-valued query name is refused 400 on the dispatcher doors (a doubled keepData no longer drops tables), and a stale If-Match on an unreadable row answers 404",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "one showcase_task row id and its current version token"
+        ]
+      },
+      "steps": [
+        "PATCH /api/v1/data/showcase_task/ID with body `null`, then `[]`, then `5`; re-read updated_at",
+        "PATCH with {\"expectedVersion\": \"\"} and with an empty If-Match header",
+        "POST /api/v1/data/showcase_task/query with body `null`",
+        "GET /api/v1/packages?status=a&status=b; DELETE /api/v1/packages/com.example.showcase?keepData=true&keepData=true (expect refusal BEFORE any work — run on a throwaway boot only)",
+        "as the member PATCH with a stale If-Match a row the member cannot read"
+      ],
+      "acceptance": [
+        {
+          "clause": "request-schema gate, empty-token refusal, dispatcher query arity and conflict caller visibility — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "null / array / scalar PATCH bodies and an empty version token each → 400 VALIDATION_FAILED, and updated_at is unchanged",
+          "oracle": "api",
+          "verify": "status + code per call; updated_at before/after",
+          "evidence": "per-call lines + the two timestamps"
+        },
+        {
+          "clause": "a null /query body → 400, never the full row set",
+          "oracle": "api",
+          "verify": "status + row count",
+          "evidence": "the answer"
+        },
+        {
+          "clause": "a repeated single-valued query name → 400 VALIDATION_ERROR (\"supplied N times\"); the doubled keepData DELETE is refused and the package and its tables remain",
+          "oracle": "api",
+          "verify": "status; GET /api/v1/packages + a data read afterwards",
+          "evidence": "refusal + the reads"
+        },
+        {
+          "clause": "a stale If-Match on a row the caller cannot read → 404, not 409 with a currentRecord",
+          "oracle": "api",
+          "verify": "status + body",
+          "evidence": "the answer"
+        }
+      ],
+      "negative": [
+        "the doubled keepData being honoured as false (tables dropped) is a data-loss FAIL"
+      ],
+      "traps": [
+        "destructive-in-place",
+        "silent-coercion"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/request-schema-gate.conformance.test.ts + packages/runtime/src/domains/data-write-request-gate.test.ts + packages/runtime/src/domains/data-delete-expected-version.test.ts + packages/runtime/src/domains/dispatcher-query-arity.test.ts + packages/runtime/src/domains/packages-write-flag-arity.test.ts + packages/runtime/src/domains/data-conflict-caller-visibility.test.ts"
+      },
+      "source": [
+        "packages/rest/src/meta-item-read-gate.ts#metaQueryArityRefusal",
+        "packages/rest/src/query-multiplicity.ts#assertFilterParamSuppliedOnce",
+        "packages/metadata-protocol/src/protocol.ts#ConcurrentUpdateError",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23491-patch-data-request-gate, 23492-empty-version-token-refused, 23574-data-request-contract-remainder, 23214-dispatcher-query-arity, 23214-hono-query-multiplicity, 23586-occ-conflict-caller-visibility, 23531-hono-conflict-body, 23531-hono-conflict-current-record"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.meta-read-doors-v18",
+      "title": "/meta read doors on v18: GET /meta/app/PACKAGE_ID returns that package's app, `?member=` selects one bundle member on by-name doors, an unknown query parameter on any by-name door is refused 400, `?package=all` folds to the no-parameter answer, and the object definition marks an FLS-denied field unsortable for that caller",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase email template with two locale members (or one authored through PUT /api/v1/meta/email_template/NAME?member=zh-CN)"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/meta/app/com.example.showcase; GET /api/v1/meta/app/com.unknown.pkg",
+        "GET /api/v1/meta/email_template/NAME?member=zh-CN; GET /api/v1/meta/object/showcase_task?member=x",
+        "GET /api/v1/meta/object/showcase_task?memeber=x (typo)",
+        "GET /api/v1/meta/view?package=all vs GET /api/v1/meta/view",
+        "as a member whose FLS hides a field F: GET /api/v1/meta/object/showcase_task and read sortability for F; GET /api/v1/data/showcase_task?sort=F"
+      ],
+      "acceptance": [
+        {
+          "clause": "app-by-package-id, member selector, closed query sets, package=all fold and caller-FLS sortability — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "/meta/app/com.example.showcase returns the app whose name is the showcase app; an unknown package → the same 404 as an unknown name",
+          "oracle": "api",
+          "verify": "status + name",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "?member= reads only that member; on a non-bundled type → 400 VALIDATION_ERROR; an unknown parameter → 400 naming it",
+          "oracle": "api",
+          "verify": "status + code + body",
+          "evidence": "three lines"
+        },
+        {
+          "clause": "?package=all answers byte-identically to no parameter",
+          "oracle": "api",
+          "verify": "compare item ids",
+          "evidence": "the two id lists"
+        },
+        {
+          "clause": "for the FLS-restricted caller F is marked unsortable and the data sort on F is 403 — the two agree",
+          "oracle": "api",
+          "verify": "sortability entry + data answer",
+          "evidence": "both excerpts"
+        }
+      ],
+      "traps": [
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/meta-object-sortability-caller-fls.test.ts + packages/runtime/src/domains/meta-object-sortability-caller-fls.test.ts + packages/metadata-protocol/src/protocol.app-package-id-key.test.ts + packages/runtime/src/domains/meta-app-package-id-key.test.ts + packages/rest/src/rest-server-meta-member-selector.test.ts + packages/rest/src/rest-server-meta-door-closed-sets.test.ts + packages/runtime/src/domains/meta-package-all-fold.test.ts"
+      },
+      "source": [
+        "packages/spec/src/api/protocol.zod.ts#isAppPackageIdKey",
+        "packages/rest/src/meta-item-read-gate.ts#metaItemQueryRefusal",
+        "packages/rest/src/meta-item-read-gate.ts#metaMemberSelector",
+        "packages/metadata-core/src/object-schema-fls.ts#resolveObjectSchemaRuntimeView",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23183-app-item-read-by-package-id, 22877-member-selector, 22877-overlay-locale-member, 23072-dispatcher-meta-query-decision, 23072-meta-doors-closed-sets, 23073-list-member, 22250-meta-fls-runtime-sortability, 22128-draft-head-resolution"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.error-sentences-and-unique-violation-wire-code",
+      "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "in the scratch app: a beforeInsert hook on sys_sharing_rule (or another hand-built write route's object) that throws a business sentence, and an object with a unique field plus a script action inserting a duplicate"
+        ]
+      },
+      "steps": [
+        "POST the hand-built write route whose hook refuses; read the body",
+        "invoke the script action that inserts a duplicate value: POST /api/v1/actions/OBJECT/ACTION",
+        "force a server fault on a storage route (e.g. a malformed adapter config on the scratch boot) and read error.message"
+      ],
+      "acceptance": [
+        {
+          "clause": "hook-refusal sentences, withheld 500 text and the unique-violation wire code — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the hook refusal answers 400 VALIDATION_ERROR carrying the hook's sentence — not 500",
+          "oracle": "api",
+          "verify": "status + message",
+          "evidence": "the body"
+        },
+        {
+          "clause": "the duplicate insert through the action door → 409 UNIQUE_VIOLATION with details naming the field",
+          "oracle": "api",
+          "verify": "status + code + details",
+          "evidence": "the body"
+        },
+        {
+          "clause": "a forced 500 carries the route's generic sentence, never the caught internal message or a stack",
+          "oracle": "api",
+          "verify": "error.message text",
+          "evidence": "the body"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-write-route-hook-refusal-sentence.ledger.test.ts + packages/rest/src/rest-hook-script-fault-envelope.test.ts + packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts + packages/services/service-storage/src/storage-routes.server-fault-withheld.test.ts"
+      },
+      "source": [
+        "packages/types/src/data-error-classification.ts#sandboxBusinessMessage",
+        "packages/types/src/data-error-classification.ts#isSandboxOwnFault",
+        "packages/types/src/response-envelope.ts#sendServerFault",
+        "packages/runtime/src/http-dispatcher.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22719-rest-write-hook-refusal-sentence, 22764-rest-write-fault-withheld, 22885-sandbox-own-fault-rest-write-routes, 22588-nested-refusal-sentence-zero-row-total, 22694-import-row-hook-sentence, 22718-import-row-sandbox-fault, 22868-sandbox-fault-not-unknown-object, 23718-sandbox-plain-object-throw, 23686-dispatcher-unique-violation, 23701-mcp-unique-violation, 23702-sandbox-relay-duplicate, 23587-hono-structured-arm-fields, 23587-hono-unique-violation, 23174-nested-fault-writer"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

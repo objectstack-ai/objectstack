@@ -891,6 +891,163 @@
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new item from the scoped scan-functionality sweep (扫描功能): the server-side re-enforcement of field accept/maxSize had NO coverage on either lane — the only pinned guard is the client dialog's (records-forms.upload-guard-blocks-confirm), which the enforcement source itself calls 'a convenience rather than a control'. Authored with the qa-media-constraints recipe (no stock showcase field declares either key), the two source-documented holes (missing metadata, dotless-name vs extension-only accept) as documented-boundary passes, the declaration-based content boundary recorded so runs do not score sniffing absence as a leak, and the per-source wire-envelope analysis (ERR_FILE_CONSTRAINT ledgered but status-less → sanitized 500 expected) carried as a knownGap for the run to measure rather than rediscover", "ref": "claude/new-session-0pv25p" }
       ]
+    },
+    {
+      "id": "attachments-storage.upload-limits-scope-and-ownership",
+      "title": "Upload contract on v18: a declared size over the limit (100 MiB default, moved live by the max_upload_mb setting) is 413 with nothing written, an unknown scope is 400 naming the allowed values (public is retired), only the uploader may complete or poll an upload, an unclaimed private file is 401 to anonymous, and a file id copied from another record hydrates as {id, metadataRefused:true}",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)",
+        "anonymous caller (no cookie, no bearer, no x-api-key)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/storage/upload/presigned declaring size 101 MiB; then set the storage max_upload_mb setting lower and retry a smaller declared size without restarting",
+        "POST presigned with scope \"avatars\", \"PUBLIC\", \"public\", null; and with scope omitted",
+        "as the admin start an upload; as the member POST /api/v1/storage/upload/complete and GET the chunked progress for it",
+        "anonymously GET the download URL of an unclaimed private file",
+        "as the member GET a record whose file field holds an id copied from another record"
+      ],
+      "acceptance": [
+        {
+          "clause": "limits, scope vocabulary, uploader-only doors, unclaimed-download floor and file hydration — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "over-limit → 413 PAYLOAD_TOO_LARGE with no sys_file row; the saved max_upload_mb takes effect without restart",
+          "oracle": "api",
+          "verify": "status + sys_file count; the second refusal",
+          "evidence": "answers + counts"
+        },
+        {
+          "clause": "an unknown or retired scope → 400 INVALID_REQUEST naming the allowed values (never 500); omitted → user",
+          "oracle": "api",
+          "verify": "status + message per variant",
+          "evidence": "per-variant lines"
+        },
+        {
+          "clause": "the member's complete/progress on the admin's upload → 403 PERMISSION_DENIED (no admin exception)",
+          "oracle": "api",
+          "verify": "status + code",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "anonymous download of an unclaimed private file → 401 AUTH_REQUIRED with no signed URL",
+          "oracle": "api",
+          "verify": "status + absence of Location",
+          "evidence": "the answer"
+        },
+        {
+          "clause": "a copied file id hydrates as {id, metadataRefused:true}; the record's own file hydrates fully",
+          "oracle": "api",
+          "verify": "field value shapes",
+          "evidence": "both excerpts"
+        }
+      ],
+      "negative": [
+        "an anonymous caller receiving a signed URL for a private file is an authorization FAIL — carve-out applies"
+      ],
+      "traps": [
+        "wrong-persona",
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/services/service-storage/src/storage-limits.test.ts + packages/services/service-storage/src/upload-scope-vocabulary.test.ts + packages/qa/dogfood/test/storage-unclaimed-download.dogfood.test.ts + packages/services/service-storage/src/upload-door-ownership.test.ts + packages/services/service-storage/src/storage-routes.raw-token-refusal.test.ts + packages/objectql/src/engine-file-hydrate-refused.test.ts + packages/objectql/src/engine-file-hydrate-parent-derived.test.ts"
+      },
+      "source": [
+        "packages/services/service-storage/src/storage-limits.ts#resolveStorageLimits",
+        "packages/spec/src/api/storage.zod.ts#UploadScopeSchema",
+        "packages/services/service-storage/src/upload-ownership.ts#isFileUploader",
+        "packages/spec/src/data/field-value.zod.ts#FileRefusedValueSchema",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22283-storage-limits-honoured, 22314-storage-payload-too-large-provenance, 22470-upload-scope-vocabulary, 22443-storage-scope-public-retired, 22443-sys-file-public-scope-rewrite, 22431-unclaimed-download-signed-in, 22046-upload-doors-uploader-only, 23143-storage-token-refusal-401, 22593-file-field-hydration-refused, 22637-file-field-metadata-parent-derived"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "attachments-storage.chunked-upload-integrity",
+      "title": "Chunked upload integrity on v18: complete with a missing chunk is 409 with details.missingChunks and the session stays in_progress, a re-sent chunk counts once, parallel chunks all record, and an org switch mid-upload answers 409 on complete / chunk / progress",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
+        ]
+      },
+      "steps": [
+        "start a chunked upload of 3 chunks; PUT chunks 1 and 3; POST complete",
+        "PUT chunk 1 again; GET progress",
+        "PUT chunk 2; POST complete",
+        "start another, switch active organization (POST /api/v1/auth/organization/set-active) and PUT a chunk"
+      ],
+      "acceptance": [
+        {
+          "clause": "chunk accounting, missing-chunk refusal and the org-switch guard — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "complete with a missing chunk → 409 RESOURCE_CONFLICT with details.missingChunks [2]; progress still in_progress",
+          "oracle": "api",
+          "verify": "status + details + progress",
+          "evidence": "answers"
+        },
+        {
+          "clause": "a re-sent chunk is counted once in progress",
+          "oracle": "api",
+          "verify": "received count",
+          "evidence": "the progress body"
+        },
+        {
+          "clause": "after the org switch chunk PUT / complete / progress → 409",
+          "oracle": "api",
+          "verify": "status per call",
+          "evidence": "three lines"
+        }
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/services/service-storage/src/chunked-upload-integrity.test.ts + packages/qa/dogfood/test/storage-chunked-resume-integrity.dogfood.test.ts + packages/services/service-storage/src/chunk-part-record-concurrency.test.ts"
+      },
+      "source": [
+        "packages/services/service-storage/src/storage-routes.ts#registerStorageRoutes",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22313-chunked-completion-assembles-held-parts, 22175-upload-org-change-4xx, 22218-chunk-progress-org-change-4xx, 22332-chunk-part-record-compare-and-set"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

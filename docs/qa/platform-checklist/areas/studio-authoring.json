@@ -1573,6 +1573,235 @@
       "history": [
         { "revision": 1, "date": "2026-10-06", "change": "new — drafted with objectui#10202 against the measured run of its PR; filed by the seat. Authored from that draft with these changes: since v17.7, because 17.6.0 shipped before objectui PR 11669 merged; the picker clause split in two, one oracle each; the picklist fixture spelled with its export, its stack keys and the reload it needs; the console fixture naming the merge it must carry; the spec citations written as anchors the gate resolves", "ref": "#21957" }
       ]
+    },
+    {
+      "id": "studio-authoring.meta-save-preconditions-and-draft-rows",
+      "title": "Metadata save preconditions on v18: the item read serves its `version` and sending it back as If-Match saves, `If-None-Match: *` refuses an existing item 409 METADATA_CONFLICT with currentVersion, any other If-None-Match is 400, pending-draft rows carry the draft's label, and every stored row records its acting user",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a scratch view (view is overlay-allowed on stock showcase): PUT /api/v1/meta/view/qa_occ_view"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/meta/view/qa_occ_view and read version; PUT it back with If-Match: VERSION (200); PUT again with the old version (409)",
+        "PUT /api/v1/meta/view/qa_occ_view with If-None-Match: *",
+        "PUT with If-None-Match: \"abc\", and with both If-Match and If-None-Match",
+        "PUT with ?mode=draft a label change; GET /api/v1/meta/_drafts and read the row's label",
+        "read the stored row's created_by / updated_by (GET /api/v1/meta/view/qa_occ_view/history)"
+      ],
+      "acceptance": [
+        {
+          "clause": "version-token OCC, create-only precondition, draft rows and row actor — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "If-Match with the served version saves; a stale one → 409; If-None-Match:* on an existing item → 409 METADATA_CONFLICT with currentVersion; any other If-None-Match (or one beside If-Match) → 400 and nothing written",
+          "oracle": "api",
+          "verify": "status + code per call; version before/after",
+          "evidence": "per-call lines"
+        },
+        {
+          "clause": "the pending-drafts row carries the draft body's label, never the machine name",
+          "oracle": "api",
+          "verify": "label field",
+          "evidence": "the row"
+        },
+        {
+          "clause": "created_by / updated_by on the stored row name the acting admin",
+          "oracle": "api",
+          "verify": "history entry actor fields",
+          "evidence": "the entry"
+        }
+      ],
+      "traps": [
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/meta-item-version-token-occ.test.ts + packages/rest/src/meta-draft-head-package-inheritance.test.ts + packages/runtime/src/domains/meta-save-preconditions-parity.test.ts + packages/objectql/src/sys-metadata-repository-list-drafts.test.ts + packages/objectql/src/protocol-metadata-row-actor.test.ts"
+      },
+      "source": [
+        "packages/rest/src/meta-save-request.ts#metaSaveRequestOptions",
+        "packages/spec/src/api/protocol.zod.ts#MetadataConflictErrorSchema",
+        "packages/metadata-protocol/src/sys-metadata-repository.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22114-meta-read-version-token, 22141-rest-meta-save-request-options, 22141-runtime-meta-save-preconditions, 22188-rest-meta-package-all-fold, 22188-runtime-meta-package-all-fold, 22200-drafts-header-label, 23033-metadata-row-actor, 23086-actor-family, 23068-migrate-actor"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.multi-package-item-rows",
+      "title": "One item name, one stored row PER PACKAGE (ADR-0048) on v18: a package-less save resolves its owning package and an ambiguous one is 409, a dropStorage delete while another package's row remains is 409 and keeps the table, a save into the wrong package is 422 OBJECT_OVERLAY_PACKAGE_MISMATCH, a sealed packaged name answers one 403 NOT_OVERRIDABLE sentence, and revert discards a Studio package's drafts",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "two scratch Studio-authored packages A and B (POST /api/v1/packages), each saving a view named qa_shared_view (?package=A / ?package=B)"
+        ]
+      },
+      "steps": [
+        "PUT /api/v1/meta/view/qa_shared_view with no ?package= — expect 409 (two holders)",
+        "DELETE /api/v1/meta/view/qa_shared_view?package=A; then re-save without ?package= — expect it to update B's row",
+        "PUT /api/v1/meta/object/showcase_task?package=A (a package that does not own it)",
+        "PUT a sealed packaged name (any showcase object) as a create; read the 403 sentence",
+        "publish package A, edit to a draft, POST /api/v1/packages/A/revert; then revert a never-published package"
+      ],
+      "acceptance": [
+        {
+          "clause": "multi-package row addressing, drop-storage and owner-mismatch refusals, the sealed sentence and stored-package revert — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "an ambiguous package-less save or delete → 409 RESOURCE_CONFLICT and nothing changes; once one holder remains the package-less save updates THAT row (no second row)",
+          "oracle": "api",
+          "verify": "status + GET /meta/view/qa_shared_view/layers before/after",
+          "evidence": "answers + layer lists"
+        },
+        {
+          "clause": "a save into a package that does not own the object → 422 OBJECT_OVERLAY_PACKAGE_MISMATCH, nothing stored",
+          "oracle": "api",
+          "verify": "status + code; read-back",
+          "evidence": "refusal + read-back"
+        },
+        {
+          "clause": "a sealed packaged name answers 403 NOT_OVERRIDABLE with ONE sentence naming TYPE/NAME as managed and the list door",
+          "oracle": "api",
+          "verify": "error.message is a single sentence",
+          "evidence": "the body"
+        },
+        {
+          "clause": "revert serves the published body and removes a draft-only item; a never-published package → 409 RESOURCE_CONFLICT",
+          "oracle": "api",
+          "verify": "item reads + status",
+          "evidence": "reads + refusal"
+        }
+      ],
+      "traps": [
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/meta-delete-drop-storage-other-rows.test.ts + packages/runtime/src/package-uninstall-shared-object.integration.test.ts + packages/objectql/src/protocol-runtime-owner-overlay-refusal.test.ts + packages/objectql/src/protocol-sentinel-owner-package-save-refusal.test.ts + packages/runtime/src/package-promote-runtime-owner-refusal.integration.test.ts + packages/rest/src/rest-meta-sealed-first-draft-remedy.test.ts + packages/metadata-protocol/src/protocol.packageless-save-address.test.ts + packages/metadata-protocol/src/protocol.sealed-remedy-kind.test.ts + packages/runtime/src/package-revert-stored-members.integration.test.ts"
+      },
+      "source": [
+        "packages/metadata-protocol/src/protocol.ts",
+        "packages/metadata-protocol/src/sys-metadata-repository.ts",
+        "ADR-0048",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23297-package-axis-delete-draft, 23415-drop-storage-other-rows, 23473-uninstall-shared-object-refusal, 23416-runtime-owner-overlay-refusal, 23514-sentinel-owner-save, 23630-promote-doors-d99, 23495-draft-doors-one-address, 23657-draft-save-one-package-draft, 23715-strict-draft-read-address, 23577-sealed-write-one-sentence, 23165-direct-save-resolves-package, 22591-sealed-remedy-kind, 22090-metadata-protocol-revert-stored-package, 22090-runtime-revert-studio-package, 22113-revert-package-code-shipped-members, 23505-extension-refusal-409"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; the sealed-name sentence was rewritten twice on the line (22591 → 23406 → 23577): assert the 23577 one-sentence form",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.save-door-runs-authoring-rules",
+      "title": "The metadata save door runs the build's authoring rules on v18 — a page with an unknown component prop, a page with both details and tabs slots, a second default record page, a chart list view with no dataset, an object predicate that does not compile, a `protection` block or a lock change, and a non-http(s) URL target are each refused 4xx at PUT (drafts still admitted where the rule says so)",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "scratch names only (qa_*) so nothing shipped is touched; view/page are written on stock showcase, object writes need the scratch app or OS_METADATA_WRITABLE on a scratch boot"
+        ]
+      },
+      "steps": [
+        "PUT /api/v1/meta/page/qa_props_page with a page:header block carrying properties.titel",
+        "PUT a record page with both slots.details and slots.tabs",
+        "PUT a second isDefault:true record page for showcase_task",
+        "PUT /api/v1/meta/view/qa_chart_view as a chart list view with no dataset binding",
+        "PUT an object with an option visibleWhen reading `parent` and a validation condition `sqrt(record.amount)`; then the same with ?mode=draft",
+        "PUT any item with a `protection` block; PUT with _lock:\"full\" on an unlocked item",
+        "PUT /api/v1/meta/action/qa_bad_url with target `javascript:alert(1)`"
+      ],
+      "acceptance": [
+        {
+          "clause": "the runtime authoring gate on the page, view, object and action save doors — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "each refused body answers 422 INVALID_METADATA (400 VALIDATION_ERROR for protection / _lock*, 422 DEFAULT_RECORD_PAGE_CONFLICT naming both pages) with the rule id and located path, and a read-back shows nothing stored",
+          "oracle": "api",
+          "verify": "status + code + rule id + path per PUT; GET afterwards",
+          "evidence": "one line per PUT"
+        },
+        {
+          "clause": "component-props refusal offers the did-you-mean (titel → title)",
+          "oracle": "api",
+          "verify": "message text",
+          "evidence": "the body"
+        },
+        {
+          "clause": "a draft save (?mode=draft) of the bad object predicate is admitted and its publish is refused",
+          "oracle": "api",
+          "verify": "draft status then publish status",
+          "evidence": "both answers"
+        }
+      ],
+      "negative": [
+        "a refused body that is nevertheless readable afterwards (stored despite the 4xx) is a FAIL"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts + packages/metadata-protocol/src/protocol.save-door-protection.test.ts + packages/metadata-protocol/src/protocol.save-door-lock-family.test.ts + packages/objectql/src/default-record-page-save-door.test.ts + packages/spec/src/ui/page-slot-pair.test.ts + packages/rest/src/meta-view-chart-binding.test.ts + packages/lint/src/runtime-gate.object-option-visibility-writes.test.ts + packages/lint/src/validate-component-props-url-target.test.ts"
+      },
+      "source": [
+        "packages/metadata-protocol/src/runtime-authoring-gate.ts",
+        "packages/metadata-protocol/src/protocol.ts#protectionBlockRefusal",
+        "packages/spec/src/ui/page.zod.ts#checkPageSlotPair",
+        "packages/spec/src/ui/view.zod.ts#checkListViewChartBinding",
+        "packages/lint/src/validate-expressions.ts#validateStackExpressions",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23388-page-component-rules-runtime-door, 23357-page-component-view-data-api-refused, 23332-page-action-row-operation, 23427-page-action-row-declarative-update-rules, 23096-save-door-protection, 23119-save-door-lock-envelope, 23015-one-default-record-page-per-object, 22568-page-slots-details-beside-tabs-refused, 22491-chart-list-view-binds-a-dataset, 22157-option-visible-when-parent, 22274-option-visible-when-members, 22394-option-visible-when-evaluser-members, 22019-object-save-door-formula-verdict, 22019-objectql-formula-fault-log, 22032-object-save-door-action-predicates, 22032-object-save-door-field-rule-slots, 22032-object-save-door-option-visible-when, 22032-object-save-door-validation-predicates, 22042-nested-validation-predicate-verdict, 23010-url-action-target-scheme-set, 23077-url-target-doors-scheme-set, 23103-page-action-row-on-success-and-executor, 23168-page-action-row-name-leg-url-target, 23168-page-action-row-on-success-beside-executor"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }
