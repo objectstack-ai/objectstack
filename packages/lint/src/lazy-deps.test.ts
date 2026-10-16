@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — whole-package import: the in-process case imports the whole @objectstack/lint barrel cold, so the file's floor is vitest's transform of that graph and of every inlined @objectstack/spec dist bundle it reaches, and the two built-dist probes each spawn node once; slowest CI reading 18.0 s (hourly run 38267594064) x 1.25, rounded up
 //
 // Boot-path contract: importing @objectstack/lint must NOT load its heavy,
 // gate-only dependencies. The package sits on the kernel boot path, while each

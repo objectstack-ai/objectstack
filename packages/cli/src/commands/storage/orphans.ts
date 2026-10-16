@@ -17,6 +17,8 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { StrandedOrphanInventoryEngine } from '@objectstack/service-storage';
 
@@ -181,7 +183,17 @@ export default class StorageOrphans extends Command {
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
       reads.notice(false);
       console.log('');
-      console.log(formatStrandedOrphanInventory(report));
+      // [#23726] The report's last line says the pass is READ-ONLY and wrote
+      // no row or table. The boot's connect may still have switched a SQLite
+      // file's journal mode (`SqlDriver.applySqliteJournalMode`, its rule for
+      // every connect), which rewrites the file header and no row, so on a
+      // SQLite file that line is followed by the note naming the switch. A
+      // target that is no SQLite file (PostgreSQL, MySQL) has no header to
+      // switch. The `--json` document carries no sentence and is unchanged.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      console.log(`${formatStrandedOrphanInventory(report)}${journalNote}`);
       console.log('');
       if (report.truncated) {
         printWarning(

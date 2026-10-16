@@ -218,7 +218,7 @@ export default class SecretOrphans extends Command {
         // [#21471] Composed through the one-shot helper, never with the
         // service's default provider: in a development posture with no key,
         // that default mints a key file in the key home, and this report
-        // promises to write nothing.
+        // promises to write no row or table, and writes no key file either.
         extraPlugins: [new PlatformObjectsPlugin(), await oneShotSettingsPlugin()],
         // [#21391] The report boots READ-ONLY, the boot `os migrate plan`
         // takes: `deferSchemaDdl` holds schema DDL back on every SQL

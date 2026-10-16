@@ -558,10 +558,11 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
   // scheme and never the URL — the CLI host's is the runtime host's minus its
   // `[StandaloneStack]` tag, as for the retired engine above — and the CLI
   // host's refusal is typed, the class serve.ts makes fatal (it swallows every
-  // other construction error). Two
-  // inputs reach it: an explicit sqlite selection over a server URL, which the
-  // CLI host used to open as a file at a path made of the URL, credentials
-  // included, and a `file:` that names no file.
+  // other construction error). What reaches it: an explicit selection over a
+  // value that is not a file path (these rows hold a server URL; the
+  // explicit-selection rows below hold every other shape, on both kinds),
+  // which the CLI host used to open as a file at a path made of the URL,
+  // credentials included, and a `file:` that names no file.
   it.each([
     ['sqlite', 'postgres://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:5432/db', 'its scheme is "postgres://"'],
     [undefined, 'file:', 'it names no file after "file:"'],
@@ -586,6 +587,102 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
       expect((error as Error).message).not.toBe(sentence);
       expect((error as Error).message).not.toContain('PLACEHOLDER');
     }
+  });
+
+  // An explicit `sqlite` or `sqlite-wasm` selection skips both hosts' URL
+  // classification, so the filename rule is the only check its URL meets.
+  // Under either kind both hosts refuse every value that is not a file path —
+  // an OPAQUE scheme (two or more characters and a `:` with no `//`), an
+  // unrecognised `<scheme>://` and a server URL, on the WASM kind too, which
+  // used to refuse nothing — with one sentence naming the kind and the scheme,
+  // and the same CONTROL file for every file value. `backup:2026.db` is the one
+  // file name that changes answer: it reads as the scheme `backup:`, as it does
+  // on the classification path above.
+  describe('an explicit sqlite / sqlite-wasm selection: one verdict per URL on both hosts', () => {
+    const KINDS = ['sqlite', 'sqlite-wasm'] as const;
+    const PLACEHOLDERS = ['PLACEHOLDER-USER', 'PLACEHOLDER-SECRET', 'PLACEHOLDER-TOKEN'];
+    const REFUSED = [
+      ['jdbc:postgresql://127.0.0.1:5999/db', 'jdbc:'],
+      ['jdbc:postgresql://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:5999/db?authToken=PLACEHOLDER-TOKEN', 'jdbc:'],
+      ['redis:h', 'redis:'],
+      ['redis://h/x.db', 'redis://'],
+      ['postgres://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:5999/db', 'postgres://'],
+      ['backup:2026.db', 'backup:'],
+    ] as const;
+
+    /** Every own property of `error`, serialised, after a check that the message is in it. */
+    function ownProperties(error: unknown): string {
+      const everything = JSON.stringify(error, Object.getOwnPropertyNames(error));
+      expect(everything).toContain(JSON.stringify((error as Error).message));
+      return everything;
+    }
+
+    it.each(KINDS.flatMap((kind) => REFUSED.map(([url, scheme]) => [kind, url, scheme] as const)))(
+      'both hosts REFUSE an explicit %s over %s, naming %s only, in dev AND in prod, with one sentence',
+      (kind, url, scheme) => {
+        process.env.OS_DATABASE_DRIVER = kind;
+        process.env.OS_DATABASE_URL = url;
+        let runtime: unknown;
+        try {
+          resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' });
+        } catch (err) {
+          runtime = err;
+        }
+        expect(runtime, `the runtime host accepted an explicit ${kind} over ${url}`).toBeInstanceOf(Error);
+        const sentence = (runtime as Error).message;
+        expect(sentence).toContain(`[StandaloneStack] ${kind} driver was selected`);
+        expect(sentence).toContain(`its scheme is "${scheme}"`);
+        for (const placeholder of PLACEHOLDERS) {
+          expect(ownProperties(runtime), `the runtime host's refusal carries ${placeholder}`).not.toContain(placeholder);
+        }
+        for (const isDev of [false, true]) {
+          let error: unknown;
+          try {
+            resolveStorageDefinition(resolveDriverType(kind, url), { databaseUrl: url, isDev });
+          } catch (err) {
+            error = err;
+          }
+          expect(error, `the CLI host (isDev=${isDev}) did not refuse ${url} by type`).toBeInstanceOf(UnsupportedDriverError);
+          expect((error as UnsupportedDriverError).recognized).toBe(true);
+          expect((error as UnsupportedDriverError).driverType).toBe(kind);
+          expect((error as Error).message).toBe(sentence.replace(/^\[StandaloneStack\] /, ''));
+          for (const placeholder of PLACEHOLDERS) {
+            expect(ownProperties(error), `the CLI host's refusal carries ${placeholder}`).not.toContain(placeholder);
+          }
+        }
+      },
+    );
+
+    type FileRow = readonly [(typeof KINDS)[number], string, string];
+    const FILES: FileRow[] = [
+      ...KINDS.flatMap((kind): FileRow[] => [
+        [kind, 'file:./x.db', './x.db'],
+        [kind, './x.db', './x.db'],
+        [kind, 'C:\\data\\x.db', 'C:\\data\\x.db'],
+        [kind, 'C:/data/x.db', 'C:/data/x.db'],
+        [kind, ':memory:', ':memory:'],
+        [kind, 'file:backup:2026.db', 'backup:2026.db'],
+        [kind, './backup:2026.db', './backup:2026.db'],
+      ]),
+      ['sqlite-wasm', 'wasm-sqlite:///tmp/x.db', '/tmp/x.db'],
+    ];
+
+    it.each(FILES)(
+      'CONTROL: both hosts open an explicit %s over %s as the file %s, in dev and prod',
+      (kind, url, file) => {
+        process.env.OS_DATABASE_DRIVER = kind;
+        process.env.OS_DATABASE_URL = url;
+        const runtime = resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' });
+        expect(runtime.driver).toBe(kind);
+        // The runtime host reports an in-memory database as no file at all.
+        expect(runtime.sqliteFile).toBe(file === ':memory:' ? null : file);
+        for (const isDev of [false, true]) {
+          const definition = resolveStorageDefinition(resolveDriverType(kind, url), { databaseUrl: url, isDev });
+          expect(definition!.driverId).toBe(kind);
+          expect(definition!.config.filename, `the CLI host's file for ${url} (isDev=${isDev})`).toBe(file);
+        }
+      },
+    );
   });
 
   // CLI host only: under an explicit sqlite selection a blank URL is the absent

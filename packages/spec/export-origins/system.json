@@ -816,6 +816,8 @@
     "resolveSettingsActionConfirm": "src/system/i18n-resolver.ts#resolveSettingsActionConfirm (function)",
     "resolveSettingsActionLabel": "src/system/i18n-resolver.ts#resolveSettingsActionLabel (function)",
     "resolveSettingsActionSuccess": "src/system/i18n-resolver.ts#resolveSettingsActionSuccess (function)",
+    "resolveSettingsBannerText": "src/system/i18n-resolver.ts#resolveSettingsBannerText (function)",
+    "resolveSettingsBannerTitle": "src/system/i18n-resolver.ts#resolveSettingsBannerTitle (function)",
     "resolveSettingsDescription": "src/system/i18n-resolver.ts#resolveSettingsDescription (function)",
     "resolveSettingsFieldHelp": "src/system/i18n-resolver.ts#resolveSettingsFieldHelp (function)",
     "resolveSettingsFieldLabel": "src/system/i18n-resolver.ts#resolveSettingsFieldLabel (function)",

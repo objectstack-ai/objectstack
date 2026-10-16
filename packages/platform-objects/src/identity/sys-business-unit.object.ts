@@ -270,6 +270,9 @@ export const SysBusinessUnit = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
+    // Setup's identity records are not discussion surfaces (objectui#12614 item 1):
+    // no Discussion feed, and a comment create on one answers 403 FEEDS_DISABLED.
+    feeds: false,
     // No `apiMethods` — default-open (#3543 audit). The HRIS org-tree sync
     // scenario (#3025) needs every primitive, and a whitelist naming all six is
     // equivalent to no whitelist while NOT tracking future primitives; the P1

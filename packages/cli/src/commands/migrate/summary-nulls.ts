@@ -18,6 +18,7 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 // Type-only, so the heavy engine package is still loaded lazily below: this is
@@ -254,7 +255,19 @@ export default class MigrateSummaryNulls extends Command {
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
       console.log('');
-      console.log(formatSummaryBackfillReport(report).join('\n'));
+      // [#23726] A dry run that found NULL roll-ups ends the report with "Dry
+      // run — no row or table was written." (its last line). The read-only
+      // boot's connect may still have switched a SQLite file's journal mode
+      // (`SqlDriver.applySqliteJournalMode`, its rule for every connect), which
+      // rewrites the file header and no row, so on a SQLite file that line is
+      // followed by the note naming the switch. A target that is no SQLite file
+      // (PostgreSQL, MySQL) has no header to switch. The `--json` document
+      // carries no sentence and is unchanged.
+      const journalNote = !report.applied && report.nullRows > 0
+        && describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      console.log(`${formatSummaryBackfillReport(report).join('\n')}${journalNote}`);
       console.log('');
 
       if (report.failures.length > 0) {
