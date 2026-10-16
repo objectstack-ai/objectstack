@@ -6,6 +6,8 @@ import { dialectOfDriver } from '@objectstack/metadata-core';
 import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import {
   APPLICATION_OBJECT_FATE,
+  LEGACY_SHIPPED_SET_SEEDS,
+  LEGACY_SHIPPED_SET_SEEDS_CATEGORY,
   ORGANIZATION_OWNERSHIP_INVENTORY,
   type Anchor,
   type InventoryCategory,
@@ -103,6 +105,8 @@ export interface AttributionAssignment {
   id: string;
   /** The physical table the row lives in (a rotation shard, or the object's own table). */
   table: string;
+  /** The database that table lives in, when it is not the primary ({@link PlanSibling.name}). */
+  database?: string;
   organizationId: string;
   /** The anchor that answered, as the plan's `attribution` counts label it. */
   via: string;
@@ -114,6 +118,34 @@ export interface AttributionAssignment {
  * one place a caller may.
  */
 export type AttributionSink = (batch: { object: string; assignments: AttributionAssignment[] }) => Promise<void>;
+
+/**
+ * A database beside the primary that the deployment keeps objects in — the
+ * `telemetry` sibling a development boot (or an `OS_TELEMETRY_DB` deployment)
+ * keeps its lifecycle-classed objects in (ADR-0057 §3.6). The plan reads its
+ * tables with their own fates, through their own reader.
+ */
+export interface PlanSibling {
+  /** The datasource name (`telemetry`). */
+  name: string;
+  /** What the operator reads for it: its file. */
+  database: string;
+  reader: PlanReader;
+}
+
+/** A table in a database its object does not live in ({@link OrganizationOwnershipPlan.staleCopies}). */
+export interface StaleCopy {
+  object: string;
+  /** Where the table is: `primary`, or a {@link PlanSibling.name}. */
+  database: string;
+  /** Where the object lives. */
+  home: string;
+  tables: string[];
+  rows: number;
+}
+
+/** The name the primary database goes by beside its siblings. */
+export const PRIMARY_DATABASE = 'primary';
 
 export interface PlannedCategory {
   id: string;
@@ -135,6 +167,12 @@ export interface PlannedDeparture {
 
 export interface TablePlan {
   object: string;
+  /**
+   * The database the object lives in, when it is not the primary: the
+   * `telemetry` sibling a development boot (or an `OS_TELEMETRY_DB`
+   * deployment) keeps its lifecycle-classed objects in ({@link PlanSibling}).
+   */
+  database?: string;
   fate: OrganizationOwnershipFate;
   citation: string;
   /** `inventory` row, or the application-object default. */
@@ -398,6 +436,20 @@ export interface OrganizationOwnershipPlan {
   organizations: number;
   /** sha256 of the inventory this plan was computed from. */
   inventoryDigest: string;
+  /** The databases beside the primary the plan read, each by name ({@link PlanSibling}). */
+  siblings?: Array<{ name: string; database: string }>;
+  /**
+   * Tables in a database the object does not live in — left by a boot from
+   * before the object moved (a lifecycle-classed object a development boot now
+   * keeps in the `telemetry` sibling, say). Nothing reads them, so the ceremony
+   * neither attributes nor drops them; each is warned about.
+   */
+  staleCopies: StaleCopy[];
+  /**
+   * What the ceremony decides on the operator's behalf, one sentence each:
+   * printed by the plan and again by `--apply` before anything is written.
+   */
+  warnings: string[];
   tables: TablePlan[];
   summary: {
     present: number;
@@ -604,7 +656,7 @@ interface Catalog {
   columns: Map<string, Set<string>>;
 }
 
-async function readCatalog(sql: Sql, reader: PlanReader, inventoried: ReadonlySet<string>): Promise<Catalog> {
+async function readCatalog(sql: Sql, reader: PlanReader, inventoried: ReadonlySet<string>, sibling = false): Promise<Catalog> {
   const listSql = physicalTableListSql(sql.dialect);
   if (!listSql) {
     throw new OrganizationOwnershipPlanRefusal(
@@ -631,7 +683,8 @@ async function readCatalog(sql: Sql, reader: PlanReader, inventoried: ReadonlySe
     list.push(table);
     bases.set(base, list);
   }
-  if (![...bases.keys()].some((base) => hasPlatformObjectPrefix(base) && inventoried.has(base))) {
+  // A sibling holds only the objects the deployment moved there — possibly none yet.
+  if (!sibling && ![...bases.keys()].some((base) => hasPlatformObjectPrefix(base) && inventoried.has(base))) {
     throw new OrganizationOwnershipPlanRefusal(
       'not-an-objectstack-database',
       `This database holds none of the platform tables the inventory names (${rows.length} table(s) listed), so it is ` +
@@ -660,13 +713,36 @@ async function readCatalog(sql: Sql, reader: PlanReader, inventoried: ReadonlySe
   return { bases, columns };
 }
 
-/** Context one table's attribution reads beyond the table itself. */
-interface PlanContext {
+/** One database the plan reads: its name, its SQL seam and what its catalog answered. */
+interface PlanDatabase {
+  name: string;
   sql: Sql;
   catalog: Catalog;
+}
+
+/** Context one table's attribution reads beyond the table itself. */
+interface PlanContext {
+  /** The database the table being planned lives in. */
+  database: string;
+  sql: Sql;
+  catalog: Catalog;
+  /** Every database the plan reads, the primary first: an anchor is read where its object lives. */
+  databases: readonly PlanDatabase[];
+  /** The database the deployment keeps `object` in, when the boot says. */
+  homeOf: (object: string) => string | undefined;
   posture: string;
   defaultOrganizationId: string | null;
   onAttribution?: AttributionSink;
+}
+
+/**
+ * The database an anchor's object is read from: the one the deployment keeps
+ * it in when that one holds its table, else the first that does.
+ */
+function locate(ctx: PlanContext, object: string): PlanDatabase | null {
+  const home = ctx.homeOf(object);
+  const at = ctx.databases.find((d) => d.name === home && d.catalog.bases.has(object));
+  return at ?? ctx.databases.find((d) => d.catalog.bases.has(object)) ?? null;
 }
 
 /** The organization of each id in `ids` on `object`'s own table, or a reason it cannot be read. */
@@ -675,17 +751,19 @@ async function organizationsById(
   object: string,
   ids: string[],
 ): Promise<Map<string, string | null> | string> {
-  const tables = ctx.catalog.bases.get(object);
-  if (!tables || tables.length !== 1 || tables[0] !== object) return `${object} has no table on this database`;
-  const cols = ctx.catalog.columns.get(object);
+  const db = locate(ctx, object);
+  const tables = db?.catalog.bases.get(object);
+  if (!db || !tables || tables.length !== 1 || tables[0] !== object) return `${object} has no table on this database`;
+  const cols = db.catalog.columns.get(object);
   if (!cols?.has(ID) || !cols.has(ORG)) return `${object} carries no ${ORG} to derive from`;
   const out = new Map<string, string | null>();
-  const t = ctx.sql.q(object, object);
+  const { sql } = db;
+  const t = sql.q(object, object);
   for (let i = 0; i < ids.length; i += IN_CHUNK) {
     const chunk = ids.slice(i, i + IN_CHUNK);
-    const rows = await ctx.sql.read(
+    const rows = await sql.read(
       object,
-      `SELECT ${ctx.sql.q(ID, object)} AS id, ${ctx.sql.q(ORG, object)} AS org FROM ${t} WHERE ${ctx.sql.q(ID, object)} IN (${chunk.map(() => '?').join(', ')})`,
+      `SELECT ${sql.q(ID, object)} AS id, ${sql.q(ORG, object)} AS org FROM ${t} WHERE ${sql.q(ID, object)} IN (${chunk.map(() => '?').join(', ')})`,
       chunk,
     );
     for (const row of rows) out.set(String(row.id), nonEmpty(row.org));
@@ -712,7 +790,7 @@ async function applyAnchor(
   const left: PendingRow[] = [];
   const derive = (row: PendingRow, organizationId: string): void => {
     derived[label] = (derived[label] ?? 0) + 1;
-    assigned.push({ id: row.id, table: row.shard, organizationId, via: label });
+    assigned.push({ id: row.id, table: row.shard, ...(ctx.database !== PRIMARY_DATABASE ? { database: ctx.database } : {}), organizationId, via: label });
   };
   if (anchor.kind === 'parent') {
     const keys = [...new Set(rows.map((r) => nonEmpty(r.values[anchor.childKey])).filter((k): k is string => k !== null))];
@@ -755,20 +833,22 @@ async function applyAnchor(
     return left;
   }
   // holder
-  const holderTables = ctx.catalog.bases.get(anchor.holderObject);
-  const cols = ctx.catalog.columns.get(anchor.holderObject);
-  if (!holderTables || holderTables.length !== 1 || !cols?.has(anchor.holderKey) || !cols.has(ORG)) {
+  const holderDb = locate(ctx, anchor.holderObject);
+  const holderTables = holderDb?.catalog.bases.get(anchor.holderObject);
+  const cols = holderDb?.catalog.columns.get(anchor.holderObject);
+  if (!holderDb || !holderTables || holderTables.length !== 1 || !cols?.has(anchor.holderKey) || !cols.has(ORG)) {
     return rows.map((row) => ({ ...row, reason: `${anchor.holderObject} holds no ${anchor.holderKey} / ${ORG} to derive from` }));
   }
   const holders = new Map<string, Set<string>>();
-  const t = ctx.sql.q(anchor.holderObject, anchor.holderObject);
-  const k = ctx.sql.q(anchor.holderKey, anchor.holderObject);
+  const hsql = holderDb.sql;
+  const t = hsql.q(anchor.holderObject, anchor.holderObject);
+  const k = hsql.q(anchor.holderKey, anchor.holderObject);
   const ids = rows.map((r) => r.id);
   for (let i = 0; i < ids.length; i += IN_CHUNK) {
     const chunk = ids.slice(i, i + IN_CHUNK);
-    const found = await ctx.sql.read(
+    const found = await hsql.read(
       anchor.holderObject,
-      `SELECT ${k} AS k, ${ctx.sql.q(ORG, anchor.holderObject)} AS org FROM ${t} WHERE ${k} IN (${chunk.map(() => '?').join(', ')}) AND ${ctx.sql.q(ORG, anchor.holderObject)} IS NOT NULL`,
+      `SELECT ${k} AS k, ${hsql.q(ORG, anchor.holderObject)} AS org FROM ${t} WHERE ${k} IN (${chunk.map(() => '?').join(', ')}) AND ${hsql.q(ORG, anchor.holderObject)} IS NOT NULL`,
       chunk,
     );
     for (const row of found) {
@@ -890,6 +970,7 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
   const hasOrg = columns.has(ORG);
   const plan: TablePlan = {
     object: entry.object,
+    ...(ctx.database !== PRIMARY_DATABASE ? { database: ctx.database } : {}),
     fate: entry.fate,
     citation: entry.citation,
     source,
@@ -1053,7 +1134,13 @@ async function walkNullRows(
       if (pending.length > 0 && ctx.posture === 'single' && ctx.defaultOrganizationId !== null) {
         derived['default-organization'] = (derived['default-organization'] ?? 0) + pending.length;
         for (const row of pending) {
-          assigned.push({ id: row.id, table: row.shard, organizationId: ctx.defaultOrganizationId, via: 'default-organization' });
+          assigned.push({
+            id: row.id,
+            table: row.shard,
+            ...(ctx.database !== PRIMARY_DATABASE ? { database: ctx.database } : {}),
+            organizationId: ctx.defaultOrganizationId,
+            via: 'default-organization',
+          });
         }
         pending = [];
       }
@@ -1103,6 +1190,18 @@ export async function buildOrganizationOwnershipPlan(opts: {
   reader: PlanReader;
   posture: string;
   database: string;
+  /**
+   * The databases beside the primary the deployment keeps objects in (the
+   * `telemetry` sibling), each read through its own reader. An object is
+   * planned in the database {@link homeOf} names for it.
+   */
+  siblings?: readonly PlanSibling[];
+  /**
+   * The database (`primary`, or a {@link PlanSibling.name}) the deployment
+   * keeps `object` in — the engine's routing on the booted stack — or
+   * `undefined` when the boot does not say (an object nothing declares).
+   */
+  homeOf?: (object: string) => string | undefined;
   now?: Date;
   inventory?: readonly InventoryEntry[];
   /**
@@ -1112,11 +1211,21 @@ export async function buildOrganizationOwnershipPlan(opts: {
   onAttribution?: AttributionSink;
 }): Promise<OrganizationOwnershipPlan> {
   const inventory = opts.inventory ?? ORGANIZATION_OWNERSHIP_INVENTORY;
-  // The reader's dialect was resolved from the driver before this call
+  const byObject = new Map(inventory.map((e) => [e.object, e]));
+  const inventoried = new Set(byObject.keys());
+  // Each reader's dialect was resolved from its driver before this call
   // (`ceremonyDialectOf`, which refuses an unresolved one).
   const sql = new Sql(opts.reader, opts.reader.dialect);
-  const byObject = new Map(inventory.map((e) => [e.object, e]));
-  const catalog = await readCatalog(sql, opts.reader, new Set(byObject.keys()));
+  const databases: PlanDatabase[] = [{ name: PRIMARY_DATABASE, sql, catalog: await readCatalog(sql, opts.reader, inventoried) }];
+  for (const sibling of opts.siblings ?? []) {
+    const siblingSql = new Sql(sibling.reader, sibling.reader.dialect);
+    databases.push({ name: sibling.name, sql: siblingSql, catalog: await readCatalog(siblingSql, sibling.reader, inventoried, true) });
+  }
+  const catalog = databases[0]!.catalog;
+  const homeOf = (object: string): string => {
+    const home = opts.homeOf?.(object);
+    return home && databases.some((d) => d.name === home) ? home : PRIMARY_DATABASE;
+  };
 
   // No sys_organization table (a deployment composed without the auth family)
   // holds no organization at all: nothing derives to a Default Organization.
@@ -1133,43 +1242,97 @@ export async function buildOrganizationOwnershipPlan(opts: {
     );
     defaultOrganizationId = rows.length > 0 ? nonEmpty(rows[0]!.id) : null;
   }
-  const ctx: PlanContext = {
-    sql,
-    catalog,
-    posture: opts.posture,
-    defaultOrganizationId,
-    ...(opts.onAttribution ? { onAttribution: opts.onAttribution } : {}),
-  };
 
   const tables: TablePlan[] = [];
+  const staleCopies: StaleCopy[] = [];
+  const planned = new Set<string>();
   let outsideCeremony = 0;
-  for (const [base, physical] of [...catalog.bases].sort(([a], [b]) => a.localeCompare(b))) {
-    const entry = byObject.get(base);
-    const hasOrg = physical.some((t) => catalog.columns.get(t)?.has(ORG));
-    if (!entry) {
-      if (!hasOrg) {
+  for (const db of databases) {
+    const ctx: PlanContext = {
+      database: db.name,
+      sql: db.sql,
+      catalog: db.catalog,
+      databases,
+      homeOf,
+      posture: opts.posture,
+      defaultOrganizationId,
+      ...(opts.onAttribution ? { onAttribution: opts.onAttribution } : {}),
+    };
+    for (const [base, physical] of [...db.catalog.bases].sort(([a], [b]) => a.localeCompare(b))) {
+      const entry = byObject.get(base);
+      const hasOrg = physical.some((t) => db.catalog.columns.get(t)?.has(ORG));
+      if (!hasOrg && !entry) {
         outsideCeremony++;
         continue;
       }
-      if (hasPlatformObjectPrefix(base)) {
-        throw new OrganizationOwnershipPlanRefusal(
-          'uninventoried-platform-table',
-          `${base} carries ${ORG} but the ADR-0131 D10 inventory gives it no fate. The plan refuses rather than ` +
-            'guess one: the inventory (packages/cli/src/utils/organization-ownership-inventory.ts) owes it a row, or, ' +
-            'when the host provides the object, the host declares its fate in a fate supplement passed with ' +
-            '--fate-supplement FILE.',
-          base,
-        );
+      // A table in a database its object does not live in, beside the one it
+      // does: a boot from before the object moved left it. Nothing reads it, so
+      // no fate is performed on it — it is listed and warned about, never
+      // attributed, deleted or dropped. (With no table where the object lives,
+      // the one found here is the object's table and is planned where it is.)
+      const home = homeOf(base);
+      if (home !== db.name && databases.find((d) => d.name === home)?.catalog.bases.has(base)) {
+        if (hasOrg) {
+          let rows = 0;
+          for (const t of physical) rows += await db.sql.count(t, `SELECT COUNT(*) AS n FROM ${db.sql.q(t, t)}`);
+          staleCopies.push({ object: base, database: db.name, home, tables: [...physical], rows });
+        } else {
+          outsideCeremony++;
+        }
+        continue;
       }
-      tables.push(await planPresentTable(ctx, { object: base, census: [], ...APPLICATION_OBJECT_FATE }, 'application-default', physical));
-      continue;
+      if (!entry) {
+        if (hasPlatformObjectPrefix(base)) {
+          throw new OrganizationOwnershipPlanRefusal(
+            'uninventoried-platform-table',
+            `${base} carries ${ORG} but the ADR-0131 D10 inventory gives it no fate. The plan refuses rather than ` +
+              'guess one: the inventory (packages/cli/src/utils/organization-ownership-inventory.ts) owes it a row, or, ' +
+              'when the host provides the object, the host declares its fate in a fate supplement passed with ' +
+              '--fate-supplement FILE.',
+            base,
+          );
+        }
+        tables.push(await planPresentTable(ctx, { object: base, census: [], ...APPLICATION_OBJECT_FATE }, 'application-default', physical));
+        planned.add(base);
+        continue;
+      }
+      tables.push(await planPresentTable(ctx, entry, 'inventory', physical));
+      planned.add(base);
     }
-    tables.push(await planPresentTable(ctx, entry, 'inventory', physical));
   }
   for (const entry of inventory) {
-    if (!catalog.bases.has(entry.object)) tables.push(absentTable(entry));
+    if (!planned.has(entry.object)) tables.push(absentTable(entry));
   }
-  tables.sort((a, b) => a.object.localeCompare(b.object));
+  tables.sort((a, b) => a.object.localeCompare(b.object) || (a.database ?? '').localeCompare(b.database ?? ''));
+  staleCopies.sort((a, b) => a.object.localeCompare(b.object));
+
+  const warnings: string[] = [];
+  const legacySets = tables.find((t) => t.object === LEGACY_SET_OBJECT && t.physical === 'present')
+    ?.categories.find((c) => c.id === LEGACY_SHIPPED_SET_SEEDS_CATEGORY);
+  if (legacySets && legacySets.rows > 0) {
+    const setColumns = catalog.columns.get(LEGACY_SET_OBJECT)!;
+    const where = predicateSql(sql, LEGACY_SET_OBJECT, setColumns, LEGACY_SHIPPED_SET_SEEDS);
+    const names = (await sql.read(
+      LEGACY_SET_OBJECT,
+      `SELECT ${sql.q('name', LEGACY_SET_OBJECT)} AS name FROM ${sql.q(LEGACY_SET_OBJECT, LEGACY_SET_OBJECT)} WHERE ${where.text}`,
+      where.params,
+    )).map((r) => String(r.name));
+    warnings.push(
+      `${names.length} shipped permission set row(s) are stored as managed_by 'admin' (${[...new Set(names)].sort().join(', ')}): ` +
+        'the seeder of an install created before 2026-08-15 wrote them that way. The ceremony adopts them as the platform ' +
+        'seeds they are and deletes them as mirrors once every grant names its set, so the shipped definitions stand. ' +
+        'An edit an administrator made to one of these sets in Setup is not carried — record it before --apply and ' +
+        'author it as a new permission set afterwards.',
+    );
+  }
+  for (const copy of staleCopies) {
+    warnings.push(
+      `${copy.object} has a table in the ${copy.database} database, but this deployment keeps the object in the ` +
+        `${copy.home} database: the ${copy.database} copy (${copy.rows} row(s)) is left over from an older boot and ` +
+        'nothing reads it. The ceremony neither attributes nor drops it; drop it yourself once its rows are no ' +
+        'longer needed.',
+    );
+  }
 
   const byFate = { 'column-drop': 0, 'mirror-deletion': 0, attribution: 0, report: 0 } as Record<OrganizationOwnershipFate, number>;
   for (const t of tables) if (t.physical === 'present') byFate[t.fate]++;
@@ -1186,6 +1349,9 @@ export async function buildOrganizationOwnershipPlan(opts: {
     defaultOrganization: defaultOrganizationId === null ? null : { id: defaultOrganizationId, slug: 'default' },
     organizations,
     inventoryDigest: inventoryDigest(inventory),
+    ...(opts.siblings?.length ? { siblings: opts.siblings.map((d) => ({ name: d.name, database: d.database })) } : {}),
+    staleCopies,
+    warnings,
     tables,
     summary: {
       present: present.length,

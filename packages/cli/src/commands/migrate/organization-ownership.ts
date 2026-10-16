@@ -18,7 +18,8 @@ import {
   errorCodeFields,
   isExitSignal,
 } from '../../utils/format.js';
-import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { bootSchemaStack, describeTelemetryDatabase } from '../../utils/schema-migrate.js';
+import { TELEMETRY_DATASOURCE } from '../../utils/telemetry-datasource.js';
 import { OCCUPANCY_STOP_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
@@ -29,6 +30,7 @@ import {
   columnListSql,
   columnNameOf,
   ceremonyDialectOf,
+  PRIMARY_DATABASE,
   type OrganizationOwnershipPlan,
 } from '../../utils/organization-ownership-plan.js';
 import {
@@ -45,6 +47,7 @@ import {
   reviewedPlanFromFile,
   TemplateChoiceRefusal,
   type ApplyExecutor,
+  type ApplySibling,
   type CeremonyLedgerPort,
   type OrganizationOwnershipApplyReport,
   type ReviewedPlan,
@@ -52,6 +55,57 @@ import {
 
 /** Who the ceremony's metadata saves name as their actor. */
 const CEREMONY_ACTOR = 'os migrate organization-ownership';
+
+/**
+ * The databases beside the primary this boot provisioned — the `telemetry`
+ * sibling a development boot (`--dev`) or an `OS_TELEMETRY_DB` deployment
+ * keeps its lifecycle-classed objects in, exactly as the serving boot does —
+ * each with its raw-SQL seam, and the booted engine's routing of an object to
+ * its database. The ceremony plans, attributes and drops columns in each
+ * object's own database: the boot refusal reads every object's columns where
+ * the engine routes it, sibling included.
+ */
+async function ceremonySiblings(stack: {
+  kernel: { getService(name: string): unknown };
+  drivers: readonly unknown[];
+  telemetryDatabase: string | null;
+}): Promise<{ siblings: ApplySibling[]; homeOf: (object: string) => string | undefined }> {
+  const { normalizeRows } = await import('@objectstack/metadata-protocol');
+  const siblings: ApplySibling[] = [];
+  const telemetry = stack.telemetryDatabase ? stack.drivers[1] : undefined;
+  const exec = telemetry ? resolvePlannedDriverExec(telemetry as never) : null;
+  if (telemetry && exec) {
+    const client = (telemetry as { config?: { client?: unknown } }).config?.client;
+    siblings.push({
+      name: TELEMETRY_DATASOURCE,
+      database: stack.telemetryDatabase!,
+      executor: {
+        dialect: ceremonyDialectOf(telemetry),
+        ...(typeof client === 'string' ? { client } : {}),
+        query: async (sql, params) => normalizeRows(await exec(sql, params ? [...params] : [])),
+        execute: async (sql, params) => {
+          await exec(sql, params ? [...params] : []);
+        },
+      },
+    });
+  }
+  let engine: { getDriverForObject?: (object: string) => unknown } | undefined;
+  try {
+    engine = stack.kernel.getService('objectql') as typeof engine;
+  } catch {
+    engine = undefined;
+  }
+  const homeOf = (object: string): string | undefined => {
+    if (siblings.length === 0 || typeof engine?.getDriverForObject !== 'function') return undefined;
+    try {
+      const driver = engine.getDriverForObject(object) as { name?: unknown } | undefined;
+      return driver === telemetry || driver?.name === TELEMETRY_DATASOURCE ? TELEMETRY_DATASOURCE : PRIMARY_DATABASE;
+    } catch {
+      return undefined;
+    }
+  };
+  return { siblings, homeOf };
+}
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --backup-taken
@@ -376,6 +430,7 @@ export default class MigrateOrganizationOwnership extends Command {
       const dialect = ceremonyDialectOf(stack.driver);
       const { normalizeRows } = await import('@objectstack/metadata-protocol');
       const client = (stack.driver.config as { client?: unknown } | undefined)?.client;
+      const { siblings, homeOf } = await ceremonySiblings(stack);
       plan = await buildOrganizationOwnershipPlan({
         reader: {
           dialect,
@@ -384,6 +439,8 @@ export default class MigrateOrganizationOwnership extends Command {
         },
         posture,
         database: stack.dbLabel,
+        siblings: siblings.map((d) => ({ name: d.name, database: d.database, reader: d.executor })),
+        homeOf,
         ...(inventory ? { inventory } : {}),
       });
     } catch (error: unknown) {
@@ -421,12 +478,14 @@ export default class MigrateOrganizationOwnership extends Command {
     }
     printInfo(`Database: ${chalk.white(plan.database)} · posture ${chalk.white(plan.posture)} · ` +
       `Default Organization ${plan.defaultOrganization ? chalk.white(plan.defaultOrganization.id) : chalk.yellow('none')}`);
+    for (const sibling of plan.siblings ?? []) printInfo(describeTelemetryDatabase(sibling.database));
     console.log('');
     for (const table of plan.tables) {
       if (table.physical === 'absent') continue;
       const unattributable = table.unattributable.length;
+      const where = table.database ? chalk.dim(` [${table.database}]`) : '';
       console.log(
-        `  ${chalk.white(table.object.padEnd(34))} ${table.fate.padEnd(16)} ` +
+        `  ${chalk.white(table.object.padEnd(34))}${where} ${table.fate.padEnd(16)} ` +
           `rows ${String(table.rows?.total ?? 0).padStart(7)}  null ${String(table.rows?.organizationNull ?? 0).padStart(6)}  ` +
           `${unattributable > 0 ? chalk.yellow(`unattributable ${unattributable}`) : ''}` +
           `${table.notNull.willReceive ? chalk.green(' NOT NULL') : ''}`,
@@ -449,6 +508,10 @@ export default class MigrateOrganizationOwnership extends Command {
       }
     }
     console.log('');
+    // What the ceremony decides on the operator's behalf: said before the
+    // summary, and again by --apply before its first write.
+    for (const warning of plan.warnings) printWarning(warning);
+    if (plan.warnings.length) console.log('');
     const { summary } = plan;
     printInfo(
       `${summary.present} table(s) planned, ${summary.absent} inventoried object(s) with no table here; ` +
@@ -470,6 +533,7 @@ export default class MigrateOrganizationOwnership extends Command {
       'database-url'?: string;
       out?: string;
       json?: boolean;
+      dev?: boolean;
       'backup-taken'?: boolean;
       'template-choice'?: string[];
       'metadata-choice'?: string[];
@@ -603,8 +667,12 @@ export default class MigrateOrganizationOwnership extends Command {
         },
       };
       const liveStack = stack;
+      const { siblings, homeOf } = await ceremonySiblings(stack);
+      if (!json) for (const sibling of siblings) printInfo(describeTelemetryDatabase(sibling.database));
       report = await applyOrganizationOwnership({
         executor,
+        siblings,
+        homeOf,
         // Whether this boot composed the security plugin: a shipped set or a
         // built-in position it alone declares is reported with that cause.
         securityPlugin: stack.composition.securityPlugin,
@@ -710,7 +778,7 @@ export default class MigrateOrganizationOwnership extends Command {
         ledger,
         reviewedPlan,
         ...(inventory ? { inventory } : {}),
-        ...(json ? {} : { onProgress: (message: string) => printStep(message) }),
+        ...(json ? {} : { onProgress: (message: string) => printStep(message), onWarning: (message: string) => printWarning(message) }),
       });
     } catch (error: unknown) {
       if (isExitSignal(error)) throw error;
