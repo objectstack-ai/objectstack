@@ -178,7 +178,7 @@ export interface ServeRestartCoordinatorOptions {
      * meanwhile is absorbed (the replacement boots the newest build), and a
      * signal meanwhile ends the parent once the answer is in.
      */
-    recover?: (exit: { code: number | null; signal: NodeJS.Signals | null }) => Promise<boolean> | boolean;
+    recover?: (exitCode: number | null, signal: NodeJS.Signals | null) => Promise<boolean> | boolean;
 }
 
 export type ServeRestartState = 'idle' | 'running' | 'stopping' | 'recovering' | 'shutdown';
@@ -327,7 +327,7 @@ export class ServeRestartCoordinator {
         if (recover) {
             this.state = 'recovering';
             void Promise.resolve()
-                .then(() => recover({ code, signal }))
+                .then(() => recover(code, signal))
                 .catch(() => false)
                 .then((recovered) => {
                     if (this.state === 'shutdown') {
