@@ -198,9 +198,10 @@ const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; w
     why: 'the same scan, for an email slot left in actor_id',
   },
   'action-slot-backfill.ts · backfillActionSlots · row.actor_id': {
-    count: 2,
+    count: 4,
     role: 'migration',
-    why: 'the value the repair moves to acted_as or clears (pass 1), or copies to acted_as (pass 2)',
+    why: 'the value the repair moves to acted_as or clears (pass 1), or copies to acted_as (pass 2); and, once per '
+      + 'pass, the same values collected for the page\'s one display-label read (#23889) — a slot to label, no identity',
   },
 };
 const PREDICATE_NAMES = new Set(['where', 'filter']);
