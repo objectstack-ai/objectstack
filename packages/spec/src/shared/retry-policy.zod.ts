@@ -122,9 +122,11 @@ export function retryPolicyShape() {
     // precisely the quiet-failure class ADR-0049 exists to remove. Every owning
     // shape is strict since #22343, and the tombstone is still the better
     // channel — it carries the rename, where a bare unknown-key rejection would
-    // only carry the key. `retry-policy-converged` rewrites it on the load path;
-    // a copy that conversion leaves (a `backoffMs` beside it with a different
-    // value, or a `null`) meets this tombstone at parse.
+    // only carry the key. `retry-policy-converged` rewrites it wherever stored
+    // documents are replayed (it left the load path at 18, #23543 F2, so an
+    // authored copy meets this tombstone directly); a copy that conversion
+    // leaves (a `backoffMs` beside it with a different value, or a `null`)
+    // meets it at parse too.
     retryDelayMs: retiredKey(
       '`retryDelayMs` was removed in @objectstack/spec 17.0.0 — the retry policy now ' +
       'has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, ' +
@@ -154,7 +156,10 @@ export function retryPolicyShape() {
  * attempts, and `ETLPipeline.retry` (as `maxAttempts`). The
  * `retry-policy-converged` conversion writes that `3` (and the old
  * `backoffMultiplier: 2`) into existing job documents, so no deployed stack
- * changes behaviour. What changes is what a NEWLY authored omission means.
+ * changes behaviour. What changed is what a NEWLY authored omission means —
+ * and since 18 (#23543 F2) a JOB may not author it at all: `JobSchema` refuses
+ * a `retryPolicy` whose `maxRetries` is omitted or 0, while this shared schema
+ * keeps the default for a `try_catch` node's `retry`.
  *
  * The ETL half never got a conversion branch — deliberately, and now
  * permanently: an ETL pipeline was not a `defineStack` collection and

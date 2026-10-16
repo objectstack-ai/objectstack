@@ -366,6 +366,8 @@ describe('[#21154] the parent-field query guard: its column lists, its pin rule 
     const row: Record<string, unknown> = {
       id: 'a1', object_name: '', record_id: 'r1', type: 'note', url: 'u', actor_name: 'n',
       summary: 's', record_label: 'l', metadata: '{}',
+      // [ADR-0139 E6] The two writer-stamped columns are value-bearing too.
+      changed_fields: ['f'], milestone_key: 'f',
     };
     const before = Object.keys(row);
     await redactActivityRows([row], { getReadableFields: async () => [], getQueryableFields: async () => [] }, {});

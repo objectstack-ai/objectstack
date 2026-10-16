@@ -269,10 +269,13 @@ export default defineStack({
 });
 `;
   // The same stack with a flow whose retry policy spells its delay the old
-  // way: a conversion the load still applies. The raw hand-back keeps it
-  // visible to the chain. (It was a datasource `driver: 'mongo'` until that
-  // spelling was retired as a value at 18, #23543 F1.)
-  const SINGLE_WITH_LOAD_PATH_CONVERSION = edit(
+  // way: a second refused spelling, which the chain's step 17 renames. The raw
+  // hand-back keeps it visible to the chain. It was a conversion the load
+  // still applied — a datasource `driver: 'mongo'` until #23543 F1, then this
+  // `retryDelayMs` until F2 retired `retry-policy-converged` from the load
+  // path — and no load-path conversion is a step the chain replays from its
+  // floor any more, so the row reads the two-spelling refused arm.
+  const SINGLE_WITH_SECOND_REFUSED_SPELLING = edit(
     SINGLE,
     '  ],\n});\n',
     '  ],\n'
@@ -297,7 +300,7 @@ export default defineStack({
 
   it.each([
     { name: 'a refused stack', source: SINGLE, applied: [TIME_SITE], writtenSites: 1 },
-    { name: 'a refused stack carrying a load-path conversion', source: SINGLE_WITH_LOAD_PATH_CONVERSION, applied: [RETRY_SITE, TIME_SITE], writtenSites: 2 },
+    { name: 'a refused stack carrying a second refused spelling', source: SINGLE_WITH_SECOND_REFUSED_SPELLING, applied: [RETRY_SITE, TIME_SITE], writtenSites: 2 },
   ])('$name: `applied` and `write.files` as measured before the change', async ({ source, applied, writtenSites }) => {
     const dir = writeProject({ 'objectstack.config.ts': source });
     const dry = json(await runMeta(dir, ['--from', '16', '--json']));

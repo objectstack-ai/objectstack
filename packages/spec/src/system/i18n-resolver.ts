@@ -1052,7 +1052,11 @@ function formSectionObjectName(config: Record<string, unknown>, viewObject: stri
  * nothing matched (so {@link translateView} rebuilds `config` only when a
  * section moved).
  *
- * Three rules, each the one its sibling translators already follow:
+ * Three rules. The first and the third are the ones its sibling translators
+ * already follow ({@link translateBulkActionDefs} keys each def by its own
+ * `name` and keeps a diverged string); the second is the sections' own —
+ * {@link resolveViewDescription} returns a catalog description the view never
+ * authored, and {@link translateBulkActionDefs} has no authored-copy guard:
  *
  *  - **The key is the section's own `name`**, ⛔ never a slug of its label: a
  *    section without a `name` has no `_sections` key (`FormSectionSchema.name`
@@ -3912,9 +3916,13 @@ function translateFormField(
  * Translate the labels, descriptions, helpTexts, and placeholders of a
  * metadata-type configuration form against the active translation bundle.
  *
- * Sections without a stable `name` are returned unchanged for section-level
- * attributes — only field labels are translated (field names are always
- * stable identifiers).
+ * A section's `label` and `description` are looked up at
+ * `metadataForms.<type>.sections.<section_name>`, where `<section_name>` is
+ * the section's own `name` or, when it has none, a slug of its string `label`
+ * (lowercased, `&` → `and`, each run of non-alphanumerics → `_`, edge
+ * underscores trimmed). Only a section with neither keeps its section-level
+ * text. Its fields are translated either way, since field names are always
+ * stable identifiers.
  *
  * Returns a new form object; the input is not mutated.
  *

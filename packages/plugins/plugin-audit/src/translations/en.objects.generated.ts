@@ -181,6 +181,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       metadata: {
         label: "Metadata",
         help: "JSON-serialized additional context"
+      },
+      changed_fields: {
+        label: "Changed Fields",
+        help: "The key set of the recorded change: for an update, every field its recorded old/new values name; empty for every other row. Stamped by the platform at write time; served narrowed to the fields the reader is served. NULL means the row is not stamped yet (run `os migrate activity-changed-fields`)."
+      },
+      milestone_key: {
+        label: "Milestone Key",
+        help: "For a fired activity milestone, one sorted, comma-joined key of every field the object's activityMilestones declaration watched when it fired; NULL for every other row. Stamped by the platform at write time and never served: the read rule compares it with the current declaration."
       }
     }
   },

@@ -4257,22 +4257,35 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
  *    default flip 3 → 0 never needed a materialization step while the job one
  *    did: nothing was ever deployed under the old reading.
  *
- * `retiredFromLoadPath` is NOT set, and the base-delay rename is not why:
- * every surface that carried `retryDelayMs` already refuses it with the rename
- * to `backoffMs` (the `RetryPolicySchema` tombstone, which a `try_catch` node's
- * `config.retry` is, and `flow.errorHandling`'s own).
+ * ## Retired from the load path at 18 (#23543, ruling F2 A)
  *
- * **A recorded verdict at 18 (#23487):** it stays, for the job half alone. It
- * writes the pre-17 `maxRetries: 3` / `backoffMultiplier: 2` into a source
- * `job.retryPolicy` that omits them; retired, the authoring funnel would stop
- * doing that, and such a job would silently drop from three retries to none
- * under the merged 0 / 1 defaults — a default flip no gate can see. It can
- * retire once that default flip has a ruling for authored sources (or the entry
- * is recorded as permanent).
+ * The base-delay rename never needed the load path: every surface that carried
+ * `retryDelayMs` refuses it with the rename to `backoffMs` (the
+ * `RetryPolicySchema` tombstone, which a `try_catch` node's `config.retry` is,
+ * and `flow.errorHandling`'s own). It stayed for the job half alone (the
+ * verdict #23487 recorded): retired, the authoring funnel would stop writing
+ * `maxRetries: 3` into a source block that omits it, and such a job would
+ * silently drop from three retries to none — a default flip no gate can see.
+ * The ruling made that drop loud instead: the job parse refuses a
+ * `retryPolicy` whose `maxRetries` is omitted or 0, naming the fix
+ * (`JOB_RETRY_POLICY_NO_ATTEMPTS`, `system/job.zod.ts`), so no authored job
+ * changes its retry count without its author being told. An omitted
+ * `backoffMultiplier` is not refused and now keeps its declared default (1):
+ * it shapes the delay curve, not whether the job retries.
+ *
+ * The authoring funnel (`defineStack`, `os validate` / `os build` / `os lint`)
+ * no longer replays it. Stored documents are the `includeRetired` seams —
+ * stored-row rehydration (`applyConversionsToStoredItem`), the automation
+ * engine's flow rehydration, the metadata save door's flow fallback, the
+ * artifact-ingestion door inside its window — and `os migrate meta --from 16`
+ * (a step-17 member, carried by the D3 entry `job-retry-policy-without-attempts-refused`),
+ * so a job stored or written before 17 keeps the three retries it ran with.
  */
 const retryPolicyConverged: MetadataConversion = {
   id: 'retry-policy-converged',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
   summary:
     "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', " +
@@ -12178,8 +12191,9 @@ const hookTimeoutToTimeoutMs: MetadataConversion = {
  * rename `hookTimeoutToTimeoutMs` documents. The sibling `retryPolicy.backoffMs`
  * spelled its unit; the per-attempt limit did not. Same posture: retired from
  * the load path, tombstoned at the schema, replayable here. The fixture stays
- * clear of `retryPolicy` on purpose — `retry-policy-converged` is still in its
- * live window on that block and would fire on it.
+ * clear of `retryPolicy` on purpose — `retry-policy-converged` replays on that
+ * block wherever retired entries do (the fixture harness among them) and would
+ * fire on it.
  */
 const jobTimeoutToTimeoutMs: MetadataConversion = {
   id: 'job-timeout-to-timeout-ms',

@@ -392,9 +392,19 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * Section translations keyed by section name (snake_case).
    * Convention:
    *   objects.<object>._sections.<section_name>.label
-   * Used by `record:details` to translate per-section labels on detail pages
-   * (e.g. "Opportunity Information" → "商机信息"). Each section in the
-   * page schema must declare a stable `name` for the lookup to fire.
+   *   objects.<object>._sections.<section_name>.description
+   * Three authoring surfaces name a section under this key (e.g.
+   * "Opportunity Information" → "商机信息"): an object-bound form view's
+   * `sections[].name` (`FormSectionSchema.name`), a `record:details`
+   * component's `sections[].name` on a record page, and an object's
+   * `fieldGroups[].key`. A section without a stable name has no key here.
+   *
+   * Read by the i18n extractor (`walkObjectSections`, which scaffolds the key
+   * from all three surfaces), the translation linter (`collectViewRecord`,
+   * which accepts the names a form view declares) and `translateView` (which
+   * overlays a served form view's `config.sections`). A metadata-editing
+   * form's sections are keyed elsewhere, at
+   * `metadataForms.<type>.sections.<section_name>`.
    */
   _sections: z.record(z.string(), strictObject({
     surface: 'this section translation',

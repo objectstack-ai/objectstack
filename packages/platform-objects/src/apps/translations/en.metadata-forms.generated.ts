@@ -2202,7 +2202,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    description: "A stable HTTP URL that other systems call to run a flow or work with records in the app"
   },
   translation: {
     label: "Translation"
@@ -2282,11 +2282,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    description: "A help page written in Markdown that a package ships or you write yourself"
   },
   book: {
     label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    description: "A table of contents that groups help pages into ordered sections"
   },
   permission: {
     label: "Permission Set",
@@ -2390,7 +2390,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   capability: {
     label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    description: "A permission a package defines; you grant it through permission sets"
   },
   agent: {
     label: "AI Agent",
