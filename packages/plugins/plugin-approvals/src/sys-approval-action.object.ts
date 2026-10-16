@@ -43,13 +43,18 @@ export const SysApprovalAction = ObjectSchema.create({
   // parent request, exactly as `listActions` applies it), so it answers.
   fileAccessDelegate: 'approvals',
 
+  // The display columns (`step_label`, `acted_as_label`) and the record pointer
+  // (`object_name` + `record_id`) are written by `ApprovalService` with the row,
+  // copied from the request it belongs to (`appendAction`). The row is
+  // append-only, so each is the engine's fact at the moment of the action; a
+  // list shows them as stored and never re-derives them.
   listViews: {
     recent: {
       type: 'grid',
       name: 'recent',
       label: 'Recent',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'acted_as', 'via_override', 'comment'],
+      columns: ['created_at', 'object_name', 'record_id', 'request_id', 'step_label', 'action', 'actor_id', 'acted_as_label', 'via_override', 'comment'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
       emptyState: { title: 'No approval actions yet', message: 'Actions are logged automatically when approvals progress.' },
@@ -59,7 +64,7 @@ export const SysApprovalAction = ObjectSchema.create({
       name: 'by_actor',
       label: 'By Actor',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['actor_id', 'created_at', 'request_id', 'step_name', 'action'],
+      columns: ['actor_id', 'created_at', 'request_id', 'step_label', 'action'],
       sort: [{ field: 'actor_id', order: 'asc' }, { field: 'created_at', order: 'desc' }],
       grouping: { fields: [{ field: 'actor_id', order: 'asc', collapsed: false }] },
       pagination: { pageSize: 100 },
@@ -69,7 +74,7 @@ export const SysApprovalAction = ObjectSchema.create({
       name: 'all_actions',
       label: 'All',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['created_at', 'request_id', 'step_name', 'action', 'actor_id', 'acted_as', 'via_override', 'comment'],
+      columns: ['created_at', 'object_name', 'record_id', 'request_id', 'step_label', 'action', 'actor_id', 'acted_as_label', 'via_override', 'comment'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },
@@ -107,6 +112,44 @@ export const SysApprovalAction = ObjectSchema.create({
       required: false,
       maxLength: 100,
       description: 'Machine name of the step at the time of the action',
+      group: 'Target',
+    }),
+
+    // The step's authored label at the time of the action, copied from the
+    // request's `current_step_label` (the node label the engine snapshotted
+    // when the request opened). Null on rows written before this column.
+    step_label: Field.text({
+      label: 'Approval Step',
+      required: false,
+      maxLength: 255,
+      readonly: true,
+      description: 'Label of the step at the time of the action',
+      group: 'Target',
+    }),
+
+    // The record the request is about — the request's own pointer pair
+    // (ADR-0052 §5), copied onto the action when it is written so an action
+    // list can name the record without a join. Null on rows written before
+    // these columns: their record is still reachable through `request_id`.
+    object_name: Field.text({
+      label: 'Object',
+      required: false,
+      maxLength: 100,
+      readonly: true,
+      description: 'Object of the record the request is about',
+      group: 'Target',
+    }),
+
+    record_id: Field.text({
+      label: 'Record',
+      required: false,
+      maxLength: 100,
+      readonly: true,
+      // The id half of the pointer pair; `object_name` names its object. Both
+      // are copied from the request in one write, so a stored id is always a
+      // record id of the object the sibling names.
+      referenceVia: 'object_name',
+      description: 'The record the request is about',
       group: 'Target',
     }),
 
@@ -178,6 +221,21 @@ export const SysApprovalAction = ObjectSchema.create({
         'The pending-approver slot this action was taken as, in the slot’s stored spelling: a user id, an '
         + 'email, or a position address. Empty when no slot admitted the action, such as the submitter’s own '
         + 'actions, system actions and admin overrides.',
+    }),
+
+    // `acted_as` for display: the name of the account the slot names (a user
+    // id, or an email an account carries), resolved when the action is written
+    // by `resolveUserNames` — the resolver `listActions` names the hand-off
+    // parties with — or the stored address when the slot names no person (a
+    // `position:` literal). Null exactly when `acted_as` is null. A snapshot:
+    // a later rename does not rewrite an append-only row.
+    acted_as_label: Field.text({
+      label: 'Acting As',
+      required: false,
+      maxLength: 255,
+      readonly: true,
+      description: 'The slot this action was taken as, for display: the name of the person it names, or its address when it names no person',
+      group: 'Action',
     }),
 
     comment: Field.textarea({ label: 'Comment', required: false, group: 'Action' }),
