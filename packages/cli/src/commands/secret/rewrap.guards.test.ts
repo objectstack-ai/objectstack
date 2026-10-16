@@ -34,6 +34,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 import { ciphertextDerivationStatus } from '@objectstack/service-settings';
 import SecretRewrap from './rewrap.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
@@ -315,6 +316,14 @@ describe('os secret rewrap — guards that stop a run before any row is opened o
 
 const SQLITE_CONFIG = { client: 'better-sqlite3', connection: { filename: '/srv/app/.objectstack/data/objectstack.db' } };
 const POSTGRES_CONFIG = { client: 'pg', connection: 'postgres://db.example.com:5432/app' };
+/**
+ * Printed by every run, both modes. A finished run writes no sys_secret row; it
+ * is never said to write nothing, since either mode's connect can switch a
+ * SQLite file's journal mode and an --apply run's plain boot creates the tables
+ * a never-started database lacks.
+ */
+const RESUMABLE_NOTE = 'Re-running is safe. A row already sealed under the current derivation is skipped as done, so a '
+  + 'run that stopped part-way finishes the rest, and a finished run writes no sys_secret row.';
 
 /** One human-mode run; every line `console.log` received. */
 async function runHuman(argv: string[]): Promise<string[]> {
@@ -381,6 +390,40 @@ describe('os secret rewrap — the human face names no write it cannot vouch for
     expect(h.writes).toEqual([]);
     const aborted = lines.find((line) => line.includes('Aborted'));
     expect(aborted, lines.join('\n')).toContain(`Aborted — no row was opened or written. ${JOURNAL_MODE_SWITCH_NOTE}`);
+  }, 60_000);
+
+  it('an --apply run\'s "Re-running is safe" note claims no sys_secret row and names the switch on a SQLite file', async () => {
+    wireBoot(freshRows(), { driverConfig: SQLITE_CONFIG });
+    const lines = (await runHuman(['--apply', '--yes', '--no-declared-datasources'])).map(stripVTControlCharacters);
+    const resumable = lines.filter((line) => line.includes('Re-running is safe.'));
+    expect(resumable, lines.join('\n')).toEqual([`  ⚠ ${RESUMABLE_NOTE} ${JOURNAL_MODE_SWITCH_NOTE}`]);
+    expect(lines.join('\n')).not.toContain('writes nothing');
+  }, 60_000);
+
+  it('on a target with no file header (PostgreSQL) an --apply run\'s "Re-running is safe" note names no switch', async () => {
+    wireBoot(freshRows(), { driverConfig: POSTGRES_CONFIG });
+    const lines = (await runHuman(['--apply', '--yes', '--no-declared-datasources'])).map(stripVTControlCharacters);
+    const resumable = lines.filter((line) => line.includes('Re-running is safe.'));
+    expect(resumable, lines.join('\n')).toEqual([`  ⚠ ${RESUMABLE_NOTE}`]);
+    expect(lines.join('\n')).not.toContain(JOURNAL_MODE_SWITCH_NOTE);
+  }, 60_000);
+
+  it('a dry run\'s "Re-running is safe" note carries no switch of its own: its closing line names it once', async () => {
+    wireBoot(freshRows(), { driverConfig: SQLITE_CONFIG });
+    const lines = (await runHuman(['--no-declared-datasources'])).map(stripVTControlCharacters);
+    const resumable = lines.filter((line) => line.includes('Re-running is safe.'));
+    expect(resumable, lines.join('\n')).toEqual([`  ⚠ ${RESUMABLE_NOTE}`]);
+    expect(lines.join('\n').split(JOURNAL_MODE_SWITCH_NOTE)).toHaveLength(2);
+  }, 60_000);
+
+  it('--json report.notes carries the "Re-running is safe" note as it is, in both modes, with no switch', async () => {
+    for (const argv of [['--no-declared-datasources'], ['--apply', '--yes', '--no-declared-datasources']]) {
+      wireBoot(freshRows(), { driverConfig: SQLITE_CONFIG });
+      const { payload } = await run(argv);
+      expect(payload.report.notes, argv.join(' ')).toContain(RESUMABLE_NOTE);
+      expect(JSON.stringify(payload.report.notes), argv.join(' ')).not.toContain('writes nothing');
+      expect(JSON.stringify(payload.report.notes), argv.join(' ')).not.toContain(JOURNAL_MODE_SWITCH_NOTE);
+    }
   }, 60_000);
 
   it('the help says the dry run writes no row or table, never that it writes nothing', () => {

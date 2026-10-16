@@ -17,12 +17,16 @@
  * boot can still switch a SQLite file's journal mode, which rewrites its
  * header and no row, so the report's dry-run line claims no row or table and,
  * on a SQLite target only, is followed by the note naming the switch. The
- * report's formatter is the real one from `@objectstack/objectql`.
+ * report's formatter is the real one from `@objectstack/objectql`. A refused
+ * `--recompute-undefined-on-empty` name, thrown after the boot in either mode,
+ * vouches for the walk only and is followed by the same note on a SQLite
+ * target; its refusal is the engine's real one.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 import MigrateSummaryNulls from './summary-nulls.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
@@ -214,5 +218,76 @@ describe('os migrate summary-nulls — the dry run names no write it cannot vouc
     const dryRun = lines.find((line) => line.startsWith('Dry run —'));
     expect(dryRun, lines.join('\n')).toBe(DRY_RUN_LINE);
     expect(lines.join('\n')).not.toContain(JOURNAL_MODE_SWITCH_NOTE);
+  }, RUN_TIMEOUT);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// The human face: what a refused --recompute-undefined-on-empty name says
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('os migrate summary-nulls — a refused scope names no write it cannot vouch for', () => {
+  /** The engine's own refusal of `customer.nope`, from the real `backfillSummaryNulls`. */
+  async function realRefusal(): Promise<Error & { code: string }> {
+    const real = await vi.importActual<typeof import('@objectstack/objectql')>('@objectstack/objectql');
+    const quiet = { info: () => {}, warn: () => {} };
+    return real.backfillSummaryNulls(engine as any, quiet, { recomputeUndefinedOnEmpty: ['customer.nope'] })
+      .then(() => { throw new Error('expected the scope to be refused'); }, (e: unknown) => e as Error & { code: string });
+  }
+
+  /** Boot onto a primary driver with `config`, in either mode; every line the run printed, colour stripped. */
+  async function runRefused(config: Record<string, unknown>, argv: string[]): Promise<{ lines: string[]; message: string }> {
+    const refusal = await realRefusal();
+    expect(refusal.code).toBe('INVALID_FIELD');
+    vi.mocked(bootSchemaStack).mockResolvedValue({
+      driver: { config },
+      kernel: { getService: () => engine },
+      dbLabel: 'test database',
+      shutdown: vi.fn(async () => {}),
+    } as any);
+    vi.mocked(backfillSummaryNulls).mockRejectedValue(refusal);
+    const err = await MigrateSummaryNulls.run(
+      [...argv, '--recompute-undefined-on-empty', 'customer.nope'],
+      { root: CLI_ROOT },
+    ).catch((e: unknown) => e);
+    expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(1);
+    const lines = log.mock.calls
+      .map((c: unknown[]) => stripVTControlCharacters(c.map(String).join(' ')))
+      .join('\n')
+      .split('\n');
+    return { lines, message: refusal.message };
+  }
+
+  for (const [mode, argv] of [['dry run', []], ['--apply', ['--apply', '--yes']]] as const) {
+    it(`${mode}: on a SQLite file the refusal vouches for the walk and is followed by the journal-mode note`, async () => {
+      const { lines, message } = await runRefused(SQLITE_CONFIG, [...argv]);
+      expect(message).toMatch(/ Refused before the walk read or wrote any row\.$/);
+      const refused = lines.filter((line) => line.includes('this run cannot find'));
+      expect(refused, lines.join('\n')).toEqual([`  ✗ ${message} ${JOURNAL_MODE_SWITCH_NOTE}`]);
+      expect(lines.join('\n')).not.toContain('nothing was written');
+    }, RUN_TIMEOUT);
+
+    it(`${mode}: on a target with no file header (PostgreSQL) the refusal names no switch`, async () => {
+      const { lines, message } = await runRefused(POSTGRES_CONFIG, [...argv]);
+      const refused = lines.filter((line) => line.includes('this run cannot find'));
+      expect(refused, lines.join('\n')).toEqual([`  ✗ ${message}`]);
+      expect(lines.join('\n')).not.toContain(JOURNAL_MODE_SWITCH_NOTE);
+    }, RUN_TIMEOUT);
+  }
+
+  it('--json: the envelope carries the engine\'s message as it is, with no journal-mode note, on a SQLite file', async () => {
+    const refusal = await realRefusal();
+    vi.mocked(bootSchemaStack).mockResolvedValue({
+      driver: { config: SQLITE_CONFIG },
+      kernel: { getService: () => engine },
+      dbLabel: 'test database',
+      shutdown: vi.fn(async () => {}),
+    } as any);
+    vi.mocked(backfillSummaryNulls).mockRejectedValue(refusal);
+    await MigrateSummaryNulls.run(
+      ['--json', '--recompute-undefined-on-empty', 'customer.nope'],
+      { root: CLI_ROOT },
+    ).catch((e: unknown) => e);
+    const payload = JSON.parse(stdout.mock.calls.map((c: unknown[]) => String(c[0])).join(''));
+    expect(payload).toMatchObject({ code: 'INVALID_FIELD', httpStatus: 400, error: refusal.message });
   }, RUN_TIMEOUT);
 });

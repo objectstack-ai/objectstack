@@ -469,6 +469,23 @@ describe('rendering — informational, and silent when there is nothing to say',
     expect(text.toLowerCase()).not.toContain('delete');
   });
 
+  it('closes with a claim of no row or table, never that a plan writes nothing', () => {
+    // A plan's read-only boot can still switch a SQLite file's journal mode,
+    // which rewrites its header: "writes nothing" is false there, "no row or
+    // table" is true on every target. `os migrate plan` appends the note
+    // naming the switch to this line on a SQLite file (its own pin).
+    const lines = renderUnmanagedTables({
+      status: 'read',
+      prefixes: ['sys_'],
+      physicalTables: 3,
+      tables: [{ table: 'sys_legacy_widget' }],
+    });
+    expect(lines[lines.length - 1]).toBe(
+      'They are reported for information only — nothing here drops them, and a plan writes no row or table.',
+    );
+    expect(lines.join('\n')).not.toContain('writes nothing');
+  });
+
   it('describes a collapsed rotation family by its shard count', () => {
     expect(describeUnmanagedTable({ table: 'sys_activity', rotationShards: ['sys_activity__r20260810'] }))
       .toBe('sys_activity (1 rotation shard(s): sys_activity__r20260810)');

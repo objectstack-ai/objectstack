@@ -72,6 +72,7 @@
 
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { mapAuthApiError, type EndpointResult } from './admin-user-endpoints.js';
+import { readJsonRequestBody } from './request-json-body.js';
 
 /** Minimal better-auth server-api surface this route drives. */
 export interface AddMemberCapableApi {
@@ -97,13 +98,19 @@ const badRequest = (message: string): EndpointResult => ({
   body: { success: false, error: { code: 'INVALID_REQUEST', message } },
 });
 
-async function parseJson(request: Request): Promise<Record<string, unknown>> {
-  try {
-    const parsed = await request.json();
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
+/**
+ * [#24032] The body, or the refusal message for a declared-JSON body that does
+ * not parse: it was read as `{}`, which answered "userId is required" for a
+ * body that carried `userId` (see request-json-body.ts). A well-formed body
+ * that is not an object still reads as no fields, as before.
+ */
+async function parseJson(
+  request: Request,
+): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }> {
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) return reading;
+  const parsed = reading.body;
+  return { ok: true, body: parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {} };
 }
 
 /**
@@ -155,7 +162,9 @@ export async function runOrganizationAddMember(
     };
   }
 
-  const body = await parseJson(request);
+  const read = await parseJson(request);
+  if (!read.ok) return badRequest(read.message);
+  const body = read.body;
   const userId = readString(body, 'userId', 'user_id');
   if (!userId) return badRequest('userId is required');
   const role = readRole(body);

@@ -1145,7 +1145,7 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
         .join(', ');
       parts.push(
         `Refused ${total} write(s) during the declaration boot`
-        + `${writesNothingHeld ? ' — a plan writes nothing' : ''}: ${detail}. `
+        + `${writesNothingHeld ? ' — a plan writes no row or table' : ''}: ${detail}. `
         + 'A plugin in this stack registers a writing hook outside start(); the plan below is '
         + 'unaffected, but that write WOULD have landed on a served boot of the same stack.',
       );
@@ -1160,7 +1160,7 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
         + 'FORWARDED, not refused: a raw command is opaque to this guard — the contract admits '
         + 'any native shape, and SQL text cannot be classified as read-vs-write reliably — so '
         + 'whether this boot wrote is NOT verified, and this run does NOT claim to have '
-        + 'written nothing. If those commands only read, nothing was written; if one wrote, it '
+        + 'written nothing. If those commands only read, no row or table was written; if one wrote, it '
         + 'landed. Issue row writes through the contract methods (refused and reported here), '
         + 'or move raw commands out of the boot path.',
       );

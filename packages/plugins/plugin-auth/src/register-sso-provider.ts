@@ -23,6 +23,7 @@
  */
 
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
+import { readJsonRequestBody } from './request-json-body.js';
 
 export interface RegisterSsoFormResult {
   /** HTTP status to return to the caller. */
@@ -37,6 +38,21 @@ export interface RegisterSsoFormResult {
 
 /** A better-auth universal handler: `(request) => Response`. */
 export type AuthRequestHandler = (request: Request) => Promise<Response>;
+
+/**
+ * [#24032] The four bridges' body read. A declared-JSON body that does not
+ * parse is answered `400 INVALID_REQUEST` before the vendor is called; it was
+ * read as `{}`, which answered "Missing required field(s)" for a form that
+ * carried every field (see request-json-body.ts).
+ */
+async function readFormBody(request: Request): Promise<{ ok: true; body: any } | { ok: false; refusal: RegisterSsoFormResult }> {
+  const reading = await readJsonRequestBody(request);
+  if (reading.ok) return { ok: true, body: reading.body };
+  return {
+    ok: false,
+    refusal: { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: reading.message } } },
+  };
+}
 
 /**
  * Resolve the caller's active organization id by re-dispatching a
@@ -94,12 +110,9 @@ export async function runRegisterSsoProviderFromForm(
   handle: AuthRequestHandler,
   request: Request,
 ): Promise<RegisterSsoFormResult> {
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    body = {};
-  }
+  const read = await readFormBody(request);
+  if (!read.ok) return read.refusal;
+  const body = read.body;
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const providerId = str(body?.providerId);
   const issuer = str(body?.issuer);
@@ -246,8 +259,9 @@ export async function runRegisterSamlProviderFromForm(
   handle: AuthRequestHandler,
   request: Request,
 ): Promise<RegisterSsoFormResult & { body: RegisterSsoFormResult['body'] & { acsUrl?: string; spMetadataUrl?: string } }> {
-  let body: any;
-  try { body = await request.json(); } catch { body = {}; }
+  const read = await readFormBody(request);
+  if (!read.ok) return read.refusal;
+  const body = read.body;
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const providerId = str(body?.providerId);
   const issuer = str(body?.issuer);
@@ -440,8 +454,9 @@ export async function runRequestDomainVerification(
   request: Request,
   options: SsoDomainVerificationBridgeOptions = {},
 ): Promise<DomainVerificationBridgeResult> {
-  let body: any;
-  try { body = await request.json(); } catch { body = {}; }
+  const read = await readFormBody(request);
+  if (!read.ok) return read.refusal;
+  const body = read.body;
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const providerId = str(body?.providerId);
   const domain = bareHostname(str(body?.domain));
@@ -497,8 +512,9 @@ export async function runVerifyDomain(
   request: Request,
   options: SsoDomainVerificationBridgeOptions = {},
 ): Promise<DomainVerificationBridgeResult> {
-  let body: any;
-  try { body = await request.json(); } catch { body = {}; }
+  const read = await readFormBody(request);
+  if (!read.ok) return read.refusal;
+  const body = read.body;
   const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const providerId = str(body?.providerId);
   if (!providerId) {

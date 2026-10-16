@@ -288,11 +288,16 @@ function resolveRecomputeScope(
     else if (!unresolved.includes(entry)) unresolved.push(entry);
   }
   if (unresolved.length > 0) {
+    // The closing sentence names what the walk vouches for and nothing wider:
+    // the command that prints this boots before it calls here, and that boot's
+    // connect can switch a SQLite file's journal mode (its header, no row),
+    // while an `--apply` boot may create a missing table. The command, which
+    // knows its target, appends the journal-mode note on a SQLite file.
     const err = new Error(
       `[summary-backfill] recomputeUndefinedOnEmpty names ${unresolved.length} roll-up(s) this run cannot find: ` +
         `${unresolved.join(', ')}. Each entry is spelled object.field and must name a summary field owned by one ` +
         `of the ${candidates.length} object(s) this run walks (an object left out by \`objects\` is not walked). ` +
-        'Refused before any row was read; nothing was written.',
+        'Refused before the walk read or wrote any row.',
     ) as Error & { code: string; status: number; httpStatus: number; field: string; fields: string[] };
     err.code = 'INVALID_FIELD';
     err.status = 400;

@@ -505,6 +505,6 @@ export function renderUnmanagedTables(report: UnmanagedTablesReport): string[] {
     `${report.tables.length} table(s) in the database(s) this plan covers carry a reserved platform prefix `
     + `(${report.prefixes.join(', ')}) and are declared by no object in this plan:`,
     ...report.tables.map((finding) => `  • ${describeUnmanagedTable(finding)}`),
-    'They are reported for information only — nothing here drops them, and a plan writes nothing.',
+    'They are reported for information only — nothing here drops them, and a plan writes no row or table.',
   ];
 }

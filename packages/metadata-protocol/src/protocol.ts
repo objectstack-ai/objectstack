@@ -6461,11 +6461,12 @@ export class ObjectStackProtocolImplementation implements
      * has always done, extended by the full-chain replay data at rest needs
      * (a stored row has no author for a tombstone to teach).
      *
-     * `flow` is deliberately skipped: flow-node conversions carry an
-     * open-namespace conflict guard that needs the automation engine's live
-     * executor registry (`reservedNodeTypes`), which this layer does not
-     * have. Flows canonicalize at `AutomationEngine.registerFlow` — the
-     * execution seam — with the same full-chain policy.
+     * `flow` is deliberately skipped: flows canonicalize at
+     * `AutomationEngine.registerFlow` — the execution seam — with the same
+     * full-chain policy. (The reason this was first written for — the callout
+     * rename's open-namespace conflict guard, which needed the engine's live
+     * executor registry — retired with that guard; the conflict channel left
+     * in protocol 18, #24001.)
      *
      * [#20101] …and a page that omits `type` is read with the default
      * `PageSchema` declares ({@link withDeclaredPageTypeDefault}). That fill is
@@ -6531,10 +6532,9 @@ export class ObjectStackProtocolImplementation implements
     /**
      * Resolve a flow canonicalizer from the live services registry (#4498).
      *
-     * `convertStoredItem` skips `flow` because flow-node conversions carry
-     * ADR-0078's open-namespace conflict guard, which needs the automation
-     * engine's executor registry to tell a rename from a clobber. #4454 built
-     * that capability as `AutomationEngine.canonicalizeStoredFlow` and handed
+     * `convertStoredItem` skips `flow` because a flow canonicalizes at the
+     * automation engine, whose registration checks judge it against the live
+     * node registry. #4454 built that capability as `AutomationEngine.canonicalizeStoredFlow` and handed
      * it to `migrateStoredMetadata` as an explicit hook, because the CLI has
      * to boot an engine of its own to hold one.
      *
@@ -22988,9 +22988,9 @@ export class ObjectStackProtocolImplementation implements
 
         // Canonicalize `flow` bodies BEFORE the schema gate, so an author's
         // save heals a pre-protocol row the way it heals every other type
-        // (#4542). The read path serves stored flows verbatim (the ADR-0078
-        // conflict guard needs the engine's executor registry — see
-        // {@link resolveFlowCanonicalizer}), and `FlowNodeSchema.config` is an
+        // (#4542). The read path serves stored flows verbatim (a flow
+        // canonicalizes at the engine — see {@link resolveFlowCanonicalizer}),
+        // and `FlowNodeSchema.config` is an
         // open record, so without this pass the gate below accepts the legacy
         // dialect back and the row stays `pending` in `os migrate meta
         // --stored` forever. Persists `storable`, never the parsed shape —
@@ -23011,10 +23011,9 @@ export class ObjectStackProtocolImplementation implements
         // verdict that depended on whether this host runs an automation
         // service. So the fallback replays the chain the canonicalizer replays
         // FOR THIS SAVE, minus the same default flip
-        // ({@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}). No `reservedNodeTypes` (no
-        // engine here): a node-type rename's conflict guard keeps its one home
-        // in the engine's canonicalizer, and this converted body is never
-        // persisted. A key no conversion rewrites is judged exactly as written.
+        // ({@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}). This converted body is
+        // never persisted. A key no conversion rewrites is judged exactly as
+        // written.
         //
         // [#23775, ADR-0087 addendum 2026-07-31] Which chain that is, is the
         // ruling's predicate ({@link flowSaveReplaysRetired}). A re-save of a
@@ -23074,26 +23073,6 @@ export class ObjectStackProtocolImplementation implements
                     result = undefined;
                 }
                 if (result) {
-                    if (result.conflicts.length > 0) {
-                        // ADR-0078's guard refused a node-type rename because
-                        // the old token is a LIVE name owned by a custom
-                        // executor here. Persisting the un-renamed body would
-                        // mint exactly the row this pass exists to prevent
-                        // (same posture as `duplicatePackage` / #4454). 409,
-                        // not 422: the body may be perfectly valid — the
-                        // refusal comes from environment state, so
-                        // resubmitting the same body cannot help.
-                        const first = result.conflicts[0]!;
-                        const err = new Error(
-                            `${request.type}/${request.name}: conversion refused — `
-                            + `'${first.token}' at ${first.path} is a live name in this environment `
-                            + `(${result.conflicts.length} conflict(s)). ${first.message}`
-                        );
-                        (err as any).code = 'FLOW_CONVERSION_CONFLICT';
-                        (err as any).status = 409;
-                        (err as any).conflicts = result.conflicts;
-                        throw err;
-                    }
                     request.item = result.storable;
                     canonicalized = true;
                 }
@@ -23847,21 +23826,12 @@ export class ObjectStackProtocolImplementation implements
      * four. #9271 ruled that split intentional: keep each list correct for
      * its own audience rather than reconciling them.
      *
-     * - **`flow` rows with no reachable automation engine.** Flow-node
-     *   conversions carry ADR-0078's open-namespace conflict guard, which
-     *   needs the engine's live executor registry. When one is reachable —
+     * - **`flow` rows with no reachable automation engine.** A flow
+     *   canonicalizes at the engine, whose registration checks need the live
+     *   node registry. When one is reachable —
      *   passed as `canonicalizeFlow`, or resolved from the services registry
      *   (#4498) — flows are migrated like anything else (#4454); when none is,
      *   they are reported `skipped` with that reason, never counted done.
-     * - **A flow whose rename that guard refused.** With an engine reachable,
-     *   the same open-namespace check can still find the old node-type token
-     *   is a LIVE name something else owns here. The conversion is refused and
-     *   the row reported `failed`, naming the token and its path: rewriting
-     *   would clobber that owner, and a quiet skip would hide it. Unlike the
-     *   bullet above this one IS reachable from every door — the CLI boots an
-     *   inert engine to hold the registry, and `POST /meta/_migrate-stored`
-     *   resolves a live one from the services registry — so
-     *   `content/docs/deployment/cli.mdx` carries it too.
      * - **Types with no repository write path** (neither `allowEnvironmentOverlay` nor
      *   `allowRuntimeCreate`). This pass declines them, and since #5086 it
      *   would have no choice: `saveMetaItem` refuses a code-only type with
@@ -23936,9 +23906,8 @@ export class ObjectStackProtocolImplementation implements
          * services registry (#4498, {@link resolveFlowCanonicalizer}).
          *
          * `AutomationEngine.canonicalizeStoredFlow` is the implementation.
-         * Flow conversions carry ADR-0078's open-namespace conflict guard,
-         * which needs the engine's executor registry to tell a rename from a
-         * clobber. A caller running next to a live engine (an admin route, a
+         * A flow canonicalizes at the engine, whose registration checks need
+         * the live node registry. A caller running next to a live engine (an admin route, a
          * server task) needs to pass nothing; the CLI passes its own because
          * it boots an inert engine specifically to hold one, and an explicit
          * hook is also what makes the flow branch testable without an engine.
@@ -24136,18 +24105,19 @@ export class ObjectStackProtocolImplementation implements
                 }
             }
 
-            // Flow rows need the automation engine's live executor registry for
-            // ADR-0078's open-namespace conflict guard — supplied by the caller
-            // (#4454) or resolved from the services registry (#4498), and
-            // reported `skipped` when neither can reach one.
+            // Flow rows need the automation engine's canonicalizer — its
+            // registration preview judges plugin nodes against the live
+            // registry — supplied by the caller (#4454) or resolved from the
+            // services registry (#4498), and reported `skipped` when neither
+            // can reach one.
             let flowResult: StoredFlowCanonicalization | undefined;
             if (singular === 'flow') {
                 if (!canonicalizeFlow) {
                     record({
                         ...base,
                         outcome: 'skipped',
-                        reason: 'flows canonicalize at AutomationEngine.registerFlow — the node-type '
-                            + 'conflict guard needs the live executor registry, and no automation service '
+                        reason: 'flows canonicalize at AutomationEngine.registerFlow — its registration '
+                            + 'checks need the live node registry, and no automation service '
                             + 'is reachable from this caller',
                     });
                     continue;
@@ -24162,19 +24132,6 @@ export class ObjectStackProtocolImplementation implements
                         ...base,
                         outcome: 'failed',
                         reason: `the flow does not canonicalize: ${e?.message ?? String(e)}`,
-                    });
-                    continue;
-                }
-                if (flowResult.conflicts.length > 0) {
-                    // A rename refused because its old token is a LIVE name owned
-                    // by something else. Rewriting would clobber that owner, and
-                    // skipping quietly would hide it — the guard exists to be loud.
-                    const first = flowResult.conflicts[0]!;
-                    record({
-                        ...base,
-                        outcome: 'failed',
-                        reason: `conversion refused — '${first.token}' at ${first.path} is a live name in `
-                            + `this environment (${flowResult.conflicts.length} conflict(s)). ${first.message}`,
                     });
                     continue;
                 }
@@ -27552,22 +27509,6 @@ export class ObjectStackProtocolImplementation implements
                 } else {
                     try {
                         const result = canonicalizeFlow(String(row.name ?? ''), body);
-                        if (result.conflicts.length > 0) {
-                            // ADR-0078's guard refused a node-type rename because
-                            // the old token is a LIVE name owned by something
-                            // else here. Copying the un-renamed body anyway would
-                            // mint exactly the row this fix exists to prevent, so
-                            // the item fails and names the token (same posture as
-                            // #4454's `failed` outcome).
-                            const first = result.conflicts[0]!;
-                            failed.push({
-                                type: row.type,
-                                name: row.name,
-                                error: `conversion refused — '${first.token}' at ${first.path} is a live name in `
-                                    + `this environment (${result.conflicts.length} conflict(s)). ${first.message}`,
-                            });
-                            continue;
-                        }
                         item = result.storable;
                     } catch (e: any) {
                         // `FlowSchema` is strict (#4001) and the region validator
@@ -27728,8 +27669,7 @@ export class ObjectStackProtocolImplementation implements
      *  6. the target id names an installed package (`RESOURCE_CONFLICT` / 409;
      *     Q3: ⛔ never into an existing base) or the namespace is owned;
      *  7. an item does not convert to today's protocol (`INVALID_METADATA` /
-     *     422), or a flow's conversion would clobber a live name
-     *     (`FLOW_CONVERSION_CONFLICT` / 409);
+     *     422);
      *  8. a name collides with an environment row or an item a managed package
      *     ships (`RESOURCE_CONFLICT` / 409).
      *
@@ -27815,7 +27755,6 @@ export class ObjectStackProtocolImplementation implements
         const canonicalizeFlow = plan.items.some((i) => i.type === 'flow') ? this.resolveFlowCanonicalizer() : undefined;
         const prepared: Array<{ type: string; name: string; item: unknown }> = [];
         const unconvertible: string[] = [];
-        const flowConflicts: string[] = [];
         for (const planned of plan.items) {
             try {
                 if (planned.type !== 'flow') {
@@ -27826,12 +27765,7 @@ export class ObjectStackProtocolImplementation implements
                     prepared.push({ type: planned.type, name: planned.name, item: planned.body });
                 } else {
                     const result = canonicalizeFlow(planned.name, planned.body);
-                    if (result.conflicts.length > 0) {
-                        const first = result.conflicts[0]!;
-                        flowConflicts.push(`flow '${planned.name}': '${first.token}' at ${first.path} — ${first.message}`);
-                    } else {
-                        prepared.push({ type: planned.type, name: planned.name, item: result.storable });
-                    }
+                    prepared.push({ type: planned.type, name: planned.name, item: result.storable });
                 }
             } catch (e: any) {
                 unconvertible.push(`${planned.type} '${planned.name}': ${e?.message ?? String(e)}`);
@@ -27845,14 +27779,6 @@ export class ObjectStackProtocolImplementation implements
                 + 'this protocol, then install again.',
             ), { code: 'INVALID_METADATA', status: 422 });
         }
-        if (flowConflicts.length > 0) {
-            throw Object.assign(new Error(
-                `Package '${sourcePackageId}' cannot be installed unmanaged: converting its flows would overwrite live `
-                + `names in this environment — ${flowConflicts.slice(0, 3).join('; ')}`
-                + `${flowConflicts.length > 3 ? ` (+${flowConflicts.length - 3} more)` : ''}.`,
-            ), { code: 'FLOW_CONVERSION_CONFLICT', status: 409 });
-        }
-
         // 8. Every name the copy would take, against the environment and the
         //    managed packages — the save door would refuse or overlay them.
         const collisions = await this.unmanagedImportCollisions(plan.items);
@@ -31392,6 +31318,20 @@ export class ObjectStackProtocolImplementation implements
 
         // [#23972] Every package this primitive installs is AUTHORED — a Studio
         // base, a duplicate, an HTTP install — persisted to `sys_packages` below.
+        //
+        // ADR-0087 D2 — this door is AUTHORING-side, so the registry judges the
+        // manifest exactly as handed, and no forward conversion runs here (the
+        // window the registration door, the `sys_packages` hydration and the
+        // marketplace install open is for bodies at rest). Its callers hand it
+        // a manifest being written now: `POST /api/v1/packages` parses the
+        // whole body through the closed `ManifestSchema` first, which refuses
+        // a metadata collection such as `pages` outright; `duplicatePackage`
+        // copies the registry's own record, already judged; the unmanaged
+        // install's base carries identity keys only; and AI Studio's blueprint
+        // tools author in-process. A retired declaration there is the author's
+        // to fix, refused loudly at the moment of writing. Once the body sits
+        // in `sys_packages` it is data at rest, and the boot hydration
+        // (`@objectstack/service-package`) converts it at every load.
         let pkg = this.engine.registry.installPackage(manifest as any, 'authored', request.settings);
 
         // [#19277] HONOUR `enableOnInstall` — the key THIS request contract

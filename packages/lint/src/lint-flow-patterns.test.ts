@@ -48,10 +48,28 @@ import { validateStackExpressions } from './validate-expressions.js';
 // the hint block at the foot of the file holds each recorded `fix:` line to one
 // line of at most 200 characters.
 const firedHints: Array<{ rule: string; message: string; hint: string }> = [];
+// [#22161] Slice 20: the twelve anti-pattern ids, recorded the same way for the
+// second hint block at the foot of the file.
+const SLICE_20_IDS: readonly string[] = [
+  FLOW_LOOP_BODY_UNCONTAINED,
+  FLOW_MULTI_WRITE_UNFILTERED,
+  FLOW_TRY_CATCH_WITHOUT_CATCH,
+  FLOW_DECISION_INCLUSIVE_OVERLAP,
+  FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED,
+  FLOW_TIME_RELATIVE_ANTIPATTERN,
+  FLOW_DATE_EQUALITY_FILTER,
+  FLOW_RUNAS_UNSCOPED,
+  FLOW_DECISION_MODE_INVALID,
+  FLOW_DECISION_UNCONDITIONAL_BRANCH,
+  FLOW_ERROR_LABEL_NOT_FAULT,
+  FLOW_BRANCH_LABEL_UNMATCHED,
+];
+const firedSlice20Hints: Array<{ rule: string; message: string; hint: string }> = [];
 const lintFlowPatterns: typeof lintFlowPatternsUnrecorded = (...args) => {
   const findings = lintFlowPatternsUnrecorded(...args);
   for (const f of findings) {
     if (f.rule === FLOW_DOUBLE_BRACE_INTERP || f.rule === FLOW_BARE_DOLLAR_REF) firedHints.push(f as { rule: string; message: string; hint: string });
+    if (SLICE_20_IDS.includes(f.rule)) firedSlice20Hints.push(f as { rule: string; message: string; hint: string });
   }
   return findings;
 };
@@ -1775,16 +1793,21 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
 
   it('names the #3810 run-time guard and says the two judge DIFFERENT facts', () => {
     const [f] = lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', multi: true }));
+    // [#22161] The `fix:` line is the remedy alone; the cross-naming and the
+    // way to keep a meant whole-object write are `os explain` (pinned here
+    // where they were pinned on the hint before).
+    const text = explained(FLOW_MULTI_WRITE_UNFILTERED);
     // Cross-naming, not duplication: the run-time guard refuses "a condition you
     // WROTE is gone"; this rule warns "no condition was ever written".
-    expect(f.hint).toContain('the run-time erased-condition guard');
-    expect(f.hint).toMatch(/REFUSES this node at run time/);
-    expect(f.hint).toMatch(/a written condition is gone/);
-    expect(f.hint).toMatch(/the filter is empty/);
+    expect(text).toContain('the run-time erased-condition guard');
+    expect(text).toMatch(/REFUSES this node at run time/);
+    expect(text).toMatch(/a written condition is gone/);
+    expect(text).toMatch(/the filter is empty/);
     // Both ways out are offered, and the run-time path is explicitly NOT closed.
     expect(f.hint).toMatch(/Write the constraint you mean/);
-    expect(f.hint).toMatch(/warning, not a gate/);
-    expect(f.hint).toContain('showcase_inquiry_purge');
+    expect(text).toMatch(/warning, not a gate/);
+    expect(text).toContain('showcase_inquiry_purge');
+    expect(f.hint).not.toContain('erased-condition guard');
   });
 
   describe('does NOT flag (false-positive guards)', () => {
@@ -2093,7 +2116,9 @@ describe('per-iteration containment (#13681 / #14394)', () => {
       // The prescribed spelling, with the measured minimal `catch`.
       expect(fnds[0].hint).toContain("type: 'try_catch'");
       expect(fnds[0].hint).toContain("{ id: 'handled', type: 'assignment', label: 'Handled' }");
-      expect(fnds[0].hint).toContain('`catch: {}` and `catch: { nodes: [] }` are both refused');
+      // [#22161] The empty spellings the parse refuses moved to `os explain`.
+      expect(explained(FLOW_LOOP_BODY_UNCONTAINED)).toContain('`catch: {}` and `catch: { nodes: [] }` are both refused');
+      expect(fnds[0].hint).not.toContain('are both refused');
     });
 
     it('flags every fallible builtin in the body, once each', () => {
@@ -3243,7 +3268,10 @@ describe('decision `mode` (#15429)', () => {
         expect(fnds[0].where).toBe("flow 'verdict' · decision 'check' · config.mode");
         expect(fnds[0].message).toContain(`\`mode: '${mode}'\` is not valid on a decision that declares a \`conditions\` list`);
         expect(fnds[0].message).toContain('Either delete `mode` and keep the list');
-        expect(fnds[0].hint).toContain('`registerFlow` refuses this flow with the same sentence');
+        // [#22161] Why it gates moved to `os explain`; the line is the remedy.
+        expect(explained(FLOW_DECISION_MODE_INVALID)).toContain('`registerFlow` refuses this flow with the same sentence');
+        expect(fnds[0].hint).toContain("set `mode: 'inclusive'`");
+        expect(fnds[0].hint).not.toContain('registerFlow');
       }
     });
 
@@ -3288,7 +3316,9 @@ describe('decision `mode` (#15429)', () => {
       expect(fnds[0].message).toContain("'refuse', 'convert'");
       expect(fnds[0].message).toContain('EVERY one whose condition holds runs');
       expect(fnds[0].hint).toContain('delete `mode`');
-      expect(fnds[0].hint).toContain('os migrate meta --from 17');
+      // [#22161] Where the migration left the key moved to `os explain`.
+      expect(explained(FLOW_DECISION_INCLUSIVE_OVERLAP)).toContain('authored against protocol major 17 and converted by `os migrate meta`');
+      expect(fnds[0].hint).not.toContain('os migrate meta');
     });
 
     it('does NOT advise an exclusive decision — omitted or written — with the same two edges', () => {
@@ -3556,5 +3586,115 @@ describe('[#22161] one-line fix — flow-double-brace-interpolation and flow-bar
   it.each(Object.keys(MOVED_FROM_HINT))('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
     const text = explained(rule);
     for (const fact of MOVED_FROM_HINT[rule]!) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 20: the twelve anti-pattern ids. Each `fix:` line is one remedy
+// line; what it used to carry (why the shape fails, when it is a legitimate
+// reading, what the rule does not judge, the history and the worked examples)
+// is each id's `os explain` entry. The cases above fire every id, and the
+// recorder at the top of the file collects every hint they produced.
+describe('[#22161] one-line fix — the twelve flow anti-pattern ids', () => {
+  it('every `fix:` line the cases above fired for the twelve ids is one line of at most 200 characters', () => {
+    // Coverage control: every id fired, and every hint arm of each.
+    expect([...new Set(firedSlice20Hints.map((f) => f.rule))].sort()).toEqual([...SLICE_20_IDS].sort());
+    const ofRule = (rule: string) => firedSlice20Hints.filter((f) => f.rule === rule);
+    // `flow-decision-unconditional-branch` has two arms, by message.
+    expect(ofRule(FLOW_DECISION_UNCONDITIONAL_BRANCH).some((f) => f.message.startsWith('gates on NOTHING')), 'no-gate arm').toBe(true);
+    expect(ofRule(FLOW_DECISION_UNCONDITIONAL_BRANCH).some((f) => f.message.startsWith('has guarded out-edge(s)')), 'mixed arm').toBe(true);
+    // `flow-runas-unscoped` once named the trigger kind in its line; every kind still fires.
+    for (const kind of ['schedule', 'time-relative', 'api']) {
+      expect(ofRule(FLOW_RUNAS_UNSCOPED).some((f) => f.message.startsWith(`${kind}-triggered`)), kind).toBe(true);
+    }
+    for (const f of firedSlice20Hints) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the two containment entries spell the `catch` region their `fix:` lines prescribe', () => {
+    for (const rule of [FLOW_LOOP_BODY_UNCONTAINED, FLOW_TRY_CATCH_WITHOUT_CATCH]) {
+      const hints = firedSlice20Hints.filter((f) => f.rule === rule).map((f) => f.hint);
+      expect(hints.length, rule).toBeGreaterThan(0);
+      for (const hint of hints) {
+        const region = /`catch: \{[^`]*\}`/.exec(hint)?.[0];
+        expect(region, `${rule}: ${hint}`).toBeDefined();
+        expect(explained(rule), rule).toContain(region!);
+      }
+    }
+  });
+
+  // What each `fix:` line stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED_FROM_SLICE_20_HINT: Record<string, readonly string[]> = {
+    [FLOW_LOOP_BODY_UNCONTAINED]: [
+      '`catch: {}` and `catch: { nodes: [] }` are both refused by the parse',
+      'one bare `assignment` node with no `config`',
+      'processes all 5 items and the run completes',
+      'a legitimate reading',
+      'content/docs/automation/flows.mdx §"Per-iteration containment"',
+    ],
+    [FLOW_TRY_CATCH_WITHOUT_CATCH]: [
+      '`catch: {}` and `catch: { nodes: [] }` are both refused by the parse',
+      '`errorVariable`',
+      'legitimate retry-then-fail shape',
+      'content/docs/automation/flows.mdx §"Per-iteration containment"',
+    ],
+    [FLOW_MULTI_WRITE_UNFILTERED]: [
+      'showcase_inquiry_purge',
+      'warning, not a gate',
+      'the run-time erased-condition guard',
+      '"the filter is empty"',
+    ],
+    [FLOW_DECISION_INCLUSIVE_OVERLAP]: [
+      "Keep `mode: 'inclusive'` only where running every matching branch is the intent",
+      'authored against protocol major 17 and converted by `os migrate meta`',
+    ],
+    [FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED]: [
+      'POST /api/v1/approvals/requests/:id/resubmit',
+      'ADR-0044 D3 originally said `wait` here',
+      'resumable by anyone with the run id',
+    ],
+    [FLOW_TIME_RELATIVE_ANTIPATTERN]: [
+      'is swept daily',
+      'a range (`$gte` / `$lt`)',
+    ],
+    [FLOW_DATE_EQUALITY_FILTER]: [
+      'abutting windows tile the timeline',
+      'each row matches exactly once',
+      '`offsetDays` runs once per record on each offset day',
+    ],
+    [FLOW_RUNAS_UNSCOPED]: [
+      'scopes each data operation to the triggering user\'s grants',
+      'refuses the operation rather than run it unscoped',
+      'ADR-0049, ADR-0073 D5',
+    ],
+    [FLOW_DECISION_MODE_INVALID]: [
+      '`registerFlow` refuses this flow with the same sentence',
+      'Fix the node in the flow definition',
+    ],
+    [FLOW_DECISION_UNCONDITIONAL_BRANCH]: [
+      'drop `type: \'decision\'` and use the node it already behaves as',
+    ],
+    [FLOW_ERROR_LABEL_NOT_FAULT]: [
+      'A guard refusal (a filter token that resolved to nothing, a missing required config key, an unscoped run) stays fatal by design',
+    ],
+    [FLOW_BRANCH_LABEL_UNMATCHED]: [
+      'one mechanism per decision, never both',
+      '`isDefault: true` on the fallback',
+    ],
+  };
+
+  it('every one of the twelve ids has its facts listed', () => {
+    expect(Object.keys(MOVED_FROM_SLICE_20_HINT).sort()).toEqual([...SLICE_20_IDS].sort());
+  });
+
+  it.each(SLICE_20_IDS)('`os explain %s` carries what its `fix:` line no longer says, and the line does not', (rule) => {
+    const text = explained(rule);
+    const hints = firedSlice20Hints.filter((f) => f.rule === rule).map((f) => f.hint);
+    expect(hints.length, rule).toBeGreaterThan(0);
+    for (const fact of MOVED_FROM_SLICE_20_HINT[rule]!) {
+      expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+      for (const hint of hints) expect(hint, `${rule} fix: line still says ${fact}`).not.toContain(fact);
+    }
   });
 });

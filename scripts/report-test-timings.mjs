@@ -133,7 +133,8 @@
  * unreachable by construction and pinned that way in `--self-test`.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, readdirSync, existsSync, appendFileSync, statSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -220,11 +221,15 @@ export function parseFileTimings(rawText) {
 
   for (const { line, group } of attributedLines(text)) {
     let pkg = group;
+    // Only the stream prefix names the TASK; a `::group::` or bare header
+    // attributes a package and nothing more, so such a row carries `null`.
+    let task = null;
     let rest = line;
 
     const testPrefixed = line.match(STREAM_TEST_PREFIX);
     if (testPrefixed) {
       pkg = testPrefixed[1];
+      task = testPrefixed[2];
       rest = testPrefixed[3];
     } else if (STREAM_OTHER_PREFIX.test(line)) {
       // A non-test task's streamed output. Not this tool's population.
@@ -249,6 +254,7 @@ export function parseFileTimings(rawText) {
 
     files.push({
       pkg,
+      task,
       file: split.file,
       project: split.project,
       tests: Number(m[3]),
@@ -262,6 +268,29 @@ export function parseFileTimings(rawText) {
 
 // ── Per-package seconds, from turbo's own run summaries ───────────────────
 
+/** The `(package, task)` key a replay mark is read under. */
+export function taskKey(pkg, task) {
+  return JSON.stringify([pkg, task]);
+}
+
+/**
+ * Every vitest-bearing task in one run summary that did NOT execute, keyed by
+ * `(package, task)`. Same rule as `samplesFromSummary`: a `cache.status` other
+ * than `MISS` is a replay. Read here rather than out of that function's
+ * `skippedCached`, which folds a package's legs on purpose -- the shard
+ * planner must refuse a package with ANY replayed leg, while a file row's
+ * label is a fact about the one task that printed it.
+ */
+export function cachedTestTasks(parsed) {
+  const keys = [];
+  for (const task of parsed?.tasks ?? []) {
+    if (task?.task !== 'test' && task?.task !== 'test:repo') continue;
+    if (task?.cache?.status === 'MISS') continue;
+    keys.push(taskKey(task.package, task.task));
+  }
+  return keys;
+}
+
 /**
  * Read every `.turbo/runs/*.json` in `dir`. A shard runs its whole-package leg
  * and each file-level slice as SEPARATE turbo invocations, so there is more
@@ -274,6 +303,7 @@ export function parseFileTimings(rawText) {
 export function readSummaries(dir) {
   const packages = new Map();
   const cached = [];
+  const cachedTasks = [];
   const problems = [];
   let summariesRead = 0;
 
@@ -281,7 +311,7 @@ export function readSummaries(dir) {
   try {
     entries = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
   } catch {
-    return { packages, cached, problems: [`no turbo run summaries could be listed at ${dir}`], summariesRead };
+    return { packages, cached, cachedTasks, problems: [`no turbo run summaries could be listed at ${dir}`], summariesRead };
   }
 
   for (const entry of entries) {
@@ -291,6 +321,7 @@ export function readSummaries(dir) {
       const { samples, skippedCached, slices } = samplesFromSummary(parsed, entry);
       summariesRead += 1;
       cached.push(...skippedCached);
+      cachedTasks.push(...cachedTestTasks(parsed));
       for (const [pkg, seconds] of samples) {
         const slice = slices.get(pkg) ?? null;
         const row = packages.get(pkg) ?? { pkg, seconds: 0, sliceCount: null, parts: new Set() };
@@ -306,7 +337,7 @@ export function readSummaries(dir) {
     }
   }
 
-  return { packages, cached, problems, summariesRead };
+  return { packages, cached, cachedTasks, problems, summariesRead };
 }
 
 /** The pinned weight table, or null when it cannot be read. */
@@ -337,6 +368,7 @@ export function mergeCaptures(captures) {
   const problems = [];
   let declaredFiles = 0;
   let unattributed = 0;
+  let replayMarkedByPackage = 0;
   const shards = [];
 
   for (const capture of captures) {
@@ -348,6 +380,7 @@ export function mergeCaptures(captures) {
     files.push(...(capture.files ?? []));
     declaredFiles += capture.coverage?.declaredFiles ?? 0;
     unattributed += capture.coverage?.unattributed ?? 0;
+    replayMarkedByPackage += capture.coverage?.replayMarkedByPackage ?? 0;
     for (const name of capture.cached ?? []) cached.add(name);
     for (const p of capture.problems ?? []) problems.push(p);
     for (const row of capture.packages ?? []) {
@@ -377,6 +410,7 @@ export function mergeCaptures(captures) {
     problems,
     declaredFiles,
     unattributed,
+    replayMarkedByPackage,
     shards: shards.filter(Boolean).sort(),
   };
 }
@@ -482,6 +516,11 @@ export function renderTable(merged, pinned, context = {}) {
   if (merged.unattributed) {
     out.push(`- file lines no task header could attribute, dropped: **${merged.unattributed}**`);
   }
+  if (merged.replayMarkedByPackage) {
+    out.push(
+      `- file lines whose turbo task the log did not name, so labelled replayed or not by their PACKAGE's cache state: **${merged.replayMarkedByPackage}**`,
+    );
+  }
   const incomplete = merged.packages.filter((p) => p.sliceCount !== null && !p.complete);
   if (incomplete.length) {
     out.push(
@@ -534,7 +573,7 @@ export function capture({ log, summaries, shard, out }) {
   const summaryDir = summaries ?? join(ROOT, '.turbo/runs');
   const pkgRead = existsSync(summaryDir)
     ? readSummaries(summaryDir)
-    : { packages: new Map(), cached: [], problems: [`no turbo run summary directory at ${summaryDir}`], summariesRead: 0 };
+    : { packages: new Map(), cached: [], cachedTasks: [], problems: [`no turbo run summary directory at ${summaryDir}`], summariesRead: 0 };
   problems.push(...pkgRead.problems);
 
   // A cache HIT REPLAYS the stored log in milliseconds, so the file lines in it
@@ -545,9 +584,24 @@ export function capture({ log, summaries, shard, out }) {
   // this table on exactly the runs where the cache is doing its job: on a
   // typical affected-set PR every package in the log is a replay.
   // Marked per shard, because the shard that replayed a package and the shard
-  // that measured it need not be the same shard.
-  const replayedHere = new Set(pkgRead.cached);
-  for (const f of files) f.replayed = replayedHere.has(f.pkg);
+  // that measured it need not be the same shard. And marked per TASK: a split
+  // package runs `test` and `test:repo` as two turbo tasks, one can replay
+  // while the other executes, and a package-level mark would label the
+  // executed task's rows replayed -- dropping real readings from every window
+  // that reads `replayed`. A row whose task the log did not name (a grouped or
+  // bare header, never the stream order CI runs under) keeps the package-level
+  // mark and is counted, so the fallback is visible rather than silent.
+  const replayedTasks = new Set(pkgRead.cachedTasks);
+  const replayedPackages = new Set(pkgRead.cached);
+  let replayMarkedByPackage = 0;
+  for (const f of files) {
+    if (f.task) {
+      f.replayed = replayedTasks.has(taskKey(f.pkg, f.task));
+    } else {
+      f.replayed = replayedPackages.has(f.pkg);
+      replayMarkedByPackage += 1;
+    }
+  }
 
   const payload = {
     schema: CAPTURE_SCHEMA,
@@ -561,7 +615,7 @@ export function capture({ log, summaries, shard, out }) {
     })),
     cached: pkgRead.cached,
     problems,
-    coverage: { declaredFiles, unattributed, summariesRead: pkgRead.summariesRead },
+    coverage: { declaredFiles, unattributed, replayMarkedByPackage, summariesRead: pkgRead.summariesRead },
   };
 
   if (out) writeOut(out, JSON.stringify(payload, null, 2));
@@ -630,7 +684,7 @@ export function merge({ captures: dir, out, json, summaryFile, root = ROOT }) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'file-line parsing': 22,
   'attribution and the naive-parser controls': 9,
-  'package seconds, slices and cache replays': 11,
+  'package seconds, slices and cache replays': 16,
   'refusals, rendering and exit codes': 19,
 });
 
@@ -860,6 +914,41 @@ function selfTest({ quiet = false } = {}) {
 
   const failed = samplesFromSummary(summary([task('@objectstack/a', 500, { exitCode: 1 })]), 's');
   eq([...failed.samples], [], 'a failed task was read as a measurement');
+
+  // The replay label is per TASK, not per package. Measured on the hourly full
+  // battery: `@objectstack/spec:test` replayed while `:test:repo` executed for
+  // ten minutes, and a package-keyed mark labelled the executed `repo` rows
+  // replayed, so the budget window dropped them. Two summaries, as a shard
+  // writes them, over a stream-order log carrying both tasks' module lines.
+  const splitDir = mkdtempSync(join(tmpdir(), 'report-test-timings-'));
+  try {
+    const specTask = (name, status) => ({
+      ...task('@objectstack/spec', 600_000, { status }),
+      task: name,
+    });
+    writeFileSync(join(splitDir, 'a.json'), JSON.stringify(summary([specTask('test', 'HIT')])));
+    writeFileSync(join(splitDir, 'b.json'), JSON.stringify(summary([specTask('test:repo', 'MISS')])));
+    writeFileSync(
+      join(splitDir, 'test.log'),
+      [
+        '@objectstack/spec:test:  ✓ |local| src/data/field.test.ts (40 tests) 120ms',
+        '@objectstack/spec:test:repo:  ✓ |repo| scripts/build-schemas-check-mode.test.ts (3 tests) 620870ms',
+        '::group::@objectstack/spec:test:repo',
+        ' ✓ |repo| scripts/grouped.test.ts (1 test) 9ms',
+        '::endgroup::',
+      ].join('\n'),
+    );
+    const split = capture({ log: join(splitDir, 'test.log'), summaries: splitDir, shard: '1/6' });
+    const label = (file) => split.files.find((f) => f.file === file)?.replayed;
+    eq(label('scripts/build-schemas-check-mode.test.ts'), false, 'an EXECUTED test:repo row was labelled replayed');
+    eq(label('src/data/field.test.ts'), true, 'a REPLAYED test row was labelled measured');
+    // A row the log names no task for keeps the package-level mark, counted.
+    eq(label('scripts/grouped.test.ts'), true, 'a task-less row lost the package-level fallback mark');
+    eq(split.coverage.replayMarkedByPackage, 1, 'the package-level fallback was not counted');
+    eq(split.cached, ['@objectstack/spec'], 'the package-level cached list changed');
+  } finally {
+    rmSync(splitDir, { recursive: true, force: true });
+  }
 
   // Two shards, each carrying one half of a sliced package.
   const capA = {
