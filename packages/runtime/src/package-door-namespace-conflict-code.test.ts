@@ -39,7 +39,7 @@
  *
  * Doubled: only the kernel's service lookup, which hands the door that
  * registry. There is no protocol service, so the install takes the documented
- * fallback limb (`registry.installPackage(manifest, settings)`) — the same
+ * fallback limb (`registry.installPackage(manifest, 'authored', settings)`) — the same
  * primitive the protocol limb calls underneath.
  *
  * ## Reverse verification — direction predicted BEFORE running

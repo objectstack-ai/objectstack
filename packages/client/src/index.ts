@@ -2582,11 +2582,16 @@ export class ObjectStackClient {
      * SAME envelope for this route, which is what makes it bindable:
      * `runtime`'s `/packages` domain sends `success({ packages, total:
      * packages.length })` and `rest`'s `GET {base}/packages` sends
-     * `sendOk(res, { packages, total: packages.length })`. The REST rows carry
-     * an extra `source: 'database' | 'registry' | 'both'` discriminator that is
-     * deliberately NOT declared here — the dispatcher rows have no such key, so
-     * declaring it would be false on that surface. #8140 bound the identical
-     * scoped sibling (`ScopedEnvironmentClient.packages.list`) the same way.
+     * `sendOk(res, { packages, total: packages.length })`. #8140 bound the
+     * identical scoped sibling (`ScopedEnvironmentClient.packages.list`) the
+     * same way. (The REST rows' `source: 'database' | 'registry' | 'both'`
+     * stamp left with those routes in #14503.)
+     *
+     * [#23972] Every row carries two declared keys besides the record's own:
+     * `source` (`'code' | 'marketplace' | 'authored'`, where the package came
+     * from, stamped by the door that registered it) and `writable` (the
+     * server's writability verdict, computed per read). Read the origin from
+     * `source`; ⛔ do not reconstruct it from `writable` or from a second list.
      *
      * ⚠️ [#17536] The ROW type moved, the envelope did not. #11925 bound the
      * element to `InstalledPackage` — the AUTHORING stage — and PR #17517 then
@@ -2697,9 +2702,8 @@ export class ObjectStackClient {
      * manifest stages. It was a COMMENT and never a binding, which is why the
      * disagreement it describes could sit here unread by any gate.
      *
-     * `source` stays undeclared because there is no longer anything that
-     * emits it on this route; `writable` stays undeclared for the reason
-     * `list` leaves it undeclared.
+     * [#23972] The row carries the declared `source` and `writable`, as on
+     * `list`.
      *
      * ⚠️ Clause-② narrowing (#12034). `{ package: any }` is what let
      * `(await client.packages.get(id)).package` compile, and on the only

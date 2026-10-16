@@ -174,7 +174,7 @@ async function seed(protocol: any, registry: SchemaRegistry) {
     [PKG, 'demo_widget', 'demo_app'],
     [OTHER_PKG, 'healthy_widget', 'healthy_app'],
   ] as const) {
-    registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any);
+    registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
     await protocol.saveMetaItem({ type: 'object', name: obj, packageId: pkg, item: objectBody(obj) });
     // `app` rather than `view` as the non-object specimen: a `view` is saved as
     // an ADR-0017 CONTAINER and only becomes independently listable once the

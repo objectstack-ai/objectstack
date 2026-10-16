@@ -46,6 +46,7 @@ import { ObjectStackProtocolImplementation } from './index.js';
 
 interface Row {
   manifest: Record<string, unknown>;
+  source: string;
   status: string;
   enabled: boolean;
   installedAt: string;
@@ -61,10 +62,11 @@ function makeRegistry() {
   return {
     rows,
     namespaces,
-    installPackage(manifest: any, settings?: unknown): Row {
+    installPackage(manifest: any, source: string, settings?: unknown): Row {
       const existing = rows.get(manifest.id);
       const row: Row = {
         manifest: { ...manifest },
+        source,
         status: existing?.status ?? 'installed',
         enabled: existing?.enabled ?? true,
         installedAt: stamp(),
@@ -171,7 +173,7 @@ describe('#21243 installPackage — a refused sys_packages write fails the insta
 
   it('a re-install over an existing row puts the PRIOR row back, lifecycle included', async () => {
     const { impl, registry } = makeImpl(returnedDriverFault);
-    const prior = registry.installPackage({ id: 'com.example.leave', name: 'Leave v1', version: '1.0.0', namespace: 'leave' });
+    const prior = registry.installPackage({ id: 'com.example.leave', name: 'Leave v1', version: '1.0.0', namespace: 'leave' }, 'authored');
     registry.disablePackage('com.example.leave');
     const priorContent = JSON.parse(JSON.stringify(registry.getPackage('com.example.leave')));
 
@@ -221,7 +223,7 @@ describe('#21243 updatePackage — a refused sys_packages write fails the edit a
     ['thrown DATABASE_ERROR', 'DATABASE_ERROR', thrownDatabaseError],
   ] as const)('%s → 500 %s, the prior manifest back in place', async (_label, code, publish) => {
     const { impl, registry } = makeImpl(publish);
-    const row = registry.installPackage({ id: 'com.example.leave', name: 'Leave', version: '1.0.0' });
+    const row = registry.installPackage({ id: 'com.example.leave', name: 'Leave', version: '1.0.0' }, 'authored');
     const manifestObject = row.manifest;
     const priorContent = JSON.parse(JSON.stringify(row));
 
@@ -243,7 +245,7 @@ describe('#21243 updatePackage — a refused sys_packages write fails the edit a
 
   it('CONTROL — a landed write answers the edited row', async () => {
     const { impl, registry } = makeImpl(async () => ({ success: true }));
-    registry.installPackage({ id: 'com.example.leave', name: 'Leave', version: '1.0.0' });
+    registry.installPackage({ id: 'com.example.leave', name: 'Leave', version: '1.0.0' }, 'authored');
 
     const res = await impl.updatePackage({ packageId: 'com.example.leave', patch: { description: 'patched' } });
 

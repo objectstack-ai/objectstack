@@ -120,7 +120,7 @@ function makeSession() {
 
 /** The packaged object, as a code package registers it. */
 function registerPackaged(registry: SchemaRegistry) {
-    registry.installPackage({ id: PKG, name: 'Showcase', version: '1.0.0' } as any);
+    registry.installPackage({ id: PKG, name: 'Showcase', version: '1.0.0' } as any, 'code');
     registry.registerObject(
         {
             name: OBJ,

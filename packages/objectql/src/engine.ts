@@ -98,7 +98,7 @@ import {
   resolveBundleLocale,
   SystemFieldName,
 } from '@objectstack/spec/system';
-import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
+import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 // [#21120] The family-wide stored-metadata-body seam. A `data.record.*` event
 // carries the written row in `after` (and the input patch in `changes`), so a
 // subscriber to `sys_metadata` / `sys_metadata_history` events would receive
@@ -7863,10 +7863,30 @@ export class ObjectQL implements IObjectQLEngine {
    * 
    * Key: Package ≠ App. The manifest is the package. The apps[] array inside
    * the manifest contains UI navigation definitions (AppSchema).
+   *
+   * [#23972] `source` is where the package came from, stamped on its registry
+   * row (`InstalledPackageSchema.source`). This is the door the deployment's
+   * own code registers through — a `defineStack()` host, a plugin's bundled
+   * manifest, a platform package — so `'code'` is what the door means when the
+   * caller says nothing. The one other producer on this door, the marketplace
+   * install-local plugin, states `'marketplace'` through the `manifest`
+   * service's `register(artifact, { source })`. An authored package never
+   * comes through here (it is installed by `installPackage` in
+   * `@objectstack/metadata-protocol`), so `'authored'` is not accepted.
    */
-  registerApp(registeredBody: any, scope?: ArtifactInstallScope) {
+  registerApp(registeredBody: any, scope?: ArtifactInstallScope, source: Exclude<InstalledPackageSource, 'authored'> = 'code') {
       // The CONVERTED body, for everything below — the package record, the
       // live manifest, every item it registers (see {@link convertPackageBodyForward}).
+      // [#23972] Refused before anything registers — see the docblock: an
+      // untyped caller handing this door `'authored'` (or any other value)
+      // would record a row whose origin contradicts the read-only verdict
+      // this door's `manifests` entry produces.
+      if (source !== 'code' && source !== 'marketplace') {
+          throw new TypeError(
+              `[ObjectQL] registerApp: source must be 'code' or 'marketplace'; received ${JSON.stringify(source)}. `
+              + `An authored package is installed through the protocol's installPackage, not registered here.`,
+          );
+      }
       const manifest = this.convertPackageBodyForward(registeredBody);
       const id = manifest.id || manifest.name;
       const namespace = manifest.namespace as string | undefined;
@@ -7899,7 +7919,7 @@ export class ObjectQL implements IObjectQLEngine {
       // tell a CO-OWNER (another package from this same artifact) from a
       // stranger — the question D1 corrected the gate to ask. Absent for every
       // single-package caller, where the gate behaves exactly as before (D7).
-      this._registry.installPackage(manifest, undefined, scope);
+      this._registry.installPackage(manifest, source, undefined, scope);
       this.logger.debug('Installed Package', { id: manifest.id, name: manifest.name, namespace });
 
       // 2. Register owned objects

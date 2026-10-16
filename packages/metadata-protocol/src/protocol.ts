@@ -31390,7 +31390,9 @@ export class ObjectStackProtocolImplementation implements
         // install REPLACES the row object (and may register the namespace).
         const undoInstall = this.packageInstallUndo(manifest);
 
-        let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+        // [#23972] Every package this primitive installs is AUTHORED — a Studio
+        // base, a duplicate, an HTTP install — persisted to `sys_packages` below.
+        let pkg = this.engine.registry.installPackage(manifest as any, 'authored', request.settings);
 
         // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
         // declares and this primitive read past. `InstallPackageRequestSchema`

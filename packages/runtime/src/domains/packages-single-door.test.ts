@@ -126,7 +126,7 @@ function registryWith(): SchemaRegistry {
         type: 'app',
         scope: 'user',
         objects: [{ name: 'lead', fields: { title: { type: 'text' } } }],
-    } as any);
+    } as any, 'code');
     return registry;
 }
 
@@ -177,6 +177,9 @@ describe('/packages — one implementation, and its 404 wording says which (#145
         }
     });
 
+    /** The retired REST door's row stamp — its values, never this door's. */
+    const RETIRED_REST_SOURCE_STAMPS = ['registry', 'database', 'both'];
+
     for (const [label, base] of [['unscoped', UNSCOPED], ['environment-scoped', SCOPED]] as const) {
         it(`${label} GET /packages/:id for a missing package answers the dispatcher's spelling, never the retired REST one`, async () => {
             const r = await send('GET', `${base}/${MISSING}`);
@@ -195,13 +198,17 @@ describe('/packages — one implementation, and its 404 wording says which (#145
             expect(r.body?.error?.message).toBe(DISPATCHER_SPELLING);
         });
 
-        it(`${label} GET /packages/:id for an installed package answers the BARE row under data — no { package } wrapper, no source stamp`, async () => {
+        it(`${label} GET /packages/:id for an installed package answers the BARE row under data — no { package } wrapper, no REST source stamp`, async () => {
             const r = await send('GET', `${base}/${PKG_ID}`);
             expect(r.status).toBe(200);
             expect(r.body?.success).toBe(true);
             expect(r.body?.data?.manifest?.id).toBe(PKG_ID);
             expect(r.body?.data?.package).toBeUndefined();
-            expect('source' in (r.body?.data ?? {})).toBe(false);
+            // [#23972] The row's `source` is the declared origin the registering
+            // door stamped, ⛔ never the retired REST door's
+            // `'registry' | 'database' | 'both'` stamp.
+            expect(r.body?.data?.source).toBe('code');
+            expect(RETIRED_REST_SOURCE_STAMPS).not.toContain(r.body?.data?.source);
             // The dispatcher envelope, measured: `data` + `meta` beside the flag.
             // The retired REST door answered `{ data, success }` with the row
             // one level down under `data.package` — the key set is part of
@@ -209,7 +216,7 @@ describe('/packages — one implementation, and its 404 wording says which (#145
             expect(Object.keys(r.body).sort()).toEqual(['data', 'meta', 'success']);
         });
 
-        it(`${label} GET /packages answers { packages, total, hasMore } and its rows carry no source stamp`, async () => {
+        it(`${label} GET /packages answers { packages, total, hasMore } and its rows carry no REST source stamp`, async () => {
             const r = await send('GET', base);
             expect(r.status).toBe(200);
             expect(r.body?.success).toBe(true);
@@ -218,7 +225,8 @@ describe('/packages — one implementation, and its 404 wording says which (#145
             expect(r.body?.data?.hasMore).toBe(false);
             expect(r.body?.data?.packages).toHaveLength(1);
             expect(r.body?.data?.packages[0]?.manifest?.id).toBe(PKG_ID);
-            expect('source' in r.body.data.packages[0]).toBe(false);
+            expect(r.body.data.packages[0].source).toBe('code');
+            expect(RETIRED_REST_SOURCE_STAMPS).not.toContain(r.body.data.packages[0].source);
         });
     }
 

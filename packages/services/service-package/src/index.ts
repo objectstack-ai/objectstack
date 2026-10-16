@@ -712,7 +712,10 @@ export class PackageServicePlugin implements Plugin {
                   `'${compat.requiredRange}'; skipping the protocol handshake (ADR-0087).`,
               );
             }
-            registry.installPackage(rec.manifest);
+            // [#23972] `sys_packages` holds the packages `installPackage`
+            // persisted (Studio bases, duplicates, HTTP installs), so every row
+            // it rehydrates is authored — the origin the install stamped.
+            registry.installPackage(rec.manifest, 'authored');
             hydrated++;
           }
         }

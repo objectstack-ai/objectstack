@@ -63,6 +63,7 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
     // from the id (`app.demo` → `demo`) since none was declared (see below).
     expect(registry.installPackage).toHaveBeenCalledWith(
       { ...manifest, namespace: 'demo' },
+      'authored',
       undefined,
     );
     expect(publish).toHaveBeenCalledTimes(1);
@@ -93,7 +94,7 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
     const { protocol, registry } = makeProtocol();
     const manifest = { id: 'app.s', name: 'S', version: '1.0.0', type: 'application' };
     await protocol.installPackage({ manifest, settings: { theme: 'dark' } } as never);
-    expect(registry.installPackage).toHaveBeenCalledWith(manifest, { theme: 'dark' });
+    expect(registry.installPackage).toHaveBeenCalledWith(manifest, 'authored', { theme: 'dark' });
   });
 
   it('still registers in-memory when no package service is present (non-fatal)', async () => {

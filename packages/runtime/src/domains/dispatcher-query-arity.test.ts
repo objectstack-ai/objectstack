@@ -94,8 +94,8 @@ function boot() {
 function bootPackages() {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     (registry as any).logLevel = 'silent';
-    registry.installPackage({ id: 'com.acme.app', name: 'com.acme.app', namespace: 'app', version: '1.0.0', type: 'app' } as any);
-    registry.installPackage({ id: 'com.acme.plugin', name: 'com.acme.plugin', namespace: 'plugin', version: '1.0.0', type: 'plugin' } as any);
+    registry.installPackage({ id: 'com.acme.app', name: 'com.acme.app', namespace: 'app', version: '1.0.0', type: 'app' } as any, 'code');
+    registry.installPackage({ id: 'com.acme.plugin', name: 'com.acme.plugin', namespace: 'plugin', version: '1.0.0', type: 'plugin' } as any, 'code');
     (registry.getPackage('com.acme.plugin') as any).status = 'error';
     const getAllPackages = vi.spyOn(registry, 'getAllPackages');
     const get = (n: string) => (n === 'objectql' ? { registry } : null);

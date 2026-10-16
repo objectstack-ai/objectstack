@@ -21,22 +21,22 @@ describe('SchemaRegistry.securityCatalogNamesHeldBy', () => {
     });
 
     it('answers the permission-set names a package declared, and no other package\'s', () => {
-        registry.installPackage(manifest('com.acme.tasks', ['tasks_user', 'tasks_admin']));
-        registry.installPackage(manifest('com.acme.other', ['other_user']));
+        registry.installPackage(manifest('com.acme.tasks', ['tasks_user', 'tasks_admin']), 'code');
+        registry.installPackage(manifest('com.acme.other', ['other_user']), 'code');
 
         expect(registry.securityCatalogNamesHeldBy('com.acme.tasks', 'permission')).toEqual(['tasks_admin', 'tasks_user']);
         expect(registry.securityCatalogNamesHeldBy('com.acme.tasks', 'position')).toEqual([]);
     });
 
     it('a disabled package still holds its names', () => {
-        registry.installPackage(manifest('com.acme.tasks', ['tasks_user']));
+        registry.installPackage(manifest('com.acme.tasks', ['tasks_user']), 'code');
         registry.disablePackage('com.acme.tasks');
 
         expect(registry.securityCatalogNamesHeldBy('com.acme.tasks', 'permission')).toEqual(['tasks_user']);
     });
 
     it('nothing once the package is uninstalled — which is why the doors read it first', () => {
-        registry.installPackage(manifest('com.acme.tasks', ['tasks_user']));
+        registry.installPackage(manifest('com.acme.tasks', ['tasks_user']), 'code');
         registry.uninstallPackage('com.acme.tasks');
 
         expect(registry.securityCatalogNamesHeldBy('com.acme.tasks', 'permission')).toEqual([]);

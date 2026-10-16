@@ -68,13 +68,20 @@ export const SysApprovalRequest = ObjectSchema.create({
   // the caller's own rows. A caller-scoped list view is never an object's
   // first; an entry that wants one names it. The order decides which view
   // opens, never which rows a caller may read.
+  //
+  // The display columns (`process_label`, `current_step_label`,
+  // `pending_approver_labels`) are ENGINE-WRITTEN snapshots, set by
+  // `ApprovalService` on the writes that change the facts they describe. A list
+  // reads them as stored and never re-derives a label from flow metadata or
+  // resolves an approver address itself; `process_name`, `current_step` and
+  // `pending_approvers` keep the machine values every query and decision reads.
   listViews: {
     all_requests: {
       type: 'grid',
       name: 'all_requests',
       label: 'All',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'status', 'current_step', 'submitter_id', 'updated_at'],
+      columns: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -83,7 +90,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'my_pending',
       label: 'My Pending',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'current_step', 'submitter_id', 'updated_at'],
+      columns: ['process_label', 'object_name', 'record_id', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
       filter: [
         { field: 'status', operator: 'equals', value: 'pending' },
         { field: 'pending_approvers', operator: 'contains', value: '{current_user_id}' },
@@ -97,7 +104,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'submitted_by_me',
       label: 'I Submitted',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'status', 'current_step', 'updated_at'],
+      columns: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'updated_at'],
       filter: [{ field: 'submitter_id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 25 },
@@ -107,7 +114,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'completed',
       label: 'Completed',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'status', 'submitter_id', 'completed_at'],
+      columns: ['process_label', 'object_name', 'record_id', 'status', 'submitter_id', 'completed_at'],
       // Every terminal state, `cancelled` included (#13568) — a platform-voided
       // request is kept as audit evidence, and a terminal state absent from the
       // only curated terminal view is evidence nobody can find.
@@ -172,6 +179,23 @@ export const SysApprovalRequest = ObjectSchema.create({
       required: true,
       maxLength: 100,
       description: 'Origin of the request — `flow:<flowName|nodeId>` for node-driven approvals',
+      group: 'Target',
+    }),
+
+    // The flow's authored label when the request was opened — a snapshot the
+    // engine writes once, in `openNodeRequest`, from the label the flow engine
+    // seeds as `$flowLabel` (`FlowSchema.label`, required). A rename of the flow
+    // later does not rewrite it: the row records what the approver was asked
+    // under. An empty or absent authored label falls through to the humanized
+    // machine name (`display-labels.ts`, the chain the approvals door serves).
+    // Rows opened before this column are filled by the boot backfill
+    // (`display-label-backfill.ts`) by the same chain.
+    process_label: Field.text({
+      label: 'Flow',
+      required: false,
+      maxLength: 255,
+      readonly: true,
+      description: 'Label of the flow that opened this request, as it stood when the request was opened',
       group: 'Target',
     }),
 
@@ -284,6 +308,19 @@ export const SysApprovalRequest = ObjectSchema.create({
       group: 'State',
     }),
 
+    // The Approval node's authored label (`FlowNodeSchema.label`, required),
+    // written with `current_step` when the request opens. The engine's fact at
+    // that moment: the console shows it as stored and never reads the flow to
+    // re-derive it. Same chain and same boot backfill as `process_label`.
+    current_step_label: Field.text({
+      label: 'Approval Step',
+      required: false,
+      maxLength: 255,
+      readonly: true,
+      description: 'Label of the step awaiting approval, as it stood when the request reached it',
+      group: 'State',
+    }),
+
     current_step_index: Field.number({
       label: 'Current Step Index',
       required: false,
@@ -295,6 +332,31 @@ export const SysApprovalRequest = ObjectSchema.create({
       label: 'Pending Approvers',
       required: false,
       description: 'Comma-separated user ids who can act on the current step',
+      group: 'State',
+    }),
+
+    // Whom a pending request waits on, for display: one label per slot of
+    // `pending_approvers`, in slate order, joined with ", ". The engine writes
+    // it on every write that sets the slate (open, a partial tally, reassign,
+    // SLA reassign) and clears it with the slate on every terminal write, so it
+    // never outlives the slate it describes. A slot that names a person (a user
+    // id, or an email an account carries) is labelled with that account's name
+    // by `resolveUserNames`, the resolver the approvals door serves
+    // `pending_approver_names` with; any other slot (a `position:` / `team:`
+    // literal, an address no account answers to) shows as its stored address.
+    //
+    // A snapshot, not a live read: a user renamed while the request is pending
+    // keeps the old name here until the slate is next written. Display only —
+    // no decision, filter or index reads it; `pending_approvers` stays the
+    // authority. Null on a non-pending row, and while a person slot's name
+    // could not be read (never a raw address in its place); the boot backfill
+    // (`display-label-backfill.ts`) fills pending rows written before this
+    // column, and retries a failed read.
+    pending_approver_labels: Field.textarea({
+      label: 'Waiting On',
+      required: false,
+      readonly: true,
+      description: 'Who the request is waiting on: the name of each pending approver, or the slot address when it names no person',
       group: 'State',
     }),
 

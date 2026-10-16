@@ -147,6 +147,26 @@ export type AssembledInstalledPackage = z.input<typeof AssembledInstalledPackage
 export type AssembledInstalledPackageParsed = z.infer<typeof AssembledInstalledPackageSchema>;
 
 /**
+ * The keys a read door adds to a registry row — the server's OWN verdicts,
+ * computed per read and never stored on the registry record, so they are
+ * declared on the SERVED row (both stage branches below) and not on
+ * {@link InstalledPackageSchema}, which is the record.
+ *
+ * - `writable` — the server's writability verdict (ADR-0070 D2, ADR-0130
+ *   Consequences row 6): `isWritablePackage` in `@objectstack/metadata-protocol`,
+ *   the same predicate the authoring and lifecycle gates use. `true` is a
+ *   writable base; `false` is read-only (booted by code or installed from the
+ *   marketplace, or a `system` / `cloud` scope).
+ *
+ * ⛔ `writable` and the row's `source` are two statements, neither derived from
+ * the other: `source` says where the package came from, `writable` what this
+ * server lets an org do to it.
+ */
+const SERVED_ROW_VERDICTS = {
+  writable: z.boolean().describe('Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server\'s own predicate, never stored'),
+};
+
+/**
  * One installed-package row at WHICHEVER manifest stage it was installed at —
  * the element the read doors (`GET /packages`, `GET /packages/:id`) serve.
  *
@@ -186,8 +206,8 @@ export type AssembledInstalledPackageParsed = z.infer<typeof AssembledInstalledP
  * keep saying so.
  */
 export const InstalledPackageAtEitherStageSchema = lazySchema(() => z.union([
-  InstalledPackageSchema,
-  AssembledInstalledPackageSchema,
+  InstalledPackageSchema.extend(SERVED_ROW_VERDICTS),
+  AssembledInstalledPackageSchema.extend(SERVED_ROW_VERDICTS),
 ]).describe('Installed package row at whichever manifest stage it was installed at'));
 export type InstalledPackageAtEitherStage = z.input<typeof InstalledPackageAtEitherStageSchema>;
 /** Post-parse shape of {@link InstalledPackageAtEitherStage} — defaults applied, transforms run (ADR-0122). */

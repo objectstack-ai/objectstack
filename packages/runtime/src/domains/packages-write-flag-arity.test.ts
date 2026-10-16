@@ -38,7 +38,7 @@ const AUTHOR = { userId: 'u_author', isSystem: false, systemPermissions: ['manag
 function boot() {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     (registry as any).logLevel = 'silent';
-    registry.installPackage({ id: PKG, name: PKG, namespace: 'app', version: '1.0.0', type: 'app' } as any);
+    registry.installPackage({ id: PKG, name: PKG, namespace: 'app', version: '1.0.0', type: 'app' } as any, 'code');
     const getPackage = vi.spyOn(registry, 'getPackage');
     const protocol = {
         deletePackage: vi.fn(async (_r: any) => ({ success: true })),

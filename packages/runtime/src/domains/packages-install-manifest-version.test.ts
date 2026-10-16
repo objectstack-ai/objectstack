@@ -288,7 +288,7 @@ describe('§2 a well-formed manifest still installs', () => {
         // The gate sits ahead of BOTH limbs, so the fallback limb is reached by
         // a well-formed manifest exactly as before this card.
         expect(r.response?.status).toBe(201);
-        expect(registryInstall).toHaveBeenCalledWith(WELL_FORMED, undefined);
+        expect(registryInstall).toHaveBeenCalledWith(WELL_FORMED, 'authored', undefined);
     });
 });
 

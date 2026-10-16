@@ -252,8 +252,8 @@ describe('the refusal reports, and only refuses, what the ruling covers', () => 
   it('collisionPolicy "warn" does not downgrade it', async () => {
     const registry = new SchemaRegistry({ collisionPolicy: 'warn' });
     registry.logLevel = 'silent';
-    registry.installPackage(pkg('com.acme.first', { position: ['p1'] }) as never);
-    const err = await caught(() => registry.installPackage(pkg('com.acme.second', { position: ['p1'] }) as never));
+    registry.installPackage(pkg('com.acme.first', { position: ['p1'] }) as never, 'code');
+    const err = await caught(() => registry.installPackage(pkg('com.acme.second', { position: ['p1'] }) as never, 'code'));
     expectRefusal(err, 'com.acme.second', { kind: 'package', packageId: 'com.acme.first' });
   });
 

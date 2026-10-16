@@ -165,7 +165,7 @@ describe('a second package registering a default record page for an object anoth
   it('a package installed with no pages registered still holds what it declared (its claim)', async () => {
     const { registry, register } = await boot();
     // A bare install — `POST /api/v1/packages` stores the manifest alone.
-    registry.installPackage(pkg('com.acme.auth', [recordPage('acme_org_detail', 'acme_org')]) as any);
+    registry.installPackage(pkg('com.acme.auth', [recordPage('acme_org_detail', 'acme_org')]) as any, 'code');
     expect(registry.listItems('page')).toEqual([]);
     const err = await register(pkg('com.acme.tenant', [recordPage('tenant_org_detail', 'acme_org')]));
     expectRefusal(err, 'acme_org', pkgPage('com.acme.tenant', 'tenant_org_detail'), pkgPage('com.acme.auth', 'acme_org_detail'));
@@ -301,8 +301,8 @@ describe('controls — what is not a second default', () => {
   it('`collisionPolicy: \'warn\'` does not downgrade it', async () => {
     const registry = new SchemaRegistry({ collisionPolicy: 'warn' });
     registry.logLevel = 'silent';
-    registry.installPackage(pkg('com.acme.auth', [recordPage('acme_org_detail', 'acme_org')]) as never);
-    const err = await caught(() => registry.installPackage(pkg('com.acme.tenant', [recordPage('tenant_org_detail', 'acme_org')]) as never));
+    registry.installPackage(pkg('com.acme.auth', [recordPage('acme_org_detail', 'acme_org')]) as never, 'code');
+    const err = await caught(() => registry.installPackage(pkg('com.acme.tenant', [recordPage('tenant_org_detail', 'acme_org')]) as never, 'code'));
     expectRefusal(err, 'acme_org', pkgPage('com.acme.tenant', 'tenant_org_detail'), pkgPage('com.acme.auth', 'acme_org_detail'));
   });
 });

@@ -824,7 +824,7 @@ describe('importUnmanagedPackage — the verb', () => {
 
     it('refuses a target id that names an installed package — never into an existing base', async () => {
         const { protocol, engine, writes } = makeProtocol();
-        engine.registry.installPackage({ id: 'com.example.mine', name: 'Mine' });
+        engine.registry.installPackage({ id: 'com.example.mine', name: 'Mine' }, 'code');
         const err = await refusalOf(() => protocol.importUnmanagedPackage({
             manifest: crmBody(), targetPackageId: 'com.example.mine',
         }));
