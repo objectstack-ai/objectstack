@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — spawns the real producer once per single-cause fixture: three boots of the built CLI (production --no-server, a default boot, a config-mounted HonoServerPlugin under --no-server), each read over its IPC channel and its OS_HOME; budget set before a CI reading, from local runs (see the PR)
+// test-budget: 30 — spawns the real producer once per single-cause fixture: three boots of the built CLI (production --no-server, a default boot, a config-mounted HonoServerPlugin under --no-server), each read over its IPC channel and its OS_HOME; 19.4 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -305,12 +305,13 @@ describe('os serve — the machine channels announce an address only when an HTT
       const { banner, messages, stateFilesEverSeen, stop } = await boot(plainDir, {}, ['--no-server', '--preset', 'minimal']);
       stop();
       const seen = `\n--- messages ---\n${JSON.stringify(messages)}\n--- banner ---\n${banner}`;
-      expect(
+      // `soft`: three independent channels, each reported on its own when it regresses.
+      expect.soft(
         messages.filter((m) => m.type === 'objectstack:listening'),
         `objectstack:listening was sent by a boot that bound no HTTP server${seen}`,
       ).toEqual([]);
-      expect(types(messages), `seed-settled is not the boot's one message${seen}`).toEqual(['objectstack:seed-settled']);
-      expect(stateFilesEverSeen, `a runtime state file was written by a boot that bound no HTTP server${seen}`).toEqual([]);
+      expect.soft(types(messages), `seed-settled is not the boot's one message${seen}`).toEqual(['objectstack:seed-settled']);
+      expect.soft(stateFilesEverSeen, `a runtime state file was written by a boot that bound no HTTP server${seen}`).toEqual([]);
     },
     240_000,
   );
