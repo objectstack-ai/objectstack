@@ -15,30 +15,28 @@ Register under `defineStack({ pages: [...] })`.
 
 ### Page Types
 
-`PageTypeSchema` has exactly **five** values — only types with a dedicated
-renderer are authorizable (ADR-0049 enforce-or-remove):
+`PageTypeSchema` has exactly **five** values (ADR-0049 enforce-or-remove):
 
 | `type`    | Purpose |
 |:----------|:--------|
 | `record`  | Component-based record layout with regions (overrides the default record detail) |
-| `home`    | App home / landing page |
-| `app`     | App-level page with navigation context |
-| `utility` | Floating utility panel (e.g. notes, phone dialer) |
+| `home`    | Widest region page; not a landing (`isDefault` refused): an app opens on its first navigation item |
+| `app`     | Region page at app width |
+| `utility` | Narrow inline region page for a tool (notes, a dialer); no floating or docked shell slot exists |
 | `list`    | Record list/grid interface page — configured via `interfaceConfig` |
 
-Disambiguation: there is **no** `record_detail`, `app_launcher`, or
-`utility_bar` type — a record layout is `type: 'record'`, an app-level page is
-`type: 'app'`, a utility panel is `type: 'utility'`. Likewise
-grid/kanban/calendar/gallery/timeline are NOT page types — they are
-*visualizations* of a `list` page
-(`interfaceConfig.appearance.allowedVisualizations`).
+There is **no** `record_detail`, `app_launcher` or `utility_bar` type, and
+grid/kanban/calendar/gallery/timeline are *visualizations* of a `list` page
+(`interfaceConfig.appearance.allowedVisualizations`), not page types.
 
 ### Templates & Regions
 
-`template` controls the column layout (e.g. `'three-column'`,
-`'two-column'`, `'single-column'`). Each template exposes named
-**regions** (`header`, `left_sidebar`, `main`, `right_sidebar`, `footer`)
-which contain components.
+`template` is `default` (regions `header`, `sidebar`, `main`, `aside`, `footer`),
+`header-sidebar-main` (`header`, `sidebar`, `main`), `three-column` (the same
+five) or `dashboard` (`header`, `footer`; other regions are grid cells);
+`full-width` is retired (a second name for `default`). On a `kind: 'full'` page a region
+the template does not place, or a second one for a filled slot, is refused at
+its `name` — the left column is `sidebar`, the right `aside`.
 
 ### Component Catalogue (selection)
 
@@ -69,7 +67,7 @@ An invoice, a delivery order, a letter or a report is an ordinary page with a
 the document. Only a `kind: 'full'` page of `type: 'record'`, `'home'` or
 `'app'` with its blocks in `regions` may declare it: the parse refuses `print`
 on a `list` page (its switch is `interfaceConfig.allowPrinting`), a `utility`
-panel, a `slotted` / `html` / `react` page and a `full` page with no regions.
+page, a `slotted` / `html` / `react` page and a `full` page with no regions.
 
 `print` keys, each mapped to print CSS: `paperSize` (`'A4'` default, `'A5'`,
 `'Letter'`, `'Legal'`) and `orientation` (`'portrait'` default, `'landscape'`);
@@ -134,8 +132,8 @@ by what the page needs:
 | `react` | **real React** (hooks, `.map`, `onClick`, expressions) | yes (main React tree) | complex interactive business UIs — master/detail, wizards, state-driven filters |
 
 `source` is the source-of-truth in both source tiers; `regions` is ignored. A
-`kind:'html'`/`'react'` page with no `source` fails the build (ADR-0078). The legacy
-value `kind:'jsx'` is a deprecated alias for `kind:'html'`.
+`kind:'html'`/`'react'` page with no `source` fails the build (ADR-0078).
+`kind:'jsx'` is retired: the parse refuses it and names `kind:'html'`.
 
 #### `kind:'html'` — constrained JSX, parsed (safe by construction)
 
@@ -283,9 +281,6 @@ Rules:
   },
 }
 ```
-
-The spec field is `PageComponentSchema.responsiveStyles` (`ResponsiveStylesSchema` —
-see `node_modules/@objectstack/spec/src/ui/responsive.zod.ts`).
 
 **In the source tiers (`kind:'html'` / `kind:'react'`) the same rule holds — no
 Tailwind `className` — but the primitive differs:**
