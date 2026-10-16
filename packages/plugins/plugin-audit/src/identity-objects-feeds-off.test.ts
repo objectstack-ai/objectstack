@@ -211,6 +211,12 @@ describe('Setup identity objects declare enable.feeds: false — a comment creat
     const stored = await driver.create('sys_comment', { thread_id: 'sys_user:usr-1', body: 'before the flag' });
     const id = String(stored.id);
 
+    // The gate is live on this very thread — so what follows is a grandfathered
+    // row surviving the flag, not a harness in which the flag never applied.
+    await expect(
+      engine.insert('sys_comment', { thread_id: 'sys_user:usr-1', body: 'after the flag' } as any),
+    ).rejects.toMatchObject({ code: 'FEEDS_DISABLED', status: 403, object: 'sys_user' });
+
     const read: any[] = await engine.find('sys_comment', {
       where: { thread_id: 'sys_user:usr-1' },
     } satisfies EngineQueryOptions);
