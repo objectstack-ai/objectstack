@@ -137,7 +137,7 @@ async function run(
   }) as never);
   let thrownExit: number | undefined;
   try {
-    await command.run(argv, { root: CLI_ROOT });
+    await (command === MigrateApply ? MigrateApply.run(argv, { root: CLI_ROOT }) : MigratePlan.run(argv, { root: CLI_ROOT }));
   } catch (error) {
     const oclif = (error as { oclif?: { exit?: number } }).oclif;
     const trapped = error instanceof Error && error.message.startsWith('__PROCESS_EXIT__');

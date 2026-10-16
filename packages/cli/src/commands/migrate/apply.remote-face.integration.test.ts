@@ -206,7 +206,7 @@ async function run(
   let thrownExit: number | undefined;
   try {
     try {
-      await command.run(args, { root: CLI_ROOT });
+      await (command === MigrateApply ? MigrateApply.run(args, { root: CLI_ROOT }) : MigratePlan.run(args, { root: CLI_ROOT }));
     } catch (error) {
       const trapped = error instanceof Error && error.message.startsWith('__PROCESS_EXIT__');
       if (!trapped && !isExitSignal(error)) throw error;

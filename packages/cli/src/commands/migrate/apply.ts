@@ -659,7 +659,7 @@ export default class MigrateApply extends Command {
       if (partial) {
         printError(
           `PARTIAL apply: ${unappliedDestructive.length} destructive change(s) confirmed with --allow-destructive were `
-          + 'NOT applied (named above). The other changes in this run were applied.',
+          + 'NOT applied (named above), so this database still differs from its metadata.',
         );
         this.exit(1);
       }
