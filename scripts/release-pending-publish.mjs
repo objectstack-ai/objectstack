@@ -13,7 +13,7 @@
  *   node scripts/release-pending-publish.mjs npm-state VERSION
  *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --version VERSION
  *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --json
- *   node scripts/release-pending-publish.mjs queue-guard --event EVENT --base SHA --head SHA
+ *   node scripts/release-pending-publish.mjs annotate-shipped [--head REV] [--no-deepen]
  *   node scripts/release-pending-publish.mjs sweep --workflow release.yml [--dry-run]
  *   node scripts/release-pending-publish.mjs in-flight --version VERSION --version-commit SHA --head SHA --workflow release.yml
  *   node scripts/release-pending-publish.mjs --self-test
@@ -107,38 +107,47 @@
  * section, and `release.yml` runs it in the push (or dispatch) that queues the
  * publish, where the approver reads it. `--json` prints the measurement alone.
  *
- * `queue-guard` -- the REFUSAL half of the same measurement (#23818), taken
- * where it can still stop the landing. `unconsumed` above is read after the
- * version commit is on `main`: its CHANGELOG files are already written, and its
- * contract is to warn and never refuse. That is how 18.0.0-next.2 shipped 11
- * changesets with no CHANGELOG entry while the report worked exactly as built:
- * the push run of its version commit `e5136ff10f` (run 38841989023) carried the
- * warning naming all 11 and their 10 commits, and the publish was approved three
- * minutes later. Pre mode played no part -- @changesets/cli v3 moves what a
- * prerelease pass consumes into `.changeset/pre/`, so the top-level read names
- * the late ones correctly in either mode. What was missing is a check BEFORE the
- * landing, on the tree that lands. A `pull_request` build cannot be it: a
- * scheduled refresh starts none (#23825's head `d5c44f86be` carries zero check
- * runs), and when one runs (#23481's head `958e5b07b7`, after a dispatched
- * refresh) it judges the PR against the base it was cut from, where it is
- * current by construction. Only the merge-queue build sees the tree that lands,
- * and none of its steps read changesets.
+ * `annotate-shipped` -- the WRITING half of the same measurement (#23818). The
+ * root `version` script runs it ahead of `changeset version`, so every cut
+ * records what the previous one left out, with no human step and no refusal.
+ * `unconsumed` above reads the leak after the landing and only warns. That is
+ * how 18.0.0-next.2 shipped 11 changesets with no CHANGELOG entry while the
+ * report worked exactly as built: run 38841989023 named all 11 and their 10
+ * commits, and the publish started three minutes later. Pre mode played no
+ * part -- @changesets/cli v3 moves what a prerelease pass consumes into
+ * `.changeset/pre/`, so the top-level read is right in either mode. Refusing
+ * such a landing is not the remedy: `main` takes a changeset-bearing landing
+ * about every twenty minutes (77 of 111 landings in the 24 h to
+ * 2026-10-16T08Z), so a Version Packages PR almost never reaches the merge
+ * queue current, and a refusal would block nearly every release to protect a
+ * CHANGELOG line.
  *
- * So this mode judges a merge-queue build. It reads the first-parent commits of
- * `base..head` -- `base` and `head` are the group's `merge_group.base_sha`
- * and `merge_group.head_sha`, full shas from the event payload and never a ref
- * guess; the base already carries every entry ahead of this one -- and finds
- * each version commit there,
- * as `select` defines one. For each it takes the `unconsumed` measurement AT
- * that commit -- not at the group's head, so a later entry's own changeset in
- * the same batch is the next release's, never this one's -- and REFUSES (exit
- * 1) when any changeset is left over: the PR was cut from a base that `main`,
- * or a queue entry ahead of it, has since passed by at least one changeset. The
- * remedy it prints is the refresh stroke `release.yml` already offers. A group
- * that moves no version is never judged, so no ordinary PR depends on it. An
- * event that is not `merge_group` is answered "nothing to judge"; a
- * `merge_group` with no full base or head sha, a base off the head's history or
- * a shallow clone is refused rather than answered.
+ * So the next cut writes the line. The step finds the LAST version commit on
+ * HEAD's first-parent chain (`select`'s definition), takes the changesets that
+ * sat unconsumed in that commit's tree (the set `unconsumed` reports, read here
+ * from the tree alone), and gives each one still pending a lead line right
+ * after its frontmatter:
+ *
+ *     **Shipped in VERSION**, whose CHANGELOG missed this entry; listed here one prerelease late.
+ *
+ * ("release" in place of "prerelease" for a version with no prerelease tag).
+ * `changeset version` then renders that line as the entry's first line under
+ * the next version. The frontmatter is byte-unchanged. A changeset whose first
+ * body line already starts with `**Shipped in` is left as it is, so a second
+ * run, or a line written by hand, is never doubled. It annotates only when
+ * VERSION is on npm: a version commit nobody published shipped nothing, and its
+ * changesets then land in the next CHANGELOG correctly with no note.
+ *
+ * ⛔ It never blocks a release. The `version` script joins it with `;`, not
+ * `&&`, and the mode exits 0 on every path. When it cannot decide -- no version
+ * commit, history it cannot reach, an unreadable tree or `pre.json`, npm
+ * unreadable -- it prints a `::warning::` and annotates nothing; one changeset
+ * it cannot parse is skipped with its own warning. A shallow clone (the
+ * version-pr job checks out at depth 1) is deepened in place, bounded:
+ * `git fetch --no-tags --deepen=N origin HEAD-SHA` with N = 100, 200, 400, 800,
+ * 1600, until the version commit and its first parent are both present. That is
+ * all the history the step reads; the changesets come from that commit's tree.
+ * `--no-deepen` turns the fetch off.
  *
  * `npm-state` -- present / absent / unknown for one version, from `npm view`'s
  * exit status and its `E404`. The caller decides what `unknown` means: the
@@ -230,7 +239,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -376,19 +385,14 @@ export function isChangesetFile(basename) {
 }
 
 /**
- * Every pending changeset in the version commit's tree, each with the commit
- * that added it. Pending means `changeset version` would still read it, so the
- * version commit did not consume it. Throws on a shallow clone, on a rev that
- * is not a commit, and on a `pre.json` whose `changesets` is not a list of ids.
+ * The changesets pending in one commit's tree, and those of them a 2.x
+ * `pre.json` does not record as consumed -- read from that tree alone, so it
+ * needs no history and answers in a shallow clone. Pending means `changeset
+ * version` would still read it. Throws on a rev that is not a commit and on a
+ * `pre.json` that is not JSON or whose `changesets` is not a list of ids.
  */
-export function unconsumedChangesets({ cwd, versionCommit }) {
-  if (gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') {
-    throw new Error(
-      'refusing to name the commits that added changesets in a shallow clone: at the graft boundary every older ' +
-        'changeset reads as added by the boundary commit. Check out with fetch-depth: 0.',
-    );
-  }
-  const sha = gitOk(cwd, ['rev-parse', '--verify', `${versionCommit}^{commit}`]).trim();
+export function pendingChangesetsAt({ cwd, rev }) {
+  const sha = gitOk(cwd, ['rev-parse', '--verify', `${rev}^{commit}`]).trim();
   // `--full-tree`: paths from the repository root whatever the cwd. A tree
   // with no `.changeset/` lists nothing, which is the answer "none pending".
   const blobs = gitOk(cwd, ['ls-tree', '-z', '--full-tree', sha, '--', `${CHANGESET_DIR}/`])
@@ -417,15 +421,28 @@ export function unconsumedChangesets({ cwd, versionCommit }) {
     }
   }
 
-  const pending = blobs.filter((e) => isChangesetFile(e.path.slice(CHANGESET_DIR.length + 1)));
+  const pending = blobs.map((e) => e.path).filter((path) => isChangesetFile(path.slice(CHANGESET_DIR.length + 1)));
+  const unrecorded = pending.filter((path) => !recorded.has(path.slice(CHANGESET_DIR.length + 1, -'.md'.length)));
+  return { sha, pending, unrecorded, recordedInPreState: pending.length - unrecorded.length };
+}
+
+/**
+ * Every pending changeset in the version commit's tree, each with the commit
+ * that added it. Pending means `changeset version` would still read it, so the
+ * version commit did not consume it. Throws on a shallow clone, on a rev that
+ * is not a commit, and on a `pre.json` whose `changesets` is not a list of ids.
+ */
+export function unconsumedChangesets({ cwd, versionCommit }) {
+  if (gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') {
+    throw new Error(
+      'refusing to name the commits that added changesets in a shallow clone: at the graft boundary every older ' +
+        'changeset reads as added by the boundary commit. Check out with fetch-depth: 0.',
+    );
+  }
+  const at = pendingChangesetsAt({ cwd, rev: versionCommit });
   const unconsumed = [];
-  let recordedInPreState = 0;
-  for (const { path } of pending) {
-    if (recorded.has(path.slice(CHANGESET_DIR.length + 1, -'.md'.length))) {
-      recordedInPreState += 1;
-      continue;
-    }
-    const added = gitOk(cwd, ['log', '--no-renames', '--diff-filter=A', '--max-count=1', '--format=%H %s', sha, '--', path]).trim();
+  for (const path of at.unrecorded) {
+    const added = gitOk(cwd, ['log', '--no-renames', '--diff-filter=A', '--max-count=1', '--format=%H %s', at.sha, '--', path]).trim();
     const space = added.indexOf(' ');
     unconsumed.push(
       added === ''
@@ -434,9 +451,9 @@ export function unconsumedChangesets({ cwd, versionCommit }) {
     );
   }
   return {
-    versionCommit: sha,
-    pending: pending.length,
-    recordedInPreState,
+    versionCommit: at.sha,
+    pending: at.pending.length,
+    recordedInPreState: at.recordedInPreState,
     unconsumed,
     commits: new Set(unconsumed.map((c) => c.commit ?? `unknown:${c.path}`)).size,
   };
@@ -489,137 +506,208 @@ export function describeUnconsumed({ version, report }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The merge-queue guard: refuse a version commit that would land behind main
+// annotate-shipped: the next cut records what the last one left out
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The one event whose build lands a commit on `main` (the merge queue's). */
-export const QUEUE_EVENT = 'merge_group';
+/** How a changeset already carrying the note begins its body, by this step or by hand. */
+export const SHIPPED_MARK = '**Shipped in ';
+
+/** The lead line for a changeset whose code shipped in `version` with no CHANGELOG entry. */
+export function shippedLeadLine(version) {
+  const kind = /-/.test(version) ? 'prerelease' : 'release';
+  return `${SHIPPED_MARK}${version}**, whose CHANGELOG missed this entry; listed here one ${kind} late.`;
+}
+
+/** Commits per deepening round for a shallow clone: 3,100 in all, then it gives up and warns. */
+export const DEEPEN_ROUNDS = Object.freeze([100, 200, 400, 800, 1600]);
 
 /**
- * The version commits on `head`'s first-parent chain after `base`, oldest
- * first: each commit at which the CLI version differs from its first parent's
- * (`select`'s definition, read over a range instead of a whole history).
+ * `text` with `line` as the first line of its body, right after the
+ * frontmatter, every other byte unchanged. `already` when the first non-blank
+ * body line starts with SHIPPED_MARK; `unparseable` when there is no
+ * `---`-fenced frontmatter to put it after.
  */
-export function versionCommitsInRange({ cwd, base, head }) {
-  const out = [];
-  const touching = gitOk(cwd, ['log', '--first-parent', '--reverse', '--format=%H', `${base}..${head}`, '--', CLI_MANIFEST])
-    .split('\n')
-    .filter(Boolean);
-  for (const commit of touching) {
-    const to = versionAt(cwd, commit);
-    if (to === null) continue;
-    const parent = git(cwd, ['rev-parse', '--verify', '--quiet', `${commit}^1`]);
-    const from = parent.status === 0 ? versionAt(cwd, parent.stdout.trim()) : null;
-    if (from !== to) out.push({ versionCommit: commit, from, to });
-  }
-  return out;
+export function withLeadLine(text, line) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(eol);
+  if (lines[0] !== '---') return { state: 'unparseable' };
+  const close = lines.indexOf('---', 1);
+  if (close < 0) return { state: 'unparseable' };
+  const head = `${lines.slice(0, close + 1).join(eol)}${eol}`;
+  if (!text.startsWith(head)) return { state: 'unparseable' };
+  const body = text.slice(head.length);
+  const first = body.split(eol).find((l) => l.trim() !== '');
+  if (first !== undefined && first.trimStart().startsWith(SHIPPED_MARK)) return { state: 'already' };
+  return { state: 'annotated', text: `${head}${eol}${line}${eol}${body.startsWith(eol) ? '' : eol}${body}` };
 }
 
 /**
- * Judge one merge-queue build. `behind` when any version commit it lands
- * leaves a changeset unconsumed; `current` when every one consumed its whole
- * tree; `no-version-commit` when the build moves no version; `not-a-merge-group`
- * for any other event. Throws -- never answers -- on a `merge_group` without a
- * full base and head sha, on a base that is not an ancestor of the head, and on
- * a shallow clone.
+ * The last version commit on `head`'s first-parent chain, read WITHOUT
+ * assuming full history: `found` needs the commit and its first parent both
+ * present, because a graft-boundary commit has no parent and would read as the
+ * version's introduction. `need-history` = the walk reached the shallow
+ * boundary first; `none` = this history has no version commit, with the reason.
  */
-export function queueGuard({ cwd, event, base, head }) {
-  if (event !== QUEUE_EVENT) return { verdict: 'not-a-merge-group', event, base: base || null, head, versionCommits: [] };
-  if (!base || !FULL_SHA.test(base)) {
-    throw new Error(
-      `a ${QUEUE_EVENT} build needs --base, the group's full base sha (got ${JSON.stringify(base ?? '')}): without it the ` +
-        'commits this build lands cannot be told apart from main, so nothing can be judged.',
-    );
-  }
-  if (!head || !FULL_SHA.test(head)) {
-    throw new Error(
-      `a ${QUEUE_EVENT} build needs --head, the group's full head sha (got ${JSON.stringify(head ?? '')}): the checked-out ` +
-        'ref is a guess at what the queue built, and the payload names it exactly.',
-    );
-  }
-  if (gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') {
-    throw new Error(
-      'refusing to judge a merge-queue build in a shallow clone: the group base and the commits that added each changeset ' +
-        'can sit past the graft boundary. Check out with fetch-depth: 0.',
-    );
-  }
-  if (git(cwd, ['cat-file', '-e', `${base}^{commit}`]).status !== 0) {
-    throw new Error(`the group base ${base} is not in this clone`);
-  }
+export function locateLastVersionCommit({ cwd, head }) {
+  const shallow = gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false';
   const headSha = gitOk(cwd, ['rev-parse', '--verify', `${head}^{commit}`]).trim();
-  if (!isAncestor(cwd, base, headSha)) {
-    throw new Error(`the group base ${base} is not an ancestor of ${headSha}, so ${base}..${headSha} is not what this build lands`);
+  const version = versionAt(cwd, headSha);
+  if (version === null) return { state: 'none', headSha, reason: `${headSha.slice(0, 10)} carries no ${CLI_MANIFEST}` };
+  const touching = gitOk(cwd, ['log', '--first-parent', '--format=%H', headSha, '--', CLI_MANIFEST]).split('\n').filter(Boolean);
+  for (const commit of touching) {
+    const here = versionAt(cwd, commit);
+    if (here !== version) {
+      return {
+        state: 'none',
+        headSha,
+        reason: `the first-parent walk from ${headSha.slice(0, 10)} reached ${commit.slice(0, 10)} carrying ${here} before finding where ${version} was introduced`,
+      };
+    }
+    const parent = git(cwd, ['rev-parse', '--verify', '--quiet', `${commit}^1`]);
+    if (parent.status !== 0) {
+      return shallow
+        ? { state: 'need-history', headSha, version }
+        : { state: 'none', headSha, reason: `${CLI_MANIFEST} first appears in the root commit ${commit.slice(0, 10)}, so no version commit ever moved it` };
+    }
+    const before = versionAt(cwd, parent.stdout.trim());
+    if (before === version) continue;
+    if (before === null) {
+      return { state: 'none', headSha, reason: `${CLI_MANIFEST} is created at ${commit.slice(0, 10)}, and its creation is not a release` };
+    }
+    return { state: 'found', headSha, version, from: before, versionCommit: commit };
   }
-  const versionCommits = versionCommitsInRange({ cwd, base, head: headSha }).map((vc) => ({
-    ...vc,
-    report: unconsumedChangesets({ cwd, versionCommit: vc.versionCommit }),
-  }));
-  const verdict =
-    versionCommits.length === 0
-      ? 'no-version-commit'
-      : versionCommits.some((vc) => vc.report.unconsumed.length > 0)
-        ? 'behind'
-        : 'current';
-  return { verdict, event, base, head: headSha, versionCommits };
+  return shallow
+    ? { state: 'need-history', headSha, version }
+    : { state: 'none', headSha, reason: `no first-parent commit of ${headSha.slice(0, 10)} introduces ${CLI_PACKAGE}@${version}` };
 }
 
-/** The refresh stroke the refusal prescribes, spelled once. */
-export const QUEUE_GUARD_REMEDY =
-  'Refresh the Version Packages PR from the current main -- dispatch release.yml with refresh_version_pr: true, the ' +
-  'bookkeeping lane only -- and queue it again with no changeset-bearing PR ahead of it.';
+function commitCount(cwd, rev) {
+  return Number(gitOk(cwd, ['rev-list', '--count', rev]).trim());
+}
 
 /**
- * The guard's report -- pure, so every line is pinned. `refused` is the exit
- * decision; `log` goes to the step log (an `::error::` per refused version
- * commit), `summary` to the job summary.
+ * Annotate, in the working tree, every changeset the last version commit left
+ * unconsumed and that is still pending -- or decide not to, with the reason.
+ * Never throws. Verdicts: `done` (written, possibly zero), `unshipped` (the
+ * version is not on npm: nothing shipped), `undecided` (a warning; nothing
+ * written).
  */
-export function describeQueueGuard(result) {
-  const range = result.base ? `${result.base.slice(0, 10)}..${result.head.slice(0, 10)}` : null;
-  if (result.verdict === 'not-a-merge-group') {
-    const line = `Version-PR queue guard: event ${result.event} is not a merge-queue build, and only a ${QUEUE_EVENT} build lands a commit on main, so there is nothing to judge here.`;
-    return { refused: false, log: [line], summary: ['', line] };
-  }
-  if (result.verdict === 'no-version-commit') {
-    const line = `Version-PR queue guard: ${range} moves no ${CLI_PACKAGE} version, so this merge-queue build lands no version commit. Nothing to judge.`;
-    return { refused: false, log: [line], summary: ['', line] };
-  }
-  const log = [];
-  const summary = [''];
-  for (const { versionCommit, from, to, report } of result.versionCommits) {
-    const short = versionCommit.slice(0, 10);
-    const bump = `${CLI_PACKAGE} ${from ?? '(none)'} -> ${to}`;
-    if (report.unconsumed.length === 0) {
-      const line = `Version-PR queue guard: the version commit ${short} (${bump}) consumed every changeset in its tree, so ${to}'s CHANGELOG leaves out no change this build lands.`;
-      log.push(line);
-      summary.push(line);
-      continue;
+export function annotateShipped({ cwd, head = 'HEAD', npmStateOf, deepen = true, remote = 'origin', rounds = DEEPEN_ROUNDS }) {
+  const result = {
+    verdict: 'undecided',
+    reason: null,
+    version: null,
+    from: null,
+    versionCommit: null,
+    npm: null,
+    deepenedBy: 0,
+    annotated: [],
+    already: [],
+    gone: [],
+    unparseable: [],
+  };
+  try {
+    const root = gitOk(cwd, ['rev-parse', '--show-toplevel']).trim();
+    let at = locateLastVersionCommit({ cwd: root, head });
+    for (const by of deepen ? rounds : []) {
+      if (at.state !== 'need-history') break;
+      const before = commitCount(root, at.headSha);
+      const fetched = git(root, ['fetch', '--no-tags', '--quiet', `--deepen=${by}`, remote, at.headSha]);
+      if (fetched.status !== 0) {
+        result.reason = `the clone is shallow and \`git fetch --deepen=${by} ${remote}\` failed (${fetched.stderr.trim().split('\n').pop() || `exit ${fetched.status}`})`;
+        return result;
+      }
+      result.deepenedBy += by;
+      if (commitCount(root, at.headSha) === before) {
+        result.reason = `the clone is shallow and deepening it from ${remote} gained no history`;
+        return result;
+      }
+      at = locateLastVersionCommit({ cwd: root, head });
     }
-    const n = report.unconsumed.length;
-    const by = (c) => (c.commit ? c.commit.slice(0, 10) : 'commit not found');
-    log.push(
-      commandData(
-        `::error::Version Packages PR behind main: the version commit ${short} (${bump}) would land ${n} changeset(s) ` +
-          `from ${report.commits} commit(s) it did not consume. Their code would ship in ${to}, and the CHANGELOG.md files ` +
-          `${to} publishes would not name them. ${QUEUE_GUARD_REMEDY} ` +
-          report.unconsumed.map((c) => `${c.path} (${by(c)})`).join(', '),
-      ),
-      ...report.unconsumed.map((c) => `  ${c.path}  added by ${c.commit ? `${c.commit.slice(0, 10)} ${c.subject}` : 'a commit this history does not show'}`),
-    );
-    summary.push(
-      `### Refused: the Version Packages PR is behind main by ${n} changeset(s)`,
-      '',
-      `The version commit \`${short}\` (${bump}) this merge-queue build would land still carries these in its tree.`,
-      `It did not consume them, so their code would ship in ${to} while the \`CHANGELOG.md\` files ${to} publishes`,
-      'leave them out.',
-      '',
-      ...report.unconsumed.map((c) =>
-        c.commit ? `- \`${c.path}\`, added by \`${c.commit.slice(0, 10)}\`: ${c.subject}` : `- \`${c.path}\`, added by a commit this history does not show`,
-      ),
-      '',
-      QUEUE_GUARD_REMEDY,
-    );
+    if (at.state === 'need-history') {
+      result.reason = deepen
+        ? `the last version commit is not within the ${result.deepenedBy} commits this step may fetch into a shallow clone`
+        : 'the clone is shallow and --no-deepen was given, so the last version commit is out of reach';
+      return result;
+    }
+    if (at.state === 'none') {
+      result.reason = `no version commit to read: ${at.reason}`;
+      return result;
+    }
+    Object.assign(result, { version: at.version, from: at.from, versionCommit: at.versionCommit });
+    result.npm = npmStateOf(at.version);
+    if (result.npm === 'absent') {
+      result.verdict = 'unshipped';
+      return result;
+    }
+    if (result.npm !== 'present') {
+      result.reason = `npm could not say whether ${CLI_PACKAGE}@${at.version} is published`;
+      return result;
+    }
+    const line = shippedLeadLine(at.version);
+    const writes = [];
+    for (const path of pendingChangesetsAt({ cwd: root, rev: at.versionCommit }).unrecorded) {
+      const abs = join(root, path);
+      if (!existsSync(abs)) {
+        result.gone.push(path);
+        continue;
+      }
+      const text = readFileSync(abs, 'utf8');
+      const out = withLeadLine(text, line);
+      if (out.state === 'already') result.already.push(path);
+      else if (out.state === 'unparseable') result.unparseable.push(path);
+      else writes.push({ path, abs, text, next: out.text });
+    }
+    const written = [];
+    try {
+      for (const w of writes) {
+        writeFileSync(w.abs, w.next);
+        written.push(w);
+      }
+    } catch (err) {
+      for (const w of written) {
+        try {
+          writeFileSync(w.abs, w.text);
+        } catch {
+          // The warning below names the failure; a second one here adds nothing.
+        }
+      }
+      result.reason = `a write failed (${err instanceof Error ? err.message : err}); the ${written.length} written before it were put back`;
+      return result;
+    }
+    result.annotated = writes.map((w) => w.path);
+    result.verdict = 'done';
+    return result;
+  } catch (err) {
+    result.verdict = 'undecided';
+    result.reason = err instanceof Error ? err.message : String(err);
+    result.annotated = [];
+    return result;
   }
-  return { refused: result.verdict === 'behind', log, summary };
+}
+
+/** The step's log lines -- pure, so each one is pinned. Warnings are `::warning::` lines. */
+export function describeAnnotate(result) {
+  const tail = 'Annotated nothing; the version pass goes on without it.';
+  if (result.verdict === 'undecided') return [commandData(`::warning::annotate-shipped: ${result.reason}. ${tail}`)];
+  const vc = result.versionCommit.slice(0, 10);
+  if (result.verdict === 'unshipped') {
+    return [
+      `annotate-shipped: the last version commit ${vc} brought ${CLI_PACKAGE} to ${result.version}, which is not on npm, so nothing shipped without a CHANGELOG entry. Annotated nothing.`,
+    ];
+  }
+  const n = result.annotated.length + result.already.length + result.gone.length + result.unparseable.length;
+  const deepened = result.deepenedBy > 0 ? ` (the shallow clone was deepened by ${result.deepenedBy} commits to read it)` : '';
+  return [
+    `annotate-shipped: the last version commit ${vc} (${result.from} -> ${result.version}) left ${n} changeset(s) unconsumed${deepened}: ` +
+      `${result.annotated.length} annotated, ${result.already.length} already annotated, ${result.gone.length} no longer pending, ${result.unparseable.length} unreadable.`,
+    ...result.annotated.map((p) => `  annotated  ${p}`),
+    ...result.already.map((p) => `  already    ${p}`),
+    ...result.gone.map((p) => `  gone       ${p}`),
+    ...result.unparseable.map((p) =>
+      commandData(`::warning::annotate-shipped: ${p} shipped in ${result.version} with no CHANGELOG entry, but it has no frontmatter fence this step can read, so it was not annotated.`),
+    ),
+  ];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1164,12 +1252,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the report -> a warning naming every changeset with its commit, a summary section, or a plain line for none': 4,
   "a publish of the version in another run -> in flight until it completes, and an unreadable read is in flight": 12,
   "the publishing run's image build -> in flight from the approval until its docker job completes, and an unreadable read is in flight": 12,
-  'the merge-queue guard -> a Version Packages PR cut behind main is refused, naming each changeset it did not consume': 5,
-  'the merge-queue guard -> a Version Packages PR cut from the current main passes (the control)': 3,
-  'the merge-queue guard -> a build that moves no version is never judged': 2,
-  'the merge-queue guard -> a batch is judged at its version commit, never at the batch head': 2,
-  'the merge-queue guard -> outside pre mode, where the version pass deletes what it consumes, a stale cut is refused too': 1,
-  'the merge-queue guard -> another event, a missing or foreign base, a shallow clone: answered or refused, never guessed': 8,
+  'annotate-shipped -> the next.2 shape: each changeset the last version commit left unconsumed gets the lead line once, frontmatter byte-unchanged': 5,
+  'annotate-shipped -> a second run writes nothing': 2,
+  'annotate-shipped -> a changeset whose first body line already says Shipped in is left byte-identical': 2,
+  'annotate-shipped -> outside pre mode, where the version pass deletes what it consumes': 2,
+  'annotate-shipped -> a depth-1 clone deepens itself to the version commit; with no reachable history it warns, annotates nothing and exits 0': 4,
+  'annotate-shipped -> no version commit, an unpublished or unreadable version, an error anywhere: a warning or a plain line, nothing written, exit 0': 5,
 });
 const SELF_TEST_BATTERY_FLOOR = 28;
 
@@ -1444,128 +1532,94 @@ async function selfTest() {
     );
     check(throws(() => unconsumedAt('f'.repeat(40)), /exited/), 'a version commit the clone does not have is refused');
 
-    // ── the merge-queue guard (#23818) ───────────────────────────────────
+    // ── annotate-shipped (#23818) ────────────────────────────────────────
     // The 18.0.0-next.2 sequence, reduced, in @changesets/cli v3's pre-mode
     // layout: the Version Packages PR is cut from a base carrying two pending
     // changesets and moves them into `.changeset/pre/`; main then takes two
-    // landings carrying three more; the queue builds the PR as a squash on top
-    // of them. #23825 (next.3) is the same shape one cut later.
+    // landings carrying three more; the queue lands the PR as a squash on top
+    // of them (the version commit), and one more landing follows it.
     const q = fixture();
     const qPut = (path, text = `---\n'${CLI_PACKAGE}': patch\n---\n\n${path}\n`) => {
       mkdirSync(dirname(join(q.dir, path)), { recursive: true });
       writeFileSync(join(q.dir, path), text);
     };
-    const qMove = (...names) => {
-      for (const name of names) q.g('mv', `.changeset/${name}.md`, `.changeset/pre/${name}.md`);
-    };
-    const guard = (base, head, event = QUEUE_EVENT) => queueGuard({ cwd: q.dir, event, base, head });
-    const guardPaths = (result) => result.versionCommits.flatMap((vc) => vc.report.unconsumed.map((u) => u.path)).join();
+    const qRead = (path) => readFileSync(join(q.dir, path), 'utf8');
     const SCRIPT = fileURLToPath(import.meta.url);
-    const cli = (cwd, ...args) => spawnSync(process.execPath, [SCRIPT, 'queue-guard', ...args], { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
+    const cli = (cwd, ...args) => spawnSync(process.execPath, [SCRIPT, 'annotate-shipped', ...args], { cwd, encoding: 'utf8' });
+    const shipped = npmOf(['18.0.0-next.2', '17.7.0']);
+    const annotate = (cwd, over = {}) => annotateShipped({ cwd, npmStateOf: shipped, ...over });
+    const LATE = ['.changeset/late-one.md', '.changeset/late-three.md', '.changeset/late-two.md'];
     q.writeCli('18.0.0-next.1');
     qPut('.changeset/README.md', 'what a changeset is\n');
     qPut(PRE_STATE, `${JSON.stringify({ mode: 'pre', tag: 'next' })}\n`);
     qPut('.changeset/pre/consumed-by-next-1.md');
     qPut('.changeset/a.md');
     qPut('.changeset/b.md');
-    const qBase = q.commit('base: two changesets pending in pre mode');
+    q.commit('base: two changesets pending in pre mode');
     q.g('checkout', '-q', '-b', 'version-pr');
-    qMove('a', 'b');
+    for (const name of ['a', 'b']) q.g('mv', `.changeset/${name}.md`, `.changeset/pre/${name}.md`);
     q.writeCli('18.0.0-next.2');
-    const qPr = q.commit('chore: version packages (next), as cut');
+    q.commit('chore: version packages (next), as cut');
     q.g('checkout', '-q', 'main');
     qPut('.changeset/late-one.md');
     q.commit('a landing after the cut');
     qPut('.changeset/late-two.md');
-    qPut('.changeset/late-three.md');
-    const groupBase = q.commit('a landing carrying two changesets: the merge group base');
-    q.g('checkout', '-q', '-b', 'queue-build', groupBase);
+    qPut('.changeset/late-three.md', `---\n'${CLI_PACKAGE}': minor\n'@objectstack/spec': patch\n---\nfeat: a summary line right under the fence\n\nmore prose\n`);
+    q.commit('a landing carrying two changesets');
     q.g('merge', '-q', '--squash', 'version-pr');
-    const qLanded = q.commit('chore: version packages (next) (the queue build)');
+    const qLanded = q.commit('chore: version packages (next) (landed behind main)');
+    qPut('.changeset/after-the-cut.md');
+    const qHead = q.commit('a landing after the version commit');
+    const qBefore = Object.fromEntries([...LATE, '.changeset/after-the-cut.md', '.changeset/pre/a.md'].map((p) => [p, qRead(p)]));
+    const LINE = '**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.';
+    // The hand-written form a seat adds (it cites its card); the step must read it as already annotated.
+    const HAND = '**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.';
 
-    battery('the merge-queue guard -> a Version Packages PR cut behind main is refused, naming each changeset it did not consume');
-    const behindGuard = guard(groupBase, qLanded);
+    battery('annotate-shipped -> the next.2 shape: each changeset the last version commit left unconsumed gets the lead line once, frontmatter byte-unchanged');
+    const first = annotate(q.dir);
     check(
-      behindGuard.verdict === 'behind' && behindGuard.versionCommits.length === 1 &&
-        behindGuard.versionCommits[0].versionCommit === qLanded &&
-        behindGuard.versionCommits[0].from === '18.0.0-next.1' && behindGuard.versionCommits[0].to === '18.0.0-next.2',
-      'the queue build of a PR cut behind main is "behind", judged at its version commit, next.1 -> next.2',
+      first.verdict === 'done' && first.versionCommit === qLanded && first.from === '18.0.0-next.1' && first.version === '18.0.0-next.2' &&
+        first.annotated.join() === LATE.join(),
+      'the last version commit is the queue-landed squash, and exactly the three late changesets are annotated',
     );
     check(
-      guardPaths(behindGuard) === '.changeset/late-one.md,.changeset/late-three.md,.changeset/late-two.md',
-      'it names exactly the three changesets main gained after the cut -- not the two the PR moved into pre/, not the pre/ stock',
-    );
-    const behindText = describeQueueGuard(behindGuard);
-    check(
-      behindText.refused && behindText.log[0].startsWith('::error::Version Packages PR behind main') &&
-        behindText.log[0].includes('3 changeset(s) from 2 commit(s)') && behindText.log[0].includes('refresh_version_pr: true') &&
-        behindText.summary.includes(QUEUE_GUARD_REMEDY),
-      'the report is a refusal: an error annotation with the count, and the refresh stroke as its remedy',
-    );
-    const behindCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', groupBase, '--head', qLanded);
-    check(behindCli.status === 1 && /late-two\.md/.test(behindCli.stdout), 'and the CLI exits 1 on it, naming the changesets on stdout');
-    // The miss, reproduced: before this mode, the one reader of this shape was
-    // `unconsumed`, run on the push that carries the landed version commit. It
-    // names the same three -- and only warns, after the landing, by contract.
-    const missed = describeUnconsumed({ version: '18.0.0-next.2', report: unconsumedChangesets({ cwd: q.dir, versionCommit: qLanded }) });
-    check(
-      missed.log[0].startsWith('::warning::') && !missed.log.some((l) => l.startsWith('::error::')) &&
-        unconsumedChangesets({ cwd: q.dir, versionCommit: qLanded }).unconsumed.map((u) => u.path).join() === guardPaths(behindGuard),
-      'the control: the post-landing report reads the same three and answers a warning -- it never refuses, which is the miss',
-    );
-
-    battery('the merge-queue guard -> a Version Packages PR cut from the current main passes (the control)');
-    q.g('checkout', '-q', '-b', 'fresh-cut', groupBase);
-    qMove('a', 'b', 'late-one', 'late-two', 'late-three');
-    q.writeCli('18.0.0-next.2');
-    const qFresh = q.commit('chore: version packages (next), refreshed from the current main');
-    const freshGuard = guard(groupBase, qFresh);
-    check(
-      freshGuard.verdict === 'current' && freshGuard.versionCommits[0].report.unconsumed.length === 0 && !describeQueueGuard(freshGuard).refused,
-      'a refresh from the group base consumes all five -> "current", not refused',
+      qRead('.changeset/late-one.md') === `---\n'${CLI_PACKAGE}': patch\n---\n\n${LINE}\n\n.changeset/late-one.md\n` &&
+        qRead('.changeset/late-three.md') === `---\n'${CLI_PACKAGE}': minor\n'@objectstack/spec': patch\n---\n\n${LINE}\n\nfeat: a summary line right under the fence\n\nmore prose\n`,
+      'byte-exact: the line goes right after the frontmatter, set off by blank lines; the frontmatter and every body byte are unchanged',
     );
     check(
-      guard(qBase, qPr).verdict === 'current',
-      'and the stale PR itself was current against the base it was cut from -- the defect is the landing, not the cut',
+      qRead('.changeset/after-the-cut.md') === qBefore['.changeset/after-the-cut.md'] && qRead('.changeset/pre/a.md') === qBefore['.changeset/pre/a.md'],
+      'a changeset added after the version commit, and one the cut consumed into pre/, are untouched',
     );
-    const freshCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', groupBase, '--head', qFresh);
     check(
-      freshCli.status === 0 && /consumed every changeset in its tree/.test(freshCli.stdout),
-      'and the CLI exits 0 on it with one plain line naming the version commit it read',
+      shippedLeadLine('18.0.0-next.2') === LINE && shippedLeadLine('17.7.0').endsWith('listed here one release late.') && !/#\d/.test(LINE),
+      'the line names the version, says "release" for a version with no prerelease tag, and carries no card number',
+    );
+    const crlf = withLeadLine(`---\r\n'x': patch\r\n---\r\n\r\nsummary\r\n`, LINE);
+    check(
+      crlf.state === 'annotated' && crlf.text === `---\r\n'x': patch\r\n---\r\n\r\n${LINE}\r\n\r\nsummary\r\n` &&
+        withLeadLine('summary with no frontmatter\n', LINE).state === 'unparseable' && withLeadLine("---\n'x': patch\n", LINE).state === 'unparseable',
+      'a CRLF changeset keeps its line endings; one with no frontmatter fence is unparseable, never guessed at',
     );
 
-    battery('the merge-queue guard -> a build that moves no version is never judged');
-    q.g('checkout', '-q', '-b', 'ordinary', groupBase);
-    qPut('.changeset/ordinary.md');
-    const qOrdinary = q.commit('an ordinary PR carrying a changeset');
-    const ordinaryGuard = guard(groupBase, qOrdinary);
-    check(
-      ordinaryGuard.verdict === 'no-version-commit' && ordinaryGuard.versionCommits.length === 0 && !describeQueueGuard(ordinaryGuard).refused,
-      'an ordinary PR with a changeset, on a base with five pending -> "no-version-commit", not refused',
-    );
-    q.writeCli('18.0.0-next.1', { dependencies: { 'left-pad': '1.3.0' } });
-    const qDepOnly = q.commit('deps: cli gains a dependency');
-    check(guard(groupBase, qDepOnly).verdict === 'no-version-commit', 'a CLI manifest edit that moves no version is no version commit either');
+    battery('annotate-shipped -> a second run writes nothing');
+    const annotatedBytes = Object.fromEntries(LATE.map((p) => [p, qRead(p)]));
+    const second = annotate(q.dir);
+    check(second.verdict === 'done' && second.annotated.length === 0 && second.already.join() === LATE.join(), 'the second run finds all three already annotated');
+    check(LATE.every((p) => qRead(p) === annotatedBytes[p]), 'and every file is byte-identical to the first run\'s output: the line is never doubled');
 
-    battery('the merge-queue guard -> a batch is judged at its version commit, never at the batch head');
-    q.g('checkout', '-q', '-b', 'batch-fresh', qFresh);
-    qPut('.changeset/after-fresh.md');
-    const qBatchFresh = q.commit('an entry behind the refreshed PR in the same batch');
-    const batchFresh = guard(groupBase, qBatchFresh);
+    battery('annotate-shipped -> a changeset whose first body line already says Shipped in is left byte-identical');
+    q.g('checkout', '-q', '--', '.changeset');
+    const handText = `---\n'${CLI_PACKAGE}': patch\n---\n\n${HAND}\n\n.changeset/late-two.md\n`;
+    writeFileSync(join(q.dir, '.changeset/late-two.md'), handText);
+    const third = annotate(q.dir);
     check(
-      batchFresh.verdict === 'current' && batchFresh.versionCommits[0].versionCommit === qFresh,
-      'a current version commit followed by an entry with its own changeset -> "current": that changeset is the next release\'s',
+      third.already.join() === '.changeset/late-two.md' && third.annotated.join() === '.changeset/late-one.md,.changeset/late-three.md',
+      'the hand-annotated one is "already"; the other two are annotated',
     );
-    q.g('checkout', '-q', '-b', 'batch-behind', qLanded);
-    qPut('.changeset/after-landed.md');
-    const qBatchBehind = q.commit('an entry behind the stale PR in the same batch');
-    const batchBehind = guard(groupBase, qBatchBehind);
-    check(
-      batchBehind.verdict === 'behind' && guardPaths(batchBehind) === guardPaths(behindGuard),
-      'a stale version commit mid-batch -> refused for the same three, and the later entry\'s changeset is not among them',
-    );
+    check(qRead('.changeset/late-two.md') === handText, 'and the hand-written line is not rewritten or doubled');
 
-    battery('the merge-queue guard -> outside pre mode, where the version pass deletes what it consumes, a stale cut is refused too');
+    battery('annotate-shipped -> outside pre mode, where the version pass deletes what it consumes');
     const s = fixture();
     const sPut = (path) => {
       mkdirSync(dirname(join(s.dir, path)), { recursive: true });
@@ -1580,39 +1634,99 @@ async function selfTest() {
     s.commit('chore: version packages');
     s.g('checkout', '-q', 'main');
     sPut('.changeset/y.md');
-    const sBase = s.commit('a landing after the cut');
+    s.commit('a landing after the cut');
     s.g('merge', '-q', '--squash', 'version-pr');
-    const sLanded = s.commit('chore: version packages (the queue build)');
-    const stable = queueGuard({ cwd: s.dir, event: QUEUE_EVENT, base: sBase, head: sLanded });
+    s.commit('chore: version packages (landed behind main)');
+    const stable = annotate(s.dir);
+    check(stable.verdict === 'done' && stable.annotated.join() === '.changeset/y.md', 'a 17.6.0 -> 17.7.0 cut landed behind one changeset -> y.md alone is annotated');
     check(
-      stable.verdict === 'behind' && stable.versionCommits[0].report.unconsumed.map((u) => u.path).join() === '.changeset/y.md',
-      'a 17.6.0 -> 17.7.0 cut landing behind one changeset -> refused, naming y.md alone',
+      readFileSync(join(s.dir, '.changeset/y.md'), 'utf8').includes('**Shipped in 17.7.0**, whose CHANGELOG missed this entry; listed here one release late.'),
+      'with the "release" form of the line',
     );
 
-    battery('the merge-queue guard -> another event, a missing or foreign base, a shallow clone: answered or refused, never guessed');
-    const pr = guard('', qLanded, 'pull_request');
+    battery('annotate-shipped -> a depth-1 clone deepens itself to the version commit; with no reachable history it warns, annotates nothing and exits 0');
+    q.g('checkout', '-q', '--', '.changeset');
+    q.g('config', 'uploadpack.allowReachableSHA1InWant', 'true');
+    q.g('branch', '-f', 'annotate-head', qHead);
+    const shallowClone = () => {
+      const d = mkdtempSync(join(tmpdir(), 'release-pending-publish-shallow-'));
+      dirs.push(d);
+      gitOk(tmpdir(), ['clone', '-q', '--depth', '1', '--branch', 'annotate-head', `file://${q.dir}`, d]);
+      return d;
+    };
+    const deep = shallowClone();
+    const deepened = annotate(deep, { rounds: [1, 1, 2, 4] });
     check(
-      pr.verdict === 'not-a-merge-group' && !describeQueueGuard(pr).refused && /not a merge-queue build/.test(describeQueueGuard(pr).log[0]),
-      'a pull_request build -> "not-a-merge-group", said out loud, not refused',
+      deepened.verdict === 'done' && deepened.deepenedBy > 0 && deepened.versionCommit === qLanded && deepened.annotated.join() === LATE.join(),
+      `a depth-1 clone fetches history in bounded rounds until the version commit and its parent are present, then annotates the same three (deepened by ${deepened.deepenedBy})`,
     );
-    check(throws(() => guard('', qLanded), /needs --base/), 'a merge_group build with an empty base is refused, not read as "nothing to judge"');
-    check(throws(() => guard('f'.repeat(40), qLanded), /not in this clone/), 'a base the clone does not have is refused');
-    check(throws(() => guard(qPr, qOrdinary), /not an ancestor/), 'a base off the head\'s first-parent history is refused');
-    const shallowQueue = mkdtempSync(join(tmpdir(), 'release-pending-publish-shallow-'));
-    dirs.push(shallowQueue);
-    gitOk(tmpdir(), ['clone', '-q', '--depth', '1', '--branch', 'queue-build', `file://${q.dir}`, shallowQueue]);
+    const cut = shallowClone();
+    gitOk(cut, ['remote', 'set-url', 'origin', `file://${join(tmpdir(), 'release-pending-publish-no-such-remote')}`]);
+    const unreachable = annotate(cut);
     check(
-      throws(() => queueGuard({ cwd: shallowQueue, event: QUEUE_EVENT, base: qLanded, head: qLanded }), /shallow clone/),
-      'a shallow clone is refused before any range is read',
+      unreachable.verdict === 'undecided' && /--deepen/.test(unreachable.reason) && unreachable.annotated.length === 0 &&
+        gitOk(cut, ['status', '--porcelain']).trim() === '',
+      'origin unreachable -> undecided, naming the failed fetch, and the working tree is untouched',
     );
+    const cutCli = cli(cut);
     check(
-      throws(() => guard(groupBase, ''), /needs --head/) && throws(() => guard(groupBase, 'HEAD'), /needs --head/),
-      'a merge_group build with an empty head, or a ref name in place of the payload sha, is refused, never read off the checkout',
+      cutCli.status === 0 && cutCli.stdout.startsWith('::warning::annotate-shipped:') && /Annotated nothing/.test(cutCli.stdout),
+      'and the CLI says so in a warning and exits 0',
     );
-    const noHeadCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', groupBase, '--head', '');
-    check(noHeadCli.status === 1 && /needs --head/.test(noHeadCli.stderr), 'and the CLI exits 1 on an empty merge_group head, saying why');
-    const emptyCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', '', '--head', qLanded);
-    check(emptyCli.status === 1 && /needs --base/.test(emptyCli.stderr), 'and the CLI exits 1 on an empty merge_group base, saying why');
+    const noDeepen = annotate(shallowClone(), { deepen: false });
+    check(noDeepen.verdict === 'undecided' && /--no-deepen/.test(noDeepen.reason), '--no-deepen in a shallow clone -> undecided, never a graft-boundary guess');
+
+    battery('annotate-shipped -> no version commit, an unpublished or unreadable version, an error anywhere: a warning or a plain line, nothing written, exit 0');
+    const none = fixture();
+    writeFileSync(join(none.dir, 'README.md'), 'no CLI here\n');
+    none.commit('a repository with no CLI manifest');
+    const noManifest = annotate(none.dir);
+    const born = fixture();
+    born.writeCli('1.0.0');
+    born.commit('the manifest is born here');
+    born.commit('a landing', 'x.txt');
+    const rootOnly = annotate(born.dir);
+    const later = fixture();
+    later.commit('before the CLI', 'y.txt');
+    later.writeCli('1.0.0');
+    later.commit('the manifest is created');
+    const createdOnly = annotate(later.dir);
+    check(
+      [noManifest, rootOnly, createdOnly].every((r) => r.verdict === 'undecided' && r.annotated.length === 0) &&
+        /carries no packages\/cli\/package\.json/.test(noManifest.reason) && /root commit/.test(rootOnly.reason) && /creation is not a release/.test(createdOnly.reason),
+      'no manifest, a manifest born in the root commit, a manifest created later: each is "no version commit", undecided',
+    );
+    q.g('checkout', '-q', '--', '.changeset');
+    const unpublished = annotateShipped({ cwd: q.dir, npmStateOf: npmOf([]) });
+    check(
+      unpublished.verdict === 'unshipped' && unpublished.annotated.length === 0 && gitOk(q.dir, ['status', '--porcelain']).trim() === '' &&
+        /not on npm/.test(describeAnnotate(unpublished)[0]) && !describeAnnotate(unpublished)[0].startsWith('::'),
+      'the last version is not on npm -> nothing shipped, a plain line, nothing written',
+    );
+    const unreadableNpm = annotateShipped({ cwd: q.dir, npmStateOf: () => 'unknown' });
+    check(
+      unreadableNpm.verdict === 'undecided' && /npm could not say/.test(unreadableNpm.reason) && gitOk(q.dir, ['status', '--porcelain']).trim() === '',
+      'npm unreadable -> undecided, nothing written',
+    );
+    const notGit = mkdtempSync(join(tmpdir(), 'release-pending-publish-not-git-'));
+    dirs.push(notGit);
+    const notGitCli = cli(notGit);
+    check(
+      notGitCli.status === 0 && notGitCli.stdout.startsWith('::warning::annotate-shipped:'),
+      'run outside any git repository -> a warning and exit 0: the step never stops the version pass',
+    );
+    const badPre = fixture();
+    badPre.writeCli('1.0.0');
+    badPre.commit('base');
+    mkdirSync(join(badPre.dir, '.changeset'), { recursive: true });
+    writeFileSync(join(badPre.dir, PRE_STATE), '{ not json');
+    badPre.writeCli('1.1.0');
+    badPre.commit('a version commit whose pre.json is not JSON');
+    const badPreResult = annotate(badPre.dir, { npmStateOf: () => 'present' });
+    check(
+      badPreResult.verdict === 'undecided' && /is not JSON/.test(badPreResult.reason) && /^::warning::/.test(describeAnnotate(badPreResult)[0]),
+      'an unreadable pre.json at the version commit -> undecided with the reason, as a warning',
+    );
   } finally {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
@@ -2160,16 +2274,18 @@ async function main(argv) {
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
     return;
   }
-  if (mode === 'queue-guard') {
-    const event = flag(rest, '--event');
-    if (!event) throw new Error('queue-guard needs --event (the build event, e.g. merge_group)');
-    // An empty `--base ""` is what the workflow expression renders on every
-    // event that is not `merge_group`; `queueGuard` refuses it on one that is.
-    const result = queueGuard({ cwd: process.cwd(), event, base: flag(rest, '--base') || '', head: flag(rest, '--head') || '' });
-    const { refused, log, summary } = describeQueueGuard(result);
-    console.log(log.join('\n'));
-    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
-    if (refused) process.exitCode = 1;
+  if (mode === 'annotate-shipped') {
+    // ⛔ Exit 0 on every path. This step runs inside the version pass, and it
+    // must never be the reason a release does not happen: anything it cannot
+    // decide is a warning and an untouched tree.
+    try {
+      const head = flag(rest, '--head') || 'HEAD';
+      const result = annotateShipped({ cwd: process.cwd(), head, deepen: !rest.includes('--no-deepen'), npmStateOf: (v) => npmState(v) });
+      console.log(describeAnnotate(result).join('\n'));
+    } catch (err) {
+      console.log(commandData(`::warning::annotate-shipped: ${err && err.message ? err.message : err}. Annotated nothing; the version pass goes on without it.`));
+    }
+    process.exitCode = 0;
     return;
   }
   if (mode === 'sweep') {
@@ -2197,7 +2313,7 @@ async function main(argv) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return;
   }
-  throw new Error(`unknown mode ${JSON.stringify(mode)} -- expected select, npm-state, unconsumed, queue-guard, sweep, in-flight or --self-test`);
+  throw new Error(`unknown mode ${JSON.stringify(mode)} -- expected select, npm-state, unconsumed, annotate-shipped, sweep, in-flight or --self-test`);
 }
 
 if (isEntrypoint(import.meta.url)) {
