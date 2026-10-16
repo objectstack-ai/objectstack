@@ -2,19 +2,26 @@
 
 /**
  * Record-surface derivation — the single source for *how* an object's
- * create / edit / detail record opens by DEFAULT: a full page, or an overlay
- * (drawer / modal). ADR-0085 §5 "one shared derivation, every surface".
+ * create / edit / detail record opens by DEFAULT. ADR-0085 §5 "one shared
+ * derivation, every surface". The size axis comes from the record's weight
+ * ({@link deriveRecordSurface}: field-heavy or mobile → `'page'`, otherwise a
+ * side drawer); what that means per flow is {@link deriveRecordFlowSurface}'s:
+ *   - viewing a record: a routed full page when field-heavy (or on mobile),
+ *     otherwise a drawer;
+ *   - creating / editing one: always an overlay — a modal when field-heavy
+ *     (full-screen on mobile, bounded on desktop), otherwise a drawer.
  *
- * Why this is a derivation and NOT an authored object key
- * ------------------------------------------------------
+ * Why the default is a derivation, not an authored object key
+ * -----------------------------------------------------------
  * ADR-0085 §2's admission test rejects per-surface presentation toggles on the
- * object: modal-vs-page is not a business fact a machine cannot infer — it is
- * exactly inferable from how heavy the record is. So the platform derives a
- * sensible default here (field-heavy → full page; otherwise a side drawer),
- * and AI authors write nothing in the common case. Explicit control, when a
- * specific object genuinely needs it, is the sanctioned per-page path: an
- * assigned page. The renderer therefore uses this ONLY as the default and lets
- * an explicit form/navigation config win.
+ * object: the size of the surface is not a business fact a machine cannot
+ * infer — it is exactly inferable from how heavy the record is. So the
+ * platform derives a sensible default here and AI authors write nothing in the
+ * common case. The renderer uses this ONLY as the default and lets explicit
+ * config win: a view's form/navigation config, an assigned page, and the
+ * object's `editMode` (`'modal' | 'page'`, declared in `object.zod.ts` by
+ * commit f11fc61c5's maintainer ruling as edit-interaction intent, which the
+ * renderer applies; nothing in this file reads it).
  *
  * The rule is deliberately simple and predictable (a single field-count
  * threshold + a mobile override) because an unpredictable heuristic is its own
@@ -147,9 +154,12 @@ export interface RecordFlowSurface {
  * desktop the field-heavy task flow is a bounded modal; mobile keeps
  * full-screen.
  *
- * Like the base derivation this is a DEFAULT only: explicit `navigation.mode`
- * / `navigation.size`, `FormView.type` / `modalSize`, or an assigned page win
- * (the sanctioned per-object overrides — no new authorable key, ADR-0085 §2).
+ * Like the base derivation this is a DEFAULT only, read from `def.fields`,
+ * `flow` and `opts` and nothing else: the renderer lets explicit
+ * config win over it — `navigation.mode` / `navigation.size`,
+ * `FormView.type` / `modalSize`, an assigned page, and the object's
+ * `editMode` (`'modal' | 'page'`, declared in `object.zod.ts` as the object's
+ * edit-interaction intent, which the renderer applies; not read here).
  */
 export function deriveRecordFlowSurface(
   def: unknown,
