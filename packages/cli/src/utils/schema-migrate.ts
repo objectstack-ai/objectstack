@@ -1397,6 +1397,45 @@ export function renderPlan(
   }
 }
 
+/**
+ * [#23925] The entries whose reporting driver declares its apply door cannot
+ * perform them ({@link SchemaStack.driftApplyLimit}), each with that limit.
+ * Empty when every reporting driver declares nothing, and then `os migrate
+ * plan` and `os migrate apply` render exactly as they always have.
+ */
+export function collectDriftApplyLimits(
+  stack: Pick<SchemaStack, 'driftApplyLimit'>,
+  drift: readonly ManagedDriftEntry[],
+): Map<ManagedDriftEntry, string> {
+  const limits = new Map<ManagedDriftEntry, string>();
+  for (const d of drift) {
+    const limit = stack.driftApplyLimit(d);
+    if (limit !== null) limits.set(d, limit);
+  }
+  return limits;
+}
+
+/**
+ * [#23925] The {@link renderPlan} `describe` for those entries: the finding
+ * without its `--allow-destructive` sentence, then the driver's limit, so the
+ * listing never offers a remedy that database does not have. Every other
+ * entry keeps its message. One spelling, read by `os migrate plan` and by the
+ * listing `os migrate apply` prints before its prompt. The driver package is
+ * imported at the point of use, never statically
+ * (`schema-migrate.lazy-driver-import.test.ts`).
+ */
+export async function describeWithApplyLimits(
+  limits: ReadonlyMap<ManagedDriftEntry, string>,
+): Promise<(d: ManagedDriftEntry) => string> {
+  const { driftFindingWithoutRemedy } = await import('@objectstack/driver-sql');
+  return (d) => {
+    const limit = limits.get(d);
+    return limit === undefined
+      ? d.message
+      : `${driftFindingWithoutRemedy(d)} "os migrate apply" cannot apply it on this database: ${limit}.`;
+  };
+}
+
 export function summarize(drift: ManagedDriftEntry[]): string {
   const g = groupByCategory(drift);
   return `${drift.length} change(s): ${g.safe.length} safe, ${g.needs_confirm.length} needs-confirm, ${g.destructive.length} destructive`;

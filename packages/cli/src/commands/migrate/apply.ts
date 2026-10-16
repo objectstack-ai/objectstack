@@ -17,6 +17,8 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  collectDriftApplyLimits,
+  describeWithApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
   renderPlan,
@@ -326,12 +328,31 @@ export default class MigrateApply extends Command {
       const deferred = drift.filter((d) => d.category === 'destructive' && !allowDestructive);
 
       if (!flags.json) {
+        // [#23925] The listing reads what the driver that reported each entry
+        // declares its apply door cannot perform, as `os migrate plan` does: such
+        // an entry shows its finding and that limit, never --allow-destructive.
+        // Empty for a driver that declares nothing, which reads as it always has.
+        // The human listing only: the --json document and everything after the
+        // prompt (`notApplied`, PARTIAL, the exit code) are unchanged.
+        const limits = collectDriftApplyLimits(stack, drift);
         await renderPendingSchemaWork(pending);
-        renderPlan(drift);
+        if (limits.size === 0) renderPlan(drift);
+        else renderPlan(drift, await describeWithApplyLimits(limits));
         if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
         printInfo(summarize(drift));
-        if (deferred.length > 0) {
-          printWarning(`${deferred.length} destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).`);
+        // [#23925] A re-run with --allow-destructive is offered only for the
+        // held-back entries it could apply here; the rest are named as drift
+        // that re-run would leave as it is.
+        const reRunnable = deferred.filter((d) => !limits.has(d));
+        const notReRunnable = deferred.length - reRunnable.length;
+        if (reRunnable.length > 0) {
+          printWarning(`${reRunnable.length} destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).`);
+        }
+        if (notReRunnable > 0) {
+          printWarning(
+            `${notReRunnable} destructive change(s) remain drift that a re-run with --allow-destructive cannot apply `
+            + 'on this database either (each says why above).',
+          );
         }
         if (allowDestructive && grouped.destructive.length > 0) {
           printWarning('Destructive changes assume your full app/plugin set is loaded. A column that looks "orphaned" here may belong to a plugin that is not part of this build.');

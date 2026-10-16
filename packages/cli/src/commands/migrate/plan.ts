@@ -15,6 +15,8 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  collectDriftApplyLimits,
+  describeWithApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
   renderPlan,
@@ -23,7 +25,6 @@ import {
   summarizePendingSchemaWork,
   SKIPPED_SCHEMA_SYNC_NOTE,
 } from '../../utils/schema-migrate.js';
-import type { ManagedDriftEntry } from '@objectstack/driver-sql';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import {
   refuseWhenHostConfigUnloadable,
@@ -375,11 +376,7 @@ export default class MigratePlan extends Command {
       // door cannot perform: on the Turso REMOTE transport, every column entry
       // but a drop (it runs no SQLite table rebuild). Empty for a driver that
       // declares nothing, and then everything below reads as it always has.
-      const limits = new Map<ManagedDriftEntry, string>();
-      for (const d of drift) {
-        const limit = stack.driftApplyLimit(d);
-        if (limit !== null) limits.set(d, limit);
-      }
+      const limits = collectDriftApplyLimits(stack, drift);
 
       await renderPendingSchemaWork(pending);
       if (limits.size === 0) {
@@ -387,13 +384,7 @@ export default class MigratePlan extends Command {
       } else {
         // Still listed, still counted: it IS drift. Only the remedy changes,
         // from a command that cannot perform it here to the reason it cannot.
-        const { driftFindingWithoutRemedy } = await import('@objectstack/driver-sql');
-        renderPlan(drift, (d) => {
-          const limit = limits.get(d);
-          return limit === undefined
-            ? d.message
-            : `${driftFindingWithoutRemedy(d)} "os migrate apply" cannot apply it on this database: ${limit}.`;
-        });
+        renderPlan(drift, await describeWithApplyLimits(limits));
       }
       if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
       printInfo(summarize(drift));
