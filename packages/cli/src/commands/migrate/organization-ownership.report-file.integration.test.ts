@@ -10,8 +10,10 @@
  * anything runs: `apply_refused`, `report-file-unwritable`, the OS code named,
  * the database untouched and the existing file byte-identical. The control is
  * the same run with a new `--out`: the ceremony executes and its report is
- * written there. A report that cannot be kept AFTER the ceremony executed — here
- * the reserved file removed while the run went on — carries its own code,
+ * written there. A run refused after the boot (here, a plan that is not the
+ * reviewed one) releases the file it reserved, so a resume can reuse the path. A
+ * report that cannot be kept AFTER the ceremony executed — here the reserved
+ * file removed while the run went on — carries its own code,
  * `apply_report_unwritable`, with `executed: true` and the report itself.
  *
  * The fixture is a database a served boot of this tree left behind, shaped like
@@ -241,7 +243,26 @@ describe('organization-ownership --apply: the report file', () => {
     expect(hasOrganizationColumn(prepared.dbFile, DROPPED)).toBe(false);
   }, CASE_TIMEOUT_MS);
 
-  it('(iii) a report lost after the ceremony executed carries its own code, executed: true and the report', async () => {
+  it('(iii) a run refused after the boot (a plan that is not the reviewed one) releases its reserved file', async () => {
+    const prepared = await prepare('refused-after-boot');
+    const plan = JSON.parse(readFileSync(prepared.planFile, 'utf8')) as Record<string, unknown>;
+    writeFileSync(prepared.planFile, JSON.stringify({ ...plan, inventoryDigest: 'f'.repeat(64) }));
+    const out = join(prepared.projectDir, 'apply.json');
+    let reservedAtBoot: unknown;
+    bootHook.once = () => {
+      reservedAtBoot = JSON.parse(readFileSync(out, 'utf8'));
+    };
+
+    const { payload, exitCode } = await apply(prepared, out);
+
+    expect(payload).toMatchObject({ error: 'apply_refused', reason: 'plan-digest-mismatch' });
+    expect(exitCode).toBe(1);
+    expect(reservedAtBoot).toMatchObject({ kind: 'organization-ownership-apply-reservation' });
+    expect(existsSync(out)).toBe(false);
+    expect(hasCeremonyMarker(prepared.dbFile)).toBe(false);
+  }, CASE_TIMEOUT_MS);
+
+  it('(iv) a report lost after the ceremony executed carries its own code, executed: true and the report', async () => {
     const prepared = await prepare('lost-report');
     const out = join(prepared.projectDir, 'apply.json');
     // The reserved file is removed while the run goes on (after the boot,
