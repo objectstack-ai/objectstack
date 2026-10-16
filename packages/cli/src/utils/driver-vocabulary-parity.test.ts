@@ -457,6 +457,9 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
     ['data/app.sqlite3', 'sqlite'],
     ['./data/app', 'sqlite'],
     ['/var/lib/objectstack/app', 'sqlite'],
+    // A single letter and a `:` is a Windows drive, not an opaque scheme.
+    ['C:\\data\\app.db', 'sqlite'],
+    ['C:/data/app.db', 'sqlite'],
   ])('both hosts ACCEPT %s as %s, and the CLI builds it from that URL in dev and prod', (url, kind) => {
     expect(runtimeUrlVerdict(url), `the runtime host refused ${url}`).toEqual({ accepted: true, driverId: kind });
     for (const isDev of [false, true]) {
@@ -465,41 +468,26 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
     }
   });
 
-  // A `<scheme>://` neither host recognises: refused by both, the CLI's refusal
-  // being the typed one serve.ts makes fatal, in dev as in production.
+  // A scheme neither host recognises: refused by both, naming the same scheme,
+  // the CLI's refusal being the typed one serve.ts makes fatal, in dev as in
+  // production. That is an unrecognised `<scheme>://`; an OPAQUE scheme — two
+  // or more characters and a `:`, no `//` (`jdbc:postgresql://…`, `redis:h`),
+  // which the runtime host used to open as a SQLite file at a path made of the
+  // URL; and any scheme a `*.wasm.db` file name used to rescue there (#23765).
   it.each([
     ['redis://127.0.0.1:6399/0', 'redis://'],
     ['rediss://cache.example.com:6380', 'rediss://'],
     ['https://db.example.com/app', 'https://'],
     ['mssql://h/db', 'mssql://'],
     ['redis://h/app.db', 'redis://'],
-  ])('both hosts REFUSE %s, in dev AND in prod', (url, scheme) => {
-    const runtime = runtimeUrlVerdict(url);
-    expect(runtime.accepted, `the runtime host accepted ${url}`).toBe(false);
-    for (const isDev of [false, true]) {
-      const cli = cliUrlVerdict(url, isDev);
-      expect(cli.accepted, `the CLI host (isDev=${isDev}) accepted ${url}`).toBe(false);
-      const error = (cli as { error: unknown }).error;
-      expect(error, `the CLI host (isDev=${isDev}) did not refuse ${url} by type`).toBeInstanceOf(UnsupportedDriverError);
-      expect((error as UnsupportedDriverError).recognized).toBe(false);
-      expect((error as Error).message).toContain(`"${scheme}"`);
-      expect((error as Error).message).toContain('OS_DATABASE_URL');
-    }
-  });
-
-  // An OPAQUE scheme — two or more characters and a `:`, no `//`
-  // (`jdbc:postgresql://…`, `redis:h`) — and any scheme a `*.wasm.db` file name
-  // used to rescue. The CLI host refuses them, typed, in dev and prod. The
-  // runtime host's answer is deliberately NOT pinned here: today it opens these
-  // as a SQLite file at a path made of the URL, an implementation gap against
-  // its own "unknown schemes throw" rule that is #23765's to close, so asserting
-  // either agreement or its current answer would pin that gap.
-  it.each([
     ['jdbc:postgresql://localhost:5432/db', 'jdbc:'],
     ['redis:cache', 'redis:'],
     ['redis://h/app.wasm.db', 'redis://'],
     ['jdbc:x/app.wasm.db', 'jdbc:'],
-  ])('the CLI host REFUSES %s (scheme %s), in dev AND in prod', (url, scheme) => {
+  ])('both hosts REFUSE %s, in dev AND in prod', (url, scheme) => {
+    const runtime = runtimeUrlVerdict(url);
+    expect(runtime.accepted, `the runtime host accepted ${url}`).toBe(false);
+    expect((runtime as { message: string }).message, `the runtime host's refusal of ${url}`).toContain(`"${scheme}"`);
     for (const isDev of [false, true]) {
       const cli = cliUrlVerdict(url, isDev);
       expect(cli.accepted, `the CLI host (isDev=${isDev}) accepted ${url}`).toBe(false);
