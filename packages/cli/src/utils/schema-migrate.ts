@@ -80,6 +80,13 @@ export interface SqlDriverLike {
    * caller's own refusal branch can tell an operator which it was.
    */
   planMediaColumnMove?: () => Promise<MediaColumnMoveScan>;
+  /**
+   * [#23816] Why this driver's drift report must not be acted on unattended,
+   * or `null` / absent when it may be — `TursoDriver`'s REMOTE face declares
+   * one. Read by the artifact-pinned boot gate (`./artifact-boot-migration.ts`),
+   * which then neither applies nor refuses on the report.
+   */
+  readonly driftReportCaveat?: string | null;
   /** Deferred-DDL surface (#3917) — optional, so a driver without it still boots. */
   setDeferredDdl?: (deferred: boolean) => void;
   previewDeferredSchemaWork?: () => Promise<PendingSchemaWork[]>;

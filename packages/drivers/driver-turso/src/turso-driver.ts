@@ -579,8 +579,11 @@ function refuseRemoteDeferredDdl(): never {
  * The declared side is {@link TursoDriver.remoteDeclaredSchemas}: what each
  * object that reached this face declares, recorded by every remote schema door
  * and by the DDL-free registration a `skipSchemaSync` boot takes.
- * `turso-local-remote-drift-parity.test.ts` holds the two faces to one answer
+ * `turso-remote-drift-detection.test.ts` holds the two faces to one answer
  * over one SQLite file, both for a clean table and for each drifted shape.
+ * The no-argument call reads the whole catalog it needs in three round trips,
+ * whatever the number of tables (`readRemoteCatalog`), because a hosted
+ * tenant's first v18 request pays for this read.
  *
  * # What the apply door answers here
  *
@@ -593,8 +596,30 @@ function refuseRemoteDeferredDdl(): never {
  * DEFAULT) needs that rebuild, which this transport has no copy of, so it is
  * reported `skipped` and logged, as the in-place arm reports an op its dialect
  * cannot perform. Each entry is reported `applied` only once a read-back shows
- * the physical schema in its target state.
+ * the physical schema in its target state: the column gone, the index name
+ * gone, or the index present with the uniqueness and the key columns, in
+ * order, the entry asked for.
+ *
+ * # What this face does NOT claim: a boot may not act on its report
+ *
+ * The report is accurate about the database, but not every finding is real
+ * drift. This face's schema sync (`RemoteTransport`) does not create the NOT NULL
+ * constraint a field declares, so a table it created reads as `tighten_not_null`
+ * (destructive) against its own declaration. Nor is there a remedy for a
+ * destructive entry on this transport: `os migrate apply` arms deferred DDL,
+ * which this face refuses. So {@link TursoDriver.driftReportCaveat} says so,
+ * and a caller that would apply or refuse on the report unattended (the
+ * `OS_ARTIFACT_URL` boot gate) reads the caveat and does neither. The ceremony
+ * is not such a caller: it applies only the column and index drops it named.
  */
+
+/** [#23816] {@link TursoDriver.driftReportCaveat} on the REMOTE face. */
+const REMOTE_DRIFT_REPORT_CAVEAT =
+  'the Turso REMOTE transport\'s schema sync does not create the NOT NULL constraint a field declares, so ' +
+  'this driver\'s drift report can name a tightening its own sync produced, and a destructive entry has no ' +
+  'remedy on this transport (`os migrate apply` refuses against it). The report is for reading; nothing is ' +
+  'applied or refused on it unattended. To review the drift, run `os migrate plan` against a local SQLite ' +
+  'copy of this database (a `file:` URL)';
 
 /**
  * One `pragma_table_info` row as Knex's SQLite `columnInfo()` reports it — the
@@ -619,6 +644,53 @@ function remoteIntrospectedColumn(row: Record<string, unknown>): IntrospectedCol
 
 /** A SQLite identifier, quoted, with any embedded quote doubled. */
 const quoteRemoteIdentifier = (name: string): string => `"${String(name).replace(/"/g, '""')}"`;
+
+/** [#23816] The catalog statements the remote drift reads send, one spelling each. */
+const REMOTE_TABLE_INFO_SQL = 'SELECT cid, name, type, "notnull", dflt_value FROM pragma_table_info(?) ORDER BY cid';
+const REMOTE_INDEX_LIST_SQL = 'SELECT name, "unique", origin, partial FROM pragma_index_list(?) ORDER BY seq';
+const REMOTE_INDEX_INFO_SQL = 'SELECT name FROM pragma_index_info(?) ORDER BY seqno';
+/** [#23816] Statements per catalog `read` batch: a bound on one request, not a tuning knob. */
+const REMOTE_CATALOG_BATCH = 200;
+
+/** [#23816] What one remote drift detection reads, keyed by table and by index name. */
+interface RemoteCatalogSnapshot {
+  /** `pragma_table_info` rows per table the database holds. */
+  columns: Map<string, Array<Record<string, unknown>>>;
+  /** `pragma_index_list` rows per table the database holds. */
+  indexList: Map<string, Array<Record<string, unknown>>>;
+  /** Each index's DDL, from `sqlite_master`, where SQLite keeps one. */
+  indexDdl: Map<string, string>;
+  /** `pragma_index_info` rows per index whose DDL does not parse. */
+  indexInfo: Map<string, Array<Record<string, unknown>>>;
+}
+
+/**
+ * [#23816] A table's indexes from its `pragma_index_list` rows, built as the
+ * local SQLite arm of `SqlDriver.introspectIndexes` builds them: the key from
+ * the parsed DDL where it parses (an expression key or a predicate survives
+ * only there), else from `pragma_index_info`.
+ */
+function remotePhysicalIndexes(
+  list: ReadonlyArray<Record<string, unknown>>,
+  ddlOf: (name: string) => string | undefined,
+  infoOf: (name: string) => ReadonlyArray<Record<string, unknown>>,
+): PhysicalIndex[] {
+  const byName = new Map<string, PhysicalIndex>();
+  for (const r of list) {
+    const name = String(r.name);
+    let entry = byName.get(name);
+    if (!entry) byName.set(name, (entry = { name, columns: [], unique: Number(r.unique) === 1, primary: r.origin === 'pk' }));
+    const parsed = parseIndexDdl(ddlOf(name) ?? '');
+    if (parsed) {
+      applyIndexKeyParts(entry, parsed.keyParts);
+      if (parsed.partial) entry.partial = true;
+    } else {
+      for (const c of infoOf(name)) if (c.name != null) entry.columns.push(String(c.name));
+    }
+    if (Number(r.partial) === 1) entry.partial = true;
+  }
+  return [...byName.values()];
+}
 
 // ── Remote media column move planning: refused, never "nothing to move" ──────
 
@@ -3721,13 +3793,27 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
+   * Why this driver's drift report must not be ACTED ON unattended, or `null`
+   * when it may be. [#23816] A sentence on the REMOTE face (see "Remote schema
+   * drift" at the top of this file); `null` on the local and embedded-replica
+   * faces, whose report is the Knex detector's. A caller that would apply or
+   * refuse on the report with nobody watching (the `OS_ARTIFACT_URL` boot gate)
+   * reads this first; a caller that applies only the entries it named itself
+   * (the organization-ownership ceremony's column drops) does not need to.
+   */
+  get driftReportCaveat(): string | null {
+    return this.isRemote ? REMOTE_DRIFT_REPORT_CAVEAT : null;
+  }
+
+  /**
    * Detect managed-schema drift. [#23816] On the REMOTE face: the shared
    * differ, fed by the remote catalog (see "Remote schema drift" at the top of
    * this file). With no `objects` it walks {@link remoteDeclaredSchemas}, which
    * every remote schema door and the DDL-free {@link registerObjectMetadata}
    * fill, as the local face walks `managedObjectFields`. A table the database
-   * does not hold is skipped, as the local face skips it. Local and replica
-   * modes inherit the Knex detector unchanged.
+   * does not hold is skipped, as the local face skips it. The catalog is read
+   * once for the call ({@link readRemoteCatalog}), not per table. Local and
+   * replica modes inherit the Knex detector unchanged.
    *
    * The parameter repeats the base's declared shape key for key rather than
    * deriving it (`check:object-def-param-keys` arm C), so the keys a caller may
@@ -3745,22 +3831,72 @@ export class TursoDriver extends SqlDriver {
     } else {
       for (const [table, declared] of this.remoteDeclaredSchemas) tables.set(table, declared);
     }
-    const present = new Set(
-      (await this.remoteCatalogRead(`SELECT name FROM sqlite_master WHERE type = 'table'`)).map((r) => String(r.name)),
-    );
-    const out: ManagedDriftEntry[] = [];
-    for (const [table, declared] of tables) {
-      if (!present.has(table)) continue;
-      out.push(...(await this.detectTableDrift(table, declared.fields, declared.indexes)));
+    const catalog = await this.readRemoteCatalog([...tables.keys()]);
+    const previous = this.remoteCatalogSnapshot;
+    this.remoteCatalogSnapshot = catalog;
+    try {
+      const out: ManagedDriftEntry[] = [];
+      for (const [table, declared] of tables) {
+        if (!catalog.columns.has(table)) continue; // not a table this database holds
+        out.push(...(await this.detectTableDrift(table, declared.fields, declared.indexes)));
+      }
+      // The base detector's order: by table, then by column.
+      out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
+      return out;
+    } finally {
+      if (this.remoteCatalogSnapshot === catalog) this.remoteCatalogSnapshot = previous;
     }
-    // The base detector's order: by table, then by column.
-    out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
-    return out;
+  }
+
+  /**
+   * [#23816] The catalog one {@link detectManagedDrift} call diffs, while it
+   * runs, so {@link introspectColumns} and {@link introspectIndexes} answer from
+   * it instead of a round trip per read. `null` outside a detection. The apply
+   * door never reads it: its read-backs are live ({@link remoteLiveColumns},
+   * {@link remoteLiveIndexes}).
+   */
+  private remoteCatalogSnapshot: RemoteCatalogSnapshot | null = null;
+
+  /**
+   * [#23816] Read, for `tables`, everything the differ reads, in three round
+   * trips whatever the number of tables: `sqlite_master` (which tables exist,
+   * and each index's DDL); one `read` batch of `pragma_table_info` and
+   * `pragma_index_list` per existing table; one `read` batch of
+   * `pragma_index_info` for each index whose DDL does not parse (the
+   * autoindexes SQLite keeps no DDL for among them). A table the database does
+   * not hold has no `columns` entry.
+   */
+  private async readRemoteCatalog(tables: readonly string[]): Promise<RemoteCatalogSnapshot> {
+    const catalog: RemoteCatalogSnapshot = { columns: new Map(), indexList: new Map(), indexDdl: new Map(), indexInfo: new Map() };
+    const present = new Set<string>();
+    for (const r of await this.remoteCatalogRead(`SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table', 'index')`)) {
+      if (r.type === 'table') present.add(String(r.name));
+      else if (typeof r.sql === 'string' && r.sql) catalog.indexDdl.set(String(r.name), r.sql);
+    }
+    const existing = tables.filter((t) => present.has(t));
+    const reads: Array<{ sql: string; args: unknown[] }> = [];
+    for (const t of existing) {
+      reads.push({ sql: REMOTE_TABLE_INFO_SQL, args: [t] }, { sql: REMOTE_INDEX_LIST_SQL, args: [t] });
+    }
+    const answers = await this.remoteCatalogBatch(reads);
+    existing.forEach((t, i) => {
+      catalog.columns.set(t, answers[2 * i]!);
+      catalog.indexList.set(t, answers[2 * i + 1]!);
+    });
+    const needInfo = [...catalog.indexList.values()]
+      .flat()
+      .map((r) => String(r.name))
+      .filter((name) => !parseIndexDdl(catalog.indexDdl.get(name) ?? ''));
+    const infos = await this.remoteCatalogBatch(needInfo.map((name) => ({ sql: REMOTE_INDEX_INFO_SQL, args: [name] })));
+    needInfo.forEach((name, i) => catalog.indexInfo.set(name, infos[i]!));
+    return catalog;
   }
 
   /**
    * [#23816] One catalog read on the REMOTE database, in the raw-statement
-   * fault envelope `execute()` answers with.
+   * fault envelope `execute()` answers with. An answer that is not a row list
+   * is a fault too, never read as an empty catalog: an empty catalog is "no
+   * drift".
    */
   private async remoteCatalogRead(sql: string, args: unknown[] = []): Promise<Array<Record<string, unknown>>> {
     let rows: unknown;
@@ -3769,73 +3905,91 @@ export class TursoDriver extends SqlDriver {
     } catch (error) {
       throw this.rawStatementFault(sql, error);
     }
-    return (Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>;
+    if (!Array.isArray(rows)) throw this.rawStatementFault(sql, new Error('the remote database answered no row list'));
+    return rows as Array<Record<string, unknown>>;
+  }
+
+  /** [#23816] {@link remoteCatalogRead} for several statements, as one `read` batch (chunked). */
+  private async remoteCatalogBatch(reads: ReadonlyArray<{ sql: string; args: unknown[] }>): Promise<Array<Array<Record<string, unknown>>>> {
+    const out: Array<Array<Record<string, unknown>>> = [];
+    for (let i = 0; i < reads.length; i += REMOTE_CATALOG_BATCH) {
+      const chunk = reads.slice(i, i + REMOTE_CATALOG_BATCH);
+      let answers: unknown[];
+      try {
+        answers = await this.remoteTransport!.batch(chunk.map((r) => ({ sql: r.sql, args: r.args as never })), 'read');
+      } catch (error) {
+        throw this.rawStatementFault(chunk[0]!.sql, error);
+      }
+      chunk.forEach((r, j) => {
+        if (!Array.isArray(answers[j])) throw this.rawStatementFault(r.sql, new Error('the remote database answered no row list'));
+        out.push(answers[j] as Array<Record<string, unknown>>);
+      });
+    }
+    return out;
   }
 
   /**
-   * The table's columns, in declared order. [#23816] On the REMOTE face, read
-   * from `pragma_table_info` and shaped as Knex's SQLite `columnInfo()` shapes
-   * it ({@link remoteIntrospectedColumn}); the cid is the ordinal, as
+   * The table's columns, in declared order. [#23816] On the REMOTE face, from
+   * `pragma_table_info` (a detection's catalog while one runs, else a live
+   * read), shaped as Knex's SQLite `columnInfo()` shapes it
+   * ({@link remoteIntrospectedColumn}); the cid is the ordinal, as
    * `introspectColumnOrder` reads it locally.
    */
   protected override async introspectColumns(tableName: string): Promise<IntrospectedColumn[]> {
     if (!this.isRemote) return super.introspectColumns(tableName);
-    const rows = await this.remoteCatalogRead(
-      'SELECT cid, name, type, "notnull", dflt_value FROM pragma_table_info(?) ORDER BY cid',
-      [tableName],
-    );
-    return rows.map(remoteIntrospectedColumn);
+    const held = this.remoteCatalogSnapshot?.columns.get(tableName);
+    return held ? held.map(remoteIntrospectedColumn) : this.remoteLiveColumns(tableName);
+  }
+
+  /** [#23816] The table's columns, read live from the remote catalog. */
+  private async remoteLiveColumns(tableName: string): Promise<IntrospectedColumn[]> {
+    return (await this.remoteCatalogRead(REMOTE_TABLE_INFO_SQL, [tableName])).map(remoteIntrospectedColumn);
   }
 
   /**
    * The table's indexes. [#23816] On the REMOTE face, the statements the local
-   * SQLite arm sends, sent to the remote database: `sqlite_master` for each
-   * index's DDL (the only place an expression key or a `WHERE` predicate
-   * survives), `pragma_index_list` for the set, and `pragma_index_info` for an
-   * index whose DDL does not parse. The DDL goes through the driver-sql
-   * parsers the local arm uses, so an index reads alike on both faces.
+   * SQLite arm sends, sent to the remote database (a detection's catalog while
+   * one runs, else live reads): `sqlite_master` for each index's DDL (the only
+   * place an expression key or a `WHERE` predicate survives),
+   * `pragma_index_list` for the set, and `pragma_index_info` for an index whose
+   * DDL does not parse. The DDL goes through the driver-sql parsers the local
+   * arm uses, so an index reads alike on both faces.
    */
   protected override async introspectIndexes(
     tableName: string,
     opts: { onFailure?: 'throw' | 'partial' } = {},
   ): Promise<PhysicalIndex[]> {
     if (!this.isRemote) return super.introspectIndexes(tableName, opts);
-    const byName = new Map<string, PhysicalIndex>();
-    const upsert = (name: string, unique: boolean, primary: boolean): PhysicalIndex => {
-      let entry = byName.get(name);
-      if (!entry) byName.set(name, (entry = { name, columns: [], unique, primary }));
-      return entry;
-    };
+    const held = this.remoteCatalogSnapshot;
+    const list = held?.indexList.get(tableName);
+    if (held && list) {
+      return remotePhysicalIndexes(list, (name) => held.indexDdl.get(name), (name) => held.indexInfo.get(name) ?? []);
+    }
+    return this.remoteLiveIndexes(tableName, opts);
+  }
+
+  /** [#23816] The table's indexes, read live from the remote catalog. */
+  private async remoteLiveIndexes(tableName: string, opts: { onFailure?: 'throw' | 'partial' } = {}): Promise<PhysicalIndex[]> {
+    const ddlByName = new Map<string, string>();
+    const info = new Map<string, Array<Record<string, unknown>>>();
+    let list: Array<Record<string, unknown>> = [];
     try {
-      const ddlByName = new Map<string, string>();
       for (const r of await this.remoteCatalogRead(
         `SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`,
         [tableName],
       )) {
         if (typeof r.sql === 'string' && r.sql) ddlByName.set(String(r.name), r.sql);
       }
-      for (const r of await this.remoteCatalogRead(
-        'SELECT name, "unique", origin, partial FROM pragma_index_list(?) ORDER BY seq',
-        [tableName],
-      )) {
+      list = await this.remoteCatalogRead(REMOTE_INDEX_LIST_SQL, [tableName]);
+      for (const r of list) {
         const name = String(r.name);
-        const entry = upsert(name, Number(r.unique) === 1, r.origin === 'pk');
-        const parsed = parseIndexDdl(ddlByName.get(name) ?? '');
-        if (parsed) {
-          applyIndexKeyParts(entry, parsed.keyParts);
-          if (parsed.partial) entry.partial = true;
-        } else {
-          for (const c of await this.remoteCatalogRead('SELECT name FROM pragma_index_info(?) ORDER BY seqno', [name])) {
-            if (c.name != null) entry.columns.push(String(c.name));
-          }
-        }
-        if (Number(r.partial) === 1) entry.partial = true;
+        if (!parseIndexDdl(ddlByName.get(name) ?? '')) info.set(name, await this.remoteCatalogRead(REMOTE_INDEX_INFO_SQL, [name]));
       }
     } catch (e) {
       // Only a caller that can CORRECT a short read may ask for one (#7332).
       if (opts.onFailure !== 'partial') throw e;
     }
-    return [...byName.values()];
+    return remotePhysicalIndexes(list, (name) => ddlByName.get(name), (name) => info.get(name) ?? []);
   }
 
   /**
@@ -4323,9 +4477,9 @@ export class TursoDriver extends SqlDriver {
       );
       return false;
     }
-    const hasColumn = async () => (await this.introspectColumns(op.table)).some((c) => c.name === column);
+    const hasColumn = async () => (await this.remoteLiveColumns(op.table)).some((c) => c.name === column);
     if (!(await hasColumn())) return false;
-    const keyed = (await this.introspectIndexes(op.table)).filter(
+    const keyed = (await this.remoteLiveIndexes(op.table)).filter(
       (i) => !i.primary && !i.name.startsWith('sqlite_autoindex_') && i.columns.includes(column),
     );
     await this.remoteTransport!.batch(
@@ -4344,9 +4498,18 @@ export class TursoDriver extends SqlDriver {
    * one `write` batch, so a create that fails (duplicates under a new UNIQUE,
    * a column that is not there) leaves the old index exactly as it was. The
    * `CREATE INDEX` is the schema sync's own ({@link RemoteTransport.createIndexSql}).
+   * A created index counts as applied only when a live read finds it with the
+   * uniqueness and the key columns, in order, the entry asked for; a name
+   * alone would also match a stale index the `IF NOT EXISTS` left in place.
    */
   private async applyRemoteIndexDriftOp(op: ManagedDriftEntry['op']): Promise<boolean> {
-    const names = async () => new Set((await this.introspectIndexes(op.table)).map((i) => i.name));
+    const live = () => this.remoteLiveIndexes(op.table);
+    const names = async () => new Set((await live()).map((i) => i.name));
+    const built = async (name: string, columns: readonly string[], unique: boolean) => {
+      const found = (await live()).find((i) => i.name === name);
+      return !!found && found.unique === unique && found.columns.length === columns.length
+        && found.columns.every((c, i) => c === columns[i]);
+    };
     const create = (name: string, columns: string[], unique: boolean, nullSafeColumns?: string[]) =>
       this.remoteTransport!.createIndexSql(op.table, { name, columns, unique, ...(nullSafeColumns ? { nullSafeColumns } : {}) });
     const drop = (name: string) => `DROP INDEX IF EXISTS ${quoteRemoteIdentifier(name)}`;
@@ -4359,7 +4522,7 @@ export class TursoDriver extends SqlDriver {
       case 'create_index': {
         if (!(await this.remoteIndexColumnsPresent(op.table, op.indexName, op.columns))) return false;
         await this.remoteTransport!.batch([create(op.indexName, op.columns, op.unique, op.nullSafeColumns)], 'write');
-        return (await names()).has(op.indexName);
+        return built(op.indexName, op.columns, op.unique);
       }
       case 'recreate_index': {
         // ADR-0120 D4: the NULL-safe tightening re-runs the duplicate pre-flight
@@ -4380,7 +4543,7 @@ export class TursoDriver extends SqlDriver {
           [drop(op.indexName), create(op.indexName, op.columns, op.unique, op.nullSafeColumns)],
           'write',
         );
-        return (await names()).has(op.indexName);
+        return built(op.indexName, op.columns, op.unique);
       }
       case 'replace_unique_index': {
         // CREATE before DROP, in one transaction: uniqueness is never
@@ -4391,7 +4554,7 @@ export class TursoDriver extends SqlDriver {
           'write',
         );
         const after = await names();
-        return after.has(op.createIndexName) && op.dropIndexNames.every((n) => !after.has(n));
+        return (await built(op.createIndexName, op.createColumns, true)) && op.dropIndexNames.every((n) => !after.has(n));
       }
       default:
         // `unbuildable_index` is report-only: no column to build it over.
@@ -4406,7 +4569,7 @@ export class TursoDriver extends SqlDriver {
    * there and here: the index the metadata declares is not created.
    */
   private async remoteIndexColumnsPresent(table: string, indexName: string, columns: readonly string[]): Promise<boolean> {
-    const physical = new Set((await this.introspectColumns(table)).map((c) => c.name));
+    const physical = new Set((await this.remoteLiveColumns(table)).map((c) => c.name));
     const missing = columns.filter((c) => !physical.has(c));
     if (missing.length === 0) return true;
     this.logDurabilityFailure(

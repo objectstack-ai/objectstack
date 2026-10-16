@@ -33,6 +33,14 @@
  * 3. The DDL-free `registerObjectMetadata` (a `skipSchemaSync` boot) fills the
  *    registry the no-argument call walks, and sends nothing to the database.
  * 4. A declared table the database does not hold is skipped, as locally.
+ * 5. The embedded-replica face, which reads its local file through Knex, still
+ *    reports drift on a drifted database (the control the retired refusal
+ *    suite carried for this face, kept here at the same layer).
+ * 6. `driftReportCaveat`: a sentence on the remote face, which a caller that
+ *    would act on the report unattended reads first; `null` on the local and
+ *    embedded-replica faces.
+ * 7. The no-argument call reads the catalog in the same number of round trips
+ *    for one table as for many.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -41,6 +49,8 @@ import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { createClient, type Client } from '@libsql/client';
 import { TursoDriver } from './turso-driver.js';
+import { makeLibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
+import { replicaFiles } from './replica-file.testkit.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'turso-remote-drift-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -218,5 +228,83 @@ describe('the registry the no-argument call walks', () => {
 
     expect(await local.detectManagedDrift([T, absent])).toEqual([]);
     expect(await remote.detectManagedDrift([T, absent])).toEqual([]);
+  });
+});
+
+describe('the embedded-replica face still reports drift (its Knex detector)', () => {
+  const replicas = replicaFiles();
+  afterAll(() => replicas.removeAll());
+
+  it.each(['no arguments', 'explicit objects'] as const)('%s', async (call) => {
+    // Replica mode reads its local file through Knex; `sync.onConnect: false`
+    // keeps the (stubbed) sync target out of the measurement.
+    const stub = makeLibsqlSqliteStub();
+    const driver = new TursoDriver({
+      url: replicas.next(),
+      syncUrl: 'libsql://drift.example.turso.io',
+      client: stub as never,
+      sync: { onConnect: false },
+    });
+    open.push({ driver, client: null });
+    await driver.connect();
+    expect(driver.transportMode).toBe('replica');
+    await driver.initObjects([T] as never);
+    await driver.execute('ALTER TABLE "t" ADD COLUMN "legacy" TEXT');
+
+    const drift = call === 'no arguments' ? await driver.detectManagedDrift() : await driver.detectManagedDrift([T]);
+
+    expect(drift).toEqual([expect.objectContaining({
+      table: 't', column: 'legacy', kind: 'unmapped_column', category: 'destructive', op: expect.objectContaining({ type: 'drop_column' }),
+    })]);
+    stub.close();
+  });
+});
+
+describe('driftReportCaveat: whether a caller may act on the report unattended', () => {
+  it('a sentence on the remote face; null on the local and embedded-replica faces', async () => {
+    const { driver: remote } = await remoteOver(nextFile());
+    expect(remote.driftReportCaveat).toEqual(expect.stringContaining('NOT NULL'));
+
+    const local = new TursoDriver({ url: `file:${nextFile()}` });
+    expect(local.transportMode).toBe('local');
+    expect(local.driftReportCaveat).toBeNull();
+
+    const replicas = replicaFiles();
+    try {
+      const replica = new TursoDriver({ url: replicas.next(), syncUrl: 'libsql://drift.example.turso.io', sync: { onConnect: false } });
+      expect(replica.transportMode).toBe('replica');
+      expect(replica.driftReportCaveat).toBeNull();
+    } finally {
+      replicas.removeAll();
+    }
+  });
+});
+
+describe('the no-argument call reads the catalog in a fixed number of round trips', () => {
+  /** Every client call a detection makes, counted, one batch as one call. */
+  async function roundTripsFor(objects: Objects): Promise<number> {
+    const file = nextFile();
+    const { driver: synced } = await remoteOver(file);
+    await SYNC.syncSchemasBatch(synced, objects);
+    const client = createClient({ url: `file:${file}` });
+    let calls = 0;
+    const counting = {
+      execute: (stmt: unknown) => { calls++; return client.execute(stmt as never); },
+      batch: (stmts: unknown[], mode?: unknown) => { calls++; return client.batch(stmts as never, mode as never); },
+      close: () => client.close(),
+    } as unknown as Client;
+    const driver = new TursoDriver({ url: 'libsql://drift.example.turso.io', client: counting });
+    open.push({ driver, client });
+    await driver.connect();
+    driver.registerObjectMetadata(objects);
+    const before = calls;
+    expect(await driver.detectManagedDrift()).toEqual([]);
+    return calls - before;
+  }
+
+  it('one table and five tables cost the same three reads', async () => {
+    const many = ['a', 'b', 'c', 'd', 'e'].map((n) => ({ name: `rt_${n}`, fields: { name: { type: 'text' } }, indexes: [{ fields: ['name'] }] }));
+    expect(await roundTripsFor(many.slice(0, 1))).toBe(3);
+    expect(await roundTripsFor(many)).toBe(3);
   });
 });
