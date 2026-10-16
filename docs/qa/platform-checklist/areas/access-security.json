@@ -3117,7 +3117,7 @@
     },
     {
       "id": "access-security.anonymous-floor-v18-doors",
-      "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), every /ui face, /openapi.json and /docs, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
+      "title": "The anonymous floor answers 401 FIRST on the doors v18 added to it — /notifications (was 501), non-POST /keys (was 405), share-link management (was 501), /openapi.json and /docs, every /i18n face and the settings family — while the token faces and the public-form submit stay anonymous and the submit echoes only {id}",
       "since": "v18",
       "status": "active",
       "revision": 1,
@@ -3132,10 +3132,14 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "the showcase's published public form slug (GET /api/v1/meta/form as admin lists it)"
+        ],
+        "knownGaps": [
+          "the dispatcher `/ui` domain (also floored by 23225) is NOT mounted over HonoServer on a stock `os dev` / `os serve` — GET /api/v1/ui/... answers 404 ENDPOINT_NOT_FOUND to the admin too — so it is not driven here; it is reachable only on a dispatcher-only (hosted) kernel and is pinned by the dogfood sweep",
+          "the dispatcher mounts only POST /keys on HonoServer (packages/runtime/src/dispatcher-plugin.ts), so a non-POST /keys never reaches the domain's floor on a stock boot: the HonoServer fallback answers it 405 METHOD_NOT_ALLOWED (packages/plugins/plugin-hono-server/src/adapter.ts unmatchedResponse) — run 2026-10-16 measured exactly that; the clause stays as the 23225 contract states it, so a 405 there is a FAIL, not a re-point"
         ]
       },
       "steps": [
-        "with NO credentials call: GET /api/v1/notifications, GET /api/v1/keys, GET /api/v1/share-links, GET /api/v1/ui/view/showcase_task, GET /api/v1/openapi.json, GET /api/v1/docs, GET /api/v1/i18n/locales, GET /api/settings/branding",
+        "with NO credentials call: GET /api/v1/notifications, GET /api/v1/keys, GET /api/v1/share-links, GET /api/v1/openapi.json, GET /api/v1/docs, GET /api/v1/i18n/locales, GET /api/settings/branding",
         "with no credentials call a token face: GET /api/v1/share-links/BOGUS/resolve",
         "with no credentials POST /api/v1/forms/SLUG/submit with a valid body",
         "repeat two of the 401 calls as admin to prove the door itself serves"
@@ -3274,19 +3278,19 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a scratch list view (PUT /api/v1/meta/view/qa_gated_view — view is overlay-allowed on stock showcase) with requiredPermissions naming a capability the member lacks",
+          "a scratch list view (PUT /api/v1/meta/view/showcase_task.qa_gated_view — view is overlay-allowed on stock showcase; a view name is dotted OBJECT.NAME) with requiredPermissions naming a capability the member lacks",
           "a member granted setup.access but not studio.access / manage_metadata (a scratch permission set assigned through sys_user_permission_set)"
         ]
       },
       "steps": [
         "as the setup.access-only member: GET /api/v1/meta/object/showcase_task/history, /audit, /diff; GET /api/v1/packages/com.example.showcase/commits",
-        "as a member without the capability: GET /api/v1/meta/view (list) and GET /api/v1/meta/view/qa_gated_view, plus /published, /layers, ?state=draft, /history",
+        "as a member without the capability: GET /api/v1/meta/view (list) and GET /api/v1/meta/view/showcase_task.qa_gated_view, plus /published, /layers, ?state=draft, /history",
         "as admin: the same reads (control); then delete the scratch view"
       ],
       "acceptance": [
@@ -3344,7 +3348,7 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)",
         "anonymous caller (no cookie, no bearer, no x-api-key)"
       ],
       "fixtures": {
@@ -3498,7 +3502,7 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
       ],
       "fixtures": {
         "app": "showcase",
@@ -3522,10 +3526,16 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "permission_set_id → 400 INVALID_FIELD; a second identical grant → 409 UNIQUE_VIOLATION; valid_until <= valid_from → 400 VALIDATION_FAILED at valid_until (rule validity_window_order)",
+          "clause": "permission_set_id → 400 INVALID_FIELD; a second identical grant → 409 UNIQUE_VIOLATION",
           "oracle": "api",
           "verify": "status + code + located field per arm",
-          "evidence": "three refusal bodies"
+          "evidence": "two refusal bodies"
+        },
+        {
+          "clause": "an INSERT with valid_until <= valid_from is refused as the rule's VIOLATION: 400 VALIDATION_FAILED at valid_until with constraint.rule validity_window_order, constraint.reason NOT `unevaluable`, and the rule's authored message (\"Valid Until must be later than Valid From …\") — an unevaluable-predicate refusal is a FAIL even though it also answers 400",
+          "oracle": "api",
+          "verify": "fields[0].constraint + message on the inverted-window insert; a valid window inserts 201 (control)",
+          "evidence": "the refusal body + the control"
         },
         {
           "clause": "a non-system insert naming someone else as granted_by stores the CALLER",
@@ -3568,7 +3578,7 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
       ],
       "fixtures": {
         "app": "showcase",
@@ -3645,7 +3655,7 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
       ],
       "fixtures": {
         "app": "showcase",

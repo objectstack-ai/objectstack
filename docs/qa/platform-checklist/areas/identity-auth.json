@@ -2127,13 +2127,13 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
       ],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a member whose session the policy holds: force a reset on the member (the admin set-password / force-reset action) or enable a password-expiry / MFA-required policy in auth settings, then sign the member in",
+          "a member whose session the policy holds — the cheapest: create the member with POST /api/v1/auth/admin/create-user, which lands mustChangePassword:true, and sign it in BEFORE it changes its password (held with PASSWORD_RESET_REQUIRED); an expiry / MFA-required policy in auth settings holds it with the other two codes",
           "an API key minted by the member before the hold (POST /api/v1/keys)"
         ]
       },
@@ -2344,7 +2344,7 @@
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member (a second sign-up on the same boot — joins the Default Organization as `member`, not platform admin)"
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
       ],
       "fixtures": {
         "app": "showcase",
@@ -2353,8 +2353,8 @@
         ]
       },
       "steps": [
-        "before signing anyone up (a boot WITHOUT --seed-admin on a fresh DB), confirm via the boot log / scratch DB that sys_organization holds the slug `default` row",
-        "sign up the first user, then a second; GET /api/v1/auth/get-session for each",
+        "on a fresh DB, confirm the slug `default` sys_organization row exists before the first user: read the boot log ordering (the Default Organization is ensured before --seed-admin signs the admin up) or boot WITHOUT --seed-admin and read the scratch DB",
+        "let --seed-admin create the first user, then create a second with POST /api/v1/auth/admin/create-user (self-registration is closed on the stock showcase); GET /api/v1/auth/get-session for each",
         "as admin GET /api/v1/data/sys_member?filter organization = default",
         "as admin GET /api/v1/data/sys_business_unit and read organization_id on the seeded rows"
       ],
@@ -2372,7 +2372,7 @@
           "evidence": "the row (id, slug) and the timestamp ordering against the first sign-up"
         },
         {
-          "clause": "first sign-up is owner, the second is member, and both sessions carry the Default Organization as activeOrganizationId",
+          "clause": "the first user is owner, the second is member, and both sessions carry the Default Organization as activeOrganizationId",
           "oracle": "api",
           "verify": "sys_member roles + get-session payloads",
           "evidence": "the two member rows and two session payloads"

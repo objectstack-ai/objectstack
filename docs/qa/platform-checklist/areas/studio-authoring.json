@@ -1589,15 +1589,16 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a scratch view (view is overlay-allowed on stock showcase): PUT /api/v1/meta/view/qa_occ_view"
+          "a scratch view (view is overlay-allowed on stock showcase; a view name is dotted OBJECT.NAME): copy the body of GET /api/v1/meta/view/showcase_task.in_progress (item, minus underscore keys) to showcase_task.qa_occ_view",
+          "the token lives on the DRAFT read: the plain read is the cached published-value branch and serves no `version` (22114 says so), so drive the precondition legs on a draft row (?mode=draft save, ?state=draft read)"
         ]
       },
       "steps": [
-        "GET /api/v1/meta/view/qa_occ_view and read version; PUT it back with If-Match: VERSION (200); PUT again with the old version (409)",
-        "PUT /api/v1/meta/view/qa_occ_view with If-None-Match: *",
+        "PUT /api/v1/meta/view/showcase_task.qa_occ_view?mode=draft; GET it with ?state=draft and read version; PUT ?mode=draft with If-Match: VERSION (200); PUT again with the same, now stale, version (409)",
+        "PUT /api/v1/meta/view/showcase_task.qa_occ_view (active) with If-None-Match: * once the row exists",
         "PUT with If-None-Match: \"abc\", and with both If-Match and If-None-Match",
         "PUT with ?mode=draft a label change; GET /api/v1/meta/_drafts and read the row's label",
-        "read the stored row's created_by / updated_by (GET /api/v1/meta/view/qa_occ_view/history)"
+        "read the stored row's actor (GET /api/v1/meta/view/showcase_task.qa_occ_view/history → events[].actor); delete the scratch view"
       ],
       "acceptance": [
         {
@@ -1607,7 +1608,7 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "If-Match with the served version saves; a stale one → 409; If-None-Match:* on an existing item → 409 METADATA_CONFLICT with currentVersion; any other If-None-Match (or one beside If-Match) → 400 and nothing written",
+          "clause": "the ?state=draft read serves `version`; If-Match with it saves; a stale one → 409; If-None-Match:* on an existing item → 409 METADATA_CONFLICT with currentVersion; any other If-None-Match (or one beside If-Match) → 400 and nothing written",
           "oracle": "api",
           "verify": "status + code per call; version before/after",
           "evidence": "per-call lines"
@@ -1662,12 +1663,12 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "two scratch Studio-authored packages A and B (POST /api/v1/packages), each saving a view named qa_shared_view (?package=A / ?package=B)"
+          "two scratch Studio-authored packages A and B (POST /api/v1/packages), each saving a view named showcase_task.qa_shared_view (?package=A / ?package=B)"
         ]
       },
       "steps": [
-        "PUT /api/v1/meta/view/qa_shared_view with no ?package= — expect 409 (two holders)",
-        "DELETE /api/v1/meta/view/qa_shared_view?package=A; then re-save without ?package= — expect it to update B's row",
+        "PUT /api/v1/meta/view/showcase_task.qa_shared_view with no ?package= — expect 409 (two holders)",
+        "DELETE /api/v1/meta/view/showcase_task.qa_shared_view?package=A; then re-save without ?package= — expect it to update B's row",
         "PUT /api/v1/meta/object/showcase_task?package=A (a package that does not own it)",
         "PUT a sealed packaged name (any showcase object) as a create; read the 403 sentence",
         "publish package A, edit to a draft, POST /api/v1/packages/A/revert; then revert a never-published package"
@@ -1682,7 +1683,7 @@
         {
           "clause": "an ambiguous package-less save or delete → 409 RESOURCE_CONFLICT and nothing changes; once one holder remains the package-less save updates THAT row (no second row)",
           "oracle": "api",
-          "verify": "status + GET /meta/view/qa_shared_view/layers before/after",
+          "verify": "status + GET /meta/view/showcase_task.qa_shared_view/layers before/after",
           "evidence": "answers + layer lists"
         },
         {
@@ -1748,7 +1749,7 @@
         "PUT /api/v1/meta/page/qa_props_page with a page:header block carrying properties.titel",
         "PUT a record page with both slots.details and slots.tabs",
         "PUT a second isDefault:true record page for showcase_task",
-        "PUT /api/v1/meta/view/qa_chart_view as a chart list view with no dataset binding",
+        "PUT /api/v1/meta/view/showcase_task.qa_chart_view as a chart list view with no dataset binding",
         "PUT an object with an option visibleWhen reading `parent` and a validation condition `sqrt(record.amount)`; then the same with ?mode=draft",
         "PUT any item with a `protection` block; PUT with _lock:\"full\" on an unlocked item",
         "PUT /api/v1/meta/action/qa_bad_url with target `javascript:alert(1)`"
