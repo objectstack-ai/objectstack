@@ -94,7 +94,7 @@ describe('messaging objects: admin-facing copy carries no design-record vocabula
   });
 
   it('object, field and view copy of every object this package exports', () => {
-    const objects = Object.values(MessagingObjects).filter(isObjectSchema);
+    const objects: ObjectLike[] = (Object.values(MessagingObjects) as unknown[]).filter(isObjectSchema);
     const names = objects.map((o) => o.name);
     for (const name of [
       'sys_notification_preference', 'sys_notification_subscription', 'sys_notification_template',
