@@ -548,14 +548,16 @@ type AnyRec = Record<string, unknown>;
  *
  * `checkElement` used to read `visibleWhen ?? visibleOn ?? visibility`, for a
  * caller handing this export a raw authored object. Both aliases retired at 18
- * as spec tombstones, and every door that runs this rule hands it a body the
- * spec parse ACCEPTED: the three CLI commands run the rule stage only after
- * `ObjectStackDefinitionSchema` passes (`judgeAuthorTimeRules`), per-package
- * bodies come from that parsed stack, and the metadata save door parses the
- * `view` body (a 422 on refusal) before its runtime rule pass. An accepted body
- * cannot carry either key, so the limbs could only ever judge the value of a key
- * the spec already refuses — the consumer-side alias tolerance the retirement
- * ends.
+ * as spec tombstones. The doors that PARSE first — `os validate`, `os build`,
+ * `os verify` (`judgeAuthorTimeRules`), `defineStack`, and the metadata save
+ * door, which parses the `view` body (a 422 on refusal) before its runtime rule
+ * pass — refuse either key by name, so a body they hand this rule cannot carry
+ * one. `os lint` is the one door that hands this rule an UNPARSED stack (its
+ * `'lint'` run reads the normalized stack on both tiers): there a predicate
+ * written under a retired key is nobody's verdict, by design — the parsing
+ * doors refuse the key itself, and `os lint` reports no refused shape. Reading
+ * the limbs would only judge the value of a key the spec refuses — the
+ * consumer-side alias tolerance the retirement ends.
  */
 const CANONICAL = 'visibleWhen';
 

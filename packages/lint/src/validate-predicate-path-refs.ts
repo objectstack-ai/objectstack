@@ -301,9 +301,9 @@ type AnyRec = Record<string, unknown>;
 /**
  * The predicate keys a form field / section can carry (ADR-0089): `visibleWhen`
  * alone. The view-side `visibleOn` retired at 18 as a spec tombstone (#23543
- * F4), and every door that runs this rule hands it a body the spec parse
- * accepted — the reason `validate-visibility-predicates.ts` states at its own
- * `CANONICAL` — so no input carries it.
+ * F4). The doors that parse first refuse it by name; `os lint`, which hands
+ * this rule an unparsed stack, leaves a predicate under it unjudged by design —
+ * the posture `validate-visibility-predicates.ts` states at its own `CANONICAL`.
  */
 const PREDICATE_KEYS = ['visibleWhen'] as const;
 

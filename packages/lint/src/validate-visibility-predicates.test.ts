@@ -69,11 +69,12 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
   //
   // #6318 retired the alias-KEY rule and kept an alias-VALUE read
   // (`visibleWhen ?? visibleOn ?? visibility`) for raw callers. Both aliases
-  // retired at 18 as spec tombstones, and every door that runs this rule hands
-  // it a body the spec parse accepted, which cannot carry either key (the
-  // measurement is in `CANONICAL`'s docblock). So the limbs went too: a defect
-  // written under a retired key produces no finding HERE — the parse refuses
-  // the key by name one layer earlier. Each row pairs the alias spelling with
+  // retired at 18 as spec tombstones, and the doors that parse first (`os
+  // validate`, `os build`, `os verify`, `defineStack`, the metadata save door)
+  // refuse either key by name. So the limbs went too: a defect written under a
+  // retired key produces no finding HERE. At `os lint`, the one door that hands
+  // this rule an unparsed stack, that is the reading by design (`CANONICAL`'s
+  // docblock; pinned as that door's reading in `authoring-rule-input-tier.test.ts`). Each row pairs the alias spelling with
   // the same value under `visibleWhen`, which must still report, so an empty
   // alias reading cannot pass by the rule having stopped working.
   describe('the retired alias keys are not read (#23543 F4)', () => {

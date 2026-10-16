@@ -234,9 +234,14 @@ describe('premise 3 (FALSE): "the `visibleOn` alias survives until the parse"', 
   //   * the authoring funnel no longer renames the key — `normalizeStackInput`
   //     passes it through, so a rule fed this tier would see it;
   //   * no rule reads it either way — the family reads `visibleWhen` only;
-  //   * the author is not silent — `defineStack` (and the parse every door
-  //     runs before its rule pass) refuses the key by name with the rename.
-  //     That refusal IS the recorded guard for this surface now.
+  //   * the author is not silent — the doors that parse first (`defineStack`,
+  //     `os validate`, `os build`, `os verify`, the metadata save door) refuse
+  //     the key by name with the rename. That refusal IS the recorded guard for
+  //     this surface now;
+  //   * `os lint` is the one door that hands the rules an UNPARSED stack
+  //     (`runAuthoringRules('lint', …)` over the normalized tier). There a
+  //     predicate under a retired key is nobody's verdict, by design — pinned
+  //     below as that door's reading, beside a canonical control.
   /** The three alias sites, each carrying `predicate` under its RETIRED key. */
   const aliasSitesWith = (predicate: string): Array<[string, AnyRec]> => [
     ['views[].form.sections[]', {
@@ -275,7 +280,7 @@ describe('premise 3 (FALSE): "the `visibleOn` alias survives until the parse"', 
       // The key passes through: the D2 conversion is retired from the load path.
       expect(JSON.stringify(normalized)).toMatch(/"visibleOn"|"visibility"/);
       // A VALUE defect under it is nobody's verdict here, raw or normalized —
-      // the parse refuses the key before any rule runs (next case).
+      // the parsing doors refuse the key itself (next case).
       expect(validateVisibilityPredicates(structuredClone(stack))).toEqual([]);
       expect(validateVisibilityPredicates(normalized)).toEqual([]);
     },
@@ -292,6 +297,23 @@ describe('premise 3 (FALSE): "the `visibleOn` alias survives until the parse"', 
       const flat = JSON.stringify(issues);
       expect(flat).toMatch(/(visibleOn|visibility)` was removed in @objectstack\/spec 18/);
       expect(flat).toContain('Use `visibleWhen`');
+    },
+  );
+
+  it.each(aliasSitesBadValue)(
+    '%s: `os lint`\'s reading — the unparsed stack it hands the registry leaves a retired key\'s predicate unjudged, by design',
+    (_site, stack) => {
+      // What `os lint` runs (`commands/lint.ts`): the `'lint'` registry door over
+      // the NORMALIZED stack, never parsed. The retired key reaches it unrenamed
+      // and no visibility rule reads it.
+      const visibilityRules = (s: AnyRec) => runAuthoringRules('lint', { normalized: normalizeStackInput(structuredClone(s)) as AnyRec })
+        .filter((f) => f.rule.startsWith('visibility-'))
+        .map((f) => f.rule);
+      expect(visibilityRules(stack)).toEqual([]);
+      // CONTROL — the same predicate under the canonical key is the finding at
+      // the same door, so the empty reading above is the posture, not a dead rule.
+      const canonical = JSON.parse(JSON.stringify(stack).replace(/"(visibleOn|visibility)":/g, '"visibleWhen":')) as AnyRec;
+      expect(visibilityRules(canonical)).toEqual(['visibility-bare-identifier']);
     },
   );
 
