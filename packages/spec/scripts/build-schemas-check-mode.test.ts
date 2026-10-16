@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 940 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause; slowest CI reading 749.9 s (hourly run 38657693085) x 1.25, rounded up
+// test-budget: 1230 — spawns the real producer once per single-cause fixture: every case runs the real schema generator (build-schemas.ts --check) in its own sandbox git tree, one fixture per cause; re-measured 2026-10-16 over the 11 hourly runs that executed it (38731551915 to 38891051243): slowest CI reading 983.3 s (run 38798542648) x 1.25, rounded up; rose from 940, which rested on 3 executed runs, with the file unchanged: its wall tracks the run's load (spec package 969.8 to 1560.2 s in the same runs)
 //
 // Pins that `build-schemas.ts --check` — the script behind
 // `check:authorable-surface`, one of the eight generated-artifact gates
