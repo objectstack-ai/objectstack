@@ -202,7 +202,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       thread_id: {
         label: "Thread",
-        help: "Thread identifier — conventionally `{object}:{record_id}` (e.g. `sys_user:abc123`)"
+        help: "Thread identifier — conventionally `{object}:{record_id}` (e.g. `account:9001`)"
       },
       parent_id: {
         label: "Parent Comment",
