@@ -2,9 +2,13 @@
 
 /**
  * The JSON body of a request to one of this package's own Hono routes —
- * parsed, `{}` when there is none, or a `400` refusal when it was declared as
- * JSON and does not parse (#23914). Module-private: not exported from this
+ * parsed, `{}` when there is none, or the refusal message when it was declared
+ * as JSON and does not parse (#23914). Module-private: not exported from this
  * package's entry.
+ *
+ * It answers a MESSAGE, never a response: each route builds the `400` body
+ * itself, in its own module, where `scripts/check-route-envelope.mjs` counts
+ * every body a plugin-route module builds.
  *
  * ## The defect
  *
@@ -29,19 +33,19 @@
  *   narrowing that is not this change.
  */
 
+/**
+ * `ok: false` is answered `400` with the registered code `INVALID_REQUEST`
+ * (`ERROR_CODE_LEDGER`) and this `message`, in the declared envelope.
+ */
 export type JsonBodyReading =
     | { readonly ok: true; readonly body: any }
-    | { readonly ok: false; readonly response: Response };
+    | { readonly ok: false; readonly message: string };
 
 const MALFORMED_JSON_BODY_MESSAGE =
     'The request body could not be parsed as JSON (it was sent as application/json). It was refused rather than '
     + 'read as an empty body: send a well-formed JSON document, or no body at all.';
 
 const UNREADABLE_BODY_MESSAGE = 'The request body could not be read. It was refused rather than read as an empty body.';
-
-function refused(c: any, message: string): JsonBodyReading {
-    return { ok: false, response: c.json({ success: false, error: { code: 'INVALID_REQUEST', message } }, 400) };
-}
 
 export async function readJsonRequestBody(c: any): Promise<JsonBodyReading> {
     try {
@@ -55,9 +59,9 @@ export async function readJsonRequestBody(c: any): Promise<JsonBodyReading> {
         try {
             text = await c.req.text();
         } catch {
-            return refused(c, UNREADABLE_BODY_MESSAGE);
+            return { ok: false, message: UNREADABLE_BODY_MESSAGE };
         }
         if (text.trim() === '') return { ok: true, body: {} };
-        return refused(c, MALFORMED_JSON_BODY_MESSAGE);
+        return { ok: false, message: MALFORMED_JSON_BODY_MESSAGE };
     }
 }

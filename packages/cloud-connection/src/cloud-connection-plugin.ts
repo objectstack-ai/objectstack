@@ -319,7 +319,7 @@ export class CloudConnectionPlugin implements Plugin {
                 // [#23914] A declared JSON body that does not parse is refused 400,
                 // never read as no body (`./request-json-body.ts`).
                 const read = await readJsonRequestBody(c);
-                if (!read.ok) return read.response;
+                if (!read.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: read.message } }, 400);
                 const body: any = read.body;
                 // Self-hosted (single-env) runtimes need NO environment id —
                 // registration happens cloud-side at approval (ADR
@@ -382,7 +382,7 @@ export class CloudConnectionPlugin implements Plugin {
                 // [#23914] A declared JSON body that does not parse is refused 400,
                 // never read as no body (`./request-json-body.ts`).
                 const read = await readJsonRequestBody(c);
-                if (!read.ok) return read.response;
+                if (!read.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: read.message } }, 400);
                 const body: any = read.body;
                 let environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && this.cfg.singleEnvironment) {
@@ -552,7 +552,7 @@ export class CloudConnectionPlugin implements Plugin {
                 // [#23914] A declared JSON body that does not parse is refused 400,
                 // never read as no body (`./request-json-body.ts`).
                 const read = await readJsonRequestBody(c);
-                if (!read.ok) return read.response;
+                if (!read.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: read.message } }, 400);
                 const body: any = read.body;
                 const packageId = String(body?.package_id ?? body?.packageId ?? '').trim();
                 if (!packageId) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'package_id is required' } }, 400);

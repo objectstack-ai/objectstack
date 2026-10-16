@@ -1128,7 +1128,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // [#23914] A declared JSON body that does not parse is refused 400,
         // never read as no body (`./request-json-body.ts`).
         const read = await readJsonRequestBody(c);
-        if (!read.ok) return read.response;
+        if (!read.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: read.message } }, 400);
         const body: any = read.body;
 
         // 0. [ADR-0131 D6] ⭐ THE REQUESTED INSTALL MODE, parsed against the
