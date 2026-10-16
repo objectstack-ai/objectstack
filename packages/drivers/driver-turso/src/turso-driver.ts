@@ -603,24 +603,23 @@ function refuseRemoteDeferredDdl(): never {
  * # What this face does NOT claim: a boot may not act on its report
  *
  * The report is accurate about the database, but not every finding is real
- * drift. Until #23847 this face's schema sync (`RemoteTransport`) did not
- * create the NOT NULL constraint a field declares, so a table it created then
- * reads as `tighten_not_null` (destructive) against its own declaration. The
- * sync creates the constraint now, but a remote database keeps the nullable
- * columns it already has: an additive sync never tightens an existing column.
- * Nor is there a remedy for a destructive entry on this transport: `os migrate
- * apply` arms deferred DDL, which this face refuses. So
- * {@link TursoDriver.driftReportCaveat} says so, and a caller that would apply
- * or refuse on the report unattended (the `OS_ARTIFACT_URL` boot gate) reads
- * the caveat and does neither. The ceremony is not such a caller: it applies
- * only the column and index drops it named.
+ * drift. A table this face's schema sync (`RemoteTransport`) created before
+ * #23847 has no NOT NULL constraint for the fields that declare one: the sync
+ * creates it now, but an additive sync never tightens a column that already
+ * exists. So such a table reads as `tighten_not_null`
+ * (destructive) against its own declaration. Nor is there a remedy for a
+ * destructive entry on this transport: `os migrate apply` arms deferred DDL,
+ * which this face refuses. So {@link TursoDriver.driftReportCaveat} says so,
+ * and a caller that would apply or refuse on the report unattended (the
+ * `OS_ARTIFACT_URL` boot gate) reads the caveat and does neither. The ceremony
+ * is not such a caller: it applies only the column and index drops it named.
  */
 
 /** [#23816] {@link TursoDriver.driftReportCaveat} on the REMOTE face. */
 const REMOTE_DRIFT_REPORT_CAVEAT =
-  'a table the Turso REMOTE transport\'s schema sync created in an earlier release has no NOT NULL constraint ' +
-  'on the fields that declare one (the sync creates it now, but never tightens a column that already exists), ' +
-  'so this driver\'s drift report can name a tightening that sync produced, and a destructive entry has no ' +
+  'a table the Turso REMOTE transport\'s schema sync created in an earlier release has no NOT NULL ' +
+  'constraint on the fields that declare one (the sync creates it now, but never tightens an existing column), so ' +
+  'this driver\'s drift report can name a tightening its own sync produced, and a destructive entry has no ' +
   'remedy on this transport (`os migrate apply` refuses against it). The report is for reading; nothing is ' +
   'applied or refused on it unattended. To review the drift, run `os migrate plan` against a local SQLite ' +
   'copy of this database (a `file:` URL)';
