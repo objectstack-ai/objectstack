@@ -181,7 +181,6 @@ describe('Setup copy carries no design-record vocabulary', () => {
   // the four bundles judges the source too.
   const FORM_HELP_LEAVES = [
     ['permission', 'fields', 'isDefault', 'helpText'],
-    ['permission', 'fields', 'managedBy', 'helpText'],
     ['permission', 'fields', 'packageId', 'helpText'],
     ['permission', 'fields', 'adminScope', 'helpText'],
     ['position', 'fields', 'delegatable', 'helpText'],
@@ -209,7 +208,6 @@ describe('Setup copy carries no design-record vocabulary', () => {
     const replaced = {
       permission: { fields: {
         isDefault: { helpText: 'App baseline for the everyone position (ADR-0090 D5): an app-level set is auto-bound at boot.' },
-        managedBy: { helpText: 'Record provenance (ADR-0086 D3): who owns this set across upgrades.' },
         packageId: { helpText: 'Owning package id for a package-shipped set (ADR-0086 D3).' },
         adminScope: { helpText: 'Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree.' },
       } },

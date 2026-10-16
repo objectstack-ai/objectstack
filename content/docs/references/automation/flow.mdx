@@ -67,7 +67,7 @@ const result = FlowSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Node unique ID |
-| **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. |
+| **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. The retired callout names 'http_request', 'http_call' and 'webhook' are reserved and refused: use 'http'. |
 | **label** | `string` | ✅ | Node label |
 | **config** | `Record<string, any>` | optional | Node configuration |
 | **connectorConfig** | `{ connectorId: string; actionId: string; input?: Record<string, any> }` | optional |  |
@@ -138,7 +138,7 @@ const result = FlowSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Node unique ID |
-| **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. |
+| **type** | `string` | ✅ | Action type — a built-in FlowNodeAction id or a plugin-registered node type. Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. The retired callout names 'http_request', 'http_call' and 'webhook' are reserved and refused: use 'http'. |
 | **label** | `string` | ✅ | Node label |
 | **config** | `Record<string, any>` | optional | Node configuration |
 | **connectorConfig** | `{ connectorId: string; actionId: string; input?: Record<string, any> }` | optional |  |

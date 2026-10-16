@@ -157,9 +157,7 @@
     },
     "src/stack.test.ts": {
       "TS18048: 'result.manifest' is possibly 'undefined'.": 4,
-      "TS2345: Argument of type '…' is not assignable to parameter of type 'ObjectStackDefinitionInput'.": 27,
-      "TS2739: Type '…' is missing the following properties from type '…': label, type, edges": 1,
-      "TS2741: Property 'label' is missing in type '…' but required in type '…'.": 1
+      "TS2345: Argument of type '…' is not assignable to parameter of type 'ObjectStackDefinitionInput'.": 27
     },
     "src/system/collaboration.test.ts": {
       "TS2339: Property 'attributes' does not exist on type '…'.": 2

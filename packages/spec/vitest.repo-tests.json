@@ -45,6 +45,7 @@
   "src/kernel/metadata-type-registry-allow-org-override-absence.test.ts",
   "src/qa/requires-plugins-retirement.test.ts",
   "src/security/admin-scope-binding-authoring-retirement.test.ts",
+  "src/security/permission-set-managed-by-retirement.test.ts",
   "src/security/rls-tags-retirement.test.ts",
   "src/shared/retired-key-migrate-sentence.test.ts",
   "src/system/compliance-families-retirement.test.ts",

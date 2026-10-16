@@ -124,6 +124,11 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *     one would refuse them; they are reported, never deleted).
  *
  * Then the post-check re-runs the plan and reports, per table, what remains.
+ * A departure no step of this release can perform — the declared sharing-rule
+ * mirrors, which this release's own boot keeps seeding
+ * (`DECLARED_SHARING_RULE_SEEDER_RUNS`, the inventory) — is reported as
+ * advisory: named and counted, its rows still NULL, never deleted, and not a
+ * discrepancy. Every other remaining row is one.
  *
  * ## Idempotent and resumable
  *
@@ -431,12 +436,15 @@ export interface TableOutcome {
   /**
    * Rows that leave this table by a step this ceremony has not yet performed
    * (a move, or a mirror its own stage removes): each counts as remaining
-   * until it is gone, and its label is the remedy.
+   * until it is gone, and its label is the remedy. One that carries `advisory`
+   * is a departure no step of this release can perform, because its own boot
+   * re-creates the rows (`PlannedDeparture.advisory`): its rows are named and
+   * counted here and in the run's `advisory`, never in `remaining`.
    */
-  departures: Array<{ id: string; label: string; as: 'mirror-deletion' | 'moved'; rows: number }>;
+  departures: Array<{ id: string; label: string; as: 'mirror-deletion' | 'moved'; rows: number; advisory?: string }>;
   /** Templates: each `(name, locale)` whose rows still differ, with every candidate row and its organization. */
   templateConflicts?: TemplateConflict[];
-  /** Post-check: what is left for this table's fate, `0` when the fate is done. */
+  /** Post-check: what is left for this table's fate, `0` when the fate is done; advisory departures are not in it. */
   remaining: number;
   notNull: TablePlan['notNull'];
 }
@@ -466,7 +474,11 @@ export interface OrganizationOwnershipApplyReport {
   complete: boolean;
   /** Blockers (an unfinished ceremony) or post-check discrepancies (a finished one). Zero is the verdict. */
   blocking: number;
-  /** Rows reported, never guessed: unattributable rows and rows held for another stage. */
+  /**
+   * Rows reported, never guessed and never held against the verdict:
+   * unattributable rows, and the rows of an advisory departure, held for the
+   * release that can remove them (`TableOutcome.departures`).
+   */
   advisory: number;
 }
 
@@ -2506,8 +2518,15 @@ const RUNNERS: Record<CeremonyStep, (run: Run) => Promise<StepReport>> = {
   'column-drops': runColumnDrops,
 };
 
-/** NULL rows a departure still has to carry out of the table. */
-const departingRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + d.rows, 0);
+/**
+ * NULL rows a departure still has to carry out of the table. An advisory
+ * departure's rows are not among them: no step of this release removes them
+ * (`PlannedDeparture.advisory`), so they are counted as advisory instead.
+ */
+const departingRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + (d.advisory ? 0 : d.rows), 0);
+
+/** NULL rows of the table's advisory departures: reported, never held against the verdict. */
+const advisoryRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + (d.advisory ? d.rows : 0), 0);
 
 /** What a table still owes its fate, read from the post-check plan. */
 async function remainingFor(run: Run, table: TablePlan, complete: boolean): Promise<number> {
@@ -2732,7 +2751,9 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     const ref = a ?? b!;
     const remaining = a ? await remainingFor(run, a, complete) : 0;
     if (complete) discrepancies += remaining;
-    const departures = (a?.departures ?? []).filter((d) => d.rows > 0).map((d) => ({ id: d.id, label: d.label, as: d.as, rows: d.rows }));
+    const departures: TableOutcome['departures'] = (a?.departures ?? [])
+      .filter((d) => d.rows > 0)
+      .map((d) => ({ id: d.id, label: d.label, as: d.as, rows: d.rows, ...(d.advisory ? { advisory: d.advisory } : {}) }));
     if (a?.physical === 'present' && object === TEMPLATES) {
       let unpromoted = 0;
       for (const physical of a.tables) {
@@ -2747,7 +2768,10 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
         });
       }
     }
-    const waiting = departures.reduce((n, d) => n + d.rows, 0);
+    // Advisory rows stay NULL too, and the plan's own NOT NULL reading
+    // (`ref.notNull`) already says so; only a step not yet run overrides it.
+    const pending = departures.filter((d) => !d.advisory);
+    const waiting = pending.reduce((n, d) => n + d.rows, 0);
     tables.push({
       object,
       fate: ref.fate,
@@ -2763,11 +2787,11 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       ...(a?.templateConflicts?.length ? { templateConflicts: a.templateConflicts } : {}),
       remaining,
       notNull: waiting > 0
-        ? { willReceive: false, reason: `${waiting} row(s) still wait for a step not yet run: ${departures.map((d) => d.label).join('; ')}` }
+        ? { willReceive: false, reason: `${waiting} row(s) still wait for a step not yet run: ${pending.map((d) => d.label).join('; ')}` }
         : ref.notNull,
     });
   }
-  const advisory = after.summary.unattributableRows;
+  const advisory = after.summary.unattributableRows + after.tables.reduce((n, t) => n + advisoryRows(t), 0);
   const blocking = complete ? discrepancies : steps.reduce((n, s) => n + s.blockers.length, 0) || 1;
   await opts.ledger.write(checkpoint, { complete, blocking, advisory });
   return {

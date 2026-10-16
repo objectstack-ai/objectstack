@@ -330,7 +330,10 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // Nor does the global search body (`search-routes.ts`): it READS its two
         // caps through `readDeclaredQueryNumber`, never coerces one:
         // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 9 → 10.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
+        // [#23050 slice 10] Nor does the UI view body (`ui-routes.ts`): it reads
+        // only the two path parameters, as strings:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 10 → 11.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });

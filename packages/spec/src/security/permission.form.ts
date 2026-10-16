@@ -34,26 +34,21 @@ export const permissionForm = defineForm({
         { field: 'label', colSpan: 1, helpText: 'Display label for admins' },
         // #19331 — four declared keys had no control, so the only door to any of
         // them was the Source tab's free-text JSON. `description` is persisted on
-        // sys_permission_set and shown in Setup; the other three are the ADR-0086
-        // D3 provenance pair plus the ADR-0090 D5 baseline flag. The help texts
-        // are an admin's words; the decision records stay here:
+        // sys_permission_set and shown in Setup; of the other three, `packageId`
+        // (ADR-0086 D3) and the ADR-0090 D5 baseline flag keep their rows. The
+        // help texts are an admin's words; the decision records stay here:
         //  - `isDefault` (ADR-0090 D5): an app-level set is auto-bound to the
         //    built-in `everyone` position at boot, after the high-privilege check;
         //    a package-level set materializes a `sys_audience_binding_suggestion`
         //    an admin confirms in Setup.
-        //  - `managedBy` (ADR-0086 D3): `package` rows are re-seeded on upgrade;
-        //    `platform` / `user` rows are environment config package seeding
-        //    never touches.
+        //  - `managedBy` left this form with its key (#23891, ADR-0049
+        //    enforce-or-remove): nothing read the authored value, so its labels
+        //    promised upgrade behaviour no code kept.
         //  - `packageId` (ADR-0086 D3): a value that disagrees with the package
         //    the set ships in or is saved into is refused
         //    (`judgePermissionSetOwnerBinding`).
         { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Human-readable description shown in Setup.' },
         { field: 'isDefault', type: 'boolean', colSpan: 1, helpText: 'Gives this set to everyone who signs in, through the built-in everyone position. A set the app itself declares is granted at startup; a set from an installed package becomes a suggestion an admin confirms in Setup. A set with high-privilege permissions is never granted this way. Default false.' },
-        { field: 'managedBy', type: 'select', colSpan: 1, helpText: 'Who owns this set: Package means it ships with a package and package upgrades update it; Platform and User mean it was created in this environment and upgrades leave it alone.', options: [
-          { label: 'Package (upgrade-owned metadata)', value: 'package' },
-          { label: 'Platform (environment config)', value: 'platform' },
-          { label: 'User (environment config)', value: 'user' },
-        ] },
         { field: 'packageId', type: 'text', colSpan: 2, helpText: 'The package that ships this set; a value naming any other package is refused. Leave empty for a set created in this environment.' },
       ],
     },

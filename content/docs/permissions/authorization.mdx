@@ -65,9 +65,17 @@ session from protected resources while keeping remediation reachable), and
 since ADR-0090 D12 every RBAC-table write is additionally checked by the
 **[delegated-admin gate](/docs/permissions/delegated-administration)**: tenant admins pass, delegates are confined to their
 `adminScope` (BU subtree + assignable-set allowlist, no self-escalation,
-strict containment for scope grants), and everyone else is denied. The
-`everyone`/`guest` audience-anchor bindings reject high-privilege sets at the
-data layer for every caller.
+strict containment for scope grants), and everyone else is denied. No caller
+writes either audience anchor's definition (`everyone`, `guest`), and a
+high-privilege set is refused at each point where one can reach `everyone`:
+accepting a package's `isDefault` suggestion answers `403 PERMISSION_DENIED`;
+every derivation of the anchor's definition (boot, accept, revoke, uninstall,
+package publish) leaves out a baseline, accepted or host-declared set that
+carries a forbidden bit and logs it; and the author-time rule
+`security-anchor-high-privilege` reports such an `isDefault` set as an error in
+`os validate`, `os build` and `os lint`, and the metadata door refuses to
+publish it (`422`). No door binds a set to `guest` until ADR-0138 D3 item 5's
+bind door is built ([Permission sets](/docs/permissions/permission-sets#package-suggestion--isdefault-adr-0090-d5)).
 
 ### The MCP execution surface (ADR-0096 / ADR-0101)
 
