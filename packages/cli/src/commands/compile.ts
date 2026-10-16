@@ -18,6 +18,7 @@ import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { isExtractionRefusal, lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
+import { makeDirectorySync } from '../utils/make-directory.js';
 import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact-packages.js';
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
@@ -989,7 +990,9 @@ export default class Compile extends Command {
       const artifactDir = path.dirname(artifactPath);
 
       if (!fs.existsSync(artifactDir)) {
-        fs.mkdirSync(artifactDir, { recursive: true });
+        // Bounded (#23858): an `--output` directory that can never be made is
+        // refused at once with the OS's code and the path, never a loop.
+        makeDirectorySync(artifactDir);
       }
 
       const finalBundle: Record<string, unknown> = { ...(result.data as Record<string, unknown>) };
