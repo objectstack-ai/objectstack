@@ -29,5 +29,8 @@
     "@objectstack/verify": "^18.0.0",
     "typescript": "^5.3.0",
     "vitest": "~4.0.0"
+  },
+  "overrides": {
+    "vitest": "$vitest"
   }
 }
