@@ -3317,7 +3317,7 @@ describe('decision `mode` (#15429)', () => {
       expect(fnds[0].message).toContain('EVERY one whose condition holds runs');
       expect(fnds[0].hint).toContain('delete `mode`');
       // [#22161] Where the migration left the key moved to `os explain`.
-      expect(explained(FLOW_DECISION_INCLUSIVE_OVERLAP)).toContain('os migrate meta --from 17');
+      expect(explained(FLOW_DECISION_INCLUSIVE_OVERLAP)).toContain('authored against protocol major 17 and converted by `os migrate meta`');
       expect(fnds[0].hint).not.toContain('os migrate meta');
     });
 
@@ -3647,7 +3647,7 @@ describe('[#22161] one-line fix — the twelve flow anti-pattern ids', () => {
     ],
     [FLOW_DECISION_INCLUSIVE_OVERLAP]: [
       "Keep `mode: 'inclusive'` only where running every matching branch is the intent",
-      'os migrate meta --from 17',
+      'authored against protocol major 17 and converted by `os migrate meta`',
     ],
     [FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED]: [
       'POST /api/v1/approvals/requests/:id/resubmit',

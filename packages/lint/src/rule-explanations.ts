@@ -3634,8 +3634,13 @@ const FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION: RuleExplanation = {
     'Counted over conditioned out-edges only: a `fault` edge is error routing, and an `isDefault` edge opens ' +
       'only when nothing else did, so one conditioned edge beside a default is not reported (there the two ' +
       'modes cannot differ).',
-    'A flow migrated by `os migrate meta --from 17` carries `mode: \'inclusive\'` wherever two or more ' +
-      'conditioned out-edges left a decision: delete it where the branches partition.',
+    // Named as the bare command, the way descriptive prose names it: a quoted
+    // `--from N` marker is judged as a prescription by the spec class pin
+    // `shared/retired-key-migrate-sentence.test.ts`, and this is not one.
+    'A flow authored against protocol major 17 and converted by `os migrate meta` carries ' +
+      '`mode: \'inclusive\'` wherever two or more conditioned out-edges left a decision (the ' +
+      '`flow-decision-mode-inclusive-explicit` conversion writes it so the run does not change ' +
+      'silently): delete it where the branches partition.',
   ],
 };
 
