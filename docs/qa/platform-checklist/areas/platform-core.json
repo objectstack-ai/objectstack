@@ -3117,6 +3117,9 @@
         "requires": [
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
           "per leg a scratch config: packages[] plus one top-level view; an isDefault:true sys_organization record page; a datasourceMapping (examples/app-crm declares one); NODE_ENV=production with no storage service"
+        ],
+        "knownGaps": [
+          "test/serve-organization-record-page.e2e.test.ts is a `*.e2e.test.ts` file, which packages/cli collects ONLY under OS_TEST_TIERS=nightly (vitest.config.ts nightly tiers): run it as `OS_TEST_TIERS=nightly npx vitest run test/serve-organization-record-page.e2e.test.ts` in packages/cli — a plain run of the automated.ref list silently collects 25 of its 26 cli files"
         ]
       },
       "steps": [
