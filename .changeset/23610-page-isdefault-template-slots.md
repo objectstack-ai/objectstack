@@ -3,6 +3,8 @@
 '@objectstack/objectql': patch
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 feat(spec)!: a page declares nothing the console does not honour — `isDefault: true` is refused off a record page bound to an object, `template` closes to the registered layouts, and a region the template does not place is refused
 
 Clause-②: yes (narrowing)
