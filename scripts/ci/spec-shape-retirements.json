@@ -1,4 +1,24 @@
 {
   "$comment": "Intentional spec retirements the Spec Shape Gate reads as `known` instead of red. One entry per retirement, written by the accepting seat when the downstream (objectui) card is filed, deleted when that card closes. Every entry carries exactly: retired, objectstack_pr, objectstack_commit (40-hex merge commit), downstream_card (owner/repo#N), registered_at (YYYY-MM-DD), matches (non-empty; each pattern names a repo-relative objectui `file` -- `*` within a segment, `**` across -- plus at least one of `code` (TS<digits>) or `message` (substring)). A file alone is refused. The reader, its grammar and its refusals: scripts/ci/spec-shape-gate.mjs (THE REGISTRY).",
-  "retirements": []
+  "retirements": [
+    {
+      "retired": "the page component's `visibility` and the view form's `visibleOn` (field and section), retired as keys -- retiredKey() tombstones naming `visibleWhen` (F4 of #23543) -- objectui still passes the page component's `visibility` to an expression argument, and its expressions test (compiled only by the package's chained test project) still authors that key",
+      "objectstack_pr": 23836,
+      "objectstack_commit": "105902f10ae8124a5e965cb24f7b30681fd9fae2",
+      "downstream_card": "objectstack-ai/objectui#12654",
+      "registered_at": "2026-10-16",
+      "matches": [
+        {
+          "file": "packages/react/src/SchemaRenderer.tsx",
+          "code": "TS2345",
+          "message": "Argument of type '{ '[REMOVED] Key retired: run `os validate` for its migration.': never; }' is not assignable to parameter of type 'string | boolean | { dialect?: string | undefined; source?: string | undefined; } | undefined'."
+        },
+        {
+          "file": "packages/react/src/__tests__/SchemaRenderer.expressions.test.tsx",
+          "code": "TS2322",
+          "message": "Type 'string' is not assignable to type '{ '[REMOVED] Key retired: run `os validate` for its migration.': never; }'."
+        }
+      ]
+    }
+  ]
 }

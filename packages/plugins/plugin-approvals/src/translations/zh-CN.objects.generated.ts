@@ -83,15 +83,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       flow_run_id: {
         label: "Flow Run",
-        help: "Suspended automation run id this request gates (ADR-0019). The decision resumes it."
+        help: "Suspended automation run id this request gates. The decision resumes it."
       },
       flow_node_id: {
         label: "Flow Node",
-        help: "Approval node id within the flow that opened this request (ADR-0019)."
+        help: "Approval node id within the flow that opened this request."
       },
       node_config_json: {
         label: "Node Config",
-        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests (ADR-0019)."
+        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."
       },
       completed_at: {
         label: "完成时间"
@@ -315,7 +315,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "审批委派",
     pluralLabel: "审批委派",
-    description: "自助不在岗规则：在时间窗内把该用户的审批人槽位改派给候补人。",
+    description: "某人不在岗期间，直接指派给其本人的审批会转给其委派人。",
     fields: {
       id: {
         label: "委派 ID"
@@ -334,7 +334,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "生效时间",
-        help: "此刻之前规则不生效。留空 = 立即生效。在解析时通过 isGrantActive 强制（ADR-0091 D2 判定式）——绝不依赖后台任务。"
+        help: "此刻之前规则不生效。留空 = 立即生效。在解析时通过 isGrantActive 强制——绝不依赖后台任务。"
       },
       valid_until: {
         label: "失效时间",

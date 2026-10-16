@@ -855,6 +855,8 @@
     "resolveSettingsActionConfirm (function)",
     "resolveSettingsActionLabel (function)",
     "resolveSettingsActionSuccess (function)",
+    "resolveSettingsBannerText (function)",
+    "resolveSettingsBannerTitle (function)",
     "resolveSettingsDescription (function)",
     "resolveSettingsFieldHelp (function)",
     "resolveSettingsFieldLabel (function)",

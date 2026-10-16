@@ -350,6 +350,21 @@ describe('os secret rewrap — the human face names no write it cannot vouch for
     expect(closing, lines.join('\n')).toContain(`Dry run — no row or table was written. ${JOURNAL_MODE_SWITCH_NOTE}`);
   }, 60_000);
 
+  it('the dry run\'s own note claims no row or table, in the human face and in --json report.notes', async () => {
+    const DRY_RUN_NOTE = 'Dry run: every attributed row was opened, re-sealed and verified in memory, and no row or '
+      + 'table was written. Re-run with --apply to write.';
+    wireBoot(freshRows(), { driverConfig: SQLITE_CONFIG });
+    const lines = await runHuman(['--no-declared-datasources']);
+    const note = lines.find((line) => line.includes('Dry run: every attributed row'));
+    expect(note, lines.join('\n')).toContain(DRY_RUN_NOTE);
+    expect(lines.join('\n')).not.toContain('nothing was written');
+
+    wireBoot(freshRows(), { driverConfig: SQLITE_CONFIG });
+    const { payload } = await run(['--no-declared-datasources']);
+    expect(payload.report.notes).toContain(DRY_RUN_NOTE);
+    expect(JSON.stringify(payload.report.notes)).not.toContain('nothing was written');
+  }, 60_000);
+
   it('on a target with no file header (PostgreSQL) the dry run claims no row or table and names no switch', async () => {
     wireBoot(freshRows(), { driverConfig: POSTGRES_CONFIG });
     const lines = await runHuman(['--no-declared-datasources']);

@@ -106,11 +106,15 @@ export function reservedIdentityNamesCelList(): string {
  * It names the remedy, because the refusal is not "you lack permission" — no
  * caller has permission, tenant admins included. The name is reserved by the
  * framework; a different name is the only way through.
+ *
+ * The decision record (ADR-0068 D2) is named here, not in the sentence: the
+ * sentence is admin copy, shown on Setup's assignment form and carried into
+ * every locale's bundle.
  */
 export function reservedIdentityNameMessage(column: string): string {
   return (
     `'${column}' cannot spell a framework-reserved built-in identity name ` +
-    `(${RESERVED_IDENTITY_NAMES.join(', ')}). These names are ADR-0068 built-in identities: ` +
+    `(${RESERVED_IDENTITY_NAMES.join(', ')}). These names are built-in identities: ` +
     `the platform projects them into current_user.positions from their own sources of truth, ` +
     `and a row spelling one is not an assignment of that identity. Choose a different name.`
   );

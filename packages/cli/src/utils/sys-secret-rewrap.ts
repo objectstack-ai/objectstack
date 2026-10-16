@@ -500,9 +500,12 @@ export const REWRAP_NOTES = {
   resumable:
     'Re-running is safe. A row already sealed under the current derivation is skipped as done, so a '
     + 'run that stopped part-way finishes the rest, and a finished run writes nothing.',
+  // [#23726] No row or table, never "nothing": the dry run's connect can switch
+  // a SQLite file's journal mode, which rewrites its header. The note naming
+  // that switch follows the human face's closing line, on a SQLite file only.
   dryRun:
-    'Dry run: every attributed row was opened, re-sealed and verified in memory, and nothing was '
-    + 'written. Re-run with --apply to write.',
+    'Dry run: every attributed row was opened, re-sealed and verified in memory, and no row or table '
+    + 'was written. Re-run with --apply to write.',
   unfinished:
     'Some rows were not re-wrapped (see the refused and not-written counts). Each was left exactly as '
     + 'it was. A row that changed during the run is picked up by a re-run.',

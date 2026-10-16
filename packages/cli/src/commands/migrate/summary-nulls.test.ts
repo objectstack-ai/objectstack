@@ -12,6 +12,12 @@
  * (the unscoped run the ruling keeps byte-for-byte). The seams that would boot
  * a database or walk a real engine are replaced; the command's own parse and
  * control flow run for real.
+ *
+ * And what the human face says about the database: the dry run's read-only
+ * boot can still switch a SQLite file's journal mode, which rewrites its
+ * header and no row, so the report's dry-run line claims no row or table and,
+ * on a SQLite target only, is followed by the note naming the switch. The
+ * report's formatter is the real one from `@objectstack/objectql`.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -21,6 +27,7 @@ import MigrateSummaryNulls from './summary-nulls.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { isExitSignal } from '../../utils/format.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { backfillSummaryNulls } from '@objectstack/objectql';
 
 vi.mock('../../utils/schema-migrate.js', () => ({ bootSchemaStack: vi.fn() }));
@@ -29,10 +36,15 @@ vi.mock('../../utils/migrate-occupancy-gate.js', () => ({
   probeMigrationTarget: vi.fn(),
 }));
 vi.mock('../../utils/data-migration-plugins.js', () => ({ buildDataMigrationPlugins: vi.fn(async () => []) }));
-vi.mock('@objectstack/objectql', () => ({
-  backfillSummaryNulls: vi.fn(),
-  formatSummaryBackfillReport: vi.fn(() => []),
-}));
+// The walk is replaced; the formatter is the real one, so the human-face pins
+// below read the report's own dry-run line.
+vi.mock('@objectstack/objectql', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@objectstack/objectql')>();
+  return {
+    backfillSummaryNulls: vi.fn(),
+    formatSummaryBackfillReport: real.formatSummaryBackfillReport,
+  };
+});
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
@@ -152,5 +164,55 @@ describe('os migrate summary-nulls', () => {
     const payload = JSON.parse(emitted);
     expect(payload).toMatchObject({ code: 'INVALID_FIELD', httpStatus: 400 });
     expect(payload.error).toContain('customer.nope');
+  }, RUN_TIMEOUT);
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// The human face: what the dry run says about the database
+// ───────────────────────────────────────────────────────────────────────────
+
+const SQLITE_CONFIG = { client: 'better-sqlite3', connection: { filename: '/srv/app/.objectstack/data/objectstack.db' } };
+const POSTGRES_CONFIG = { client: 'pg', connection: 'postgres://db.example.com:5432/app' };
+const DRY_RUN_LINE = 'Dry run — no row or table was written. Re-run with --apply to backfill.';
+
+/** A dry run that found one NULL roll-up, so the report closes with its dry-run line. */
+const DRY_REPORT_WITH_NULLS = {
+  ...EMPTY_REPORT,
+  scannedObjects: ['customer'],
+  scannedRecords: 1,
+  fields: [{
+    object: 'customer', field: 'open_count', fn: 'count', childObject: 'case',
+    nullRows: 1, nonEmpty: 0, filled: 0, sampleRecordIds: ['c_1'],
+  }],
+  nullRows: 1,
+};
+
+describe('os migrate summary-nulls — the dry run names no write it cannot vouch for', () => {
+  /** Boot onto a primary driver with `config`; every report line the run printed. */
+  async function runDry(config: Record<string, unknown>): Promise<string[]> {
+    vi.mocked(bootSchemaStack).mockResolvedValue({
+      // The primary datasource's driver, as `SchemaStack.driver` carries it.
+      driver: { config },
+      kernel: { getService: () => engine },
+      dbLabel: 'test database',
+      shutdown: vi.fn(async () => {}),
+    } as any);
+    vi.mocked(backfillSummaryNulls).mockResolvedValue(DRY_REPORT_WITH_NULLS as any);
+    await MigrateSummaryNulls.run([], { root: CLI_ROOT });
+    return log.mock.calls.map((c: unknown[]) => c.map(String).join(' ')).join('\n').split('\n');
+  }
+
+  it('on a SQLite file the dry-run line claims no row or table and names the journal-mode switch', async () => {
+    const lines = await runDry(SQLITE_CONFIG);
+    const dryRun = lines.find((line) => line.startsWith('Dry run —'));
+    expect(dryRun, lines.join('\n')).toBe(`${DRY_RUN_LINE} ${JOURNAL_MODE_SWITCH_NOTE}`);
+    expect(lines.join('\n')).not.toContain('nothing was written');
+  }, RUN_TIMEOUT);
+
+  it('on a target with no file header (PostgreSQL) the dry-run line claims no row or table and names no switch', async () => {
+    const lines = await runDry(POSTGRES_CONFIG);
+    const dryRun = lines.find((line) => line.startsWith('Dry run —'));
+    expect(dryRun, lines.join('\n')).toBe(DRY_RUN_LINE);
+    expect(lines.join('\n')).not.toContain(JOURNAL_MODE_SWITCH_NOTE);
   }, RUN_TIMEOUT);
 });

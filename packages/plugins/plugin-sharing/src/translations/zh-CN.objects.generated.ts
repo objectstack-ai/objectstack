@@ -18,7 +18,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_record_share: {
     label: "记录共享",
     pluralLabel: "记录共享",
-    description: "按记录粒度的共享授权——在 OWD 基础上提供显式访问",
+    description: "共享给所有者以外人员的记录，每条授权一行。",
     fields: {
       id: {
         label: "共享 ID"
