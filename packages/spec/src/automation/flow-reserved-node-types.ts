@@ -51,7 +51,7 @@ export function reservedFlowNodeTypeRefusal(type: unknown): string | undefined {
     ? " A wait node's `waitEventConfig.eventType: 'webhook'` is a different field and stays legal."
     : '';
   return `Flow node \`type: '${type}'\` was removed in @objectstack/spec 18 (ADR-0087 D2) — it is one of the `
-    + `three callout node types protocol 11 unified into \`${canonical}\`, the loader rewrote it to \`${canonical}\` `
+    + `three callout node types ADR-0018 unified into \`${canonical}\`, the loader rewrote it to \`${canonical}\` `
     + 'until this release, and the name stays reserved inside the open node namespace so no plugin can claim it '
     + `(ADR-0018). Use \`type: '${canonical}'\`. Change the value; the conversion never touched the node's \`config\`, `
     + `so the \`${canonical}\` contract judges it as written.${eventTypeNote}`;

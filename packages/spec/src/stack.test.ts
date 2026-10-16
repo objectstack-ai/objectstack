@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   ObjectStackDefinitionSchema,
   defineStack,
@@ -1434,78 +1434,10 @@ describe('defineStack — at most one App per package (ADR-0019 D1/D3)', () => {
 
 // ── ADR-0087 D2 conversion notices reach the author ─────────────────────────
 //
-// A conversion is deliberately silent about FIXING the shape — zero consumer
-// action is the point. It is not supposed to be silent about having had to:
-// the notice carries "retires in protocol N", after which the old spelling
-// stops loading. `defineStack` passed no sink, so the author who wrote the old
-// shape heard nothing unless they happened to run `os validate` (`os build`
-// was deaf too). Five conversions are live today, so this was a real gap.
-describe('defineStack — ADR-0087 D2 conversion notices', () => {
-  const manifest = { id: 'com.example.p', version: '1.0.0', type: 'app' as const, name: 'P', namespace: 'demo' };
-  const obj = { name: 'demo_task', label: 'Task', fields: { title: { type: 'text' as const } } };
-
-  // A protocol-11 flow callout node type — `webhook` converts to `http`.
-  //
-  // The warn-once key is (conversionId, path, from, to) and the notice path is
-  // INDEX-based (`flows[i].nodes[j].type`) — the flow's name never enters it.
-  // Since the dedupe set is process-scoped by design, every case below has to
-  // occupy its own node index or it silently reuses an earlier case's key and
-  // asserts nothing.
-  const legacyFlowAt = (index: number) => ({
-    name: `conv_demo_${index}`,
-    nodes: [
-      ...Array.from({ length: index }, (_, i) => ({ id: `n_pad_${i}`, type: 'http' })),
-      { id: 'n_call', type: 'webhook' },
-    ],
-  });
-  // Non-strict throughout: the assertion is about the conversion sink alone,
-  // not about satisfying every downstream cross-reference check. The sink is
-  // wired on the single `normalizeStackInput` call that runs BEFORE the strict
-  // branch, so both modes go through it.
-  const define = (index: number) =>
-    defineStack({ manifest, objects: [obj], flows: [legacyFlowAt(index)] }, { strict: false });
-
-  let warn: ReturnType<typeof vi.spyOn>;
-  beforeEach(() => {
-    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-  afterEach(() => {
-    warn.mockRestore();
-  });
-
-  it('warns when a conversion rewrites an old shape, naming the retirement major', () => {
-    define(0);
-
-    expect(warn).toHaveBeenCalledTimes(1);
-    const msg = warn.mock.calls[0][0] as string;
-    expect(msg).toContain(`'webhook' → 'http'`);
-    expect(msg).toContain('flow-node-http-callout-rename');
-    expect(msg).toContain('retires in protocol');
-  });
-
-  it('nags once per distinct conversion site', () => {
-    define(1);
-    define(1);
-    define(1);
-    expect(warn).toHaveBeenCalledTimes(1);
-  });
-
-  it('reports a second, distinct site separately', () => {
-    // Two different authored occurrences, each needing its own fix — dedupe
-    // must not swallow the second.
-    define(2);
-    define(3);
-    expect(warn).toHaveBeenCalledTimes(2);
-  });
-
-  it('stays quiet for a stack that is already canonical', () => {
-    defineStack(
-      { manifest, objects: [obj], flows: [{ name: 'conv_canonical', nodes: [{ id: 'n1', type: 'http' }] }] },
-      { strict: false },
-    );
-    expect(warn).not.toHaveBeenCalled();
-  });
-});
+// Moved to `stack-conversion-notices.test.ts` with #23543 F5-http: the block
+// was driven by `flow-node-http-callout-rename`, the last real entry left live
+// on the load path, and it retired there. That file owns a test-only live entry
+// so the pins stay about `defineStack`'s notice sink, not about any one entry.
 
 describe('defineStack — the RETIRED `type: page` view mount', () => {
   const baseManifest = {

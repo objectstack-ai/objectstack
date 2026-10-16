@@ -380,6 +380,16 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(FormSectionSchema, 'view.form.sections[]', 'visibleOn'),
   ],
   'page-component-visibility-to-visibleWhen': [tombstone(PageComponentSchema, 'page.components[]', 'visibility')],
+  // #23543 F5-http: the three retired callout names, reserved inside the open
+  // node namespace and refused by the flow parse at the node's `type`; the
+  // flow is otherwise complete, so `nodes` is the only issue path.
+  'flow-node-http-callout-rename': (['http_request', 'http_call', 'webhook'] as const).map((type) =>
+    refusal(
+      `a flow node typed '${type}'`,
+      () => FlowSchema.safeParse(flowWithNode({ type, config: { url: 'https://example.com' } })),
+      'nodes',
+    ),
+  ),
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.
   'page-header-breadcrumb-removed': [tombstone(PageHeaderProps, 'page:header', 'breadcrumb')],
   'object-grid-default-sort-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultSort')],
