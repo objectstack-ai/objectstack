@@ -40,6 +40,7 @@ import { ObjectKernel, findMisplacedReadableIds, refuseReadableIdsOnce } from '@
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysAttachment } from '@objectstack/platform-objects';
+import type { ISecurityService } from '@objectstack/spec/contracts';
 import { installAttachmentReadVisibility } from './attachment-access-hooks.js';
 
 const ATTACHMENT = 'sys_attachment';
@@ -213,7 +214,7 @@ describe('[ADR-0139 E7] the attachment read gate on the leaf path', () => {
       return next();
     }, { object: GATED });
     // The gate, as StorageServicePlugin installs it: the security service resolved per read.
-    installAttachmentReadVisibility(engine as any, silent, () => kernel.getService<any>('security'));
+    installAttachmentReadVisibility(engine as any, silent, () => kernel.getService<ISecurityService>('security'));
     // Registered after the gate, so it sees each gated read's WHERE as the gate left it.
     engine.registerMiddleware(async (op: any, next: () => Promise<void>) => {
       if (READ_OPS.has(op.operation) && op.context && !op.context.isSystem) seenWhere.push(op.ast?.where);
@@ -377,7 +378,7 @@ describe('[ADR-0139 D3] on a driver that refuses the leaf, the attachment read f
     ({ kernel, engine } = await bootKernel(new RefusingDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })));
     engine.registry.registerObject(objectOf(DOC) as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
-    installAttachmentReadVisibility(engine as any, silent, () => kernel.getService<any>('security'));
+    installAttachmentReadVisibility(engine as any, silent, () => kernel.getService<ISecurityService>('security'));
     const doc = await engine.insert(DOC, { name: 'one', owner: MEMBER_A.userId }, { context: SYS });
     await engine.insert(ATTACHMENT, attachmentTo(DOC, doc.id), { context: SYS });
   }, 120_000);
