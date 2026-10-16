@@ -301,7 +301,7 @@ describe('the remedy names what the operator can change', () => {
       process.env.OS_DATABASE_URL = url;
       return resolveStandaloneDatabase({ artifactPath: join(root, 'none.json') });
     },
-    ...Object.fromEntries(Object.entries(DOORS).map(([door, run]) => [`an explicit sqlite via ${door}`, (url: string) => run('sqlite', url)])),
+    ...Object.fromEntries(Object.entries(DOORS).map(([door, run]) => [`an explicit sqlite selection, ${door}`, (url: string) => run('sqlite', url)])),
   } as Record<string, (url: string) => unknown>;
   it.each(Object.keys(NO_FILE).flatMap((door) => [[door, 'file:'], [door, 'FILE:']] as const))(
     'via %s, %s names the file to write and no driver change',
