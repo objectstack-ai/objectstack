@@ -669,6 +669,18 @@ const ADMIN_SCOPE_AUTHOR_ENVIRONMENT_SETS_REMOVED =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
+ * [#23891] The prescription for the retired authored key
+ * `PermissionSetSchema.managedBy` — see the tombstone on that schema.
+ */
+const PERMISSION_SET_MANAGED_BY_REMOVED =
+  '`permission.managedBy` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0086 D3) — '
+  + 'nothing ever read the authored key: no seeder, package upgrade or lock consulted it, so `package` never made '
+  + 'a set upgrade-owned and `platform` or `user` never shielded one from an upgrade. Delete the key; a set\'s '
+  + 'provenance is the package that ships it, decided from that package\'s artifact and recorded as `packageId`, '
+  + 'and a set created in this environment carries neither. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+/**
  * [ADR-0090 D12] Delegated-administration scope.
  *
  * Attaches to a permission set (and is therefore distributed via positions,
@@ -885,8 +897,7 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
   /**
    * [ADR-0086 D3] Owning package for a package-shipped permission set
    * (absent ⇒ environment-authored). Persisted on `sys_permission_set`
-   * records together with the per-record `managedBy` provenance, this is
-   * what makes the metadata↔config boundary machine-checkable and package
+   * records, this is what makes the metadata↔config boundary machine-checkable and package
    * uninstall well-defined (remove the package's own sets).
    *
    * The owner is the package that ships the set or that it is saved into:
@@ -903,16 +914,19 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
   packageId: z.string().optional().describe('[ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored); a value that disagrees with the package that ships the set, or that it is saved into, is refused by the stack schema (defineStack, os validate, os build), the package registration, and the metadata save, restore and publish doors'),
 
   /**
-   * [ADR-0086 D3] Per-record provenance on the existing
-   * metadata-persistence axis (`package | platform | user`):
-   * `package` = versioned package metadata (seeded by
-   * `bootstrapDeclaredPermissions`, re-seeded on upgrade, read-mostly for
-   * admins per ADR-0010); `platform`/`user` = environment config, live-edited
-   * and never touched by package seeding. Distinct from the `sys_permission_set`
-   * TABLE's object-affordance `managedBy: 'config'`, which stays.
+   * REMOVED (#23891, ADR-0049 enforce-or-remove): the authored per-record
+   * provenance `package | platform | user` (ADR-0086 D3). No code ever read
+   * the AUTHORED key — the retired `bootstrapDeclaredPermissions` seeder
+   * stamped the `sys_permission_set.managed_by` COLUMN and never read
+   * `ps.managedBy`, and the packaged-set lock decides provenance from the
+   * package's artifact — so the key promised upgrade behaviour nothing kept.
+   * The column is a different surface and is untouched, as is the
+   * `sys_permission_set` TABLE's object-affordance `managedBy: 'config'`.
+   * The ADR-0087 D2 conversion `permission-set-managed-by-removed` strips the
+   * key from stored rows and built artifacts; the D3 record is the semantic
+   * entry `permission-set-managed-by-retired`.
    */
-  managedBy: z.enum(['package', 'platform', 'user']).optional()
-    .describe('[ADR-0086 D3] Record provenance: package (upgrade-owned metadata) vs platform/user (env config)'),
+  managedBy: retiredKey(PERMISSION_SET_MANAGED_BY_REMOVED),
 
   /**
    * [ADR-0090 D5] Marks this set as the app's baseline for the built-in

@@ -86,7 +86,7 @@ import {
 } from '../automation/builtin-node-config.zod';
 import { NotifyConfigSchema } from '../automation/io-node-config.zod';
 import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemaless-node-config.zod';
-import { AdminScopeSchema } from '../security/permission.zod';
+import { AdminScopeSchema, PermissionSetSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { PageComponentSchema, PageSchema } from '../ui/page.zod';
@@ -247,6 +247,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(AdminScopeSchema, 'permission.adminScope', 'manageBindings'),
     tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
   ],
+  'permission-set-managed-by-removed': [tombstone(PermissionSetSchema, 'permission', 'managedBy')],
   'manifest-permissions-string-list-removed': [
     refusal('manifest.permissions as a list of strings', () => ManifestPermissionsSchema.safeParse(['system.user.read'])),
   ],
