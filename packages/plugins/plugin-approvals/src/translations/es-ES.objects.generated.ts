@@ -87,7 +87,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       pending_approver_labels: {
         label: "En espera de",
-        help: "A quién espera la solicitud: el nombre de cada aprobador pendiente, o la dirección del puesto cuando no designa a ninguna persona"
+        help: "A quién espera la solicitud: el nombre de cada aprobador pendiente, o la dirección del turno cuando no designa a ninguna persona"
       },
       payload_json: {
         label: "Instantánea",
@@ -299,7 +299,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       acted_as_label: {
         label: "En nombre de",
-        help: "El puesto con el que se realizó esta acción, para mostrar: el nombre de la persona que designa, o su dirección cuando no designa a ninguna persona"
+        help: "El turno en calidad del cual se realizó esta acción, para mostrar: el nombre de la persona que designa, o su dirección cuando no designa a ninguna persona"
       },
       comment: {
         label: "Comentario"
