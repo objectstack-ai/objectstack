@@ -91,6 +91,7 @@ import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { PageSchema } from '../ui/page.zod';
 import { FlowSchema } from '../automation/flow.zod';
+import { JobSchema } from '../system/job.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
@@ -352,6 +353,21 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
         config: { input: { text: 'Hi' } },
       })),
       'nodes',
+    ),
+  ],
+  // #23543 F2: a default flip made loud — a job's retry block with no
+  // attempts, refused by the job parse at the key; the job is otherwise
+  // complete, so the block is the only issue.
+  'retry-policy-converged': [
+    refusal(
+      'a job retryPolicy with maxRetries omitted',
+      () => JobSchema.safeParse({
+        name: 'nightly_sync',
+        schedule: { type: 'cron', expression: '0 0 * * *' },
+        handler: 'syncOrders',
+        retryPolicy: { backoffMs: 5000 },
+      }),
+      'retryPolicy',
     ),
   ],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.

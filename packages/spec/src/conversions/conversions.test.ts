@@ -14,6 +14,7 @@ import {
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { ElementButtonPropsSchema, PageHeaderProps, PageTabsProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
+import { JobSchema, RetryPolicySchema } from '../system/job.zod.js';
 import { defineStack } from '../stack.zod.js';
 import { applyMetaMigrations } from '../migrations/chain.js';
 import { applyConversions, applyConversionsToFlow, collectConversionNotices } from './apply.js';
@@ -402,7 +403,6 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(kept).toEqual([
         'flow-node-http-callout-rename',
         'page-component-visibility-to-visibleWhen',
-        'retry-policy-converged',
         'view-visibleOn-to-visibleWhen',
       ]);
       for (const id of [
@@ -421,6 +421,9 @@ describe('conversion layer (ADR-0087 D2)', () => {
         // keys and each lift deleted the keys its block shadows.
         'flow-node-wait-event-config-lift',
         'flow-node-connector-config-lift',
+        // #23543 F2: retired once the job parse refused a `retryPolicy` block
+        // whose `maxRetries` is omitted or 0.
+        'retry-policy-converged',
       ]) {
         expect(ALL_CONVERSIONS.find((c) => c.id === id), id).toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
       }
@@ -1119,6 +1122,88 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(FlowSchema.safeParse(flowOf({ id: 'c', type: 'connector_action', connectorConfig: SHADOWED_CONNECTOR.connectorConfig })).success).toBe(true);
       const other = FlowSchema.safeParse(flowOf({ id: 'a', type: 'assignment', config: { input: 1, duration: 'PT1M' } }));
       expect(other.success ? [] : other.error.issues.map((i) => i.message)).not.toContainEqual(expect.stringContaining('was removed in @objectstack/spec 18'));
+    });
+  });
+
+  // #23543 F2 — the job half of `retry-policy-converged` was the only reason
+  // it stayed on the load path. The retirement's claims: an AUTHORED block with
+  // no attempts meets the prescription instead of a silent `maxRetries: 3`; a
+  // STORED row still loads with the numbers it ran with (the data-at-rest seams
+  // replay the entry); the flow half needed nothing beyond the retirement,
+  // because the `retryDelayMs` tombstone already carries its rename.
+  describe('retry-policy-converged is retired (#23543 F2)', () => {
+    const jobOf = (retryPolicy: Record<string, unknown>) => ({
+      name: 'nightly_sync',
+      schedule: { type: 'cron', expression: '0 0 * * *' },
+      handler: 'syncOrders',
+      retryPolicy,
+    });
+    const refusalOf = (authored: Record<string, unknown>) => {
+      let refusal: unknown;
+      try {
+        defineStack(authored as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      return (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+    };
+
+    it.each([
+      ['omits `maxRetries`', { backoffMs: 5000 }],
+      ['writes `maxRetries: 0`', { maxRetries: 0, backoffMs: 5000 }],
+    ])('an authored job block that %s reaches defineStack as written and is refused at the key', (_name, policy) => {
+      const issues = refusalOf({ jobs: [jobOf(policy)] });
+      // The count is the ONE issue: the job is otherwise complete.
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['jobs.0.retryPolicy.maxRetries']);
+      expect(issues[0]!.message.startsWith(
+        'A retry block with no attempts is no retry block: state `maxRetries` ≥ 1, for example 3, or delete the block.',
+      )).toBe(true);
+    });
+
+    it('is retired from the load path — the authoring funnel writes no count into an authored block', () => {
+      const before = { jobs: [jobOf({ backoffMs: 5000 })] };
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('a stored job row with no count still loads at the rehydration seam, with the pre-17 numbers', () => {
+      const raw = jobOf({ backoffMs: 5000 });
+      // The row as written is what the parse now refuses …
+      expect(JobSchema.safeParse(raw).success).toBe(false);
+      // … and the seam's replay (stored-row rehydration) makes it load, three retries and all.
+      const converted = applyConversionsToStoredItem('job', structuredClone(raw));
+      expect(converted.retryPolicy).toEqual({ backoffMs: 5000, maxRetries: 3, backoffMultiplier: 2 });
+      expect(JobSchema.safeParse(converted).success).toBe(true);
+    });
+
+    it('the flow half needed nothing more: an authored `retryDelayMs` meets its tombstone naming `backoffMs`', () => {
+      const issues = refusalOf({
+        flows: [{
+          name: 'sync_orders',
+          label: 'Sync',
+          type: 'autolaunched',
+          errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 },
+          nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+          edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        }],
+      });
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['flows.0.errorHandling.retryDelayMs']);
+      expect(issues[0]!.message).toContain('Rename the key to `backoffMs`');
+    });
+
+    it('CONTROL — a job with no block, and a block stating `maxRetries: 1`, both parse; an omitted multiplier keeps its default', () => {
+      const { retryPolicy: _none, ...bare } = jobOf({});
+      expect(JobSchema.safeParse(bare).success).toBe(true);
+      const one = JobSchema.safeParse(jobOf({ maxRetries: 1 }));
+      expect(one.success).toBe(true);
+      expect(one.data!.retryPolicy).toMatchObject({ maxRetries: 1, backoffMultiplier: 1 });
+      expect(() => defineStack({ jobs: [jobOf({ maxRetries: 1 }), bare] } as never)).not.toThrow();
+    });
+
+    it('the same block on a `try_catch` node\'s `retry` is not this rule\'s — the shared schema is unchanged', () => {
+      expect(RetryPolicySchema.safeParse({ backoffMs: 5000 }).success).toBe(true);
     });
   });
 
