@@ -946,7 +946,7 @@ export const ERROR_CODE_LEDGER = {
     // two HTTP install doors call `installPackage`. Its own code rather than
     // `NAMESPACE_CONFLICT`: no name is taken — an object's one default slot is
     // held — and renaming fixes nothing; the remedy is `isDefault: false` on
-    // one page, or composing the deployment without the other package. Not a
+    // one page, or composing the deployment without the other package's page. Not a
     // synonym of any standard member: the manifest is well-formed, and the
     // refusal comes from what the deployment already holds.
     'DEFAULT_RECORD_PAGE_CONFLICT',
