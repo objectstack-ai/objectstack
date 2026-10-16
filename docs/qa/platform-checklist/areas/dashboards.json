@@ -1218,7 +1218,7 @@
         "POST /api/v1/analytics/query on the cube over the unexposed object",
         "POST /api/v1/analytics/query using the internal field as a dimension, then as a filter",
         "GET /api/v1/analytics/meta and the boot log",
-        "POST /api/v1/analytics/dataset/query on a showcase dataset with a count measure; read fields[]"
+        "POST /api/v1/analytics/dataset/query {datasetName: \"sys_user_metrics\", selection: {measures: [\"user_count\"]}} (a saved dataset is named by `datasetName`; `dataset` is an INLINE definition object); read fields[]"
       ],
       "acceptance": [
         {

@@ -3131,7 +3131,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "the showcase's published public form slug (GET /api/v1/meta/form as admin lists it)"
+          "the showcase's stock public form `contact-us` (anon GET /api/v1/forms/contact-us resolves it; fields name/email/company/message)"
         ],
         "knownGaps": [
           "the dispatcher `/ui` domain (also floored by 23225) is NOT mounted over HonoServer on a stock `os dev` / `os serve` — GET /api/v1/ui/... answers 404 ENDPOINT_NOT_FOUND to the admin too — so it is not driven here; it is reachable only on a dispatcher-only (hosted) kernel and is pinned by the dogfood sweep",
@@ -3141,7 +3141,7 @@
       "steps": [
         "with NO credentials call: GET /api/v1/notifications, GET /api/v1/keys, GET /api/v1/share-links, GET /api/v1/openapi.json, GET /api/v1/docs, GET /api/v1/i18n/locales, GET /api/settings/branding",
         "with no credentials call a token face: GET /api/v1/share-links/BOGUS/resolve",
-        "with no credentials POST /api/v1/forms/SLUG/submit with a valid body",
+        "with no credentials POST /api/v1/forms/contact-us/submit with the four whitelisted fields plus a forged owner_id and a non-whitelisted status",
         "repeat two of the 401 calls as admin to prove the door itself serves"
       ],
       "acceptance": [
