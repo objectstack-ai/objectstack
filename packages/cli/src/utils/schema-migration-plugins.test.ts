@@ -770,6 +770,36 @@ describe('measureComposedCoverage (#13028)', () => {
     expect(out.notes.join(' ')).toContain('did not defer schema DDL');
     expect(out.notes.join(' ')).toContain('UNMEASURED');
   });
+
+  it('[#23816] on a boot that SKIPPED schema sync, binds each object DDL-free and never syncs', async () => {
+    // The Turso REMOTE primary cannot defer DDL, so the organization-ownership
+    // ceremony boots it with schema sync skipped. The composed host's objects
+    // still have to reach the driver for its drift report, and the one binding
+    // that runs no DDL is `registerObjectMetadata`, the engine's own skip-sync
+    // pass. `syncObjectSchema` would take the DDL path there.
+    const registered: string[] = [];
+    const planned = {
+      ...driverDouble('remote'),
+      registerObjectMetadata: (objects: Array<{ name: string }>) => {
+        for (const o of objects) registered.push(o.name);
+      },
+    };
+    const withoutRegistration = driverDouble('older');
+    let synced = 0;
+    const engine = engineDouble({
+      objects: [{ name: 'sys_position' }, { name: 'sys_job' }, { name: 'legacy_row' }],
+      driverFor: (n) => (n === 'legacy_row' ? withoutRegistration : planned),
+      sync: async () => { synced++; },
+    });
+
+    const out = await measureComposedCoverage(kernelWith(engine), [planned, withoutRegistration], false, { ddlFree: true });
+
+    expect(synced).toBe(0);
+    expect(registered).toEqual(['sys_position', 'sys_job']);
+    expect(out.coverage).toMatchObject({ registeredObjects: 3, examinedObjects: 2, unexaminedObjects: 1 });
+    expect(out.coverage.reasons.unsupported).toBe(1);
+    expect(out.notes.join(' ')).not.toContain('did not defer schema DDL');
+  });
 });
 
 /**
