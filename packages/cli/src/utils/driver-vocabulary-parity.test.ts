@@ -567,8 +567,10 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
   });
 
   // What that rule refuses, both hosts refuse, with ONE sentence that names the
-  // scheme and never the URL; the CLI host's refusal is typed, the class
-  // serve.ts makes fatal (it swallows every other construction error). Two
+  // scheme and never the URL — the CLI host's is the runtime host's minus its
+  // `[StandaloneStack]` tag, as for the retired engine above — and the CLI
+  // host's refusal is typed, the class serve.ts makes fatal (it swallows every
+  // other construction error). Two
   // inputs reach it: an explicit sqlite selection over a server URL, which the
   // CLI host used to open as a file at a path made of the URL, credentials
   // included, and a `file:` that names no file.
@@ -592,7 +594,8 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
       expect(error, `the CLI host (isDev=${isDev}) did not refuse ${url} by type`).toBeInstanceOf(UnsupportedDriverError);
       expect((error as UnsupportedDriverError).recognized).toBe(true);
       expect((error as UnsupportedDriverError).driverType).toBe('sqlite');
-      expect((error as Error).message).toBe(sentence);
+      expect((error as Error).message).toBe(sentence.replace(/^\[StandaloneStack\] /, ''));
+      expect((error as Error).message).not.toBe(sentence);
       expect((error as Error).message).not.toContain('PLACEHOLDER');
     }
   });

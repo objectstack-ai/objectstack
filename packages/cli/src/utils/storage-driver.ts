@@ -640,7 +640,9 @@ export function resolveStorageDefinition(
  * {@link inferDriverTypeFromUrl} reads it, never a file named by whitespace.
  *
  * A URL the rule refuses is re-raised as {@link UnsupportedDriverError} with
- * the runtime host's own sentence, which names the scheme and never the URL.
+ * the runtime host's own sentence, which names the scheme and never the URL,
+ * minus its `[StandaloneStack]` tag — the shape this host's retired-engine
+ * refusal already has (`driver-vocabulary-parity.test.ts` holds both).
  * Two inputs reach that: an explicit `sqlite` selection over a server URL
  * (`OS_DATABASE_DRIVER=sqlite` beside `postgres://user:password@…`), and a
  * `file:` that names no file. Both used to build a definition: the first opened
@@ -655,7 +657,7 @@ function sqliteFileFor(databaseUrl: string | undefined, kind: 'sqlite' | 'sqlite
   try {
     return sqliteFilenameFromUrl(url, kind);
   } catch (err) {
-    throw new UnsupportedDriverError(kind, (err as Error).message);
+    throw new UnsupportedDriverError(kind, (err as Error).message.replace(/^\[StandaloneStack\] /, ''));
   }
 }
 
