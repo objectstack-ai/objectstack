@@ -1,11 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import {
-  FILE_ATTACHMENT_SERVICE,
-  type IDataEngine,
-  type IFileAttachmentService,
-} from '@objectstack/spec/contracts';
+import { FILE_ATTACHMENT_SERVICE, type IFileAttachmentService } from '@objectstack/spec/contracts';
 import { createChromiumDriver } from './chromium-driver.js';
 import {
   describeEndpoint,
@@ -14,7 +10,7 @@ import {
   type PrintPlacementResolution,
 } from './config.js';
 import { principalSessionMinterOf } from './principal-session.js';
-import { PrintService, type PrintMetadataReader } from './print-service.js';
+import { PrintService, type PrintEngine } from './print-service.js';
 
 /** The service-registry slot the plugin registers {@link PrintService} under. */
 export const PRINT_SERVICE = 'print' as const;
@@ -41,7 +37,7 @@ export type PrintServicePluginOptions = PrintPlacementOptions;
  *     engine makes the deployment visibly smaller and loses nothing, which is
  *     a `warn`.
  *   - `kernel:ready`: the services a print needs (the auth service's
- *     principal-session mint, `file-attachments`, metadata, the data engine)
+ *     principal-session mint, `file-attachments`, the data engine)
  *     are registered by other plugins, so their absence is reported only once
  *     every plugin has started. `status()` reads them at call time either way.
  */
@@ -70,8 +66,7 @@ export class PrintServicePlugin implements Plugin {
     this.service = new PrintService({
       placement,
       driver,
-      getMetadata: () => optional<PrintMetadataReader>('metadata'),
-      getEngine: () => optional<Pick<IDataEngine, 'findOne'>>('objectql'),
+      getEngine: () => optional<PrintEngine>('objectql'),
       getAttachments: () => optional<IFileAttachmentService>(FILE_ATTACHMENT_SERVICE),
       getMinter: () => principalSessionMinterOf(optional<unknown>('auth')),
     });

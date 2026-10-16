@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { recordNotFoundError } from '@objectstack/core';
-import type { IDataEngine, IFileAttachmentService } from '@objectstack/spec/contracts';
+import type { EngineSchemaRegistryView, IDataEngine, IFileAttachmentService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import type { ChromiumDriver } from './chromium-driver.js';
@@ -104,19 +104,21 @@ export interface IPrintService {
   printRecordToFile(request: PrintRecordRequest, context: ExecutionContext): Promise<PrintedRecordFile>;
 }
 
-/** The metadata reads a print needs. */
-export interface PrintMetadataReader {
-  get(type: string, name: string): Promise<unknown | undefined>;
-  getObject(name: string): Promise<unknown | undefined>;
-}
+/**
+ * The data engine a print reads through: the record, read as the caller, and
+ * the engine's schema registry — the pages and objects the console itself is
+ * served, so the page judged here is the page the browser renders.
+ */
+export type PrintEngine = Pick<IDataEngine, 'findOne'> & {
+  readonly registry: Pick<EngineSchemaRegistryView, 'getItem' | 'getObject'>;
+};
 
 /** What {@link PrintService} is composed over — each service read at call time. */
 export interface PrintServiceDeps {
   placement: PrintPlacementResolution;
   /** The engine for the configured placement; `null` exactly when none is configured. */
   driver: ChromiumDriver | null;
-  getMetadata(): PrintMetadataReader | undefined;
-  getEngine(): Pick<IDataEngine, 'findOne'> | undefined;
+  getEngine(): PrintEngine | undefined;
   getAttachments(): IFileAttachmentService | undefined;
   getMinter(): PrincipalSessionMinter | undefined;
 }
@@ -198,8 +200,7 @@ export class PrintService implements IPrintService {
         "@objectstack/service-storage's StorageServicePlugin."
       );
     }
-    if (!this.deps.getMetadata()) return 'No metadata service is registered, so a print page cannot be read.';
-    if (!this.deps.getEngine()) return 'No data engine is registered, so a record cannot be read.';
+    if (!this.deps.getEngine()) return 'No data engine is registered, so a page or a record cannot be read.';
     return undefined;
   }
 
@@ -215,7 +216,6 @@ export class PrintService implements IPrintService {
       printRefusal('SERVICE_UNAVAILABLE', 503, `Records cannot be printed to a file: ${status.reason}`);
     }
     const driver = this.deps.driver!;
-    const metadata = this.deps.getMetadata()!;
     const engine = this.deps.getEngine()!;
     const attachments = this.deps.getAttachments()!;
     const minter = this.deps.getMinter()!;
@@ -223,13 +223,13 @@ export class PrintService implements IPrintService {
 
     // ③ The page.
     const req = validateRequest(request);
-    await this.refuseUnlessPrintPage(metadata, req);
+    this.refuseUnlessPrintPage(engine, req);
 
     // ④ The record, read as the caller.
     await this.refuseUnlessReadable(engine, req, context);
 
     // ⑤ The files opt-in.
-    await this.refuseUnlessFilesEnabled(metadata, req.object);
+    this.refuseUnlessFilesEnabled(engine, req.object);
 
     // Mint, render, archive — and revoke, whatever happened.
     const filename = req.filename ?? `${req.page}-${req.recordId}.pdf`;
@@ -265,8 +265,8 @@ export class PrintService implements IPrintService {
     if (context.authGate) deny(`the user's sign-in is held by an authentication policy (${context.authGate.code})`);
   }
 
-  private async refuseUnlessPrintPage(metadata: PrintMetadataReader, req: ValidRequest): Promise<void> {
-    const page = (await metadata.get('page', req.page)) as Record<string, unknown> | undefined;
+  private refuseUnlessPrintPage(engine: PrintEngine, req: ValidRequest): void {
+    const page = engine.registry.getItem<Record<string, unknown>>('page', req.page);
     if (!page || typeof page !== 'object') {
       printRefusal('RESOURCE_NOT_FOUND', 404, `There is no page named '${req.page}'.`);
     }
@@ -296,7 +296,7 @@ export class PrintService implements IPrintService {
   }
 
   private async refuseUnlessReadable(
-    engine: Pick<IDataEngine, 'findOne'>,
+    engine: PrintEngine,
     req: ValidRequest,
     context: ExecutionContext,
   ): Promise<void> {
@@ -312,8 +312,8 @@ export class PrintService implements IPrintService {
     if (!row) throw recordNotFoundError(req.object, req.recordId);
   }
 
-  private async refuseUnlessFilesEnabled(metadata: PrintMetadataReader, object: string): Promise<void> {
-    const def = (await metadata.getObject(object)) as { enable?: { files?: unknown } } | undefined;
+  private refuseUnlessFilesEnabled(engine: PrintEngine, object: string): void {
+    const def = engine.registry.getObject(object) as { enable?: { files?: unknown } } | undefined;
     if (def?.enable?.files !== true) {
       printRefusal(
         'FILES_DISABLED',

@@ -86,18 +86,21 @@ async function harness(setup: Setup = {}): Promise<Harness> {
     if (setup.readError) throw setup.readError;
     return 'record' in setup ? setup.record : { id: 'inv_1' };
   });
-  const metadataGet = vi.fn(async (_type: string, name: string) =>
+  const metadataGet = vi.fn((_type: string, name: string) =>
     'page' in setup ? setup.page : name === PRINT_PAGE.name ? PRINT_PAGE : undefined,
   );
   const minter: PrincipalSessionMinter = { mint };
   const service = new PrintService({
     placement,
     driver: placement.state === 'configured' ? (driver as ChromiumDriver) : null,
-    getMetadata: () => ({
-      get: metadataGet,
-      getObject: async () => ('object' in setup ? setup.object : { name: 'invoice', enable: { files: true } }),
-    }),
-    getEngine: () => ({ findOne }) as never,
+    getEngine: () =>
+      ({
+        findOne,
+        registry: {
+          getItem: metadataGet,
+          getObject: () => ('object' in setup ? setup.object : { name: 'invoice', enable: { files: true } }),
+        },
+      }) as never,
     getAttachments: () => (setup.noAttachments ? undefined : ({ attachFile } as never)),
     getMinter: () => (setup.noMint ? undefined : minter),
   });
