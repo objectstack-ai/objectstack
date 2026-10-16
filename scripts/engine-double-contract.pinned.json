@@ -3867,6 +3867,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-exposure-gate-one-object-read.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/rest-server-meta-cached-etag-door-scope.test.ts",
       "verb": "findOne",
       "pinned": 1

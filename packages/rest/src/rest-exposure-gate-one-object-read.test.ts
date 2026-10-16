@@ -115,8 +115,10 @@ function host(opts: { environmentId?: string; withoutByName?: boolean } = {}): H
         });
     const engine = {
         registry,
-        find: async (table: string, q: { where: Record<string, unknown> }) =>
-            table === 'sys_metadata' ? rows.filter((r) => matches(r, q.where)) : [],
+        find: async (table: string, q: { where: Record<string, unknown>; limit?: number }) => {
+            const hits = table === 'sys_metadata' ? rows.filter((r) => matches(r, q.where)) : [];
+            return typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
+        },
         findOne: async (table: string, q: { where: Record<string, unknown> }) => {
             assertEngineFindOnePredicate(table, q as never);
             return table === 'sys_metadata' ? rows.find((r) => matches(r, q.where)) : undefined;
