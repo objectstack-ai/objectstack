@@ -338,7 +338,13 @@ describe('#23889 — the boot-time display-label backfill', () => {
     await engine.insert('sys_approval_request', legacyRequest('moved', {
       status: 'pending', pending_approvers: 'u_alice', node_config_json: JSON.stringify({ approvers: [] }),
     }), { context: SYSTEM } as any);
-    for (const id of ['areq_done', 'areq_open', 'areq_recalled', 'areq_moved']) await backdate('sys_approval_request', id);
+    // And one the sweep moves while its name read fails, so the live writer leaves no label.
+    await engine.insert('sys_approval_request', legacyRequest('moved_unnamed', {
+      status: 'pending', pending_approvers: 'u_alice', node_config_json: JSON.stringify({ approvers: [] }),
+    }), { context: SYSTEM } as any);
+    for (const id of ['areq_done', 'areq_open', 'areq_recalled', 'areq_moved', 'areq_moved_unnamed']) {
+      await backdate('sys_approval_request', id);
+    }
 
     const svc = new ApprovalService({ engine: engine as any, logger: quiet as any });
     const source = slotLabelSourceOf(svc);
@@ -356,9 +362,13 @@ describe('#23889 — the boot-time display-label backfill', () => {
           await engine.update('sys_approval_request', {
             id: 'areq_moved', pending_approvers: 'u_mail', pending_approver_labels: 'Mia Mail',
           }, { context: SYSTEM } as any);
+          await engine.update('sys_approval_request', {
+            id: 'areq_moved_unnamed', pending_approvers: 'u_mail', pending_approver_labels: null,
+          }, { context: SYSTEM } as any);
           left = {
             recalled: await row('sys_approval_request', 'areq_recalled'),
             moved: await row('sys_approval_request', 'areq_moved'),
+            movedUnnamed: await row('sys_approval_request', 'areq_moved_unnamed'),
           };
         }
         return source.slotLabels(slots);
@@ -373,6 +383,8 @@ describe('#23889 — the boot-time display-label backfill', () => {
     expect(left!.recalled.updated_at).not.toBe(BACKDATED);
     expect(pick(await row('sys_approval_request', 'areq_recalled'))).toEqual(pick(left!.recalled));
     expect(pick(await row('sys_approval_request', 'areq_moved'))).toEqual(pick(left!.moved));
+    // Labels made for the page's slate are never written onto the slate that replaced it.
+    expect(pick(await row('sys_approval_request', 'areq_moved_unnamed'))).toEqual(pick(left!.movedUnnamed));
     // Their null label columns are still filled, under the stamp the live write left.
     expect((await row('sys_approval_request', 'areq_recalled')).process_label).toBe('Deal Review');
 
