@@ -2556,28 +2556,24 @@ function mutationEventMemberOfBody(type: string, body: unknown): { member?: stri
 
 /**
  * One place a stored `sys_metadata` row of an item can sit, as
- * {@link servedOverlayRowCandidates} orders them: a scope (the environment's,
- * `organizationId: null`, or — for the anonymous form doors' legacy layer
- * alone — a legacy organization's), a spelling of the type
+ * {@link servedOverlayRowCandidates} orders them: a spelling of the type
  * (`'canonical'`, or `'other'`, the type's singular/plural twin, pre-#4432
  * residue), and the package the row is bound to: the address's package, `null`
  * for the package-less row, or `undefined` for any row (an address that names
- * no package).
+ * no package). Every row in a candidate's place is the environment's
+ * (ADR-0131 D6/D7: the reads leave a legacy organization's rows out).
  */
 interface ServedOverlayRowCandidate {
-    readonly scope: 'env';
-    readonly organizationId: string | null;
     readonly spelling: 'canonical' | 'other';
     readonly packageId: string | null | undefined;
 }
 
 /**
  * [#21804] Where a stored row the list read sits, beside the package it is
- * bound to: the scope it was read from (`null` for env-wide) and the type
- * spelling it is stored under (the row's own `type` column).
+ * bound to: the type spelling it is stored under (the row's own `type`
+ * column).
  */
 interface StoredRowPlace {
-    readonly organizationId: string | null;
     readonly type: string;
 }
 
@@ -2620,12 +2616,11 @@ function servedOverlayRowCandidates(address: {
      */
     readonly packageId: string | null | undefined;
 }): ServedOverlayRowCandidate[] {
-    const scopes: Array<Pick<ServedOverlayRowCandidate, 'scope' | 'organizationId'>> = [{ scope: 'env', organizationId: null }];
     const packages: Array<string | null | undefined> = address.packageId === null
         ? [null]
         : address.packageId ? [address.packageId, null] : [undefined];
-    return scopes.flatMap((scope) => (['canonical', 'other'] as const).flatMap((spelling) =>
-        packages.map((packageId) => ({ ...scope, spelling, packageId }))));
+    return (['canonical', 'other'] as const).flatMap((spelling) =>
+        packages.map((packageId) => ({ spelling, packageId })));
 }
 
 /**
@@ -2698,14 +2693,14 @@ function servedViewExpansion<E extends { packageId: string | undefined }>(
  *     disagree on package attribution still collapses (a package-less active
  *     row + its `package_id`-bearing draft resolve to the one package slot,
  *     draft winning).
- *   • [#21804] When `records` are stored rows the caller read (`rowsRead`,
- *     each record's `stored` place), the winner among them is the one
+ *   • [#21804] When `records` are stored rows the caller read (each record
+ *     carrying its `stored` place), the winner among them is the one
  *     {@link servedOverlayRowCandidates} picks for `P`: `P`'s own row before
  *     the package-less one. It
  *     is the resolution `getMetaItem` takes, so it does not depend on the
- *     order the store returned the rows in. Without `rowsRead` (the
- *     MetadataService merge, whose `records` are already-resolved items),
- *     the LATEST contribution wins, as before.
+ *     order the store returned the rows in. Records with no `stored` place
+ *     (the MetadataService merge, whose `records` are already-resolved items)
+ *     leave the LATEST contribution the winner, as before.
  *   • A name with NO package-owned row resolves to its latest package-less
  *     contribution — the pre-existing env-wide behaviour, unchanged.
  *   • [#21817] A list scoped to one package passes the package-less rows in
@@ -2749,7 +2744,6 @@ function mergePackageAwareOverlay(
     baseItems: unknown[],
     records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
-    rowsRead?: Readonly<Record<string, never>>,
     unseated?: WeakSet<object>,
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
@@ -2775,7 +2769,6 @@ function mergePackageAwareOverlay(
     const servedStoredRow = (list: readonly Contribution[], real: string | undefined): any => {
         for (const candidate of servedOverlayRowCandidates({ packageId: real })) {
             const hit = list.find((c) => c.stored !== undefined
-                && c.stored.organizationId === candidate.organizationId
                 && (c.stored.type === type ? 'canonical' : 'other') === candidate.spelling
                 && (candidate.packageId === undefined || (c.pkg ?? null) === candidate.packageId));
             if (hit) return hit.item;
@@ -2803,7 +2796,7 @@ function mergePackageAwareOverlay(
                 ?? list.find((c) => c.pkg === undefined)?.item
                 ?? list[0]?.item)
             : undefined;
-        push(slot, packageId, transform ? transform(body, prev) : body, rowsRead ? stored : undefined, standIn);
+        push(slot, packageId, transform ? transform(body, prev) : body, stored, standIn);
     }
 
     const out: unknown[] = [];
@@ -2815,7 +2808,7 @@ function mergePackageAwareOverlay(
             // The stand-in the one candidate order picks among the stored
             // rows here, else (no stored row: a stand-in held back by an
             // earlier merge) the latest.
-            let held = rowsRead ? servedStoredRow(list, undefined) : undefined;
+            let held = servedStoredRow(list, undefined);
             if (held === undefined) held = list[list.length - 1].item;
             unseated?.add(held);
             out.push(held);
@@ -2831,7 +2824,7 @@ function mergePackageAwareOverlay(
             // chosen by the served-row resolution, whatever order the rows
             // came back in; with no stored row of `real`'s own or package-less,
             // the latest lower-layer contribution of either stands, as before.
-            let chosen: any = rowsRead ? servedStoredRow(list, real) : undefined;
+            let chosen: any = servedStoredRow(list, real);
             if (chosen === undefined) {
                 for (const c of list) {
                     if ((c.pkg === real || c.pkg === undefined) && c.stored === undefined) chosen = c.item;
@@ -7773,7 +7766,6 @@ export class ObjectStackProtocolImplementation implements
         // any more, and an organization-scoped row never entered the shared
         // registry (#6602). So an event a peer stamped with an organization
         // converges on the environment row — the state the registry holds.
-        const orgId = null;
         const repo = this.getOverlayRepo();
         const ref = {
             type,
@@ -7797,10 +7789,10 @@ export class ObjectStackProtocolImplementation implements
                 name: evt.name,
                 item: current.body,
                 packageId,
-                organizationId: orgId,
+                organizationId: null,
             });
         } else {
-            await this.restoreArtifactRegistryView(type, evt.name, orgId, evt.member);
+            await this.restoreArtifactRegistryView(type, evt.name, null, evt.member);
         }
         // [#13609] Retire this replica's overlay-row cache at the moment of
         // convergence — never a direct `@objectstack/objectql` import, see
@@ -9764,19 +9756,19 @@ export class ObjectStackProtocolImplementation implements
                 const mergeable = overlays.filter(
                     ({ data }) => !this.declinesStoredRow(request.type, (data as { name?: unknown } | null)?.name),
                 );
-                // [#21804] Each row travels with its place (scope and stored
+                // [#21804] Each row travels with its place (its stored
                 // spelling), so the merge picks a package's slot by the
                 // served-row resolution the by-name read takes
                 // ({@link servedOverlayRowCandidates}), not by row order.
-                const placed = mergeable.map(({ data, packageId: recPkg, organizationId: recOrg, type: recType }) => ({
-                    data, packageId: recPkg, stored: { organizationId: recOrg, type: recType },
+                const placed = mergeable.map(({ data, packageId: recPkg, type: recType }) => ({
+                    data, packageId: recPkg, stored: { type: recType },
                 }));
                 // [#21817] The package-less rows, placed the same way, as
                 // stand-ins: the same parse and the same stored-row rule.
                 const standIns = this.storedOverlayEntries(request, standInRows)
                     .filter(({ data }) => !this.declinesStoredRow(request.type, (data as { name?: unknown } | null)?.name))
-                    .map(({ data, organizationId: recOrg, type: recType }) => ({
-                        data, packageId: undefined, stored: { organizationId: recOrg, type: recType }, standIn: true,
+                    .map(({ data, type: recType }) => ({
+                        data, packageId: undefined, stored: { type: recType }, standIn: true,
                     }));
                 items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns], (data, prev) => {
                     if (isView && data && typeof data === 'object') {
@@ -9796,7 +9788,7 @@ export class ObjectStackProtocolImplementation implements
                     return this.foldObjectExtendersFromRegistry(
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
-                }, {}, unseated);
+                }, unseated);
 
                 // [#13407] Expand any aggregated `defineView` container this
                 // READ just merged in, INLINE into this response's own `items`
@@ -10060,10 +10052,7 @@ export class ObjectStackProtocolImplementation implements
                         // by-name read's preview arm serves, in any row order.
                         // [ADR-0131 D6/D7] Every row read here is the
                         // environment's (filtered at the read).
-                        const stored = {
-                            organizationId: null,
-                            type: String(record.type ?? request.type),
-                        };
+                        const stored = { type: String(record.type ?? request.type) };
                         return { data, packageId: recPkg, stored };
                     };
                     const drafts = [
@@ -10076,7 +10065,7 @@ export class ObjectStackProtocolImplementation implements
                     items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
-                    }, {}, unseated);
+                    }, unseated);
                 }
             } catch (error) {
                 // [#5532] Same rule as the active-overlay read above. Serving
@@ -20782,8 +20771,9 @@ export class ObjectStackProtocolImplementation implements
      * the designed per-org overlay leaking out of its org. `organizationId`
      * is now part of this request and is handed to
      * {@link hydrateOverlayIntoRegistry}, which owns the row-scope verdict
-     * for all three hydration paths. Callers pass the SAME `orgId` they wrote
-     * the row with, so the registry's view cannot disagree with the row's
+     * for all three hydration paths. Callers pass the SAME organization they
+     * wrote the row with (`null`: since ADR-0131 D6 every row is the
+     * environment's), so the registry's view cannot disagree with the row's
      * scope.
      *
      * [#23198] Every caller awaits it: a republish of a view container heals
@@ -28636,9 +28626,8 @@ export class ObjectStackProtocolImplementation implements
 
             // [ADR-0131 D6] Every item reverts environment-wide: the commit row
             // is environment-wide (a legacy organization's was refused above).
-            const itemOrgId = null;
             const repo = this.getOverlayRepo();
-            const ref = { type: it.type, name: it.name, org: itemOrgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
+            const ref = { type: it.type, name: it.name, org: 'env' } as unknown as Parameters<typeof repo.get>[0];
             // [#22877] The plan item's bundle member: every row read, write
             // and heal below addresses it, so reverting a commit that changed
             // one locale of a template leaves the other locale's row alone.
@@ -28735,8 +28724,8 @@ export class ObjectStackProtocolImplementation implements
                     //
                     // [#6780] The verdict this comment argues now lives INSIDE
                     // {@link restoreArtifactRegistryView} as a REQUIRED
-                    // parameter, so `orgId` is handed over rather than tested
-                    // here: PR #6807's call-site `if (orgId === null)` guarded
+                    // parameter, so the organization is handed over rather than
+                    // tested here: PR #6807's call-site `if (orgId === null)` guarded
                     // this ONE caller while the sibling `deleteMetaItem` — the
                     // caller this limb was modelled on — had the same hole on
                     // all three of its own call sites. The gate moved to the
@@ -28746,7 +28735,7 @@ export class ObjectStackProtocolImplementation implements
                     // #6602 gate this parameter carries asks "is this row
                     // env-wide?", and an env-wide row reverted by an org-scoped
                     // caller skipped the heal entirely while answering success.
-                    await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId, member);
+                    await this.restoreArtifactRegistryView(it.type, it.name, null, member);
                     // [#14179] …and announce it on the ONE choke point,
                     // {@link emitMetadataMutation}, exactly as the sibling
                     // delete caller {@link deleteMetaItem} does after its own
@@ -28771,13 +28760,13 @@ export class ObjectStackProtocolImplementation implements
                             type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                             name: it.name,
                             state: 'deleted',
-                            organizationId: itemOrgId,
+                            organizationId: null,
                         });
                         this.emitMetadataMutation({
                             type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                             name: it.name,
                             state: 'deleted',
-                            organizationId: itemOrgId,
+                            organizationId: null,
                             ...mutationEventMember(it.type, member),
                         });
                     }
@@ -28875,7 +28864,7 @@ export class ObjectStackProtocolImplementation implements
                         // [#7559] …and now that is what it actually IS. This line
                         // said "the row's OWN scope" while passing the REQUEST's
                         // org; the resolution above is what makes the comment true.
-                        organizationId: itemOrgId,
+                        organizationId: null,
                     });
                     // [ADR-0094] Awaited projection BEFORE the
                     // fire-and-forget emit below — the order `saveMetaItem`'s
@@ -28887,7 +28876,7 @@ export class ObjectStackProtocolImplementation implements
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
                         state: 'active',
-                        organizationId: itemOrgId,
+                        organizationId: null,
                         body: restored.item.body,
                     });
                     // [#14179] The restore limb's half of the same repair: a
@@ -28900,7 +28889,7 @@ export class ObjectStackProtocolImplementation implements
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
                         state: 'active',
-                        organizationId: itemOrgId,
+                        organizationId: null,
                         ...mutationEventMember(it.type, member),
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
@@ -29156,7 +29145,6 @@ export class ObjectStackProtocolImplementation implements
         await this.ensureOverlayIndex();
         // [ADR-0131 D6] The environment's lineage: an organization-scoped
         // request was refused above.
-        const orgId = null;
         const repo = this.getOverlayRepo();
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked
@@ -29164,7 +29152,7 @@ export class ObjectStackProtocolImplementation implements
         const ref = {
             type: singularType,
             name: request.name,
-            org: orgId ?? 'env',
+            org: 'env',
         } as Parameters<typeof repo.restoreVersion>[0];
         // [#4636] The ownership key the write-through below needs, read from
         // the ROW rather than from the request — `rollbackMetaItem` has no
@@ -29211,7 +29199,7 @@ export class ObjectStackProtocolImplementation implements
                 packageId: rollbackPackageId,
                 // [#6602] A rollback restores the row IN ITS OWN SCOPE — an
                 // org-scoped restore must not graft the body process-wide.
-                organizationId: orgId,
+                organizationId: null,
             });
             // [#7748] ADR-0010 — success audit (best-effort). Same position as
             // `saveMetaItem`'s: persistence committed, registry write-through
@@ -29221,7 +29209,7 @@ export class ObjectStackProtocolImplementation implements
             await this.recordMetadataAudit({
                 type: request.type,
                 name: request.name,
-                organizationId: orgId,
+                organizationId: null,
                 operation: 'rollback',
                 outcome: 'allowed',
                 code: 'ok',
@@ -29242,7 +29230,7 @@ export class ObjectStackProtocolImplementation implements
                 type: singularType,
                 name: request.name,
                 state: 'active',
-                organizationId: orgId,
+                organizationId: null,
                 body: result.item.body,
             });
             // [#14179] A rollback is a live write like any other (#4521, the
@@ -29258,7 +29246,7 @@ export class ObjectStackProtocolImplementation implements
                 type: singularType,
                 name: request.name,
                 state: 'active',
-                organizationId: orgId,
+                organizationId: null,
                 ...mutationEventMember(singularType, member),
             });
             return {
@@ -29827,12 +29815,11 @@ export class ObjectStackProtocolImplementation implements
         // `assertAllowed()` whitelist would 403 those deletes.
         if (useRepoPath) {
             // [ADR-0131 D6] Environment-wide: refused above otherwise.
-            const orgId = null;
             const repo = this.getOverlayRepo();
             const ref = {
                 type: singularTypeForRepo,
                 name: request.name,
-                org: orgId ?? 'env',
+                org: 'env',
             } as Parameters<typeof repo.delete>[0];
             // [#23165] The refusal of a package-less delete of an item two or
             // more packages hold: the door's own verdict, rethrown as it is by
@@ -29940,7 +29927,7 @@ export class ObjectStackProtocolImplementation implements
                     // before this fix shipped) — drop it so the artifact
                     // view really IS the default we claim below.
                     //
-                    // [#6780] `orgId` is passed, and this branch is where it
+                    // [#6780] The organization is passed, and this branch is where it
                     // matters MOST: with no row to delete, an org that never
                     // customized anything at all could evict the env-wide
                     // plain-key entry with a single no-op DELETE. Measured on
@@ -29950,7 +29937,7 @@ export class ObjectStackProtocolImplementation implements
                     // `sys_metadata`. A gate applied only to the delete-ful
                     // branch below would have left this door standing open.
                     if (targetState === 'active') {
-                        await this.restoreArtifactRegistryView(request.type, request.name, orgId, member);
+                        await this.restoreArtifactRegistryView(request.type, request.name, null, member);
                     }
                     return {
                         success: true,
@@ -30027,7 +30014,7 @@ export class ObjectStackProtocolImplementation implements
                 // skip this: drafts never hydrate into the registry, and the
                 // still-active overlay (if any) must keep its shadow.
                 //
-                // [#6780] SCOPED by the same `orgId` the row was deleted with,
+                // [#6780] SCOPED by the same organization the row was deleted with,
                 // so the registry's view cannot disagree with the row's scope
                 // — the sibling rule the write side states in
                 // {@link applyRegistryWriteThrough}. Org A resetting ITS OWN
@@ -30035,7 +30022,7 @@ export class ObjectStackProtocolImplementation implements
                 // ENV-WIDE row, i.e. one tenant's "reset to default" blanked
                 // the item for every other tenant and the control plane.
                 if (targetState === 'active') {
-                    await this.restoreArtifactRegistryView(request.type, request.name, orgId, member);
+                    await this.restoreArtifactRegistryView(request.type, request.name, null, member);
                 }
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
@@ -30050,7 +30037,7 @@ export class ObjectStackProtocolImplementation implements
                 await this.recordMetadataAudit({
                     type: request.type,
                     name: request.name,
-                    organizationId: orgId,
+                    organizationId: null,
                     operation: 'delete',
                     outcome: 'allowed',
                     code: 'ok',
@@ -30066,13 +30053,13 @@ export class ObjectStackProtocolImplementation implements
                     type: singularTypeForRepo,
                     name: request.name,
                     state: 'deleted',
-                    organizationId: orgId,
+                    organizationId: null,
                 });
                 this.emitMetadataMutation({
                     type: singularTypeForRepo,
                     name: request.name,
                     state: 'deleted',
-                    organizationId: orgId,
+                    organizationId: null,
                     ...mutationEventMember(singularTypeForRepo, member),
                 });
                 const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
