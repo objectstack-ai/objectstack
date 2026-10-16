@@ -399,8 +399,10 @@ const DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
 /**
  * What an unprovisioned anchor is — the cause half of every read-side anchor
  * id (`dashboard-filter-field-unprovisioned`, `react-chart-field-unprovisioned`,
- * `sort-field-unprovisioned`, `searchable-field-unprovisioned`).
- * The rule files share its verdict clause, `unprovisionedAnchorVerdict()`.
+ * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
+ * `page-field-unprovisioned`, `flow-template-field-unprovisioned`).
+ * The rule files share its verdict clause, `unprovisionedAnchorVerdict()`, or
+ * its long form, `unprovisionedAnchorCause()`.
  */
 const UNPROVISIONED_ANCHOR_CAUSE =
   'The registry injects system columns — the ownership and audit anchors such as `owner_id`, ' +
@@ -412,8 +414,9 @@ const UNPROVISIONED_ANCHOR_CAUSE =
  * The three ways out of an unprovisioned anchor, which the one-line `fix:` of
  * the converted anchor ids (`unprovisionedAnchorFix()`) names without the how:
  * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
- * `react-chart-field-unprovisioned`, `dashboard-filter-field-unprovisioned`
- * and the hook, action and flow-node write-anchor ids write it out.
+ * `react-chart-field-unprovisioned`, `dashboard-filter-field-unprovisioned`,
+ * `page-field-unprovisioned`, `flow-template-field-unprovisioned` and the hook,
+ * action and flow-node write-anchor ids write it out.
  */
 const UNPROVISIONED_ANCHOR_REMEDY =
   'To fix it, check the remote table. If it really carries the column, declare it in the object\'s ' +
@@ -2335,6 +2338,62 @@ const COMPONENT_TYPE_UNKNOWN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Page component props and print pages (`validate-component-props.ts`, `validate-print-page-blocks.ts`) ──
+
+const COMPONENT_PROPS_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'component-props-invalid',
+  covers: 'why a page component\'s props are refused',
+  paragraphs: [
+    'A page component\'s `properties` is an untyped bag at the parse, and the renderer spreads whatever ' +
+      'it carries. Each type\'s typed props schema is its row in `ComponentPropsMap` ' +
+      '(`@objectstack/spec/ui`), and this rule judges the bag against that row: a value the schema ' +
+      'rejects is refused at the value\'s own path, and the verdict carries the schema\'s own account of ' +
+      'what it expected. A key the schema does not declare at all is `component-props-unknown-key`\'s ' +
+      'finding, not this one.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the metadata ' +
+      'save door (Studio, REST, MCP), judged page by page — so the stack does not pass and the page does ' +
+      'not save until its props are ones the schema accepts. A stored page keeps loading and serving: ' +
+      'only its next save is judged.',
+    'The fix belongs to the PAGE in almost every case: write the value the verdict asks for. Correct ' +
+      'the schema instead only when the component really does honour what is written — then the ' +
+      'declaration is what is wrong, and the change makes the declaration and the renderer agree.',
+    'Two verdicts of this id carry their own fix. A RETIRED key is refused with its retirement\'s ' +
+      'prescription, and the fix is the rename or removal it names, never a schema change: the props ' +
+      'schema keeps a retired key only to refuse it, so re-declaring it would undo the retirement. And a ' +
+      'block that reads its records from the node-level `dataSource` binding (`element:record_picker`, ' +
+      '`element:number`, `element:repeater`) must name its object there — `dataSource: { object: NAME }`, ' +
+      'a sibling of `type`, not a key inside `properties`, where a flat `object` is retired and read by ' +
+      'nothing.',
+  ],
+};
+
+const PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION: RuleExplanation = {
+  rule: 'print-page-block-unprintable',
+  covers: 'which blocks a print page may hold',
+  paragraphs: [
+    'A page that declares `print` is a document, and a document prints only what it draws in full. So ' +
+      'every block in it, at any depth — every region, a container\'s `children`, a card\'s `footer`, a ' +
+      'tab or accordion panel — must come from the printable block subset the spec declares ' +
+      '(`PRINTABLE_PAGE_COMPONENT_TYPES`, `@objectstack/spec/ui`). The subset is an allow list: a type ' +
+      'the platform vocabulary does not declare at all, such as a plugin widget or an SDUI layout block, ' +
+      'is refused too, because nothing answers for how it prints.',
+    // Held equal to `PRINTABLE_PAGE_COMPONENT_TYPES` (`@objectstack/spec/ui`) by the rule's test.
+    'The printable blocks: `page:section`, `page:card`, `page:footer`, `record:details`, ' +
+      '`record:highlights`, `record:line_items`, `element:text`, `element:image`, `element:divider`, ' +
+      '`element:definition-list`, `element:repeater`, `element:number`, `object-metric`.',
+    'Every other declared type is refused for one of three reasons, and the verdict names the one for ' +
+      'the block it reports: the block draws a window of its rows (a page, a `limit`, the nodes a viewer ' +
+      'expanded), so a printed copy carries only part of the data; it lays itself out to the screen ' +
+      '(docked panels, boards, canvases sized to the viewport); or it has no printable content of its ' +
+      'own (a control, an input, shell chrome, a panel switcher, per-viewer state). A retired type is ' +
+      'refused by name at the parse and reported by `component-type-unknown`, not here.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the metadata ' +
+      'save door (Studio, REST, MCP) — so the page does not validate or save until the block is ' +
+      'replaced with a printable one or removed. A page that is not a document should not declare ' +
+      '`print`: delete the declaration and the subset no longer applies.',
+  ],
+};
+
 // ── Filter comparands (`validate-preset-comparands.ts`) ────────────────────
 
 const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
@@ -2363,6 +2422,43 @@ const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
     'Not judged: a filter no ancestor binds to an object, an object or dataset the stack does not ' +
       'declare, a `time` field, and a field the object does not declare (the `*-filter-field-unknown` ' +
       'rules\' finding).',
+  ],
+};
+
+// ── Filter placeholders (`validate-filter-tokens.ts`) ──────────────────────
+
+const FILTER_TOKEN_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'filter-token-unknown',
+  covers: 'which placeholders a filter value resolves',
+  paragraphs: [
+    'A filter value travels as JSON, so a user- or time-scoped filter writes a placeholder that is ' +
+      'resolved just before the query: `{ owner_id: \'{current_user_id}\', created_at: { $gte: ' +
+      '\'{week_start}\' } }`. Only a whole-string placeholder counts (`{token}`, or `${token}`); a value ' +
+      'that merely contains braces is left alone.',
+    // The context tokens are held equal to `CONTEXT_TOKENS` (`@objectstack/spec/data`) by the rule's test.
+    'Exactly two vocabularies resolve in a filter value. The context tokens: `{current_user_id}`, ' +
+      '`{current_org_id}`. The date macros: the instants `{today}`, `{yesterday}`, `{tomorrow}` and ' +
+      '`{now}`; the start and end of the current, last or next week, month, quarter or year ' +
+      '(`{current_quarter_start}`, `{last_year_end}`), with bare aliases for the current period ' +
+      '(`{week_start}`, `{month_end}`); and counted offsets in minutes, hours, days, weeks, months or ' +
+      'years (`{30_days_ago}`, `{2_weeks_from_now}`).',
+    'Anything else does not resolve: the data engine refuses the query (`FILTER_TOKEN_UNKNOWN`, 400) ' +
+      'rather than compare the placeholder as a literal string, so the surface never shows the data the ' +
+      'filter meant. The rule makes that an error at build time, where an author — or an AI correcting ' +
+      'from `os validate` — sees it before anyone opens the surface. A near miss spelled the way ' +
+      'another part of the platform spells it (`{current_user}`, `{user_id}`, ' +
+      '`{current_organization_id}`) gets a "Did you mean" naming the token meant. A literal value that ' +
+      'really looks like a placeholder cannot be filtered on: rename the value.',
+    'The record-context token `{record_id}` is the id of the record a `type: \'record\'` page shows, ' +
+      'so it resolves only in a filter on a component of such a page. Every other surface this rule ' +
+      'walks — list views and the rest of an object definition, dashboard widgets, reports, datasets, ' +
+      'apps, and `home`, `app`, `utility` and `list` pages — has no record in context, and there the ' +
+      'server refuses the query rather than count every record or none. Move the filter onto a record ' +
+      'page\'s component, filter on a concrete id, or scope to the signed-in user with ' +
+      '`{current_user_id}`.',
+    'Walked: the `filter`, `filters` and `runtimeFilter` subtrees of dashboards, objects, views, ' +
+      'reports, datasets, pages and apps. Not walked: navigation `recordId` and `params`, which resolve ' +
+      'the app-context selector vocabulary, not a filter\'s.',
   ],
 };
 
@@ -3462,6 +3558,110 @@ const PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const PAGE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'page-field-unprovisioned',
+  covers: 'why a page binding on an unprovisioned anchor is blank',
+  paragraphs: [
+    UNPROVISIONED_ANCHOR_CAUSE,
+    'A page component that binds such an anchor reads a column that holds nothing, at the cost the ' +
+      'message names for its position: a display binding renders blank on every record, a query ' +
+      'predicate can never match a real value (on SQLite it degrades to constant-false and the ' +
+      'surface reads as "there is no data"), and a field a section heading counts reads 0 on every ' +
+      'record. A `kind: \'react\'` page\'s blocks are judged the same way, under the same id.',
+    'Only a name that resolved BECAUSE it is injected is judged — an author-declared column of the ' +
+      'same name is one the author vouches for — and a dotted relationship path is not judged. The rule ' +
+      'is a warning in every position, the query one included, where a genuinely missing field is an ' +
+      'error: it cannot see the remote table, only that the platform provisions no storage.',
+    UNPROVISIONED_ANCHOR_REMEDY,
+  ],
+};
+
+/**
+ * What a section's `group` reference is, the half the two section-group ids
+ * (`page-section-group-unknown`, `form-section-group-unknown`) share. Their
+ * one-line `fix:` comes from one helper, `checkSectionGroupRefs()`.
+ */
+const SECTION_GROUP_REFERENCE: readonly string[] = [
+  'A layout section may name one of its object\'s declared field groups instead of listing its ' +
+    'members: `{ group: \'contact_info\' }`. The section then inherits its members and presentation ' +
+    'from the object\'s `fieldGroups` entry with that key (ADR-0085 §5). A section either names a ' +
+    'group or enumerates `fields`, never both, so a key that matches no declared group leaves it with ' +
+    'no members, and the whole section silently does not render.',
+  'The key is judged against the groups the bound object DECLARES (`fieldGroups[].key`), not the ' +
+    'ones the layout derives: a declared group no visible field joins is a different question. An ' +
+    'object this stack does not define is not judged. The rule is a warning: the section is missing ' +
+    'on screen, and no query reads the key.',
+  'To fix it, correct the key (the `fix:` line names the nearest declared group when one is close), ' +
+    'or declare the group on the object — `fieldGroups: [{ key, label }]` — and set `group` to that ' +
+    'key on each field that belongs in it: membership is declared on the FIELD, never on the group. ' +
+    'An object with no field groups yet can take the members as the section\'s `fields` list instead.',
+];
+
+const PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'page-section-group-unknown',
+  covers: 'how a page section inherits a field group',
+  paragraphs: [
+    ...SECTION_GROUP_REFERENCE,
+    'On a page the reference is a `record:details` section\'s `group`, resolved against the object ' +
+      'the component binds (its `dataSource.object`, then `properties.object`, then the page\'s ' +
+      '`object`).',
+  ],
+};
+
+const FORM_SECTION_GROUP_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'form-section-group-unknown',
+  covers: 'how a form section inherits a field group',
+  paragraphs: [
+    ...SECTION_GROUP_REFERENCE,
+    'On a form view the reference is a section\'s `group`, in `sections` and in the legacy `groups` ' +
+      'alias alike, resolved against the object the form binds (its own `data.object`, else its ' +
+      'container\'s, else the container\'s list binding).',
+  ],
+};
+
+// ── Flow template paths (`validate-flow-template-paths.ts`) ───────────────────
+
+const FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-template-field-unprovisioned',
+  covers: 'why a template hole on an unprovisioned anchor is empty',
+  paragraphs: [
+    UNPROVISIONED_ANCHOR_CAUSE,
+    'A `{{ record.<anchor> }}` hole in a flow node\'s text — a notify title or body, an http body — on ' +
+      'a flow triggered by such an object renders from the flow record, where the anchor carries no ' +
+      'value: the hole renders an empty string on every run, and nothing reports it.',
+    'Only the trigger root is judged: the injected columns are read off the start node\'s object, and ' +
+      'a flow variable a `get_record` node binds has no counterpart. A CRUD node\'s `filter` operand is ' +
+      'a value slot, not a template, and is not scanned. The rule is a warning because it cannot see ' +
+      'the remote table, only that the platform provisions no storage.',
+    UNPROVISIONED_ANCHOR_REMEDY,
+  ],
+};
+
+const FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION: RuleExplanation = {
+  rule: 'flow-template-lookup-traversal',
+  covers: 'why a lookup hop in a template renders empty',
+  paragraphs: [
+    'A flow record carries a relationship field (`lookup`, `master_detail`, `user` or `tree`) as its ' +
+      'foreign-key id, a scalar, not as the related record, so a `{{ record.<lookup>.<field> }}` hole ' +
+      'walks `.<field>` on a string id and renders an empty string at run time, with no error. The same ' +
+      'holds for a record a `get_record` node reads into a flow variable. A trailing numeric segment ' +
+      '(`{{ record.target_channels.0 }}`) indexes a `multiple` lookup and is not a hop, and a sub-path ' +
+      'on any other field type is left alone.',
+    'On the trigger root the start node can opt in: `config.expand` names relations (a string or a ' +
+      'list), and the engine re-reads the triggering record with those relations expanded, one hop ' +
+      'deep, as the run\'s identity, so the related object\'s record and field access rules apply as ' +
+      'the run. A hop through a relation named there resolves and is not reported.',
+    '`config.expand` is the start node\'s opt-in and covers the trigger record alone: a record read ' +
+      'into a flow variable is never expanded, so the `fix:` line on a variable root does not ' +
+      'prescribe it.',
+    'To fix it, reference the foreign-key id itself (`{{ record.<lookup> }}`), project the related ' +
+      'value onto this object with a formula field and reference that, read the related record with a ' +
+      '`get_record` node and reference its fields, or — on the trigger root — add the relation to the ' +
+      'start node\'s `config.expand`. The rule is a warning: the run completes, with a blank where the ' +
+      'value should be.',
+  ],
+};
+
 // ── Flow reference syntax (`lint-flow-patterns.ts`) ──────────────────────────
 
 /** Where a flow node reads `{{ }}`, shared by the two wrong-syntax entries. */
@@ -4314,7 +4514,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PREDICATE_RHS_PATH_SHAPED_EXPLANATION.rule]: PREDICATE_RHS_PATH_SHAPED_EXPLANATION,
   [ACTION_DISPATCH_CONTRACT_MISMATCH_EXPLANATION.rule]: ACTION_DISPATCH_CONTRACT_MISMATCH_EXPLANATION,
   [COMPONENT_TYPE_UNKNOWN_EXPLANATION.rule]: COMPONENT_TYPE_UNKNOWN_EXPLANATION,
+  [COMPONENT_PROPS_INVALID_EXPLANATION.rule]: COMPONENT_PROPS_INVALID_EXPLANATION,
+  [PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION.rule]: PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION,
   [FILTER_PRESET_COMPARAND_EXPLANATION.rule]: FILTER_PRESET_COMPARAND_EXPLANATION,
+  [FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FILTER_TOKEN_UNKNOWN_EXPLANATION,
   [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION.rule]: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION,
   [APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION.rule]: APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION,
   [APPROVAL_EXPRESSION_INVALID_EXPLANATION.rule]: APPROVAL_EXPRESSION_INVALID_EXPLANATION,
@@ -4354,6 +4557,11 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [LIVENESS_LEDGER_UNREADABLE_EXPLANATION.rule]: LIVENESS_LEDGER_UNREADABLE_EXPLANATION,
   [PAGE_FIELD_UNKNOWN_EXPLANATION.rule]: PAGE_FIELD_UNKNOWN_EXPLANATION,
   [PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION.rule]: PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION,
+  [PAGE_FIELD_UNPROVISIONED_EXPLANATION.rule]: PAGE_FIELD_UNPROVISIONED_EXPLANATION,
+  [PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION,
+  [FORM_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: FORM_SECTION_GROUP_UNKNOWN_EXPLANATION,
+  [FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION.rule]: FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION,
+  [FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION.rule]: FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION,
   [FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION.rule]: FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION,
   [FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION.rule]: FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION,
   [ACTION_NAME_UNDEFINED_EXPLANATION.rule]: ACTION_NAME_UNDEFINED_EXPLANATION,

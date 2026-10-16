@@ -14,12 +14,23 @@ import { describe, expect, it } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 import {
-  validateComponentProps,
+  validateComponentProps as validateComponentPropsUnrecorded,
   COMPONENT_PROPS_UNKNOWN_KEY,
   COMPONENT_PROPS_INVALID,
   DATA_SOURCE_BOUND_ELEMENT_TYPES,
 } from './validate-component-props.js';
 import { runAuthoringRules, AUTHORING_RULES } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Slice 21: every finding this file fires is recorded, and the block at
+// the foot of the file holds each recorded `component-props-invalid` `fix:` line
+// to one line of at most 200 characters.
+const fired: Array<{ rule: string; hint: string; where: string }> = [];
+const validateComponentProps: typeof validateComponentPropsUnrecorded = (...args) => {
+  const findings = validateComponentPropsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -1317,5 +1328,56 @@ describe('validateComponentProps — record:line_items is dispatched (#21142)', 
       stackWith([{ ...fieldKeyed, properties: { ...fieldKeyed.properties, columns } }]),
     );
     expect(findings).toEqual([]);
+  });
+});
+
+// [#22161] Slice 21: the `fix:` line of a value the props schema rejects is one
+// remedy line. Where the props schema lives, that the page — not the schema — is
+// what to fix in almost every case, and the retired-key and node-binding cases
+// are the id's `os explain` entry. The retired-key and binding lines were one
+// remedy each already, and are unchanged.
+describe('[#22161] one-line fix — component-props-invalid', () => {
+  const GENERAL = (type: string) =>
+    `Give \`${type}\` a value its props schema accepts (the verdict names what it expects), or correct the ` +
+    'schema if the component really honours what is written.';
+
+  it('a wrong-typed prop prints the one remedy line', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'object-grid', properties: { objectName: 'task', pageSize: 'ten' } }]),
+    );
+    expect(findings.map((f) => [f.rule, f.hint])).toEqual([[COMPONENT_PROPS_INVALID, GENERAL('object-grid')]]);
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === COMPONENT_PROPS_INVALID);
+    // Coverage control: the general line, the retired-key line and the
+    // node-binding line all fired.
+    expect(converted.some((f) => f.hint.startsWith('Give `'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Apply the prescription above'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Name the object on the component node'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint).not.toContain('\n');
+      expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('each line that names its type still fits for the longest type `ComponentPropsMap` declares', () => {
+    // The two lines that interpolate the type, measured from a fired sample
+    // and re-measured at the longest key: a type the map grows past the bound
+    // turns this red rather than printing a second line.
+    const longest = Math.max(...Object.keys(ComponentPropsMap).map((t) => t.length));
+    for (const lead of ['Give `', 'Apply the prescription above']) {
+      const sample = fired.find((f) => f.rule === COMPONENT_PROPS_INVALID && f.hint.startsWith(lead))!;
+      const type = sample.where.slice(sample.where.indexOf('· ') + 2);
+      expect(sample.hint, lead).toContain(`\`${type}\``);
+      expect(sample.hint.length - type.length + longest, lead).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain component-props-invalid` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(COMPONENT_PROPS_INVALID)!.paragraphs.join('\n');
+    for (const fact of ['`ComponentPropsMap`', '`@objectstack/spec/ui`', 'declaration and the renderer agree', 'never a schema change']) {
+      expect(text, fact).toContain(fact);
+    }
   });
 });

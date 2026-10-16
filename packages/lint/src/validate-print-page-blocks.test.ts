@@ -19,7 +19,26 @@ import {
   PRINT_REFUSED_PAGE_COMPONENT_TYPES,
   RETIRED_PAGE_COMPONENT_TYPES,
 } from '@objectstack/spec/ui';
-import { validatePrintPageBlocks, PRINT_PAGE_BLOCK_UNPRINTABLE } from './validate-print-page-blocks.js';
+import {
+  validatePrintPageBlocks as validatePrintPageBlocksUnrecorded,
+  PRINT_PAGE_BLOCK_UNPRINTABLE,
+} from './validate-print-page-blocks.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Slice 21: every finding this file fires is recorded, and the block at
+// the foot of the file holds each recorded `fix:` line to one line of at most
+// 200 characters.
+const fired: Array<{ rule: string; hint: string }> = [];
+const validatePrintPageBlocks: typeof validatePrintPageBlocksUnrecorded = (...args) => {
+  const findings = validatePrintPageBlocksUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+
+/** The one remedy line every refusal of this id prints (slice 21 of #22161). */
+const PRINT_FIX =
+  'Replace the block with a printable one (`os explain print-page-block-unprintable` lists them) or remove it; ' +
+  'if the page is not a document, delete its `print` declaration.';
 
 const printPage = (components: unknown[], extra: Record<string, unknown> = {}) => ({
   pages: [{ name: 'invoice_print', type: 'record', object: 'invoice', regions: [{ name: 'main', components }], print: {}, ...extra }],
@@ -36,8 +55,10 @@ describe('refuses every block outside the printable subset inside a print page',
     expect(f.where).toBe(`page "invoice_print" · ${type}`);
     expect(f.message).toContain(`\`${type}\` cannot be placed in a print page`);
     expect(f.message).toContain(`it ${reason}.`);
-    // The fix names the printable set, derived from the spec's own list.
-    for (const printable of PRINTABLE_PAGE_COMPONENT_TYPES) expect(f.hint).toContain(`\`${printable}\``);
+    // [#22161] Slice 21: one remedy line. The printable set no longer fits on
+    // it; `os explain` lists it, held to the spec's own list at the foot of
+    // this file.
+    expect(f.hint).toBe(PRINT_FIX);
   });
 
   it('names the two refusal reasons the ruling gives, on the blocks that carry them', () => {
@@ -159,5 +180,30 @@ describe('judges nothing outside a print page', () => {
   it('a malformed stack yields nothing rather than throwing', () => {
     expect(validatePrintPageBlocks({})).toEqual([]);
     expect(validatePrintPageBlocks({ pages: [null, 'x', { print: {} }] })).toEqual([]);
+  });
+});
+
+// [#22161] Slice 21: the `fix:` line of `print-page-block-unprintable` is one
+// remedy line, and the printable blocks it used to list are the id's
+// `os explain` entry — written out there (that module imports nothing) and held
+// equal to the spec's set here, so neither can drift from the other.
+describe('[#22161] one-line fix — print-page-block-unprintable', () => {
+  it('every `fix:` line the cases in this file fired is the one remedy line, at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === PRINT_PAGE_BLOCK_UNPRINTABLE);
+    expect(converted.length).toBeGreaterThan(PRINT_REFUSED_PAGE_COMPONENT_TYPES.size);
+    for (const f of converted) {
+      expect(f.hint).toBe(PRINT_FIX);
+      expect(f.hint.length).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain print-page-block-unprintable` lists exactly the spec\'s printable blocks', () => {
+    const text = explainRule(PRINT_PAGE_BLOCK_UNPRINTABLE)!.paragraphs.join('\n');
+    expect(text).toContain(
+      `The printable blocks: ${[...PRINTABLE_PAGE_COMPONENT_TYPES].map((t) => `\`${t}\``).join(', ')}.`,
+    );
+    for (const fact of ['allow list', 'draws a window of its rows', 'delete the declaration']) {
+      expect(text, fact).toContain(fact);
+    }
   });
 });

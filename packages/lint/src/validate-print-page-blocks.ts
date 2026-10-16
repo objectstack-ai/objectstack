@@ -18,7 +18,8 @@
  * `severity: 'error'`, at the node's `type`, with the reason
  * `PRINT_REFUSED_PAGE_COMPONENT_TYPES` records for that type (it draws a window
  * of its rows, it lays itself out to the screen, or it has nothing printable of
- * its own) and the printable list as the fix.
+ * its own) and a one-line fix; the printable list is the id's `os explain`
+ * entry, held equal to the spec's set by this rule's test.
  *
  * The subset is an ALLOW list. A type the platform vocabulary does not declare
  * at all — a plugin widget, a kebab SDUI layout block — is refused too: nothing
@@ -86,11 +87,6 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** The printable types, spelled for the fix line — derived from the spec's set, never restated. */
-function printableList(): string {
-  return [...PRINTABLE_PAGE_COMPONENT_TYPES].map((t) => `\`${t}\``).join(', ');
-}
-
 export function validatePrintPageBlocks(stack: AnyRec): PrintPageBlockFinding[] {
   const findings: PrintPageBlockFinding[] = [];
   if (!isRec(stack)) return findings;
@@ -122,9 +118,14 @@ export function validatePrintPageBlocks(stack: AnyRec): PrintPageBlockFinding[] 
               'custom or registered block, or an SDUI layout block, declares no printed form.') +
           ' A print page prints exactly the blocks it draws, in full, so every block in it must come ' +
           'from the printable block subset.',
+        // [#22161] One remedy line. The printable types do not fit on one,
+        // so they are `os explain print-page-block-unprintable`'s list
+        // (held equal to `PRINTABLE_PAGE_COMPONENT_TYPES` by this rule's test),
+        // which the line names because a refusal at the save door has no
+        // `rule:` line to carry the pointer.
         hint:
-          `Replace or remove the block. The printable blocks are ${printableList()}. ` +
-          'If the page is not a document, delete its `print` declaration instead.',
+          'Replace the block with a printable one (`os explain print-page-block-unprintable` lists them) ' +
+          'or remove it; if the page is not a document, delete its `print` declaration.',
       });
     }
   }
