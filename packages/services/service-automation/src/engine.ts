@@ -4485,15 +4485,26 @@ export class AutomationEngine implements IAutomationService {
      * none (the save door, a package duplication, the sync's comparison of a
      * held flow) does no more work than before. `registerFlow` reads none
      * either: it runs the same checks itself and throws the first refusal.
+     *
+     * [#23775, ADR-0087 addendum 2026-07-31] `options.includeRetired` — whether
+     * the chain replays the entries retired from the authoring funnel
+     * (`retiredFromLoadPath`). Omitted, it is `true`: a body at rest has no
+     * author to teach, so every caller that hands this method a stored row, a
+     * copied row or a built artifact passes nothing. `false` is the AUTHORING
+     * posture `normalizeStackInput` takes: the metadata save door passes it for
+     * a flow with no stored row at the save's address, so a retired spelling is
+     * left in place and meets the parse refusal, with its prescription, instead
+     * of being lifted. {@link registerFlow}, the rehydration seam, never passes
+     * it. The default-flip ids stay excluded either way.
      */
-    canonicalizeStoredFlow(name: string, definition: unknown): {
+    canonicalizeStoredFlow(name: string, definition: unknown, options: { includeRetired?: boolean } = {}): {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
         conflicts: ConversionConflictNotice[];
         todos: ConversionTodoNotice[];
     } {
-        const { parsed, storable, notices, conflicts, todos: chainTodos } = this.canonicalizeFlow(name, definition);
+        const { parsed, storable, notices, conflicts, todos: chainTodos } = this.canonicalizeFlow(name, definition, options);
         // The registration checks run when `todos` is first READ, once: the
         // stored pass reads it, and the doors that only want `parsed` or
         // `storable` (the save door, a package duplication, the sync's
@@ -4530,9 +4541,10 @@ export class AutomationEngine implements IAutomationService {
      * {@link canonicalizeStoredFlow}'s pass without the registration checks:
      * convert, parse, and refuse what the parse, the cycle check and the
      * region validator refuse. {@link registerFlow} calls this and then runs
-     * the checks itself, so registration judges a flow once.
+     * the checks itself, so registration judges a flow once. `options` is
+     * {@link canonicalizeStoredFlow}'s, and only that method passes it.
      */
-    private canonicalizeFlow(name: string, definition: unknown): {
+    private canonicalizeFlow(name: string, definition: unknown, options: { includeRetired?: boolean } = {}): {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
@@ -4558,6 +4570,10 @@ export class AutomationEngine implements IAutomationService {
         // exact hazard this seam exists to prevent. Authored sources keep
         // window semantics at their own seam (`normalizeStackInput` applies
         // live-window entries only; the schema tombstones the retired shape).
+        // [#23775] The one caller that closes the window is the metadata save
+        // door, for a flow with no stored row (an authored body, not one at
+        // rest), through `canonicalizeStoredFlow`'s option; the rehydration
+        // passes none and replays the full chain, as it always has.
         //
         // `excludeConversionIds`: the retired window is opened for a CLASS of
         // caller, and one kind of entry inside it is not a rescue but a
@@ -4575,7 +4591,7 @@ export class AutomationEngine implements IAutomationService {
         const todos: ConversionTodoNotice[] = [];
         const converted = applyConversionsToFlow(definition, {
             reservedNodeTypes,
-            includeRetired: true,
+            includeRetired: options.includeRetired ?? true,
             excludeConversionIds: CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION,
             onNotice: (n) => {
                 notices.push(n);
