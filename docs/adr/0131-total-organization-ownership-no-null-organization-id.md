@@ -376,6 +376,7 @@ half, together with the two symbols that carry the migration window —
 `reportLegacyPlatformAdminGrant` and `resetLegacyPlatformAdminGrantReport` — **left D13 on 2026-09-16**
 and retire on the **17.x** line under #11663's design instead (#18336; see the Amendment at the end).
 The `single` anchor's own disposition is #11979's (Choice 4B), which this record does not pre-empt.
+**Amended** (2026-10-16, [#23385](https://github.com/objectstack-ai/objectstack/issues/23385) — objectstack-ai/cloud#2872 ruling A′, comment `6160165869`, maintainer 「同意」, item 3): under a walled posture the deployment-level acceptance of package defaults for the `everyone` anchor (ADR-0090 D5) is configuration too — the security plugin's `acceptedDefaultPermissionSets` option, read only under a wall, each name held to the anchor's ADR-0090 D7 gate — with no NULL-owner row and no reserved organization (§1.5); the `single` posture keeps its Default-Organization row.
 
 ### D6 — Managed definitions are sealed; customization is environment-level state beside them, never an edit and never per organization
 
