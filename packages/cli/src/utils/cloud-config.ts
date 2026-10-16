@@ -29,9 +29,10 @@
  * family this file's token goes only to this file's `url`.
  */
 
-import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { chmod, readFile, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { makeDirectorySync } from './make-directory.js';
 
 /** Canonical hosted control plane. */
 export const DEFAULT_CLOUD_URL = 'https://cloud.objectos.ai';
@@ -91,7 +92,8 @@ export async function writeCloudConfig(config: CloudConfig): Promise<void> {
   const path = getCloudCredentialsPath();
   const dir = join(homedir(), '.objectstack');
 
-  await mkdir(dir, { recursive: true });
+  // Bounded (#23858): see `writeAuthConfig`.
+  makeDirectorySync(dir);
   await writeFile(path, JSON.stringify(config, null, 2), { mode: 0o600 });
   try {
     await chmod(path, 0o600);

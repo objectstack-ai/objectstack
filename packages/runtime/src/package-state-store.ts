@@ -61,10 +61,11 @@
  * legacy file is never deleted here — a machine that rolls back to the previous
  * release must still find its operator's disables where that release looks.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 
+import { makeDirectorySync } from './make-directory.js';
 import { resolveObjectStackHome } from './standalone-stack.js';
 
 const DEFAULT_ENVIRONMENT_ID = 'default';
@@ -150,7 +151,10 @@ function readState(environmentId?: string): PackageStateFile {
 
 function writeState(environmentId: string | undefined, state: PackageStateFile): void {
     const file = stateFilePath(environmentId);
-    mkdirSync(dirname(file), { recursive: true });
+    // Bounded (#23858): a state directory under an `OS_HOME` that cannot be
+    // made throws the OS's answer to the caller instead of holding the event
+    // loop — the HTTP handlers already catch it and keep the in-memory state.
+    makeDirectorySync(dirname(file));
     writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
 }
 

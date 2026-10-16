@@ -36,7 +36,9 @@ export const SysUserPreference = ObjectSchema.create({
   listViews: {
     // [#21972] Declared FIRST on purpose: a route that names no view opens the
     // first declared list view, so a caller-scoped view (`mine`) is never
-    // first. Setup's `nav_user_preferences` names this view.
+    // first. No nav entry names this view any more (Setup's "User
+    // Preferences" left the menu, #23803); the bare-object routes — a
+    // preference record's object breadcrumb — still open it.
     all_preferences: {
       type: 'grid',
       name: 'all_preferences',

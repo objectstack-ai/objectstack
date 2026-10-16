@@ -2,6 +2,9 @@
 
 
 export * from './flow.zod';
+// [#23543 F5-http] The reserved retired callout names — the engine's
+// registration refusal reads the same table the flow parse refuses with.
+export { FLOW_RESERVED_NODE_TYPES, reservedFlowNodeTypeRefusal } from './flow-reserved-node-types';
 export * from './region-slots';
 export * from './control-flow.zod';
 export * from './io-node-config.zod';

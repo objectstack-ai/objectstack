@@ -73,11 +73,12 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkProtocolCompat } from '@objectstack/metadata-core';
+import { makeDirectorySync } from './make-directory.js';
 
 /** The one environment variable this feature adds. */
 export const OS_ARTIFACT_URL_ENV = 'OS_ARTIFACT_URL';
@@ -392,7 +393,10 @@ export function stagedArtifactPath(homeDir: string, redacted: string): string {
 
 /** Write bytes to `target` atomically (temp file + rename). */
 function writeArtifactFile(target: string, bytes: Uint8Array): void {
-    mkdirSync(resolvePath(target, '..'), { recursive: true });
+    // Bounded (#23858): a cache directory under an `OS_HOME` that cannot be
+    // made is refused at once, and the caller's OS_ARTIFACT_UNREACHABLE
+    // refusal names it — never a loop.
+    makeDirectorySync(resolvePath(target, '..'));
     const tmp = `${target}.tmp-${process.pid}`;
     writeFileSync(tmp, bytes);
     renameSync(tmp, target);

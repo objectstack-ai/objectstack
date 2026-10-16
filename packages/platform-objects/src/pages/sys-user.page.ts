@@ -36,11 +36,14 @@ import type { Page } from '@objectstack/spec/ui';
  *  - The other `tabs` items are **explicitly curated** to the related lists
  *    that matter on a user profile (Positions / Permission Sets / Business
  *    Units / Sessions / Linked Accounts / Organizations / OAuth Apps / API
- *    Keys) plus a Security tab. Without this override, the synthesizer
- *    auto-generates a tab per object that has a FK to sys_user
- *    (sys_position.created_by, sys_email.updated_by, sys_user_preference,
+ *    Keys / Preferences) plus a Security tab. Without this override, the
+ *    synthesizer auto-generates a tab per object that has a FK to sys_user
+ *    (sys_position.created_by, sys_email.updated_by,
  *    sys_email_template.created_by, …) producing dozens of noisy
  *    "查看全部" cards on every profile.
+ *  - Linked Accounts (`sys_account`) and Preferences (`sys_user_preference`)
+ *    are where an administrator reaches those two per-user stores: Setup
+ *    has no menu entry listing them across users (#23803).
  *  - `discussion: []` removes the Chatter feed — it has no business
  *    on a personal profile.
  */
@@ -517,6 +520,37 @@ export const SysUserDetailPage: Page = {
                   limit: 25,
                   showViewAll: true,
                   title: { en: 'API Keys', 'zh-CN': 'API 密钥', 'ja-JP': 'API キー', 'es-ES': 'Claves de API' },
+                },
+              },
+            ],
+          },
+          // ── Preferences ───────────────────────────────────────────
+          // [#23803] This user's `sys_user_preference` rows — the console's
+          // per-user UI state (`ui.recent`, `ui.favorites`, `ui.list.<object>`
+          // …). Setup's "User Preferences" menu entry, which listed every
+          // user's rows, left the menu; this tab is where an administrator
+          // reaches them now, from the user they belong to.
+          //
+          // The columns are the object's `all_preferences` view (the grid that
+          // entry opened) minus `user_id`, which is the page's own record.
+          // Nothing is shown here that view did not show. No `add` and no
+          // `actions`: New / Edit / Delete are the host's, decided by the
+          // object's `managedBy: 'system-data'` and the caller's grant, the
+          // same verdict the grid's buttons read.
+          {
+            label: { en: 'Preferences', 'zh-CN': '偏好设置', 'ja-JP': '設定', 'es-ES': 'Preferencias' },
+            icon: 'sliders',
+            children: [
+              {
+                type: 'record:related_list',
+                properties: {
+                  objectName: 'sys_user_preference',
+                  relationshipField: 'user_id',
+                  columns: ['key', 'created_at', 'updated_at'],
+                  sort: [{ field: 'updated_at', order: 'desc' }],
+                  limit: 25,
+                  showViewAll: true,
+                  title: { en: 'Preferences', 'zh-CN': '偏好设置', 'ja-JP': '設定', 'es-ES': 'Preferencias' },
                 },
               },
             ],

@@ -7,11 +7,16 @@ import type { SemanticMigration } from '../../types.js';
 // to an object, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row — the
 // parse refuses the flag elsewhere through `checkPageDefaultPlacement`
 // (ui/page.zod.ts), and the registry refuses it on a page a package registers
-// without a parse. No D2 conversion and no grace window, per the ruling: the
-// delete is lossless (nothing read the flag), but whether the page should be
-// the app's landing — and so first in its navigation — is the author's call.
-// No relevance question: the surface reaches pages a plugin registers in code
-// and stored rows.
+// without a parse. No grace window on the AUTHORING surface, per the ruling:
+// the delete is lossless (nothing read the flag), but whether the page should
+// be the app's landing — and so first in its navigation — is the author's
+// call. Data at rest is the other half: an installed or stored page carrying
+// the flag replays the retired D2 entry
+// `page-is-default-off-record-page-removed` on read (the maintainer's P0 order
+// after the refusal stopped kernel builds on environments holding an installed
+// package built before it), so the kernel builds with a named notice instead
+// of refusing. No relevance question: the surface reaches pages a plugin
+// registers in code and stored rows.
 //
 // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
 // inside a code span and a table cell.
@@ -38,11 +43,13 @@ export const entry: SemanticMigration = {
     + 'the page parse (definePage; defineStack, so objectstack validate and objectstack build, with '
     + 'STACK_SCHEMA_INVALID 422; the metadata save door with 422 INVALID_METADATA) and at package '
     + 'registration (SchemaRegistry.installPackage and registerItem, 422 INVALID_METADATA). '
-    + '⚠️ No D2 conversion: deleting the flag changes nothing at runtime, but where the app should open is the '
-    + 'author\'s decision, made in its navigation. '
-    + '⚠️ A page row already stored with the flag is served unchanged (no conversion touches it, and a stored '
-    + 'row hydrates without a package, so the registry does not judge it), while saving it again is refused '
-    + 'until the flag is deleted. ADR-0087.',
+    + '⚠️ No D2 conversion on the authoring surface: deleting the flag changes nothing at runtime, but where the '
+    + 'app should open is the author\'s decision, made in its navigation. '
+    + '⚠️ Data at rest converts instead of failing: a page row already stored with the flag, a compiled artifact '
+    + 'inside the window its manifest opens, and a package body registered with a declared engines.protocol '
+    + 'range (an installed package) replay the retired conversion page-is-default-off-record-page-removed on '
+    + 'read, which deletes the flag with an OS_METADATA_CONVERTED notice, so the kernel builds; saving the page '
+    + 'again is refused until the flag is deleted. ADR-0087.',
   acceptanceCriteria:
     'Grep every page in defineStack pages sources, exported stacks, pages a plugin registers in code and every '
     + 'page row in sys_metadata for isDefault: true on a page whose type is not record, or that binds no '

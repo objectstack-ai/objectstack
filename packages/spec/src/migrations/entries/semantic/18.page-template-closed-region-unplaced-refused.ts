@@ -8,9 +8,14 @@ import type { SemanticMigration } from '../../types.js';
 // `full-width` refused by name through the enum's error map), and a region
 // whose name the page's template does not place is refused through
 // `checkPageRegionPlacement` (ui/page.zod.ts), against the declared slot table
-// `PAGE_TEMPLATE_SLOTS`. No key is removed, so no tombstone. No D2 conversion,
-// per the ruling (no alias window): `full-width` → `default` is a one-word
-// edit, and a region's rename is a choice of which slot the author meant.
+// `PAGE_TEMPLATE_SLOTS`. No key is removed, so no tombstone. No alias window
+// on the AUTHORING surface, per the ruling: `full-width` → `default` is a
+// one-word edit, and a region's rename is a choice of which slot the author
+// meant. Data at rest replays the retired D2 entry
+// `page-template-full-width-to-default` on read (the two names drew the same
+// layout), so an installed or stored page still spelling it keeps loading; an
+// unregistered name and an unplaced region have no lossless rewrite and stay
+// with the parse.
 //
 // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
 // inside a code span and a table cell.
@@ -46,8 +51,11 @@ export const entry: SemanticMigration = {
     + 'at its name too, naming the region that fills the slot. dashboard places every other name by design (two '
     + 'regions of one other name are two grid cells); slotted, html and '
     + 'react pages, which do not lay out regions by template, are not judged on region names. '
-    + '⚠️ No D2 conversion: the ruling keeps no alias window for full-width, and which slot a renamed region '
-    + 'fills is the author\'s call. '
+    + '⚠️ No D2 conversion on the authoring surface: the ruling keeps no alias window for full-width, and which '
+    + 'slot a renamed region fills is the author\'s call. Data at rest replays the retired conversion '
+    + 'page-template-full-width-to-default on read (full-width and default were one layout component in the '
+    + 'console, so nothing changes on screen); an unregistered template and an unplaced region have no lossless '
+    + 'rewrite and are not converted. '
     + '⚠️ A page row already stored with an unregistered template or an unplaced region is served unchanged '
     + 'and renders as before, while saving it again is refused until it is renamed. ADR-0087.',
   acceptanceCriteria:

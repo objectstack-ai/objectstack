@@ -29,6 +29,10 @@ import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 // [#23543 F3] The loose `config` keys of the two sibling-block node types — one
 // table, shared with the two D2 lifts that still run at rehydration.
 import { siblingBlockLooseConfigRefusals } from './flow-sibling-block-loose-keys';
+// [#23543 F5-http] The retired callout names, reserved inside the open node
+// namespace — one table, shared with the D2 rename that still runs at
+// rehydration and the engine's registration refusal.
+import { FLOW_RESERVED_NODE_TYPES, reservedFlowNodeTypeRefusal } from './flow-reserved-node-types';
 import { EndConfigSchema } from './builtin-node-config.zod';
 // [#22572] The `$` names are the flow engine's at every binding door — the one
 // rule, composed into a declared variable's `name` and judging an `assignment`
@@ -605,10 +609,21 @@ function flowNodeObject() { return strictObject(
   },
   {
   id: z.string().describe('Node unique ID').meta({ title: 'ID' }),
-  type: z.string().min(1).describe(
-    'Action type — a built-in FlowNodeAction id or a plugin-registered node type. ' +
-    'Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum.',
-  ).meta({ title: 'Node Type' }),
+  // An open namespace (ADR-0018), with one closed exception: the retired
+  // callout names are reserved and refused by name, naming `http` (#23543
+  // F5-http). A `pattern` per name, like `DriverType`'s retired spellings, so
+  // the refusal survives the JSON Schema projection. This reaches a top-level
+  // node; a node in a region body is judged by the `FlowSchema` superRefine.
+  type: Object.keys(FLOW_RESERVED_NODE_TYPES)
+    .reduce(
+      (schema, name) => schema.regex(new RegExp(`^(?!${name}$)`), reservedFlowNodeTypeRefusal(name)!),
+      z.string().min(1),
+    )
+    .describe(
+      'Action type — a built-in FlowNodeAction id or a plugin-registered node type. ' +
+      'Validated against the live action registry at registerFlow() (ADR-0018), not by a closed enum. ' +
+      "The retired callout names 'http_request', 'http_call' and 'webhook' are reserved and refused: use 'http'.",
+    ).meta({ title: 'Node Type' }),
   label: z.string().describe('Node label').meta({ title: 'Label' }),
   
   /** Node Configuration Options (Specific to type) */
@@ -1598,6 +1613,20 @@ export const FlowSchema = lazySchema(() => strictObject(
       for (const refusal of siblingBlockLooseConfigRefusals(node)) {
         ctx.addIssue({ code: 'custom', path: [...graph.path, 'nodes', index, ...refusal.path], message: refusal.message });
       }
+    });
+  }
+
+  // [#23543 F5-http] A reserved callout name as a node `type`, refused naming
+  // `http`. A top-level node meets the same refusal at its `type` field (the
+  // `pattern` above); a region-body node's region parse is left raw on a
+  // refusal (`parseFlowNodeRegions`), so this walk is what reaches it — top-level
+  // graphs are skipped so each site is reported once.
+  for (const graph of collectFlowGraphs(flow)) {
+    if (graph.path.length === 0) continue;
+    graph.nodes.forEach((node, index) => {
+      const message = reservedFlowNodeTypeRefusal((node as { type?: unknown } | null)?.type);
+      if (message === undefined) return;
+      ctx.addIssue({ code: 'custom', path: [...graph.path, 'nodes', index, 'type'], message });
     });
   }
 

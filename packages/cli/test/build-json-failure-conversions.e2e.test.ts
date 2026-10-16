@@ -58,8 +58,8 @@
  *
  * ⭐ A pin asserting `'conversions' in payload` passes against a `conversions:
  * []` hard-coded at every exit. So every fixture drives a LIVE conversion
- * (`flow-node-http-callout-rename`, ADR-0087 D2, protocol 11, on
- * `flows[0].nodes[1].type: 'http_request'`) and each exit is asserted to carry exactly that one notice — no
+ * (a test-only probe loaded with `--import`, ADR-0087 D2 shape, on
+ * `flows[0].nodes[1].type: 'probe_old_callout'`) and each exit is asserted to carry exactly that one notice — no
  * fewer, and NO MORE, the array being asserted whole. `converts nothing` runs
  * the same exit with the canonical `type: 'http'` and requires `[]`, which is
  * the negative whose positive is every other test here.
@@ -84,6 +84,7 @@ import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
+import { LIVE_PROBE, liveProbeNodeOptions } from './helpers/live-conversion-probe.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -91,10 +92,13 @@ const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const COMPILE_TS = resolve(HERE, '../src/commands/compile.ts');
 
 /**
- * The live ADR-0087 D2 conversion these fixtures drive (protocol 11). It was
- * `page-kind-jsx-to-html` until `jsx` retired as a page kind at 18.
+ * The live ADR-0087 D2 conversion these fixtures drive: a TEST-ONLY probe the
+ * child loads with `--import` (`helpers/live-conversion-probe.ts`). It was a
+ * real entry before — `page-kind-jsx-to-html` until `jsx` retired as a page
+ * kind at 18, then `flow-node-http-callout-rename` until #23543 F5-http
+ * reserved its old names, the last real entry left live.
  */
-const CONVERSION_ID = 'flow-node-http-callout-rename';
+const CONVERSION_ID = LIVE_PROBE.conversionId;
 /** The FATAL capability token — `unavailable` whatever is installed. */
 const FATAL_TOKEN = 'governance';
 
@@ -109,7 +113,7 @@ function runCli(args: string[], cwd: string): Promise<Run> {
     execFile(
       TSX,
       [CLI, ...args],
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
+      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', NODE_OPTIONS: liveProbeNodeOptions() }) },
       (err, stdout, stderr) => {
         resolvePromise({
           code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,
@@ -135,7 +139,7 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
  * shape with the CANONICAL spelling, where there is nothing to convert.
  */
 function stack(ns: string, opts: { nodeType?: string; requires?: string[]; extraFields?: string; extraTop?: string } = {}): string {
-  const { nodeType = 'http_request', requires = [], extraFields = '', extraTop = '' } = opts;
+  const { nodeType = LIVE_PROBE.from as string, requires = [], extraFields = '', extraTop = '' } = opts;
   return `
 import { defineStack } from '@objectstack/spec';
 
@@ -201,9 +205,9 @@ function conversionsOf(payload: Record<string, unknown>): unknown[] {
  */
 const THE_NOTICE = {
   conversionId: CONVERSION_ID,
-  surface: 'flow.node.type',
-  from: 'http_request',
-  to: 'http',
+  surface: LIVE_PROBE.surface,
+  from: LIVE_PROBE.from,
+  to: LIVE_PROBE.to,
   path: 'flows[0].nodes[1].type',
 };
 
@@ -317,7 +321,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect(payload.success).toBe(true);
     expectTheOneNotice(payload, 'control', run);
     // The expiry rides the payload entry (`expectTheOneNotice`) and the producer's line.
-    expect(run.stderr).toMatch(/conversion 'flow-node-http-callout-rename', retires in protocol \d+\)/);
+    expect(run.stderr).toMatch(new RegExp(`conversion '${CONVERSION_ID}', retires in protocol \\d+\\)`));
   }, 180_000);
 
   it('2b (--strict-body) — ⭐ carries the notice, where `warnings` is empty by construction', async () => {
@@ -351,7 +355,7 @@ describe('#12125 — every `os build --json` failure exit carries the conversion
     expect('conversions' in payload, 'the field must be PRESENT even when empty').toBe(true);
     expect(payload.conversions, 'a canonical node type converts nothing').toEqual([]);
     // …and, since the producer is what converts now, raised no notice at load either.
-    expect(run.stderr).not.toContain("conversion 'flow-node-http-callout-rename'");
+    expect(run.stderr).not.toContain(`conversion '${CONVERSION_ID}'`);
   }, 180_000);
 
   it('3b (author-time rules) — the notice rides the rule gate', async () => {

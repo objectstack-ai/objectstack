@@ -20,6 +20,7 @@ import {
   isExitSignal,
 } from '../utils/format.js';
 import { validateScaffold } from '../utils/scaffold-validate.js';
+import { makeDirectorySync } from '../utils/make-directory.js';
 import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
 import { GENERATOR_SCAFFOLD_TARGETS } from './generate.js';
 
@@ -1262,7 +1263,10 @@ export default class Init extends Command {
           this.exit(2);
         }
       } else {
-        fs.mkdirSync(targetDir, { recursive: true });
+        // Bounded (#23858): a target that can never be made — this command
+        // run inside `/proc` — is refused at once with the OS's code and the
+        // path. Node's recursive mkdir looped on it, printing nothing.
+        makeDirectorySync(targetDir);
       }
     } else {
       targetDir = startCwd;
