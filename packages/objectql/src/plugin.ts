@@ -667,7 +667,19 @@ export class ObjectQLPlugin implements Plugin {
       // register/bridge interleave would bridge a body that the very next
       // package is about to change. For the single-package artifact this is the
       // same one register followed by the same one bridge as before (D7).
-      register: (artifact: any) => {
+      register: (registeredArtifact: any) => {
+        // ADR-0087 D2 at the registration door, for an artifact that carries
+        // `packages[]`: its bodies are strictly parsed by the ordering below
+        // BEFORE `registerApp` could convert each one, so a bundle handed here
+        // as authored (a marketplace install, a hosted kernel's own loader)
+        // converts once as a whole first — the window is the artifact's, read
+        // off its own declared range, and every body replays under it. A
+        // single-body payload converts at `registerApp` (the body door) and is
+        // handed through untouched here; a bundle an artifact door already
+        // converted comes back by reference. See `ObjectQL.convertPackageBodyForward`.
+        const artifact = Array.isArray(registeredArtifact?.packages)
+          ? ql.convertPackageBodyForward(registeredArtifact)
+          : registeredArtifact;
         const ordered = resolveArtifactPackageOrder(artifact) as any[];
         // [ADR-0130 D4] The objects of the stack's RESIDUAL — top-level objects
         // no package body declares — as the residual rule answers it. See

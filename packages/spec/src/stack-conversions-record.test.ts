@@ -45,10 +45,12 @@ import { CONVERSION_NOTICE_CODE, type ConversionNotice, type MetadataConversion 
  * the page vehicle is a conversion this file owns: a live copy of the page
  * component `visibility` → `visibleWhen` rename, appended to the table the pass
  * reads. It was the real entry `page-component-visibility-to-visibleWhen` until
- * #23543 F4 retired it with its key, and the one entry still live on the load
- * path, the callout rename below, retires in the same card. A probe nobody
- * retires keeps this file about the record, not about whichever entry happens to
- * be live. (`toMajor: 15`, the real entry's, keeps every pinned `retiresIn: 16`.)
+ * #23543 F4 retired it with its key. The second vehicle, for the ordering case,
+ * is a test-only flow-node type rename: it was the real callout rename
+ * `flow-node-http-callout-rename` until #23543 F5-http retired that, the last
+ * real entry left live on the load path. Probes nobody retires keep this file
+ * about the record, not about whichever entry happens to be live. (`toMajor:
+ * 15`, the real page entry's, keeps every pinned `retiresIn: 16`.)
  *
  * `vi.mock` replaces the registry module for the whole file, so `apply.ts`
  * (which `defineStack` calls) reads the extended table; nothing outside this
@@ -74,7 +76,22 @@ vi.mock('./conversions/registry', async (importOriginal) => {
     },
     fixture: { before: {}, after: {}, expectedNotices: 0 },
   };
-  return { ...original, ALL_CONVERSIONS: [...original.ALL_CONVERSIONS, probe] };
+  const { mapFlowNodes } = await import('./conversions/walk');
+  const calloutProbe: MetadataConversion = {
+    id: 'stack-conversions-record-callout-probe',
+    toMajor: 18,
+    surface: 'flow.node.type (test probe)',
+    summary: "test-only probe: a live load-path rename, node type 'probe_old_callout' → 'http'",
+    apply(stack, emit) {
+      return mapFlowNodes(stack, (node, path) => {
+        if (node.type !== 'probe_old_callout') return node;
+        emit({ from: 'probe_old_callout', to: 'http', path: `${path}.type` });
+        return { ...node, type: 'http' };
+      });
+    },
+    fixture: { before: {}, after: {}, expectedNotices: 0 },
+  };
+  return { ...original, ALL_CONVERSIONS: [...original.ALL_CONVERSIONS, probe, calloutProbe] };
 });
 
 afterEach(() => {
@@ -90,12 +107,13 @@ afterEach(() => {
  * load path at 18 — any live page conversion carries what is pinned here.)
  * No standalone actions, so the same built stack can be composed twice.
  *
- * `callout` adds a flow whose node is authored as `http_request`, the spelling
- * the live conversion `flow-node-http-callout-rename` rewrites to `http` — a
- * second, different conversion for the ordering case. (It used to be a
- * `kind: 'jsx'` page, until `jsx` retired as a page kind at 18.)
+ * `callout` adds a flow whose node is authored as `probe_old_callout`, the
+ * spelling the second probe rewrites to `http` — a second, different conversion
+ * for the ordering case. (It used to be a `kind: 'jsx'` page, until `jsx`
+ * retired as a page kind at 18, and then the real `http_request` callout rename,
+ * until that retired too.)
  */
-const source = (ns: string, headerKey: 'visibility' | 'visibleWhen', callout: 'http_request' | 'http' | null = null) => ({
+const source = (ns: string, headerKey: 'visibility' | 'visibleWhen', callout: 'probe_old_callout' | 'http' | null = null) => ({
   manifest: { id: `com.example.${ns}`, name: ns, version: '1.0.0', type: 'app' as const, namespace: ns },
   objects: [{ name: `${ns}_thing`, label: 'Thing', fields: { title: { type: 'text' as const, label: 'Title' } } }],
   pages: [
@@ -136,9 +154,9 @@ const HEADER_NOTICE = {
 
 const CALLOUT_NOTICE = {
   code: CONVERSION_NOTICE_CODE,
-  conversionId: 'flow-node-http-callout-rename',
+  conversionId: 'stack-conversions-record-callout-probe',
   path: 'flows[0].nodes[0].type',
-  from: 'http_request',
+  from: 'probe_old_callout',
   to: 'http',
 };
 
@@ -171,7 +189,7 @@ describe('defineStack records the conversions it applied', () => {
 
   it('two conversions in one source are recorded in the order they were applied', () => {
     quiet();
-    const built = defineStack(source('aa', 'visibility', 'http_request') as never, { strict: false });
+    const built = defineStack(source('aa', 'visibility', 'probe_old_callout') as never, { strict: false });
     const record = stackConversionsOf(built).map(substance);
     expect(record).toHaveLength(2);
     expect(record).toContainEqual(HEADER_NOTICE);

@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ALL_CONVERSIONS, ObjectStackDefinitionSchema, applyConversions, applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
+import { ALL_CONVERSIONS, ObjectStackDefinitionSchema, applyConversions, applyConversionsToStoredItem, type ConversionNotice, type MetadataConversion } from '@objectstack/spec';
 import {
   applyArtifactForwardConversions,
   parseRangeFloor,
@@ -221,6 +221,30 @@ describe('applyArtifactForwardConversions — the versioned window (#12772)', ()
     expect(result.authoredFloor).toBeNull();
     const grant = (result.definition as typeof def).permissions[0]!.objects.crm_ticket;
     expect(grant).not.toHaveProperty('allowRestore');
+  });
+
+  it('reads a FLAT package body\'s range off the body itself — the shape `registerApp` and the marketplace ledger hold', () => {
+    // The same bytes as `legacyPermissionDefinition`, flattened the way
+    // `normalizeBundle` and a package body inside `packages[]` spell them: the
+    // manifest half beside the collections, no `manifest` key.
+    const nested = legacyPermissionDefinition('^17.1.0');
+    const { manifest, ...collections } = nested;
+    const flat = { ...manifest, ...collections };
+    const fromFlat = applyArtifactForwardConversions(flat, { runtimeSpecVersion: '17.2.0' });
+    const fromNested = applyArtifactForwardConversions(nested, { runtimeSpecVersion: '17.2.0' });
+    expect(fromFlat.verdict).toBe('converted-forward');
+    expect(fromFlat.authoredFloor).toBe('17.1.0');
+    expect([fromFlat.verdict, fromFlat.authoredFloor]).toEqual([fromNested.verdict, fromNested.authoredFloor]);
+    expect((fromFlat.definition as typeof flat).permissions[0]!.objects.crm_ticket).not.toHaveProperty('allowPurge');
+    // A flat body authored at a current-or-newer floor is NOT the undeclared
+    // amnesty: the strict parse stays its authority.
+    const current = applyArtifactForwardConversions({ ...flat, engines: { protocol: '>=99.0.0' } }, { runtimeSpecVersion: '17.2.0' });
+    expect(current.verdict).toBe('authored-current');
+    expect(current.authoredFloor).toBe('99.0.0');
+    // A `manifest` object, when present, is still the only place the range is read.
+    const both = applyArtifactForwardConversions({ ...nested, engines: { protocol: '>=99.0.0' } }, { runtimeSpecVersion: '17.2.0' });
+    expect(both.verdict).toBe('converted-forward');
+    expect(both.authoredFloor).toBe('17.1.0');
   });
 
   it('closes the window when the runtime spec version cannot be resolved — amnesty needs positive version evidence', () => {
@@ -441,14 +465,65 @@ describe('the artifact door never turns an authored `hidden: true` into an unpub
 
   /**
    * ⭐ FIRING CONTROL 1 — a NON-RETIRED conversion still fires in the subject's
-   * own window. `flow-node-http-callout-rename` is not retired, so a door that
-   * had stopped converting anything would fail here. (The subject was
-   * `page-kind-jsx-to-html` until `jsx` retired as a page kind at 18, then
-   * `page-component-visibility-to-visibleWhen` until that key retired too,
-   * #23543 F4. The callout rename is the last live entry, and the family that
-   * retires it inherits this control.)
+   * own window, so a door that had stopped converting anything would fail
+   * here. (The subject was `page-kind-jsx-to-html` until `jsx` retired as a
+   * page kind at 18, then `page-component-visibility-to-visibleWhen` until that
+   * key retired too, #23543 F4, then `flow-node-http-callout-rename` until
+   * #23543 F5-http reserved the callout names — the last real entry left live.)
+   * No real entry is live now, so the subject is a test-only flow-node type
+   * rename appended, for this case alone, to the very table the door reads
+   * (`ALL_CONVERSIONS` from `@objectstack/spec`, the instance this package
+   * imports) and removed again in `finally`. The door itself is the real one.
    */
   it('still applies a non-retired conversion in that same window', () => {
+    const probe: MetadataConversion = {
+      id: 'artifact-forward-live-probe',
+      toMajor: 18,
+      surface: 'flow.node.type (test probe)',
+      summary: "test-only probe: a live load-path rename, node type 'probe_old_callout' → 'http'",
+      apply(stack, emit) {
+        const flows = stack.flows as Array<{ nodes: Array<Record<string, unknown>> }> | undefined;
+        if (!Array.isArray(flows) || !flows.some((f) => f.nodes.some((n) => n.type === 'probe_old_callout'))) return stack;
+        return {
+          ...stack,
+          flows: flows.map((flow, f) => ({
+            ...flow,
+            nodes: flow.nodes.map((node, n) => {
+              if (node.type !== 'probe_old_callout') return node;
+              emit({ from: 'probe_old_callout', to: 'http', path: `flows[${f}].nodes[${n}].type` });
+              return { ...node, type: 'http' };
+            }),
+          })),
+        };
+      },
+      fixture: { before: {}, after: {}, expectedNotices: 0 },
+    };
+    const table = ALL_CONVERSIONS as MetadataConversion[];
+    expect(table.some((c) => !c.retiredFromLoadPath), 'premise: no real entry is live, so the probe is the subject').toBe(false);
+    table.push(probe);
+    try {
+      const def = {
+        ...hiddenAppDefinition('^17.0.0'),
+        flows: [{ name: 'notify', nodes: [{ id: 'n1', type: 'probe_old_callout', config: { url: 'https://example.com' } }] }],
+      };
+      const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+      expect(result.verdict).toBe('converted-forward');
+      expect(result.notices.map((n) => n.conversionId)).toContain('artifact-forward-live-probe');
+      const converted = (result.definition as { flows: { nodes: Record<string, unknown>[] }[] }).flows[0]!.nodes[0]!;
+      expect(converted.type).toBe('http');
+      // …and the app in the SAME artifact still keeps its authored key.
+      expect((result.definition as { apps: Record<string, unknown>[] }).apps[0]!.hidden).toBe(true);
+    } finally {
+      table.splice(table.indexOf(probe), 1);
+    }
+  });
+
+  /**
+   * [#23543 F5-http] The retired callout rename still fires at this door
+   * inside its window: an artifact built against 17 that carries an old
+   * callout node keeps loading, as `http`.
+   */
+  it('still replays the retired callout rename in that same window', () => {
     const def = {
       ...hiddenAppDefinition('^17.0.0'),
       flows: [{ name: 'notify', nodes: [{ id: 'n1', type: 'http_request', config: { url: 'https://example.com' } }] }],
@@ -456,10 +531,7 @@ describe('the artifact door never turns an authored `hidden: true` into an unpub
     const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
     expect(result.verdict).toBe('converted-forward');
     expect(result.notices.map((n) => n.conversionId)).toContain('flow-node-http-callout-rename');
-    const converted = (result.definition as { flows: { nodes: Record<string, unknown>[] }[] }).flows[0]!.nodes[0]!;
-    expect(converted.type).toBe('http');
-    // …and the app in the SAME artifact still keeps its authored key.
-    expect((result.definition as { apps: Record<string, unknown>[] }).apps[0]!.hidden).toBe(true);
+    expect((result.definition as { flows: { nodes: Record<string, unknown>[] }[] }).flows[0]!.nodes[0]!.type).toBe('http');
   });
 
   /**
