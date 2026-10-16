@@ -18,7 +18,7 @@ export default defineConfig({
     disableConsoleIntercept: true,
   },
   resolve: {
-    // `hydration-convert-forward.test.ts` boots the REAL engine over a REAL
+    // `hydration-convert-forward.test.ts` boots the REAL engine, protocol and
     // driver, so its verdict must be about the source in this checkout, never
     // a sibling's `dist/` (`pnpm check:test-source-alias`). ANCHORED regex,
     // array form: a bare string `find` matches by PREFIX and would swallow a
@@ -26,6 +26,7 @@ export default defineConfig({
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
+      { find: /^@objectstack\/metadata-protocol$/, replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts') },
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
     ],
   },

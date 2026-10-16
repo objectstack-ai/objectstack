@@ -31390,6 +31390,19 @@ export class ObjectStackProtocolImplementation implements
         // install REPLACES the row object (and may register the namespace).
         const undoInstall = this.packageInstallUndo(manifest);
 
+        // ADR-0087 D2 — this door is AUTHORING-side, so the registry judges the
+        // manifest exactly as handed, and no forward conversion runs here (the
+        // window the registration door, the `sys_packages` hydration and the
+        // marketplace install open is for bodies at rest). Its callers hand it
+        // a manifest being written now: `POST /api/v1/packages` parses the
+        // whole body through the closed `ManifestSchema` first, which refuses
+        // a metadata collection such as `pages` outright; `duplicatePackage`
+        // copies the registry's own record, already judged; the unmanaged
+        // install's base carries identity keys only; and AI Studio's blueprint
+        // tools author in-process. A retired declaration there is the author's
+        // to fix, refused loudly at the moment of writing. Once the body sits
+        // in `sys_packages` it is data at rest, and the boot hydration
+        // (`@objectstack/service-package`) converts it at every load.
         let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
 
         // [#19277] HONOUR `enableOnInstall` — the key THIS request contract

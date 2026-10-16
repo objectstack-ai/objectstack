@@ -37,6 +37,20 @@
  *     meets the registry's refusal exactly as before, and nothing converts;
  *   - HotCRM 4.0.1 exactly as published is refused by the handshake, not the
  *     registry, and the records after it keep hydrating.
+ *
+ * ## The install door stays strict, and why (`protocol.installPackage`)
+ *
+ * The same converting body handed to the install primitive is REFUSED by the
+ * registry, and nothing lands in `sys_packages`. That door is authoring-side:
+ * its HTTP caller, `POST /api/v1/packages`, parses the whole body through the
+ * closed `ManifestSchema` first, which refuses a `pages` key outright, so no
+ * package body carrying metadata collections reaches the primitive over HTTP;
+ * `duplicatePackage` copies the registry's own record (already judged), and
+ * the unmanaged install's base is identity keys only. What it does receive is
+ * a manifest being authored now (AI Studio's blueprint tools call it
+ * in-process), and a retired declaration there is the author's to fix, loudly,
+ * at the moment of writing. A body that lands in `sys_packages` by any road is
+ * data at rest from then on, and the hydration above converts it.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -48,6 +62,7 @@ import { ObjectKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { PackageServicePlugin, type PackageService } from './index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -156,6 +171,32 @@ const expectMisplacedDefault = (line: Line | undefined, id: string) => {
     .toEqual({ name: 'MisplacedDefaultPageError', code: 'INVALID_METADATA', status: 422 });
   expect(line!.text).toContain(`Page "sales_home_page" of package "${id}": \`isDefault: true\` is refused on a \`type: 'home'\` page`);
 };
+
+describe('the install primitive is authoring-side and stays strict', () => {
+  it('protocol.installPackage refuses the same body with the registry\'s refusal, and writes no sys_packages row', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-sys-packages-install-'));
+    dirs.push(dir);
+    const { ql, lines, packages } = await boot(dir);
+    const protocol = new ObjectStackProtocolImplementation(
+      ql as never,
+      () => new Map<string, unknown>([['package', packages]]),
+    );
+
+    let refusal: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      await protocol.installPackage({ manifest: hotcrmBody() } as never);
+    } catch (e) {
+      refusal = e as typeof refusal;
+    }
+    expect(refusal, 'the install primitive accepted a retired declaration').toBeDefined();
+    expect({ name: refusal!.name, code: refusal!.code, status: refusal!.status })
+      .toEqual({ name: 'MisplacedDefaultPageError', code: 'INVALID_METADATA', status: 422 });
+    expect(refusal!.message).toContain(`Page "sales_home_page" of package "${HOTCRM_ID}": \`isDefault: true\` is refused on a \`type: 'home'\` page`);
+    expect(ql.registry.getPackage(HOTCRM_ID)).toBeUndefined();
+    expect(await packages.get(HOTCRM_ID)).toBeNull();
+    expect(lines.filter((l) => l.text.includes('ADR-0087 conversion'))).toEqual([]);
+  });
+});
 
 describe('sys_packages boot hydration converts a stored body forward before the registry judges it', () => {
   it('hydrates HotCRM 4.0.1\'s stored body, converted, with the engine\'s named warning', async () => {
