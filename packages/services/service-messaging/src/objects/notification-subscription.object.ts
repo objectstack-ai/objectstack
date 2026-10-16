@@ -48,6 +48,27 @@ export const NotificationSubscription = ObjectSchema.create({
     titleFormat: '{principal} · {topic}',
     highlightFields: ['topic', 'principal', 'enabled', 'created_at'],
 
+    // The one list view this object ships, declared for its `emptyState`: with
+    // no view at all the console synthesizes an "All records" tab and draws
+    // the generic "Nothing here yet" under it, which says nothing about what
+    // belongs on this page. `columns: []` declares no projection on purpose —
+    // the spec's "left to the renderer" form — so the grid keeps exactly the
+    // columns it derived from `highlightFields` before this view existed, and
+    // the view adds no filter, sort or page size of its own.
+    listViews: {
+        all: {
+            type: 'grid',
+            name: 'all',
+            label: 'All',
+            data: { provider: 'object', object: 'sys_notification_subscription' },
+            columns: [],
+            emptyState: {
+                title: 'No subscriptions yet',
+                message: 'A subscription records that a role, a team or a user follows a notification topic.',
+            },
+        },
+    },
+
     fields: {
         id: Field.text({ label: 'Subscription ID', required: true, readonly: true }),
 

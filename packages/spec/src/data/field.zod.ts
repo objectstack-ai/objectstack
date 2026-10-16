@@ -1770,19 +1770,21 @@ export const FieldSchema = lazySchema(() => {
    * result from the referenced object's schema when omitted (objectui
    * packages/fields: LookupField / RecordPickerDialog / deriveLookupColumns).
    *
-   * SNAKE_CASE TOLERANCE — measured on the consumer, not assumed. Those
-   * readers accept a snake_case alias for three of the seven keys declared
-   * below, and for three only: `lookupColumns`, `lookupPageSize` and
-   * `allowCreate` are each read as `<snake> ?? <camel>` in LookupField.tsx.
-   * The other four — `displayField`, `descriptionField`, `lookupFilters`
-   * and `dependsOn` — are read camelCase-only, so a snake_case spelling of
-   * any of those four arrives at the picker as nothing at all. Three of them
-   * lost their twin in objectui#7155's LookupFieldMetadata alias sweep (no
-   * deprecation window, no dual read); `dependsOn` lost its own later,
-   * retired under ADR-0049 enforce-or-remove in objectui#7357. The three
-   * aliases that survive are objectui's own back-compat, never a spelling
-   * this schema declares — the camelCase key is the authored one in every
-   * case.
+   * SNAKE_CASE SPELLINGS — measured on the consumer, not assumed. Those
+   * readers accept no snake_case alias for any of the seven keys declared
+   * below: LookupField.tsx reads `displayField`, `descriptionField`,
+   * `lookupColumns`, `lookupPageSize`, `lookupFilters`, `dependsOn` and
+   * `allowCreate` camelCase-only. The twins went in three rounds, each with
+   * no deprecation window and no dual read: three in objectui#7155's
+   * LookupFieldMetadata alias sweep, `dependsOn`'s under ADR-0049
+   * enforce-or-remove in objectui#7357, and the last three
+   * (`lookup_columns`, `lookup_page_size`, `allow_create`) in
+   * objectui#12157. A stored definition that still spells one of these keys
+   * in snake_case is folded onto the declared key when the console ingests
+   * it (`normalizeSchemaReferenceKeys`, objectui `packages/core`), so it
+   * reaches the picker camelCase; one that reaches the picker without that
+   * fold arrives as nothing at all. The camelCase key is the only spelling
+   * this schema declares.
    *
    * The read points, dated, are recorded in `liveness/field.json`, row
    * `lookupColumns`. It is a reading of a foreign tree and no gate here

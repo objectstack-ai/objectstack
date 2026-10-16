@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validatePageFieldBindings,
+  validatePageFieldBindings as validatePageFieldBindingsUnrecorded,
   checkFieldRefs,
   componentSectionGroupRefs,
   indexObjectFields,
@@ -14,6 +14,19 @@ import {
 } from './validate-page-field-bindings.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Slice 19: every finding of the two ids whose `fix:` line this file
+// shortened is recorded, and the hint block at the foot of the file holds each
+// recorded `fix:` line to one line of at most 200 characters.
+const firedHints: Array<{ rule: string; hint: string }> = [];
+const validatePageFieldBindings: typeof validatePageFieldBindingsUnrecorded = (...args) => {
+  const findings = validatePageFieldBindingsUnrecorded(...args);
+  for (const f of findings) {
+    if (f.rule === PAGE_FIELD_UNKNOWN || f.rule === PAGE_SECTION_COUNT_NOT_MULTI_VALUE) firedHints.push(f);
+  }
+  return findings;
+};
 
 const baseStack = () => ({
   objects: [
@@ -807,5 +820,53 @@ describe('validatePageFieldBindings — unprovisioned injected anchors (#8340)',
       'queried',
     );
     expect(findings).toEqual([]);
+  });
+});
+
+// [#22161] Slice 19: the `fix:` line of `page-field-unknown` and
+// `page-section-count-not-multi-value`. One remedy line each; the object's
+// field list is no longer echoed (the nearest declared field is named instead),
+// and the reasoning is each id's `os explain` entry.
+describe('[#22161] one-line fix — the page field ids whose `fix:` line this file shortened', () => {
+  it('an unknown field names the nearest declared field, not the field list', () => {
+    const findings = validatePageFieldBindings({
+      ...baseStack(),
+      pages: [pageWith([{ type: 'record:highlights', properties: { fields: ['statsu'] } }])],
+    });
+    expect(findings.map((f) => f.hint)).toEqual(['Fix the field name, or add "statsu" to crm_lead. Did you mean "status"?']);
+    expect(findings[0]!.hint).not.toContain('Object fields:');
+  });
+
+  it('a counted single-value field prints the one remedy line', () => {
+    const findings = validatePageFieldBindings({
+      ...baseStack(),
+      pages: [pageWith([{
+        type: 'record:details',
+        properties: { sections: [{ name: 's', label: '{{ count }} items', fields: ['status'], count: { field: 'status' } }] },
+      }])],
+    });
+    expect(findings.map((f) => f.hint)).toEqual([
+      'Count a multi-value field (`multiselect`, `checkboxes`, `tags`, or one declared with `multiple: true`), or ' +
+        'list this field in the section\'s `fields` to show its value.',
+    ]);
+  });
+
+  it('every `fix:` line the cases above fired for those ids is one line of at most 200 characters', () => {
+    expect([...new Set(firedHints.map((f) => f.rule))].sort()).toEqual([PAGE_FIELD_UNKNOWN, PAGE_SECTION_COUNT_NOT_MULTI_VALUE].sort());
+    for (const f of firedHints) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, f.rule).not.toContain('Object fields:');
+      expect(f.hint, f.rule).not.toContain('References must match');
+    }
+  });
+
+  const MOVED_FROM_HINT: Record<string, readonly string[]> = {
+    [PAGE_FIELD_UNKNOWN]: ['exactly', 'nearest declared field', 'dotted relationship path'],
+    [PAGE_SECTION_COUNT_NOT_MULTI_VALUE]: ['`select`, `lookup`, `user`, `file` or `image`', '`multiple: true`', '0 or 1'],
+  };
+  it.each(Object.keys(MOVED_FROM_HINT))('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explainRule(rule)!.paragraphs.join('\n');
+    for (const fact of MOVED_FROM_HINT[rule]!) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

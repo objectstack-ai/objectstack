@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { lstat, open, readFile, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Command, Flags } from '@oclif/core';
@@ -119,6 +119,89 @@ async function confirm(question: string): Promise<boolean> {
 }
 
 /**
+ * [#23826] What the apply's report file holds from the moment it is reserved
+ * (before the boot) until the report is written over it. A run that stops in
+ * between without reaching its own cleanup (an interrupt, a crash) leaves this
+ * text behind, which says what happened, never an empty file taken for a report.
+ */
+function reportReservationText(reservedAt: string): string {
+  const note =
+    'os migrate organization-ownership --apply reserved this file for its report before it opened the database. ' +
+    'If this text is still here after that run ended, the run stopped before it wrote its report: the deployment ' +
+    `ledger (sys_migration, row ${ORGANIZATION_OWNERSHIP_MIGRATION_ID}) records every step it finished. Re-run ` +
+    '--apply with a new --out: it resumes, and finished steps are not repeated.';
+  return `${JSON.stringify({ kind: 'organization-ownership-apply-reservation', reservedAt, note }, null, 2)}\n`;
+}
+
+/** Write `text` as the whole content of `handle`'s file, from its first byte. */
+async function writeWholeFile(handle: FileHandle, text: string): Promise<void> {
+  const bytes = Buffer.from(text, 'utf8');
+  await handle.truncate(0);
+  for (let at = 0; at < bytes.length;) {
+    const { bytesWritten } = await handle.write(bytes, at, bytes.length - at, at);
+    if (bytesWritten <= 0) throw new Error(`the write stopped at byte ${at} of ${bytes.length}`);
+    at += bytesWritten;
+  }
+}
+
+/**
+ * The reserved path no longer names the file this run created: it was removed
+ * or replaced while the ceremony ran. Not an OS error, so it carries no errno
+ * `code`; what became of the file is its `standing`.
+ */
+class ReportFileLost extends Error {
+  constructor(readonly file: string, readonly standing: 'removed' | 'replaced') {
+    super(`${file} no longer names the file this run reserved: it was ${standing} while the ceremony ran`);
+  }
+}
+
+/**
+ * [#23826] The apply report's file, reserved before the apply boots: created
+ * exclusively (never opened over an existing file), so an `--out` the run
+ * cannot write refuses before anything executes, and no concurrent creator can
+ * take the path between that check and the report. The report is written into
+ * this same file at the end; a run with nothing to report releases it.
+ */
+class ReportFileReservation {
+  private constructor(readonly file: string, private readonly handle: FileHandle) {}
+
+  /** Create `file` exclusively, holding the reservation text; throws the OS error when it cannot. */
+  static async take(file: string): Promise<ReportFileReservation> {
+    const reservation = new ReportFileReservation(file, await open(file, 'wx'));
+    try {
+      await writeWholeFile(reservation.handle, reportReservationText(new Date().toISOString()));
+    } catch (error) {
+      await reservation.release();
+      throw error;
+    }
+    return reservation;
+  }
+
+  /** Whether `file` still names the file this run created, or what became of it. */
+  private async standing(): Promise<'held' | 'removed' | 'replaced'> {
+    const ours = await this.handle.stat();
+    const there = await lstat(this.file).catch(() => undefined);
+    if (!there) return 'removed';
+    return there.dev === ours.dev && there.ino === ours.ino ? 'held' : 'replaced';
+  }
+
+  /** Write the report over the reservation text; throws when it cannot be kept at {@link file}. */
+  async keep(text: string): Promise<void> {
+    const standing = await this.standing();
+    if (standing !== 'held') throw new ReportFileLost(this.file, standing);
+    await writeWholeFile(this.handle, text);
+    await this.handle.close();
+  }
+
+  /** Nothing will be reported: remove the reservation, only while {@link file} still names it. Best effort. */
+  async release(): Promise<void> {
+    const standing = await this.standing().catch(() => undefined);
+    await this.handle.close().catch(() => {});
+    if (standing === 'held') await unlink(this.file).catch(() => {});
+  }
+}
+
+/**
  * `os migrate organization-ownership` — the v18 organization-ownership
  * ceremony's preflight (ADR-0131 D10, ceremony item 1): per table, the fate,
  * the row counts each fate will touch, the rows whose owner cannot be derived
@@ -175,7 +258,11 @@ async function confirm(question: string): Promise<boolean> {
  * resumes where it stopped, and ends with the post-check. The ledger row is
  * the ceremony's marker: `applied_at` once every step has finished,
  * `verified_at` when the post-check also reads zero discrepancies. A report
- * file is written beside the plan's, never over an existing one.
+ * file is written beside the plan's, never over an existing one: it is reserved
+ * (created exclusively) before the boot, so an `--out` that cannot be written
+ * is refused before anything executes (`apply_refused`), and a report that
+ * still cannot be kept after the ceremony executed is answered with its own
+ * code (`apply_report_unwritable`, `executed: true`, the report itself).
  *
  * ## `--plan-file FILE` (the plan the operator reviewed)
  *
@@ -243,7 +330,8 @@ export default class MigrateOrganizationOwnership extends Command {
       description:
         'Where to write the plan, or with --apply the apply report (default: organization-ownership-plan-TIMESTAMP.json, ' +
         'or organization-ownership-apply-TIMESTAMP.json, in the current directory). ' +
-        'An existing file is never overwritten',
+        'An existing file is never overwritten; with --apply, a report file that cannot be written refuses the run ' +
+        'before anything executes',
     }),
     json: Flags.boolean({ description: 'Also print the plan (or, with --apply, the apply report) on stdout' }),
     dev: Flags.boolean({
@@ -300,11 +388,15 @@ export default class MigrateOrganizationOwnership extends Command {
     const json = Boolean(flags.json);
     const refuse = async (payload: Record<string, unknown>, message: string): Promise<void> => {
       if (json) {
+        // `apply_refused` / `plan_refused` mean nothing was executed; a report
+        // lost after the ceremony executed has its own code (#23826).
         const error = payload.reason === 'boot-failed'
           ? 'boot_failed'
           : payload.reason === 'apply-failed'
             ? 'apply_failed'
-            : flags.apply ? 'apply_refused' : 'plan_refused';
+            : payload.reason === 'report-write-failed'
+              ? 'apply_report_unwritable'
+              : flags.apply ? 'apply_refused' : 'plan_refused';
         await emitJson({ error, ...payload }, 1, { compact: true });
         return;
       }
@@ -581,6 +673,24 @@ export default class MigrateOrganizationOwnership extends Command {
       }
     }
 
+    // [#23826] The report file, reserved before the boot under either boot
+    // posture: an `--out` this run cannot write (an existing file, a missing
+    // directory, no permission) is refused here, before anything executes. The
+    // default name is stamped with this moment.
+    const reportFile = resolve(flags.out ?? `organization-ownership-apply-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    let reservation: ReportFileReservation;
+    try {
+      reservation = await ReportFileReservation.take(reportFile);
+    } catch (error) {
+      const message = String((error as Error)?.message ?? error);
+      await refuse(
+        { reason: 'report-file-unwritable', file: reportFile, ...errorCodeFields(error), detail: message },
+        `Refused: the apply report cannot be written to ${reportFile}: ${message}. Nothing was executed. An existing ` +
+          'file is never overwritten (a file a stopped run reserved says so in its own text); pass --out with a new path.',
+      );
+      return;
+    }
+
     if (!json) {
       printHeader('Migrate · organization-ownership (apply)');
       printStep('Booting the deployment\'s served stack (schema DDL held back)…');
@@ -599,11 +709,12 @@ export default class MigrateOrganizationOwnership extends Command {
         serveFlags: { dev: flags.dev === true },
       });
     } catch (error: unknown) {
+      await reservation.release();
       await refuse({ reason: 'boot-failed', detail: String((error as Error)?.message ?? error) }, String((error as Error)?.message ?? error));
       return;
     }
 
-    let report: OrganizationOwnershipApplyReport;
+    let report: OrganizationOwnershipApplyReport | undefined;
     try {
       const exec = resolvePlannedDriverExec(stack.driver);
       if (!stack.driver || !exec) {
@@ -808,20 +919,34 @@ export default class MigrateOrganizationOwnership extends Command {
       );
       return;
     } finally {
+      // No report (a refusal, a failed step): the reserved file goes with the run.
+      if (!report) await reservation.release();
       await stack.shutdown();
     }
 
-    const target = resolve(flags.out ?? `organization-ownership-apply-${report.generatedAt.replace(/[:.]/g, '-')}.json`);
     try {
-      await writeFile(target, `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx' });
+      await reservation.keep(`${JSON.stringify(report, null, 2)}\n`);
     } catch (error) {
+      await reservation.release();
+      // The ceremony executed: never the pre-write refusal's code (#23826).
+      const message = String((error as Error)?.message ?? error);
       await refuse(
-        { reason: 'report-file-unwritable', file: target, detail: String((error as Error).message) },
-        `The ceremony ran, and its report could not be written to ${target}: ${(error as Error).message}. ` +
-          'An existing file is never overwritten; re-run --apply (it resumes, writing nothing new) with --out.',
+        {
+          reason: 'report-write-failed',
+          file: reportFile,
+          // An OS error keeps its own code; a lost reservation says what became of the file.
+          ...(error instanceof ReportFileLost ? { standing: error.standing } : errorCodeFields(error)),
+          detail: message,
+          executed: true,
+          report,
+        },
+        `The ceremony ran (${report.complete ? 'every step finished' : 'it stopped at a blocker'}), and its report could ` +
+          `not be written to ${reportFile}: ${message}. Every finished step is checkpointed in the deployment ledger; ` +
+          're-run --apply with a new --out to write the report (it resumes, and finished steps are not repeated).',
       );
       return;
     }
+    const target = reportFile;
     const verdictCode = report.complete && report.blocking === 0 ? 0 : 1;
     if (json) {
       await emitJson({ file: target, report }, verdictCode);
