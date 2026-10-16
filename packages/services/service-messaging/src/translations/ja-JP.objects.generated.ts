@@ -116,7 +116,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_delivery: {
     label: "Notification Delivery",
     pluralLabel: "Notification Deliveries",
-    description: "",
+    description: "Durable per-recipient × channel delivery outbox.",
     fields: {
       id: {
         label: "Delivery ID"
@@ -190,7 +190,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_preference: {
     label: "Notification Preference",
     pluralLabel: "Notification Preferences",
-    description: "",
+    description: "Which topics and channels each user receives; admins set the defaults.",
     fields: {
       id: {
         label: "Preference ID"
@@ -268,7 +268,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
-    description: "",
+    description: "The subject and body each notification topic sends, per channel and language.",
     fields: {
       id: {
         label: "Template ID"
@@ -319,7 +319,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_http_delivery: {
     label: "HTTP Delivery",
     pluralLabel: "HTTP Deliveries",
-    description: "",
+    description: "Outgoing HTTP calls made by webhooks and flows, one row per call, with its delivery status.",
     fields: {
       id: {
         label: "Delivery ID",
