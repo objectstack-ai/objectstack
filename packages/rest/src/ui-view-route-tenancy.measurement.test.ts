@@ -1122,7 +1122,9 @@ describe('[#13214] §4 preconditions', () => {
         // still 1.
         // [#23050 slice 8] 8 → 9 (`email-routes.ts`): 57 and 72, +1 each for
         // that slice's forwarder; the ownership guard still 1.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(9);
+        // [#23050 slice 9] 9 → 10 (`search-routes.ts`): 58 and 73, +1 each for
+        // that slice's forwarder; the ownership guard still 1.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
         // ...and the ownership guard is NOT sprayed across the file — it is a

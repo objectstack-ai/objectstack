@@ -96,6 +96,32 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   (historical import) update keeps a supplied value, as it does for
  *   `updated_at`.
  *
+ * ## Platform-written: the parent pair `object_name` / `record_id` (ADR-0139 E7)
+ *
+ * The record `thread_id` names, stamped as ADR-0052 §5's pointer pair so the
+ * read gate can narrow comments with one `ReadableIds` leaf per parent object
+ * instead of a bounded pre-scan (`comment-access-hooks.ts`,
+ * `installCommentReadVisibility`). `thread_id` stays the authored key; the
+ * pair is derived from it by one planner (`planCommentParentPair`):
+ *
+ * - **The stamp.** On create, every row is stamped from its `thread_id`, for
+ *   every caller and over any value sent. On an update that names `thread_id`
+ *   (the re-point the update gate authorizes as an insert into the new
+ *   thread), the pair is re-stamped from it. A thread naming no record stamps
+ *   `null` / `null`.
+ * - **Read-only to authors.** Both declare `readonly: true`, and no writer's
+ *   value lands: on create the stamp is assigned over it, and an update that
+ *   names either column without a thread has the pair re-derived from the
+ *   row's stored thread — for every caller, because under `preserveAudit` (a
+ *   historical import) the engine's update-side strip keeps a readonly value.
+ *   A multi-row update naming the pair without a thread is refused whole
+ *   (`VALIDATION_ERROR` / 400) when its rows' threads name different records:
+ *   one write cannot store each row's own pair.
+ * - **Stored rows.** Rows written before the pair existed carry `null` until
+ *   `os migrate comment-parent-pair --apply` stamps them; until then the read
+ *   gate answers them with the bounded thread probe (fail closed), never a
+ *   leaf.
+ *
  * @namespace sys
  */
 export const SysComment = ObjectSchema.create({
@@ -127,6 +153,28 @@ export const SysComment = ObjectSchema.create({
       maxLength: 255,
       description:
         'Thread identifier — conventionally `{object}:{record_id}` (e.g. `account:9001`)',
+      group: 'Thread',
+    }),
+
+    // [ADR-0139 E7, ADR-0052 §5] The record the thread names, as the pointer
+    // pair every other parent-derived stream keys on. Platform-written from
+    // `thread_id` (see "Platform-written: the parent pair" above); never
+    // authored.
+    object_name: Field.text({
+      label: 'Parent Object',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The object of the record `thread_id` names — stamped by the platform, never written by authors',
+      group: 'Thread',
+    }),
+
+    record_id: Field.text({
+      label: 'Parent Record',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The id of the record `thread_id` names — stamped by the platform, never written by authors',
       group: 'Thread',
     }),
 
@@ -217,6 +265,9 @@ export const SysComment = ObjectSchema.create({
 
   indexes: [
     { fields: ['thread_id', 'created_at'] },
+    // [ADR-0139 E7] The thread gate's leaf is one `record_id IN (…)` per
+    // `object_name`, and its probe of unbackfilled rows is `object_name IS NULL`.
+    { fields: ['object_name', 'record_id'] },
     { fields: ['parent_id'] },
     { fields: ['author_id'] },
   ],
