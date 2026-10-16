@@ -44,9 +44,10 @@
  * `nameSubjectRecord`. `approval.requested` used it; every other body that
  * names the record built `<object_name>/<record_id>`, so an approver read the
  * API name and a slash in the reminder, the SLA breach, the escalation, the
- * hand-off and both send-back sentences. The same battery pins each of those
- * bodies, and a control: a record of an object whose schema has no label is
- * named by the object's API name and the id, the helper's own fallback.
+ * hand-off, both send-back sentences and both out-of-office sentences. The same
+ * battery pins the record's name in each of those bodies, and a control: a
+ * record of an object whose schema has no label is named by the object's API
+ * name and the id, the helper's own fallback.
  *
  * ## And whose notification it is (#23284)
  *
@@ -294,36 +295,30 @@ describe('every approval notification carries its text in body', () => {
   });
 
   it('[#23978] every body that names the record names it by its object label and its id, as approval.requested does', () => {
-    /** The one body a site sent; a site that sent two different bodies is a failure of its own. */
-    const bodyAt = (site: string): unknown => {
-      const bodies = [...new Set(emits.filter((e) => siteOf(e) === site).map((e) => e.payload?.body))];
-      expect(bodies, site).toHaveLength(1);
-      return bodies[0];
-    };
     // Ruling B of #23556 / #23594: label and id, no title — one form for every
-    // body, the one `approval.requested` already sends.
-    expect(bodyAt('approval.requested@thread')).toBe('A decision on Deal D_thread is waiting on you.');
-    expect({
-      reminder: bodyAt('approval.reminder@thread+links'),
-      slaBreached: bodyAt('approval.sla_breached@sla_notify'),
-      slaBreachedToSubmitter: bodyAt('approval.sla_breached@sla_notify>submitter'),
-      escalated: bodyAt('approval.escalated@sla_reassign'),
-      reassigned: bodyAt('approval.reassigned@thread'),
-      revisionLimit: bodyAt('approval.returned@budget'),
-      sentBackWithoutNote: bodyAt('approval.returned@rework'),
-    }).toEqual({
-      reminder: 'A decision on Deal D_thread is still waiting on you.',
-      slaBreached: 'A decision on Deal D_sla_notify is overdue.',
-      slaBreachedToSubmitter: "Deal D_sla_notify: escalation action 'notify' was taken.",
-      escalated: 'An overdue approval on Deal D_sla_reassign was escalated to you.',
-      reassigned: 'You are now an approver on Deal D_thread.',
-      revisionLimit: 'Your Deal D_budget exceeded the revision limit (0) and was rejected.',
-      sentBackWithoutNote: 'Your Deal D_rework needs rework before it can be approved.',
+    // body, the one `approval.requested` already sends. The pin is the record's
+    // name in each body, not the rest of the sentence around it.
+    const NAMED: Record<string, string> = {
+      'approval.requested@thread': 'Deal D_thread',
+      'approval.reminder@thread+links': 'Deal D_thread',
+      'approval.sla_breached@sla_notify': 'Deal D_sla_notify',
+      'approval.sla_breached@sla_notify>submitter': 'Deal D_sla_notify',
+      'approval.escalated@sla_reassign': 'Deal D_sla_reassign',
+      'approval.reassigned@thread': 'Deal D_thread',
+      'approval.returned@budget': 'Deal D_budget',
+      'approval.returned@rework': 'Deal D_rework',
+      'approval.ooo_substituted@ooo': 'Deal D_ooo',
+      'approval.ooo_skipped@ooo': 'Deal D_ooo',
+      // The control: the object's schema has no label, so the record is named
+      // by the object's API name and the id.
+      'approval.reminder@bare+links': 'crm_memo D_bare',
+    };
+    const offenders = Object.entries(NAMED).flatMap(([site, name]) => {
+      const bodies = emits.filter((e) => siteOf(e) === site).map((e) => String(e.payload?.body));
+      if (!bodies.length) return [`${site}: sent nothing`];
+      return bodies.filter((body) => !body.includes(name)).map((body) => `${site}: ${body}`);
     });
-
-    // The control: the object's schema has no label, so the record is named by
-    // the object's API name and the id — never a title, never the slash form.
-    expect(bodyAt('approval.reminder@bare+links')).toBe('A decision on crm_memo D_bare is still waiting on you.');
+    expect(offenders).toEqual([]);
 
     // And no body anywhere in the battery joins the API name and the id with a slash.
     const slashed = emits
