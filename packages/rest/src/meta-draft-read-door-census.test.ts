@@ -248,8 +248,9 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // never its file, so no ledger row changed: 8 = 6 + 0 + 0 + 0 + 0 + 2,
         // length 5 → 6. [#23050 slice 6] The two security bodies
         // (`security-routes.ts`) read no draft: 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0,
-        // length 6 → 7.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(7);
+        // length 6 → 7. [#23050 slice 7] Nor do the discovery and OpenAPI bodies
+        // (`discovery-routes.ts`): 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0, length 7 → 8.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(8);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });

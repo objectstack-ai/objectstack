@@ -5,18 +5,19 @@
 ## 复核归属与资格(按面)
 
 - 欠不欠按面判 ⛔ 不按车道:diff 或认领申报碰下列任一面即欠达档复核,交付后当轮完成。
-- 复核面 = 契约三面:`Clause-②: yes` 申报、已发布 schema(`packages/spec/src/**` 非测试)、governed
-  规则文本(统一定义见 SKILL.md);`.changeset`/CHANGELOG、`content/docs/**`、`apps/docs/**` 散文面
-  ⛔ 不在其列:派发席按本席档在 ACCEPT 逐句对照 diff 核,ACCEPT 点名所核句。
-- 档随面定:已发布 schema 或 governed 规则文本 ⇒ `CONTRACT_REVIEW_TIER`,混合 diff 一处命中即此档;
-  仅凭 `Clause-②: yes` 申报而欠 ⇒ `TIER_DEFAULT`,由车道席位作复核记录;档恰等不作下限。
+- 复核面 = 契约四面:`Clause-②: yes` 申报、收窄申报、已发布 schema(`packages/spec/src/**` 非测
+  试)、governed 规则文本(统一定义见 SKILL.md);`.changeset`/CHANGELOG、`content/docs/**`、`apps/docs/**` 散
+  文面 ⛔ 不在其列:派发席按本席档在 ACCEPT 逐句对照 diff 核,ACCEPT 点名所核句。
+- 档随面定:已发布 schema 或 governed 规则文本 ⇒ `CONTRACT_REVIEW_TIER`,混合 diff 一处命中即此
+  档;PR 正文与 changeset 行首 `Clause-②: no (narrowing)` 申报的收窄亦此档,范围为散文面外全
+  diff;仅凭 `Clause-②: yes` 申报而欠 ⇒ `TIER_DEFAULT`,由车道席位作复核记录;档恰等不作下限。
 - 混合 diff 的达档复核范围 = `reviewFace` 的 `hits` 路径 + 其 hunk 所断言的文件(读被引代码);
   规则与执行它的门禁同属一改者一并读;记录 `Scope:` 行列两者,可放宽、⛔ 不窄于 `hits`。
 - 余部归车道席位 `TIER_DEFAULT` 的 ACCEPT,同单独开 PR 并点名;Tier H 人批与队列守卫仍整张 PR。
-- 面读 PR 已提交树的文件清单,同队列守卫判 governed 路径;⛔ 不读席位自述。
+- 面读 PR 已提交树的文件清单(同队列守卫判 governed 路径)与申报行;⛔ 不读席位自述。
 - 已发布面以包的 `exports` 映射为准:从入口类型图不可达、且 `exports` 不可寻址的 `.d.ts` 是
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
-- 三面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
+- 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,达档者席内审。
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
 - 同形 = `## Contract review` 题头、所审 head sha 独占码段、①②③ 逐项、独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写该面所定档的常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;

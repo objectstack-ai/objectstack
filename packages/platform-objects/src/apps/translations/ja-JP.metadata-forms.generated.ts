@@ -632,6 +632,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "ポリモーフィック参照の相棒項目",
         helpText: "このテキスト項目をポリモーフィック参照の id 側にします。ここには、対象オブジェクト名を行ごとに保持する同一オブジェクト上の別項目名を指定します（ADR-0052 §5）。snake_case で記述し、テキスト項目のみ、`reference` とは併用できません。"
       },
+      referenceDeletedWhen: {
+        label: "参照先削除条件",
+        helpText: "referenceVia と併用する場合のみ有効：同じオブジェクトの選択（select）項目が特定の選択肢の値を持つ行では、このポインターが指すレコードはプラットフォームにより削除済みであり、ポインターはその選択肢のラベルで削除済み表示されます。未設定：どの行も削除済みとして扱われません。"
+      },
+      "referenceDeletedWhen.field": {
+        label: "項目",
+        helpText: "このオブジェクト上の兄弟の選択項目（snake_case）。例：cancel_reason。インラインの選択肢を宣言した単一値の選択項目である必要があります。"
+      },
+      "referenceDeletedWhen.value": {
+        label: "値",
+        helpText: "参照先が削除されたことを示す、その選択項目の選択肢の値。例：record_deleted。宣言済みの選択肢の値のいずれかである必要があります。"
+      },
       mailAssociation: {
         label: "受信メールの照合",
         helpText: "この項目の値がメッセージの送信者またはいずれかの受信者のアドレスと一致する、このオブジェクトのレコードに受信メールを関連付けます（大文字と小文字は区別しません。メールボックス自身のアドレスは除きます）。メール項目のみ。メールボックスサービスが設定されている環境でのみ有効です。"

@@ -65,6 +65,8 @@ import {
 } from './lib/openapi-self-consistency';
 
 const PKG_ROOT = path.resolve(__dirname, '..');
+/** The package's own tsx — the binary `npx tsx` resolved to here, without npx's own start-up per spawn. */
+const TSX = path.join(PKG_ROOT, 'node_modules', '.bin', 'tsx');
 
 describe('findDanglingRefs', () => {
   it('reports nothing for a document whose refs all resolve', () => {
@@ -183,7 +185,7 @@ function runGenerator(
     fs.writeFileSync(scriptPath, mutated);
   }
 
-  const res = spawnSync('npx', ['tsx', scriptPath], {
+  const res = spawnSync(TSX, [scriptPath], {
     cwd: dir,
     encoding: 'utf-8',
     env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=4096' },
@@ -195,6 +197,25 @@ function runGenerator(
     artifact: path.join(dir, 'json-schema', 'openapi.json'),
   };
 }
+
+/**
+ * One run per distinct fixture. The generator is deterministic and every case
+ * that shares a fixture only READS its output, so a fixture several cases
+ * assert on is generated once and read by each of them: the unmutated source
+ * (five cases), and the dangling component `$ref` (two cases). Each mutation
+ * keeps its own run, and every assertion reads the bytes it always read.
+ */
+let shippedRun: ReturnType<typeof runGenerator> | undefined;
+const shipped = (): ReturnType<typeof runGenerator> => (shippedRun ??= runGenerator());
+
+let danglingComponentRefRun: ReturnType<typeof runGenerator> | undefined;
+const danglingComponentRef = (): ReturnType<typeof runGenerator> =>
+  (danglingComponentRefRun ??= runGenerator((src) =>
+    src.replace(
+      '  return schemas;',
+      "  return { ...schemas, Broken: { $ref: '#/components/schemas/ApiErrorTypo' } };",
+    ),
+  ));
 
 /** Read back the artifact a `runGenerator()` call just wrote. */
 function readArtifact(run: ReturnType<typeof runGenerator>): any {
@@ -227,7 +248,7 @@ describe('build-openapi.ts end to end', () => {
   });
 
   it('emits all nine components WITHOUT OS_EAGER_SCHEMAS (#5168 regression pin)', () => {
-    const { status, output } = runGenerator();
+    const { status, output } = shipped();
     expect(output).toContain('Components: 9');
     // The exact symptom string from the issue, which nobody was asserting.
     expect(output).not.toContain('Components: 0');
@@ -235,7 +256,7 @@ describe('build-openapi.ts end to end', () => {
   });
 
   it('writes a document whose components are complete and self-contained', () => {
-    const run = runGenerator();
+    const run = shipped();
     expect(run.status).toBe(0);
     // Re-read the artifact the run just produced and check it independently of
     // the generator's own gate.
@@ -252,7 +273,7 @@ describe('build-openapi.ts end to end', () => {
     // will see it — and so that the day a contract schema starts emitting
     // `$defs` pointers, this expectation goes red and points at the reason the
     // gate was kept (see `build-openapi.ts`'s comment above `assertRefsResolve`).
-    const doc = readArtifact(runGenerator());
+    const doc = readArtifact(shipped());
     const refs: string[] = [];
     const walk = (node: any): void => {
       if (!node || typeof node !== 'object') return;
@@ -271,7 +292,7 @@ describe('build-openapi.ts end to end', () => {
     // OpenAPI 3.1 makes it optional, and an empty object would assert "this API
     // serves nothing" — false — where an absent key asserts nothing about
     // routes, which is the only claim this artifact is entitled to make.
-    const doc = readArtifact(runGenerator());
+    const doc = readArtifact(shipped());
     expect(doc.paths, 'the static artifact must not describe routes').toBeUndefined();
     // The three tags described exactly the removed sections; nothing carries
     // them, and the served document produces its own tag list with its routes.
@@ -295,7 +316,7 @@ describe('build-openapi.ts end to end', () => {
     // document, not a husk. These five keys are what `rest`'s serve-time
     // pipeline reads out of the artifact (`rest-server.ts`), so a later
     // "cleanup" that drops one of them changes the SERVED document.
-    const doc = readArtifact(runGenerator());
+    const doc = readArtifact(shipped());
     expect(Object.keys(doc).sort()).toEqual(['components', 'info', 'openapi', 'security', 'servers']);
     expect(doc.openapi).toBe('3.1.0');
     expect(doc.info.title).toBe('ObjectStack REST API');
@@ -335,12 +356,7 @@ describe('build-openapi.ts end to end', () => {
   it('goes RED when a component $ref points at a schema that does not exist', () => {
     // A component referencing a sibling that was renamed — the shape the ref
     // gate now guards, since nothing else in the document carries a `$ref`.
-    const { status, output } = runGenerator((src) =>
-      src.replace(
-        '  return schemas;',
-        "  return { ...schemas, Broken: { $ref: '#/components/schemas/ApiErrorTypo' } };",
-      ),
-    );
+    const { status, output } = danglingComponentRef();
     expect(status).not.toBe(0);
     expect(output).toMatch(/unresolvable \$ref/);
     expect(output).toContain('#/components/schemas/ApiErrorTypo');
@@ -368,12 +384,7 @@ describe('build-openapi.ts end to end', () => {
   });
 
   it('refuses to WRITE the artifact when the document is inconsistent', () => {
-    const run = runGenerator((src) =>
-      src.replace(
-        '  return schemas;',
-        "  return { ...schemas, Broken: { $ref: '#/components/schemas/ApiErrorTypo' } };",
-      ),
-    );
+    const run = danglingComponentRef();
     expect(run.status).not.toBe(0);
     // A non-zero status and a missing artifact are BOTH satisfied by a subprocess
     // that never started, so on their own they cannot tell "the gate refused the

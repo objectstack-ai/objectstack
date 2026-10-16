@@ -46,9 +46,10 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // `config.<key>` and REPLACING the client's hand-written
             // connectorConfig form (with its connector/action pickers). So the
             // schema steered online authoring to keys the executor never
-            // reads, and the node refused to dispatch. Stored flows that
-            // carry the mis-taught shape are healed at load by the ADR-0087 D2
-            // conversion 'flow-node-connector-config-lift'.
+            // reads, and the node refused to dispatch. Since 18 the flow parse
+            // refuses those loose keys at authoring, and stored flows that
+            // carry the mis-taught shape are healed at rehydration by the
+            // retired ADR-0087 D2 conversion 'flow-node-connector-config-lift'.
         }),
         async execute(node, variables, context) {
             const cfg = node.connectorConfig;

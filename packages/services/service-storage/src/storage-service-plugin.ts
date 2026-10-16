@@ -475,8 +475,18 @@ export class StorageServicePlugin implements Plugin {
         // Parent-derived READ visibility (#2970 item 1) — list/find/count of
         // sys_attachment only returns rows whose parent record the caller can
         // read. Middleware (not a hook) so list `total` is filtered too.
+        // [ADR-0139 D4, D5] The gate writes a `ReadableIds` leaf per parent
+        // object only when the security service answers `canReadObject`;
+        // resolved on every read (the security plugin may start after this
+        // one), and without it every read takes the bounded probe.
         if (typeof (engine as any).registerMiddleware === 'function') {
-          installAttachmentReadVisibility(engine as any, ctx.logger);
+          installAttachmentReadVisibility(engine as any, ctx.logger, () => {
+            try {
+              return ctx.getService<ISecurityService>('security');
+            } catch {
+              return undefined;
+            }
+          });
         }
         // Field-reference ownership (ADR-0104 D3 wave 2) — keeps
         // sys_file.ref_object/ref_id/ref_field in step with what records hold,

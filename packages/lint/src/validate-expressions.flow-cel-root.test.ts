@@ -209,8 +209,8 @@ describe('controls — one per binding kind the run has', () => {
 describe('the door stands down where the run can bind a name it cannot see', () => {
   it.each<[string, AnyRec]>([
     ['a `script` (its function gets the live variable map)', { id: 'fn', type: 'script', config: { function: 'enrich' } }],
-    ['a `connector_action` (its handler gets the live variable map)', { id: 'push', type: 'connector_action', config: { connectorId: 'slack', actionId: 'post' } }],
-    ['a `wait` (a resume folds the caller\'s bag)', { id: 'hold', type: 'wait', config: { eventType: 'signal', signalName: 'go' } }],
+    ['a `connector_action` (its handler gets the live variable map)', { id: 'push', type: 'connector_action', connectorConfig: { connectorId: 'slack', actionId: 'post' } }],
+    ['a `wait` (a resume folds the caller\'s bag)', { id: 'hold', type: 'wait', waitEventConfig: { eventType: 'signal', signalName: 'go' } }],
     ['a `subflow` (a resume folds the caller\'s bag)', { id: 'child', type: 'subflow', config: { flowName: 'other' } }],
     ['a `map` (a resume folds the caller\'s bag)', { id: 'each', type: 'map', config: { collection: { dialect: 'cel', source: 'rows' }, flowName: 'other' } }],
     ['a plugin node type', { id: 'ai', type: 'ai_classify', config: {} }],

@@ -140,6 +140,11 @@ interface CensusEntry {
  * (`security-routes.ts`) build no `query:` literal either — the explain doors
  * hand the security service a parsed explain request, and the suggestion list
  * a `status` / `packageId` pair read off `req.query`, never a `query:` slot.
+ *
+ * [#23050 slice 7] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0: the discovery and
+ * OpenAPI bodies (`discovery-routes.ts`) build no `query:` literal either —
+ * they read the protocol's discovery document and its `getMetaItems` listings
+ * by `type`, never through a `query:` slot.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 1,
@@ -149,6 +154,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'sharing-routes.ts': 0,
     'analytics-routes.ts': 0,
     'security-routes.ts': 0,
+    'discovery-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -339,7 +345,8 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // widening unnoticed. [#23050 slice 4] Length 4 → 5, the sum unchanged.
         // [#23050 slice 5] Length 5 → 6, the sum unchanged.
         // [#23050 slice 6] Length 6 → 7, the sum unchanged.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(7);
+        // [#23050 slice 7] Length 7 → 8, the sum unchanged.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(8);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

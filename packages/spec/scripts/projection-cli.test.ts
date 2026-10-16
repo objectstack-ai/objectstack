@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: the last block spawns each of the two real projection generators (build-spec-changes.ts, build-upgrade-guide.ts) once per mode it pins (twice for the determinism pin), and the rest drive the runner in-process; slowest CI reading 11.6 s (hourly run 38798542648) x 1.25, rounded up
 //
 // Pins the command-line contract of the two ADR-0087 D4 projections
 // (`lib/projection-cli.ts`), which since the #22449 B′ ruling are generated at

@@ -70,9 +70,26 @@ describe('deriveRecordFlowSurface — viewing a record may route, a create or ed
     });
   });
 
-  it('task flows never route: heavy → full-screen modal overlay', () => {
+  it('task flows never route: heavy on desktop → a bounded modal overlay (size auto), not full-screen', () => {
     for (const flow of TASK_FLOWS) {
       expect(deriveRecordFlowSurface(heavy, flow)).toEqual({
+        container: 'overlay', surface: 'modal', size: 'auto',
+      });
+      expect(deriveRecordFlowSurface(heavy, flow, { viewport: 'desktop' })).toEqual({
+        container: 'overlay', surface: 'modal', size: 'auto',
+      });
+    }
+  });
+
+  it('a heavy form with an embedded line-items table takes the same bounded modal on desktop (no subtable split)', () => {
+    const withLineItems = objWithFields(RECORD_SURFACE_PAGE_THRESHOLD, {
+      line_items: { type: 'repeater', label: 'Line items', fields: { sku: { type: 'text' } } },
+    });
+    for (const flow of TASK_FLOWS) {
+      expect(deriveRecordFlowSurface(withLineItems, flow)).toEqual({
+        container: 'overlay', surface: 'modal', size: 'auto',
+      });
+      expect(deriveRecordFlowSurface(withLineItems, flow, { viewport: 'mobile' })).toEqual({
         container: 'overlay', surface: 'modal', size: 'full',
       });
     }
@@ -86,12 +103,15 @@ describe('deriveRecordFlowSurface — viewing a record may route, a create or ed
     }
   });
 
-  it('mobile: view routes to a page; task flows become a full-screen modal', () => {
+  it('mobile: view routes to a page; task flows, light or heavy, become a full-screen modal', () => {
     expect(deriveRecordFlowSurface(light, 'view', { viewport: 'mobile' })).toEqual({
       container: 'route', surface: 'page', size: 'auto',
     });
     for (const flow of TASK_FLOWS) {
       expect(deriveRecordFlowSurface(light, flow, { viewport: 'mobile' })).toEqual({
+        container: 'overlay', surface: 'modal', size: 'full',
+      });
+      expect(deriveRecordFlowSurface(heavy, flow, { viewport: 'mobile' })).toEqual({
         container: 'overlay', surface: 'modal', size: 'full',
       });
     }
@@ -100,14 +120,16 @@ describe('deriveRecordFlowSurface — viewing a record may route, a create or ed
   it('child-* flows size to the def they are given (the child), independent of any parent', () => {
     // A thin child stays a drawer even though its parent (not passed) is heavy.
     expect(deriveRecordFlowSurface(objWithFields(3), 'child-create').surface).toBe('drawer');
-    // A fat child gets the full-screen modal.
+    // A fat child gets the bounded modal on desktop.
     expect(deriveRecordFlowSurface(objWithFields(40), 'child-edit')).toEqual({
-      container: 'overlay', surface: 'modal', size: 'full',
+      container: 'overlay', surface: 'modal', size: 'auto',
     });
   });
 
   it('honours pageThreshold and tolerates bare/malformed input', () => {
-    expect(deriveRecordFlowSurface(objWithFields(5), 'create', { pageThreshold: 4 }).size).toBe('full');
+    expect(deriveRecordFlowSurface(objWithFields(5), 'create', { pageThreshold: 4 })).toEqual({
+      container: 'overlay', surface: 'modal', size: 'auto',
+    });
     expect(deriveRecordFlowSurface(null, 'create')).toEqual({
       container: 'overlay', surface: 'drawer', size: 'auto',
     });

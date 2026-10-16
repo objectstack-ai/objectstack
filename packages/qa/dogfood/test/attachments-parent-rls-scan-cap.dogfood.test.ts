@@ -1,37 +1,37 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// attachments-storage.read-inherits-parent-rls — clause C3, the 2000-row
-// pre-scan cap.
+// attachments-storage.read-inherits-parent-rls — clause C3, the broad read
+// past the old 2,000-row pre-scan window.
 //
-// The read-visibility middleware pre-scans the candidate (parent_object,
-// parent_id) pairs a query would touch, bounded at READ_SCAN_LIMIT = 2000.
-// Past that bound the filter is built from a TRUNCATED candidate set, and the
-// clause is about which way the truncation falls: rows outside the scan window
-// are EXCLUDED (the caller may lose rows they could see) rather than admitted
-// unfiltered (the caller gains rows they may not). The cap also logs, because a
-// silent truncation is indistinguishable from a leak — the item's own wording:
-// "silence plus leaked rows is the failure".
+// [ADR-0139 E7] The read-visibility middleware used to pre-scan the candidate
+// (parent_object, parent_id) pairs a query would touch, bounded at 2,000 rows,
+// and fail CLOSED past that bound: the un-scanned rows were excluded, a warning
+// said so, and the list's `total` agreed with the short answer. It now writes
+// one `ReadableIds` leaf per parent object and pre-scans nothing for an
+// ordinary parent: the engine composes the leaf from the security service's
+// `canReadObject` and `getReadFilter`, and the driver evaluates it as one
+// subquery. So the clause this file pins is now the OTHER side of the bound:
+// a broad read past 2,000 candidates serves EVERY row the member may read,
+// its `total` is true, no truncation is announced, and the security direction
+// holds exactly as before — no invisible-parent row and no dangling-parent row.
+// (The bounded probe survives for ADR-0139 D5's three classes only, which this
+// fixture's parents are not; those are pinned in service-storage's
+// `attachment-read-leaf.integration.test.ts`.)
 //
 // ## Why the seed is shaped the way it is
 //
-// The pre-scan takes 2000 rows in whatever order the driver returns them, with
-// no ORDER BY of its own — so which rows land inside the window is NOT a
-// property this test may assume. A first attempt seeded the probe row last and
-// asserted it fell outside; measured, it fell INSIDE (the control caught it),
-// so the driver is not returning insertion order here.
-//
-// The seed therefore puts visible rows at BOTH ENDS of the insertion sequence
-// with the filler bulk between them. Any ordering that takes a contiguous run
-// from either end leaves one of the two groups outside the window, so some
-// visible row is excluded either way — and the test then picks an actually
-// excluded row at RUNTIME rather than predicting which one it will be. The
-// control asserts that premise (window full, at least one visible parent
-// unscanned) instead of trusting it.
+// The old pre-scan took 2,000 rows in whatever order the driver returned them,
+// so the seed puts visible rows at BOTH ENDS of the insertion sequence with the
+// filler bulk between them: any contiguous window from either end leaves one
+// group outside it. The control asserts that premise (a 2,000-row window
+// really does leave some visible row unscanned), so this pin cannot pass on a
+// fixture the old bound would have served whole.
 //
 // Volume goes in through bulk system inserts: the clause is about the READ
 // path, and 2000 real presigned uploads would pay for nothing it tests. The
 // filler rows share ONE committed sys_file (ContentDocumentLink semantics — a
-// file legitimately carries many join rows).
+// file legitimately carries many join rows) and name parent ids that do not
+// exist, which is what a hard-deleted parent record leaves behind.
 //
 // @proof: attachments-parent-rls-scan-cap
 
@@ -47,9 +47,9 @@ import {
 
 const SYS = { isSystem: true } as const;
 
-/** READ_SCAN_LIMIT in attachment-access-hooks.ts. Mirrored, not imported: the
- *  test asserts the SHIPPED bound, so a silent change to it must surface here
- *  as a failure rather than be followed automatically. */
+/** The old pre-scan window (READ_SCAN_LIMIT in attachment-access-hooks.ts, now
+ *  the bounded probe's, for ADR-0139 D5's classes only). Mirrored, not
+ *  imported: the fixture must stay past the bound the gate shipped with. */
 const READ_SCAN_LIMIT = 2_000;
 
 /** Visible attachments seeded BEFORE the filler bulk, and again AFTER it. */
@@ -74,7 +74,7 @@ function captureLog() {
   };
 }
 
-describe('sys_attachment read visibility fails CLOSED past the pre-scan cap (#9483)', () => {
+describe('[ADR-0139 E7] a broad sys_attachment read past the old pre-scan window is served whole', () => {
   let harness: AttachmentsHarness;
   let stack: VerifyStack;
   let ql: any;
@@ -167,31 +167,27 @@ describe('sys_attachment read visibility fails CLOSED past the pre-scan cap (#94
     await stopAttachmentsHarness(harness);
   });
 
-  it('control: the window is full and some visible parent really is outside it', async () => {
-    // The premise, asserted. An unreached branch reads exactly like a satisfied
-    // one, so if the seed ever stopped crossing the bound this must fail loudly
-    // rather than let the clause pass on a code path it never entered.
+  it('control: the old window would be full and some visible row really is outside it', async () => {
+    // The premise, asserted. A fixture the old 2,000-row window would have
+    // served whole cannot tell the leaf from the bound, so if the seed ever
+    // stopped crossing it this must fail loudly.
     const total = await ql.count('sys_attachment', { context: { ...SYS } });
-    expect(total, 'candidate rows must exceed READ_SCAN_LIMIT').toBeGreaterThan(READ_SCAN_LIMIT);
+    expect(total, 'candidate rows must exceed the old window').toBeGreaterThan(READ_SCAN_LIMIT);
     expect(visibleRows.size).toBe(VISIBLE_PER_GROUP * 2);
 
-    const scanned = await ql.find('sys_attachment', {
+    const window = await ql.find('sys_attachment', {
       where: {},
       fields: ['id'],
       limit: READ_SCAN_LIMIT,
       context: { ...SYS },
     });
-    expect(scanned.length, 'the pre-scan window is exactly the cap').toBe(READ_SCAN_LIMIT);
-
-    const scannedIds = new Set(scanned.map((r: any) => String(r.id)));
-    const unscannedVisible = [...visibleRows.keys()].filter((id) => !scannedIds.has(id));
-    expect(
-      unscannedVisible.length,
-      'at least one visible row must fall outside the window, or the clause is unreachable',
-    ).toBeGreaterThan(0);
+    expect(window.length, 'a 2,000-row window is full').toBe(READ_SCAN_LIMIT);
+    const inWindow = new Set(window.map((r: any) => String(r.id)));
+    const outside = [...visibleRows.keys()].filter((id) => !inWindow.has(id));
+    expect(outside.length, 'at least one visible row falls outside a 2,000-row window').toBeGreaterThan(0);
   });
 
-  it('C3 — the capped broad read warns AND fails closed: visible rows are dropped, the hidden one never appears', async () => {
+  it('C3 — the member is served every visible row, with a true total, and nothing is announced as truncated', async () => {
     const log = captureLog();
     let body: any;
     try {
@@ -202,73 +198,33 @@ describe('sys_attachment read visibility fails CLOSED past the pre-scan cap (#94
       log.restore();
     }
 
-    // 1. The truncation is LOUD. This is the clause's own oracle: silence plus
-    //    leaked rows is the failure, so the warning is what makes a truncated
-    //    answer distinguishable from a complete one.
-    const warned = log.matching('[storage] attachment read visibility');
-    expect(warned.length, 'the cap must announce itself').toBeGreaterThan(0);
-    expect(
-      warned.some((l) => l.includes(`${READ_SCAN_LIMIT}-row cap`) && l.includes('fail-closed')),
-      'the warning names the cap and the direction it falls',
-    ).toBe(true);
-
-    // 2. It falls CLOSED: rows the member could otherwise see are excluded,
-    //    rather than the un-scanned remainder being admitted unfiltered.
+    // 1. Every row the member may read, past the old window, on one page.
     const returned = new Set(body.records.map((r: any) => String(r.id)));
-    const returnedVisible = [...visibleRows.keys()].filter((id) => returned.has(id));
-    expect(
-      returnedVisible.length,
-      'a truncated scan must return FEWER visible rows than exist, not more',
-    ).toBeLessThan(visibleRows.size);
+    const missing = [...visibleRows.keys()].filter((id) => !returned.has(id));
+    expect(missing, 'no visible row is dropped').toEqual([]);
+    expect(body.records.length, 'and nothing else is served').toBe(visibleRows.size);
 
-    // 3. And the security direction, which must hold under truncation too.
-    expect(returned.has(hiddenAttachmentId), 'an invisible parent’s row must never appear').toBe(
-      false,
-    );
-    expect(
-      body.records.every((r: any) => r.parent_object !== 'att_secret'),
-      'no att_secret row under any id',
-    ).toBe(true);
+    // 2. The total is the engine's count over the same WHERE, and it agrees.
+    expect(body.total, 'total equals the rows served').toBe(visibleRows.size);
 
-    // 4. Every row that DID come back is one the member may genuinely see —
-    //    truncation must not admit a dangling-parent row either.
-    expect(
-      body.records.every((r: any) => visibleRows.has(String(r.id))),
-      'no row with an unresolvable parent is admitted by the truncated filter',
-    ).toBe(true);
+    // 3. No truncation: the bounded probe never ran for this parent.
+    expect(log.matching('-row cap'), 'no pre-scan cap is announced').toEqual([]);
   });
 
-  it('the dropped rows are genuinely visible: a scoped read returns one the broad read omitted', async () => {
-    // The contrast that makes assertion 2 above mean "excluded by the cap"
-    // rather than "invisible anyway". Without it, a surface that hid these rows
-    // from this member for some entirely different reason would satisfy the
-    // fail-closed assertion while proving nothing about the cap.
-    const broad = await stack.apiAs(memberTok, 'GET', '/data/sys_attachment?$top=200');
-    const records = ((await broad.json()) as any).records as any[];
-
-    // The page must NOT be full, or "absent from the page" means paged out
-    // rather than filtered out and the conclusion below does not follow. This
-    // guard is not decoration: the fail-open ablation of the cap was caught by
-    // it and by nothing else — with the filter removed the page fills with
-    // unfiltered rows, every visible row falls off the end, and the test would
-    // otherwise have gone green while the surface leaked the whole table.
-    expect(records.length, 'the page is not full, so absence means excluded').toBeLessThan(200);
-
-    const returned = new Set(records.map((r: any) => String(r.id)));
-    const dropped = [...visibleRows.entries()].find(([id]) => !returned.has(id));
-    expect(dropped, 'the broad read dropped at least one visible row').toBeTruthy();
-
-    const [droppedId, parentId] = dropped as [string, string];
-    const scoped = await stack.apiAs(
-      memberTok,
-      'GET',
-      `/data/sys_attachment?$top=10&parent_object=att_case&parent_id=${parentId}`,
-    );
-    expect(scoped.status).toBe(200);
-    const rows = ((await scoped.json()) as any).records;
+  it('the security direction holds past the old window: no invisible-parent row, no dangling-parent row', async () => {
+    const res = await stack.apiAs(memberTok, 'GET', '/data/sys_attachment?$top=200');
+    expect(res.status).toBe(200);
+    const records = ((await res.json()) as any).records as any[];
+    expect(records.some((r) => String(r.id) === hiddenAttachmentId), 'an invisible parent’s row never appears').toBe(false);
+    expect(records.filter((r) => r.parent_object === 'att_secret'), 'no att_secret row under any id').toEqual([]);
     expect(
-      rows.some((r: any) => String(r.id) === droppedId),
-      'the same row, reachable when the read does not hit the cap',
-    ).toBe(true);
+      records.filter((r) => String(r.parent_id).startsWith('cap-ghost-')),
+      'a row whose parent record does not exist is never served',
+    ).toEqual([]);
+
+    // The paired side: the record's owner is served the hidden row on the same read.
+    const asAdmin = await stack.apiAs(adminTok, 'GET', '/data/sys_attachment?$top=200');
+    const adminRecords = ((await asAdmin.json()) as any).records as any[];
+    expect(adminRecords.some((r) => String(r.id) === hiddenAttachmentId), 'the owner reads it').toBe(true);
   });
 });

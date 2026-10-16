@@ -26,6 +26,9 @@ import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
+// [#23543 F3] The loose `config` keys of the two sibling-block node types — one
+// table, shared with the two D2 lifts that still run at rehydration.
+import { siblingBlockLooseConfigRefusals } from './flow-sibling-block-loose-keys';
 import { EndConfigSchema } from './builtin-node-config.zod';
 // [#22572] The `$` names are the flow engine's at every binding door — the one
 // rule, composed into a declared variable's `name` and judging an `assignment`
@@ -455,7 +458,9 @@ const CONNECTOR_DISPATCH_KEYS = ['connectorId', 'actionId'] as const;
  *
  *  - **the block absent** — `{ type: 'connector_action' }`, the shape of a node
  *    authored without its configuration, or with the keys left under `config`
- *    where the load-time conversion cannot complete the pair;
+ *    (since 18 each such key is refused on its own as well,
+ *    `siblingBlockLooseConfigRefusals`; a stored row's lift completes the pair
+ *    when it can);
  *  - **an id present and blank** — `connectorConfig: { connectorId: '',
  *    actionId: '' }` is the Studio designer's seed for a freshly added node, so
  *    a node added and saved before it is configured is this shape.
@@ -1578,6 +1583,19 @@ export const FlowSchema = lazySchema(() => strictObject(
   for (const graph of collectFlowGraphs(flow)) {
     graph.nodes.forEach((node, index) => {
       for (const refusal of connectorActionConfigRefusals(node)) {
+        ctx.addIssue({ code: 'custom', path: [...graph.path, 'nodes', index, ...refusal.path], message: refusal.message });
+      }
+    });
+  }
+
+  // [#23543 F3] A `wait` / `connector_action` node's settings live in its
+  // sibling block only, and the loader no longer lifts the named loose
+  // `config` keys into it (both D2 lifts left the load path at 18). Each such
+  // key is refused where it is written, naming the block key it belongs on —
+  // in this walk, like the rule above, so a region-body node is reached too.
+  for (const graph of collectFlowGraphs(flow)) {
+    graph.nodes.forEach((node, index) => {
+      for (const refusal of siblingBlockLooseConfigRefusals(node)) {
         ctx.addIssue({ code: 'custom', path: [...graph.path, 'nodes', index, ...refusal.path], message: refusal.message });
       }
     });
