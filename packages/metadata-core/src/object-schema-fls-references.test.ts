@@ -708,9 +708,29 @@ describe('[ADR-0106] the shared contract table, driven through the bare projecti
     }
 });
 
-describe('the published contract fixture is an object the spec accepts', () => {
-    it('`FLS_CONTRACT_OBJECT` parses through `ObjectSchema` (its stage field declares every option\'s `kind`, #23809)', () => {
-        const parsed = ObjectSchema.safeParse(FLS_CONTRACT_OBJECT);
-        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+describe('the published contract fixture meets the stage-field rule', () => {
+    // [#23809] `ObjectSchema` requires every option of the `stageField` field to
+    // declare `kind`. The fixture is not a whole spec-valid object (its `script`
+    // actions carry no `body` / `target` on purpose — it exercises the mask's
+    // reference positions, not the action contract), so this asserts the one
+    // rule that names its stage field: no issue at `stageField` or under
+    // `fields.salary_grade.options`. The positive control strips one `kind` and
+    // must raise exactly there.
+    const stageIssues = (doc: unknown) => {
+        const parsed = ObjectSchema.safeParse(doc);
+        const issues = parsed.success ? [] : parsed.error.issues;
+        return issues
+            .map((i) => i.path.join('.'))
+            .filter((p) => p === 'stageField' || p.startsWith('fields.salary_grade.options'));
+    };
+
+    it('`FLS_CONTRACT_OBJECT` raises no stage-field issue: both `salary_grade` options declare `kind`', () => {
+        expect(stageIssues(FLS_CONTRACT_OBJECT)).toEqual([]);
+    });
+
+    it('positive control: the same fixture with one option\'s `kind` removed is refused at that option', () => {
+        const copy = JSON.parse(JSON.stringify(FLS_CONTRACT_OBJECT));
+        delete copy.fields.salary_grade.options[1].kind;
+        expect(stageIssues(copy)).toEqual(['fields.salary_grade.options.1.kind']);
     });
 });
