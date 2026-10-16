@@ -268,6 +268,9 @@ const planFooter = (lines: string) =>
 const heldBackLines = (lines: string) =>
   lines.split('\n').filter((l) => /will be SKIPPED|re-run with --allow-destructive cannot/.test(l));
 
+/** [#23925] The apply's held-back lines after it ran. */
+const postApplySkippedLines = (lines: string) => lines.split('\n').filter((l) => l.startsWith('  ⚠ Skipped '));
+
 beforeAll(() => {
   for (const key of OVERRIDING_ENV) {
     savedEnv[key] = process.env[key];
@@ -328,6 +331,7 @@ describe('CONTROL: the same apply on a local SQLite file applies all three, as i
     );
     expect(apply.lines).not.toContain('cannot apply it on this database');
     expect(heldBackLines(apply.lines)).toEqual(['  ⚠ 2 destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).']);
+    expect(postApplySkippedLines(apply.lines)).toEqual(['  ⚠ Skipped 2 destructive change(s) (re-run with --allow-destructive to include them).']);
   }, CASE_TIMEOUT_MS);
 
   it('apply --allow-destructive on a file: exit 0, every entry applied, nothing skipped', async () => {
@@ -423,6 +427,11 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
     ]);
     // Unchanged after the prompt: the relax the driver could not apply is still named.
     expect(apply.lines).toContain(`${TABLE}.memo — relax_not_null`);
+    // The post-apply held-back line splits the same way.
+    expect(postApplySkippedLines(apply.lines)).toEqual([
+      '  ⚠ Skipped 1 destructive change(s) (re-run with --allow-destructive to include them).',
+      '  ⚠ Skipped 1 destructive change(s) that a re-run could not apply on this database either: they remain drift (each says why above).',
+    ]);
     expect(await remote(columnsOf)).toMatchObject({ code: false, memo: true, legacy_23848: false });
   }, CASE_TIMEOUT_MS);
 

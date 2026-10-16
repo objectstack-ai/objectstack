@@ -298,6 +298,8 @@ describe('apply\'s listing reads the driver\'s apply limit', () => {
     return all[at + 1]!;
   };
   const skippedLines = (lines: string) => lines.split('\n').filter((l) => /will be SKIPPED|re-run with --allow-destructive cannot/.test(l));
+  /** The held-back lines the apply prints after it ran. */
+  const postApplySkippedLines = (lines: string) => lines.split('\n').filter((l) => l.startsWith('  ⚠ Skipped '));
 
   it('without --allow-destructive: the limited entries name the limit; only the drop is offered a re-run, the tightening is named as drift no re-run applies', async () => {
     boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped', LIMITED).stack);
@@ -316,6 +318,11 @@ describe('apply\'s listing reads the driver\'s apply limit', () => {
     ]);
     // Unchanged after the prompt: the needs-confirm entry the driver could not apply is still named.
     expect(lines).toContain('t23925.memo — relax_not_null');
+    // The post-apply held-back line splits the same way.
+    expect(postApplySkippedLines(lines)).toEqual([
+      '  ⚠ Skipped 1 destructive change(s) (re-run with --allow-destructive to include them).',
+      '  ⚠ Skipped 1 destructive change(s) that a re-run could not apply on this database either: they remain drift (each says why above).',
+    ]);
   }, CASE_TIMEOUT_MS);
 
   it('with --allow-destructive: the listing names the limit, and the notApplied report, PARTIAL and exit 1 are unchanged', async () => {
@@ -347,6 +354,7 @@ describe('apply\'s listing reads the driver\'s apply limit', () => {
     expect(entryLine(lines, 'relax_not_null')).toBe(`        ${RELAX.message}`);
     expect(entryLine(lines, 'drop_column')).toBe(`        ${DROP.message}`);
     expect(skippedLines(lines)).toEqual(['  ⚠ 2 destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).']);
+    expect(postApplySkippedLines(lines)).toEqual(['  ⚠ Skipped 2 destructive change(s) (re-run with --allow-destructive to include them).']);
     expect(lines).not.toContain('cannot apply it on this database');
   }, CASE_TIMEOUT_MS);
 });
