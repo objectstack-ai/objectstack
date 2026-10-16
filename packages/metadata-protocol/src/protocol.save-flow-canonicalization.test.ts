@@ -3,8 +3,8 @@
 /**
  * #4542 — `saveMetaItem` canonicalizes flow bodies on write.
  *
- * The read path serves stored flows verbatim (the ADR-0078 conflict guard
- * needs the engine's executor registry), and `FlowNodeSchema.config` is an
+ * The read path serves stored flows verbatim (a flow canonicalizes at the
+ * automation engine), and `FlowNodeSchema.config` is an
  * open record — so before this fix a Studio round-trip (GET legacy dialect →
  * edit label → PUT it back) re-persisted the pre-protocol shape and the row
  * stayed `pending` in `os migrate meta --stored` forever. Every other type is
@@ -63,7 +63,7 @@ const flowBody = (config: Record<string, unknown>) => ({
 const canonicalizeStoredFlow = (_name: string, body: any, options: { includeRetired?: boolean } = {}) => {
     const node = body?.nodes?.[0];
     if (!node || !('filters' in (node.config ?? {}))) {
-        return { storable: body, notices: [], conflicts: [] };
+        return { storable: body, notices: [] };
     }
     if (options.includeRetired === false) {
         throw new Error('Unrecognized key(s) on this delete_record node config: `filters`');
@@ -79,7 +79,6 @@ const canonicalizeStoredFlow = (_name: string, body: any, options: { includeReti
             path: 'flows[0].nodes[0].config',
             message: 'filters → filter',
         }],
-        conflicts: [],
     };
 };
 
@@ -240,29 +239,6 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         expect(stored.row.checksum).toBe(hashSpec(stored.body));
     });
 
-    it('a refused rename fails the save loudly and persists NOTHING', async () => {
-        const conflicting = () => ({
-            storable: {},
-            notices: [],
-            conflicts: [{
-                conversionId: 'flow-node-type-open-namespace',
-                token: 'http_request',
-                path: 'flows[0].nodes[0].type',
-                message: 'a custom executor owns this node type here',
-            }],
-        });
-        const { protocol, rows } = makeProtocol(
-            new Map([['automation', { canonicalizeStoredFlow: conflicting }]]),
-        );
-
-        await expect(save(protocol, legacyBody())).rejects.toMatchObject({
-            code: 'FLOW_CONVERSION_CONFLICT',
-            status: 409,
-        });
-        await expect(save(protocol, legacyBody())).rejects.toThrow(/'http_request' at flows\[0\]\.nodes\[0\]\.type is a live name in this environment/);
-        expect(rows.size).toBe(0);
-    });
-
     it('a canonicalizer throw falls back to the raw save — today\'s gate stays the arbiter', async () => {
         // `canonicalizeStoredFlow` is stricter than the schema gate (cycle
         // detection, control-flow regions). A WIP draft that saves fine today
@@ -413,26 +389,6 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         await seedStoredFlow(engine, legacyBody());
 
         await save(protocol, legacyBody());
-
-        expect(fallbackWarnings()).toHaveLength(0);
-    });
-
-    it('the conflict path stays silent — the 409 IS the signal', async () => {
-        const conflicting = () => ({
-            storable: {},
-            notices: [],
-            conflicts: [{
-                conversionId: 'flow-node-type-open-namespace',
-                token: 'http_request',
-                path: 'flows[0].nodes[0].type',
-                message: 'a custom executor owns this name here.',
-            }],
-        });
-        const { protocol } = makeProtocol(
-            new Map([['automation', { canonicalizeStoredFlow: conflicting }]]),
-        );
-
-        await expect(save(protocol, legacyBody())).rejects.toMatchObject({ status: 409 });
 
         expect(fallbackWarnings()).toHaveLength(0);
     });

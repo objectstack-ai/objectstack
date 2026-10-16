@@ -58,7 +58,7 @@ describe('registerFlow canonicalizes stored flows (ADR-0087 D2 runtime seam)', (
     expect(warns.some((w) => w.includes('OS_METADATA_CONVERTED') || w.includes('→'))).toBe(false);
   });
 
-  it('rewrites every reserved callout name in a stored flow, with no conflict', async () => {
+  it('rewrites every reserved callout name in a stored flow, one notice per site', async () => {
     const warns: string[] = [];
     const engine = new AutomationEngine(collectingLogger(warns));
     engine.registerFlow('f', {
@@ -78,7 +78,7 @@ describe('registerFlow canonicalizes stored flows (ADR-0087 D2 runtime seam)', (
 
     const stored = await engine.getFlow('f');
     expect(stored?.nodes.filter((n) => n.id === 'n' || n.id === 'm').map((n) => n.type)).toEqual(['http', 'http']);
-    expect(warns.some((w) => w.includes('OS_METADATA_CONVERSION_CONFLICT'))).toBe(false);
+    expect(warns.filter((w) => w.includes('OS_METADATA_CONVERTED'))).toHaveLength(2);
   });
 });
 

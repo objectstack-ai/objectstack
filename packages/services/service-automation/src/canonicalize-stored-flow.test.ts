@@ -199,10 +199,9 @@ describe('canonicalizeStoredFlow — a site registerFlow refuses comes back as a
     it('a braced operand parses, is not rewritten, and is reported by node — and registerFlow refuses the same site', () => {
         const engine = new AutomationEngine(silentLogger);
         const flow = storedFlow('{record.id}');
-        const { storable, notices, conflicts, todos } = engine.canonicalizeStoredFlow('fd_refused_filter', flow);
+        const { storable, notices, todos } = engine.canonicalizeStoredFlow('fd_refused_filter', flow);
 
         expect(notices).toEqual([]);
-        expect(conflicts).toEqual([]);
         expect((storable as any).nodes[1].config.filter).toEqual({ id: '{record.id}' });
         expect(todos.map((t) => [t.conversionId, t.path])).toEqual([
             ['flow-value-slot-template-dialect-refused', 'flows[0].nodes[1].config.filter.id'],
@@ -357,7 +356,6 @@ describe('canonicalizeStoredFlow — every site registerFlow refuses after the p
         // What the save door, a duplication and the sync's held-flow comparison read.
         void result.parsed;
         void result.storable;
-        void result.conflicts;
         expect(checks).not.toHaveBeenCalled();
         expect(result.todos).toHaveLength(1);
         expect(result.todos).toBe(result.todos);
