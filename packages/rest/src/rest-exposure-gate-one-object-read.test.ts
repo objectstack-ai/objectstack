@@ -27,6 +27,10 @@
 //  3. FAULTS — a THROWING by-name read fails OPEN and logs, as #3545 requires;
 //     "no object" logs nothing.
 //  4. FALLBACK — a protocol with no by-name read is asked the list, as before.
+//  5. A DISABLED PACKAGE'S OBJECT — the one class whose answer moves: the list
+//     omits it, the by-name read serves it, so a DENIED operation now answers
+//     the exposure verdict instead of the data plane's 404
+//     `OBJECT_PACKAGE_DISABLED`; an ALLOWED one still gets that 404.
 //
 // ⛔ The count rows are the regression this file exists for: put the list read
 // back in `enforceApiAccess` and they go red while every answer row stays
@@ -71,6 +75,13 @@ const STORED = {
     enable: { apiMethods: ['get'] },
 };
 const UNKNOWN = 'no_such_object';
+/** Owned by a package the test DISABLES; whitelisted to reads. */
+const OFF = {
+    name: 'off_widget', label: 'Off Widget',
+    fields: { title: { name: 'title', type: 'text' } },
+    enable: { apiMethods: ['get', 'list'] },
+};
+const OFF_PACKAGE = 'pkg_off';
 
 const DATA_METHODS = ['findData', 'getData', 'createData', 'updateData', 'deleteData'] as const;
 
@@ -86,6 +97,7 @@ function createMockServer() {
 interface Host {
     rest: RestServer;
     protocol: any;
+    registry: SchemaRegistry;
     /** Object-list reads since the last `reset()`. */
     listReads: () => number;
     reset: () => void;
@@ -98,6 +110,8 @@ function host(opts: { environmentId?: string; withoutByName?: boolean } = {}): H
     registry.registerObject(clone(HIDDEN) as never, 'pkg_code', undefined, 'own');
     registry.registerObject(clone(OWNER) as never, 'pkg_owner', undefined, 'own');
     registry.registerObject(clone(EXTENSION) as never, 'pkg_extender', undefined, 'extend', 210);
+    registry.installPackage({ id: OFF_PACKAGE, name: OFF_PACKAGE, version: '1.0.0' } as never, 'code');
+    registry.registerObject(clone(OFF) as never, OFF_PACKAGE, undefined, 'own');
 
     const rows = [{
         id: 'row_stored',
@@ -139,12 +153,13 @@ function host(opts: { environmentId?: string; withoutByName?: boolean } = {}): H
     if (opts.withoutByName) protocol.getMetaItem = undefined;
 
     // The data calls: stubbed for every object this host declares, so a door
-    // the gate clears answers 200/201; the REAL call for an unknown object, so
-    // its answer is the data path's own (the registry gate's 404).
+    // the gate clears answers 200/201; the REAL call for an unknown object and
+    // for the disabled package's object, so their answers are the data path's
+    // own (the registry gate's 404s).
     for (const m of DATA_METHODS) {
         const real = protocol[m].bind(protocol);
         protocol[m] = vi.fn(async (req: any) => {
-            if (req?.object === UNKNOWN) return real(req);
+            if (req?.object === UNKNOWN || req?.object === OFF.name) return real(req);
             if (m === 'findData') return { object: req.object, records: [], total: 0 };
             if (m === 'deleteData') return { object: req.object, id: req.id, success: true };
             return { object: req.object, id: req.id ?? 'r1', record: { id: req.id ?? 'r1' } };
@@ -155,7 +170,7 @@ function host(opts: { environmentId?: string; withoutByName?: boolean } = {}): H
     (rest as unknown as { resolveExecCtx: () => Promise<unknown> }).resolveExecCtx =
         async () => ({ userId: 'test-user' });
     rest.registerRoutes();
-    return { rest, protocol, listReads: () => reads, reset: () => { reads = 0; } };
+    return { rest, protocol, registry, listReads: () => reads, reset: () => { reads = 0; } };
 }
 
 type Door = 'list' | 'get' | 'create' | 'update' | 'delete';
@@ -280,5 +295,30 @@ describe('[#24031] a protocol with no by-name read is asked the list, as before'
         expect(out.status).toBe(405);
         expect(errorCode(out.body)).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
         expect(h.listReads()).toBe(1);
+    });
+});
+
+// [#24031] An object whose package is DISABLED: the list read omits it (#7557)
+// while the by-name read still serves it, so the gate now judges it by its own
+// `enable`. A DENIED operation answers the exposure verdict — it answered the
+// data plane's 404 OBJECT_PACKAGE_DISABLED while the gate read the list — and an
+// ALLOWED one still reaches the data plane, which refuses it as before.
+describe('[#24031] an object of a disabled package', () => {
+    it('a DENIED operation answers the exposure verdict (405), and the data call is never reached', async () => {
+        const h = host();
+        h.registry.disablePackage(OFF_PACKAGE);
+        const out = await call(h, 'create', OFF.name);
+        expect(out.status, JSON.stringify(out.body)).toBe(405);
+        expect(errorCode(out.body)).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+        expect(h.protocol.createData).not.toHaveBeenCalled();
+    });
+
+    it('an ALLOWED operation still answers the data plane\'s 404 OBJECT_PACKAGE_DISABLED', async () => {
+        const h = host();
+        h.registry.disablePackage(OFF_PACKAGE);
+        const out = await call(h, 'list', OFF.name);
+        expect(h.protocol.findData).toHaveBeenCalledTimes(1);
+        expect(out.status, JSON.stringify(out.body)).toBe(404);
+        expect(errorCode(out.body)).toBe('OBJECT_PACKAGE_DISABLED');
     });
 });
