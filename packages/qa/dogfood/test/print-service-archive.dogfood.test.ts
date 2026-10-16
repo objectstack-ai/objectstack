@@ -246,8 +246,8 @@ describe('print service on a real showcase boot', () => {
       await real.probe();
       await real.printRecordToFile(request(ownInvoice), ctx);
       expect((duringRender as { user?: { id?: string } } | null)?.user?.id).toBe(ctx.userId);
-      const after = await (await asSession(seenCookie!)).json();
-      expect(after).toBeNull();
+      const after = await asSession(seenCookie!);
+      expect([after.status, ((await after.json()) as { error?: { code?: string } }).error?.code]).toEqual([401, 'UNAUTHENTICATED']);
     });
   });
 });
