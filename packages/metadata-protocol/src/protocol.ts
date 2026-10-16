@@ -10362,8 +10362,9 @@ export class ObjectStackProtocolImplementation implements
      * whole answer.
      *
      * Two reads deliberately do NOT: {@link migrateStoredMetadata}, which must
-     * see a legacy row to report it, and {@link revertCommit}'s commit read,
-     * which refuses a legacy commit by name; each reads the column itself.
+     * see a legacy row to report it, and the commit read of {@link revertCommit}
+     * and {@link rollbackToPackageCommit} ({@link readRevertableCommit}), which
+     * refuses a legacy commit by name; each reads the column itself.
      */
     private async findEnvironmentRows(table: string, query: { where: Record<string, unknown>; context?: unknown; [key: string]: unknown }): Promise<any[]> {
         const rows = (await this.engine.find(table, query as never)) as any[] | null | undefined;
@@ -28414,6 +28415,43 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * The commit {@link revertCommit} reverts and {@link rollbackToPackageCommit}
+     * rolls back to, read by its id: `COMMIT_NOT_FOUND` (404) when there is
+     * none.
+     *
+     * [ADR-0131 D6] A commit recorded in a legacy organization's layer
+     * describes organization-scoped rows; reverting it, or rolling back to it,
+     * would write them. [ADR-0131 D7] The commit ledger declares no
+     * organization column, so the engine row never carries one: the commit's
+     * organization is read off the physical column, on a database the
+     * ceremony has not migrated, and such a commit is refused by name
+     * (`NOT_OVERRIDABLE`, 403). [#23609] Both doors read it here: the rollback
+     * used to read it through {@link findEnvironmentRow}, which leaves the
+     * legacy commit out, and answered `COMMIT_NOT_FOUND` for a commit that is
+     * there.
+     */
+    private async readRevertableCommit(commitId: string): Promise<any> {
+        // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
+        // platform store the door already authorized; the protocol scopes the
+        // `where` by organization itself. Principal-less, the engine refuses it.
+        const row = (await this.engine.findOne('sys_metadata_commit', { where: { id: commitId }, context: { isSystem: true } })) as any;
+        if (!row) {
+            const err: any = new Error(`No commit '${commitId}'.`);
+            err.code = 'COMMIT_NOT_FOUND';
+            err.status = 404;
+            throw err;
+        }
+        const legacyCommits = await this.legacyOrganizationRowsOf('sys_metadata_commit');
+        const legacy = ObjectStackProtocolImplementation.organizationScopedWriteRefusal(
+            `Commit '${commitId}'`,
+            legacyCommits.get(String(row.id)) ?? null,
+            'It records a change to that organization\'s legacy layer, which no write reaches any more.',
+        );
+        if (legacy) throw legacy;
+        return row;
+    }
+
+    /**
      * Revert a single commit (ADR-0067): undo exactly the artifacts it touched.
      * A created-by-this-commit artifact is soft-removed (metadata row deleted;
      * the data table is NOT dropped — recoverable, per ADR-0067 §5); a modified
@@ -28459,35 +28497,7 @@ export class ObjectStackProtocolImplementation implements
             `Commit '${request.commitId}'`, request,
         );
         await this.ensureOverlayIndex();
-        const where: Record<string, unknown> = { id: request.commitId };
-        // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
-        // platform store the door already authorized; the protocol scopes the
-        // `where` by organization itself. Principal-less, the engine refuses it.
-        const row = (await this.engine.findOne('sys_metadata_commit', { where, context: { isSystem: true } })) as any;
-        if (!row) {
-            const err: any = new Error(`No commit '${request.commitId}'.`);
-            err.code = 'COMMIT_NOT_FOUND';
-            err.status = 404;
-            throw err;
-        }
-        // [ADR-0131 D6] A commit recorded in a legacy organization's layer
-        // describes organization-scoped rows; reverting it would write them.
-        // [ADR-0131 D7] The commit ledger declares no organization column, so
-        // the engine row never carries one: the commit's organization is read
-        // off the physical column, on a database the ceremony has not migrated.
-        {
-            const legacyCommits = await readLegacyOrganizationRows(
-                (this.engine as { getDriverForObject?: (objectName: string) => unknown })
-                    .getDriverForObject?.('sys_metadata_commit'),
-                'sys_metadata_commit',
-            );
-            const legacy = ObjectStackProtocolImplementation.organizationScopedWriteRefusal(
-                `Commit '${request.commitId}'`,
-                legacyCommits.get(String(row.id)) ?? null,
-                'It records a change to that organization\'s legacy layer, which no write reaches any more.',
-            );
-            if (legacy) throw legacy;
-        }
+        const row = await this.readRevertableCommit(request.commitId);
         const items = this.parseCommitItems(row.items);
         // #4556 — threaded into repo.put/delete → `recorded_by`; NULL when the
         // revert carries no human actor.
@@ -28975,17 +28985,7 @@ export class ObjectStackProtocolImplementation implements
         ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
             `Commit '${request.commitId}'`, request,
         );
-        const where: Record<string, unknown> = { id: request.commitId };
-        // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
-        // platform store the door already authorized; the protocol scopes the
-        // `where` by organization itself. Principal-less, the engine refuses it.
-        const target = (await this.findEnvironmentRow('sys_metadata_commit', { where, context: { isSystem: true } })) as any;
-        if (!target) {
-            const err: any = new Error(`No commit '${request.commitId}'.`);
-            err.code = 'COMMIT_NOT_FOUND';
-            err.status = 404;
-            throw err;
-        }
+        const target = await this.readRevertableCommit(request.commitId);
         const all = await this.listCommits({ packageId: target.package_id });
         // listCommits is newest-first; revert every `apply` commit strictly newer
         // than the target (by created_at). Revert commits are skipped (their

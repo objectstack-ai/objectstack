@@ -15,6 +15,10 @@
  *    `list({ limit })`. Filtered after the cut, the page came back short, and
  *    the probe answered 409 "never been published" for a package whose first
  *    active row was an organization's.
+ * 2. `rollbackToPackageCommit` reads the commit it rolls back to as
+ *    `revertCommit` reads the commit it reverts: a legacy organization's
+ *    commit is refused by name (`NOT_OVERRIDABLE`), never answered
+ *    `COMMIT_NOT_FOUND` (404) for a commit that is there.
  *
  * The real-engine pins over a v17-shape SQLite file are in `@objectstack/cli`
  * (`meta-stored-legacy-organization.integration.test.ts`).
@@ -213,6 +217,39 @@ describe('[#23609] a read that pages leaves the legacy organization rows out bef
                 const names: string[] = [];
                 for await (const header of repo.list({ type: 'view', limit: 1 })) names.push(String(header.ref.name));
                 expect(names).toEqual(['grid']);
+            });
+        });
+    }
+});
+
+describe('[#23609] rollbackToPackageCommit refuses a legacy organization commit by name, as revertCommit does', () => {
+    for (const { shape, legacyShape } of SHAPES) {
+        describe(shape, () => {
+            const ledger = () => store([
+                commit('o_c', '2026-01-01T00:00:00.000Z', 'org_a'),
+                commit('c_env', '2026-01-02T00:00:00.000Z', null),
+            ], legacyShape);
+
+            it('the legacy commit: one answer from both doors', async () => {
+                const { protocol } = harness({ sys_metadata_commit: ledger() }, legacyShape);
+                const revert = await protocol.revertCommit({ commitId: 'o_c' }).then(() => null, (e: unknown) => e);
+                const rollback = await protocol.rollbackToPackageCommit({ commitId: 'o_c' }).then(() => null, (e: unknown) => e);
+                // On the control store the ceremony has carried it away: there is no such commit.
+                expect(revert).toMatchObject(legacyShape
+                    ? { code: 'NOT_OVERRIDABLE', status: 403 }
+                    : { code: 'COMMIT_NOT_FOUND', status: 404 });
+                expect(rollback).toMatchObject({
+                    code: (revert as { code?: unknown }).code,
+                    status: (revert as { status?: unknown }).status,
+                    message: (revert as Error).message,
+                });
+                if (legacyShape) expect((rollback as Error).message).toMatch(/^Commit 'o_c' cannot be written organization-scoped \(organization 'org_a'\)/);
+            });
+
+            it('an environment commit still rolls back', async () => {
+                const { protocol } = harness({ sys_metadata_commit: ledger() }, legacyShape);
+                await expect(protocol.rollbackToPackageCommit({ commitId: 'c_env' }))
+                    .resolves.toEqual({ success: true, revertedCommits: [], failed: [] });
             });
         });
     }
