@@ -28,7 +28,8 @@ export const SysMetadataCommitObject = ObjectSchema.create({
   icon: 'git-commit',
   isSystem: true,
   managedBy: 'engine-owned',
-  description: 'Package-scoped commit log grouping a turn’s metadata changes (ADR-0067).',
+  // ADR-0067 — the reference lives in the docblock above, not in the copy.
+  description: 'Package-scoped commit log grouping a turn’s metadata changes.',
 
   fields: {
     /**

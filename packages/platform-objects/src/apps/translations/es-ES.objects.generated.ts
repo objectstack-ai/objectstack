@@ -35,7 +35,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "Rol de plataforma",
-        help: "Valor de rol heredado de better-auth (admin, user, …). ObjectStack ya no lo escribe (ADR-0068 D2). Para conceder la condición de administrador de la plataforma, incluya el correo verificado del usuario en `OS_PLATFORM_OWNER_EMAIL`; bajo la postura de tenencia `single`, una asignación sin ámbito de `admin_full_access` en `sys_user_permission_set` también la concede."
+        help: "Valor de rol heredado de better-auth (admin, user, …). ObjectStack ya no lo escribe. Para conceder la condición de administrador de la plataforma, incluya el correo verificado del usuario en `OS_PLATFORM_OWNER_EMAIL`; bajo la postura de tenencia `single`, una asignación sin ámbito de `admin_full_access` en `sys_user_permission_set` también la concede."
       },
       banned: {
         label: "Bloqueado",
@@ -97,11 +97,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "Gerente",
-        help: "Gerente directo de este usuario. Forma la cadena de reporte que recorre el ámbito jerárquico `own_and_reports` (ADR-0057 / @objectstack/security-enterprise)."
+        help: "Gerente directo de este usuario. Forma la cadena de reporte que recorre el ámbito jerárquico `own_and_reports`."
       },
       primary_business_unit_id: {
         label: "Unidad de negocio principal",
-        help: "Unidad de negocio principal del usuario: una proyección desnormalizada de sys_business_unit_member.is_primary que mantiene plugin-sharing (anexo D12 de ADR-0057). Permite que una búsqueda de usuarios filtre candidatos por unidad de negocio sin recorrer la tabla de unión de membresías. No la edites directamente; establécela mediante la membresía a la unidad de negocio."
+        help: "Unidad de negocio principal del usuario: una proyección desnormalizada de sys_business_unit_member.is_primary que mantiene plugin-sharing. Permite que una búsqueda de usuarios filtre candidatos por unidad de negocio sin recorrer la tabla de unión de membresías. No la edites directamente; establécela mediante la membresía a la unidad de negocio."
       },
       source: {
         label: "Origen de la identidad",
@@ -537,7 +537,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "Organización principal",
-        help: "Organización principal a efectos de informes y agrupación. No concede NADA: la visibilidad entre organizaciones procede de la membresía, nunca de esta referencia (ADR-0105 D6)."
+        help: "Organización principal a efectos de informes y agrupación. No concede NADA: la visibilidad entre organizaciones procede de la membresía, nunca de esta referencia."
       },
       sort_order: {
         label: "Orden",
@@ -710,11 +710,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "Unidad de negocio de asignación",
-        help: "Unidad de negocio en la que se asigna a la persona invitada al aceptar (ADR-0105 D8). Debe estar dentro del subárbol delegado de quien emite la invitación."
+        help: "Unidad de negocio en la que se asigna a la persona invitada al aceptar. Debe estar dentro del subárbol delegado de quien emite la invitación."
       },
       positions: {
         label: "Puestos de asignación",
-        help: "Nombres de puestos asignados al aceptar (ADR-0105 D8). Los conjuntos de permisos de cada puesto deben estar en la lista de permitidos del adminScope de quien emite la invitación."
+        help: "Nombres de puestos asignados al aceptar. Los conjuntos de permisos de cada puesto deben estar en la lista de permitidos del adminScope de quien emite la invitación."
       }
     },
     _views: {
@@ -848,7 +848,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Unidad de negocio",
     pluralLabel: "Unidades de negocio",
-    description: "Nodo jerárquico de la estructura organizativa (departamento / división / unidad de negocio / oficina).",
+    description: "La estructura de su empresa (divisiones, departamentos, regiones y oficinas), usada para delimitar datos e informes.",
     fields: {
       name: {
         label: "Nombre"
@@ -1797,7 +1797,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "Dominio verificado",
-        help: "Si se ha probado la propiedad DNS del dominio de correo (ADR-0135 D6). Lo establece «Verificar dominio» tras resolverse el registro DNS TXT. Gestionado por better-auth: no editable directamente. Solo se aplica cuando la verificación de dominio está habilitada para el entorno."
+        help: "Si se ha probado la propiedad DNS del dominio de correo. Lo establece «Verificar dominio» tras resolverse el registro DNS TXT. Gestionado por better-auth: no editable directamente. Solo se aplica cuando la verificación de dominio está habilitada para el entorno."
       },
       oidc_config: {
         label: "Configuración OIDC",
@@ -2356,7 +2356,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "Notificación",
     pluralLabel: "Notificaciones",
-    description: "Eventos de notificación: una fila por cada emit() (entrada de la capa 2 de ADR-0030)",
+    description: "Todas las notificaciones que envió la plataforma, una fila por evento.",
     fields: {
       id: {
         label: "ID de notificación"
@@ -2984,7 +2984,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       environment_id: {
         label: "Entorno (obsoleto)",
-        help: "OBSOLETO. Las personalizaciones son filas del entorno (ADR-0131 D6); no hay columna de tenant."
+        help: "OBSOLETO. Las personalizaciones son filas del entorno; no hay columna de tenant."
       },
       version: {
         label: "Versión"
@@ -3090,7 +3090,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_audit: {
     label: "Auditoría de metadatos",
     pluralLabel: "Auditoría de metadatos",
-    description: "Registro de auditoría de solo adición de las decisiones de escritura de metadatos (ADR-0010).",
+    description: "Registro de auditoría de solo adición de las decisiones de escritura de metadatos.",
     fields: {
       id: {
         label: "ID"

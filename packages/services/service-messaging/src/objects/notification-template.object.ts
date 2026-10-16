@@ -27,7 +27,8 @@ export const NotificationTemplate = ObjectSchema.create({
     // CRUD, so no `userActions` block is needed — affordance is a declaration
     // only; permission sets remain the authz.
     managedBy: 'system-data',
-    description: 'Per (topic × channel × locale) render template for notifications.',
+    // Admin-facing copy; one row per (topic, channel, locale) — see the docblock.
+    description: 'The subject and body each notification topic sends, per channel and language.',
     titleFormat: '{topic} · {channel} · {locale}',
     highlightFields: ['topic', 'channel', 'locale', 'is_active'],
 
