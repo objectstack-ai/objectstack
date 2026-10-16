@@ -43,15 +43,9 @@ import { LocalCryptoProvider, type SettingsManifest } from '@objectstack/service
 // `.js` extension deliberate: this package resolves NodeNext, so an
 // extensionless relative import does not resolve under its typecheck.
 import { bootStack, type BootOptions } from './harness.js';
-import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
-
-// The boot's first load, paid during collection rather than in the first
-// boot's `beforeAll` (see `boot-warm-up.testkit.ts`): the same options as
-// that boot.
-await warmUpBoot({ multiTenant: false });
 
 /** Every variable that decides where a data key comes from, and the posture. */
 const KEY_ENV = [
