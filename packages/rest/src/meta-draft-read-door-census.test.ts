@@ -242,7 +242,14 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // and analytics doors); the data-action, batch and approval bodies read
         // no draft. [#23050 slice 4] Nor do the two record-sharing bodies
         // (`sharing-routes.ts`): 8 = 8 + 0 + 0 + 0 + 0, length 4 → 5.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(5);
+        // [#23050 slice 5] The analytics door's two switches (`body.previewDrafts`
+        // and `req.query?.preview === 'draft'`, admitted in one declaration)
+        // moved with its body to `analytics-routes.ts`. A key names its route,
+        // never its file, so no ledger row changed: 8 = 6 + 0 + 0 + 0 + 0 + 2,
+        // length 5 → 6. [#23050 slice 6] The two security bodies
+        // (`security-routes.ts`) read no draft: 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0,
+        // length 6 → 7.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(7);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });

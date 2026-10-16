@@ -344,6 +344,18 @@ const MODULES = {
     // this file for `sharing-routes.ts` carrying NO literal string `error` body
     // (every arm there computes its message), so this count does not move and
     // that module declares 0 below; the sum is unchanged (17 + 13 + 8 + 1 + 0 = 39).
+    //
+    // 17 → 17 (#23050 slice 5): the analytics dataset body left this file for
+    // `analytics-routes.ts` carrying NO literal string `error` body (its one
+    // `{ code, error }` arm sends the computed `outward`), so this count does
+    // not move and that module declares 0 below; the sum is unchanged
+    // (17 + 13 + 8 + 1 + 0 + 0 = 39).
+    //
+    // 17 → 17 (#23050 slice 6): the security-explain and suggested-binding
+    // bodies left this file for `security-routes.ts` carrying NO literal string
+    // `error` body (every arm there emits the nested `{ error: { code, message } }`
+    // through its family's one emitter), so this count does not move and that
+    // module declares 0 below; the sum is unchanged (17 + 13 + 8 + 1 + 0 + 0 + 0 = 39).
     stringError: 17,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
@@ -401,7 +413,19 @@ const MODULES = {
     // `handleError` (`VALIDATION_FAILED`, `PERMISSION_DENIED`, `RULE_NOT_FOUND`
     // and its 500 terminal) left with that body for `sharing-routes.ts`,
     // declared below; the sum is unchanged (18 + 15 + 8 + 9 + 4 = 54).
-    siblingCode: 18,
+    //
+    // 18 → 17 (#23050 slice 5): NOT progress — the same MOVE as `stringError`
+    // above. The analytics dataset door's one `{ code, error }` body (its
+    // undeclared-fault 500, `ANALYTICS_QUERY_FAILED`) left with that body for
+    // `analytics-routes.ts`, declared below; the sum is unchanged
+    // (17 + 15 + 8 + 9 + 4 + 1 = 54).
+    //
+    // 17 → 17 (#23050 slice 6): the security-explain and suggested-binding
+    // bodies left this file for `security-routes.ts` carrying NO `{ code, error }`
+    // body — the two arms #7981 and #8073 converted are the ones counted above
+    // as 77 → 73 — so this count does not move and that module declares 0 below;
+    // the sum is unchanged (17 + 15 + 8 + 9 + 4 + 1 + 0 = 54).
+    siblingCode: 17,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -509,6 +533,43 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 0,
     siblingCode: 4,
+  },
+
+  // [#23050 slice 5] `RestServer#registerAnalyticsEndpoints`' body — the
+  // analytics dataset preview/query door, `POST {basePath}/analytics/dataset/query`
+  // — moved out of `rest-server.ts` whole, on exactly slice 1's terms above: a
+  // MOVE, no wire answer changed, so it inherits `dialectOnly` and the two
+  // dialect facts, and no write-site count. Both counts were measured on the
+  // moved file and equal what left `rest-server.ts` in the same PR (stringError
+  // 17 → 17, siblingCode 18 → 17), so each sum is unchanged. Both only ever
+  // tick down. Discovered by the `*-routes.ts` convention and declared in the
+  // same PR that created the module, so the gap never exists.
+  'packages/rest/src/analytics-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 5 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 1,
+  },
+
+  // [#23050 slice 6] `RestServer#registerSecurityExplainEndpoints`' and
+  // `#registerSecurityEndpoints`' bodies — the access-explanation family
+  // (`/security/explain` and `/security/my-delegable-scope`) and the
+  // suggested audience bindings (`/security/suggested-bindings` and its
+  // confirm / dismiss) — moved out of `rest-server.ts` whole, into ONE module,
+  // on exactly slice 1's terms above: a MOVE, no wire answer changed, so it
+  // inherits `dialectOnly` and the two dialect facts, and no write-site count.
+  // Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 17 → 17, siblingCode 17 → 17:
+  // none), so each sum is unchanged. Both only ever tick down. Discovered by
+  // the `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/security-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 6 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
   },
 };
 

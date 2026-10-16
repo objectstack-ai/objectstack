@@ -207,7 +207,7 @@ export default class MigratePlan extends Command {
       // are separate CUSTOMERS. The HARD gate runs at app install; this covers
       // the two populations it cannot reach (installs predating the gate, and
       // environments whose posture changed after install). Never fatal: a plan
-      // writes nothing, and this reports a metadata decision, not drift.
+      // writes no row or table, and this reports a metadata decision, not drift.
       const uniqueScopeAdvisory = postureGatesGlobalUniques(resolveTenancyPosture())
         ? collectGlobalUniques(stack.allObjects())
         : [];

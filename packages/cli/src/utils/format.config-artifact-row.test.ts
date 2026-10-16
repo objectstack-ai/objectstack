@@ -20,6 +20,7 @@ const ANSI_SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 describe('printServerReady Config:/Artifact: row (#8978)', () => {
   const base: Omit<ServerReadyOptions, 'configFile' | 'artifactSource' | 'bundleSource'> = {
     externalBaseOrigin: 'http://localhost:3000',
+    httpServer: 'composed',
     isDev: true,
     pluginCount: 1,
   };

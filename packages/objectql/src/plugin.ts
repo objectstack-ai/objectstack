@@ -290,6 +290,35 @@ export interface ObjectQLPluginOptions {
  */
 const SKIP_SCHEMA_SYNC_ENGINE_KEY = 'skipSchemaSync';
 
+/**
+ * [#23649] The kernel-bus event {@link ObjectQLPlugin.start} triggers once per
+ * boot, with the live engine as its one argument, at the last moment a routing
+ * decision can still be made for free: every boot-registered driver has been
+ * adopted (`driver.*` services) and connected (`ObjectQL.init()`), and nothing
+ * has been schema-synced, hydrated from `sys_metadata`, read or written yet.
+ *
+ * It exists for the stack's `datasourceMapping` (ADR-0062 D2 (d), #4462). A
+ * mapping rule is routing, not a hint: from the moment it is installed, every
+ * object it matches resolves to the named datasource and never falls back to
+ * the default store. Installed any later than this (it used to be installed in
+ * `AppPlugin.start()`, after this plugin's schema sync and after the auth
+ * plugin wrote the Default Organization), the rules re-route platform objects
+ * whose tables and rows already sit in the default store, and the boot reports
+ * ready over two stores. The app plugin subscribes in its `init()`: it installs
+ * the rules and connects every datasource they route a registered object to,
+ * so the first DDL and every boot write land where the mapping routes them.
+ *
+ * After driver adoption on purpose, never in Phase 1: the engine makes its
+ * first registered driver the default, so a datasource connected before a
+ * stack plugin's `driver.*` service is adopted would take the default slot
+ * from it and move every unbound object with it. A handler's throw propagates
+ * and fails the boot (a mapped datasource that cannot connect has no fallback).
+ *
+ * Not in `IPluginLifecycleEvents`: the bus is open to custom names, and this
+ * one has one emitter (here) and one subscriber (`AppPlugin`).
+ */
+export const OBJECTQL_DRIVERS_READY_HOOK = 'objectql:drivers-ready';
+
 export class ObjectQLPlugin implements Plugin {
   name = 'com.objectstack.engine.objectql';
   type = 'objectql' as const;
@@ -1016,6 +1045,16 @@ export class ObjectQLPlugin implements Plugin {
     // Initialize drivers (calls driver.connect() which sets up persistence)
     await this.ql?.init();
 
+    // [#23649] The drivers are live and nothing has been synced, hydrated, read
+    // or written: the moment a subscriber can still decide WHERE objects live
+    // (the stack's `datasourceMapping`). See {@link OBJECTQL_DRIVERS_READY_HOOK}.
+    // Spelled as the literal here, not the constant: the settings bind-window
+    // guard derives the hooks fired before the settings bind from their call
+    // sites and can only read a literal name. The constant is the subscribers'
+    // spelling; the runtime pin `datasource-mapping-before-schema-sync.test.ts`
+    // subscribes through it and goes red if the two ever differ.
+    if (this.ql) await ctx.trigger('objectql:drivers-ready', this.ql);
+
     // Phase 1: Sync built-in schemas so sys_metadata table exists before reading it.
     //
     // Cold-start-sensitive runtimes (Cloudflare Containers, Lambda) can
@@ -1068,6 +1107,10 @@ export class ObjectQLPlugin implements Plugin {
     // skip it in that case.
     if (this.environmentId === undefined) {
         await this.bridgeObjectsToMetadataService(ctx);
+    } else if (this.hydrateMetadataFromDb) {
+        // The runtime-authored objects the hydration above just put in this
+        // kernel's own registry. See {@link bridgeRuntimeObjectsToMetadataService}.
+        await this.bridgeRuntimeObjectsToMetadataService(ctx);
     }
     // Arm the incremental per-manifest bridge for everything after start() —
     // marketplace install / rehydrate register through the `manifest`
@@ -2398,6 +2441,56 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * The boot half of {@link followRuntimeObjectCopy} on a kernel with an
+   * `environmentId` that hydrates its own `sys_metadata`
+   * (`hydrateMetadataFromDb`: `os dev`, `os serve`, `os start` and the cloud
+   * single-environment runtime): copy each RUNTIME-AUTHORED object the
+   * hydration put in the registry into the `metadata` service.
+   *
+   * The full {@link bridgeObjectsToMetadataService} stays off on this shape
+   * (cross-project leakage, and the code packages' objects come from the
+   * artifact). But nothing else gives a hydrated runtime object a copy, and no
+   * mutation fires for it after boot: an object saved with `apiEnabled: false`
+   * and then restarted was served by both exposure gates, which read an absent
+   * copy as "no declaration". `hydrateMetadataFromDb` is set only on a kernel
+   * whose registry is its own, so every object this pass copies is one this
+   * environment authored. Same write as the follow: tenant-authored owner rows
+   * only, through `registerInMemory` (no persistence, no announce).
+   */
+  private async bridgeRuntimeObjectsToMetadataService(ctx: PluginContext): Promise<void> {
+    if (!this.ql?.registry) return;
+    let metadataService: IMetadataService | undefined;
+    try {
+      metadataService = ctx.getService<IMetadataService>('metadata');
+    } catch {
+      return; // no metadata service on this kernel — there is no copy to keep
+    }
+    if (!metadataService) return;
+    const failed: string[] = [];
+    let copied = 0;
+    for (const obj of this.ql.registry.getAllObjects()) {
+      try {
+        if (await this.mirrorRuntimeObject(metadataService, obj.name)) copied++;
+      } catch {
+        failed.push(obj.name);
+      }
+    }
+    if (copied > 0) {
+      ctx.logger.debug('Copied runtime-authored objects into the metadata service', { count: copied });
+    }
+    if (failed.length > 0) {
+      ctx.logger.error(
+        `[ObjectQLPlugin] the metadata service holds no copy of runtime-authored object(s) ${failed.map((n) => `'${n}'`).join(', ')}: `
+        + 'the registry, the data door and REST serve them, but the MCP exposure gates read an absent copy as "no '
+        + 'declaration" and serve them even when their API exposure is off, and MCP does not list them. Fix: restart '
+        + 'this process; if it recurs, check that the metadata service accepts in-memory registration.',
+        undefined,
+        { objects: failed },
+      );
+    }
+  }
+
+  /**
    * Keep the metadata service's copy of a RUNTIME-AUTHORED object current after
    * boot, and take it out when the object is deleted.
    *
@@ -2439,12 +2532,17 @@ export class ObjectQLPlugin implements Plugin {
    *    Afterwards the registry is asked again: a re-creation that landed while
    *    the removal was awaiting its loaders has its copy put back.
    *
-   * Armed on the kernel shape the bridge runs on (no `environmentId`): a
-   * project-scoped kernel's service is sourced from the artifact and holds no
-   * copy of the registry to keep current.
+   * Armed on every kernel shape. On a kernel with an `environmentId` (`os dev`
+   * as `env_local`, the cloud single-environment runtime) the service is
+   * sourced from the artifact and the boot bridge does not run, so a
+   * runtime-authored object had no copy there at all: both exposure gates read
+   * that absence as "no declaration" and served an object saved with
+   * `apiEnabled: false`. The copy written here is the object THIS kernel's
+   * authoring door just saved, so the cross-project leakage the full bridge is
+   * gated against does not arise. Its boot half on that shape is
+   * {@link bridgeRuntimeObjectsToMetadataService}.
    */
   private followRuntimeObjectCopy(ctx: PluginContext, evt: { name: string; state: string }): void {
-    if (this.environmentId !== undefined) return;
     if (typeof evt?.name !== 'string' || evt.name === '') return;
     // An async function runs synchronously up to its first `await`: the
     // refresh of a served runtime object is done before this call returns.

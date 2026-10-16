@@ -605,9 +605,10 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
  * ## Why this exists as an export rather than as a rule each route re-states
  *
  * Two route families build their error body by hand and share no branch with
- * either door in this file: `/analytics/dataset/query` (in `rest-server.ts`)
- * and the three record-share routes (in `sharing-routes.ts` since #23050
- * slice 4, `rest-server.ts` before). Both re-derived
+ * either door in this file: `/analytics/dataset/query` (in
+ * `analytics-routes.ts` since #23050 slice 5, `rest-server.ts` before) and the
+ * three record-share routes (in `sharing-routes.ts` since #23050 slice 4,
+ * `rest-server.ts` before). Both re-derived
  * classification locally — analytics from an in-line `error.status` +
  * `error.code` read, the share family from `message.startsWith(CODE)` over
  * five literal prefixes — and both landed a *different* answer from `/data`
@@ -759,7 +760,9 @@ export function sandboxFaultAnswer(
  * ## Why it exists
  *
  * Three hand-built route families in `rest-server.ts` — the sharing-rule, the
- * suggested-binding (and the since-retired overlay-discard) and the approval arms — answered a
+ * suggested-binding (and the since-retired overlay-discard) and the approval arms, which
+ * have since moved to `sharing-routes.ts`, `security-routes.ts` and `approvals-routes.ts`
+ * (#23050 slices 4, 6 and 3) — answered a
  * refusal their own arms could not read as a server fault, relaying
  * `.message`. For a sandboxed hook's refusal `.message` is the QuickJS debug
  * wrapper, so each answered `500` with `hook '<name>' threw: Error: …` where

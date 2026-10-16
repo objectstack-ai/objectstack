@@ -131,6 +131,15 @@ interface CensusEntry {
  * (`sharing-routes.ts`) build no `query:` literal either — the rule list hands
  * `listRules` an `object` / `activeOnly` pair read off `req.query`, never a
  * `query:` slot.
+ *
+ * [#23050 slice 5] 4 = 1 + 3 + 0 + 0 + 0 + 0: the analytics dataset body
+ * (`analytics-routes.ts`) builds no `query:` literal either — it hands
+ * `queryDataset` the caller's own `selection`, never a `query:` slot.
+ *
+ * [#23050 slice 6] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0: the two security bodies
+ * (`security-routes.ts`) build no `query:` literal either — the explain doors
+ * hand the security service a parsed explain request, and the suggestion list
+ * a `status` / `packageId` pair read off `req.query`, never a `query:` slot.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 1,
@@ -138,6 +147,8 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'batch-routes.ts': 0,
     'approvals-routes.ts': 0,
     'sharing-routes.ts': 0,
+    'analytics-routes.ts': 0,
+    'security-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -326,7 +337,9 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
     it('[#23050 slice 3] censuses every file on the registrar list — its length and the slot sum are pinned', () => {
         // A module added to the list makes this re-read its number rather than
         // widening unnoticed. [#23050 slice 4] Length 4 → 5, the sum unchanged.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(5);
+        // [#23050 slice 5] Length 5 → 6, the sum unchanged.
+        // [#23050 slice 6] Length 6 → 7, the sum unchanged.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(7);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

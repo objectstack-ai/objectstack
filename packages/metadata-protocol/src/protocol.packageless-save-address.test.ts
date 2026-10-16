@@ -1022,7 +1022,9 @@ describe('[#23495] the draft doors naming no package act on the draft the draft 
             await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pending' }), packageId: P, mode: 'draft' });
         } else {
             await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'pending' }), packageId: P, mode: 'draft' });
-            await saveDraft(f, 'stale');
+            // [#23657] Seeded, as an older build left it: a draft save naming no
+            // package over an item whose only draft is P's now updates P's draft.
+            f.seedRow({ type: 'app', name, state: 'draft', package_id: null, metadata: JSON.stringify(app(name, { label: 'stale' })), checksum: 'sha-stale' });
             await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live' }), packageId: P });
         }
         return f;
@@ -1180,7 +1182,9 @@ describe('[#23495] the draft doors naming no package act on the draft the draft 
                     const f = { ...makeProtocol(), name };
                     if (unboundFirst) await saveDraft(f, 'unbound');
                     await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'other' }), packageId: Q, mode: 'draft' });
-                    if (!unboundFirst) await saveDraft(f, 'unbound');
+                    // [#23657] Seeded, as an older build left it: a draft save naming
+                    // no package over Q's only draft now updates Q's draft.
+                    if (!unboundFirst) f.seedRow({ type: 'app', name, state: 'draft', package_id: null, metadata: JSON.stringify(app(name, { label: 'unbound' })), checksum: 'sha-unbound' });
                     return f;
                 };
 
@@ -1234,5 +1238,123 @@ describe('[#23495] the draft doors naming no package act on the draft the draft 
                 expect(stored(f, 'draft'), door).toEqual([`other@${Q}`, `third@${R}`]);
             }
         });
+    });
+});
+
+describe('[#23715] the strict draft read naming no package serves its content from the draft its version names', () => {
+    const P = WRITABLE;
+    const Q = OTHER_WRITABLE;
+    const R = 'com.qa.thirdapp';
+    type Fixture = ReturnType<typeof makeProtocol> & { name: string };
+
+    /** `label@binding` of every draft row of the item, in storage order. */
+    const drafts = (f: Fixture) =>
+        f.rows('app', f.name, 'draft').map((r) => `${JSON.parse(r.metadata).label}@${r.package_id ?? 'null'}`);
+    const readDraft = (f: Fixture) => f.protocol.getMetaItem({ type: 'app', name: f.name, state: 'draft' });
+    /** The draft read naming the row's own package (`null`: none), the read whose content and `version` are one row's. */
+    const readDraftAt = (f: Fixture, packageId: string) =>
+        f.protocol.getMetaItem({ type: 'app', name: f.name, state: 'draft', packageId });
+    const unboundDraft = (f: Fixture, label: string) => f.seedRow({
+        type: 'app', name: f.name, state: 'draft', package_id: null,
+        metadata: JSON.stringify(app(f.name, { label })), checksum: `sha-${label}`,
+    });
+
+    /**
+     * No active row; drafts `[package-unbound, Q]` in either storage order.
+     * The package-unbound draft is reached through the door when it is stored
+     * first (a draft save naming no package of a new item); stored second it
+     * is seeded, as an older build left it (#23657: that save now updates Q's
+     * only draft).
+     */
+    async function unboundBesideQ(name: string, unboundFirst: boolean): Promise<Fixture> {
+        const f = { ...makeProtocol(), name };
+        if (unboundFirst) await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound' }), mode: 'draft' });
+        await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'q' }), packageId: Q, mode: 'draft' });
+        if (!unboundFirst) unboundDraft(f, 'unbound');
+        return f;
+    }
+
+    for (const unboundFirst of [true, false]) {
+        const order = unboundFirst ? 'the package-unbound draft stored first' : 'Q\'s draft stored first';
+
+        it(`drafts [package-unbound, Q], no active row (${order}): content and version are the package-unbound draft's, and an If-Match save edits the row read`, async () => {
+            const f = await unboundBesideQ(`u23715_${unboundFirst ? 'unbound_first' : 'q_first'}`, unboundFirst);
+            expect(drafts(f)).toEqual(unboundFirst ? ['unbound@null', `q@${Q}`] : [`q@${Q}`, 'unbound@null']);
+            expect(f.rows('app', f.name, 'active')).toEqual([]);
+
+            const read = await readDraft(f);
+            expect(read.item.label).toBe('unbound');
+            expect(read.item._packageId).toBeUndefined();
+            expect(read.version).toEqual(expect.any(String));
+            // Q's draft is still reachable by naming Q, under its own token.
+            const q = await readDraftAt(f, Q);
+            expect(q.item.label).toBe('q');
+            expect(q.version).not.toBe(read.version);
+
+            // The token names the row read: a save pinned to it edits that row, and Q's draft is untouched.
+            const saved = await f.protocol.saveMetaItem({
+                type: 'app', name: f.name, item: app(f.name, { label: 'edited' }), mode: 'draft', parentVersion: read.version,
+            });
+            expect(saved.success).toBe(true);
+            expect(drafts(f)).toEqual(unboundFirst ? ['edited@null', `q@${Q}`] : [`q@${Q}`, 'edited@null']);
+            const again = await readDraft(f);
+            expect(again.item.label).toBe('edited');
+            expect(again.version).toBe(saved.version);
+            // The draft-overlay preview naming no package serves the same draft.
+            expect((await f.protocol.getMetaItem({ type: 'app', name: f.name, previewDrafts: true })).item)
+                .toMatchObject({ label: 'edited', _draft: true });
+        });
+    }
+
+    it('active rows bound to two packages, drafts [package-unbound, P] in either storage order: the read serves the package-unbound draft its version names', async () => {
+        for (const unboundFirst of [true, false]) {
+            const name = `u23715_two_active_${unboundFirst ? 'unbound_first' : 'p_first'}`;
+            const f = { ...makeProtocol(), name };
+            if (unboundFirst) await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'unbound' }), mode: 'draft' });
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live P' }), packageId: P });
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'live Q' }), packageId: Q });
+            await f.protocol.saveMetaItem({ type: 'app', name, item: app(name, { label: 'p' }), packageId: P, mode: 'draft' });
+            if (!unboundFirst) unboundDraft(f, 'unbound');
+            expect(drafts(f), name).toEqual(unboundFirst ? ['unbound@null', `p@${P}`] : [`p@${P}`, 'unbound@null']);
+
+            const read = await readDraft(f);
+            expect(read.item.label, name).toBe('unbound');
+            expect(read.version, name).toEqual(expect.any(String));
+            expect(read.version, name).not.toBe((await readDraftAt(f, P)).version);
+        }
+    });
+
+    it('CONTROL: a single draft is served as before — the package-unbound one, or the one package\'s', async () => {
+        const u = { ...makeProtocol(), name: 'u23715_only_unbound' };
+        const saved = await u.protocol.saveMetaItem({ type: 'app', name: u.name, item: app(u.name, { label: 'unbound' }), mode: 'draft' });
+        const ur = await readDraft(u);
+        expect(ur.item.label).toBe('unbound');
+        expect(ur.version).toBe(saved.version);
+
+        const q = { ...makeProtocol(), name: 'u23715_only_q' };
+        const qSaved = await q.protocol.saveMetaItem({ type: 'app', name: q.name, item: app(q.name, { label: 'q' }), packageId: Q, mode: 'draft' });
+        const qr = await readDraft(q);
+        expect(qr.item).toMatchObject({ label: 'q', _packageId: Q });
+        expect(qr.version).toBe(qSaved.version);
+    });
+
+    it('CONTROL: an item with an active binding serves the draft of its package, beside another package\'s draft', async () => {
+        const f = { ...makeProtocol(), name: 'u23715_bound' };
+        await f.protocol.saveMetaItem({ type: 'app', name: f.name, item: app(f.name, { label: 'q' }), packageId: Q, mode: 'draft' });
+        await f.protocol.saveMetaItem({ type: 'app', name: f.name, item: app(f.name, { label: 'live' }), packageId: P });
+        await f.protocol.saveMetaItem({ type: 'app', name: f.name, item: app(f.name, { label: 'p' }), mode: 'draft' });
+        expect(drafts(f)).toEqual([`q@${Q}`, `p@${P}`]);
+        const read = await readDraft(f);
+        expect(read.item).toMatchObject({ label: 'p', _packageId: P });
+        expect(read.version).toBe((await readDraftAt(f, P)).version);
+    });
+
+    it('CONTROL: drafts bound to two packages and none package-unbound are still served best-effort, with no version (the save naming none is refused there)', async () => {
+        const f = { ...makeProtocol(), name: 'u23715_two_drafts' };
+        await f.protocol.saveMetaItem({ type: 'app', name: f.name, item: app(f.name, { label: 'q' }), packageId: Q, mode: 'draft' });
+        await f.protocol.saveMetaItem({ type: 'app', name: f.name, item: app(f.name, { label: 'r' }), packageId: R, mode: 'draft' });
+        const read = await readDraft(f);
+        expect(['q', 'r']).toContain(read.item.label);
+        expect(read.version).toBeNull();
     });
 });

@@ -23,17 +23,17 @@ import {
     // [#23367] The API-key lifecycle policy source, and its branded refusal.
     apiKeyLifecyclePolicySourceOf, isApiKeyLifecycleRefusalError, type ApiKeyLifecycleRefusalError,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
-    // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
-    // owner, shared with the runtime dispatcher's `/security` domain.
-    isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
+    // `isAudienceBindingSuggestionStatus` and `unknownAudienceBindingSuggestionStatusMessage`,
+    // the suggested-binding `?status=` vocabulary (#7678), moved with `registerSecurityEndpoints`'
+    // body to `security-routes.ts` (#23050 slice 6).
     // `omitInternalFieldsFromWriteResponse`, the cross-object batch's update-arm
     // write-response rules, moved with that door to `batch-routes.ts` (#23050 slice 2).
 } from '@objectstack/core';
 import {
     isMcpServerEnabled,
-    looksLikeInternalErrorLeak,
-    declaresServerFault,
-    INTERNAL_ERROR_MESSAGE,
+    // `looksLikeInternalErrorLeak`, `declaresServerFault` and `INTERNAL_ERROR_MESSAGE`, the
+    // analytics dataset door's fault-withhold reads, moved with that door to
+    // `analytics-routes.ts` (#23050 slice 5).
     // `strandedDecisionDetails`, the stranded-decision carrier's recogniser
     // half, moved with `handleApprovalError` to `approvals-routes.ts` (#23050 slice 3).
     // [#20061] The thrown `VALIDATION_FAILED` + `fields[]` shape every catch in
@@ -107,11 +107,9 @@ import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './quer
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfigParsed } from '@objectstack/spec/api';
-// [#11683] The catalog's own floor for "a required `code` and no more specific
-// one" — see its use in `registerSharingEndpoints` (`sharing-routes.ts` since
-// #23050 slice 4), where the nested ADR-0112 envelope declares `code` REQUIRED
-// while the flat classification it re-dresses legitimately carries none.
-import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+// `standardErrorCodeForHttpStatus` (#11683), the catalog's floor for a required `code`, read
+// only by the security-explain family's classified-refusal arm, moved with that body to
+// `security-routes.ts` (#23050 slice 6).
 // [#11637] The DECLARED contract for `config.api`, imported as a VALUE rather
 // than a type. Both hops into this package were casts, so this schema had
 // never run on any deployment path — see `parseDeclaredApiConfig` below.
@@ -164,11 +162,8 @@ import type {
 // The four bulk request types (`BatchDataRequest`, `CreateManyDataRequest`,
 // `UpdateManyDataRequest`, `DeleteManyDataRequest`) moved with their doors to
 // `batch-routes.ts` (#23050 slice 2).
-// [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
-// refusal emitter types its `code` parameter as the vocabulary rather than as
-// `string` — an invented code is a compile error at the call site instead of a
-// runtime surprise on whichever arm a test happens to drive.
-import type { ErrorCode } from '@objectstack/spec/api';
+// `ErrorCode` (#8073), the closed vocabulary the security-explain family's one refusal
+// emitter types its `code` as, moved with that body to `security-routes.ts` (#23050 slice 6).
 // [#10235] The per-column sortability projection the object read serves on its
 // envelope (2026-08-23 ruling, option A): computed HERE, at the one seam every
 // single-item read path rebuilds its body through, from the spec's own storage
@@ -176,7 +171,8 @@ import type { ErrorCode } from '@objectstack/spec/api';
 // doors (#6994/#7095) refuse.
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
-import { stripReadDecorations } from '@objectstack/spec/kernel';
+// `stripReadDecorations`, read only by the analytics dataset door, moved with that door to
+// `analytics-routes.ts` (#23050 slice 5).
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document, and the
 // docs-audience and app-nav gates it is built from — one implementation, which
 // this server and the runtime dispatcher's `/meta` domain both call. The
@@ -325,10 +321,16 @@ import {
     type SharingRouteHost,
     type SharingRuleRouteHost,
 } from './sharing-routes.js';
-// [#17551] The `POST …/analytics/dataset/query` door parse — the half of the
-// analytics family this route never had. See the module header for the
-// measurement that decides its shape.
-import { datasetSelectionRefusal } from './analytics-selection-door.js';
+// [#23050 slice 5] The analytics dataset route's body moved to its own module — see its header.
+// `datasetSelectionRefusal`, that door's selection parse (#17551), moved with it.
+import { registerAnalyticsEndpoints, type AnalyticsRouteHost } from './analytics-routes.js';
+// [#23050 slice 6] The security-explain and suggested-binding routes' bodies moved to one module — see its header.
+import {
+    registerSecurityEndpoints,
+    registerSecurityExplainEndpoints,
+    type SecurityExplainRouteHost,
+    type SecurityRouteHost,
+} from './security-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -356,14 +358,14 @@ import { logError, logWarn } from './log.js';
 // surface `./rest-server.js` has always offered is byte-identical.
 import {
     mapDataError,
-    sandboxBusinessMessage,
-    classifiedRefusalAnswer,
-    nestedRefusalEnvelope,
-    sandboxFaultAnswer,
-    boundedDeclaredUserMessage,
+    // `sandboxBusinessMessage`, `boundedDeclaredUserMessage` and `declaredServerFaultAnswer`,
+    // read only by the analytics dataset door, moved with that door to `analytics-routes.ts`
+    // (#23050 slice 5).
+    // `classifiedRefusalAnswer`, `nestedRefusalEnvelope` and `sandboxFaultAnswer`, read only
+    // by the two security families' refusal and fault arms, moved with those bodies to
+    // `security-routes.ts` (#23050 slice 6).
     boundedDeclaredRefusalMessage,
     declaredHttpStatus,
-    declaredServerFaultAnswer,
     sendThrownError,
     sendDeclaredFault,
     sendFieldVisibilityFault,
@@ -1822,7 +1824,7 @@ function versionTokenRefusal(token: unknown, spelling: string): string | undefin
  * ledgered in `meta-draft-read-door-census.test.ts`, which also holds this
  * function to a bare delegation.
  */
-function mayReadPendingDrafts(caller: unknown): boolean {
+export function mayReadPendingDrafts(caller: unknown): boolean {
     return isObjectSchemaMaskExempt(caller);
 }
 
@@ -10260,476 +10262,23 @@ export class RestServer {
      * `@objectstack/service-analytics` fails cleanly.
      */
     private registerAnalyticsEndpoints(basePath: string): void {
-        const isScoped = basePath.includes('/environments/:environmentId');
-        // Resolve the ENVIRONMENT's analytics service first — its strategy
-        // bridges are bound to the env kernel's own data engine. The host
-        // provider (whose 'data' is the host kernel's engine) is only a
-        // fallback: serving a tenant's dataset query from the host engine
-        // reads the WRONG database and silently aggregates over nothing
-        // (the staging "Total Spend: 0 on a populated table" incident).
-        const resolveService = async (environmentId?: string, req?: any) => {
-            try {
-                const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-                if (envId && envId !== 'platform' && this.kernelManager) {
-                    const kernel = await this.kernelManager.getOrCreate(envId);
-                    const svc = await kernel.getServiceAsync<any>('analytics').catch(() => undefined);
-                    if (svc) return svc;
-                }
-            } catch { /* fall back to the host service */ }
-            if (!this.analyticsServiceProvider) return undefined;
-            try { return await this.analyticsServiceProvider(environmentId); }
-            catch { return undefined; }
+        // [#23050 slice 5] The body moved to `analytics-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `AnalyticsRouteHost`, and that module's header for why
+        // `kernelManager` and `analyticsServiceProvider` are getters).
+        const readKernelManager = () => this.kernelManager;
+        const readAnalyticsServiceProvider = () => this.analyticsServiceProvider;
+        const host: AnalyticsRouteHost = {
+            routeManager: this.routeManager,
+            get kernelManager() { return readKernelManager(); },
+            get analyticsServiceProvider() { return readAnalyticsServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            translateMetaItem: (...a) => this.translateMetaItem(...a),
         };
-
-        this.routeManager.register({
-            method: 'POST',
-            path: `${basePath}/analytics/dataset/query`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-
-                    const svc = await resolveService(environmentId, req);
-                    if (!svc || typeof svc.queryDataset !== 'function') {
-                        return res.status(501).json({
-                            code: 'NOT_IMPLEMENTED',
-                            message: 'Analytics dataset query is not available on this deployment (no analytics service with queryDataset).',
-                        });
-                    }
-
-                    const body = req.body ?? {};
-                    const selection = body.selection;
-                    if (!selection || !Array.isArray(selection.measures) || selection.measures.length === 0) {
-                        return res.status(400).json({
-                            code: 'VALIDATION_FAILED',
-                            message: 'body.selection.measures must be a non-empty array of measure names.',
-                        });
-                    }
-
-                    // [PR #17548] …and every OTHER member of `selection` had no
-                    // door at all, so a malformed one travelled into
-                    // `dataset-executor` and was answered by whatever the face
-                    // behind it happened to do with it — while the sibling
-                    // routes (`/analytics/query`, `/analytics/sql`) lift the
-                    // identical failure to a 400 at the entry. One family, two
-                    // postures, decided by which door the client knocked on.
-                    //
-                    // [#17551, ruled] The parse is the WHOLE selection, against
-                    // `DatasetSelectionSchema` — the one declaration of this
-                    // wire shape, authored in `packages/spec` beside the
-                    // sibling routes' own request body. ⛔ Never the siblings'
-                    // schema: `selection` is a `DatasetSelection`, which
-                    // carries no `cube` and has four members of its own, so
-                    // `AnalyticsQueryRequestSchema` would 400 every real
-                    // dashboard widget. PR #17548 could only door the seven
-                    // members whose declarations coincided; the four that were
-                    // left — `runtimeFilter`, `dateGranularity`, `compareTo`,
-                    // `totals` — are what this closes. {@link datasetSelectionRefusal}
-                    // carries both measurements.
-                    //
-                    // Validation-only: the caller's `selection` is what reaches
-                    // `queryDataset` below, never a parse output.
-                    const selectionRefusal = await datasetSelectionRefusal(selection);
-                    if (selectionRefusal) {
-                        return res.status(selectionRefusal.status).json(selectionRefusal.body);
-                    }
-
-                    // ADR-0037 P3 — draft data preview: the canvas / preview
-                    // pages pass the flag so (a) the dataset lookup sees
-                    // draft-overlaid definitions and (b) the selection runs
-                    // over the pending seed draft's rows when one exists.
-                    // [#6877] A repeated `?preview=draft&preview=draft` stopped
-                    // equalling `'draft'`, so the Studio preview silently ran
-                    // over PUBLISHED rows and looked like the draft had no data.
-                    if (refuseRepeatedQueryParams(req, res, ['preview'])) return;
-                    // [#20338] …for a caller who may read drafts: both halves
-                    // serve unpublished work (a draft definition, a pending
-                    // seed's rows). Anyone else runs over the published
-                    // dataset and live rows, as if the flag were absent — a
-                    // draft-only `datasetName` is this door's own 404 —
-                    // {@link mayReadPendingDrafts} says why that, and not a refusal.
-                    const previewDrafts = (body.previewDrafts === true || req.query?.preview === 'draft')
-                        && mayReadPendingDrafts(context);
-
-                    // Resolve the dataset definition: inline draft (Studio
-                    // preview) or a saved dataset by name.
-                    let dataset = body.dataset;
-                    if (!dataset && body.datasetName) {
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const datasetRequest: GetMetaItemsRequest = { type: 'dataset', previewDrafts };
-                        const items: any = await p.getMetaItems?.(datasetRequest).catch(() => null);
-                        const list = Array.isArray(items?.items) ? items.items : (Array.isArray(items) ? items : []);
-                        dataset = list.find((d: any) => d?.name === body.datasetName);
-                        if (!dataset) {
-                            return res.status(404).json({ code: 'NOT_FOUND', message: `Dataset "${body.datasetName}" not found.` });
-                        }
-                        // [#14253] Localize the SAVED definition here, at the
-                        // metadata boundary, the same way `/meta/:type` does.
-                        //
-                        // A dataset's dimension and measure `label`s are drawn
-                        // on the dashboard — chart axes, legends, the caption
-                        // under a metric tile — and they get there through the
-                        // QUERY, not through `/meta/datasets`:
-                        // `AnalyticsService` copies `dataset.measures[].label`
-                        // onto `AnalyticsResult.fields[].label` ("for
-                        // legends/KPIs"). So translating only the metadata read
-                        // would have closed the door nobody draws through and
-                        // left the one in the issue's screenshot open — the
-                        // covered-at-one-door asymmetry this repo keeps paying
-                        // for. Translating the DEFINITION carries through the
-                        // existing enrichment untouched, so nothing downstream
-                        // learns about bundles: the analytics service stays
-                        // free of i18n, and there is no second resolution path.
-                        //
-                        // ⛔ The INLINE branch is deliberately not translated:
-                        // a Studio preview posts a draft the designer is
-                        // editing, which carries no saved name to address a
-                        // bundle entry with, and overwriting a draft's copy
-                        // would misreport what the designer is about to save.
-                        dataset = await this.translateMetaItem(req, 'dataset', environmentId, dataset);
-                    }
-                    if (!dataset) {
-                        return res.status(400).json({ code: 'VALIDATION_FAILED', message: 'Provide body.dataset (inline) or body.datasetName.' });
-                    }
-
-                    // A SERVED document is not a valid input to the schema that
-                    // produced it: the read path stamps `_diagnostics` on every
-                    // item `getMetaItems` returns, and since #4001
-                    // `DatasetSchema` is CLOSED — so the parse below rejected
-                    // our OWN annotation with `unrecognized_keys`, answering
-                    // 400 "Invalid dataset definition." for every saved dataset,
-                    // i.e. every widget on every dataset-bound dashboard. Same
-                    // shape as the cold-boot flow bind (cloud#971).
-                    //
-                    // Stripped on BOTH branches, not just the `datasetName`
-                    // read: the Studio dataset preview posts its draft INLINE,
-                    // and that draft is the document the designer GET-loaded —
-                    // decorations and all. A genuinely hand-authored draft
-                    // never carries these keys, so the strip is a no-op there.
-                    dataset = stripReadDecorations(dataset);
-
-                    // Validate against the spec schema so a malformed draft
-                    // yields a clean 400 instead of a runtime throw.
-                    try {
-                        const { DatasetSchema } = await import('@objectstack/spec/ui');
-                        dataset = (DatasetSchema as any).parse(dataset);
-                    } catch (verr: any) {
-                        return res.status(400).json({
-                            code: 'VALIDATION_FAILED',
-                            message: 'Invalid dataset definition.',
-                            detail: String(verr?.message ?? verr).slice(0, 1000),
-                        });
-                    }
-
-                    const result = await svc.queryDataset(
-                        dataset,
-                        selection,
-                        context ?? undefined,
-                        previewDrafts ? { previewDrafts: true } : undefined,
-                    );
-                    res.json(result);
-                } catch (error: any) {
-                    const msg = String(error?.message ?? error ?? '');
-                    // [#11588] The text addressed to the CALLER, which for a
-                    // sandboxed hook refusal is the business message rather than
-                    // the `hook '<name>' threw: Error: …` QuickJS debug wrapper
-                    // sitting on `.message`. This route builds its envelope by
-                    // hand and shares no branch with `classifyDataError`'s
-                    // unwrap door or with `resolveErrorResponse`'s passthrough,
-                    // so it shipped the wrapper on every hook refusal while the
-                    // single-row `/data` routes served the author's sentence —
-                    // one refusal, two wordings, decided by which face caught it.
-                    // {@link sandboxBusinessMessage} is imported rather than
-                    // re-derived precisely so a third answer cannot appear here.
-                    //
-                    // Deliberately scoped to what the CLIENT reads. `logError`
-                    // below still receives the whole error, wrapper and all —
-                    // that is the half the wrapper was written for. And
-                    // `looksLikeInternalErrorLeak` below still reads the RAW
-                    // `msg`: feeding it the unwrapped text could only make it
-                    // withhold LESS, and a leak predicate must never be handed a
-                    // narrower input than the one it was calibrated on.
-                    //
-                    // Neither arm's STATUS moves. ① keeps answering the declared
-                    // 4xx and ③ keeps answering 500; only the sentence changes.
-                    //
-                    // [#11684] …and that last sentence was the defect report
-                    // for the card below: leaving the status alone left an
-                    // UNDECLARED sandbox refusal in ③, answering 500 where the
-                    // `/data` door answers 400 for the identical throw. ①b now
-                    // sits between the two arms and moves exactly that class.
-                    // The sentence this line computes is unchanged.
-                    const clientMsg = sandboxBusinessMessage(error) ?? msg;
-
-                    // ── [#12710] The producer's marked sentence, resolved once ─
-                    // Commit 79c46da90's `userMessage` channel is STATUS- and BRANCH-agnostic
-                    // by construction: `withDeclaredUserMessage` applies it ONCE at
-                    // the `/data` door's exit, over whatever envelope classification
-                    // chose. This door has no such wrapper — it builds ①, ③a and ③b
-                    // by hand — so the rule was applied at none of them, and one
-                    // producer's sentence reached the client on `POST /data/:object`
-                    // and vanished here for the identical throw (measured door to
-                    // door in `analytics-fault-user-message.test.ts` §3).
-                    //
-                    // Resolved ONCE here rather than at each terminal so this door
-                    // has a single answer to "is there a mark, and how long may it
-                    // be": {@link boundedDeclaredUserMessage} is that pair
-                    // (`declaredUserMessage`'s presence answer + #5423's bound)
-                    // shared with the `/data` door rather than copied beside it,
-                    // the same way the record-share family's two hand-built exits
-                    // ask it (#12693).
-                    //
-                    // ⛔ Deliberately NOT spread onto ①b below. That arm re-dresses
-                    // {@link classifiedRefusalAnswer}'s body, which already carries
-                    // the mark, so a second application there would be one rule
-                    // applied twice. Scope here is by ARM, not by door.
-                    //
-                    // ⛔ And riding it across the FAULT terminals ③a/③b does not
-                    // re-open #5367/#5437/#5811. Those withhold prose the producer
-                    // never addressed to the caller — driver text, a crash's
-                    // `TypeError` — while this field exists on an error only
-                    // because an author deliberately wrote caller-facing text onto
-                    // it. The prose stays withheld byte for byte, neither the
-                    // status nor the `code` moves, and an UNMARKED throw's envelope
-                    // is byte-identical to before (pinned, §4).
-                    const marked = boundedDeclaredUserMessage(error);
-                    const markExtra = marked === undefined ? {} : { userMessage: marked };
-                    // ── [#5352] ① The ADR-0112 envelope, read FIRST ──────────
-                    // A thrown error that already carries `code` + a 4xx
-                    // `status` has ANSWERED the classification question. This
-                    // route used to discard both and re-derive the answer from
-                    // the message text below, so every producer that took
-                    // ADR-0112 seriously was punished for it: analytics'
-                    // filter refusals (`INVALID_FILTER`/400 — a misspelled
-                    // operator in a dashboard widget, #3948/#5240/#5325/#5334),
-                    // the measure source-field gate (`INVALID_FIELD`/400,
-                    // #4437) and the cube-existence gate (`CUBE_NOT_FOUND`/404,
-                    // #3867) all landed as `500 ANALYTICS_QUERY_FAILED` — read
-                    // by the author as "the platform is broken" and by ops
-                    // alerting as a 5xx. The same mistakes answer 400 on
-                    // `/data`; one condition must not get two wire shapes
-                    // because a different face caught it.
-                    //
-                    // BOTH halves are required, deliberately. A 4xx status with
-                    // no code would force this route to invent one, which is
-                    // the consumer-side leniency ADR-0112 exists to remove — a
-                    // producer that ships half an envelope has a bug of its own
-                    // and should be found, not papered over here.
-                    //
-                    // 4xx ONLY: a 5xx-status error keeps going through the
-                    // `ANALYTICS_QUERY_FAILED` envelope below, so an internal
-                    // fault can never be re-labelled as the caller's fault (and
-                    // keeps its `logError` line). [#5367] It also has its MESSAGE
-                    // withheld there — declaring a server fault is declaring that
-                    // the detail is the operator's, not the caller's.
-                    const envelopeStatus = typeof error?.status === 'number' ? error.status : undefined;
-                    const envelopeCode = typeof error?.code === 'string' && error.code.length > 0 ? error.code : undefined;
-                    if (envelopeStatus !== undefined && envelopeStatus >= 400 && envelopeStatus < 500 && envelopeCode) {
-                        return res.status(envelopeStatus).json({ code: envelopeCode, message: clientMsg.slice(0, 1000), ...markExtra });
-                    }
-                    // ── [#11684] ①b The refusal ① could not read ─────────────
-                    // ① answers a refusal that declared BOTH halves of the
-                    // envelope, spelled `status`. Two classified refusals fell
-                    // past it into ③ and were reported to the caller as server
-                    // faults:
-                    //
-                    //   - **An UNDECLARED sandboxed hook refusal.** A hook body
-                    //     running `throw new Error('month-end close is in
-                    //     progress')` — the most common shape an app author
-                    //     writes — declares no `status` and no `code`, so ①
-                    //     never opened. Measured: `500 ANALYTICS_QUERY_FAILED`
-                    //     here against `400` with the same sentence on
-                    //     `POST /data/:object`, i.e. one hook body, one
-                    //     `throw`, two statuses decided by whether the caller
-                    //     hit a dashboard tile or a list view.
-                    //   - **The `statusCode` spelling** (#7525). ①'s read is
-                    //     `error.status` alone, and `plugin-approvals`'
-                    //     lifecycle hooks — plus `runtime`'s
-                    //     `action-execution.ts` and `metadata-protocol` — spell
-                    //     it `statusCode`. Same refusal, same declaration, 500.
-                    //
-                    // {@link classifiedRefusalAnswer} is the `/data` door's own
-                    // classification, imported rather than re-derived for the
-                    // same reason {@link sandboxBusinessMessage} above it is: a
-                    // third local opinion at this boundary is precisely how the
-                    // two faces came to disagree. It answers `undefined` for
-                    // everything ③ still owns — a declared 5xx, a crashed body
-                    // (#7543), a driver fault, anything unclassified — so ③'s
-                    // reach is unchanged except for the two shapes named above.
-                    //
-                    // ⛔ This is NOT a widening of ①'s both-halves gate. That
-                    // gate is #5352's ruling for producers that ship half an
-                    // ADR-0112 envelope, it still stands, and the seam encodes
-                    // it. What crosses here without a `code` is the SANDBOX
-                    // limb, where "no code" is not half a declaration: the
-                    // author declared the condition by reporting it, and
-                    // `classifyDataError`'s unwrap door has answered that with
-                    // 400 and the verbatim sentence since it existed
-                    // (`hook-error-format.dogfood.test.ts`). Nothing is
-                    // invented — a refusal that declared no code is answered
-                    // with no code, exactly as `/data` answers it.
-                    const refusal = classifiedRefusalAnswer(error);
-                    if (refusal) {
-                        const { error: refusalText, ...refusalFields } = refusal.body;
-                        return res.status(refusal.status).json({
-                            ...refusalFields,
-                            message: String(refusalText ?? clientMsg).slice(0, 1000),
-                        });
-                    }
-                    // ── ② … is GONE. The message-sniffing list is retired ────
-                    // [#5367] `/analytics/dataset/query` used to classify six
-                    // error families by matching hardcoded substrings of their
-                    // message text, which made their HTTP status a property of
-                    // their WORDING: rephrasing a message — no logic change, no
-                    // test red, no gate red — moved the error from 400 to 500.
-                    // Prime Directive #12 tolerates an accommodation like that
-                    // only while it is declared, loud, tested AND removable on a
-                    // schedule; #5352 shipped the first three and #5367 was the
-                    // schedule. It is now paid off in full:
-                    //
-                    //   - FIVE families throw `datasetInvalidError`
-                    //     (`DATASET_INVALID` / 400) from `service-analytics`'s
-                    //     `dataset-refusal.ts` and are served by ① —
-                    //     `dataset-compiler` (undeclared relationship path,
-                    //     unsupported aggregate), `dataset-executor` (order key,
-                    //     totals grouping), `native-sql-strategy` (join outside
-                    //     the allowlist).
-                    //   - The SIXTH — `read-scope-sql`'s ten fail-closed RLS
-                    //     lowering refusals — was re-judged by the maintainer on
-                    //     2026-08-06 and is now `READ_SCOPE_COMPILE_FAILED` /
-                    //     **500**. Its inputs are an admin-authored policy and a
-                    //     compiler-generated join alias, never the caller's, so
-                    //     `400 DATASET_INVALID` both misattributed the fault and
-                    //     echoed RLS policy field names back to the tenant. A
-                    //     declared 5xx is 4xx-only-① 's business no longer, so it
-                    //     falls to ③ BY DECLARATION.
-                    //
-                    // ⛔ Do not reintroduce a message test here. Give the refusal
-                    // a `code`/`status` and the branches above and below serve it.
-                    //
-                    // ── ③ The 500 — and it does not ship internals ───────────
-                    // [#5520] This route built its 5xx body by hand and echoed
-                    // the message verbatim, so a driver error arrived here with
-                    // the generated statement prefixed to it (knex's format is
-                    // `<sql> - <cause>`) and the caller received the physical
-                    // table and column names of the query:
-                    //
-                    //   {"code":"ANALYTICS_QUERY_FAILED","error":"SELECT bogus_dim AS
-                    //    \"bogus_dim\", COUNT(*) … FROM \"crm_account\" GROUP BY
-                    //    bogus_dim - no such column: bogus_dim"}
-                    //
-                    // The SIBLING analytics face never did: `/analytics/query`
-                    // exits through `dispatcher-plugin.errorResponseBase`, which
-                    // applies `looksLikeInternalErrorLeak` to any >=500 message
-                    // (#3867) — which is why the same mistake read "Internal
-                    // server error" there and dumped SQL here. One boundary
-                    // property, one shared predicate; this is the application
-                    // that was missing, not a new rule. Classification is
-                    // untouched (still `500 ANALYTICS_QUERY_FAILED`), and the
-                    // full text still reaches the operator through `logError`
-                    // immediately below — the log line is now the only copy.
-                    //
-                    // [#5367] `looksLikeInternalErrorLeak` is a heuristic over
-                    // SQL/driver PHRASING, and the read-scope refusals do not
-                    // speak it: measured, all ten messages
-                    // (`[read-scope-sql] unsafe field identifier "…"`, …) return
-                    // FALSE from it, so retiring ② alone would have moved the RLS
-                    // policy content from a 400 body to a 500 body instead of
-                    // out of the response. Widening the heuristic to recognise
-                    // them would be more message sniffing — the very thing #5367
-                    // removes. So the withhold is DECLARED instead: a producer
-                    // that says `status >= 500` with a `code` has declared a
-                    // server fault, and a server fault's detail belongs in the
-                    // log, not in the caller's body. That is a structural rule
-                    // over the ADR-0112 envelope, not a guess about prose, and it
-                    // leaves #5667's tiering intact for UNDECLARED 5xx errors —
-                    // a bare `Error` still goes through the heuristic, so a
-                    // self-authored fault ("no strategy can handle query …")
-                    // stays readable.
-                    //
-                    // [#5811] That rule is no longer written here. The sibling
-                    // face — `/analytics/query`, exiting through
-                    // `dispatcher-plugin.errorResponseBase` — had the identical
-                    // leak (measured: 11/11 read-scope messages echoed verbatim),
-                    // so the criterion was promoted to `declaresServerFault` in
-                    // `@objectstack/types`, beside the heuristic it complements,
-                    // and both boundaries read it. #5808 deliberately left it
-                    // in-line while there was one consumer; this is the second.
-                    // The verdict here is unchanged in every case — the predicate
-                    // is the same `status >= 500` + non-empty `code` test, reading
-                    // the same two fields ① derives `envelopeStatus`/`envelopeCode`
-                    // from.
-                    logError('[REST] Analytics dataset query error:', error);
-                    // ── [#11718] ③a A DECLARED 5xx is RELAYED, not collapsed ──
-                    // Measured door-to-door: one producer-declared
-                    // `{ status: 503, code: 'SERVICE_UNAVAILABLE' }` answered
-                    // `503 SERVICE_UNAVAILABLE` on `POST /data/:object` and
-                    // `500 ANALYTICS_QUERY_FAILED` here. #5582's argument is
-                    // that `502`/`503` are `isExpectedDataStatus` LIFECYCLE
-                    // outcomes — a proxy retries them and alerts differently —
-                    // so collapsing them onto `500` destroys the declaration.
-                    // That ruling landed one door over and never reached this
-                    // one, because this arm built its 5xx body by hand.
-                    //
-                    // ⛔ This does NOT re-open #5352/#5367/#5811. Those rule the
-                    // PROSE, and the prose is still withheld — byte-identical,
-                    // `INTERNAL_ERROR_MESSAGE`, from the same shared arm — and
-                    // the full text still reaches the operator through the
-                    // `logError` line ABOVE this branch, which is deliberately
-                    // placed first so a relayed status cannot buy a producer its
-                    // way past the log. What moves is the CLASSIFICATION the
-                    // producer declared and this route was overwriting.
-                    //
-                    // {@link declaredServerFaultAnswer} is `/data`'s own arm,
-                    // imported for the reason {@link classifiedRefusalAnswer}
-                    // above it is: a third local opinion at this boundary is how
-                    // the two faces came to disagree in the first place. The
-                    // SIBLING analytics face already agreed with `/data` —
-                    // `/analytics/query` relays both halves through
-                    // `dispatcher-plugin.errorResponseBase` (measured: a
-                    // read-scope refusal reaches the client as `500`
-                    // `READ_SCOPE_COMPILE_FAILED`, pinned in
-                    // `analytics-query-read-scope-withhold.test.ts`) — so this
-                    // face was the only one of three collapsing the declaration.
-                    //
-                    // ⚠️ Consequence, deliberate and named: a declared 5xx now
-                    // carries the PRODUCER's code, so `read-scope-sql`'s ten
-                    // fail-closed refusals answer `500 READ_SCOPE_COMPILE_FAILED`
-                    // here instead of `500 ANALYTICS_QUERY_FAILED`. Their
-                    // 2026-08-06 ruling is untouched in substance — a SERVER
-                    // fault, `500`, policy content withheld — and the code they
-                    // now carry is the one they declare and the one the sibling
-                    // face has always shipped. `ANALYTICS_QUERY_FAILED` remains
-                    // this route's answer for an UNDECLARED fault, below.
-                    //
-                    // [#22764] A sandboxed body the doors answer as a FAULT is
-                    // asked first, for the order the doors ask it in: a body
-                    // that CRASHED is a fault whatever status it declared
-                    // (#17273), so it must not reach the declared-5xx relay, and
-                    // it never reaches ③b, whose `clientMsg` is the QuickJS
-                    // wrapper around the native error text for a crash (the
-                    // business read declines one). A sandboxed refusal that
-                    // declared a 5xx answers here too, the same bytes ③a gives
-                    // it: one classification, `/data`'s.
-                    const declaredFault = sandboxFaultAnswer(error) ?? declaredServerFaultAnswer(error);
-                    if (declaredFault) {
-                        return res.status(declaredFault.status).json({ ...declaredFault.body, ...markExtra });
-                    }
-                    // ── ③b The generic 500, for a fault nobody declared ──────
-                    // `declaresServerFault` is kept in the withhold test rather
-                    // than dropped as dead: it reads `error.status` alone and is
-                    // not bounded above, so a nonsense `status: 700` with a code
-                    // still reaches here (`declaredHttpStatus` requires < 600)
-                    // and must keep the withhold it has had since #5367.
-                    const outward = declaresServerFault(error) || looksLikeInternalErrorLeak(msg)
-                        ? INTERNAL_ERROR_MESSAGE
-                        : clientMsg.slice(0, 500);
-                    res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward, ...markExtra });
-                }
-            },
-            metadata: { summary: 'Run a semantic-layer dataset (preview/query)', tags: ['analytics'] },
-        });
+        registerAnalyticsEndpoints.call(host, basePath);
     }
 
     /**
@@ -10759,298 +10308,21 @@ export class RestServer {
      * is mounted (a deployment without `@objectstack/plugin-security`).
      */
     private registerSecurityExplainEndpoints(basePath: string): void {
-        const isScoped = basePath.includes('/environments/:environmentId');
-        // Resolve the ENVIRONMENT's security service first (its resolver /
-        // evaluator / RLS compiler are bound to the env kernel's own data
-        // engine); the host provider is the single-kernel fallback.
-        const resolveService = async (environmentId?: string, req?: any) => {
-            try {
-                const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-                if (envId && envId !== 'platform' && this.kernelManager) {
-                    const kernel = await this.kernelManager.getOrCreate(envId);
-                    const svc = await kernel.getServiceAsync<any>('security').catch(() => undefined);
-                    if (svc) return svc;
-                }
-            } catch { /* fall back to the host service */ }
-            if (!this.securityServiceProvider) return undefined;
-            try { return await this.securityServiceProvider(environmentId); }
-            catch { return undefined; }
+        // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `SecurityExplainRouteHost`, and that module's header for why
+        // `kernelManager` and `securityServiceProvider` are getters).
+        const readKernelManager = () => this.kernelManager;
+        const readSecurityServiceProvider = () => this.securityServiceProvider;
+        const host: SecurityExplainRouteHost = {
+            routeManager: this.routeManager,
+            get kernelManager() { return readKernelManager(); },
+            get securityServiceProvider() { return readSecurityServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
         };
-
-        /**
-         * [#8073] The ONE refusal emitter for this route family — every arm of
-         * both handlers goes through it, so "explain and my-delegable-scope
-         * answer the same shape" is a property of the code rather than of
-         * eight literals that happen to agree.
-         *
-         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
-         * the 401/501/400/403 arms were flat `{ code, message }` and the two
-         * 500s were `{ code, error: 'a bare string' }`, so `body.error.code` —
-         * the one position D5 declares — read `undefined` on all six. #7035
-         * (PR #7293) had already removed both from this file's `/meta`
-         * refusals and #7981 (PR #8071) from `registerSecurityEndpoints`, the
-         * immediately ADJACENT registrar: a client calling `explain` and then
-         * `suggested-bindings` met two shapes inside one `security` family.
-         *
-         * Emitted through the SHARED builder (`sendError` from
-         * `@objectstack/types`, imported as `sendEnvelopeError` — see the note
-         * at the import). That is what makes this the reference shape by
-         * construction rather than a ninth local literal agreeing with the
-         * eight it replaced, and it types `code` to the closed vocabulary for
-         * free.
-         *
-         * ⛔ Status codes are untouched: only the POSITION of `code` and
-         * `message` moves. `detail` — the 400 arm's Zod-issue dump — moves to
-         * `error.details`, the slot `ApiErrorSchema` actually declares for
-         * structured context; as a top-level sibling it was undeclared.
-         */
-        const respondError = (
-            res: any,
-            status: number,
-            code: ErrorCode,
-            message: string,
-            details?: unknown,
-        ): void => sendEnvelopeError(
-            res, status, code, message,
-            details === undefined ? undefined : { details },
-        );
-
-        const handler = async (req: any, res: any) => {
-            try {
-                const environmentId = isScoped ? req.params?.environmentId : undefined;
-                const context = await this.resolveExecCtx(environmentId, req);
-                if (this.enforceAuth(req, res, context)) return;
-                if (!context?.userId) {
-                    // The explain surface stays authenticated-only — it is an
-                    // admin diagnosis tool. (Anonymous is already 401ed above.)
-                    return respondError(
-                        res, 401, 'UNAUTHORIZED',
-                        'The access-explanation endpoint requires an authenticated caller.',
-                    );
-                }
-
-                const svc = await resolveService(environmentId, req);
-                if (!svc || typeof svc.explain !== 'function') {
-                    return respondError(
-                        res, 501, 'NOT_IMPLEMENTED',
-                        'Access explanation is not available on this deployment (no security service with explain).',
-                    );
-                }
-
-                // GET reads the request from the query string, POST from the
-                // body — one contract (ExplainRequestSchema), two transports.
-                //
-                // [#6877] The other read point that was already safe, and for the
-                // structural reason rather than by luck: every field goes through
-                // `ExplainRequestSchema.safeParse` below, whose members are
-                // `z.string()`, so an array is refused as `400 VALIDATION_FAILED`
-                // by the schema itself. A schema at the boundary is the shape the
-                // refusal gate is imitating, so there is nothing to add here.
-                const src = req.method === 'GET' ? (req.query ?? {}) : (req.body ?? {});
-                const { ExplainRequestSchema } = await import('@objectstack/spec/security');
-                // [#8326] GET-transport normalization ONLY: a query string
-                // cannot spell a one-element array (`?recordIds=a` parses to
-                // the bare string), so a lone string is wrapped on GET. On
-                // POST the body is JSON and can say what it means — a string
-                // where the contract says array stays a 400, not a wrap.
-                const rawRecordIds = req.method === 'GET' && typeof src.recordIds === 'string' && src.recordIds !== ''
-                    ? [src.recordIds]
-                    : src.recordIds;
-                const parsed = (ExplainRequestSchema as any).safeParse({
-                    object: src.object,
-                    operation: src.operation ?? 'read',
-                    ...(src.userId != null && src.userId !== '' ? { userId: src.userId } : {}),
-                    // [C2 / ADR-0095] Optional record id — explains ONE concrete
-                    // row at record granularity; omitted stays object-level.
-                    ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
-                    // [#8326] Optional batch of record ids — the schema owns the
-                    // cap (200), the min (1), and recordId/recordIds mutual
-                    // exclusion, so every refusal is the one 400 below.
-                    ...(rawRecordIds != null ? { recordIds: rawRecordIds } : {}),
-                });
-                if (!parsed.success) {
-                    return respondError(
-                        res, 400, 'VALIDATION_FAILED',
-                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string, recordIds?: string[] (max 200, exclusive with recordId) }.',
-                        String(parsed.error?.message ?? '').slice(0, 1000),
-                    );
-                }
-
-                const { recordIds, ...singularRequest } = parsed.data as { recordIds?: string[] } & Record<string, unknown>;
-                if (!recordIds) {
-                    // Singular / object-level — the pre-#8326 path, byte-identical.
-                    const decision = await svc.explain(parsed.data, context);
-                    return res.json(decision);
-                }
-
-                // [#8326] Batch form — transport amortization of the SINGULAR
-                // evaluation, not a new semantic: the object-level trace is one
-                // object-level explain, and each per-record verdict is the
-                // singular record-grained explain for that id, relayed
-                // verbatim. "Batch answer ≡ N singular answers" is therefore a
-                // property of the construction, and the agreement test pins it
-                // from staying that way by accident.
-                const decision = await svc.explain(singularRequest, context);
-                const verdictById = new Map<string, unknown>();
-                for (const id of new Set(recordIds)) {
-                    const single = await svc.explain({ ...singularRequest, recordId: id }, context);
-                    // A service without record-grained support answers no
-                    // record verdict; fail CLOSED (a hidden button beats a
-                    // shown-then-403), with no decidedBy fabricated.
-                    verdictById.set(id, single?.record ?? { recordId: id, visible: false });
-                }
-                // Ordering contract: records[i] answers recordIds[i] — same
-                // order, same length, duplicates answered per position.
-                res.json({ ...decision, records: recordIds.map((id) => verdictById.get(id)) });
-            } catch (error: any) {
-                const msg = String(error?.message ?? error ?? '');
-                if (
-                    error?.code === 'PERMISSION_DENIED' ||
-                    error?.name === 'PermissionDeniedError' ||
-                    msg.startsWith('[Security] Access denied')
-                ) {
-                    return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
-                }
-                // [#18253] The name asked about is not a declared object
-                // (`ExplainObjectNotFoundError`, plugin-security `errors.ts`) —
-                // a REFUSAL, not a fault, so it keeps its declared answer
-                // instead of falling to the 500 below. 404 `OBJECT_NOT_FOUND`
-                // is what this package already answers for an unregistered
-                // object name (`mapDataError`, `error-response.ts`), emitted
-                // here through this family's ONE refusal emitter so the body
-                // is the same ADR-0112 D5 envelope every other arm sends.
-                // Matched by `code`/`name`, exactly as the 403 arm above is:
-                // `@objectstack/plugin-security` is not a dependency of this
-                // package, and the thrown shape is the contract (#8016).
-                if (error?.code === 'OBJECT_NOT_FOUND' || error?.name === 'ExplainObjectNotFoundError') {
-                    return respondError(res, 404, 'OBJECT_NOT_FOUND', msg.slice(0, 1000));
-                }
-                // [#20603] A refusal the SERVICE classified: an ADR-0112 `code`
-                // with a 4xx `status` (either spelling), or a sandboxed body's
-                // business `throw`. It is the caller's answer, not this route's
-                // fault. The measured producer is the explain engine answering
-                // enforcement's own refusal, `INVALID_FILTER` / 400, for a
-                // row-level filter the record matcher cannot evaluate: in a
-                // record-grained explanation, and since #20604 in an
-                // object-level one and for a `recordId` no row carries. The
-                // find that explain describes answers 400 for the same filter.
-                // This arm used to answer `500 EXPLAIN_FAILED`, so a client
-                // read an outage where the platform meant "this policy cannot
-                // be evaluated".
-                //
-                // The classification is {@link classifiedRefusalAnswer}, the
-                // `/data` door's own, imported for the same reason the analytics
-                // and record-share doors import it (#11684): a local list of
-                // codes here would be a third opinion on a question that file
-                // owns. It answers `undefined` for everything the 500 below
-                // still owns: a declared 5xx, half an envelope (a code without
-                // a status, #5352), a crashed sandbox body, an unclassified
-                // fault. The 403 and 404 arms above keep running first,
-                // because they also match refusals that declare no status.
-                //
-                // Re-dressed through this family's ONE emitter, as the
-                // record-share family re-dresses it: `code` is required by the
-                // nested envelope and the sandbox limb legitimately carries
-                // none, so the catalog's status floor fills it. The message is
-                // the classification's, which unwraps a sandbox wrapper and
-                // applies the `/data` door's bound.
-                //
-                // ⛔ Scope: status, code and message. The classification's
-                // `declaredCode` and `userMessage` siblings are not forwarded,
-                // because this family's emitter has no slot for them (its fifth
-                // argument is `details`) and no arm of the family forwards
-                // them today. Adding that slot is a change to the whole family.
-                const refusal = classifiedRefusalAnswer(error);
-                if (refusal) {
-                    const code = typeof refusal.body.code === 'string'
-                        ? refusal.body.code as ErrorCode
-                        : standardErrorCodeForHttpStatus(refusal.status);
-                    return respondError(res, refusal.status, code, String(refusal.body.error ?? ''));
-                }
-                logError('[REST] Security explain error:', error);
-                // [#22764] A sandboxed body the doors answer as a fault (a
-                // crash, or a refusal declaring a 5xx) answers as the doors do,
-                // instead of the QuickJS wrapper relayed below. Status, code
-                // and message only, the refusal arm's scope above.
-                const fault = sandboxFaultAnswer(error);
-                if (fault) {
-                    const nested = nestedRefusalEnvelope(fault);
-                    return respondError(res, nested.status, nested.code, nested.message);
-                }
-                // The 500 arm keeps its 500-char cap: an unexpected fault's
-                // message is not a contract, and truncating it stays a
-                // sanitization step — only the position of the words moves.
-                respondError(res, 500, 'EXPLAIN_FAILED', msg.slice(0, 500));
-            }
-        };
-
-        this.routeManager.register({
-            method: 'GET',
-            path: `${basePath}/security/explain`,
-            handler,
-            metadata: { summary: 'Explain why a principal can (or cannot) perform an operation on an object (ADR-0090 D6)', tags: ['security'] },
-        });
-        this.routeManager.register({
-            method: 'POST',
-            path: `${basePath}/security/explain`,
-            handler,
-            metadata: { summary: 'Explain why a principal can (or cannot) perform an operation on an object (ADR-0090 D6)', tags: ['security'] },
-        });
-
-        /**
-         * [ADR-0090 D12 / ADR-0105 D8] What the CALLER may delegate.
-         *
-         *   GET {basePath}/security/my-delegable-scope
-         *
-         * The read half of the delegated-admin gate, shaped for a picker: the
-         * business units the caller may place people into and the positions
-         * they may assign. A scoped-invitation form narrows its options with
-         * this instead of listing the whole tree and letting the user find the
-         * boundary by being refused.
-         *
-         * Strictly SELF-scoped — no `userId` parameter, by design. The caller's
-         * own resolved sets are the only input, so it discloses nothing beyond
-         * the authority they already hold, and there is no "describe someone
-         * else's authority" surface to authorize (unlike `explain`, which has
-         * one and gates it). An authenticated caller is still required.
-         */
-        const delegableHandler = async (req: any, res: any) => {
-            try {
-                const environmentId = isScoped ? req.params?.environmentId : undefined;
-                const context = await this.resolveExecCtx(environmentId, req);
-                if (this.enforceAuth(req, res, context)) return;
-                if (!context?.userId) {
-                    return respondError(
-                        res, 401, 'UNAUTHORIZED',
-                        'The delegable-scope endpoint requires an authenticated caller.',
-                    );
-                }
-
-                const svc = await resolveService(environmentId, req);
-                if (!svc || typeof svc.describeDelegableScope !== 'function') {
-                    return respondError(
-                        res, 501, 'NOT_IMPLEMENTED',
-                        'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
-                    );
-                }
-
-                res.json(await svc.describeDelegableScope(context));
-            } catch (error: any) {
-                const msg = String(error?.message ?? error ?? '');
-                logError('[REST] Delegable scope error:', error);
-                respondError(res, 500, 'DELEGABLE_SCOPE_FAILED', msg.slice(0, 500));
-            }
-        };
-
-        this.routeManager.register({
-            method: 'GET',
-            path: `${basePath}/security/my-delegable-scope`,
-            handler: delegableHandler,
-            metadata: {
-                summary: "The caller's delegable scope: business units they may place into and positions they may assign (ADR-0090 D12 / ADR-0105 D8)",
-                tags: ['security'],
-            },
-        });
+        registerSecurityExplainEndpoints.call(host, basePath);
     }
 
     /**
@@ -11145,149 +10417,18 @@ export class RestServer {
      * codes a consumer is most likely to branch on.
      */
     private registerSecurityEndpoints(basePath: string): void {
-        const dataPath = basePath;
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        const resolveService = async (environmentId?: string) => {
-            if (!this.securityServiceProvider) return undefined;
-            try {
-                const svc = await this.securityServiceProvider(environmentId);
-                return svc && typeof svc.listAudienceBindingSuggestions === 'function' ? svc : undefined;
-            } catch { return undefined; }
+        // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `SecurityRouteHost`, and that module's header for why
+        // `securityServiceProvider` is a getter).
+        const readSecurityServiceProvider = () => this.securityServiceProvider;
+        const host: SecurityRouteHost = {
+            routeManager: this.routeManager,
+            get securityServiceProvider() { return readSecurityServiceProvider(); },
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
         };
-        /**
-         * The ONE refusal emitter for this route family (#7981) — every arm
-         * goes through it, so "the three answer the same shape" is a property
-         * of the code rather than of three literals that happen to agree.
-         * `refuseRepeatedQueryParams` writes the identical body from
-         * `query-multiplicity.ts`; that helper is shared with the whole file
-         * and stays the reference point rather than being re-implemented here.
-         */
-        // [#22719] `extra` carries the declared channels of a classified refusal
-        // (`declaredCode`, `userMessage`) inside the same `error` object; every
-        // other arm passes none and writes exactly `{ code, message }`.
-        const respondError = (
-            res: any, status: number, code: string, message: string,
-            extra?: { declaredCode?: string; userMessage?: string },
-        ) => res.status(status).json({ error: { code, message, ...extra } });
-        const respond501 = (res: any) => respondError(
-            res, 501, 'NOT_IMPLEMENTED', 'Security service is not configured on this deployment',
-        );
-        const handleError = (err: any, res: any, defaultCode: string) => {
-            const status = typeof err?.statusCode === 'number' ? err.statusCode : 500;
-            if (status !== 500) {
-                // The typed arm: plugin-security's PermissionDeniedError (403),
-                // SuggestionNotFoundError (404) and SuggestionStateError (409)
-                // each carry `code` + `statusCode`. The status mapping is
-                // unchanged — only the position of the code moves.
-                return respondError(res, status, err?.code ?? defaultCode, String(err?.message ?? err));
-            }
-            // [#22719] A refusal the typed arm cannot read is asked of the
-            // `/data` door's own classification before the 500 below relays
-            // `.message`. A sandboxed hook's refusal carries no `statusCode`
-            // (the sandbox lifts `status` only), so `confirm` and `dismiss`
-            // answered `500` with the QuickJS debug wrapper
-            // where every conforming write door answers the hook's own
-            // sentence; a refusal declaring `status` + `code` is answered at
-            // its own status too. The typed arm above is untouched, and the
-            // answer leaves through this family's one emitter.
-            const refusal = classifiedRefusalAnswer(err);
-            if (refusal) {
-                const nested = nestedRefusalEnvelope(refusal);
-                return respondError(res, nested.status, nested.code, nested.message, nested.extra);
-            }
-            logError(`[REST] suggested-bindings ${defaultCode}:`, err);
-            // [#22764] A sandboxed body the doors answer as a fault (a crash, or
-            // a refusal declaring a 5xx) answers as the doors do, through this
-            // family's one emitter, instead of the wrapper relayed below.
-            const fault = sandboxFaultAnswer(err);
-            if (fault) {
-                const nested = nestedRefusalEnvelope(fault);
-                return respondError(res, nested.status, nested.code, nested.message, nested.extra);
-            }
-            // The 500 arm keeps its 500-char cap: an unexpected fault's message
-            // is not a contract, and truncating it stays a sanitization step.
-            return respondError(res, 500, defaultCode, String(err?.message ?? err).slice(0, 500));
-        };
-
-        // LIST (reconciles against installed packages / declared sets first)
-        this.routeManager.register({
-            method: 'GET',
-            path: `${dataPath}/security/suggested-bindings`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    // [#6877] Both are `String(array)` joins — `?status=a&status=b`
-                    // filtered on the single status `'a,b'` and returned nothing.
-                    if (refuseRepeatedQueryParams(req, res, ['status', 'packageId'])) return;
-                    // [#7678] …and a single well-formed but UNKNOWN `?status=`
-                    // did the same thing one layer on: the service's contract
-                    // declares exactly three values, anything else matched no
-                    // row, and the caller got 200 with an empty list — which
-                    // reads as "there are no suggestions" rather than "your
-                    // filter was not a status". The runtime dispatcher's twin of
-                    // this route had refused it since #4127; this live route
-                    // never did. Same predicate, imported — not a second copy of
-                    // the vocabulary.
-                    const status = req.query?.status ? String(req.query.status) : undefined;
-                    if (status !== undefined && !isAudienceBindingSuggestionStatus(status)) {
-                        // [#7981] Same body as before — emitted through the
-                        // shared helper now, so this arm is the reference
-                        // point by construction instead of by coincidence.
-                        return respondError(
-                            res, 400, 'VALIDATION_ERROR',
-                            unknownAudienceBindingSuggestionStatusMessage(status),
-                        );
-                    }
-                    const result = await svc.listAudienceBindingSuggestions(context ?? {}, {
-                        status,
-                        packageId: req.query?.packageId ? String(req.query.packageId) : undefined,
-                    });
-                    res.json({ data: result });
-                } catch (err: any) { handleError(err, res, 'SUGGESTION_LIST_FAILED'); }
-            },
-            metadata: { summary: 'List suggested audience bindings (ADR-0090 D5/D9)', tags: ['security'] },
-        });
-
-        // CONFIRM — the deployment-level acceptance; `everyone` is re-derived
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/security/suggested-bindings/:id/confirm`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const result = await svc.confirmAudienceBindingSuggestion(context ?? {}, String(req.params.id));
-                    res.json({ data: result });
-                } catch (err: any) { handleError(err, res, 'SUGGESTION_CONFIRM_FAILED'); }
-            },
-            metadata: { summary: 'Accept a suggested audience binding for the deployment (everyone carries the set)', tags: ['security'] },
-        });
-
-        // DISMISS — declines a pending suggestion, or revokes an accepted one
-        this.routeManager.register({
-            method: 'POST',
-            path: `${dataPath}/security/suggested-bindings/:id/dismiss`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const svc = await resolveService(environmentId);
-                    if (!svc) return respond501(res);
-                    const result = await svc.dismissAudienceBindingSuggestion(context ?? {}, String(req.params.id));
-                    res.json({ data: result });
-                } catch (err: any) { handleError(err, res, 'SUGGESTION_DISMISS_FAILED'); }
-            },
-            metadata: { summary: 'Dismiss a suggested audience binding, or revoke an accepted one', tags: ['security'] },
-        });
+        registerSecurityEndpoints.call(host, basePath);
     }
 
     /**

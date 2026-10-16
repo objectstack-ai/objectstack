@@ -27,6 +27,7 @@ import { printServerReady, type ServerReadyOptions } from './format.js';
 describe('printServerReady Tenancy row (#4801, ADR-0105 D1)', () => {
   const base: ServerReadyOptions = {
     externalBaseOrigin: 'http://localhost:3000',
+    httpServer: 'composed',
     configFile: 'objectstack.config.ts',
     isDev: true,
     pluginCount: 1,

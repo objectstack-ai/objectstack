@@ -65,6 +65,25 @@ import {
 import { DatasourceAdminService, type StoredDatasource } from '../datasource-admin-service.js';
 import type { IDatasourceDriverFactory } from '../contracts/datasource-driver-factory.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
+// [#23184] The first load of what the drivers stand on is paid HERE, at module
+// load, and not inside the first clocked case: clocked windows measure
+// behaviour, never loading (AGENTS.md, Build & Test; the clocked-window rule of
+// `check-test-source-alias`). The factory reaches every driver through a lazy
+// `await import()`, and every driver imports `@objectstack/core`, which this
+// package's vitest config aliases to its SOURCE. So the first `create()` to get
+// past the pool gate (`memory WITHOUT a pool`) used to pay a cold transform of
+// core's whole module graph: 7-9 s of this file's ~9 s of clocked wall on a
+// 4 vCPU dev container, against milliseconds of construction. `driver-sql`
+// (knex; the `sqlite`, `postgres` and `mysql` arms) is the next 0.5-1.3 s.
+// The module cache hands the drivers these same instances, so nothing a case
+// runs is different. Two drivers are deliberately NOT listed and still load in
+// their first case (0.2-0.5 s each once core is loaded): `driver-memory`,
+// whose every module binding is a ruled census entry
+// (`check:driver-memory-census`), and `driver-mongodb`, which this package's
+// tests resolve through `dist/` only from the factory, so a test-file import
+// would be a new unaliased artifact import (`check:test-source-alias`).
+import '@objectstack/core';
+import '@objectstack/driver-sql';
 
 describe('#5714 — which driver arms read a declared `pool`', () => {
   it('names the two sqlite arms, `memory` and `turso` as unable to honour it (#5931 / #7243)', () => {
