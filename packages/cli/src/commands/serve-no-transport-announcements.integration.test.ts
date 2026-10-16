@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — spawns the real producer once per single-cause fixture: three boots of the built CLI (production --no-server, a default boot, a config-mounted HonoServerPlugin under --no-server), each read over its IPC channel and its OS_HOME; 19.4 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
+// test-budget: 30 — spawns the real producer once per single-cause fixture: three boots of the built CLI (production --no-server, a default boot, a config-mounted HonoServerPlugin under --no-server), each read over its IPC channel and its OS_HOME; 20.9 s, the slowest of three local runs on a shared container, x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
