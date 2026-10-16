@@ -10351,12 +10351,33 @@ export class ObjectStackProtocolImplementation implements
      * cannot answer throws. A read inside a transaction joins it
      * (`context.transaction`).
      *
+     * [#23609] A read that PAGES (`limit`, `offset`) leaves the legacy rows out
+     * before the page is cut, never after: filtered after, a page the legacy
+     * rows sat in came back short (an audit page, a commit page), and a
+     * `limit: 1` probe whose one row was a legacy organization's read as "no
+     * row" ({@link revertStoredPackage}'s "never been published"). The read
+     * stays the common path; only when the legacy rows could have taken a
+     * place in the page is it re-read with them excluded in the query itself.
+     * On a migrated or fresh database there are none, and the one read is the
+     * whole answer.
+     *
      * Two reads deliberately do NOT: {@link migrateStoredMetadata}, which must
      * see a legacy row to report it, and {@link revertCommit}'s commit read,
      * which refuses a legacy commit by name; each reads the column itself.
      */
     private async findEnvironmentRows(table: string, query: { where: Record<string, unknown>; context?: unknown; [key: string]: unknown }): Promise<any[]> {
-        return this.withoutLegacyOrganizationRows(table, await this.engine.find(table, query as never), query.context);
+        const rows = (await this.engine.find(table, query as never)) as any[] | null | undefined;
+        if (query.limit === undefined && query.offset === undefined) {
+            return this.withoutLegacyOrganizationRows(table, rows, query.context);
+        }
+        // An offset counts rows before the page, so any legacy row can shift
+        // it; a limit alone, only one the page itself holds.
+        if ((!rows || rows.length === 0) && query.offset === undefined) return rows ?? [];
+        const legacy = await this.legacyOrganizationRowsOf(table, query.context);
+        if (legacy.size === 0) return rows ?? [];
+        if (query.offset === undefined && !(rows ?? []).some((row) => legacy.has(String(row?.id)))) return rows ?? [];
+        const where = { $and: [query.where, { id: { $nin: [...legacy.keys()] } }] };
+        return ((await this.engine.find(table, { ...query, where } as never)) as any[] | null | undefined) ?? [];
     }
 
     /**
