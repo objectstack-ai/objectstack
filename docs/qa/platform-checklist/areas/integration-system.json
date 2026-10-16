@@ -428,7 +428,7 @@
       "title": "The flow designer's connector picker mirrors GET /automation/connectors: same instances, declarative ones annotated, actions and their input schemas offered per pick",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -447,7 +447,7 @@
       "steps": [
         "before the browser: GET /api/v1/automation/connectors and record { connectors, total } — this is the ground truth the picker must mirror",
         "in Studio, open a flow (e.g. showcase_declarative_connector_ping, or a scratch flow authored env-wide through POST /api/v1/automation, which opens editable — knownGaps) and add/select a connector_action node — if the editor opens behind the 'provided by an installed package' banner, check how the flow was authored before filing anything (see the knownGap)",
-        "open the connector picker; screenshot; only AFTER the screenshot, read the DOM list",
+        "focus the connector field and screenshot it, which confirms the field rendered; the picker is a NATIVE input with a datalist, whose open list a headless screenshot cannot show, so read the datalist's options from the DOM only AFTER that screenshot",
         "pick showcase_mcp_tools; record which actions are offered and screenshot the action + input form for echo_upper",
         "pick a plugin-registered connector and compare its presentation with the declarative one's annotation"
       ],
@@ -455,8 +455,8 @@
         {
           "clause": "the picker lists exactly the instances the API reports — no extras (a picker inventing catalog descriptors would let authors wire undispatchable nodes), none missing",
           "oracle": "screenshot",
-          "verify": "picker screenshot cross-checked name-by-name against the pre-captured listing",
-          "evidence": "screenshot + API read, diffed"
+          "verify": "the field screenshot confirms render; the datalist's options, read from the DOM after it, are cross-checked name-by-name against the pre-captured listing (a headless screenshot cannot show a native datalist open, so the list itself is a DOM read)",
+          "evidence": "the field screenshot + the datalist options read from the DOM, diffed against the API read"
         },
         {
           "clause": "declarative instances carry their annotation (origin distinguishable from plugin-registered), per the descriptor's origin field the API serves",
@@ -508,6 +508,12 @@
           "date": "2026-10-13",
           "change": "knownGaps[0] and steps[1] record that the installed-package lock did not reproduce for an env-wide flow (knownGap stale, #23163 A0; parked on #23121, carried by #23169). QA run #23163 authored the fixture flow through POST /api/v1/automation, and it opened editable with no lock banner; the picker listed exactly the 5 served connectors. The older reading, about flows written over the metadata API, is kept and marked not re-measured",
           "ref": "#23169"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "steps[2] and acceptance[0] (verify, evidence) corrected (checklist-accuracy finding of QA run #23922, wave #23878). The connector picker is a native datalist input; a headless screenshot cannot show its open list, so the name-by-name diff #23922 scored was read from the DOM after a screenshot confirmed the field. The step and clause now say so. Not loosened: the listed names must still equal the API's, no extras and none missing",
+          "ref": "#24036"
         }
       ]
     },
@@ -516,7 +522,7 @@
       "title": "Outbound webhooks materialize (spec object→object_name, isActive→active), fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, redeliver terminal rows tenant-scoped via POST /api/v1/webhooks/redeliver, reject retired trigger kinds, and never clobber admin edits",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -543,7 +549,7 @@
       "steps": [
         "boot the showcase; verify the materializer bridge: read sys_webhook over /api/v1/data and locate showcase_task_changed with object_name:'showcase_task', active:false, managed_by:'package', and the envelope in definition_json",
         "in Setup → Integrations → Webhooks flip the shipped showcase_task_changed row active and point its url at the local receiver (an admin edit — it must stamp customized). This edit is the subject of the seed-not-clobber clause (acceptance[6]) ONLY: the row stays org-less, so it delivers nothing on the org-walled showcase (fixtures.requires[0]). Author the in-organization scratch webhook beside it for the delivery legs",
-        "with the in-organization scratch webhook (fixtures.requires[0]) active and pointed at the receiver, create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId)",
+        "with the in-organization scratch webhook (fixtures.requires[0]) active and pointed at the receiver, create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId). The create needs showcase_task's required `project` lookup — pass an existing showcase_project id, or the create answers 400 VALIDATION_FAILED 'Project is required' and no create event fires",
         "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data: one row per delivery with status/attempts/lastStatusCode",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
@@ -653,6 +659,12 @@
           "date": "2026-10-13",
           "change": "fixtures.requires[0], steps[1] and [2] move the delivery legs onto an in-organization scratch webhook (stale spec, #23166 A1), and knownGaps[1] (new) and acceptance[2].verify record the bulk pair as blocked(dependency) with the maintainer question open (#23166 A2); both parked on #23121, carried by #23169. The shipped showcase_task_changed materializes org-less, and the auto-enqueuer gives an organization-walled event only to its own organization's subscriptions, so on the showcase it never fans out while Setup shows it active. QA run #23166 drove the per-record legs on a webhook authored inside the organization and passed them; in-org bulk flow events carry no organizationId, so no tenant subscription can receive them. N1 / N2 were not attempted and are owed by a re-run; the item's text for them is unchanged",
           "ref": "#23169"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-16",
+          "change": "steps[2] names the create body the delivery leg needs (checklist-accuracy finding of QA run #23922, wave #23878): a showcase_task create over REST requires its `project` lookup and answers 400 VALIDATION_FAILED 'Project is required' without one, so the create variant never fires. The clauses are unchanged",
+          "ref": "#24036"
         }
       ],
       "enumSource": {
@@ -666,14 +678,15 @@
       "title": "Job metadata schedules through every ScheduleSchema variant, executes with retry/timeout enforced, records sys_job/sys_job_run truth, and refuses the closed doors (id key, runtime create, missing handler)",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
         "app": "showcase",
         "requires": [
           "the shipped cron fixture: showcase_health_sweep (schedule cron '0 1 * * *' UTC, handler 'sweepProjectHealth' registered in defineStack({ functions }), retryPolicy { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 }, timeoutMs 300000 — examples/app-showcase/src/automation/jobs/index.ts; the handler-missing regression here was #4774/#4888)",
-          "scratch jobs in a writable package for the interval / once / failing / timing-out probes (near-term schedules so the run observes real executions)"
+          "scratch jobs in a writable package for the interval / once / failing / timing-out probes (near-term schedules so the run observes real executions)",
+          "OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1 exported on every boot of this item: by default a stock boot leaves package-authored scheduled work OFF by deployment policy — the boot logs '[AppPlugin] declarative jobs NOT scheduled — disabled by deployment policy …' (packages/runtime/src/app-artifact-handlers.ts, the reason text in packages/types/src/env.ts#SCHEDULED_WORK_DISABLED_REASON) — so without the switch neither showcase_health_sweep nor any scratch job is scheduled and every firing clause is unprovable"
         ]
       },
       "variants": [
@@ -720,9 +733,9 @@
           "evidence": "the run row"
         },
         {
-          "clause": "the two skip doors are LOUD and distinct: enabled:false skips scheduling at registration; a handler naming no registered function skips with '[AppPlugin] job handler not found in bundle.functions — skipping' — the exact silent-no-op that let the showcase sweep never run for months (#4774/#4888)",
+          "clause": "the two skip doors are distinct, and the dangerous one is LOUD: a handler naming no registered function skips with a WARN, '[AppPlugin] job handler not found in bundle.functions — skipping' — the exact silent no-op that let the showcase sweep never run for months (#4774/#4888); enabled:false — a deliberate author choice — skips scheduling at registration and says so only at DEBUG, '[AppPlugin] job disabled — skipping' (packages/runtime/src/app-artifact-handlers.ts), so it is read on a boot with --log-level debug",
           "oracle": "log",
-          "verify": "both skip lines present; neither job has sys_job_run rows",
+          "verify": "the handler-missing WARN present at the default log level, and the enabled:false DEBUG line present on a --log-level debug boot; neither job has sys_job_run rows. A handler-missing skip that logs below WARN is the FAIL",
           "evidence": "log excerpts + absence of runs"
         },
         {
@@ -765,6 +778,12 @@
           "date": "2026-09-09",
           "change": "key spelling only, no clause moved — the same #14478 rename residue as records-forms.object-hook-lifecycle: `job.timeout` became `timeoutMs` (old spelling kept as a retiredKey tombstone), so the fixture citation, the timing step, the over-limit clause and the job.zod.ts citation all named a key the schema now refuses. What is exercised is unchanged; the execution STATUS is still 'timeout'.",
           "ref": "#15839"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "fixtures.requires gains the scheduling switch, and acceptance[4] (clause, verify) is corrected (checklist-accuracy findings of QA run #23922, wave #23878). A stock boot never schedules packaged jobs: OS_AUTOMATION_SCHEDULED_WORK_ENABLED is off by default ('declarative jobs NOT scheduled — disabled by deployment policy'), and neither fixtures nor steps named it. acceptance[4] called both skip doors LOUD, but the enabled:false skip logs at DEBUG by design (app-artifact-handlers.ts) — only the handler-missing skip, the #4774/#4888 regression class, is a WARN. The clause keeps that WARN as the loud requirement and reads the debug line on a debug-level boot. Not loosened: a silent handler-missing skip still FAILS",
+          "ref": "#24036"
         }
       ]
     },
@@ -773,7 +792,7 @@
       "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -786,7 +805,7 @@
         ],
         "knownGaps": [
           "no stock example exercises an email template end-to-end; needs a small fixture flow with a notify/email step",
-          "refinement of the gap above (2026-08-07 survey): the TEMPLATE fixture now exists (showcase_task_done_email) and the send path is pinned by packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts, but no shipped FLOW invokes sendTemplate — the flow-driven half still needs the fixture flow, or the send must be driven directly via IEmailService.sendTemplate in the run"
+          "refinement of the gap above: the TEMPLATE fixture exists (showcase_task_done_email) and the send path is pinned by packages/qa/dogfood/test/email-template-materialization.dogfood.test.ts, but no shipped FLOW invokes sendTemplate. The workable door, measured by QA run #23922: a SCRATCH notify flow authored through POST /api/v1/automation (a runtime flow registers on stock showcase), whose notify node names channels ['email'], template 'showcase_task_done_email' and templateData (CEL value envelopes for title / project), fired through its api trigger — the email channel calls sendTemplate per recipient, and each delivery lands in sys_email (admin GET /api/v1/data/sys_email) with the rendered subject and body"
         ]
       },
       "variants": [
@@ -799,7 +818,7 @@
       ],
       "steps": [
         "boot the showcase; GET /api/v1/meta/email_template/showcase_task_done_email and read the served item — subject, bodyHtml, variables, active. The REGISTRY serves it: since ADR-0131 D6/D10 (#22875) a declared template is read by (name, locale) from the registry, and no sys_email_template row backs it — the table holds 0 rows on a stock boot (QA run #23166) and its organization door is closed (packages/plugins/plugin-email/src/email-template-door.ts)",
-        "drive a send with full data ({ title, project }) through IEmailService.sendTemplate (or the fixture flow once it exists); capture the rendered subject/body at the dev transport",
+        "drive a send with full data ({ title, project }) through the scratch notify flow of knownGaps[1] (POST /api/v1/automation; channels ['email'], template, templateData; fired through its api trigger); capture the rendered subject/body from the sys_email row it lands (the dev log transport logs no body)",
         "drive a send MISSING the required `title`; capture the fast failure",
         "make the template inactive (a Studio save of the item with active:false, or a scratch template authored active:false) and send; capture the TEMPLATE_INACTIVE error",
         "author the zh-CN twin; send to a zh-CN-locale recipient and to an unmatched-locale recipient; capture which row rendered each",
@@ -918,6 +937,12 @@
           "date": "2026-10-13",
           "change": "the title, fixtures.requires[0] and [3] (new), steps[0], [3], [6] and [7], acceptance[0], [2] and [5] and source[2] re-pointed from the sys_email_template row to the registry (stale spec, #23166 A0 / A5 / A6; parked on #23121, carried by #23169). Since #22875 (ADR-0131 D6/D10) declared templates resolve from the registry by (name, locale); the row projector is gone, the table holds 0 rows on a stock boot, and its organization door is closed. `category` and `isSystem` are retired (#22876), so the fixture line no longer names a category. The declared-source half of acceptance[5] needs a writable showcase copy: QA run #23166 scored it partial on the read-only stock app and passed the admin half. The pin email-template-materialization.dogfood.test.ts already asserts the registry graph, no row included",
           "ref": "#23169"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-16",
+          "change": "knownGaps[1] and steps[1] name the HTTP-reachable send door (checklist-accuracy finding of QA run #23922, wave #23878). IEmailService.sendTemplate is not something a runner can call, and no shipped flow invokes it; #23922 drove every send through a scratch notify flow authored via POST /api/v1/automation (channels email, template, templateData), whose deliveries land in sys_email with the rendered subject and body. The step now names that door and reads the render off sys_email. Not loosened: the clauses score the same renders",
+          "ref": "#24036"
         }
       ]
     },
@@ -926,7 +951,7 @@
       "title": "The flow notify node delivers to the recipient's inbox (sys_inbox_message + receipt), readable and markable over /notifications, recipient-scoped — with unimplemented channels dead-lettering, never faking delivery",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -960,7 +985,7 @@
         "unauthenticated GET /api/v1/notifications; capture the 401",
         "as the assignee, POST /api/v1/notifications/read with { ids: [<id>] }; re-list with ?read=false and confirm it dropped out; then POST /notifications/read/all",
         "read the backing rows over the data API (sys_inbox_message + sys_notification_receipt keyed (notification_id, user_id, channel:'inbox')) to confirm the surface reflects storage",
-        "author a scratch flow copy whose notify node names channels ['push']; run it; capture where the message lands (dead-letter), and that NO inbox row was fabricated"
+        "author a scratch flow copy whose notify node names channels ['push'] (POST /api/v1/automation registers a runtime flow on stock showcase); run it; capture the server's WARN refusal and confirm that NO inbox row and NO sys_notification_delivery row were written — emit refuses a delivery on an unregistered channel up front rather than enqueueing a row the dispatcher could only dead-letter"
       ],
       "acceptance": [
         {
@@ -988,9 +1013,9 @@
           "evidence": "the two responses"
         },
         {
-          "clause": "an unimplemented channel dead-letters instead of faking success: the ['push'] probe produces NO inbox row and the dispatcher records the dead-letter — declared-but-unimplemented channels must stay visible failures (#3197)",
+          "clause": "an unimplemented channel never fakes delivery: the ['push'] probe produces NO inbox row and NO delivery row — emit refuses the delivery up front and says so in a WARN naming the channel ('[messaging] emit: channel 'push' is not registered; refused N delivery row(s) the dispatcher could only dead-letter …', packages/services/service-messaging/src/messaging-service.ts) — declared-but-unimplemented channels must stay visible failures (#3197)",
           "oracle": "log",
-          "verify": "no sys_inbox_message row for the probe run; the dead-letter/log evidence captured",
+          "verify": "no sys_inbox_message row and no sys_notification_delivery row for the probe run, and the WARN refusal naming channel 'push' in the server log. A delivery row reported success, or an inbox row, is the FAIL",
           "evidence": "absence check + log excerpt"
         }
       ],
@@ -1027,6 +1052,12 @@
           "date": "2026-10-13",
           "change": "knownGaps[2] (new) names why acceptance[3]'s 501 half cannot run on a showcase boot (fixture gap, #23166 A3-501; parked on #23121, carried by #23169). The clause already allowed citing it from a minimal boot without the messaging plugin, but nothing said the showcase can never be that boot: its config requires 'messaging'. QA run #23166 scored the half blocked(fixture). No clause changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "steps[6] and acceptance[4] (clause, verify) re-pointed (checklist-accuracy finding of QA run #23922, wave #23878). The clause said the dispatcher records a dead-letter for the push probe; on the live pipeline emit refuses the delivery up front — WARN 'channel push is not registered; refused 1 delivery row(s) the dispatcher could only dead-letter' — and no sys_notification_delivery row exists, which is what #23922 read. The clause now scores that refusal: no inbox row, no delivery row, the WARN present. Not loosened: any fabricated delivery or inbox row still FAILS",
+          "ref": "#24036"
         }
       ]
     },
@@ -1035,7 +1066,7 @@
       "title": "A declared external datasource federates: its objects query in place over REST, read-only",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1058,7 +1089,7 @@
         {
           "clause": "the external datasource's objects appear in /meta and return the fixture rows over the normal /data query path — federation is transparent to the query layer",
           "oracle": "api",
-          "verify": "/data/<external object> returns the seeded external rows; filters/$top work as on a native object",
+          "verify": "/data/<external object> returns the seeded external rows; the JSON `filter` query param (e.g. filter={\"status\":\"paid\"}) and `top` work as on a native object, judged on the returned rows against the unfiltered set. The OData `$filter` spelling is not this route's: it is refused 400 INVALID_FILTER (the filter must be JSON) — a refusal, not a federation failure",
           "evidence": "the reads"
         },
         {
@@ -1092,7 +1123,8 @@
           "change": "initial — the coverage.json `datasource` waiver was STALE (showcase ships a read-only SQLite external fixture); un-waived. NOTE: the external-datasource ADMIN CRUD lifecycle is a separate item (datasource-admin-lifecycle)",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "re-worded clause 3 and step 5 for this item's declared api surface. Both named the Setup → Datasources console page inside an item whose surface is api, so the clause could only ever be scored by a substitution the item did not authorize. The datasources admin API is what the page renders from, so it is now the oracle and the page is the optional substitution — surface left as api rather than widened to mixed, since every other clause here is a server read (#9417)", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "re-worded clause 3 and step 5 for this item's declared api surface. Both named the Setup → Datasources console page inside an item whose surface is api, so the clause could only ever be scored by a substitution the item did not authorize. The datasources admin API is what the page renders from, so it is now the oracle and the page is the optional substitution — surface left as api rather than widened to mixed, since every other clause here is a server read (#9417)", "ref": "#9386" },
+        { "revision": 3, "date": "2026-10-16", "change": "acceptance[0].verify corrected (checklist-accuracy finding of QA run #23922, wave #23878): 'filters/$top work as on a native object' — OData $filter is refused 400 INVALID_FILTER on /data (the filter must be JSON), while the JSON filter param and top work, which is what #23922 used. The verify text names the working spellings and the refusal. Not loosened: a filter that returns the unfiltered set still FAILS", "ref": "#24036" }
       ]
     },
     {
@@ -1462,7 +1494,7 @@
       "title": "A recipient preference muting the inbox channel for a topic suppresses delivery (no inbox row, no dead-letter fake); flipping it back resumes; a sys_notification_template renders through a delivery",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1488,7 +1520,7 @@
         "read the messaging outbox / dead-letter surface and confirm there is no dead-letter row for the muted (recipient, 'inbox') — a deliberate mute is a DROP by the preference filter, not a dead-letter (dead-letter is reserved for unimplemented channels, #3197)",
         "flip the row enabled:true (or delete it); re-fire; confirm the inbox row is delivered again",
         "probe the resolution order: a user_id='*' admin-global default OFF with a user-specific row ON delivers (user row overrides global); a mandatoryTopics-configured topic bypasses the matrix entirely (cannot be muted)",
-        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body"
+        "render a sys_notification_template through a delivery: author a scratch sys_notification_template keyed (topic, channel, locale) and drive a template-backed channel (email/sms — messaging-service-plugin registers them as 'renders sys_notification_template'); capture the rendered subject/body. Author the row's locale where the recipient's ladder REACHES it: the store walks DOWN only — the recipient's locale, then its language subtag, then 'en' (packages/services/service-messaging/src/template-renderer.ts, localeCandidates) — and a recipient with no sys_user.locale starts at the deployment default, so an en-US-only row is never used for them. Author locale 'en', or the recipient's exact locale"
       ],
       "acceptance": [
         {
@@ -1516,7 +1548,7 @@
           "evidence": "the two probe outcomes"
         },
         {
-          "clause": "a sys_notification_template renders through a delivery: driving a template-backed channel resolves (topic, channel, locale) from sys_notification_template with locale fallback and renders the subject/body holes — proving the template surface is live and DISTINCT from the inline title/message the inbox flow uses",
+          "clause": "a sys_notification_template renders through a delivery: driving a template-backed channel resolves (topic, channel, locale) from sys_notification_template along the recipient's locale ladder — down only: the recipient's locale, its language subtag, then 'en'; never up to a regional row — and renders the subject/body holes, proving the template surface is live and DISTINCT from the inline title/message the inbox flow uses",
           "oracle": "log",
           "verify": "the captured render carries the template's substituted subject/body (email/sms channel path; messaging-service-plugin 'renders sys_notification_template')",
           "evidence": "the captured render"
@@ -1551,6 +1583,12 @@
           "date": "2026-10-13",
           "change": "knownGaps[1] (new) records the mandatory-topic half of acceptance[3] as blocked(fixture) on stock and names its unit pin (fixture gap, #23166 A3-mandatory; parked on #23121, carried by #23169). mandatoryTopics is a MessagingServicePlugin constructor option, default empty, so the stock showcase declares none and a run cannot add one. QA run #23166 passed the rest of the item. No clause changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps[6] and acceptance[4].clause corrected (checklist-accuracy finding of QA run #23922, wave #23878). 'with locale fallback' overstated the ladder: the store walks only DOWN (en-US → en → en), so a recipient with no locale resolves the deployment default 'en' and an en-US-only template row is never used — #23922 authored its row at 'en'. The step now says where to author the row, and the clause names the ladder. Not loosened: the render must still carry the template's substituted subject and body",
+          "ref": "#24036"
         }
       ]
     },
