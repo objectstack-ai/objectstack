@@ -41,12 +41,13 @@
 //      has not been built);
 //   3. behavioral — each lazy path really loads its dep on demand and the
 //      gate still produces findings.
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { describe, it, expect } from 'vitest';
+import { promisify } from 'node:util';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const distDir = join(srcDir, '..', 'dist');
@@ -63,6 +64,20 @@ const depLoaded = (cache: Record<string, unknown> | undefined, dep: string) =>
 // loaded runner (dozens of parallel turbo tasks) that alone takes >5s, so vitest's
 // default 5s timeout flakes while the assertion set is pure contract, not latency.
 const COLD_LOAD_TIMEOUT_MS = 30_000;
+
+// The two dist probes are independent child processes, so they start together
+// in `beforeAll` and each case awaits its own child's output: the children
+// cold-load in parallel with each other and with the in-process case, which
+// runs first. Run one after another, they were most of this file's wall time,
+// and nothing they assert depends on it. A child that exits non-zero rejects
+// with its stderr, as `execFileSync` threw it. The no-op `catch` only marks
+// the promise as handled until its case awaits it.
+const execFileAsync = promisify(execFile);
+const spawnProbe = (args: string[]) => {
+  const stdout = execFileAsync(process.execPath, args, { encoding: 'utf8' }).then((r) => r.stdout);
+  stdout.catch(() => {});
+  return stdout;
+};
 
 describe('lazy dependency loading (kernel boot-path contract)', () => {
   it('no src file eagerly imports a lazy dep (import type only)', () => {
@@ -153,30 +168,27 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     };
   `;
 
-  it.skipIf(!existsSync(join(distDir, 'index.cjs')))('built CJS dist loads no lazy dep at import time, and each only on its own trigger', () => {
-    const out = execFileSync(
-      process.execPath,
-      ['-e', `${childBody}; check(require(${JSON.stringify(join(distDir, 'index.cjs'))}));`],
-      { encoding: 'utf8' },
-    );
-    expect(out).toContain('OK');
-  }, COLD_LOAD_TIMEOUT_MS);
-
-  it.skipIf(!existsSync(join(distDir, 'index.js')))('built ESM dist loads no lazy dep at import time, and each only on its own trigger', () => {
-    const out = execFileSync(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `import { createRequire } from 'node:module';
-         const require = createRequire(process.cwd() + '/probe.js');
-         ${childBody};
-         check(await import(${JSON.stringify(pathToFileURL(join(distDir, 'index.js')).href)}));`,
-      ],
-      { encoding: 'utf8' },
-    );
-    expect(out).toContain('OK');
-  }, COLD_LOAD_TIMEOUT_MS);
+  const probes = new Map<'cjs' | 'esm', Promise<string>>();
+  beforeAll(() => {
+    if (existsSync(join(distDir, 'index.cjs'))) {
+      probes.set('cjs', spawnProbe(['-e', `${childBody}; check(require(${JSON.stringify(join(distDir, 'index.cjs'))}));`]));
+    }
+    if (existsSync(join(distDir, 'index.js'))) {
+      probes.set(
+        'esm',
+        spawnProbe([
+          '--input-type=module',
+          '-e',
+          `import { createRequire } from 'node:module';
+           const require = createRequire(process.cwd() + '/probe.js');
+           ${childBody};
+           check(await import(${JSON.stringify(pathToFileURL(join(distDir, 'index.js')).href)}));`,
+        ]),
+      );
+    }
+  });
+  // No child outlives the file, including one whose case a `-t` filter skipped.
+  afterAll(() => Promise.allSettled(probes.values()));
 
   it('loads each dep lazily in-process and the gates still work', async () => {
     const req = createRequire(import.meta.url);
@@ -300,5 +312,13 @@ describe('lazy dependency loading (kernel boot-path contract)', () => {
     });
     expect(depLoaded(req.cache, 'typescript')).toBe(true);
     expect(props.some((f) => f.rule === 'react-prop-missing-required' && /objectName/.test(f.message))).toBe(true);
+  }, COLD_LOAD_TIMEOUT_MS);
+
+  it.skipIf(!existsSync(join(distDir, 'index.cjs')))('built CJS dist loads no lazy dep at import time, and each only on its own trigger', async () => {
+    expect(await probes.get('cjs')).toContain('OK');
+  }, COLD_LOAD_TIMEOUT_MS);
+
+  it.skipIf(!existsSync(join(distDir, 'index.js')))('built ESM dist loads no lazy dep at import time, and each only on its own trigger', async () => {
+    expect(await probes.get('esm')).toContain('OK');
   }, COLD_LOAD_TIMEOUT_MS);
 });

@@ -44,12 +44,13 @@
 // adjudication accepted is now REQUIRED rather than forbidden (tier 3), so it
 // can neither regress into an eager import nor quietly stop meaning anything.
 
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { describe, it, expect } from 'vitest';
+import { promisify } from 'node:util';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const distDir = join(srcDir, '..', 'dist');
@@ -234,45 +235,79 @@ const childBody = `
   };
 `;
 
+// The positive control's child (the last spawned case below says why it is
+// spawned and what it proves); it is a const only so `beforeAll` can start it.
+const controlBody = `${probeHelpers}
+     const rt = require(${JSON.stringify(runtimeCjs)});
+     const full = require(${JSON.stringify(indexCjs)});
+     for (const dep of ${JSON.stringify(SCHEMA_DEPS)}) {
+       if (loaded(dep)) fail(dep + ' was loaded merely by importing the full @objectstack/lint barrel');
+     }
+     const snapshots = rt.buildRuntimeWriteSnapshots({
+       type: 'object',
+       item: ${JSON.stringify(SCHEMA_OBJECT)},
+       context: { objects: ${JSON.stringify(OBJECT_CONTEXT)} },
+     });
+     if (!snapshots) fail('the gate builds no snapshot for an object write — the tier legs above are then untested');
+     const findings = full.validateRuleCompilability(snapshots.candidate);
+     if (!findings.some((f) => f.rule === 'validation-rule-json-schema-uncompilable')) {
+       fail('SCHEMA_OBJECT no longer carries a schema ajv refuses to compile, so the tier-2 legs ' +
+            'have degraded into "a body with nothing in it loads nothing" and tier 3 refuses ' +
+            'nothing. Restore a schema ajv rejects rather than deleting this test.');
+     }
+     for (const dep of ${JSON.stringify(SCHEMA_DEPS)}) {
+       if (!loaded(dep)) {
+         fail(dep + ' did NOT load even though the compilability rule just compiled this body. The ' +
+              'require-cache probe cannot see the load it exists to catch, so every clean result in ' +
+              'this file is vacuous — fix the probe, do not trust the greens.');
+       }
+     }
+     console.log('OK');`;
+
 // Cold-loading a dist entry in a spawned node on a busy runner takes seconds.
 const COLD_LOAD_TIMEOUT_MS = 30_000;
 
-describe('@objectstack/lint/runtime (kernel boot-path contract, #4463)', () => {
-  it.skipIf(!existsSync(runtimeCjs))(
-    'built CJS runtime entry honours the three-tier dep contract, at import AND while gating',
-    () => {
-      const out = execFileSync(
-        process.execPath,
-        ['-e', `${childBody}; check(require(${JSON.stringify(runtimeCjs)}));`],
-        { encoding: 'utf8' },
-      );
-      expect(out).toContain('OK');
-    },
-    COLD_LOAD_TIMEOUT_MS,
-  );
+// The three spawned cases are independent child processes, so they start
+// together in `beforeAll` and each case awaits its own child's output: the
+// children cold-load in parallel with each other and with the in-process
+// cases, which run first. Run one after another, they were most of this file's
+// wall time, and nothing they assert depends on it. A child that exits
+// non-zero rejects with its stderr, as `execFileSync` threw it. The no-op
+// `catch` only marks the promise as handled until its case awaits it.
+const execFileAsync = promisify(execFile);
+const spawnProbe = (args: string[]) => {
+  const stdout = execFileAsync(process.execPath, args, { encoding: 'utf8' }).then((r) => r.stdout);
+  stdout.catch(() => {});
+  return stdout;
+};
 
-  it.skipIf(!existsSync(runtimeEsm))(
-    'built ESM runtime entry honours the three-tier dep contract, at import AND while gating',
-    () => {
-      const out = execFileSync(
-        process.execPath,
-        [
+describe('@objectstack/lint/runtime (kernel boot-path contract, #4463)', () => {
+  const probes = new Map<'cjs' | 'esm' | 'control', Promise<string>>();
+  beforeAll(() => {
+    if (existsSync(runtimeCjs)) {
+      probes.set('cjs', spawnProbe(['-e', `${childBody}; check(require(${JSON.stringify(runtimeCjs)}));`]));
+    }
+    if (existsSync(runtimeEsm)) {
+      probes.set(
+        'esm',
+        spawnProbe([
           '--input-type=module',
           '-e',
           `import { createRequire } from 'node:module';
            const require = createRequire(process.cwd() + '/probe.js');
            ${childBody};
            check(await import(${JSON.stringify(pathToFileURL(runtimeEsm).href)}));`,
-        ],
-        { encoding: 'utf8' },
+        ]),
       );
-      expect(out).toContain('OK');
-    },
-    COLD_LOAD_TIMEOUT_MS,
-  );
+    }
+    if (existsSync(indexCjs) && existsSync(runtimeCjs)) probes.set('control', spawnProbe(['-e', controlBody]));
+  });
+  // No child outlives the file, including one whose case a `-t` filter skipped.
+  afterAll(() => Promise.allSettled(probes.values()));
 
-  // Same cold load as the two above, just in-process: the first `import()` of
-  // `./runtime.js` in this file pulls the whole gate graph through the transform.
+  // Same cold load as the two built-entry cases below, just in-process: the
+  // first `import()` of `./runtime.js` in this file pulls the whole gate graph
+  // through the transform.
   // So it gets the same budget — the claim being pinned (the boot path loads no
   // source parser) is proved by the assertions below, never by the wall clock,
   // and a 5 s default only turns a busy runner into a false red on the gate.
@@ -336,6 +371,22 @@ describe('@objectstack/lint/runtime (kernel boot-path contract, #4463)', () => {
     }
   }, COLD_LOAD_TIMEOUT_MS);
 
+  it.skipIf(!existsSync(runtimeCjs))(
+    'built CJS runtime entry honours the three-tier dep contract, at import AND while gating',
+    async () => {
+      expect(await probes.get('cjs')).toContain('OK');
+    },
+    COLD_LOAD_TIMEOUT_MS,
+  );
+
+  it.skipIf(!existsSync(runtimeEsm))(
+    'built ESM runtime entry honours the three-tier dep contract, at import AND while gating',
+    async () => {
+      expect(await probes.get('esm')).toContain('OK');
+    },
+    COLD_LOAD_TIMEOUT_MS,
+  );
+
   // #4716 — the probe's own non-vacuity, and the diagnostic that splits the
   // two ways tier 3 can fail.
   //
@@ -354,41 +405,8 @@ describe('@objectstack/lint/runtime (kernel boot-path contract, #4463)', () => {
   // very one the in-process leg reads.
   it.skipIf(!existsSync(indexCjs) || !existsSync(runtimeCjs))(
     'the schema-carrying body DOES load ajv when the compilability rule judges it directly (probe is not vacuous)',
-    () => {
-      const out = execFileSync(
-        process.execPath,
-        [
-          '-e',
-          `${probeHelpers}
-           const rt = require(${JSON.stringify(runtimeCjs)});
-           const full = require(${JSON.stringify(indexCjs)});
-           for (const dep of ${JSON.stringify(SCHEMA_DEPS)}) {
-             if (loaded(dep)) fail(dep + ' was loaded merely by importing the full @objectstack/lint barrel');
-           }
-           const snapshots = rt.buildRuntimeWriteSnapshots({
-             type: 'object',
-             item: ${JSON.stringify(SCHEMA_OBJECT)},
-             context: { objects: ${JSON.stringify(OBJECT_CONTEXT)} },
-           });
-           if (!snapshots) fail('the gate builds no snapshot for an object write — the tier legs above are then untested');
-           const findings = full.validateRuleCompilability(snapshots.candidate);
-           if (!findings.some((f) => f.rule === 'validation-rule-json-schema-uncompilable')) {
-             fail('SCHEMA_OBJECT no longer carries a schema ajv refuses to compile, so the tier-2 legs ' +
-                  'have degraded into "a body with nothing in it loads nothing" and tier 3 refuses ' +
-                  'nothing. Restore a schema ajv rejects rather than deleting this test.');
-           }
-           for (const dep of ${JSON.stringify(SCHEMA_DEPS)}) {
-             if (!loaded(dep)) {
-               fail(dep + ' did NOT load even though the compilability rule just compiled this body. The ' +
-                    'require-cache probe cannot see the load it exists to catch, so every clean result in ' +
-                    'this file is vacuous — fix the probe, do not trust the greens.');
-             }
-           }
-           console.log('OK');`,
-        ],
-        { encoding: 'utf8' },
-      );
-      expect(out).toContain('OK');
+    async () => {
+      expect(await probes.get('control')).toContain('OK');
     },
     COLD_LOAD_TIMEOUT_MS,
   );
