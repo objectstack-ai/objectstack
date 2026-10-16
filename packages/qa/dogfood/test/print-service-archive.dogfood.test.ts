@@ -36,7 +36,12 @@ import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { bootShowcase } from './showcase-boot.js';
 import { PrintServicePlugin } from '../../../services/service-print/src/print-service-plugin.js';
-import { PrintService } from '../../../services/service-print/src/print-service.js';
+import {
+  PrintService,
+  type IPrintService,
+  type PrintEngine,
+} from '../../../services/service-print/src/print-service.js';
+import { FILE_ATTACHMENT_SERVICE, type IDataEngine, type IFileAttachmentService } from '@objectstack/spec/contracts';
 
 const SYS = { isSystem: true } as const;
 const PAGE = 'showcase_invoice_document';
@@ -60,8 +65,8 @@ async function refusalOf(p: Promise<unknown>): Promise<Refusal> {
 describe('print service on a real showcase boot', () => {
   let stack: VerifyStack;
   let rootDir: string;
-  let ql: any;
-  let plugin: any;
+  let ql: IDataEngine;
+  let plugin: IPrintService;
   let service: PrintService;
   const saved: Record<string, string | undefined> = {};
   const revoke = vi.fn(async () => undefined);
@@ -89,15 +94,15 @@ describe('print service on a real showcase boot', () => {
         new PrintServicePlugin(),
       ],
     });
-    ql = stack.kernel.getService('objectql');
-    plugin = stack.kernel.getService('print');
+    ql = stack.kernel.getService<IDataEngine>('objectql');
+    plugin = stack.kernel.getService<IPrintService>('print');
 
     memberEmail = 'print-member@dogfood.test';
     memberToken = await stack.signUp(memberEmail);
     // The app's own `showcase_contributor`: invoice read scoped to the
     // caller's own rows (`owner == current_user.email`).
     const member = await ql.findOne('sys_user', { where: { email: memberEmail } }, { context: SYS });
-    await ql.insert('sys_user_permission_set', { user_id: member.id, permission_set: 'showcase_contributor' }, { context: SYS });
+    await ql.insert('sys_user_permission_set', { user_id: member!.id, permission_set: 'showcase_contributor' }, { context: SYS });
     // Two invoices cloned from a seeded one, differing only in who owns them.
     const [seeded] = await ql.find('showcase_invoice', { limit: 1 }, { context: SYS });
     const invoice = (name: string, owner: string) =>
@@ -105,22 +110,14 @@ describe('print service on a real showcase boot', () => {
     ownInvoice = String((await invoice('INV-PRINT-OWN', memberEmail)).id);
     othersInvoice = String((await invoice('INV-PRINT-OTHER', 'someone-else@dogfood.test')).id);
 
-    const k = stack.kernel as any;
-    const optional = (name: string) => {
-      try {
-        return k.getService(name);
-      } catch {
-        return undefined;
-      }
-    };
     service = new PrintService({
       placement: {
         state: 'configured',
         resolved: { placement: 'local', target: '/stand-in/chromium', consoleUrl: 'http://127.0.0.1:1/_console' },
       },
       driver: { placement: 'local', probe: async () => ({ version: 'stand-in' }), renderPdf },
-      getEngine: () => optional('objectql'),
-      getAttachments: () => optional('file-attachments'),
+      getEngine: () => stack.kernel.getService<PrintEngine>('objectql'),
+      getAttachments: () => stack.kernel.getService<IFileAttachmentService>(FILE_ATTACHMENT_SERVICE),
       getMinter: () => ({ mint }),
     });
     await service.probe();
