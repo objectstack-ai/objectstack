@@ -13,7 +13,7 @@
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import { SystemUserId } from '@objectstack/spec/system';
-import { PRINCIPAL_SESSION_MAX_TTL_SECONDS } from '@objectstack/spec/contracts';
+import { PRINCIPAL_SESSION_MAX_TTL_SECONDS, type IAuthService } from '@objectstack/spec/contracts';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { bootMintFixture, expiresAtMs, rawTokenOf, type MintFixture } from './principal-session-mint-test-support';
 import { PRINCIPAL_SESSION_TOKEN_PREFIX, holdPrincipalSessionExpiry } from './principal-session-mint';
@@ -120,6 +120,11 @@ describe('[#23772] refusals — before anything is minted', () => {
 });
 
 describe('[#23772] the minted session', () => {
+  it("AuthManager's method IS the contract member (a drift fails the test layer's typecheck)", () => {
+    const member: Required<IAuthService>['mintPrincipalSession'] = fx.manager.mintPrincipalSession.bind(fx.manager);
+    expect(typeof member).toBe('function');
+  });
+
   it('a human principal (principalKind absent or human) mints, branded, impersonatedBy unset', async () => {
     for (const ctx of [fx.human(), fx.human({ principalKind: 'human' })]) {
       const minted = await fx.manager.mintPrincipalSession(ctx);
