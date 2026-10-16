@@ -142,7 +142,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       ban_user: {
         label: "Bloquear usuario",
@@ -633,7 +643,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       add_member: {
         label: "Añadir miembro",
@@ -751,7 +771,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "Cancelar invitación",

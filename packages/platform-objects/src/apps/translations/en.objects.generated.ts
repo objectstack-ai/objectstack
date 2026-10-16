@@ -142,7 +142,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}"
+        successMessage: "Invitation sent to ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Owner",
+              admin: "Admin",
+              delegated_admin: "Delegated Admin",
+              member: "Member"
+            }
+          }
+        }
       },
       ban_user: {
         label: "Ban User",
@@ -633,7 +643,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}"
+        successMessage: "Invitation sent to ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Owner",
+              admin: "Admin",
+              delegated_admin: "Delegated Admin",
+              member: "Member"
+            }
+          }
+        }
       },
       add_member: {
         label: "Add Member",
@@ -751,7 +771,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}"
+        successMessage: "Invitation sent to ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Owner",
+              admin: "Admin",
+              delegated_admin: "Delegated Admin",
+              member: "Member"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "Cancel Invitation",
