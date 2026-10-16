@@ -704,28 +704,28 @@
     },
     {
       "id": "cli.migrate-meta-codemod",
-      "title": "os migrate meta replays the spec migration chain over authored sources and PRINTS the mechanical edit list the retirement messages prescribe — it rewrites no source file, its --out snapshot is schema-valid, replay is idempotent, and a below-floor --from is refused",
+      "title": "os migrate meta replays the spec migration chain over authored sources and PRINTS the mechanical edit list the retirement messages prescribe — by default it rewrites no source file, and --write rewrites in place exactly the edits it can prove, held to a re-run of the chain; its --out snapshot is schema-valid, replay is idempotent, and a below-floor --from is refused",
       "since": "v14.7",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "cli",
       "personas": ["build-time author (no session)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch copy of an authored source tree. ⚠️ NOT because the command rewrites in place — it does not: the authored-source chain reads the config and writes nothing but --out (commands/migrate/meta.ts: 'The command does not silently rewrite TS config source (that AST rewrite is unsafe and lossy)'), and the --stored arm is a read-only preview until --apply. A scratch copy is still the right hygiene for planting retired spellings, and --stored --apply IS a real write — to this deployment's sys_metadata ROWS, not to files",
+          "a scratch copy of an authored source tree, and a SECOND fresh copy for the --write leg: --write (#9591) rewrites the authored files in place, so it never runs on the checked-out app. The default run (no --write) writes nothing but --out (commands/migrate/meta.ts: 'By default it writes no source file'), and the --stored arm is a read-only preview until --apply. --stored --apply IS a real write too — to this deployment's sys_metadata ROWS, not to files",
           "authored sources deliberately carrying retired spellings from the previous major, so the chain has something to report"
         ],
         "knownGaps": [
           "Constructing sources that carry the OLD spellings requires authoring against a retired surface, which the current schemas refuse at parse. Author the fixture files as raw text (they are the input a real upgrader has on disk — files written before the retirement, which is exactly why they do not parse now); do NOT try to produce them through the current schema. If a retired spelling cannot be reconstructed for a sampled entry, record that entry as blocked(fixture) rather than declaring the chain clean over it.",
           "The registry carries entries for both the shipped major and the next one. Conversions for the NEXT major may be staged but not yet reachable through a released --from/--to pair; record which sampled entries were actually exercised.",
-          "The in-place SOURCE REWRITE this item was first authored against does not exist and is deliberately out of scope at revision 3: `os migrate meta` declares no --write/--fix/in-place flag and the authored-source arm's only file write is the --out snapshot. It is commissioned as #9591 for v18 (pm:on-hold, with its own Restart-when line). ⛔ Do NOT record it as blocked(dependency) and do NOT file it as a defect — print-only IS the shipped contract. The restart is mechanical instead: the last step and the last acceptance clause read the --help flag surface, and a --write appearing there is the signal to restore the rewrite assertions here."
+          "--write writes a site only when it can trace it to ONE object or array literal in ONE project file whose value matches the loaded one; every other site is REFUSED with a kind from a closed set (computed, helper, spread, shared, outside-project, mismatch, injected, unspellable, layout, unattributed, entangled — packages/cli/src/utils/authored-source-codemod.ts CodemodRefusalKind) and listed under 'left for you to apply by hand' with its reason. Plant the retired spellings as plain literals the config module reaches (directly, or through a relative import or a define* helper) so each is traceable. A planted site the run lists as refused, with a kind from that set and a reason naming the blocker, is the contract working, not a fail of the write clause — record its kind and re-plant that entry as a plain literal; a refused site with no kind or no reason is a finding."
         ]
       },
       "steps": [
         "enumerate the migration registries and record their sizes: packages/spec/src/migrations/entries/{retired-defs,retired-keys,semantic}",
-        "collect the command's advertised contract from the SHIPPED retirement messages: grep the spec for the house sentence they carry — `Run \\`os migrate meta --from <N>\\` to list the mechanical edits for existing sources; apply them by hand.` (shared text in packages/spec/src/shared/retired-key.ts, reworded class-wide by #9529) — and record which majors are named. ⚠️ The sentence promises a LIST, not an automatic rewrite: what this item verifies is that the listing is complete and honest, not that files change",
+        "collect the command's advertised contract from the SHIPPED retirement messages: grep the spec for the house sentence they carry — `Run \\`os migrate meta --from <N>\\` to list the mechanical edits for existing sources; \\`--write\\` applies the ones it can prove, and you apply the rest by hand.` (shared text in packages/spec/src/shared/retired-key.ts, reworded class-wide by #9529 and given its `--write` clause by #9591) — and record which majors are named. ⚠️ The sentence promises a LIST by default and an in-place write only for the edits --write can prove: the default run is judged on the listing being complete and honest, the --write run on writing exactly the provable edits and nothing else",
         "copy an authored source tree to a scratch dir and plant retired spellings sampled from the retired-keys registry (at minimum one ui/ key and one data/ key); record a per-file checksum of the scratch tree BEFORE the run",
         "run `os migrate meta --from <previous major>` and capture stdout + the exit code",
         "confirm every planted spelling appears in the printed `Applied <N> mechanical change(s):` block as `<path>: <from> → <to> (<conversionId>)`, naming the successor the registry declares",
@@ -735,7 +735,7 @@
         "run it with a --from BELOW the supported floor and capture the MigrationFloorError path (`Cannot migrate from protocol <N>: the chain's support floor is <F>`)",
         "run it with --json where supported and check the exit code in the same way #4873 required of every other migrate subcommand",
         "confirm the semantic-only entries behave as ADVISORIES: they are reported under `<N> manual change(s) require your judgment:` with their why/verify text, never silently 'fixed' (a semantic change has no mechanical rewrite by definition)",
-        "RESTART CHECK for #9591 — run `os migrate meta --help` and record the flag surface. Today it is exactly from/to/step/out/stored/database-url/apply/yes/force/type/json, with no in-place rewrite flag. If a --write (or equivalent) has appeared, #9591 has LANDED and this item is stale: restore the source-rewrite assertions revision 3 removed and bump the revision, rather than ticking or failing the clauses below"
+        "WRITE MODE (#9591): run `os migrate meta --help` and record the --write line. Then, on a SECOND fresh scratch copy carrying the same planted spellings, keep a byte copy of the tree and run `os migrate meta --from <previous major> --write`; capture stdout + the exit code. Read the `Wrote <N> of <M> mechanical change(s) into <K> file(s):` block (each site `:<line> <path> (<conversionId>)`), any `<N> mechanical change(s) left for you to apply by hand:` block (each with its `not written [<kind>]: <reason>`), and the closing `Re-ran the chain over the written sources: …` line. Diff the tree against its byte copy: the changed files are exactly the files the block names, each hunk sits at a listed site, and every other byte (comments, formatting, key order) is unchanged. Then, over the WRITTEN tree: re-run `os migrate meta --from <previous major>` without --write (no written site is still listed under Applied; the semantic advisories are listed exactly as before), run `--write` a second time (it writes nothing: `--write: the chain made no mechanical change here, so no file was written.`), and run `--write --json` on a third fresh copy (exit 0; the payload's `write.status` is `written` and `write.written[]` names each site with its file and line)"
       ],
       "acceptance": [
         {
@@ -745,9 +745,9 @@
           "evidence": "the printed block, with each sampled entry located in it"
         },
         {
-          "clause": "the authored sources are UNTOUCHED — the run's only file write is the --out snapshot. This is the shipped contract, not a defect: the command declines the AST rewrite as 'unsafe and lossy' in its own header",
+          "clause": "WITHOUT --write the authored sources are UNTOUCHED — the default run's only file write is the --out snapshot. This is the shipped contract, not a defect: the source rewrite is opt-in (--write, acceptance[7]), and the command's own docblock says 'By default it writes no source file'",
           "oracle": "log",
-          "verify": "per-file checksums of the scratch tree before and after: every file byte-identical, and the only new or changed path is the --out target when --out was passed",
+          "verify": "per-file checksums of the scratch tree before and after the runs made without --write: every file byte-identical, and the only new or changed path is the --out target when --out was passed",
           "evidence": "the before/after checksum pairs + the --out path"
         },
         {
@@ -781,16 +781,17 @@
           "evidence": "exit code"
         },
         {
-          "clause": "RESTART CONDITION — the command still has NO in-place rewrite flag, i.e. #9591 (v18) has not landed and this item's print-only scope is still the right one",
+          "clause": "--write rewrites the authored sources IN PLACE for exactly the mechanical changes it can prove, and for nothing else (#9591): each planted spelling traced to a literal is written at its site, each one it cannot trace is listed with a refusal kind and reason, no semantic advisory is written, every byte outside a written site is unchanged, and the write is held to a re-run of the chain over the written sources — so the written tree no longer carries the converted spelling, and a second --write has nothing to do",
           "oracle": "log",
-          "verify": "`os migrate meta --help` lists exactly from/to/step/out/stored/database-url/apply/yes/force/type/json. A --write/--fix/in-place flag appearing is NOT a failure of this item — it is the trigger to restore the source-rewrite assertions here and bump the revision",
-          "evidence": "the --help flag list"
+          "verify": "the WRITE MODE step: the `Wrote <N> of <M> mechanical change(s) into <K> file(s):` block names a file and line for each traced planted spelling, N plus the by-hand count equals M (the Applied count of the dry run over the same input), and the run closes with `Re-ran the chain over the written sources: no mechanical change remains.` (or `only the <n> change(s) left above remain.`) and exits 0; the diff against the pre-run byte copy touches only the named files, only at the named sites; the re-run without --write lists no written site under Applied and the same semantic advisories; the second --write prints `--write: the chain made no mechanical change here, so no file was written.`; `--write --json` exits 0 with `write.status` `written`. ⛔ A write the re-run disagrees with must come back `restored` with exit 1 and every file at its old bytes, never half-converted (meta.ts writeSources) — a reported `written` over a tree the re-run still converts is a FAIL",
+          "evidence": "the --write stdout and exit code, the before/after tree diff, the re-run stdout, the second --write line, and the --json write block"
         }
       ],
       "negative": [
         "a retirement message prescribing `os migrate meta --from N` for a spelling the chain does not LIST — the prescription is then a dead end, and the author who follows it is worse off than one who was told nothing",
         "a listed edit whose declared successor ALSO does not parse (pointing the author at a second retired name)",
-        "a run that MUTATES the authored sources. Against today's contract that is a FAIL of the untouched-sources clause; if it turns out to be #9591 landing rather than a bug, the correct response is to revise this item, never to tick it",
+        "a run WITHOUT --write that mutates the authored sources is a FAIL of the untouched-sources clause — the rewrite is opt-in",
+        "a --write that changes any byte outside a listed site, writes a semantic advisory, drops a planted spelling from both its written and its by-hand list, or reports the write done while the re-run over the written tree still converts a written site, is a FAIL of the write clause",
         "a below-floor --from that silently no-ops and exits 0",
         "a replay from the target major that reports changes, or two identical runs whose stdouts disagree",
         "`Migrated stack is schema-valid` printed while manual changes are still outstanding — the same dishonesty as reporting 'migrated' over a semantic change nobody applied"
@@ -798,12 +799,15 @@
       "traps": ["destructive-in-place", "absence-inference"],
       "source": [
         "packages/cli/src/commands/migrate/meta.ts#writeFileSync (applyMetaMigrations, composeSpecChanges, normalizeStackInput, MigrationFloorError, PROTOCOL_MAJOR; the declared flag surface and the two --out-guarded writeFileSync calls)",
+        "packages/cli/src/commands/migrate/meta.ts#printWriteOutcome (the --write report: the written sites, the by-hand list with each refusal kind, and the re-run verdict; the write itself and its restore-on-disagreement are MigrateMeta.writeSources)",
+        "packages/cli/src/utils/authored-source-codemod.ts#CodemodRefusalKind (what --write proves before writing a site, and the closed set of reasons it refuses one; edits are text splices at node positions, so bytes outside a site are unchanged)",
+        "packages/cli/test/migrate-meta-write.test.ts (the #9591 pin: exactness, idempotence, semantic TODOs never written, every refusal kind, and no source change without --write)",
         "packages/spec/src/migrations/entries/retired-defs/ · retired-keys/ · semantic/ (the registries it replays)",
         "the retirement messages across packages/spec that prescribe this command by name — the shared sentence in packages/spec/src/shared/retired-key.ts and its per-key sites (e.g. the BOOK_TRANSLATIONS_RETIRED text in packages/spec/src/system/book.zod.ts#pinned), pinned class-wide by packages/spec/src/shared/retired-key-migrate-sentence.test.ts",
         "ADR-0087 (retirement registries and conversion routes)",
         "#4873 (--json exit-code honesty across migrate subcommands)",
         "#9529 (the 2026-08-18 reword: the messages promise a LIST of mechanical edits applied by hand, not an automatic rewrite)",
-        "#9591 (the v18 `--write` AST codemod, pm:on-hold — `Restart-when: the v18 major development cycle opens (first v18 changeset-major accepted on main), or a maintainer instruction pulls it forward`; when it lands, the assertions removed at revision 3 come back here)",
+        "#9591 (the `--write` AST codemod — closed completed: the command landed by PR #22108 (commit a959493cd), and PR #22142 named `--write` in the house retirement sentence; the restart trigger revision 3 wrote into the last step and clause fired, and revision 5 restored the source-rewrite assertions as acceptance[7])",
         "#9733 (the disposition: keep the item active and rewrite it to today's contract rather than retire a P1 over a capability parked two majors out)",
         "sibling item cli.migrate-plan-apply-json (the DATABASE migrate lane — lists `meta` as a variant but asserts nothing about it)"
       ],
@@ -831,6 +835,12 @@
           "date": "2026-10-04",
           "change": "A4 / step 8 re-pointed: replaying from the target major is now an EMPTY range and prints '⚠ No migration step exists for protocol N → N …' (no longer the 'Nothing to migrate' success line); idempotence is proven by replaying a canonical source over --from 17 with the default --to 18 (CHAIN_TERMINUS_MAJOR, ahead of PROTOCOL_MAJOR 17): zero mechanical edits, exit 0, the step-18 semantic advisories still listed (chain.ts lists every hop's semantic entries unconditionally, so 'Nothing to migrate' does not print over 17 → 18). meta.ts printEmptyRangeAnswer / printMigrationReport, the --to flag default. Stale clause. Source fb39b385f1 (#17462, fixes #17134)",
           "ref": "#21735"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "stale clause re-pointed (#23950, from QA run #23921): the item's own restart trigger fired. #9591 closed completed — `os migrate meta --write` landed by PR #22108 (a959493cd) and the house retirement sentence names it since PR #22142 — so `--help` now lists --write (and --all), and acceptance[7], which asserted the print-only flag surface, went red against a correct product. As revision 3 prescribed, the source-rewrite assertions are restored rather than the restart clause deleted: acceptance[7] is now the write contract — --write rewrites in place exactly the mechanical edits it can trace to one literal in one project file, lists every other with a closed-set refusal kind, writes no semantic advisory, leaves every byte outside a written site unchanged, and is held to a re-run of the chain (restored, exit 1, on disagreement), so the written tree re-runs clean and a second --write writes nothing. The last step becomes the WRITE MODE leg on its own fresh scratch copy. Following the same landing: the title and fixtures say the rewrite is opt-in and needs its own copy; the third knownGap now describes what --write refuses instead of saying it does not exist; step 2 quotes the current house sentence (with its --write clause); acceptance[1] is scoped to runs without --write and drops a quotation ('unsafe and lossy') meta.ts no longer carries; and the mutation negative splits into a no-write half and a write half. Source gains printWriteOutcome, CodemodRefusalKind and the migrate-meta-write.test.ts pin",
+          "ref": "#23950"
         }
       ]
     },
