@@ -1970,13 +1970,13 @@ describe('the hint a warned row shows an author (#16094, #21096)', () => {
       (r) => (r.entry.authorWarn === true || r.entry.status === 'experimental') && r.entry.status !== 'live',
     );
     // Anti-vacuity: an experimental row without an authorHint and with a note
-    // exists, so the leak this pin forbids is a real one. An opted-in row exists
-    // too, but since #23268 retired `object.externalSharingModel` every shipped
-    // opt-in carries an authorHint (the CONTROL branch below); the no-hint
-    // opt-in class is held by the SYNTHETIC case after this one.
+    // exists, so the leak this pin forbids is a real one. No shipped row opts in
+    // with `authorWarn` any more: #23268 retired `object.externalSharingModel`,
+    // and #23710 flipped the last one, `page.print`, `live`. So the CONTROL
+    // branch below may find no shipped row, and both opt-in classes (with an
+    // authorHint and without) are held by the SYNTHETIC case after this one.
     const leakers = (pred: (r: ShippedRow) => boolean) =>
       warned.filter((r) => pred(r) && r.entry.authorHint === undefined && typeof r.entry.note === 'string');
-    expect(warned.filter((r) => r.entry.authorWarn === true).length).toBeGreaterThan(0);
     expect(leakers((r) => r.entry.status === 'experimental').length).toBeGreaterThan(0);
     expect(leakers((r) => typeof r.entry.note === 'string' && TRACKER_ID.test(r.entry.note as string)).length).toBeGreaterThan(0);
     for (const row of warned) {
