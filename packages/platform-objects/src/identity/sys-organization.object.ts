@@ -376,6 +376,9 @@ export const SysOrganization = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
+    // Setup's identity records are not discussion surfaces (objectui#12614 item 1):
+    // no Discussion feed, and a comment create on one answers 403 FEEDS_DISABLED.
+    feeds: false,
     // #1591 closed the generic writes on this table — "refused by the identity
     // write guard (ADR-0092 D2) and owned by better-auth; HTTP answers 405
     // before the 403" — and that reasoning still holds for better-auth's own
