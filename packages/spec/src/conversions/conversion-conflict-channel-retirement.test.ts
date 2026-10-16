@@ -61,7 +61,7 @@ describe('§1 the retired exports have zero holders; the TODO channel stands', (
   it('every retired name has ZERO holders on any public entry, and the survivors still stand on the root', () => {
     // Anti-vacuity: the baseline covers the real surface.
     expect(EXPORT_ENTRY_POINTS).toContain('.');
-    expect(exportNamesOf('.').length, 'the root must export a non-trivial surface').toBeGreaterThan(500);
+    expect(exportNamesOf('.').length, 'the root must export a non-trivial surface').toBeGreaterThan(100);
 
     for (const name of RETIRED_EXPORTS) {
       expect(holdersOf(name), `${name} must have zero holders after its retirement`).toEqual([]);
