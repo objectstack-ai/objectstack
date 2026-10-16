@@ -1318,6 +1318,23 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             mountMcpSkill('POST');
             mountMcpSkill('DELETE');
 
+            // [#23909] `/keys` is mounted for EVERY verb, though `POST` (mint)
+            // is the only one it serves. The published v18 text is "`/keys`:
+            // `401 UNAUTHENTICATED` for every verb", and the domain keeps it as
+            // its first statement (`handleKeysRequest`, ADR-0138 D2: the
+            // anonymous decision ahead of the method check) — but a floor can
+            // only answer a verb that REACHES it. With `POST` as the sole
+            // registration, any other verb matched no route and the adapter's
+            // unmatched-route answer replied first: `405`, naming the allowed
+            // method, to an anonymous caller as well. Same remedy as
+            // `/mcp/skill` above (#7649): register the verbs and the mismatch
+            // goes to the domain, which answers an anonymous caller 401 and a
+            // signed-in one its own 405 in the dispatcher's envelope.
+            //
+            // Unlike `/mcp/skill`, PUT and PATCH are mounted too, because the
+            // contract says every verb. Those two mounts are not wrapped by the
+            // per-route instrumentation (the observability Proxy wraps only
+            // get/post/delete), as the other PUT/PATCH mounts in this file are not.
             server.post(`${prefix}/keys`, async (req: any, res: any) => {
                 try {
                     const result = await dispatcher.dispatch('POST', '/keys', req.body, req.query, { request: req });
@@ -1326,6 +1343,25 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     errorResponse(err, res);
                 }
             });
+            const mountKeys = (method: 'GET' | 'PUT' | 'PATCH' | 'DELETE') => {
+                const register =
+                    method === 'GET' ? server.get
+                        : method === 'PUT' ? server.put
+                            : method === 'PATCH' ? server.patch
+                                : server.delete;
+                register.call(server, `${prefix}/keys`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(method, '/keys', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+            mountKeys('GET');
+            mountKeys('PUT');
+            mountKeys('PATCH');
+            mountKeys('DELETE');
 
             // ── In-app notifications (ADR-0030) ─────────────────────────
             // The inbox list + receipt mark-read surface backed by the
