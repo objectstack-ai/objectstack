@@ -70,6 +70,12 @@ vi.mock('chokidar', () => ({
   },
 }));
 
+// `dev.ts` borrows one function from `serve.ts` (`resolveAuthBaseUrl`, read by
+// the MCP connect hint, never by the watch loop), and `serve.ts` imports the
+// whole runtime graph. Stubbed here so this file pays for the code it tests,
+// not for a server boot path it never reaches.
+vi.mock('./serve.js', () => ({ resolveAuthBaseUrl: () => undefined }));
+
 import Dev from './dev.js';
 
 interface WatchOpts {
