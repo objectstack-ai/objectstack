@@ -33,21 +33,24 @@
 //      bound and is refused with `ENOENT`, naming the level that cannot be
 //      made. The artifact cache refusal stays the resolver's own
 //      `OS_ARTIFACT_UNREACHABLE`, now carrying the OS's answer.
-//   2. CONTROL, in the same child: under a creatable `OS_HOME` three levels
-//      deep, the empty-boot stub artifact is written and the stack is built.
+//   2. CONTROL, in the same child: under a creatable home three levels deep,
+//      the empty-boot stub artifact is written and the stack is built, the
+//      package state file is written and read back, and the fetched artifact
+//      is cached.
 //   3. CONTROL, in-process: the helper makes a creatable path and returns the
-//      first directory it created; the state file and the fetched artifact
-//      land under a creatable home three levels deep.
+//      first directory it created.
+//
+// Every subject but the helper is imported by the CHILD only: their graph
+// (`standalone-stack.ts` and what it pulls in) costs this worker ~10 s of
+// transform, which tsx in the child pays from its own cache.
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { makeDirectorySync } from './make-directory.js';
-import { loadDisabledPackageIds, setPackageDisabled } from './package-state-store.js';
-import { resolveArtifactReference } from './artifact-reference.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(HERE, '..');
@@ -73,6 +76,7 @@ const STUB_ARTIFACT = JSON.stringify({
 interface Outcome {
   label: string;
   outcome: 'returned' | 'rejected';
+  value?: unknown;
   code?: string;
   message?: string;
 }
@@ -82,7 +86,6 @@ let root: string;
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-23858-runtime-'));
-  if (!RUNS_PROC) return;
   const script = [
     'const [subjectsJson, top, scratch, stub] = process.argv.slice(1);',
     'const subjects = JSON.parse(subjectsJson);',
@@ -94,18 +97,31 @@ beforeAll(() => {
     'process.chdir(scratch);',
     'const out = [];',
     'const record = async (label, fn) => {',
-    '  try { await fn(); out.push({ label, outcome: "returned" }); }',
+    '  try { const value = await fn(); out.push({ label, outcome: "returned", value: typeof value === "string" || typeof value === "boolean" ? value : undefined }); }',
     '  catch (e) { out.push({ label, outcome: "rejected", code: e?.code, message: String(e?.message) }); }',
     '};',
-    'await record("helper", () => makeDirectorySync(top + "/a/data"));',
-    'process.env.OS_HOME = top + "-dh";',
-    'await record("default-host", () => createDefaultHostConfig({ requireArtifact: false }));',
-    'process.env.OS_HOME = top + "-ps";',
-    'await record("package-state", () => setPackageDisabled(undefined, "com.example.os23858", true));',
-    'await record("artifact", () => resolveArtifactReference("http://artifact.invalid/objectstack.json", {',
-    '  homeDir: top + "-ar",',
+    // `top` is empty where there is no `/proc` to refuse: the controls alone.
+    'if (top) {',
+    '  await record("helper", () => makeDirectorySync(top + "/a/data"));',
+    '  process.env.OS_HOME = top + "-dh";',
+    '  await record("default-host", () => createDefaultHostConfig({ requireArtifact: false }));',
+    '  process.env.OS_HOME = top + "-ps";',
+    '  await record("package-state", () => setPackageDisabled(undefined, "com.example.os23858", true));',
+    '  await record("artifact", () => resolveArtifactReference("http://artifact.invalid/objectstack.json", {',
+    '    homeDir: top + "-ar",',
+    '    fetchImpl: async () => new Response(stub, { status: 200 }),',
+    '  }));',
+    '}',
+    'process.env.OS_HOME = scratch + "/ps-home/a/b";',
+    'const { loadDisabledPackageIds } = await import(subjects.packageState);',
+    'await record("package-state-control", () => {',
+    '  setPackageDisabled(undefined, "com.example.os23858", true);',
+    '  return loadDisabledPackageIds(undefined).has("com.example.os23858");',
+    '});',
+    'await record("artifact-control", async () => (await resolveArtifactReference("http://artifact.invalid/objectstack.json", {',
+    '  homeDir: scratch + "/ar-home/a/b",',
     '  fetchImpl: async () => new Response(stub, { status: 200 }),',
-    '}));',
+    '})).localPath);',
     'process.env.OS_HOME = scratch + "/home/a/b";',
     'await record("default-host-control", () => createDefaultHostConfig({ requireArtifact: false }));',
     'process.stdout.write("\\nMKDIR-OUTCOMES " + JSON.stringify(out) + "\\n");',
@@ -115,7 +131,7 @@ beforeAll(() => {
   const t0 = Date.now();
   const child = spawnSync(
     process.execPath,
-    ['--import', 'tsx', '--input-type=module', '-e', script, JSON.stringify(SUBJECTS), PROC_TOP, root, STUB_ARTIFACT],
+    ['--import', 'tsx', '--input-type=module', '-e', script, JSON.stringify(SUBJECTS), RUNS_PROC ? PROC_TOP : '', root, STUB_ARTIFACT],
     {
       cwd: PKG_ROOT,
       env: {
@@ -145,12 +161,6 @@ beforeAll(() => {
 
 afterAll(() => {
   if (root) rmSync(root, { recursive: true, force: true });
-});
-
-const savedHome = process.env.OS_HOME;
-afterEach(() => {
-  if (savedHome === undefined) delete process.env.OS_HOME;
-  else process.env.OS_HOME = savedHome;
 });
 
 function outcomeOf(label: string): Outcome {
@@ -189,9 +199,24 @@ describe('OS_HOME directory preps — a directory that can never be made is refu
     expect(o.message).toContain(`'${PROC_TOP}-ar'`);
   });
 
-  it.runIf(RUNS_PROC)('CONTROL: under a creatable OS_HOME three levels deep the empty-boot stub is written', () => {
+  it('CONTROL: under a creatable OS_HOME three levels deep the empty-boot stub is written', () => {
     expect(outcomeOf('default-host-control').outcome).toBe('returned');
     expect(statSync(join(root, 'home', 'a', 'b', 'dist', 'objectstack.json')).isFile()).toBe(true);
+  });
+
+  it('CONTROL: the package state file is written and read back under a creatable OS_HOME three levels deep', () => {
+    const o = outcomeOf('package-state-control');
+    expect(o.outcome).toBe('returned');
+    expect(o.value).toBe(true);
+    expect(statSync(join(root, 'ps-home', 'a', 'b', 'package-state')).isDirectory()).toBe(true);
+  });
+
+  it('CONTROL: a fetched artifact is cached under a creatable home three levels deep', () => {
+    const o = outcomeOf('artifact-control');
+    expect(o.outcome).toBe('returned');
+    const localPath = String(o.value);
+    expect(localPath.startsWith(join(root, 'ar-home', 'a', 'b', 'artifacts'))).toBe(true);
+    expect(readFileSync(localPath, 'utf8')).toBe(STUB_ARTIFACT);
   });
 
   it('CONTROL: the helper makes a creatable path and returns the first directory it created', () => {
@@ -199,22 +224,5 @@ describe('OS_HOME directory preps — a directory that can never be made is refu
     expect(makeDirectorySync(target)).toBe(join(root, 'made'));
     expect(statSync(target).isDirectory()).toBe(true);
     expect(makeDirectorySync(target)).toBeUndefined();
-  });
-
-  it('CONTROL: the package state file lands under a creatable OS_HOME three levels deep', () => {
-    process.env.OS_HOME = join(root, 'ps-home', 'a', 'b');
-    setPackageDisabled(undefined, 'com.example.os23858', true);
-    expect(loadDisabledPackageIds(undefined).has('com.example.os23858')).toBe(true);
-    expect(statSync(join(root, 'ps-home', 'a', 'b', 'package-state')).isDirectory()).toBe(true);
-  });
-
-  it('CONTROL: a fetched artifact is cached under a creatable home three levels deep', async () => {
-    const homeDir = join(root, 'ar-home', 'a', 'b');
-    const resolved = await resolveArtifactReference('http://artifact.invalid/objectstack.json', {
-      homeDir,
-      fetchImpl: async () => new Response(STUB_ARTIFACT, { status: 200 }),
-    });
-    expect(resolved.localPath.startsWith(join(homeDir, 'artifacts'))).toBe(true);
-    expect(readFileSync(resolved.localPath, 'utf8')).toBe(STUB_ARTIFACT);
   });
 });
