@@ -78,7 +78,9 @@ function expectRefusedWithoutCredentials(err: Error): void {
   expect(err.constructor).toBe(Error);
   expect(err.cause).toBeUndefined();
   const everything = JSON.stringify(err, Object.getOwnPropertyNames(err));
-  expect(everything).toContain(err.message);
+  // Positive control: the serialisation really holds the message, so the
+  // negative reads below read something.
+  expect(everything).toContain(JSON.stringify(err.message));
   for (const placeholder of [USER, SECRET, TOKEN]) {
     expect(everything, `the refusal carries ${placeholder}`).not.toContain(placeholder);
   }
