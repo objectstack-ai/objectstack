@@ -27,7 +27,9 @@ revenue:
   label: Annual Revenue
   precision: 18
   # Automatically knows:
-  # - Store amount + currency code
+  # - Store a bare number, no per-record currency code: it shows in the
+  #   tenant default currency (plain if none is set) or one fixed on the
+  #   field, at that currency's ISO 4217 decimal places
   # - UI shows currency symbol
   # - Validate numeric precision
   # - Format for display ($1,234.56)
