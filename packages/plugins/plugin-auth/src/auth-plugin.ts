@@ -70,6 +70,7 @@ import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js
 import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
+import { readJsonRequestBody } from './request-json-body.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
@@ -2731,8 +2732,14 @@ export class AuthPlugin implements Plugin {
     // Upstream tracking: https://github.com/better-auth/better-auth
     rawApp.post(`${basePath}/admin/oauth2/toggle-disabled`, async (c: any) => {
       try {
-        let body: any = {};
-        try { body = await c.req.json(); } catch { body = {}; }
+        // [#24032] A declared-JSON body that does not parse is refused, never
+        // read as `{}` (which answered "client_id is required" for a body that
+        // carried it); see request-json-body.ts.
+        const reading = await readJsonRequestBody(c.req.raw);
+        if (!reading.ok) {
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: reading.message } }, 400);
+        }
+        const body: any = reading.body;
         const clientId: unknown = body?.client_id;
         const disabled: unknown = body?.disabled;
         if (typeof clientId !== 'string' || clientId.length === 0) {
@@ -2866,8 +2873,13 @@ export class AuthPlugin implements Plugin {
     // server-side; mirrors the toggle-disabled route's session+role check.
     rawApp.post(`${basePath}/admin/unlock-user`, async (c: any) => {
       try {
-        let body: any = {};
-        try { body = await c.req.json(); } catch { body = {}; }
+        // [#24032] Same read as toggle-disabled above: a truncated body used to
+        // answer "userId is required" for a body that carried `userId`.
+        const reading = await readJsonRequestBody(c.req.raw);
+        if (!reading.ok) {
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: reading.message } }, 400);
+        }
+        const body: any = reading.body;
         const userId: unknown = body?.userId ?? body?.user_id;
         if (typeof userId !== 'string' || userId.length === 0) {
           return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'userId is required' } }, 400);
@@ -3419,8 +3431,12 @@ export class AuthPlugin implements Plugin {
     // just to fix UX. Keeping the wrapper scoped to the self-service flow.
     rawApp.post(`${basePath}/sys-oauth-application/register`, async (c: any) => {
       try {
-        let body: any = {};
-        try { body = await c.req.json(); } catch { body = {}; }
+        // [#24032] Same read as toggle-disabled: refused, never read as `{}`.
+        const reading = await readJsonRequestBody(c.req.raw);
+        if (!reading.ok) {
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: reading.message } }, 400);
+        }
+        const body: any = reading.body;
 
         const name: unknown = body?.name;
         const redirectUrlsInput: unknown = body?.redirectURLs;
