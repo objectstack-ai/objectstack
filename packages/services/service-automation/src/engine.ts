@@ -21,6 +21,7 @@ import {
     type ScreenFieldVisibility,
 } from './screen-input-contract.js';
 import type { Logger } from '@objectstack/spec/contracts';
+import type { FlowUnboundCause } from '@objectstack/spec/contracts';
 import { FLOW_HOOK_SECRET_KEY, flowCredentialClassLabel, flowCredentialPositions } from './flow-credential-projection.js';
 import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor, DecisionConfigSchema } from '@objectstack/spec/automation';
 // [#14328] The ONE answer to "which trigger kind does this flow ask for?" —
@@ -4850,6 +4851,7 @@ export class AutomationEngine implements IAutomationService {
         triggerType?: string;
         object?: string;
         reason?: string;
+        unboundCause?: FlowUnboundCause;
         armedFrom?: FlowContender;
         shadowed?: FlowContender[];
     }> {
@@ -4859,7 +4861,7 @@ export class AutomationEngine implements IAutomationService {
             // reads. This map holds ONE entry per bare name, so without these
             // two fields a displaced contender leaves no trace on this surface.
             const shadowing = this.flowShadowing.get(name);
-            const reason = this.describeUnboundReason(name, resolved);
+            const unbound = this.describeUnboundReason(name, resolved);
             return {
                 name,
                 enabled: this.isFlowEnabled(name),
@@ -4870,7 +4872,11 @@ export class AutomationEngine implements IAutomationService {
                 // Absent, not `undefined`-valued: a row that is bound, disabled
                 // or trigger-less has no reason to carry, and `reason: null` on
                 // the wire would read as "we looked and found nothing".
-                ...(reason === undefined ? {} : { reason }),
+                // [#23842] `unboundCause` rides the SAME spread, so the pair is
+                // present together or absent together by construction.
+                ...(unbound === undefined
+                    ? {}
+                    : { reason: unbound.reason, unboundCause: unbound.cause }),
                 ...(shadowing
                     ? { armedFrom: shadowing.armed, shadowed: shadowing.shadowed }
                     : {}),
@@ -4885,6 +4891,11 @@ export class AutomationEngine implements IAutomationService {
      * sentence an operator sees in Studio and the one the CLI prints cannot
      * drift apart. `undefined` means this flow has no unbound reason to report:
      * it is bound, it is disabled, or it declares no trigger at all.
+     *
+     * [#23842] Each branch answers its sentence AND its closed
+     * `FlowUnboundCause` together, so the status door can let a consumer
+     * classify a row without parsing the sentence — one value per branch,
+     * stamped where the branch is decided, never inferred from the text.
      *
      * The POLICY branch outranks both binding branches, and deliberately so.
      * When package-authored scheduled work is off, neither of the other two
@@ -4912,21 +4923,27 @@ export class AutomationEngine implements IAutomationService {
     private describeUnboundReason(
         name: string,
         resolved: { triggerType: string } | undefined,
-    ): string | undefined {
+    ): { reason: string; cause: FlowUnboundCause } | undefined {
         if (!resolved) return undefined; // manual / screen flow — nothing to bind
         if (!this.isFlowEnabled(name)) return undefined;
         if (this.boundFlowTriggers.has(name)) return undefined;
         const policyReason = this.policyDisabledFlows.get(name);
-        if (policyReason !== undefined) return policyReason;
+        if (policyReason !== undefined) return { reason: policyReason, cause: 'deployment_policy' };
         // [#20725, ADR-0126 §7.3] The arming gate declined it onto a disabled
         // packaged subflow — read from the record, for the policy line's
         // reason, and ahead of the trigger branches for the gate's: with the
         // child off, the trigger would not arm it either.
         const declined = this.subflowDeclinedFlows.get(name);
-        if (declined !== undefined) return declined;
+        if (declined !== undefined) return { reason: declined, cause: 'disabled_subflow' };
         return this.triggers.has(resolved.triggerType)
-            ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
-            : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
+            ? {
+                reason: `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`,
+                cause: 'binding_failure',
+            }
+            : {
+                reason: `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`,
+                cause: 'missing_trigger',
+            };
     }
 
     /**
@@ -4946,9 +4963,9 @@ export class AutomationEngine implements IAutomationService {
             // trigger) and the three-branch vocabulary both live in
             // `describeUnboundReason` now, so this audit and the status door
             // report the SAME sentence for the same flow by construction.
-            const reason = this.describeUnboundReason(name, resolved);
-            if (reason === undefined || !resolved) continue;
-            audit.push({ flowName: name, triggerType: resolved.triggerType, reason });
+            const unbound = this.describeUnboundReason(name, resolved);
+            if (unbound === undefined || !resolved) continue;
+            audit.push({ flowName: name, triggerType: resolved.triggerType, reason: unbound.reason });
         }
         return audit;
     }
