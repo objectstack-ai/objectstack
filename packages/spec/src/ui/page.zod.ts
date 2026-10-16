@@ -204,6 +204,12 @@ export const PageComponentType = z.enum([
   // every record page of an `enable.files` object. Each has a
   // `ComponentPropsMap` row measured from its renderer's read points.
   'record:approvals', 'record:attachments',
+  // #23745 (the spec half of face 4 of the objectui#12438 ruling, letter C):
+  // one key of the bound record drawn as indented JSON behind a REQUIRED,
+  // fail-closed `requiredPermissions` gate. Declared spec first, as
+  // `record:approval_decision` above was: objectui registers the renderer and
+  // plugin-approvals places it after this declaration exists.
+  'record:json',
   // Navigation
   'app:launcher', 'nav:menu', 'nav:breadcrumb',
   // Utility — `user:profile` REMOVED (#14159): shell chrome, refused by name
@@ -1373,6 +1379,7 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['record:approval_decision', 'is the decision panel of an approval request: action controls that differ by viewer, beside a progress tally each decision changes, with nothing to print'],
   ['record:approvals', 'is the record\'s live approval timeline, with a remind control only the submitter sees, so what prints would depend on who prints it'],
   ['record:attachments', 'is a list of attached files with upload, download and delete controls, and the files themselves never reach paper'],
+  ['record:json', 'is a panel that starts collapsed behind a per-viewer capability gate, so what prints would depend on who prints it and whether they opened it'],
   ['element:button', 'is an action control, with nothing to print'],
   ['element:record_picker', 'is an input control, with nothing to print'],
   ['element:text_input', 'is an input control, with nothing to print'],
