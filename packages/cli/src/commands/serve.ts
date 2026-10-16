@@ -3926,7 +3926,10 @@ export default class Serve extends Command {
       );
       if (!hasOrganizationOwnershipGuard) {
         const { OrganizationOwnershipBootGuardPlugin } = await import('@objectstack/runtime');
-        await kernel.use(new OrganizationOwnershipBootGuardPlugin());
+        // A development boot's refusal names the ceremony with `--dev`, so the
+        // ceremony boots the way this one did (its secret, .env* files and
+        // `telemetry` sibling).
+        await kernel.use(new OrganizationOwnershipBootGuardPlugin({ dev: isDev }));
         trackPlugin('OrganizationOwnershipBootGuard');
       }
 

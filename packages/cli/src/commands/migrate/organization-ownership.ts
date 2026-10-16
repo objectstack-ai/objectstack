@@ -177,6 +177,7 @@ export default class MigrateOrganizationOwnership extends Command {
     '$ os migrate organization-ownership --database-url postgres://… --json',
     '$ os migrate organization-ownership --apply --plan-file plans/v18-ownership.json --backup-taken',
     '$ os migrate organization-ownership --fate-supplement host-fates.json',
+    '$ os migrate organization-ownership --dev',
   ];
 
   static override flags = {
@@ -191,6 +192,12 @@ export default class MigrateOrganizationOwnership extends Command {
         'An existing file is never overwritten',
     }),
     json: Flags.boolean({ description: 'Also print the plan (or, with --apply, the apply report) on stdout' }),
+    dev: Flags.boolean({
+      description: 'Compose as `os serve --dev` does: the config\'s devPlugins, the development .env files, a '
+        + 'development boot for the auth secret\'s fallback, and the `telemetry` sibling database a development '
+        + 'boot keeps its lifecycle objects in. Pass it when the deployment boots with --dev (`os dev`).',
+      default: false,
+    }),
     apply: Flags.boolean({
       description:
         'Perform the ceremony: attribution, the verified id-to-name rewrite, mirror deletion, column drops, then the ' +
@@ -290,7 +297,7 @@ export default class MigrateOrganizationOwnership extends Command {
     // stop remedy alone. The plan writes no row or table and warns, as every
     // sibling's read-only arm does, saying what its connect can still change
     // on a SQLite file (`JOURNAL_MODE_SWITCH_NOTE`).
-    const occupancy = await probeMigrationTarget(flags['database-url']);
+    const occupancy = await probeMigrationTarget(flags['database-url'], { dev: flags.dev === true });
     if (occupancy.status === 'busy' && flags.apply) {
       await refuse(
         {
@@ -343,6 +350,7 @@ export default class MigrateOrganizationOwnership extends Command {
         jsonOutput: json,
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
         deferSchemaDdl: true,
+        serveFlags: { dev: flags.dev === true },
         // [#23816] The plan needs no held-back work listed, so a transport that
         // cannot defer DDL boots with no schema sync instead (still read-only).
         deferredDdlUnsupported: 'skip-schema-sync',
@@ -524,6 +532,7 @@ export default class MigrateOrganizationOwnership extends Command {
         composeHostStack: true,
         composeServedPlatform: true,
         composeAuthGatedSecurity: true,
+        serveFlags: { dev: flags.dev === true },
       });
     } catch (error: unknown) {
       await refuse({ reason: 'boot-failed', detail: String((error as Error)?.message ?? error) }, String((error as Error)?.message ?? error));

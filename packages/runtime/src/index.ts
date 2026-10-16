@@ -76,6 +76,7 @@ export {
   isOrganizationOwnershipBootRefusal,
   organizationOwnershipRefusalMessage,
 } from './organization-ownership-boot-guard.js';
+export type { OrganizationOwnershipBootGuardOptions } from './organization-ownership-boot-guard.js';
 export { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 export type { DefaultDatasourceDefinition, DefaultDatasourcePluginOptions } from './default-datasource-plugin.js';
 export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFunctionEntries, collectBundleActions } from './app-plugin.js';

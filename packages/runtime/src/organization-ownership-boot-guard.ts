@@ -58,7 +58,23 @@ import {
 export const ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE = 'ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED' as const;
 
 const ORG = 'organization_id';
-const CEREMONY = 'os migrate organization-ownership';
+
+/**
+ * The ceremony command the refusal names, spelled for the boot that refused:
+ * a development boot (`os dev`, `os serve --dev`) composes its security
+ * plugin, `.env*` files and `telemetry` sibling as a development boot, and the
+ * ceremony has to boot the same way to see the same database, so the command
+ * it names carries `--dev`.
+ */
+function ceremonyCommand(dev: boolean | undefined): string {
+  return dev ? 'os migrate organization-ownership --dev' : 'os migrate organization-ownership';
+}
+
+/** How the boot that runs the guard was started — what the refusal's command must match. */
+export interface OrganizationOwnershipBootGuardOptions {
+  /** A development boot (`os dev` / `os serve --dev`): the named ceremony command carries `--dev`. */
+  dev?: boolean;
+}
 
 export class OrganizationOwnershipBootRefusal extends Error {
   readonly code = ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE;
@@ -161,7 +177,12 @@ export async function findV17ShapeTables(engine: GuardEngine): Promise<string[]>
 }
 
 /** The refusal text: what was found, that the server refuses to start, the command, and the 17.x way out. */
-export function organizationOwnershipRefusalMessage(tables: readonly string[], marker: 'absent' | 'unverified' | 'unreadable'): string {
+export function organizationOwnershipRefusalMessage(
+  tables: readonly string[],
+  marker: 'absent' | 'unverified' | 'unreadable',
+  opts: OrganizationOwnershipBootGuardOptions = {},
+): string {
+  const ceremony = ceremonyCommand(opts.dev);
   const state = marker === 'absent'
     ? 'the ceremony has not run on it'
     : marker === 'unverified'
@@ -170,8 +191,8 @@ export function organizationOwnershipRefusalMessage(tables: readonly string[], m
   return (
     `This database is still in the v17 organization-ownership shape: ${tables.join(', ')} still carr` +
     `${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column, and ${state}. The server refuses to ` +
-    `start rather than serve v17 data with v18 semantics. Run '${CEREMONY}' (review its plan), then ` +
-    `'${CEREMONY} --apply', and start again. To keep 17.x semantics, run a 17.x runtime.`
+    `start rather than serve v17 data with v18 semantics. Run '${ceremony}' (review its plan), then ` +
+    `'${ceremony} --apply', and start again. To keep 17.x semantics, run a 17.x runtime.`
   );
 }
 
@@ -182,6 +203,8 @@ export class OrganizationOwnershipBootGuardPlugin implements Plugin {
   readonly dependencies: string[] = [];
   /** Needs the engine to read columns and the marker; still loads (inert) without it. */
   readonly optionalDependencies: string[] = ['com.objectstack.engine.objectql'];
+
+  constructor(private readonly options: OrganizationOwnershipBootGuardOptions = {}) {}
 
   async init(_ctx: PluginContext): Promise<void> {}
 
@@ -194,7 +217,7 @@ export class OrganizationOwnershipBootGuardPlugin implements Plugin {
         return; // no engine — no database to judge
       }
       if (!engine || typeof engine.getDriverForObject !== 'function') return;
-      await assertOrganizationOwnershipMigrated(engine, (ctx as any)?.logger);
+      await assertOrganizationOwnershipMigrated(engine, (ctx as any)?.logger, this.options);
     });
   }
 }
@@ -207,7 +230,9 @@ export class OrganizationOwnershipBootGuardPlugin implements Plugin {
 export async function assertOrganizationOwnershipMigrated(
   engine: GuardEngine,
   logger?: { info?: (msg: string) => void },
+  opts: OrganizationOwnershipBootGuardOptions = {},
 ): Promise<void> {
+  const ceremony = ceremonyCommand(opts.dev);
   let tables: string[];
   try {
     tables = await findV17ShapeTables(engine);
@@ -215,7 +240,7 @@ export async function assertOrganizationOwnershipMigrated(
     throw new OrganizationOwnershipBootRefusal(
       `The server refuses to start: it could not read whether this database is still in the v17 organization-ownership ` +
         `shape (${error instanceof Error ? error.message : String(error)}), and an unread answer is never taken for a ` +
-        `migrated database. Fix the read, or run '${CEREMONY} --apply', then start again.`,
+        `migrated database. Fix the read, or run '${ceremony} --apply', then start again.`,
       [],
     );
   }
@@ -242,5 +267,5 @@ export async function assertOrganizationOwnershipMigrated(
   } catch {
     marker = 'unreadable';
   }
-  throw new OrganizationOwnershipBootRefusal(organizationOwnershipRefusalMessage(tables, marker), tables);
+  throw new OrganizationOwnershipBootRefusal(organizationOwnershipRefusalMessage(tables, marker, opts), tables);
 }

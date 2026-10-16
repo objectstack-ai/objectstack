@@ -94,6 +94,14 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5)', () => {
     expect(err.message).toMatch(/the ceremony has not run on it/);
   });
 
+  it('a development boot names the ceremony with --dev, so it boots the way the refused boot did', async () => {
+    v17Shape();
+    const dev = await refusalOf(() => assertOrganizationOwnershipMigrated(engine(), undefined, { dev: true }));
+    expect(dev.message).toContain("Run 'os migrate organization-ownership --dev' (review its plan), then 'os migrate organization-ownership --dev --apply'");
+    const served = await refusalOf(() => assertOrganizationOwnershipMigrated(engine()));
+    expect(served.message).not.toContain('--dev');
+  });
+
   it('a marker that is not verified (an unfinished ceremony, or one whose post-check found discrepancies) is refused', async () => {
     v17Shape();
     marker(null);
