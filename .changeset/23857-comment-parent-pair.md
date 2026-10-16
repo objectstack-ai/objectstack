@@ -1,0 +1,25 @@
+---
+'@objectstack/plugin-audit': minor
+'@objectstack/cli': minor
+---
+
+feat(plugin-audit): `sys_comment` rows carry a writer-stamped parent pair, `object_name` + `record_id`, and the comment-thread read gate narrows by it with one `ReadableIds` leaf per parent object, with no pre-scan (ADR-0139 E7)
+
+**Run `os migrate comment-parent-pair --apply` at once after upgrading.** After the upgrade, and until it runs, the `sys_comment` rows written before the upgrade carry no pair, and the read gate answers them as it answered every comment before: by a SYSTEM pre-scan of at most 2,000 candidate rows per read, fail closed. So a broad comment list — one not scoped to a single record's thread — can omit comments the reader may see, and its `total` agrees with the short list; a record's own comment thread is unaffected. The door is `os migrate comment-parent-pair`, dry run by default, `--apply` to write, idempotent, and it stamps both columns in one run, keeping each row's `updated_at`. Its flags are `os migrate activity-changed-fields`'s, one for one (`--database-url`, `--apply`, `--yes`, `--force`, `--json`). The columns arrive with the upgraded deployment's schema sync, which an `--apply` run performs itself; a dry run against a database no upgraded process has opened cannot read them and exits `1`.
+
+Clause-②: yes
+
+`sys_comment` gains two `readonly` text columns and an index over them. They are derived from `thread_id` (`{object}:{record_id}`, split on the first colon) by one planner, `planCommentParentPair`, and `thread_id` stays the key authors write: nothing changes for a writer. A `sys_comment` before-insert hook stamps every inserted row, whoever writes it, over whatever value the writer sent; an update that names `thread_id` (a re-point) is re-stamped from it; a non-system caller's own value for either column is dropped by the engine on update. A thread that names no record stamps `null` / `null`, and such a comment stays hidden from every non-system reader, as before.
+
+The comment-thread read gate (`installCommentReadVisibility`) is now the parent-record gate the activity stream and the compliance ledger use, over the comment's own pair: one branch `{ object_name: P, record_id: { $in: ReadableIds.of(P) } }` per registered object other than `sys_comment`, ORed and ANDed into the read's `where`, on `find`, `findOne`, `count` and `aggregate`. A broad comment read is served every comment the reader may read, on any table size, with a true `total`. What keeps the bounded 2,000-row fail-closed probe, chosen up front by name, never by catching a refusal:
+
+- ADR-0139 D5's three classes: a delegated (on-behalf-of) caller (the whole read); a parent narrowed by an object-scoped read middleware (`sys_attachment`, `sys_comment_reaction`, `sys_approval_request`, …); a parent bound to another datasource;
+- a security service that answers no `canReadObject`, or none at all (no leaf is written without it), and an engine that cannot classify a parent — each sends the whole read to the probe and is said once;
+- a row with no stamped pair (until the backfill reaches it): probed by its `thread_id`, restricted to rows with no pair, never leafed;
+- a composition whose registered `sys_comment` declares no pair: the thread probe over every row, said once.
+
+**The cost:** a deployment whose driver compiles no `ReadableIds` leaf — `driver-mongodb`, until ADR-0139's O3 — now fails a non-system comment read with `INTERNAL_ERROR` / 500 naming the driver in the log, as the activity, ledger and attachment reads already do (ADR-0139 D3); the gate does not catch that refusal into an empty list.
+
+Comment reactions are unchanged: their only parent is `sys_comment`, which this gate narrows by an object-scoped middleware, so the reaction gate keeps the bounded probe (ADR-0139 D5.2).
+
+`installCommentReadVisibility` takes an optional third argument, the security source whose `canReadObject` admits a leaf; without it every comment read is the bounded probe, as before. `CommentAccessEngine` gains an optional `getSchema`. `@objectstack/plugin-audit` exports the backfill, `backfillCommentParentPair` (with `COMMENT_PARENT_PAIR_BACKFILL_PAGE_SIZE` and its report and engine types), the planner `planCommentParentPair` (with `COMMENT_PARENT_OBJECT_COLUMN`, `COMMENT_PARENT_RECORD_COLUMN` and the `CommentParentPair` type).
