@@ -27,12 +27,15 @@
  *    reads, so the existing rule ages the row out with nothing changed there.
  *  - ENGINE LEVEL: the refusals that are NOT gone-for-good leave the row
  *    parked. A resume before the host has sealed the boot reads a registry
- *    that is still filling (the plugin re-arms overdue wait timers in
- *    `start()`, BEFORE its `kernel:ready` handler binds inline app flows), so
- *    "absent" there means "not registered yet" and recording it would kill a
- *    run its flow arrives for a moment later. A claim the store cannot answer
- *    is STORE_UNAVAILABLE with the row untouched, and the retry settles it. A
- *    claim another consumer won writes nothing of this engine's own.
+ *    that is still filling, so "absent" there means "not registered yet" and
+ *    recording it would kill a run whose flow arrives a moment later. A claim
+ *    the store cannot answer is STORE_UNAVAILABLE with the row untouched, and
+ *    the retry settles it. A claim another consumer won writes nothing of
+ *    this engine's own.
+ *  - PLUGIN BOOT ORDER: why the seal guard is load-bearing. The plugin
+ *    re-arms overdue wait timers by resuming them in `start()`, before any
+ *    `kernel:ready` handler can bind a flow, so a late-bound flow's overdue
+ *    run reaches the flow-gone exit during every such boot.
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -50,7 +53,6 @@ import type { RunRecord, SuspendedRun, SuspendedRunStore, SuspensionClaimOutcome
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { AutomationServicePlugin } from './plugin.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
-import { registerWaitNode, rearmSuspendedWaitTimers } from './builtin/wait-node.js';
 
 const silent = { info() {}, warn() {}, error() {}, debug() {}, child() { return silent; } } as never;
 const SYSTEM = { isSystem: true } as never;
@@ -334,47 +336,6 @@ describe('a refusal that is NOT gone-for-good leaves the row parked (engine leve
         expect(store.terminal.map((r) => r.status)).toEqual(['completed']);
     });
 
-    it('the overdue-wait re-arm a booting plugin runs before its flows bind leaves the run parked, and it resumes after the bind', async () => {
-        const store = new RecordingStore();
-        const ctxNoJob = { logger: silent, getService() { throw new Error('no service'); } } as never;
-        const waitFlow = {
-            name: 'overdue_wait', label: 'Overdue Wait', type: 'autolaunched',
-            nodes: [
-                { id: 'start', type: 'start', label: 'Start' },
-                { id: 'pause', type: 'wait', label: 'Wait', waitEventConfig: { eventType: 'timer', timerDuration: '1' } },
-                { id: 'end', type: 'end', label: 'End' },
-            ],
-            edges: [
-                { id: 'e1', source: 'start', target: 'pause' },
-                { id: 'e2', source: 'pause', target: 'end' },
-            ],
-        };
-
-        // Process 1 parks at a 1 ms timer and dies before it fires.
-        const parker = new AutomationEngine(silent, store);
-        registerWaitNode(parker, ctxNoJob);
-        parker.sealNodeTypeVocabulary();
-        parker.registerFlow('overdue_wait', waitFlow as never);
-        const parked = await parker.execute('overdue_wait', {} as never);
-        expect(parked.status).toBe('paused');
-        const runId = parked.runId!;
-        await new Promise((r) => setTimeout(r, 10)); // the deadline lapses while "down"
-
-        // Process 2, `start()`: the re-arm runs before `kernel:ready` binds the flow.
-        const booting = new AutomationEngine(silent, store);
-        registerWaitNode(booting, ctxNoJob);
-        await rearmSuspendedWaitTimers(booting, store, undefined, silent);
-        expect((await store.load(runId))?.nodeId, 'the overdue run is still parked, not killed').toBe('pause');
-        expect(store.terminal).toEqual([]);
-
-        // `kernel:ready` binds it, `kernel:bootstrapped` seals; a resume continues it.
-        booting.registerFlow('overdue_wait', waitFlow as never);
-        booting.sealNodeTypeVocabulary();
-        expect((await booting.resume(runId)).success).toBe(true);
-        await new Promise((r) => setTimeout(r, 0));
-        expect(store.terminal.map((r) => r.status)).toEqual(['completed']);
-    });
-
     it('a claim the store cannot answer is STORE_UNAVAILABLE with the row untouched, and the retry settles it', async () => {
         const store = new RecordingStore();
         const runId = await parkInAnotherProcess(store, 'flaky_store');
@@ -415,6 +376,109 @@ describe('a refusal that is NOT gone-for-good leaves the row parked (engine leve
         await new Promise((r) => setTimeout(r, 0));
         expect(store.terminal.map((r) => [r.status, r.error])).toEqual([['cancelled', 'operator cancelled']]);
         expect((await store.loadTerminal(runId))?.status).toBe('cancelled');
+    });
+});
+
+/**
+ * The plugin's OWN boot order, which is what makes the seal guard load-bearing.
+ *
+ * `AutomationServicePlugin.start()` re-arms overdue wait timers by resuming
+ * them, and that runs before any `kernel:ready` handler and before
+ * `kernel:bootstrapped`, where the plugin seals. A flow its provider binds
+ * during `kernel:ready` is therefore absent when that resume reads the flow
+ * registry. Here the provider is a plugin composed after automation that
+ * binds the flow in its own `kernel:ready` handler. A real `wait` node, a
+ * real `sys_automation_run` table, two process lifetimes over one sqlite file.
+ */
+describe('the boot re-arm runs before a late-bound flow arrives (plugin boot order, sqlite file)', () => {
+    let dir: string | undefined;
+    const kernels: ObjectKernel[] = [];
+
+    afterEach(async () => {
+        vi.restoreAllMocks();
+        for (const k of kernels.splice(0)) {
+            try { await k.shutdown(); } catch { /* noop */ }
+        }
+        if (dir) { rmSync(dir, { recursive: true, force: true }); dir = undefined; }
+    });
+
+    const overdueWaitFlow = (name: string) => ({
+        name, label: name, type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            // A 1 ms timer, so the deadline has lapsed by the next boot.
+            { id: 'pause', type: 'wait', label: 'Wait', waitEventConfig: { eventType: 'timer', timerDuration: '1' } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'pause' },
+            { id: 'e2', source: 'pause', target: 'end' },
+        ],
+    });
+
+    /** One process lifetime; the driver is a `driver.*` service, so the durable store attaches in `start()`. */
+    async function boot(file: string, flowName: string) {
+        const kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
+        kernels.push(kernel);
+        await kernel.use(new ObjectQLPlugin());
+        await kernel.use({
+            name: 'test.late-flow-provider', type: 'standard', version: '1.0.0', dependencies: [],
+            async init(ctx: any) {
+                const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
+                await driver.connect();
+                ctx.registerService('driver.default', driver);
+                ctx.hook('kernel:ready', async () => {
+                    ctx.getService('automation').registerFlow(flowName, overdueWaitFlow(flowName));
+                });
+            },
+            async start() {},
+        } as never);
+        await kernel.use(new AutomationServicePlugin());
+        await kernel.bootstrap();
+        return { kernel, ql: kernel.getService<ObjectQL>('objectql'), automation: kernel.getService<AutomationEngine>('automation') };
+    }
+
+    it('the re-armed resume finds the flow not bound yet, and the run stays parked and resumes once the boot completes', async () => {
+        dir = mkdtempSync(join(tmpdir(), 'os-gone-settle-boot-'));
+        const file = join(dir, 'data.db');
+
+        const first = await boot(file, 'late_wait');
+        const parked = await first.automation.execute('late_wait', {} as never);
+        expect(parked.status).toBe('paused');
+        const runId = parked.runId!;
+        await first.kernel.shutdown();
+        kernels.splice(kernels.indexOf(first.kernel), 1);
+        await new Promise((r) => setTimeout(r, 20)); // the deadline lapses while "down"
+
+        // Positive control: the window is really hit. The boot-time resume of
+        // this run reaches the flow-gone exit, so a pass below is not the
+        // re-arm simply never having run.
+        const answered: Array<{ runId: string; code?: string; error?: string }> = [];
+        const resume = AutomationEngine.prototype.resume;
+        vi.spyOn(AutomationEngine.prototype, 'resume').mockImplementation(async function (this: AutomationEngine, id, signal) {
+            const res = await resume.call(this, id, signal);
+            answered.push({ runId: id, code: res.code, error: res.error });
+            return res;
+        });
+        const second = await boot(file, 'late_wait');
+        vi.restoreAllMocks();
+        expect(answered).toEqual([
+            { runId, code: 'RUN_NOT_FOUND', error: `Flow 'late_wait' not found for run '${runId}'` },
+        ]);
+
+        // The verdict was "not registered YET", so nothing was recorded.
+        const row = await second.ql.findOne('sys_automation_run', { where: { id: runId }, context: SYSTEM });
+        expect(row?.status, 'the run must still be parked after the boot').toBe('paused');
+        expect(await second.ql.findOne('sys_automation_run', { where: { id: `run_${runId}` }, context: SYSTEM })).toBeNull();
+
+        // The flow has arrived; the run was never killed, so it continues.
+        expect((await second.automation.resume(runId)).success).toBe(true);
+        const done = await vi.waitFor(async () => {
+            const r = await second.ql.findOne('sys_automation_run', { where: { id: `run_${runId}` }, context: SYSTEM });
+            if (!r) throw new Error('no terminal row yet');
+            return r;
+        }, { timeout: 3000, interval: 20 });
+        expect(done.status).toBe('completed');
     });
 });
 
