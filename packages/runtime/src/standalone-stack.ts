@@ -62,8 +62,9 @@
  * builds it like postgres.
  */
 
-import { resolve as resolvePath } from 'node:path';
-import { mkdirSync, existsSync } from 'node:fs';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { existsSync } from 'node:fs';
+import { mkdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
@@ -589,6 +590,91 @@ function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): s
     return filename;
 }
 
+/**
+ * The directory of a file-backed SQLite `default` that this host could not
+ * make (#23737). Module-private on purpose: no package entry exports it.
+ *
+ * `code` is the operating system's (`ENOENT`, `EACCES`, `ENOTDIR`, `EEXIST`,
+ * …) and `cause` the error itself. The message names the database file and
+ * the directory, never the URL: refusals in this file name the scheme, never
+ * the URL, and for the two SQLite schemes the path is all an operator needs.
+ */
+class SqliteDatabaseDirectoryError extends Error {
+    readonly code: string | undefined;
+    readonly filename: string;
+    readonly directory: string;
+    /** The error the operating system answered. */
+    readonly cause: unknown;
+
+    constructor(filename: string, directory: string, cause: unknown) {
+        const reason = cause instanceof Error ? cause.message : String(cause);
+        super(
+            `[StandaloneStack] SQLite database file '${filename}' cannot be created: ` +
+            `its directory '${directory}' could not be made: ${reason}`,
+        );
+        this.name = 'SqliteDatabaseDirectoryError';
+        const code = (cause as { code?: unknown } | null | undefined)?.code;
+        this.code = typeof code === 'string' ? code : undefined;
+        this.filename = filename;
+        this.directory = directory;
+        this.cause = cause;
+    }
+}
+
+/**
+ * The host's filesystem prep for a file-backed SQLite `default` — ADR-0062's
+ * #3826 resolution keeps this `mkdir` a host concern — bounded (#23737).
+ *
+ * ## Why not `mkdirSync(dir, { recursive: true })`
+ *
+ * Node's recursive mkdir (v22.22.0, measured; sync and async alike) never
+ * returns when a level answers `ENOENT` although its parent exists. For
+ * `OS_DATABASE_URL=file:/proc/os-23737/ctl.db` it loops
+ * `mkdir("/proc/os-23737") = ENOENT`, `mkdir("/proc") = EEXIST`, retry —
+ * about 2,000 failing calls a second. The synchronous form held the event loop,
+ * so `os start` printed "Starting server..." and hung: no plugin start timeout
+ * could fire, and the SQL driver's own bounded refusal (#23696) was never
+ * reached.
+ *
+ * The walk below is the one `driver-sql`'s connect runs
+ * (`makeDatabaseDirectory` in `sqlite-database-file.ts`, which that package's
+ * entry does not export — hence this module-private copy): find the nearest
+ * level that exists, then create the missing ones top-down with a
+ * NON-recursive `mkdir`. `EEXIST` on a created level is a concurrent creator
+ * winning the race and is accepted; any other answer is the refusal, at once.
+ * A file holding the nearest existing name answers too: `ENOTDIR` from the
+ * first missing level under it, or `EEXIST` from asking for the directory
+ * itself.
+ */
+async function makeSqliteDatabaseDirectory(filename: string): Promise<void> {
+    const directory = resolvePath(filename, '..');
+    try {
+        const missing: string[] = [];
+        let level = directory;
+        for (;;) {
+            try {
+                if (!(await stat(level)).isDirectory() && missing.length === 0) await mkdir(level);
+                break;
+            } catch (e) {
+                if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
+                missing.push(level);
+                const parent = dirname(level);
+                if (parent === level) break;
+                level = parent;
+            }
+        }
+        for (const each of missing.reverse()) {
+            try {
+                await mkdir(each);
+            } catch (e) {
+                if ((e as { code?: unknown } | null)?.code !== 'EEXIST') throw e;
+            }
+        }
+    } catch (e) {
+        throw new SqliteDatabaseDirectoryError(filename, directory, e);
+    }
+}
+
 /** Which database a standalone boot would talk to, and how. */
 export interface ResolvedStandaloneDatabase {
     url: string;
@@ -800,7 +886,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         driverId = 'sqlite-wasm';
         const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite-wasm');
         if (filename !== ':memory:') {
-            mkdirSync(resolvePath(filename, '..'), { recursive: true });
+            await makeSqliteDatabaseDirectory(filename);
         }
         driverConfig = { filename };
     } else if (dbDriver === 'sqlite') {
@@ -812,9 +898,10 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // of the write side effect `os migrate plan` was leaving behind, and a
         // `mkdir -p` here would recreate the very directory the driver is about
         // to decline to put a file in. When the file DOES exist the directory
-        // does too, so this costs the mode nothing.
+        // does too, so this costs the mode nothing. Bounded, and refused at once
+        // when the directory cannot be made (#23737, see the helper).
         if (!(cfg.sqliteAbsentFile === 'empty-in-memory' && !existsSync(filename))) {
-            mkdirSync(resolvePath(filename, '..'), { recursive: true });
+            await makeSqliteDatabaseDirectory(filename);
         }
         driverConfig = { filename };
     } else {
