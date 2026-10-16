@@ -25,4 +25,14 @@ The inbox door's `process_label` / `step_label` now read the new columns first. 
 
 **Read security.** Every new value is either a column of the request the row's readers can already read, or a name the approvals door already serves those readers for that request: `pending_approver_names`, and the timeline's names. The names come from the same resolver, under the same system read. The generic data door serves both objects only to the callers the approvals door would serve.
 
-**Rows written before this release** carry null in the new columns. A pending request gets its waiting-on column at its next slate write. Its actions copy the step label from the request's config snapshot. Older action rows have no record pointer, but their record can still be reached through `request_id`. No backfill runs.
+**Rows written before this release are filled at boot.** A new boot-time pass runs on `kernel:ready`, after the action-slot repair. It fills the new columns on rows that hold null, writing only into null columns, so it never overwrites a value a live writer stored. A second boot writes nothing.
+
+- On every request, the flow and step labels come from the chain the approvals door serves: the authored labels the config snapshot carries, else the humanized machine name. The list and the inbox therefore show the same label for the same row, and no request is left blank.
+- On a pending request, whom it waits on is filled.
+- On every action, the step label and the record pointer are copied from its request, and its acting-as label is filled. An action whose request no longer exists keeps a null pointer.
+- The action-slot repair now labels every `acted_as` it writes.
+
+**Two details.**
+
+- An empty authored label (the spec allows `label: ''`) is stored as the humanized machine name, never `''`.
+- A name that cannot be read because the `sys_user` read failed is stored as null, never as the raw slot address. The failure is logged once at `warn`, and the boot pass fills it on the next boot. A slot that names no person still shows its address.
