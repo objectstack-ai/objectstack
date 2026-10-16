@@ -180,7 +180,6 @@ describe('a driver that declares what its apply door cannot perform', () => {
     boot.mockResolvedValueOnce(stack);
     const { lines, exitCode } = await run([]);
     expect(exitCode, lines.join('\n')).toBe(0);
-    expect(driftApplyLimit).toHaveBeenCalledTimes(3);
 
     const tighten = entryLine(lines, 'tighten_not_null');
     expect(tighten).not.toContain('--allow-destructive');
@@ -196,6 +195,8 @@ describe('a driver that declares what its apply door cannot perform', () => {
     expect(tail.join('\n')).not.toContain('(add --allow-destructive for drops / tightenings)');
     expect(tail.join('\n')).toContain('Apply with: os migrate apply (add --allow-destructive for the 1 destructive change(s) it can apply on this database)');
     expect(tail.join('\n')).toMatch(/2 change\(s\) above cannot be applied on this database by "os migrate apply"/);
+    // Asked once per entry, of the stack that knows which driver reported it.
+    expect(driftApplyLimit).toHaveBeenCalledTimes(3);
   }, CASE_TIMEOUT_MS);
 
   it('when it can apply none of them, the plan offers no apply at all, and never --allow-destructive for the tightening', async () => {
