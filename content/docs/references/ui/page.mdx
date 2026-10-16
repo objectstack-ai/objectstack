@@ -1,7 +1,7 @@
 ---
 title: Page schema — UI Protocol property reference
 navTitle: Page
-description: "Page schemas of the ObjectStack UI Protocol: ElementApiDataSource, ElementDataSource and 8 more — each property with its type, default and a TypeScript example."
+description: "Page schemas of the ObjectStack UI Protocol: ElementApiDataSource, ElementDataSource and 9 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Page schemas of the ObjectStack UI Protocol: ElementApiDataSource,
 ## TypeScript Usage
 
 ```typescript
-import { ElementApiDataSourceSchema, ElementDataSourceSchema, InterfacePageConfigSchema, PageSchema, PageComponentSchema, PageComponentType, PagePrintSchema, PageRegionSchema, PageTypeSchema, PageVariableSchema } from '@objectstack/spec/ui';
-import type { ElementApiDataSource, ElementDataSource, InterfacePageConfig, Page, PageComponent, PageComponentType, PagePrint, PageRegion, PageType, PageVariable } from '@objectstack/spec/ui';
+import { ElementApiDataSourceSchema, ElementDataSourceSchema, InterfacePageConfigSchema, PageSchema, PageComponentSchema, PageComponentType, PagePrintSchema, PageRegionSchema, PageTemplateSchema, PageTypeSchema, PageVariableSchema } from '@objectstack/spec/ui';
+import type { ElementApiDataSource, ElementDataSource, InterfacePageConfig, Page, PageComponent, PageComponentType, PagePrint, PageRegion, PageTemplate, PageType, PageVariable } from '@objectstack/spec/ui';
 
 // Validate data
 const result = ElementApiDataSourceSchema.parse(data);
@@ -207,9 +207,9 @@ View filter rule
 | **type** | `Enum<'record' \| 'home' \| 'app' \| 'utility' \| 'list'>` | optional (default: `"record"`) | Page type |
 | **variables** | `{ name: string; type?: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array' \| 'record_id'>; defaultValue?: any; source?: string }[]` | optional | Local page state, exposed to expressions as `page.<name>` and writable by interactive elements via `source` (master/detail, filtered dashboards). |
 | **object** | `string` | optional | Bound object (for Record pages) |
-| **template** | `string` | optional (default: `"default"`) | Layout template name (e.g. "header-sidebar-main") |
+| **template** | `Enum<'default' \| 'header-sidebar-main' \| 'three-column' \| 'dashboard'>` | optional (default: `"default"`) | Layout template — 'default', 'header-sidebar-main', 'three-column' or 'dashboard'. Each places its own regions (PAGE_TEMPLATE_SLOTS); a region the template does not place, or a second region filling the same slot, is refused at the region's name. |
 | **regions** | `{ name: string; width?: Enum<'small' \| 'medium' \| 'large' \| 'full'>; components: object[] }[]` | optional | Layout regions (header, main, sidebar, footer) with their components. Optional — list pages use interfaceConfig, slotted pages use slots, and an empty full page falls back to the synthesized default layout. |
-| **isDefault** | `boolean` | optional (default: `false`) | Whether this record page is the default record page of its `object` — the page the record view opens. At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default's own name is that page, not a second default. Outside this rule for a page that is not a record page bound to an object. |
+| **isDefault** | `boolean` | optional (default: `false`) | Whether this record page is the default record page of its `object` — the page the record view opens. At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default's own name is that page, not a second default. Refused on any other page — a page that is not a record page bound to an object: nothing reads it there. An app opens on its first navigation item, and the root landing follows the app's own isDefault. |
 | **assignedProfiles** | `never` | optional | [REMOVED] `page.assignedProfiles` was removed in @objectstack/spec 17.5.0 (ADR-0090 D2, ADR-0049 enforce-or-remove) — it was named for the Profile concept ADR-0090 D2 deleted, and it gated nothing: no renderer, route or metadata read door ever read the key, so a page that "assigned profiles" stayed open to every caller who could reach it. Delete the key. Page audience is the permission set's: gate the DATA the page shows with the object's permission sets, and bind those sets to people through positions (named in a position's `permissionSets`) — those are the checks the runtime actually runs. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **interfaceConfig** | `{ source?: string; columns?: string[] \| object[]; sort?: object[]; filterBy?: object[]; … }` | optional | Interface-level page configuration (for Airtable-style interface pages) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
@@ -239,7 +239,7 @@ View filter rule
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Region name (e.g. "sidebar", "main", "header") |
+| **name** | `string` | ✅ | Region name — a slot the page's `template` places: header, sidebar, main, aside or footer on 'default' and 'three-column'; header, sidebar or main on 'header-sidebar-main'; any name on 'dashboard' (header and footer span it, every other region is a grid cell). One region per slot. A name the template does not place, and a second region filling a slot already filled, are refused. |
 | **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional |  |
 | **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
 
@@ -425,7 +425,7 @@ Print declaration: paper size, orientation, margins, the running header and foot
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Region name (e.g. "sidebar", "main", "header") |
+| **name** | `string` | ✅ | Region name — a slot the page's `template` places: header, sidebar, main, aside or footer on 'default' and 'three-column'; header, sidebar or main on 'header-sidebar-main'; any name on 'dashboard' (header and footer span it, every other region is a grid cell). One region per slot. A name the template does not place, and a second region filling a slot already filled, are refused. |
 | **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional |  |
 | **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
 
@@ -446,6 +446,20 @@ Print declaration: paper size, orientation, margins, the running header and foot
 | **dataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … } \| { provider: 'api'; read: object; path?: string }` | optional | Per-element data binding: an object binding `{ object, view?, filter?, sort?, limit? }` that overrides the page object, or an API binding `{ provider: 'api', read: { url }, path? }` that reads one same-origin endpoint |
 | **responsive** | `never` | optional | [REMOVED] `page.components[].responsive` was removed in @objectstack/spec 17 (ADR-0049 D2) — no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to hide a component on the narrowest screens. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+
+---
+
+## PageTemplate
+
+Page layout template — one the console registers: 'default' (header, sidebar, main, aside, footer), 'header-sidebar-main' (header, sidebar, main), 'three-column' (header, sidebar, main, aside, footer) or 'dashboard' (header, footer, and every other region a grid cell).
+
+### Allowed Values
+
+* `default`
+* `header-sidebar-main`
+* `three-column`
+* `dashboard`
 
 
 ---
