@@ -21,7 +21,12 @@
  *      sys-oauth-application/register;
  *   B. the identity import (`admin-import-users.ts`);
  *   C. the four `/admin/sso/*` bridges (`register-sso-provider.ts`);
- *   D. the self-service resend (`send-verification-email.ts`).
+ *   D. the self-service resend (`send-verification-email.ts`);
+ *   E–I. the routes whose reader was a module-private `parseJson` that answered
+ *      `{}` from its `catch` — ban/unban (`admin-ban-endpoints.ts`),
+ *      set-user-manager, create-user/set-user-password
+ *      (`admin-user-endpoints.ts`), organization/add-member — and
+ *      `set-initial-password` (`parsed = {}`).
  *
  * Each refusal asserts the envelope, the code, the message's first sentence
  * (the message family IS this card's contract), that the message does not echo
@@ -38,8 +43,12 @@ import { AuthPlugin } from './auth-plugin.js';
 // The import route loads this module with a dynamic `import()` on its first
 // request, and that first load (`@objectstack/rest`'s import framework among
 // it) measured 8.7s inside a 10s clocked test. Loaded here, it is paid during
-// collection, and the route's own `import()` reads the module cache.
+// collection, and the route's own `import()` reads the module cache. The same
+// holds for the three modules the E–I routes load on first request.
 import './admin-import-users.js';
+import './admin-user-endpoints.js';
+import './admin-set-user-manager.js';
+import './organization-add-member.js';
 
 const BASE = '/api/v1/auth';
 const ORIGIN = 'http://localhost:3000';
@@ -57,7 +66,14 @@ const acts = {
   engine: [] as string[],
   vendor: [] as string[],
   sent: [] as unknown[],
+  /** better-auth server-api calls and auth-context reads (the E–I routes' next steps). */
+  authApi: [] as string[],
 };
+
+const apiCall = (name: string) => vi.fn(async () => {
+  acts.authApi.push(name);
+  return {};
+});
 
 const engineOp = (op: string) => vi.fn(async (object: string) => {
   acts.engine.push(`${op} ${object}`);
@@ -113,7 +129,16 @@ beforeAll(async () => {
     getApi: async () => ({
       getSession: async () => ({ user: { id: 'usr_platform_admin', email: SESSION_EMAIL, isPlatformAdmin: true } }),
       createOAuthClient: acts.createOAuthClient,
+      // Present so the capability checks admit the E–I routes; recorded if called.
+      createUser: apiCall('createUser'),
+      banUser: apiCall('banUser'),
+      addMember: apiCall('addMember'),
+      setPassword: apiCall('setPassword'),
     }),
+    getAuthContext: async () => {
+      acts.authApi.push('getAuthContext');
+      throw new Error('the auth context is not part of this harness');
+    },
     getDataEngine: () => engine,
     unlockUser: acts.unlockUser,
     isSsoDomainVerificationEnabled: () => true,
@@ -134,6 +159,7 @@ beforeEach(() => {
   acts.engine.length = 0;
   acts.vendor.length = 0;
   acts.sent.length = 0;
+  acts.authApi.length = 0;
 });
 
 const post = (path: string, init: { headers?: Record<string, string>; body?: BodyInit }) =>
@@ -173,6 +199,7 @@ const nothingActed = () => {
   expect(acts.engine).toEqual([]);
   expect(acts.vendor).toEqual([]);
   expect(acts.sent).toEqual([]);
+  expect(acts.authApi).toEqual([]);
 };
 
 // ── A. the inline mounts in auth-plugin.ts ─────────────────────────────────
@@ -345,3 +372,83 @@ describe('D. /send-verification-email refuses a declared-JSON body that does not
     });
   }
 });
+
+// ── E–I. the second spelling: a reader that answered `{}` from its `catch` ─
+
+interface SecondSpellingRoute {
+  path: string;
+  truncated: string;
+  echo: string;
+  empty: string;
+  /** `admin-set-user-manager.ts` discriminates its refusals by `error.details.reason`. */
+  reason?: string;
+}
+
+const SECOND_SPELLING: Array<{ reader: string; routes: SecondSpellingRoute[] }> = [
+  {
+    reader: 'E. admin-ban-endpoints.ts parseJson',
+    routes: [
+      { path: '/admin/ban-user', truncated: '{"userId": "usr_pin_target", "banReason": "spam"', echo: 'usr_pin_target', empty: 'userId is required' },
+      { path: '/admin/unban-user', truncated: '{"userId": "usr_pin_target"', echo: 'usr_pin_target', empty: 'userId is required' },
+    ],
+  },
+  {
+    reader: 'F. admin-set-user-manager.ts parseJson',
+    routes: [
+      {
+        path: '/admin/set-user-manager',
+        truncated: '{"userId": "usr_pin_target", "managerId": "usr_pin_boss"',
+        echo: 'usr_pin_target',
+        empty: 'userId is required',
+        reason: 'invalid_body',
+      },
+    ],
+  },
+  {
+    reader: 'G. admin-user-endpoints.ts parseJson',
+    routes: [
+      { path: '/admin/create-user', truncated: '{"email": "pin-new@example.test", "name": "Pin New"', echo: 'pin-new@example.test', empty: 'Either email or phoneNumber is required' },
+      { path: '/admin/set-user-password', truncated: '{"userId": "usr_pin_target", "newPassword": "Pin-Passw0rd!"', echo: 'usr_pin_target', empty: 'userId is required' },
+    ],
+  },
+  {
+    reader: 'H. organization-add-member.ts parseJson',
+    routes: [
+      { path: '/organization/add-member', truncated: '{"userId": "usr_pin_target", "role": "member", "organizationId": "org_pin"', echo: 'usr_pin_target', empty: 'userId is required' },
+    ],
+  },
+  {
+    reader: 'I. set-initial-password.ts (parsed = {})',
+    routes: [
+      { path: '/set-initial-password', truncated: '{"newPassword": "Pin-Passw0rd!"', echo: 'Pin-Passw0rd!', empty: 'newPassword is required' },
+    ],
+  },
+];
+
+for (const { reader, routes } of SECOND_SPELLING) {
+  describe(`${reader} refuses a declared-JSON body that does not parse`, () => {
+    for (const route of routes) {
+      it(`${route.path}: a truncated body is 400 INVALID_REQUEST, and nothing after the read runs`, async () => {
+        const res = await post(route.path, { headers: JSON_TYPE, body: route.truncated });
+        if (route.reason) {
+          const peek = (await res.clone().json()) as { error?: { details?: { reason?: string } } };
+          expect(peek.error?.details?.reason).toBe(route.reason);
+        }
+        await expectParseRefusal(res, route.echo);
+        nothingActed();
+      });
+
+      for (const [label, init] of EMPTY_BODIES) {
+        it(`${route.path}: CONTROL — ${label} keeps today's answer, 400 "${route.empty}"`, async () => {
+          const res = await post(route.path, init);
+          if (route.reason) {
+            const peek = (await res.clone().json()) as { error?: { details?: { reason?: string } } };
+            expect(peek.error?.details?.reason).toBe(route.reason);
+          }
+          await expectAnswer(res, 400, 'INVALID_REQUEST', route.empty);
+          nothingActed();
+        });
+      }
+    }
+  });
+}

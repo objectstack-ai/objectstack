@@ -8,9 +8,11 @@
  *
  * ## The defect
  *
- * Nine body readers here were spelled
- * `try { body = await request.json() } catch { body = {} }` (three of them over
- * `c.req.json()`), so a truncated or garbled body was read exactly like no
+ * Fourteen body readers here, serving sixteen routes, read a parse failure as
+ * `{}`: nine spelled `try { body = await request.json() } catch { body = {} }`
+ * (three of them over `c.req.json()`), four module-private `parseJson` helpers
+ * that answered `{}` from their `catch`, and `runSetInitialPassword`'s
+ * `parsed = {}`. So a truncated or garbled body was read exactly like no
  * body, and the route answered for a request the client never sent. As the
  * card measured it, on a fresh `objectstack dev` showcase boot with an admin
  * session: `POST /api/v1/auth/admin/unlock-user` with `{"userId": "usr_nobody"` (the
