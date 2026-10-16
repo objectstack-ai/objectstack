@@ -158,10 +158,12 @@ export const viewForm = defineForm({
     // `ListViewSchema` — a form input for an unwritable key is the false-compliant
     // UI half of a retirement. To put a published page in front of users, author
     // an app navigation item instead.
+    // The end-user controls are ADR-0047's Airtable Interface parity surface;
+    // the record stays in this comment, out of the section description.
     {
       name: 'end_user_controls',
       label: 'End-user controls',
-      description: 'What end users can do on this view — quick filters, filter tabs, visualization switching (ADR-0047, Airtable Interface parity).',
+      description: 'What end users can do on this view — quick filters, filter tabs, visualization switching.',
       collapsible: true,
       collapsed: true,
       fields: [

@@ -228,12 +228,15 @@ actions, translations):
 
 | | |
 | :--- | :--- |
-| Files | 31 |
-| Lines | 1,929 |
-| Approximate tokens | ~18,500 |
+| Files | 30 |
+| Lines | 1,844 |
+| Approximate tokens | ~17,500 |
 
 That's the **whole example app** — about 9% of a 200k-token context window.
-Count it yourself:
+These figures were measured at commit
+[`7a6ba0310`](https://github.com/objectstack-ai/objectstack/tree/7a6ba03109dbb7e91359eb0f7f3e64dd1263bca8/examples/app-crm),
+with tokens estimated at four bytes each. The example keeps changing, so count
+it yourself for today's numbers:
 
 ```bash
 find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l

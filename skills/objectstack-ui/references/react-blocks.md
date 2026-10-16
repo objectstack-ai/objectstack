@@ -48,7 +48,7 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `drawerWidth` | `string` | data |  | [DEPRECATED → size buckets] Drawer width, e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
 | `modalSize` | `'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'` | data |  | Modal size (modal forms) |
 | `splitDirection` | `'horizontal' \| 'vertical'` | data |  | Split orientation (split forms) |
-| `sections` | `any[]` | data |  |  |
+| `sections` | `object[]` | data |  |  |
 | `subforms` | `object[]` | data |  | Inline master-detail child collections |
 | `submitBehavior` | `object` | data |  | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
 

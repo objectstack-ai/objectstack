@@ -84,14 +84,11 @@ const SURVIVING_ROOTS = ['features', 'os.user'] as const;
 describe('no UI prose face advertises `app` as an expression-scope root — the renderer no longer mounts it', () => {
   describe('published faces (read by authoring tools and republished into the reference docs)', () => {
     it('`PageComponentSchema.visibleWhen`.describe() does not name `app` among the mounted roots', () => {
-      // ⚠️ NOT `.shape` — ADR-0089 D3a made this schema a `.strict().transform(…)`
-      // pipe (see `lazySchema`'s docblock), so it is a ZodPipe and the object
-      // with the property descriptions is its INPUT side. Reaching for `.shape`
-      // here yields `undefined` and every assertion below would then throw
-      // rather than measure.
+      // Read off `.shape`: the schema is a plain closed object since its
+      // `visibility` fold (a `.transform` pipe) retired with the key (#23543 F4).
       const shape = (PageComponentSchema as unknown as {
-        def: { in: { shape: Record<string, { description?: string }> } };
-      }).def.in.shape;
+        shape: Record<string, { description?: string }>;
+      }).shape;
       const description = shape.visibleWhen.description;
 
       expect(description, 'the describe() must exist — this pin is about its content').toBeTruthy();

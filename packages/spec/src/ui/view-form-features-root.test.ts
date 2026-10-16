@@ -102,15 +102,24 @@ describe('form-view predicates reject the features.* root', () => {
     expectFeaturesRefusal(issues, ['sections', 0, 'visibleWhen']);
   });
 
-  it('refuses the deprecated visibleOn alias — the fold cannot smuggle the root past the scan', () => {
-    // ADR-0089 D2 folds `visibleOn` into `visibleWhen` at the field parse,
-    // BEFORE this refinement runs — so the alias spelling arrives at the
-    // scanner as the canonical key and is refused at that key's path.
+  it('the retired visibleOn spelling cannot carry the root past the scan: its tombstone refuses it first (#23543 F4)', () => {
+    // Until 18 ADR-0089 D2 folded `visibleOn` into `visibleWhen` at the field
+    // parse, so the scanner met it as the canonical key. The key is retired
+    // now: the field refuses it at its own path, whatever the predicate says.
     const issues = reject({
       type: 'simple',
       sections: [{ fields: [{ field: 'phone', visibleOn: 'features.phoneNumber == true' }] }],
     });
-    expectFeaturesRefusal(issues, ['sections', 0, 'fields', 0, 'visibleWhen']);
+    // A section's `fields` is `z.union([z.string(), FormFieldSchema])`, so the
+    // field's refusal arrives as the union's, the arm's issues nested inside it.
+    type Nested = { code: string; path: PropertyKey[]; message: string; errors?: Nested[][] };
+    const flatten = (list: Nested[]): Nested[] => list.flatMap((i) => [i, ...(i.errors ?? []).flatMap(flatten)]);
+    expect(issues.map((i) => i.path)).toEqual([['sections', 0, 'fields', 0]]);
+    const tombstone = flatten(issues as Nested[]).filter((i) => i.path.join('.') === 'visibleOn');
+    expect(tombstone).toHaveLength(1);
+    expect(tombstone[0]!.message).toMatch(/was removed in @objectstack\/spec 18/);
+    // …and nothing reports a `features.*` refusal: the scanner never met it.
+    expect(flatten(issues as Nested[]).some((i) => /features/.test(i.message))).toBe(false);
   });
 
   it('refuses the root inside the legacy `groups` bucket (pre-fold)', () => {

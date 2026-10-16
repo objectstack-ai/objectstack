@@ -40,8 +40,8 @@ const VISIBILITY_KEY_PATTERN = /vis|conceal|hidden|show.?when/i;
  * The shared `strictObject` options for every `.strict()` view/page schema that
  * carries a conditional-visibility predicate (ADR-0089 D3a).
  *
- * With the shape closed, a key these schemas do not declare — a stale
- * `visibleOn` past removal, a `visibleWhen` typo, or a wrong-layer paste — is a
+ * With the shape closed, a key these schemas do not declare — a `visibility`
+ * pasted onto a form field, a `visibleWhen` typo, or a wrong-layer paste — is a
  * **loud parse error** instead of a silent strip (ADR-0049 enforce-or-remove,
  * ADR-0078 no-silently-inert). The rejection is *fixable*: it names the
  * offending key(s), points a visibility-shaped key at the canonical
@@ -50,7 +50,6 @@ const VISIBILITY_KEY_PATTERN = /vis|conceal|hidden|show.?when/i;
  *
  * ```ts
  * strictObject(VISIBILITY_STRICT_OPTIONS, { ..., visibleWhen: Expr.optional() })
- *   .transform(normalizeVisibleWhen)
  * ```
  *
  * ## Folded out of a hand-written `$ZodErrorMap` (#6619, #6416 direction 2)
@@ -104,10 +103,12 @@ export const VISIBILITY_STRICT_OPTIONS: StrictObjectOptions = {
       // matches and that none is a key the shape declares, which is the
       // answerable half of the dead-entry claim for an open family.
       examples: ['visibleWhenn', 'visibleIf', 'hiddenWhen', 'conceal', 'showWhen'],
+      // The deprecated `visibleOn` (view form) and `visibility` (page
+      // component) are no longer named here as accepted: both retired at 18
+      // (#23543 F4) and their own tombstones answer them where they were declared.
       prescription:
         'If this is the conditional-visibility predicate, the canonical key is '
-        + '`visibleWhen` (ADR-0089) — `visibleOn` (view form) and `visibility` (page '
-        + 'component) are still accepted as deprecated aliases.',
+        + '`visibleWhen` (ADR-0089).',
     },
   ],
 };

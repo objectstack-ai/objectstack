@@ -2188,7 +2188,7 @@ const SEARCHABLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
 
 /** Which predicates the three ids judge, and the oracle they ask (all three). */
 const PREDICATE_FORM_SCOPE =
-  'Judged: the `visibleWhen` (or `visibleOn`) predicates on a metadata-editing form — a `views[]` ' +
+  'Judged: the `visibleWhen` predicates on a metadata-editing form — a `views[]` ' +
   'form, its default `form` or a `formViews` entry whose data source is `{ provider: \'schema\', ' +
   'schemaId }` — on its sections and fields, nested repeater rows included, where `data` is rebound ' +
   'to the ROW. A path is resolved against the Zod schema of the metadata type the form edits ' +

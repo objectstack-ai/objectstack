@@ -57,6 +57,10 @@
           "evidence": "packages/objectql/src/validation/rule-validator.ts",
           "verifiedAt": "2026-10-01",
           "note": "Carried onto the referencing field's resolved option, where the option-visibility predicate reads it like an inline option's."
+        },
+        "kind": {
+          "status": "planned",
+          "note": "#23809 (2026-10-16): the option shape is reused verbatim, so a shared list's option carries the lifecycle `kind` too (see `field.json`, `options.kind`). No reader yet, and no stage use today: `ObjectSchema` refuses a `stageField` naming a `picklist`-backed field, because the object cannot see the list's options to check that each declares `kind`. Widening that to judge the resolved list (where `os validate` resolves picklist references) is a later decision; until then a `kind` here parses and is read by nothing."
         }
       },
       "evidence": "packages/objectql/src/registry.ts#resolvePicklistOptions"

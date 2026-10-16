@@ -286,6 +286,20 @@ export const objectForm = defineForm({
                 { field: 'value', label: 'Value', type: 'text', required: true },
                 { field: 'color', label: 'Color', type: 'color' },
                 { field: 'description', label: 'Description', type: 'text' },
+                // #23809 — the option's lifecycle category. Required on every
+                // option of the object's `stageField`; valid only on a
+                // single-value `select` / `radio`.
+                {
+                  field: 'kind',
+                  label: 'Kind',
+                  type: 'select',
+                  helpText: 'Lifecycle category (single-value select / radio only): a step on the way, the successful end, or the unsuccessful end. Required on every option of the stage field.',
+                  options: [
+                    { label: 'Open', value: 'open' },
+                    { label: 'Won', value: 'won' },
+                    { label: 'Lost', value: 'lost' },
+                  ],
+                },
               ],
             },
 

@@ -65,88 +65,37 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
     expect(validateVisibilityPredicates(stack)).toEqual([]);
   });
 
-  // ── #6318: the alias-KEY rule is RETIRED; the alias-VALUE read is not ──
+  // ── #23543 F4: the retired alias keys are not read at all ──
   //
-  // Three tests here used to assert that a `visibleOn` / `visibility` KEY
-  // produced a `visibility-alias-deprecated` finding, one per carrier. That
-  // rule never reached a real input: through all three CLI commands the stack
-  // arrives at the `normalized` tier, and the ADR-0087 D2 conversions rename the
-  // key INSIDE `normalizeStackInput`, one layer above. Measured at retirement,
-  // per site: raw object 1 finding, `normalized` tier 0. The only shape that
-  // still fired is the one those three fixtures used — a view CONTAINER with
-  // top-level `sections` — which strict `ViewSchema` refuses outright
-  // ("Unrecognized key(s) on this view container: `sections`"). Green unit test,
-  // impossible fixture: #4984 / #6251.
-  //
-  // What SURVIVES those three assertions, and is what the replacements below
-  // pin instead: the traversal reaches all three carriers, and `checkElement`
-  // still reads the predicate VALUE through the deprecated key, so a value
-  // defect written under an alias is judged rather than skipped. Each asserts
-  // the EXACT finding set — non-empty and named, so it cannot pass by producing
-  // nothing, and restoring the retired rule would fail it on set inequality.
-  //
-  // The surface itself is not unguarded: the same D2 conversion emits a
-  // `warnConversionNotice` from `defineStack` naming the site, the conversion
-  // and the protocol-16 retirement window. `authoring-rule-input-tier.test.ts`
-  // (premise 3) pins that notice as the recorded guard.
-  describe('the deprecated alias keys (#6318 — key rule retired, value read kept)', () => {
-    it('a `visibleOn` KEY with a clean value is clean — no rule judges the spelling', () => {
-      const stack = {
-        views: [
-          { name: 'task_form', sections: [{ label: 'S', visibleOn: "record.a == 1", fields: [] }] },
-        ],
-      };
-      // Deliberately labelled: this green is VACUOUS with respect to the fold —
-      // it is empty because the rule is gone, not because anything normalized.
-      // It earns its place only as the retirement's direct statement, and the
-      // three assertions below are what carry the real evidence.
-      expect(validateVisibilityPredicates(stack)).toEqual([]);
-    });
-
-    it('a form SECTION predicate is still read through `visibleOn` (value verdict survives)', () => {
-      const stack = {
-        views: [
-          { name: 'task_form', sections: [{ label: 'S', visibleOn: "data.a == 1", fields: [] }] },
-        ],
-      };
-      const findings = validateVisibilityPredicates(stack);
-      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
-      expect(findings[0].path).toBe('views[0].sections[0]');
-    });
-
-    it('a form FIELD predicate is still read through `visibleOn`', () => {
-      const stack = {
-        views: [
-          { name: 'task_form', sections: [{ fields: [{ field: 'notes', visibleOn: "data.a == 1" }] }] },
-        ],
-      };
-      const findings = validateVisibilityPredicates(stack);
-      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
-      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
-    });
-
-    it('a PAGE COMPONENT predicate is still read through the page-side `visibility` key', () => {
-      const stack = {
-        pages: [
-          { name: 'p', regions: [{ components: [{ type: 'element:text', visibility: "data.x != ''" }] }] },
-        ],
-      };
-      const findings = validateVisibilityPredicates(stack);
-      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
-      expect(findings[0].path).toBe('pages[0].regions[0].components[0]');
-    });
-
-    it('the canonical key still wins over an alias on the same element (ADR-0089 ordering)', () => {
-      // Why the surviving alias limbs can only add coverage and never change a
-      // verdict: `visibleWhen` is read first, so a stale alias beside it is
-      // ignored rather than allowed to overrule the canonical spelling.
-      const stack = {
-        views: [
-          { name: 'f', sections: [{ visibleWhen: "record.ok == 1", visibleOn: "data.stale == 1", fields: [] }] },
-        ],
-      };
-      expect(validateVisibilityPredicates(stack)).toEqual([]);
-    });
+  // #6318 retired the alias-KEY rule and kept an alias-VALUE read
+  // (`visibleWhen ?? visibleOn ?? visibility`) for raw callers. Both aliases
+  // retired at 18 as spec tombstones, and the doors that parse first (`os
+  // validate`, `os build`, `os verify`, `defineStack`, the metadata save door)
+  // refuse either key by name. So the limbs went too: a defect written under a
+  // retired key produces no finding HERE. At `os lint`, the one door that hands
+  // this rule an unparsed stack, that is the reading by design (`CANONICAL`'s
+  // docblock; pinned as that door's reading in `authoring-rule-input-tier.test.ts`). Each row pairs the alias spelling with
+  // the same value under `visibleWhen`, which must still report, so an empty
+  // alias reading cannot pass by the rule having stopped working.
+  describe('the retired alias keys are not read (#23543 F4)', () => {
+    const CARRIERS = [
+      ['a form section `visibleOn`', 'visibleOn', (key: string, v: string) => ({ views: [{ name: 'f', sections: [{ label: 'S', [key]: v, fields: [] }] }] })],
+      ['a form field `visibleOn`', 'visibleOn', (key: string, v: string) => ({ views: [{ name: 'f', sections: [{ fields: [{ field: 'n', [key]: v }] }] }] })],
+      ['a page component `visibility`', 'visibility', (key: string, v: string) => ({ pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', [key]: v }] }] }] })],
+    ] as const;
+    const DEFECTS = [
+      ['mis-layered root', "data.a == 1", VISIBILITY_ROOT_MISLAYERED],
+      ['bare identifier', "status == 'x'", VISIBILITY_BARE_IDENTIFIER],
+      ['not CEL', 'status === "x"', VISIBILITY_PREDICATE_SYNTAX],
+    ] as const;
+    for (const [carrier, alias, build] of CARRIERS) {
+      for (const [defect, value, rule] of DEFECTS) {
+        it(`${carrier} carrying a ${defect} is not judged; the same value under \`visibleWhen\` is`, () => {
+          expect(validateVisibilityPredicates(build(alias, value))).toEqual([]);
+          expect(validateVisibilityPredicates(build('visibleWhen', value)).map((f) => f.rule)).toEqual([rule]);
+        });
+      }
+    }
   });
 
   it('flags a `data.`-rooted predicate in a runtime view as mis-layered', () => {
@@ -158,18 +107,6 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
     const findings = validateVisibilityPredicates(stack);
     expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
     expect(findings[0].severity).toBe('warning');
-  });
-
-  it('a `data.`-rooted predicate under `visibleOn` reports the mis-layer ALONE (#6318)', () => {
-    // Was: "reports BOTH alias + mis-layer". The alias half is retired; the
-    // surviving half — the mis-layer verdict is reached THROUGH the deprecated
-    // key — is what this now pins, as an exact one-element set.
-    const stack = {
-      views: [
-        { name: 'task_form', sections: [{ visibleOn: "data.status == 'x'", fields: [] }] },
-      ],
-    };
-    expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
   });
 
   it('does not confuse a field literally named `data` (e.g. `record.data`) for a data root', () => {
@@ -198,12 +135,11 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
     // The `groups` bucket has no other test in this file, so the half-fact this
     // used to carry — the traversal descends `groups` at all — had to survive
     // #6318's retirement of the alias-KEY rule that used to demonstrate it. It
-    // is re-demonstrated with a rule that still exists, and with the alias key
-    // kept on the fixture so the group walk and the alias-value read are pinned
-    // together exactly as before.
+    // is re-demonstrated with a rule that still exists (the section's key is the
+    // canonical one since the `visibleOn` alias retired, #23543 F4).
     const stack = {
       views: [
-        { name: 'f', groups: [{ visibleOn: "data.a == 1", fields: [{ field: 'x', visibleWhen: 'approved' }] }] },
+        { name: 'f', groups: [{ visibleWhen: "data.a == 1", fields: [{ field: 'x', visibleWhen: 'approved' }] }] },
       ],
     };
     const findings = validateVisibilityPredicates(stack);
@@ -250,20 +186,16 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
       expect(validateVisibilityPredicates(stack, { layer: 'metadata' })).toEqual([]);
     });
 
-    it('reads the value through a deprecated alias key on the metadata layer too (#6318)', () => {
-      // Was: "still flags a deprecated alias key in the metadata layer (alias
-      // check is layer-agnostic)". The alias-KEY rule is retired, so the
-      // layer-agnostic claim about it is gone. What survives — and is the half
-      // that ever mattered — is that the alias-VALUE read is layer-agnostic:
-      // the same key feeds the layer-directional root verdict in BOTH
-      // directions. Pinned bidirectionally on one fixture, exact sets both ways.
+    it('the layer-directional root verdict holds in BOTH directions on one predicate', () => {
+      // Was pinned through the deprecated `visibleOn` key (#6318), which retired
+      // at 18 (#23543 F4); the bidirectional property is the canonical key's.
       const stack = {
-        views: [{ name: 'f', sections: [{ visibleOn: "record.a == 1", fields: [] }] }],
+        views: [{ name: 'f', sections: [{ visibleWhen: "record.a == 1", fields: [] }] }],
       };
-      // metadata layer forbids the runtime `record.` root → reported through the alias key…
+      // metadata layer forbids the runtime `record.` root…
       expect(validateVisibilityPredicates(stack, { layer: 'metadata' }).map((f) => f.rule))
         .toEqual([VISIBILITY_ROOT_MISLAYERED]);
-      // …and the same alias-spelled predicate is correct on the runtime layer.
+      // …and the same predicate is correct on the runtime layer.
       expect(validateVisibilityPredicates(stack)).toEqual([]);
     });
 
@@ -474,22 +406,6 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
         pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: "kind == 'a'" }] }] }],
       };
       expect(bareFindings(stack).map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
-    });
-
-    it('reads the value through the deprecated `visibleOn` alias too (bare ALONE since #6318)', () => {
-      // Was an "alias + bare, both reported" pair. The alias half is retired;
-      // the half this test existed for — the gate reaches a bare identifier
-      // written under the deprecated key — is unchanged and is now the whole
-      // expected set.
-      const stack = { views: [{ name: 'f', sections: [{ visibleOn: "status == 'x'", fields: [] }] }] };
-      expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_BARE_IDENTIFIER]);
-    });
-
-    it('reads the value through the deprecated page-side `visibility` alias too', () => {
-      const stack = {
-        pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibility: 'shown' }] }] }],
-      };
-      expect(bareFindings(stack)).toHaveLength(1);
     });
 
     it('resolves a `{ dialect, source }` envelope the same as a bare string', () => {
@@ -1213,23 +1129,6 @@ describe('visibility-predicate-syntax (#6253)', () => {
       expect(findings[0].where).toBe('page "p"');
     });
 
-    it('reads the value through the deprecated `visibleOn` alias (syntax ALONE since #6318)', () => {
-      // Was an "alias + syntax, both reported" pair, whose point was that two
-      // INDEPENDENT defects on one element both report. The alias half is
-      // retired, so what is left is the syntax verdict reached through the
-      // deprecated key — and the independence claim it was making now belongs
-      // to the syntax/bare-ref exclusivity pin, which states it directly.
-      const stack = { views: [{ name: 'f', sections: [{ visibleOn: 'status === "x"', fields: [] }] }] };
-      expect(validateVisibilityPredicates(stack).map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
-    });
-
-    it('reads the value through the deprecated page-side `visibility` alias', () => {
-      const stack = {
-        pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibility: 'shown === true' }] }] }],
-      };
-      expect(syntaxFindings(stack)).toHaveLength(1);
-    });
-
     it('resolves a `{ dialect, source }` envelope the same as a bare string', () => {
       expect(syntaxFindings(formStack({ dialect: 'cel', source: 'country === "USA"' }))).toHaveLength(1);
     });
@@ -1420,9 +1319,10 @@ describe('visibility-predicate-unknown-function (#13594)', () => {
     const page = { pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: 'bogusFn(1)' }] }] }] };
     expect(unknownFnFindings(page).map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
 
-    // The deprecated alias VALUE is still read (#6318 retired the KEY rule only).
+    // The retired alias is not read at all since 18 (#23543 F4): the parse
+    // refuses it before any door runs this rule.
     const alias = { views: [{ name: 'f', sections: [{ visibleOn: 'bogusFn(1)', fields: [] }] }] };
-    expect(unknownFnFindings(alias)).toHaveLength(1);
+    expect(unknownFnFindings(alias)).toHaveLength(0);
   });
 
   it('the verdict is layer-agnostic — the environment registers the same names on both', () => {
