@@ -1,7 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { installAuditWriters } from './audit-writers.js';
+// [#23804] The real-engine block: a real kernel, engine, driver and plugin, and
+// the shipped `sys_user_preference`. Static for the same reason as below.
+import { ObjectKernel } from '@objectstack/core';
+import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
+import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+import { SysUserPreference } from '@objectstack/platform-objects/identity';
+import { AuditPlugin } from './audit-plugin.js';
 // STATIC on purpose (#4186). These were `await import(...)` inside the first
 // localized test's helper, so that one test paid the whole cold-start cost of
 // resolving + transforming @objectstack/core and the translation bundle, while
@@ -687,14 +694,16 @@ describe('audit writers — enable.activities opt-out gate (#2707)', () => {
 });
 
 /**
- * [#22961] A user's own write to their own per-user UI-state row writes the
- * ledger row and no activity row. Every other writer keeps today's rows.
+ * [#22961, #23804 (ruling record 6212163130)] A user's own write to their own
+ * per-user UI-state row writes neither the ledger row nor the activity row.
+ * Every other writer keeps both rows.
  *
  * The rows below are the console's "recently visited" write as the real engine
  * hands it to this hook: the session subject is the owner, and both `result`
- * and the bound `previous` carry the full row with its `user_id`.
+ * and the bound `previous` carry the full row with its `user_id`. The real
+ * engine's own shapes are pinned in the block after this one.
  */
-describe('audit writers — a user\'s own per-user UI-state write is not mirrored (#22961)', () => {
+describe('audit writers — a user\'s own per-user UI-state write is not recorded (#22961, #23804)', () => {
   const SCHEMA = {
     sys_audit_log: SINGLE_TENANT.sys_audit_log,
     sys_activity: SINGLE_TENANT.sys_activity,
@@ -717,17 +726,13 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
   ] as const;
 
   for (const w of OWN_WRITES) {
-    it(`the owner's own ${w.action} writes the sys_audit_log row and no sys_activity row`, async () => {
+    it(`the owner's own ${w.action} writes no sys_audit_log row and no sys_activity row`, async () => {
       const { engine, fire, created } = makeEngine(SCHEMA);
       installAuditWriters(engine as any, 'test.audit');
 
       await fire(w.event, { object: 'sys_user_preference', ...w.ctx, session: { userId: OWNER } });
 
-      const ledger = rowsOn(created, 'sys_audit_log', 'sys_user_preference');
-      expect(ledger).toHaveLength(1);
-      expect(ledger[0].row.action).toBe(w.action);
-      expect(ledger[0].row.user_id).toBe(OWNER);
-      expect(ledger[0].row.record_id).toBe(PREF.id);
+      expect(created.filter((c) => c.object === 'sys_audit_log')).toHaveLength(0);
       expect(created.filter((c) => c.object === 'sys_activity')).toHaveLength(0);
     });
   }
@@ -766,7 +771,7 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
   ] as const;
 
   for (const w of OTHER_WRITERS) {
-    it(`CONTROL: on a user's preference row, ${w.who} keeps its activity row`, async () => {
+    it(`CONTROL: on a user's preference row, ${w.who} keeps its ledger row and its activity row`, async () => {
       const { engine, fire, created } = makeEngine(SCHEMA);
       installAuditWriters(engine as any, 'test.audit');
 
@@ -784,6 +789,166 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
       expect(activity[0].row.actor_id).toBe(w.actor);
     });
   }
+});
+
+/**
+ * [#23804, ruling record 6212163130] The same rule on a REAL engine with the
+ * audit plugin: `ObjectKernel` + `ObjectQLPlugin` + `AuditPlugin` over a real
+ * SQLite driver, the shipped `sys_user_preference`, and both tables read at
+ * rest. The user travels as it does in production (`ExecutionContext.userId`
+ * to the hook session), and `result` / `previous` are whatever the engine
+ * binds for a create, an update and a delete, not hand-built shapes.
+ *
+ * Each case writes its own preference row and reads only the rows about it.
+ * An own-write case that can still be written to ends with an administrator's
+ * write to the same row, which must land exactly one ledger row: a "no row"
+ * verdict cannot pass on a writer that never ran.
+ */
+describe('audit writers — a user\'s own UI-state write leaves no ledger row, on a real engine (#23804)', () => {
+  const PREFS = 'sys_user_preference';
+  const RULE = 'sys_sharing_rule';
+  const OWNER = 'u_alice';
+  const ADMIN = 'u_admin';
+  const HARNESS_PACKAGE = 'com.objectstack.audit.test.own-ui-state-ledger';
+  /** A stand-in under the real name: plugin-sharing owns the definition, and the name is what the rule reads. */
+  const sharingRule = {
+    name: RULE,
+    label: 'Sharing Rule',
+    isSystem: true,
+    fields: {
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      object_name: { name: 'object_name', label: 'Object', type: 'text' as const },
+      access_level: { name: 'access_level', label: 'Access Level', type: 'text' as const },
+    },
+  };
+
+  let kernel: ObjectKernel;
+  let engine: ObjectQL;
+  let sql: (statement: string, bindings: unknown[]) => Promise<Record<string, unknown>[]>;
+
+  const as = (userId: string) => ({ context: { userId } });
+  const SYSTEM = { context: { isSystem: true } };
+
+  /** Every row `table` holds about one record, at rest. */
+  const rowsAbout = (table: 'sys_audit_log' | 'sys_activity', object: string, recordId: string) =>
+    sql(`SELECT * FROM "${table}" WHERE object_name = ? AND record_id = ?`, [object, recordId]);
+
+  /** The owner's own create of a fresh preference row (a distinct key per case). */
+  let seq = 0;
+  async function ownPreference(): Promise<string> {
+    seq += 1;
+    const row = await engine.insert(PREFS, { user_id: OWNER, key: `ui.recent.${seq}`, value: [] }, as(OWNER) as any);
+    return String((row as { id: unknown }).id);
+  }
+  const setValue = (id: string, value: unknown[], options: Record<string, unknown>) =>
+    engine.update(PREFS, { value }, { where: { id }, ...options } as any);
+
+  beforeAll(async () => {
+    kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AuditPlugin());
+    await kernel.bootstrap();
+
+    engine = kernel.getService<ObjectQL>('objectql');
+    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    engine.registerDriver(driver, true);
+    engine.registry.registerObject(SysUserPreference as any, HARNESS_PACKAGE);
+    engine.registry.registerObject(sharingRule as any, HARNESS_PACKAGE);
+    await engine.syncSchemas();
+
+    sql = async (statement, bindings) => {
+      const result = await (driver as unknown as { execute(s: string, b: unknown[]): Promise<unknown> }).execute(
+        statement,
+        bindings,
+      );
+      // knex wraps some results as `[rows]`; normalize both shapes.
+      const list = Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result;
+      expect(Array.isArray(list)).toBe(true);
+      return list as Record<string, unknown>[];
+    };
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) {
+      await Promise.race([kernel.shutdown(), new Promise<void>((resolve) => setTimeout(resolve, 10_000))]);
+    }
+  }, 30_000);
+
+  it('the owner\'s own create writes no sys_audit_log row and no sys_activity row', async () => {
+    const id = await ownPreference();
+
+    expect(await rowsAbout('sys_audit_log', PREFS, id)).toHaveLength(0);
+    expect(await rowsAbout('sys_activity', PREFS, id)).toHaveLength(0);
+
+    // Live-writer CONTROL: another actor's write to the same row is recorded.
+    await setValue(id, [{ id: 'acc-1' }], as(ADMIN));
+    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
+    expect(ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
+  });
+
+  it('the owner\'s own update writes no sys_audit_log row and no sys_activity row', async () => {
+    const id = await ownPreference();
+    await setValue(id, [{ id: 'acc-1' }], as(OWNER));
+    await setValue(id, [{ id: 'acc-1' }, { id: 'acc-2' }], as(OWNER));
+
+    expect(await rowsAbout('sys_audit_log', PREFS, id)).toHaveLength(0);
+    expect(await rowsAbout('sys_activity', PREFS, id)).toHaveLength(0);
+
+    // Live-writer CONTROL, as above.
+    await setValue(id, [], as(ADMIN));
+    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
+    expect(ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
+  });
+
+  it('the owner\'s own delete writes no sys_audit_log row and no sys_activity row', async () => {
+    // The engine binds the deleted row as `previous`, which names the owner;
+    // the delete's `result` names no owner and is not evidence either way.
+    const id = await ownPreference();
+    await engine.delete(PREFS, { where: { id }, ...as(OWNER) } as any);
+
+    expect(await rowsAbout('sys_audit_log', PREFS, id)).toHaveLength(0);
+    expect(await rowsAbout('sys_activity', PREFS, id)).toHaveLength(0);
+  });
+
+  it('an administrator\'s update of another user\'s row writes a ledger row (and its activity row)', async () => {
+    const id = await ownPreference();
+    await setValue(id, [{ id: 'acc-9' }], as(ADMIN));
+
+    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
+    expect(ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
+    const activity = await rowsAbout('sys_activity', PREFS, id);
+    expect(activity.map((r) => [r.type, r.actor_id])).toEqual([['updated', ADMIN]]);
+  });
+
+  it('a system write with no user writes a ledger row', async () => {
+    const id = await ownPreference();
+    await setValue(id, [{ id: 'acc-9' }], SYSTEM);
+
+    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
+    expect(ledger.map((r) => [r.action, r.user_id ?? null])).toEqual([['update', null]]);
+  });
+
+  it('the owner moving the row to another user writes a ledger row', async () => {
+    const id = await ownPreference();
+    await engine.update(PREFS, { user_id: 'u_bob' }, { where: { id }, ...as(OWNER) } as any);
+
+    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
+    expect(ledger.map((r) => [r.action, r.user_id])).toEqual([['update', OWNER]]);
+  });
+
+  it('the same user\'s update of a sys_sharing_rule writes a ledger row', async () => {
+    const rule = await engine.insert(RULE, { name: 'Region West', object_name: 'account', access_level: 'read' }, SYSTEM as any);
+    const id = String((rule as { id: unknown }).id);
+    await engine.update(RULE, { access_level: 'edit' }, { where: { id }, ...as(OWNER) } as any);
+
+    const ledger = await rowsAbout('sys_audit_log', RULE, id);
+    const pairs = ledger.map((r) => [String(r.action), r.user_id ?? null]).sort((a, b) => a[0]!.localeCompare(b[0]!));
+    expect(pairs).toEqual([
+      ['create', null],
+      ['update', OWNER],
+    ]);
+  });
 });
 
 describe('audit writers — enable.feeds server-side enforcement (#2707)', () => {
