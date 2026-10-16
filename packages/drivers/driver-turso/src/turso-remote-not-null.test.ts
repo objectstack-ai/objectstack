@@ -208,7 +208,9 @@ describe('ADD COLUMN on a populated table', () => {
 
       const remote = await populated('remote');
       const refusal = SYNC[door](remote.driver, [WITH_ADDED(ADDED)]);
-      await expect(refusal).rejects.toMatchObject({ code: 'SQLITE_ERROR' });
+      // The database's own refusal, passed through. Its `code` is a transport
+      // detail (`SQLITE_ERROR` over this `file:` client, `SQLITE_UNKNOWN` over
+      // a real sqld's Hrana), so the refusal is identified by SQLite's words.
       await expect(refusal).rejects.toThrow(/Cannot add a NOT NULL column with default value NULL/);
       if (door === 'syncSchema') {
         // The engine's per-object report names the object only; the statement names the column.
