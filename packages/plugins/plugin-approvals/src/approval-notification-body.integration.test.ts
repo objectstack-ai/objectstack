@@ -37,6 +37,18 @@
  * `GET /api/v1/notifications` through the real messaging service — is the
  * dogfood pin `packages/qa/dogfood/test/approval-notification-body.dogfood.test.ts`.
  *
+ * ## And how it names the record (#23978)
+ *
+ * Ruling B of #23556 / #23594 names the record an approval notification is
+ * about by its object's label and its id (`Deal D_123`), with no title, through
+ * `nameSubjectRecord`. `approval.requested` used it; every other body that
+ * names the record built `<object_name>/<record_id>`, so an approver read the
+ * API name and a slash in the reminder, the SLA breach, the escalation, the
+ * hand-off, both send-back sentences and both out-of-office sentences. The same
+ * battery pins the record's name in each of those bodies, and a control: a
+ * record of an object whose schema has no label is named by the object's API
+ * name and the id, the helper's own fallback.
+ *
  * ## And whose notification it is (#23284)
  *
  * The same battery pins the organization every call site hands messaging: the
@@ -102,6 +114,14 @@ const deal = {
     title: { name: 'title', label: 'Title', type: 'text' as const },
   },
 };
+/** [#23978] The control: an object whose schema declares no label. */
+const memo = {
+  name: 'crm_memo',
+  fields: {
+    id: { name: 'id', label: 'Id', type: 'text' as const, primaryKey: true },
+    title: { name: 'title', label: 'Title', type: 'text' as const },
+  },
+};
 
 /** The flow the requests belong to: an approval node with a revise window. */
 const FLOW = {
@@ -142,10 +162,10 @@ describe('every approval notification carries its text in body', () => {
   const emits: Emitted[] = [];
   const ids: Record<string, string> = {};
 
-  const open = async (key: string, approvers: any[], extra: Record<string, unknown> = {}) => {
-    await engine.insert('crm_deal', { id: `D_${key}`, title: key, organization_id: orgOfDeal(key) }, { context: SYSTEM } as any);
+  const open = async (key: string, approvers: any[], extra: Record<string, unknown> = {}, object: string = deal.name) => {
+    await engine.insert(object, { id: `D_${key}`, title: key, organization_id: orgOfDeal(key) }, { context: SYSTEM } as any);
     const row: any = await svc.openNodeRequest({
-      object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: FLOW.name,
+      object, recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: FLOW.name,
       config: { approvers, behavior: 'first_response', ...extra } as any,
       submitterId: 'u_sub', record: { id: `D_${key}`, title: key },
     }, asUser('u_sub'));
@@ -167,7 +187,7 @@ describe('every approval notification carries its text in body', () => {
       client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true,
     }), true);
     await engine.init();
-    for (const def of [sysUser, deal, ...(await packageObjects())]) {
+    for (const def of [sysUser, deal, memo, ...(await packageObjects())]) {
       engine.registry.registerObject(def as any, 'approvals-test', 'approvals-test');
     }
     await engine.syncSchemas();
@@ -202,6 +222,13 @@ describe('every approval notification carries its text in body', () => {
     await svc.sendBack(ids.revise, { actorId: 'u_alice', comment: SEND_BACK } as any, asUser('u_alice'));
     await open('budget', [{ type: 'user', value: 'u_alice' }], { maxRevisions: 0 });
     await svc.sendBack(ids.budget, { actorId: 'u_alice' } as any, asUser('u_alice'));
+    // [#23978] Within budget and with no note, the body is the service's own sentence.
+    await open('rework', [{ type: 'user', value: 'u_alice' }]);
+    await svc.sendBack(ids.rework, { actorId: 'u_alice' } as any, asUser('u_alice'));
+
+    // ── [#23978] The control: a reminder about a record of an object with no label ──
+    await open('bare', [{ type: 'user', value: 'u_alice' }], {}, memo.name);
+    await svc.remind(ids.bare, { actorId: 'u_sub' }, asUser('u_sub'));
 
     // ── Out of office: the routing substitutes a delegate ──
     await engine.insert('sys_approval_delegation', {
@@ -235,12 +262,16 @@ describe('every approval notification carries its text in body', () => {
       'approval.requested@budget',
       'approval.requested@sla_notify',
       'approval.requested@sla_reassign',
+      'approval.requested@rework',
+      'approval.requested@bare',
       'approval.ooo_substituted@ooo',
       'approval.ooo_skipped@ooo',
       'approval.returned@budget',
       'approval.returned@revise',
+      'approval.returned@rework',
       'approval.reassigned@thread',
       'approval.reminder@thread+links',
+      'approval.reminder@bare+links',
       'approval.request_info@thread',
       'approval.comment@thread',
       'approval.escalated@sla_reassign',
@@ -261,6 +292,39 @@ describe('every approval notification carries its text in body', () => {
     expect([question.audience, question.payload?.body]).toEqual([['u_sub'], QUESTION]);
     const sentBack = one('approval.returned', 'revise');
     expect([sentBack.audience, sentBack.payload?.body]).toEqual([['u_sub'], SEND_BACK]);
+  });
+
+  it('[#23978] every body that names the record names it by its object label and its id, as approval.requested does', () => {
+    // Ruling B of #23556 / #23594: label and id, no title — one form for every
+    // body, the one `approval.requested` already sends. The pin is the record's
+    // name in each body, not the rest of the sentence around it.
+    const NAMED: Record<string, string> = {
+      'approval.requested@thread': 'Deal D_thread',
+      'approval.reminder@thread+links': 'Deal D_thread',
+      'approval.sla_breached@sla_notify': 'Deal D_sla_notify',
+      'approval.sla_breached@sla_notify>submitter': 'Deal D_sla_notify',
+      'approval.escalated@sla_reassign': 'Deal D_sla_reassign',
+      'approval.reassigned@thread': 'Deal D_thread',
+      'approval.returned@budget': 'Deal D_budget',
+      'approval.returned@rework': 'Deal D_rework',
+      'approval.ooo_substituted@ooo': 'Deal D_ooo',
+      'approval.ooo_skipped@ooo': 'Deal D_ooo',
+      // The control: the object's schema has no label, so the record is named
+      // by the object's API name and the id.
+      'approval.reminder@bare+links': 'crm_memo D_bare',
+    };
+    const offenders = Object.entries(NAMED).flatMap(([site, name]) => {
+      const bodies = emits.filter((e) => siteOf(e) === site).map((e) => String(e.payload?.body));
+      if (!bodies.length) return [`${site}: sent nothing`];
+      return bodies.filter((body) => !body.includes(name)).map((body) => `${site}: ${body}`);
+    });
+    expect(offenders).toEqual([]);
+
+    // And no body anywhere in the battery joins the API name and the id with a slash.
+    const slashed = emits
+      .map((e) => `${siteOf(e)}: ${String(e.payload?.body)}`)
+      .filter((line) => /\bcrm_(deal|memo)\/D_/.test(line));
+    expect(slashed).toEqual([]);
   });
 
   it('every notification carries a non-empty body, and no field the payload does not declare', () => {

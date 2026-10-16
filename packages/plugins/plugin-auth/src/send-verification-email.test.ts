@@ -88,11 +88,24 @@ describe('runResendVerificationEmail', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('tolerates a non-JSON body and falls back to the session email', async () => {
+  // [#24032] This row used to send `not-json{` as `application/json` and pin
+  // the session fallback: the very branch that read an unparseable declared
+  // body as no body. That body is now refused (`request-json-body-refusal.test.ts`
+  // drives the route). What stays is the undeclared spelling, read as before.
+  it('a body that does not declare JSON and does not parse still falls back to the session email', async () => {
     const { handle, sent } = makeHandle({ sessionEmail: 'me@example.test' });
-    const res = await runResendVerificationEmail(handle, makeRequest('not-json{'));
+    const res = await runResendVerificationEmail(handle, makeRequest('not-json{', { 'content-type': 'text/plain' }));
     expect(res.status).toBe(200);
     expect(sent[0].body).toEqual({ email: 'me@example.test' });
+  });
+
+  it('a declared-JSON body that does not parse is refused 400 INVALID_REQUEST, and nothing is looked up or sent', async () => {
+    const { handle, sent } = makeHandle({ sessionEmail: 'me@example.test' });
+    const res = await runResendVerificationEmail(handle, makeRequest('not-json{'));
+    expect(res.status).toBe(400);
+    expect((res.body as any).error?.code).toBe('INVALID_REQUEST');
+    expect(handle).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(0);
   });
 
   it('passes through the native error status/body on failure', async () => {

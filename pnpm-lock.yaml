@@ -2824,6 +2824,15 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../../metadata-protocol
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.6.3
         version: 26.6.3
