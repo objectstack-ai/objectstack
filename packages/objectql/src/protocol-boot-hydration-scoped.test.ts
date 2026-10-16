@@ -316,10 +316,10 @@ describe('security catalog read — a name two packages ship (ADR-0131 D4, ruled
         // its in-memory registrar runs (Phase 2, `AppPlugin.start`).
         const stack = (id: string, label: string) =>
             ({ id, name: id, version: '1.0.0', type: 'app', positions: [{ name: 'regional_manager', label }] }) as never;
-        registry.installPackage(stack(PKG_A, 'first stack'));
+        registry.installPackage(stack(PKG_A, 'first stack'), 'code');
         metadata.registerInMemory('position', 'regional_manager', { name: 'regional_manager', label: 'first stack' });
 
-        const refusal = refusalOf(() => registry.installPackage(stack(PKG_B, 'second stack')));
+        const refusal = refusalOf(() => registry.installPackage(stack(PKG_B, 'second stack'), 'code'));
         expect(refusal?.code).toBe(NAMESPACE_CONFLICT_CODE);
         expect(refusal?.status).toBe(422);
         expect(refusal?.incomingPackageId).toBe(PKG_B);

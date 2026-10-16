@@ -37,6 +37,8 @@
 import { describe, it, expect } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { InstalledPackageSourceSchema } from '@objectstack/spec/kernel';
+import { GetInstalledPackageResponseSchema, ListInstalledPackagesResponseSchema } from '@objectstack/spec/api-assembled';
 
 // ── the four shapes ──────────────────────────────────────────────────────────
 /** Pin 1 — booted code package, explicit `scope: 'project'` (today's hotcrm shape). */
@@ -76,12 +78,12 @@ function manifest(id: string, extra: Record<string, unknown> = {}) {
  */
 function make() {
     const registry = new SchemaRegistry({ logLevel: 'silent' } as any);
-    registry.installPackage(manifest(CODE_PROJECT, { scope: 'project', type: 'app' }));
-    registry.installPackage(manifest(CODE_MODULE, { type: 'module' }));
-    registry.installPackage(manifest(SYSTEM_SCOPED, { scope: 'system' }));
-    registry.installPackage(manifest(CLOUD_SCOPED, { scope: 'cloud' }));
-    registry.installPackage(manifest(DB_BASE));
-    registry.installPackage(manifest(DB_PROJECT, { scope: 'project' }));
+    registry.installPackage(manifest(CODE_PROJECT, { scope: 'project', type: 'app' }), 'code');
+    registry.installPackage(manifest(CODE_MODULE, { type: 'module' }), 'marketplace');
+    registry.installPackage(manifest(SYSTEM_SCOPED, { scope: 'system' }), 'code');
+    registry.installPackage(manifest(CLOUD_SCOPED, { scope: 'cloud' }), 'code');
+    registry.installPackage(manifest(DB_BASE), 'authored');
+    registry.installPackage(manifest(DB_PROJECT, { scope: 'project' }), 'authored');
 
     // Only the two code packages are booted — this is what `ObjectQL.registerApp`
     // records, both for every package of a loaded artifact (which is CODE_PROJECT,
@@ -225,5 +227,49 @@ describe('GET /packages — the verdict is additive and computed, never stored (
         const r = await make().dispatcher.handlePackages('/', 'GET', undefined, {}, reader());
         expect(r.response?.body?.data?.total).toBe(6);
         expect(r.response?.body?.data?.packages).toHaveLength(6);
+    });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 4. The row's origin — `source`, read off the record the registering door wrote
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('GET /packages — every row carries the `source` its registering door stamped (#23972)', () => {
+    it('serves each row\'s source as recorded, on the list and the detail door', async () => {
+        const { dispatcher } = make();
+        const rows = await list(dispatcher);
+        expect(Object.fromEntries(rows.map((row) => [row.manifest.id, row.source]))).toEqual({
+            [CODE_PROJECT]: 'code',
+            [CODE_MODULE]: 'marketplace',
+            [SYSTEM_SCOPED]: 'code',
+            [CLOUD_SCOPED]: 'code',
+            [DB_BASE]: 'authored',
+            [DB_PROJECT]: 'authored',
+        });
+        const r = await dispatcher.handlePackages(`/${CODE_MODULE}`, 'GET', undefined, {}, reader());
+        expect(r.response?.body?.data?.source).toBe('marketplace');
+    });
+
+    it('the served body parses through its declared contract, `source` and `writable` kept', async () => {
+        // Complete manifests, one per origin: the file's shared fixture leaves
+        // `type` off, which the declared manifest refuses on its own account.
+        const registry = new SchemaRegistry({ logLevel: 'silent' } as any);
+        const full = (id: string) => manifest(id, { type: 'app' });
+        registry.installPackage(full(CODE_PROJECT), 'code');
+        registry.installPackage(full(CODE_MODULE), 'marketplace');
+        registry.installPackage(full(DB_BASE), 'authored');
+        const objectql = { registry, manifests: new Map<string, any>([[CODE_PROJECT, full(CODE_PROJECT)], [CODE_MODULE, full(CODE_MODULE)]]) };
+        const dispatcher = new HttpDispatcher({ context: { getService: (name: string) => (name === 'objectql' ? objectql : null) } } as any);
+
+        const r = await dispatcher.handlePackages('/', 'GET', undefined, {}, reader());
+        const parsed = ListInstalledPackagesResponseSchema.parse(r.response?.body);
+        expect(parsed.data.packages.map((row) => [row.manifest.id, row.source, row.writable])).toEqual([
+            [CODE_PROJECT, 'code', false],
+            [CODE_MODULE, 'marketplace', false],
+            [DB_BASE, 'authored', true],
+        ]);
+        expect(parsed.data.packages.every((row) => InstalledPackageSourceSchema.options.includes(row.source))).toBe(true);
+        const detail = await dispatcher.handlePackages(`/${DB_BASE}`, 'GET', undefined, {}, reader());
+        expect(GetInstalledPackageResponseSchema.parse(detail.response?.body).data).toMatchObject({ source: 'authored', writable: true });
     });
 });

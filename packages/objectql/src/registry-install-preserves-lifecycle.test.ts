@@ -46,12 +46,12 @@ describe('#18877 — installPackage preserves an existing row\'s lifecycle state
     });
 
     it('a re-install carries `enabled` / `status` / `statusChangedAt` over from the existing row', () => {
-        registry.installPackage(manifest('com.acme.carry'));
+        registry.installPackage(manifest('com.acme.carry'), 'code');
         const disabled = registry.disablePackage('com.acme.carry');
         const stampedAt = disabled?.statusChangedAt;
         expect(typeof stampedAt, 'precondition: the disable stamped a time').toBe('string');
 
-        const again = registry.installPackage(manifest('com.acme.carry'));
+        const again = registry.installPackage(manifest('com.acme.carry'), 'code');
 
         expect(again.enabled, 'the row the registry RETURNED').toBe(false);
         expect(again.status).toBe('disabled');
@@ -65,8 +65,8 @@ describe('#18877 — installPackage preserves an existing row\'s lifecycle state
     it('⛔ the control leg — a re-install does not disable an ENABLED row either', () => {
         // Without this, «preserve» is satisfiable by a registry that simply
         // stopped enabling anything.
-        registry.installPackage(manifest('com.acme.stayon'));
-        const again = registry.installPackage(manifest('com.acme.stayon'));
+        registry.installPackage(manifest('com.acme.stayon'), 'code');
+        const again = registry.installPackage(manifest('com.acme.stayon'), 'code');
 
         expect(again.enabled).toBe(true);
         expect(again.status).toBe('installed');
@@ -76,7 +76,7 @@ describe('#18877 — installPackage preserves an existing row\'s lifecycle state
     it('the boot seed still decides for an id that has NO row yet', () => {
         registry.setInitialDisabledPackageIds(['com.acme.seeded']);
 
-        const first = registry.installPackage(manifest('com.acme.seeded'));
+        const first = registry.installPackage(manifest('com.acme.seeded'), 'code');
 
         expect(first.enabled, 'boot hydration must still replay a persisted disable').toBe(false);
         expect(first.status).toBe('disabled');
@@ -87,10 +87,10 @@ describe('#18877 — installPackage preserves an existing row\'s lifecycle state
         // The card's own defect, at this layer. Before #18877 the second
         // install read the seed again and re-landed the package disabled.
         registry.setInitialDisabledPackageIds(['com.acme.seeded.enabled']);
-        registry.installPackage(manifest('com.acme.seeded.enabled'));
+        registry.installPackage(manifest('com.acme.seeded.enabled'), 'code');
         registry.enablePackage('com.acme.seeded.enabled');
 
-        const again = registry.installPackage(manifest('com.acme.seeded.enabled'));
+        const again = registry.installPackage(manifest('com.acme.seeded.enabled'), 'code');
 
         expect(again.enabled, 'the most recent explicit lifecycle action stands').toBe(true);
         expect(again.status).toBe('installed');
@@ -99,7 +99,7 @@ describe('#18877 — installPackage preserves an existing row\'s lifecycle state
 
     it('an id the seed never named still lands at the declared default', () => {
         registry.setInitialDisabledPackageIds(['com.acme.someone.else']);
-        const fresh = registry.installPackage(manifest('com.acme.unseeded'));
+        const fresh = registry.installPackage(manifest('com.acme.unseeded'), 'code');
         expect(fresh.enabled).toBe(true);
         expect(fresh.status).toBe('installed');
     });
@@ -108,10 +108,10 @@ describe('#18877 — installPackage preserves an existing row\'s lifecycle state
         // ⛔ The scope leg: 「preserve」 is about lifecycle state only. A
         // re-install is still an install, and the row it writes is still the
         // new manifest's.
-        registry.installPackage({ ...manifest('com.acme.scope'), version: '1.0.0' } as any);
+        registry.installPackage({ ...manifest('com.acme.scope'), version: '1.0.0' } as any, 'code');
         registry.disablePackage('com.acme.scope');
 
-        const again = registry.installPackage({ ...manifest('com.acme.scope'), version: '2.0.0' } as any);
+        const again = registry.installPackage({ ...manifest('com.acme.scope'), version: '2.0.0' } as any, 'code');
 
         expect(again.manifest.version, 'the re-install really replaced the manifest').toBe('2.0.0');
         expect(again.enabled, 'and did so without touching the lifecycle state').toBe(false);
@@ -128,11 +128,11 @@ describe('#18877 item 3 — uninstallPackage forgets the id from the boot seed',
 
     it('a package deleted and re-installed in the same boot is a FRESH install', () => {
         registry.setInitialDisabledPackageIds(['com.acme.gone']);
-        expect(registry.installPackage(manifest('com.acme.gone')).enabled, 'precondition: the seed applied').toBe(false);
+        expect(registry.installPackage(manifest('com.acme.gone'), 'code').enabled, 'precondition: the seed applied').toBe(false);
 
         expect(registry.uninstallPackage('com.acme.gone')).toBe(true);
 
-        const reinstalled = registry.installPackage(manifest('com.acme.gone'));
+        const reinstalled = registry.installPackage(manifest('com.acme.gone'), 'code');
         expect(
             reinstalled.enabled,
             'a row that no longer exists has no lifecycle state — and the seed must not supply one',
@@ -142,10 +142,10 @@ describe('#18877 item 3 — uninstallPackage forgets the id from the boot seed',
 
     it('⛔ and it forgets only the id it was given', () => {
         registry.setInitialDisabledPackageIds(['com.acme.gone2', 'com.acme.neighbour']);
-        registry.installPackage(manifest('com.acme.gone2'));
+        registry.installPackage(manifest('com.acme.gone2'), 'code');
         registry.uninstallPackage('com.acme.gone2');
 
-        const neighbour = registry.installPackage(manifest('com.acme.neighbour'));
+        const neighbour = registry.installPackage(manifest('com.acme.neighbour'), 'code');
         expect(neighbour.enabled, 'the neighbour\'s persisted disable is untouched').toBe(false);
     });
 
@@ -155,7 +155,7 @@ describe('#18877 item 3 — uninstallPackage forgets the id from the boot seed',
         // anyway, or a refused uninstall would silently re-enable the package
         // on its next registration.
         registry.setInitialDisabledPackageIds(['com.acme.extended']);
-        registry.installPackage(manifest('com.acme.extended', 'ext'));
+        registry.installPackage(manifest('com.acme.extended', 'ext'), 'code');
         registry.registerObject({ name: 'account', fields: {} } as any, 'com.acme.extended', 'ext', 'own');
         registry.registerObject({ name: 'account', fields: {} } as any, 'com.acme.extender', undefined, 'extend');
 
@@ -169,7 +169,7 @@ describe('#18877 item 3 — uninstallPackage forgets the id from the boot seed',
         registry.unregisterObjectsByPackage('com.acme.extender');
         expect(registry.uninstallPackage('com.acme.extended'), 'now it really goes').toBe(true);
         expect(
-            registry.installPackage(manifest('com.acme.extended', 'ext')).enabled,
+            registry.installPackage(manifest('com.acme.extended', 'ext'), 'code').enabled,
             'and only THEN is the id forgotten',
         ).toBe(true);
     });

@@ -94,6 +94,8 @@ function bootWithIssuerDrop(): void {
     telemetryDatabase: null,
     composition: { plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null, notes: [] },
     detectManagedDrift: async () => [ISSUER_DROP],
+    // [#23925] The SchemaStack member the listing reads: this driver declares no apply limit.
+    driftApplyLimit: () => null,
     pendingSchemaWork: [],
     kernel: { getService: () => ({}) },
     flushSchemaDdl,
@@ -186,6 +188,8 @@ describe('controls', () => {
     const { exit } = await runApply(ARGV);
 
     expect(exit).toBe(1);
+    // Refused by the pre-flight, not by anything earlier on the human face.
+    expect(mocks.probeAccountIdentityCollisions).toHaveBeenCalledTimes(1);
     expect(applyMigrationEntries).not.toHaveBeenCalled();
   }, RUN_TIMEOUT);
 

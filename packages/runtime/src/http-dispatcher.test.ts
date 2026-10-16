@@ -2447,7 +2447,7 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handlePackages('', 'POST', { manifest }, {}, PKG_ADMIN());
 
             expect(result.response?.status).toBe(201);
-            expect(mockRegistry.installPackage).toHaveBeenCalledWith(manifest, undefined);
+            expect(mockRegistry.installPackage).toHaveBeenCalledWith(manifest, 'authored', undefined);
             expect((result.response as any)?.body?.data?.manifest?.id).toBe('app.fb');
         });
     });

@@ -55,7 +55,7 @@ function protocolFor(arrangement: Arrangement, order: readonly string[]) {
         } as Record<string, unknown>, 'name' as never, packageId);
     }
     for (const packageId of arrangement.disabled ?? []) {
-        registry.installPackage({ id: packageId, name: packageId, version: '1.0.0', type: 'app' } as never);
+        registry.installPackage({ id: packageId, name: packageId, version: '1.0.0', type: 'app' } as never, 'code');
         registry.disablePackage(packageId);
     }
     const rows = arrangement.rowLock === undefined ? [] : [{

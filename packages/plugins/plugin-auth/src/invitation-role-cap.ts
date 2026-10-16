@@ -41,6 +41,12 @@
  * independent of placement. Fail-closed by construction — an issuer role that
  * cannot be resolved grades as nothing, so anything above a plain member
  * invitation is refused.
+ *
+ * Which issuer grade may confer which role is not spelled here: it is
+ * `INVITATION_ROLE_GRANTORS` in `@objectstack/spec/identity`, the same table
+ * the `invite_user` dialog's role picker builds its per-option `visibleWhen`
+ * from, so the offer and this refusal cannot drift. The ladder below decides
+ * only the issuer's grade and which refusal text names the reason.
  */
 
 // better-auth's built-in organization roles — from the one membership-role
@@ -50,6 +56,8 @@ import {
   MEMBERSHIP_ROLE_OWNER,
   MEMBERSHIP_ROLE_ADMIN,
   MEMBERSHIP_ROLE_MEMBER,
+  INVITATION_ROLE_ANY_ISSUER,
+  invitationRoleGrantors,
 } from '@objectstack/spec/identity';
 
 export { MEMBERSHIP_ROLE_OWNER, MEMBERSHIP_ROLE_ADMIN, MEMBERSHIP_ROLE_MEMBER };
@@ -114,10 +122,30 @@ export function isOrgAdminGrade(raw: unknown): boolean {
  * Is this invitation exactly a plain `member`? Such an invitation can never
  * trip the cap, so the hook skips resolving the issuer's membership row — the
  * common path costs no extra query.
+ *
+ * Read off the grant table: one role, whose row every issuer may grant
+ * (`'any'`). `member` is the only such row.
  */
 export function isPlainMemberInvitation(requestedRole: unknown): boolean {
   const roles = parseOrgRoles(requestedRole);
-  return roles.length === 1 && roles[0] === MEMBERSHIP_ROLE_MEMBER;
+  return roles.length === 1 && invitationRoleGrantors(roles[0]) === INVITATION_ROLE_ANY_ISSUER;
+}
+
+/**
+ * Does the grant table admit every requested role for this issuer? An issuer
+ * below admin grade is admitted for nothing here: the single plain-member
+ * invitation it may issue is exempt before this is asked
+ * ({@link isPlainMemberInvitation}).
+ */
+function grantTableAdmits(requested: readonly string[], issuerRole: unknown): boolean {
+  if (!isOrgAdminGrade(issuerRole)) return false;
+  const issuerRoles = parseOrgRoles(issuerRole);
+  return requested.every((role) => {
+    const grantors = invitationRoleGrantors(role);
+    if (grantors === INVITATION_ROLE_ANY_ISSUER) return true;
+    const grades: readonly string[] = grantors;
+    return issuerRoles.some((issuer) => grades.includes(issuer));
+  });
 }
 
 /**
@@ -139,7 +167,6 @@ export function invitationRoleCapFailure(
   if (isPlainMemberInvitation(requestedRole)) return null;
 
   const issuerGrade = orgRoleGrade(issuerRole);
-  const requestedGrade = orgRoleGrade(requestedRole);
 
   // Fail-closed floor, reported as itself: an issuer whose membership could not
   // be read is not "outranked", they are unverified — say so, or an operator
@@ -153,7 +180,10 @@ export function invitationRoleCapFailure(
     );
   }
 
-  if (requestedGrade > issuerGrade) {
+  if (grantTableAdmits(requested, issuerRole)) return null;
+
+  // Refused — name the reason by the ladder.
+  if (orgRoleGrade(requestedRole) > issuerGrade) {
     return (
       `[Security] Access denied: you may not invite a member as '${requested.join(', ')}' — ` +
       `an invitation can never confer a role above the issuer's own ` +
@@ -161,14 +191,10 @@ export function invitationRoleCapFailure(
     );
   }
 
-  if (issuerGrade < GRADE_ADMIN) {
-    return (
-      `[Security] Access denied: a delegated issuer may invite only as ` +
-      `'${MEMBERSHIP_ROLE_MEMBER}' — '${requested.join(', ')}' is an organization role that can ` +
-      `carry capability of its own. Grant capability through the invitation's placement ` +
-      `(business unit + positions), which is authorized against your adminScope.`
-    );
-  }
-
-  return null;
+  return (
+    `[Security] Access denied: a delegated issuer may invite only as ` +
+    `'${MEMBERSHIP_ROLE_MEMBER}' — '${requested.join(', ')}' is an organization role that can ` +
+    `carry capability of its own. Grant capability through the invitation's placement ` +
+    `(business unit + positions), which is authorized against your adminScope.`
+  );
 }

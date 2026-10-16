@@ -30,16 +30,16 @@ describe('SchemaRegistry — namespace install gate (ADR-0048 Phase 1)', () => {
   });
 
   it('refuses a package whose namespace is already owned by a different package', () => {
-    registry.installPackage(manifest('com.acme.crm', 'crm') as any);
+    registry.installPackage(manifest('com.acme.crm', 'crm') as any, 'code');
     expect(() =>
-      registry.installPackage(manifest('com.beta.crm', 'crm') as any),
+      registry.installPackage(manifest('com.beta.crm', 'crm') as any, 'code'),
     ).toThrowError(NamespaceConflictError);
   });
 
   it('error names both packages and the namespace', () => {
-    registry.installPackage(manifest('com.acme.crm', 'crm') as any);
+    registry.installPackage(manifest('com.acme.crm', 'crm') as any, 'code');
     try {
-      registry.installPackage(manifest('com.beta.crm', 'crm') as any);
+      registry.installPackage(manifest('com.beta.crm', 'crm') as any, 'code');
       throw new Error('expected a namespace conflict error');
     } catch (e) {
       expect(e).toBeInstanceOf(NamespaceConflictError);
@@ -66,10 +66,10 @@ describe('SchemaRegistry — namespace install gate (ADR-0048 Phase 1)', () => {
     // after it. `resolveThrownHttpError` reads exactly these two fields off the
     // throw, so they are what the door's answer is MADE of — asserting the
     // class instead asserts something the wire never sees.
-    registry.installPackage(manifest('com.acme.crm', 'crm') as any);
+    registry.installPackage(manifest('com.acme.crm', 'crm') as any, 'code');
     let caught: (Error & { code?: string; status?: number }) | undefined;
     try {
-      registry.installPackage(manifest('com.beta.crm', 'crm') as any);
+      registry.installPackage(manifest('com.beta.crm', 'crm') as any, 'code');
     } catch (e) { caught = e as Error & { code?: string; status?: number }; }
 
     expect(caught?.code).toBe('NAMESPACE_CONFLICT');
@@ -80,24 +80,24 @@ describe('SchemaRegistry — namespace install gate (ADR-0048 Phase 1)', () => {
   });
 
   it('allows the same package to reinstall/reload its own namespace', () => {
-    registry.installPackage(manifest('com.acme.crm', 'crm') as any);
+    registry.installPackage(manifest('com.acme.crm', 'crm') as any, 'code');
     expect(() =>
-      registry.installPackage(manifest('com.acme.crm', 'crm') as any),
+      registry.installPackage(manifest('com.acme.crm', 'crm') as any, 'code'),
     ).not.toThrow();
   });
 
   it('allows two packages with distinct namespaces', () => {
-    registry.installPackage(manifest('com.acme.crm', 'crm') as any);
+    registry.installPackage(manifest('com.acme.crm', 'crm') as any, 'code');
     expect(() =>
-      registry.installPackage(manifest('com.acme.hr', 'hr') as any),
+      registry.installPackage(manifest('com.acme.hr', 'hr') as any, 'code'),
     ).not.toThrow();
   });
 
   it('exempts shareable platform namespaces (base/system/sys)', () => {
     for (const ns of ['base', 'system', 'sys']) {
-      registry.installPackage(manifest(`com.a.${ns}`, ns) as any);
+      registry.installPackage(manifest(`com.a.${ns}`, ns) as any, 'code');
       expect(() =>
-        registry.installPackage(manifest(`com.b.${ns}`, ns) as any),
+        registry.installPackage(manifest(`com.b.${ns}`, ns) as any, 'code'),
       ).not.toThrow();
     }
   });
@@ -105,19 +105,19 @@ describe('SchemaRegistry — namespace install gate (ADR-0048 Phase 1)', () => {
   it('downgrades to a warning under collisionPolicy "warn"', () => {
     const warnReg = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'warn' });
     warnReg.logLevel = 'silent';
-    warnReg.installPackage(manifest('com.acme.crm', 'crm') as any);
+    warnReg.installPackage(manifest('com.acme.crm', 'crm') as any, 'code');
     expect(() =>
-      warnReg.installPackage(manifest('com.beta.crm', 'crm') as any),
+      warnReg.installPackage(manifest('com.beta.crm', 'crm') as any, 'code'),
     ).not.toThrow();
     // Both packages are recorded; the namespace now has two owners.
     expect(warnReg.getNamespaceOwners('crm').sort()).toEqual(['com.acme.crm', 'com.beta.crm']);
   });
 
   it('releases the namespace on uninstall, allowing a different package to claim it', () => {
-    registry.installPackage(manifest('com.acme.crm', 'crm') as any);
+    registry.installPackage(manifest('com.acme.crm', 'crm') as any, 'code');
     registry.uninstallPackage('com.acme.crm');
     expect(() =>
-      registry.installPackage(manifest('com.beta.crm', 'crm') as any),
+      registry.installPackage(manifest('com.beta.crm', 'crm') as any, 'code'),
     ).not.toThrow();
     expect(registry.getNamespaceOwners('crm')).toEqual(['com.beta.crm']);
   });

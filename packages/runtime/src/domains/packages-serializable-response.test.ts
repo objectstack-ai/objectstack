@@ -88,7 +88,7 @@ function showcaseShapedRegistry(): SchemaRegistry {
         objects: [{ name: 'invoice', fields: { total: { type: 'currency' } } }],
         apps: [{ name: 'showcase', label: 'Showcase' }],
         plugins: [plugin],
-    } as any);
+    } as any, 'code');
     // Init AFTER install — the measured ordering: the manifest serialised
     // cleanly during boot and only became cyclic once the plugins came up.
     plugin.init(cyclicEngine());
@@ -100,7 +100,7 @@ function showcaseShapedRegistry(): SchemaRegistry {
         version: '9.3.0',
         type: 'plugin',
         scope: 'system',
-    } as any);
+    } as any, 'code');
 
     return registry;
 }

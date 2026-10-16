@@ -2794,6 +2794,10 @@ export interface MetaListTranslationSources {
  * applies built-in fallbacks (the injected system-field labels on custom
  * objects). No locale is: nothing is translated then.
  *
+ * [#23967] A `view` element is served without the `label` the translator
+ * falls back to when the view stored none ({@link withoutInventedViewLabel}),
+ * the rule the item read and the container read apply.
+ *
  * `RestServer.translateMetaItems` delegates here, and the list chain
  * ({@link createMetaListAnswer}) runs it as its last step on both transports.
  */
@@ -2820,10 +2824,13 @@ export async function translateMetaList(
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
-    const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
-        ...metaTranslateOptions(i18n, locale),
-        packagedBase: packagedObjectBaseOf(p, metaType, item?.name),
-    }));
+    const translated = arr.map((item) => {
+        const out = translateMetadataDocument(metaType, item, bundle, {
+            ...metaTranslateOptions(i18n, locale),
+            packagedBase: packagedObjectBaseOf(p, metaType, item?.name),
+        });
+        return metaType === 'view' && item && typeof item === 'object' ? withoutInventedViewLabel(item, out) : out;
+    });
     return Array.isArray(raw) ? translated : { ...raw, items: translated };
 }
 
@@ -2851,6 +2858,10 @@ export async function translateMetaList(
  * type `view` — the registry files a `defineView` container under the object
  * it binds and serves it on that key's by-name read — and the spec translator
  * the table dispatches `view` to reads a single view's `name`.
+ *
+ * [#23967] A single view is served without the `label` that translator falls
+ * back to when the view stored none ({@link withoutInventedViewLabel}) — the
+ * rule the container read and the list read apply.
  */
 export async function translateMetaDocument(
     sources: MetaListTranslationSources,
@@ -2878,10 +2889,11 @@ export async function translateMetaDocument(
     const packagedBase = PACKAGED_BASE_ACCESSORS.has(metaType)
         ? packagedObjectBaseOf(await sources.resolveProtocol(), metaType, (document as any)?.name)
         : undefined;
-    return translateMetadataDocument(metaType, document as any, bundle, {
+    const translated = translateMetadataDocument(metaType, document as any, bundle, {
         ...metaTranslateOptions(i18n, locale),
         packagedBase,
     });
+    return metaType === 'view' ? withoutInventedViewLabel(document as Record<string, unknown>, translated) : translated;
 }
 
 /**
@@ -2912,8 +2924,9 @@ export async function translateMetaDocument(
  *
  * A string the catalog does not carry is never invented: the translator falls
  * back to a view's `name` for a missing label, and that fallback is not a
- * translation ({@link projectViewTranslation}). With no bundle, nothing
- * changes and the SAME container is returned.
+ * translation ({@link withoutInventedViewLabel}, through
+ * {@link projectViewTranslation}). With no bundle, nothing changes and the SAME
+ * container is returned.
  *
  * Known limit: a container saved at runtime on ANOTHER package's object is
  * expanded by the metadata protocol under its own name (`<object>.<name>.<key>`),
@@ -3004,8 +3017,8 @@ async function translateMetaViewContainer(
  * lands on `target`, and so does every key it replaced in the view's `config`
  * (`bulkActionDefs`): an expanded view nests its whole list or form body under
  * `config`, and the slot IS that body. The expansion's own identity keys are
- * never copied. A `label` that equals `input.name` where `input` had none is
- * the translator's fallback, not a translation, and is dropped.
+ * never copied. The translator's `label` fallback is not a translation and
+ * never lands ({@link withoutInventedViewLabel}).
  */
 function projectViewTranslation(
     target: Record<string, unknown>,
@@ -3018,9 +3031,8 @@ function projectViewTranslation(
         if (out === target) out = { ...target };
         out[key] = value;
     };
-    for (const [key, value] of Object.entries(translated)) {
+    for (const [key, value] of Object.entries(withoutInventedViewLabel(input, translated))) {
         if (key === 'config' || VIEW_EXPANSION_IDENTITY_KEYS.has(key) || value === input[key]) continue;
-        if (key === 'label' && input.label == null && value === input.name) continue;
         set(key, value);
     }
     const config = translated.config;
@@ -3031,6 +3043,38 @@ function projectViewTranslation(
         }
     }
     return out;
+}
+
+/**
+ * [#22614 · #23967] `translated` — what the spec's `translateView` answered for
+ * the view `input` — without the `label` that translator invents. It answers
+ * `input.label ?? input.name` when the catalog carries no string for the view,
+ * so a view stored with no `label` comes back carrying its own name, and the
+ * spec declares a view's `label` optional with no default: that value was
+ * authored by nobody and translated from nothing, and a reader could tell it
+ * from a real label only by comparing it to `name`.
+ *
+ * The rule: a `label` equal to `input.name` where `input` carried none (absent
+ * or nullish) is the fallback, and `input`'s own value takes its place — no
+ * `label` key when `input` had none. An authored `label`, even one equal to the
+ * view's name, and a catalog string that differs from the name are served
+ * unchanged; a catalog string equal to the name cannot be told from the
+ * fallback and goes with it.
+ *
+ * ONE rule for every `view` read this module translates: the item read
+ * ({@link translateMetaDocument}), the list read ({@link translateMetaList})
+ * and each part of a container ({@link projectViewTranslation}). Returns
+ * `translated` itself when nothing is dropped.
+ */
+function withoutInventedViewLabel(
+    input: Record<string, unknown>,
+    translated: Record<string, unknown>,
+): Record<string, unknown> {
+    if (input.label != null || translated.label !== input.name) return translated;
+    const served: Record<string, unknown> = { ...translated };
+    if ('label' in input) served.label = input.label;
+    else delete served.label;
+    return served;
 }
 
 /** The keys `expandViewContainer` stamps on an item — its identity, never the view's own content. */

@@ -135,8 +135,8 @@ async function boot() {
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
     // Two installed, writable bases: no read-only manifest scope, and no code package booted them.
-    engine.registry.installPackage({ id: ALPHA, name: ALPHA, namespace: 'alpha', version: '1.0.0', type: 'app' } as any);
-    engine.registry.installPackage({ id: BETA, name: BETA, namespace: 'beta', version: '1.0.0', type: 'app' } as any);
+    engine.registry.installPackage({ id: ALPHA, name: ALPHA, namespace: 'alpha', version: '1.0.0', type: 'app' } as any, 'code');
+    engine.registry.installPackage({ id: BETA, name: BETA, namespace: 'beta', version: '1.0.0', type: 'app' } as any, 'code');
     const protocol = new ObjectStackProtocolImplementation(engine as any);
 
     const flows = new Map<string, unknown>();

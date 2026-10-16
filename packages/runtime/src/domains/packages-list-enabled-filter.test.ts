@@ -93,7 +93,7 @@ function fixtureRegistry(): SchemaRegistry {
 
     const install = (id: string, type: string) => registry.installPackage({
         id, name: id, namespace: id.split('.').pop(), version: '1.0.0', type,
-    } as any);
+    } as any, 'code');
 
     install(ENABLED_APP, 'app');
     install(DISABLED_APP, 'app');

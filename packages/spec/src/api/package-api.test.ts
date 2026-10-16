@@ -206,6 +206,7 @@ describe('PackageInstallResponseSchema', () => {
       data: {
         package: {
           manifest: { id: 'com.acme.crm', name: 'acme_crm', version: '1.0.0', type: 'plugin' },
+          source: 'authored',
           status: 'installed',
           enabled: true,
         },
@@ -231,6 +232,7 @@ describe('PackageInstallResponseSchema', () => {
       data: {
         package: {
           manifest: { id: 'com.acme.crm', name: 'acme_crm', version: '1.0.0', type: 'plugin' },
+          source: 'authored',
           status: 'installed',
           enabled: true,
         },
@@ -636,7 +638,10 @@ describe('package-rollback-response retirement (ruled: it described the wrong op
  * Everything else is held equal on purpose: what separates them has to be the
  * stage, so a failure below can only be about the stage.
  */
-const LIFECYCLE = { status: 'installed', enabled: true } as const;
+// `source` is the record's origin (every row carries one, #23972); `writable`
+// is the served row's verdict, which the record schemas do not declare and
+// strip, so one fixture serves both.
+const LIFECYCLE = { source: 'code', status: 'installed', enabled: true, writable: false } as const;
 const MANIFEST_BASE = {
   id: 'com.acme.stage', namespace: 'stage', version: '1.0.0', type: 'app', scope: 'project',
   name: 'Stage Fixture',
@@ -679,6 +684,30 @@ describe('the two declared manifest stages are DISTINCT, not two names for one s
     // on so a future widening of either declaration reddens by name here.
     expect(InstalledPackageSchema.safeParse(ASSEMBLED_ROW).success).toBe(false);
     expect(AssembledInstalledPackageSchema.safeParse(GLOB_ROW).success).toBe(false);
+  });
+});
+
+// [#23972] The read doors serve the server's writability verdict on every row;
+// it is declared on the SERVED row (both stage branches) and on neither record
+// schema, because the registry never stores it.
+describe('the served installed-package row declares `writable`', () => {
+  it('requires a boolean `writable` on either stage', () => {
+    for (const row of [GLOB_ROW, ASSEMBLED_ROW]) {
+      const { writable: _omitted, ...bare } = row;
+      const verdict = InstalledPackageAtEitherStageSchema.safeParse(bare);
+      expect(verdict.success).toBe(false);
+      expect(InstalledPackageAtEitherStageSchema.safeParse({ ...row, writable: 'yes' }).success).toBe(false);
+    }
+  });
+
+  it('keeps `writable` and `source` on the parsed served row', () => {
+    const parsed = InstalledPackageAtEitherStageSchema.parse({ ...GLOB_ROW, source: 'authored', writable: true });
+    expect(parsed).toMatchObject({ source: 'authored', writable: true });
+  });
+
+  it('is not part of the registry RECORD: the record schemas strip it', () => {
+    expect(InstalledPackageSchema.parse(GLOB_ROW)).not.toHaveProperty('writable');
+    expect(AssembledInstalledPackageSchema.parse(ASSEMBLED_ROW)).not.toHaveProperty('writable');
   });
 });
 

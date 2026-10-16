@@ -141,7 +141,7 @@ async function makeProtocol() {
     // The base every draft here is bound to is INSTALLED: a flow may be saved
     // only into a package the registry holds (#20863). Its manifest declares
     // no namespace, so the ADR-0028 prefix pre-flight is unchanged.
-    engine.registry.installPackage({ id: PKG, name: 'Edu', version: '1.0.0' } as never);
+    engine.registry.installPackage({ id: PKG, name: 'Edu', version: '1.0.0' } as never, 'code');
     return new ObjectStackProtocolImplementation(engine);
 }
 

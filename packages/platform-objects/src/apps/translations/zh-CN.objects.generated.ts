@@ -142,7 +142,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       ban_user: {
         label: "封禁用户",
@@ -633,7 +643,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       add_member: {
         label: "添加成员",
@@ -751,7 +771,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "取消邀请",
@@ -1023,6 +1053,13 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked: {
         label: "已撤销"
+      },
+      revoked_reason: {
+        label: "撤销原因",
+        help: "管理员强制重置密码时撤销了该密钥，则记录此原因。此类密钥只能由平台管理员恢复，其所有者应创建新的密钥。密钥恢复后清除。从 API 密钥列表撤销的密钥此项为空。",
+        options: {
+          admin_password_reset: "管理员强制重置密码"
+        }
       },
       key: {
         label: "哈希密钥",

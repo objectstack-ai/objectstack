@@ -181,6 +181,7 @@ import {
     type SkippedManifestEntry,
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
+import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import type { IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -740,7 +741,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         if (entries.length === 0) return;
 
-        let manifestService: { register(m: any): void | Promise<void> } | null = null;
+        let manifestService: { register(m: any, options?: { source?: 'code' | 'marketplace' }): void | Promise<void> } | null = null;
         try {
             manifestService = ctx.getService('manifest') as any;
         } catch {
@@ -784,7 +785,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // the metadata service (late-registration bridge in
                 // ObjectQLPlugin) — wait for that so metadata consumers see
                 // the package as soon as rehydrate reports success.
-                await manifestService!.register(converted);
+                // [#23972] Every ledger entry is a marketplace install, so its
+                // registry row says so (`source: 'marketplace'`) after a restart
+                // exactly as it did when it was installed.
+                await manifestService!.register(converted, { source: 'marketplace' });
                 // Sync schemas so the driver creates tables for the newly-
                 // registered objects (idempotent — already-synced tables
                 // are no-ops).
@@ -1135,8 +1139,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!admission.ok) return admission.response;
         const userId = admission.userId;
 
-        let body: any = {};
-        try { body = await c.req.json(); } catch { /* empty body */ }
+        // [#23914] A declared JSON body that does not parse is refused 400,
+        // never read as no body (`./request-json-body.ts`).
+        const read = await readJsonRequestBody(c);
+        if (!read.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: read.message } }, 400);
+        const body: any = read.body;
 
         // 0. [ADR-0131 D6] ⭐ THE REQUESTED INSTALL MODE, parsed against the
         //    manifest key's own enum (`InstallModeSchema`, by reference — never
@@ -1568,7 +1575,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // Awaited: register also bridges the manifest's objects into the
             // metadata service — a caller that reads metadata right after a
             // 200 (AI describe_object, Studio object list) must see them.
-            await manifestService.register(converted);
+            // [#23972] The registry row records where this package came
+            // from: the marketplace (`source: 'marketplace'`).
+            await manifestService.register(converted, { source: 'marketplace' });
         } catch (err: any) {
             const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard

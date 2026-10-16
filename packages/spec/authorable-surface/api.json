@@ -200,6 +200,7 @@
     "api/AssembledInstalledPackage:previousVersion",
     "api/AssembledInstalledPackage:registeredNamespaces",
     "api/AssembledInstalledPackage:settings",
+    "api/AssembledInstalledPackage:source",
     "api/AssembledInstalledPackage:status",
     "api/AssembledInstalledPackage:statusChangedAt",
     "api/AssembledInstalledPackage:updatedAt",

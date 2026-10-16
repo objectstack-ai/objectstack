@@ -283,3 +283,16 @@ describe('#19277 — a BOOT-SEEDED disable, the durable state this seam can see'
         expect(registry.getPackage('com.acme.seeded.control')?.enabled).toBe(true);
     });
 });
+
+// [#23972] The protocol primitive is the authored door: a Studio base, a
+// duplicate, an HTTP install. Every row it installs says `source: 'authored'`,
+// on the row it returns and on the registry row the read doors serve.
+describe('#23972 — the in-process install door stamps source authored', () => {
+    it('installs the row with source authored, in both records', async () => {
+        const registry = freshRegistry();
+        const { protocol } = makeDoor(registry);
+        const res = await install(protocol, { manifest: manifest('com.acme.authored', 'authored') });
+        expect(res.package.source, 'the row this primitive RETURNED').toBe('authored');
+        expect(registry.getPackage('com.acme.authored')?.source, 'the registry the next read serves from').toBe('authored');
+    });
+});

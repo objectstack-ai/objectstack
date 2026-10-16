@@ -304,7 +304,7 @@ describe('SchemaRegistry — i18n bundle keys (#7730)', () => {
     it('hides the whole bundle when its owning package is disabled', () => {
       // `listItems` filters by each item's `_packageId` (PR #7700). Re-keying
       // must not let a bundle member slip past that filter.
-      registry.installPackage({ id: 'com.acme.crm', name: 'CRM', version: '1.0.0' } as any);
+      registry.installPackage({ id: 'com.acme.crm', name: 'CRM', version: '1.0.0' } as any, 'code');
       registry.registerItem('email_template', tpl('auth.welcome', 'en-US'), 'name', 'com.acme.crm');
       registry.registerItem('email_template', tpl('auth.welcome', 'zh-CN'), 'name', 'com.acme.crm');
       expect(registry.listItems<any>('email_template')).toHaveLength(2);

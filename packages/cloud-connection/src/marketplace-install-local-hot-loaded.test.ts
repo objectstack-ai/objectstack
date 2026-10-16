@@ -63,7 +63,7 @@ async function mount(dir: string, opts: { controlPlaneUrl?: string; failRegister
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
     const registry: any[] = [];
-    const register = vi.fn(async (m: any) => {
+    const register = vi.fn(async (m: any, _options?: { source?: string }) => {
         if (opts.failRegisterOf !== undefined && m?.id === opts.failRegisterOf) {
             throw new Error(REGISTER_FAILURE);
         }
@@ -95,6 +95,9 @@ async function mount(dir: string, opts: { controlPlaneUrl?: string; failRegister
         logger,
         /** The manifest ids the install ASKED to register, whether or not the register resolved. */
         installRegisterAttempts: () => register.mock.calls.slice(registeredAtBoot).map((call) => call[0]?.id),
+        /** Every register call as `[manifest id, source stated]`, boot included. */
+        registerSources: () => register.mock.calls.map((call: any[]) => [call[0]?.id, call[1]?.source]),
+        registeredAtBoot,
     };
 }
 
@@ -190,5 +193,26 @@ describe('install-local answers hotLoaded from what the hot-register did', () =>
         expect(res.payload.error.code).toBe('PLUGIN_REGISTER_FAILED');
         expect(res.payload.error.message).toContain(REGISTER_FAILURE);
         expect(readdirSync(dir)).toEqual([]);
+    });
+});
+
+// [#23972] The registry row of a marketplace install says where it came from:
+// the plugin states `source: 'marketplace'` on the hot-register at install AND
+// on the boot rehydrate from its ledger, so a restart never reads it back as
+// code. Its own UI bundle is the plugin's code and states nothing (`'code'`).
+describe('install-local registers its packages as source marketplace', () => {
+    it('states marketplace on the install register and on the rehydrate after a restart', async () => {
+        const first = await mount(dir);
+        const res = await first.install({ manifest: MANIFEST });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(first.registerSources().slice(first.registeredAtBoot)).toEqual([[APP_ID, 'marketplace']]);
+
+        // A second boot over the same ledger: the rehydrate is the restart half.
+        const second = await mount(dir);
+        const atBoot = second.registerSources().slice(0, second.registeredAtBoot);
+        expect(atBoot.filter(([id]) => id === APP_ID)).toEqual([[APP_ID, 'marketplace']]);
+        // CONTROL: the plugin's own UI bundle registered at boot without a source.
+        expect(atBoot.filter(([id]) => id !== APP_ID).every(([, source]) => source === undefined)).toBe(true);
+        expect(atBoot.length).toBeGreaterThan(1);
     });
 });

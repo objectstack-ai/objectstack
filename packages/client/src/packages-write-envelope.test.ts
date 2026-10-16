@@ -178,7 +178,7 @@ describe('#12034 — the packages write verbs answer the bare row, not `{ packag
 
     it('enable resolves to the row, carrying the flag it just set', async () => {
         const registry = new SchemaRegistry();
-        registry.installPackage(MANIFEST as any);
+        registry.installPackage(MANIFEST as any, 'authored');
         registry.disablePackage(MANIFEST.id);
         const { client, seen } = dispatcherBackedClient(registry);
 
@@ -195,7 +195,7 @@ describe('#12034 — the packages write verbs answer the bare row, not `{ packag
 
     it('disable resolves to the row, carrying the flag it just cleared', async () => {
         const registry = new SchemaRegistry();
-        registry.installPackage(MANIFEST as any);
+        registry.installPackage(MANIFEST as any, 'authored');
         const { client, seen } = dispatcherBackedClient(registry);
 
         const row = await client.packages.disable(MANIFEST.id);
@@ -216,7 +216,7 @@ describe('#12034 — the packages write verbs answer the bare row, not `{ packag
      */
     it('the dispatcher wraps the row exactly once, and the client strips exactly that', async () => {
         const registry = new SchemaRegistry();
-        registry.installPackage(MANIFEST as any);
+        registry.installPackage(MANIFEST as any, 'authored');
         const { client, dispatcher } = dispatcherBackedClient(registry);
 
         const raw = await dispatcher.handlePackages('/com.acme.crm/enable', 'PATCH', undefined, {}, CONTEXT());

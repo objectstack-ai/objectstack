@@ -31390,6 +31390,9 @@ export class ObjectStackProtocolImplementation implements
         // install REPLACES the row object (and may register the namespace).
         const undoInstall = this.packageInstallUndo(manifest);
 
+        // [#23972] Every package this primitive installs is AUTHORED — a Studio
+        // base, a duplicate, an HTTP install — persisted to `sys_packages` below.
+        //
         // ADR-0087 D2 — this door is AUTHORING-side, so the registry judges the
         // manifest exactly as handed, and no forward conversion runs here (the
         // window the registration door, the `sys_packages` hydration and the
@@ -31403,7 +31406,7 @@ export class ObjectStackProtocolImplementation implements
         // to fix, refused loudly at the moment of writing. Once the body sits
         // in `sys_packages` it is data at rest, and the boot hydration
         // (`@objectstack/service-package`) converts it at every load.
-        let pkg = this.engine.registry.installPackage(manifest as any, request.settings);
+        let pkg = this.engine.registry.installPackage(manifest as any, 'authored', request.settings);
 
         // [#19277] HONOUR `enableOnInstall` — the key THIS request contract
         // declares and this primitive read past. `InstallPackageRequestSchema`

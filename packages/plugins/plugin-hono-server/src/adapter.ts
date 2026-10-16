@@ -33,6 +33,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 // the same drain, one different server factory. See {@link HttpsListenerMaterial}.
 import { createServer as createHttpsServer } from 'node:https';
 import { matchesRoutePattern } from './route-pattern';
+import { readRequestBody, type RequestBodyReading, type RequestBodyRefusal } from './request-body';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
 // is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
 // code must be a member of, and `HttpStatusErrorCodeMap` IS the set of statuses
@@ -688,35 +689,17 @@ export class HonoHttpServer implements IHttpServer {
             renderDeclaredEnvelope?: boolean;
         } = {},
     ): Promise<{ response: Response | null; failed: boolean }> {
-        let body: any = {};
-
         // Ambient per-request timing collector — present only when the
         // Server-Timing / perf-tuning middleware established one for this
         // request. All marks below are no-ops otherwise (zero overhead).
         const _perf = currentPerfTiming();
         const _endParse = _perf?.start('parse', 'Body parse');
 
-        const contentType = c.req.header('content-type') ?? '';
-        const isOctetStream = contentType.includes('application/octet-stream');
-
-        // Try to parse JSON body first if content-type is JSON
-        if (contentType.includes('application/json')) {
-            try {
-                body = await c.req.json();
-            } catch(e) {
-                // If JSON parsing fails, try parseBody
-                try {
-                    body = await c.req.parseBody();
-                } catch(e2) {}
-            }
-        } else if (!isOctetStream) {
-            // For non-JSON / non-binary content types, use parseBody
-            // (Skipping for octet-stream so the raw stream stays consumable
-            //  via `req.rawBody()` for binary uploads.)
-            try {
-                body = await c.req.parseBody();
-            } catch(e) {}
-        }
+        // [#23914] Parsed by the declared content type, or a refusal, never an
+        // invented `{}`. `readRequestBody` (`./request-body.ts`) says what each
+        // media type answers and why the refusal waits for `req.body` to be read.
+        let bodyReading: RequestBodyReading = await readRequestBody(c);
+        let refusedBodyRead: RequestBodyRefusal | undefined;
 
         _endParse?.();
 
@@ -735,7 +718,23 @@ export class HonoHttpServer implements IHttpServer {
         const req = {
             params: readRouteParams(c),
             query: readQuery(c),
-            body,
+            /**
+             * [#23914] An accessor rather than a value: reading a body this
+             * adapter could not parse throws the refusal, which stops the
+             * handler before it acts on the request, and is answered below
+             * whatever the handler made of the throw. A route that reads
+             * `rawBody()` instead never reaches it. Writable as before.
+             */
+            get body(): any {
+                if (bodyReading.refusal) {
+                    refusedBodyRead = bodyReading.refusal;
+                    throw bodyReading.refusal;
+                }
+                return bodyReading.body;
+            },
+            set body(value: any) {
+                bodyReading = { body: value };
+            },
             headers: rawHeaders,
             method: c.req.method,
             path: c.req.path,
@@ -873,6 +872,19 @@ export class HonoHttpServer implements IHttpServer {
         });
 
         const outcome = await streamPromise;
+
+        // [#23914] The handler read a body this adapter refused. Its answer,
+        // whatever it is, was built on a body the request never had: a catch
+        // arm's 500, a classification's own dialect, or nothing. The refusal
+        // is the answer, and it is not this handler's failure to report.
+        if (refusedBodyRead) {
+            const envelope = declaredEnvelopeForThrow(refusedBodyRead);
+            if (envelope) {
+                closeStream();
+                return { response: c.json(envelope.body, envelope.status), failed: false };
+            }
+        }
+
         // A handler that WROTE and then threw keeps what it wrote — unchanged,
         // and the reason the render decision is taken here rather than in the
         // `catch`: `capturedResponse` is not visible from inside the executor's

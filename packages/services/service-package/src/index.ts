@@ -730,12 +730,16 @@ export class PackageServicePlugin implements Plugin {
                   `'${compat.requiredRange}'; skipping the protocol handshake (ADR-0087).`,
               );
             }
+            // [#23972] `sys_packages` holds the packages `installPackage`
+            // persisted (Studio bases, duplicates, HTTP installs), so every row
+            // it rehydrates is authored — the origin the install stamped.
+            //
             // One record's refusal is that record's: it is reported by name and
             // the records after it keep hydrating. It used to throw out of the
             // whole loop into the catch below, which logged it at `debug` —
             // and every durable package after the bad one was silently absent.
             try {
-              registry.installPackage(convertForward ? convertForward(rec.manifest) : rec.manifest);
+              registry.installPackage(convertForward ? convertForward(rec.manifest) : rec.manifest, 'authored');
               hydrated++;
             } catch (refusal) {
               logger.error(

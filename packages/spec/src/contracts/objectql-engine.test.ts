@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import type {
   EngineFilterJudgement,
   EngineFilterJudgementOptions,
@@ -8,6 +8,7 @@ import type {
 import type { ServiceObject } from '../data/object.zod';
 import type { FilterCondition } from '../data/filter.zod';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
+import type { InstalledPackageSource } from '../kernel/package-registry.zod';
 
 /**
  * `getObject` — typed on the contract, not re-declared by consumers
@@ -210,4 +211,12 @@ describe('judgeFilter contract — the engine judges a filter without running it
     const same: Same = 'same';
     expect(same).toBe('same');
   });
+});
+
+// [#23972] The registry contract spells the origin union rather than importing
+// it (see its docblock); this holds the spelling equal to the declaration.
+describe('EngineSchemaRegistryView.installPackage', () => {
+    it('takes the declared InstalledPackageSource as its source', () => {
+        expectTypeOf<Parameters<EngineSchemaRegistryView['installPackage']>[1]>().toEqualTypeOf<InstalledPackageSource>();
+    });
 });

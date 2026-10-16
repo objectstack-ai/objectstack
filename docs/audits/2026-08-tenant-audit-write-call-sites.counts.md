@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 227 |
-| Object name statically decidable | 156 |
+| Write call sites | 229 |
+| Object name statically decidable | 158 |
 | Object name chosen at run time | 71 |
-| Against a tenancy-enabled object | 155 |
+| Against a tenancy-enabled object | 157 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 166 |
+| Threading a tenant context | 168 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 123 |
+| Threading a decidably elevated context | 125 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 96 |
 
@@ -90,12 +90,12 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-16 at `caebc6a7b`.
+Measured on 2026-10-16 at `22b217924`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 655 |
-| engine-shaped types recognised | 78 |
+| tracked non-test sources scanned | 657 |
+| engine-shaped types recognised | 79 |
 | declared objects in the registry | 116 |
 | same-named calls subtracted as non-engine | 165 |
 
@@ -115,6 +115,8 @@ Measured on 2026-10-16 at `caebc6a7b`.
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_token` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_token` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` | `update` | `objectPlan.object` | undecidable | context, elevation undecidable | 1 |
+| `packages/plugins/plugin-approvals/src/display-label-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 1 |
+| `packages/plugins/plugin-approvals/src/display-label-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |

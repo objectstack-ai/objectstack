@@ -13,8 +13,9 @@ export const entry: SemanticMigration = {
     '(removed from the public surface — no replacement export. It was an internal option bag '
     + 'for this package\'s own schemas; the visibility contract it configures is unchanged and '
     + 'still published through the schemas that use it — `FormFieldSchema`, `FormSectionSchema` '
-    + 'and the page component — together with `normalizeVisibleWhen` and '
-    + '`VISIBILITY_ALIAS_KEYS`, which stay exported.)',
+    + 'and the page component. The alias fold `normalizeVisibleWhen` and its key list '
+    + '`VISIBILITY_ALIAS_KEYS` are removed from the same entry in 18 as well (the D3 entry '
+    + '`visibility-alias-fold-unexported`).)',
   reason:
     'ADR-0049 enforce-or-remove applied to an export. The const was barrel-exported while its '
     + 'type, `StrictObjectOptions`, is deliberately unpublished, so no consumer could annotate it, '
