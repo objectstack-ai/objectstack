@@ -603,8 +603,10 @@ function refuseRemoteDeferredDdl(): never {
  * # What this face does NOT claim: a boot may not act on its report
  *
  * The report is accurate about the database, but not every finding is real
- * drift. This face's schema sync (`RemoteTransport`) does not create the NOT NULL
- * constraint a field declares, so a table it created reads as `tighten_not_null`
+ * drift. A table this face's schema sync (`RemoteTransport`) created before
+ * #23847 has no NOT NULL constraint for the fields that declare one: the sync
+ * creates it now, but an additive sync never tightens a column that already
+ * exists. So such a table reads as `tighten_not_null`
  * (destructive) against its own declaration. Nor does every destructive entry
  * have a remedy on this transport: `os migrate apply --allow-destructive` runs
  * here [#23848] and applies the column drops and index entries this face can
@@ -618,7 +620,8 @@ function refuseRemoteDeferredDdl(): never {
 
 /** [#23816] {@link TursoDriver.driftReportCaveat} on the REMOTE face. */
 const REMOTE_DRIFT_REPORT_CAVEAT =
-  'the Turso REMOTE transport\'s schema sync does not create the NOT NULL constraint a field declares, so ' +
+  'a table the Turso REMOTE transport\'s schema sync created in an earlier release has no NOT NULL ' +
+  'constraint on the fields that declare one (the sync creates it now, but never tightens an existing column), so ' +
   'this driver\'s drift report can name a tightening its own sync produced, and a destructive entry has no ' +
   'remedy on this transport but a column drop or an index change (`os migrate apply --allow-destructive` applies ' +
   'those and names the rest as not applied). The report is for reading; nothing is ' +

@@ -1626,11 +1626,20 @@ const platformSettingsShape = () => ({
    *   settings.<namespace>.actions.<action_id>.label
    *   settings.<namespace>.actions.<action_id>.confirmText
    *   settings.<namespace>.actions.<action_id>.successMessage
+   *   settings.<namespace>.banners.<banner_id>.title
+   *   settings.<namespace>.banners.<banner_id>.text
+   *
+   * `banners` is keyed by an `info_banner` specifier's `id`, as `groups` is
+   * keyed by a `group` specifier's. Its leaves follow the nearest sibling:
+   * the specifier's `label` translates as `title` (the heading spelling
+   * `groups` already uses for the same field), and its `bannerText` as
+   * `text`. A banner without an `id` has no address here and renders its
+   * manifest literals.
    */
   settings: z.record(z.string(), strictObject({
     surface: 'this settings manifest translation',
     history: TRANSLATION_HISTORY,
-    aliases: { label: 'title', name: 'title', sections: 'groups', fields: 'keys', settings: 'keys' },
+    aliases: { label: 'title', name: 'title', sections: 'groups', fields: 'keys', settings: 'keys', banner: 'banners', notices: 'banners', alerts: 'banners' },
   }, {
     title: z.string().optional().describe('Translated settings manifest title'),
     description: z.string().optional().describe('Translated settings manifest description'),
@@ -1669,6 +1678,17 @@ const platformSettingsShape = () => ({
       confirmText: z.string().optional().describe('Translated confirmation prompt'),
       successMessage: z.string().optional().describe('Translated success toast/message'),
     })).optional().describe('Action button translations keyed by action id'),
+    banners: z.record(z.string(), strictObject({
+      surface: 'this settings banner translation',
+      history: TRANSLATION_HISTORY,
+      // The specifier's own spellings (`label`, `bannerText`) and the group
+      // body's (`description`) are the likely borrowings; each names the leaf
+      // that holds the same string here.
+      aliases: { label: 'title', name: 'title', heading: 'title', bannerText: 'text', body: 'text', description: 'text', message: 'text' },
+    }, {
+      title: z.string().optional().describe('Translated banner title (the info_banner specifier label)'),
+      text: z.string().optional().describe('Translated banner body, markdown (the info_banner specifier bannerText)'),
+    })).optional().describe('Info banner translations keyed by the info_banner specifier id'),
   })).optional().describe('Settings manifest translations keyed by namespace'),
 });
 

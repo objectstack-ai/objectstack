@@ -687,14 +687,16 @@ describe('audit writers — enable.activities opt-out gate (#2707)', () => {
 });
 
 /**
- * [#22961] A user's own write to their own per-user UI-state row writes the
- * ledger row and no activity row. Every other writer keeps today's rows.
+ * [#22961, #23804 (ruling record 6212163130)] A user's own write to their own
+ * per-user UI-state row writes neither the ledger row nor the activity row.
+ * Every other writer keeps both rows.
  *
  * The rows below are the console's "recently visited" write as the real engine
  * hands it to this hook: the session subject is the owner, and both `result`
- * and the bound `previous` carry the full row with its `user_id`.
+ * and the bound `previous` carry the full row with its `user_id`. The real
+ * engine's own shapes are pinned in `audit-writers.own-ui-state.integration.test.ts`.
  */
-describe('audit writers — a user\'s own per-user UI-state write is not mirrored (#22961)', () => {
+describe('audit writers — a user\'s own per-user UI-state write is not recorded (#22961, #23804)', () => {
   const SCHEMA = {
     sys_audit_log: SINGLE_TENANT.sys_audit_log,
     sys_activity: SINGLE_TENANT.sys_activity,
@@ -717,17 +719,13 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
   ] as const;
 
   for (const w of OWN_WRITES) {
-    it(`the owner's own ${w.action} writes the sys_audit_log row and no sys_activity row`, async () => {
+    it(`the owner's own ${w.action} writes no sys_audit_log row and no sys_activity row`, async () => {
       const { engine, fire, created } = makeEngine(SCHEMA);
       installAuditWriters(engine as any, 'test.audit');
 
       await fire(w.event, { object: 'sys_user_preference', ...w.ctx, session: { userId: OWNER } });
 
-      const ledger = rowsOn(created, 'sys_audit_log', 'sys_user_preference');
-      expect(ledger).toHaveLength(1);
-      expect(ledger[0].row.action).toBe(w.action);
-      expect(ledger[0].row.user_id).toBe(OWNER);
-      expect(ledger[0].row.record_id).toBe(PREF.id);
+      expect(created.filter((c) => c.object === 'sys_audit_log')).toHaveLength(0);
       expect(created.filter((c) => c.object === 'sys_activity')).toHaveLength(0);
     });
   }
@@ -766,7 +764,7 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
   ] as const;
 
   for (const w of OTHER_WRITERS) {
-    it(`CONTROL: on a user's preference row, ${w.who} keeps its activity row`, async () => {
+    it(`CONTROL: on a user's preference row, ${w.who} keeps its ledger row and its activity row`, async () => {
       const { engine, fire, created } = makeEngine(SCHEMA);
       installAuditWriters(engine as any, 'test.audit');
 

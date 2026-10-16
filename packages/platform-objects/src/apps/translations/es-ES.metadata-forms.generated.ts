@@ -204,6 +204,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.description": {
         label: "Descripción"
       },
+      "fields.options.kind": {
+        label: "Tipo",
+        helpText: "Categoría del ciclo de vida (solo selección / radio de un único valor): un paso intermedio, el final con éxito o el final sin éxito. Obligatoria en cada opción del campo de etapa."
+      },
       "fields.reference": {
         label: "Referencia",
         helpText: "Nombre del objeto de destino. En un campo tree es opcional y, si se indica, debe ser este mismo objeto (un árbol es una jerarquía dentro de su propio objeto — para enlazar con otro objeto, usa un lookup)"
@@ -678,6 +682,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "options.visibleWhen": {
         label: "Condición de visibilidad"
       },
+      "options.kind": {
+        label: "Tipo"
+      },
       reference: {
         label: "Referencia",
         helpText: "Nombre del objeto referenciado"
@@ -1012,7 +1019,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       end_user_controls: {
         label: "Controles de usuario final",
-        description: "Lo que los usuarios finales pueden hacer en esta vista: filtros rápidos, pestañas de filtro, cambio de visualización (ADR-0047, paridad con Airtable Interface)."
+        description: "Lo que los usuarios finales pueden hacer en esta vista: filtros rápidos, pestañas de filtro, cambio de visualización."
       },
       navigation_sharing: {
         label: "Navegación y uso compartido",
@@ -2323,15 +2330,15 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "Predeterminado",
-        helpText: "Línea base de la aplicación para la posición everyone (ADR-0090 D5): un conjunto de nivel de aplicación se vincula automáticamente al arrancar; uno de nivel de paquete se convierte en una sugerencia que el administrador confirma al instalar. false por defecto."
+        helpText: "Concede este conjunto a todos los que inician sesión, mediante la posición integrada everyone. Un conjunto que declara la propia aplicación se concede al arrancar; uno de un paquete instalado se convierte en una sugerencia que un administrador confirma en Setup. Un conjunto con permisos de alto privilegio nunca se concede así. false por defecto."
       },
       managedBy: {
         label: "Gestionado por",
-        helpText: "Procedencia del registro (ADR-0086 D3): quién es el propietario de este conjunto entre actualizaciones."
+        helpText: "Quién es el propietario de este conjunto: Package indica que se distribuye con un paquete y que las actualizaciones del paquete lo modifican; Platform y User indican que se creó en este entorno y que las actualizaciones no lo tocan."
       },
       packageId: {
         label: "ID de paquete",
-        helpText: "Id del paquete propietario de un conjunto distribuido con un paquete (ADR-0086 D3). Déjalo vacío para un conjunto creado en el entorno."
+        helpText: "El paquete que distribuye este conjunto; un valor que nombra otro paquete se rechaza. Déjalo vacío para un conjunto creado en este entorno."
       },
       systemPermissions: {
         label: "Permisos del sistema",
@@ -2339,7 +2346,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       adminScope: {
         label: "Ámbito de administración delegada",
-        helpText: "Administración delegada (ADR-0090 D12): permite a quienes tienen este conjunto administrar un subárbol de unidades de negocio. businessUnit es la raíz del subárbol (sys_business_unit.name), es obligatorio y no puede estar en blanco; includeSubtree vale true por defecto; manageAssignments vale false por defecto y permite al titular asignar personas a puestos, y conceder conjuntos directamente, dentro de ese subárbol; un delegado solo puede asignar los conjuntos nombrados en assignablePermissionSets. Déjalo vacío en un conjunto que no delega nada."
+        helpText: "Administración delegada: permite a quienes tienen este conjunto administrar un subárbol de unidades de negocio. businessUnit es la raíz del subárbol (sys_business_unit.name), es obligatorio y no puede estar en blanco; includeSubtree vale true por defecto; manageAssignments vale false por defecto y permite al titular asignar personas a puestos, y conceder conjuntos directamente, dentro de ese subárbol; un delegado solo puede asignar los conjuntos nombrados en assignablePermissionSets. Déjalo vacío en un conjunto que no delega nada."
       },
       objects: {
         label: "Permisos de objeto",
@@ -2384,7 +2391,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       delegatable: {
         label: "Delegable",
-        helpText: "Quienes la ocupan pueden delegar esta posición por sí mismos, con un plazo y un motivo (ADR-0091 D3). false por defecto: la delegación es solo para administradores."
+        helpText: "Quienes la ocupan pueden delegar esta posición por sí mismos, con un plazo y un motivo. false por defecto: la delegación es solo para administradores."
       }
     }
   },

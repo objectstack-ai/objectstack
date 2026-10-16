@@ -204,6 +204,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.description": {
         label: "描述"
       },
+      "fields.options.kind": {
+        label: "类型",
+        helpText: "生命周期类别(仅限单值下拉 / 单选):进行中的一步、成功的终点或失败的终点。阶段字段的每个选项都必须声明。"
+      },
       "fields.reference": {
         label: "引用对象",
         helpText: "目标对象名称。tree 字段可省略；若填写，必须是本对象自身（树是同一对象内部的层级 — 链接到其他对象请用 lookup）"
@@ -678,6 +682,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "options.visibleWhen": {
         label: "可见条件"
       },
+      "options.kind": {
+        label: "类型"
+      },
       reference: {
         label: "引用对象",
         helpText: "被引用的对象名称"
@@ -1012,7 +1019,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       end_user_controls: {
         label: "终端用户控制",
-        description: "终端用户在此视图上可执行的操作——快速筛选、筛选标签页、可视化切换（ADR-0047，对标 Airtable Interface）。"
+        description: "终端用户在此视图上可执行的操作——快速筛选、筛选标签页、可视化切换。"
       },
       navigation_sharing: {
         label: "导航与共享",
@@ -2323,15 +2330,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "默认权限集",
-        helpText: "面向 everyone 岗位的应用基线（ADR-0090 D5）：应用级权限集在启动时自动绑定；包级权限集则成为安装时由管理员确认的建议。默认 false。"
+        helpText: "通过内置的 everyone 岗位，把这个权限集授予每一位登录用户。应用自身声明的权限集在启动时授予；已安装包中的权限集则成为一条建议，由管理员在 Setup 中确认。含高权限的权限集不会以这种方式授予。默认 false。"
       },
       managedBy: {
         label: "归属来源",
-        helpText: "记录来源（ADR-0086 D3）：跨版本升级时由谁拥有这个权限集。"
+        helpText: "这个权限集归谁所有：Package 表示它随包分发，包升级时会更新它；Platform 和 User 表示它在本环境中创建，升级不会改动它。"
       },
       packageId: {
         label: "所属包 ID",
-        helpText: "随包分发的权限集所属的包 id（ADR-0086 D3）。环境内自行编写的权限集留空即可。"
+        helpText: "分发这个权限集的包；填写其他包的 id 会被拒绝。在本环境中创建的权限集请留空。"
       },
       systemPermissions: {
         label: "系统权限",
@@ -2339,7 +2346,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       adminScope: {
         label: "委派管理范围",
-        helpText: "委派管理（ADR-0090 D12）：让持有本权限集的人管理一个业务单元子树。businessUnit 是子树的根（sys_business_unit.name），必填且不能为空白；includeSubtree 默认为 true；manageAssignments 默认为 false，开启后持有人可在该子树内把人员分配到岗位、并直接授予权限集；被委派者只能分配 assignablePermissionSets 中列出的权限集。不委派任何管理权的权限集请留空。"
+        helpText: "委派管理：让持有本权限集的人管理一个业务单元子树。businessUnit 是子树的根（sys_business_unit.name），必填且不能为空白；includeSubtree 默认为 true；manageAssignments 默认为 false，开启后持有人可在该子树内把人员分配到岗位、并直接授予权限集；被委派者只能分配 assignablePermissionSets 中列出的权限集。不委派任何管理权的权限集请留空。"
       },
       objects: {
         label: "对象权限",
@@ -2384,7 +2391,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       delegatable: {
         label: "可自助委派",
-        helpText: "持有者可自行委派该岗位，需限定时段并填写理由（ADR-0091 D3）。默认 false——委派仅限管理员。"
+        helpText: "持有者可自行委派该岗位，需限定时段并填写理由。默认 false——委派仅限管理员。"
       }
     }
   },
