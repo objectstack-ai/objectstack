@@ -11,8 +11,13 @@ export type PrintRefusal = Error & { code: StandardErrorCode | RegisteredErrorCo
  * wire vocabulary of its own.
  */
 export function printRefusal(code: StandardErrorCode | RegisteredErrorCode, status: number, message: string): never {
+  throw refusalError(code, status, message);
+}
+
+/** The refusal {@link printRefusal} throws, for a caller that throws it itself. */
+export function refusalError(code: StandardErrorCode | RegisteredErrorCode, status: number, message: string): PrintRefusal {
   const err = new Error(message) as PrintRefusal;
   err.code = code;
   err.status = status;
-  throw err;
+  return err;
 }

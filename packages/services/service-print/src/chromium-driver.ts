@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describeEndpoint, type PrintPlacement, type ResolvedPrintPlacement } from './config.js';
-import { printRefusal } from './refusal.js';
+import { refusalError } from './refusal.js';
 import type { PrintSessionCookie } from './principal-session.js';
 
 /**
@@ -194,7 +194,7 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
       return await page.pdf({ preferCSSPageSize: true, printBackground: true });
     } catch (err) {
       if (isTimeout(err)) {
-        printRefusal(
+        throw refusalError(
           'TIMEOUT',
           504,
           `The print page did not finish loading within ${Math.round(input.timeoutMs / 1000)} s at ${input.url}: ` +
@@ -202,7 +202,7 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
             'in flight). Check that the console is served at that URL and reachable from the browser.',
         );
       }
-      printRefusal(
+      throw refusalError(
         'INTERNAL_ERROR',
         500,
         `The print engine failed at ${this.where()}: ${redact(String((err as Error)?.message ?? err), secrets)}`,
