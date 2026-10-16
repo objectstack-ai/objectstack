@@ -5104,36 +5104,11 @@ export default class Serve extends Command {
           );
           trackPlugin('DatasourceAdminServicePlugin');
 
-          // REST routes under /api/v1/datasources. Registered via a tiny
-          // plugin so it resolves http.server during init (same pattern as
-          // the hostname guard above).
-          const adminRoutePlugin: any = {
-            name: 'com.objectstack.cli.datasource-admin-routes',
-            version: '1.0.0',
-            // init() resolves the `http.server` service the hono server plugin
-            // provides — order-if-present so route registration is
-            // deterministic (ADR-0116, #4471). Soft: without a server plugin
-            // the routes degrade on purpose (warn + not installed).
-            optionalDependencies: ['com.objectstack.server.hono'],
-            init: async (ctx: any) => {
-              try {
-                const httpServer: any =
-                  ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
-                if (!httpServer || typeof httpServer.get !== 'function') {
-                  ctx.logger?.warn?.(
-                    '[datasource-admin] http.server unavailable; REST routes not installed',
-                  );
-                  return;
-                }
-                registerDatasourceAdminRoutes(httpServer, ctx, '/api/v1');
-              } catch (routeErr: any) {
-                ctx.logger?.warn?.(
-                  `[datasource-admin] route registration failed: ${routeErr?.message ?? routeErr}`,
-                );
-              }
-            },
-          };
-          await kernel.use(adminRoutePlugin);
+          // REST routes under /api/v1/datasources, mounted by a tiny plugin
+          // during its init (same pattern as the hostname guard above). What
+          // it reads, and which warning a boot without a server gets, lives
+          // on `createDatasourceAdminRoutesPlugin()` below.
+          await kernel.use(createDatasourceAdminRoutesPlugin(registerDatasourceAdminRoutes));
           trackPlugin('DatasourceAdminRoutes');
 
           if (isDev) {
@@ -5788,6 +5763,59 @@ export default class Serve extends Command {
     }
   }
 
+}
+
+/**
+ * The plugin that mounts the datasource admin REST routes (`/api/v1/datasources`,
+ * `registerDatasourceAdminRoutes` from `@objectstack/service-datasource`) onto
+ * the composed HTTP server, from its own `init()`. Exported (#24022) so that
+ * `init` is reachable from a test against a real kernel, as
+ * {@link createUnknownHostnameGuardPlugin}'s is.
+ *
+ * ## The read
+ *
+ * The server is read through {@link readComposedHttpServer}: `http.server`
+ * only, inside a `try`, because the kernel's `getService` THROWS on a name
+ * nothing registered. The `getService?.(…) ?? getService?.(…)` chain this
+ * replaced never reached its `??`: on a boot with no server (`--no-server`)
+ * the throw landed in the registration `catch`, which printed "route
+ * registration failed" with the kernel's "composition/ordering fault" text
+ * when nothing was at fault.
+ *
+ * ## Which warning prints, and when
+ *
+ * - No server composed: the plugin's own degrade line, once. It is kept under
+ *   `--no-server` on purpose. The banner says why there is no server; this
+ *   line names the surface that leaves unmounted, beside the same boot's
+ *   other "not mounted" lines (REST API, runtime config, marketplace
+ *   install). A config can still compose its own server under that flag, and
+ *   then the routes mount. It never says "ordering fault".
+ * - A server composed, and registration throws: "route registration failed"
+ *   with the error. That is a genuine fault and stays loud.
+ *
+ * `optionalDependencies` orders the Hono server plugin ahead when it is
+ * composed (ADR-0116), so an absent server at this `init` is final for it.
+ */
+export function createDatasourceAdminRoutesPlugin(
+  registerRoutes: (server: any, ctx: any, basePath: string) => void,
+) {
+  return {
+    name: 'com.objectstack.cli.datasource-admin-routes',
+    version: '1.0.0',
+    optionalDependencies: ['com.objectstack.server.hono'],
+    init: async (ctx: any): Promise<void> => {
+      const httpServer: any = readComposedHttpServer(ctx);
+      if (!httpServer || typeof httpServer.get !== 'function') {
+        ctx.logger?.warn?.('[datasource-admin] http.server unavailable; REST routes not installed');
+        return;
+      }
+      try {
+        registerRoutes(httpServer, ctx, '/api/v1');
+      } catch (routeErr: any) {
+        ctx.logger?.warn?.(`[datasource-admin] route registration failed: ${routeErr?.message ?? routeErr}`);
+      }
+    },
+  };
 }
 
 /**
