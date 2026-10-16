@@ -2,6 +2,8 @@
 '@objectstack/runtime': patch
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 fix(runtime): `callData`'s exposure refusal for the object a request addresses carries the data door's code, `OBJECT_API_DISABLED` (404) or `OBJECT_API_METHOD_NOT_ALLOWED` (405), on the dispatcher's `/data` routes, the `/mcp` data tools and declared endpoints (#23528)
 
 Clause-②: no
