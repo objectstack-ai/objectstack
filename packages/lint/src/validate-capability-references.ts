@@ -98,11 +98,12 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
     for (const cap of asCapArray(ps.systemPermissions)) known.add(cap);
   }
 
+  // [#22161] One remedy line; that a capability another installed package
+  // declares needs no change, and that the reference fails closed, is
+  // `os explain capability-reference-unknown`.
   const hint =
-    'Fix the capability name, define it with defineCapability (stack.capabilities), ' +
-    'declare it on a permission set’s systemPermissions, ' +
-    'or ignore this if the capability is provided by another installed package ' +
-    '(references fail closed at runtime).';
+    'Fix the capability name, or declare it with `defineCapability` (`stack.capabilities`) or on a ' +
+    'permission set’s `systemPermissions`.';
 
   const flag = (cap: string, where: string, path: string) => {
     if (known.has(cap)) return;

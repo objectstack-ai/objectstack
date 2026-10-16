@@ -234,6 +234,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "Updated At"
       }
+    },
+    _views: {
+      all: {
+        label: "すべて",
+        emptyState: {
+          title: "まだ通知設定がありません",
+          message: "設定を追加するまで、ミュートされる通知はありません。設定を追加すると、1 人のユーザー向けに、または全員の既定として、チャネルごとにトピックをミュートまたは許可できます。"
+        }
+      }
     }
   },
   sys_notification_subscription: {
@@ -262,6 +271,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Created At"
+      }
+    },
+    _views: {
+      all: {
+        label: "すべて",
+        emptyState: {
+          title: "まだ通知の購読がありません",
+          message: "購読は、ロール、チーム、またはユーザーが通知トピックをフォローしていることを記録します。"
+        }
       }
     }
   },
@@ -313,6 +331,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "すべて",
+        emptyState: {
+          title: "まだ通知テンプレートがありません",
+          message: "トピック、チャネル、ロケールごとにテンプレートを追加します。追加するまでは、送信元が指定したタイトルと本文で通知が送信されます。"
+        }
       }
     }
   },

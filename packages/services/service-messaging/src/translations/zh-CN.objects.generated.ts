@@ -234,6 +234,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "更新时间"
       }
+    },
+    _views: {
+      all: {
+        label: "全部",
+        emptyState: {
+          title: "尚无通知偏好",
+          message: "添加偏好之前，任何通知都不会被静音；添加一条偏好，即可为某个用户或作为所有人的默认值，静音或允许某个主题在某个通道上的通知。"
+        }
+      }
     }
   },
   sys_notification_subscription: {
@@ -262,6 +271,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "创建时间"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部",
+        emptyState: {
+          title: "尚无通知订阅",
+          message: "订阅记录某个角色、团队或用户关注某个通知主题。"
+        }
       }
     }
   },
@@ -313,6 +331,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新时间"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部",
+        emptyState: {
+          title: "尚无通知模板",
+          message: "按主题、通道和语言添加模板；在此之前，通知会使用发送方提供的标题和正文发送。"
+        }
       }
     }
   },

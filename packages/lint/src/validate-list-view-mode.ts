@@ -95,10 +95,11 @@ function scanView(
         message:
           '`userFilters` with `element: "tabs"` is page-only and is ignored on an ' +
           'object list view ("views" mode) — it would collide with the ViewTabBar.',
+        // [#22161] One remedy line; why each alternative fits and ADR-0047 are
+        // `os explain list-view-filters-in-views-mode`.
         hint:
-          'Use `listViews` for named presets on an object (each becomes a segmented ' +
-          'tab), switch to `element: "dropdown"` for value chips, or move the `tabs` ' +
-          'filter to a page list (InterfaceListPage, "filters" mode). See ADR-0047.',
+          'Use `listViews` for named presets, `element: "dropdown"` for value chips, or move the ' +
+          '`tabs` filter to a page list (InterfaceListPage).',
       });
     }
   }
