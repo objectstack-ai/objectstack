@@ -27056,12 +27056,11 @@ export class ObjectStackProtocolImplementation implements
         // covers the WRITE. It does not cover this method, for two reasons that
         // are both about where the refusal lands:
         //
-        //   ① the `installPackage` call below sits inside a `catch {}` that is
-        //     deliberately best-effort (a manifest row is not worth aborting a
-        //     copy for), so a refusal raised THERE would be swallowed here and
-        //     the caller would read `success: true` on a package with no
-        //     manifest row — a silent partial state, strictly worse than the
-        //     201 this card set out to close;
+        //   ① a refusal of the `installPackage` call below does not abort the
+        //     copy (a manifest row is not worth aborting a copy for): it is
+        //     reported as a `failed[]` entry on a duplicate that goes on, so
+        //     a refusal of the TARGET ID raised there would arrive as a
+        //     partial copy under an id the declaration refuses outright;
         //   ② the refusal has to precede the MUTATIONS, and the manifest write
         //     is not the first of them. #14451 already established the position
         //     for this door's other precondition: `duplicatePackage` mints the
@@ -27434,6 +27433,9 @@ export class ObjectStackProtocolImplementation implements
             return { fields: Object.fromEntries(out) };
         };
 
+        const copied: Array<{ type: string; name: string }> = [];
+        const failed: Array<{ type: string; name: string; error: string }> = [];
+
         if (srcPkg?.manifest && typeof registry?.installPackage === 'function') {
             try {
                 // Route through installPackage (not a bare registry write) so the
@@ -27451,13 +27453,46 @@ export class ObjectStackProtocolImplementation implements
                 };
                 delete dupManifest.scope;
                 await this.installPackage({ manifest: dupManifest } as InstallPackageRequest);
-            } catch {
-                /* best-effort — the per-item package binding still works without a manifest row */
+            } catch (e: any) {
+                // [#24041] A REFUSED PACKAGE RECORD IS REPORTED, NEVER SWALLOWED.
+                // The copy still goes on: the per-item package binding works
+                // without a package record, and aborting here would leave the
+                // caller nothing it has today (refusing the duplicate outright
+                // is a separate decision). What it no longer does is go on in
+                // SILENCE. A refused install leaves no registry record and no
+                // `sys_packages` row, so `targetPackageId` is not an installed
+                // package — absent from `GET /packages` at once, not only after
+                // a restart — while every item copied below is bound to it.
+                //
+                // Reachable from the HTTP door: `SchemaRegistry.installPackage`'s
+                // namespace gate (`NAMESPACE_CONFLICT`, 422) refuses a target
+                // namespace another installed package owns — an explicit
+                // `targetNamespace`, or one derived from a target id whose last
+                // segment another package's namespace already uses — and a
+                // failed `sys_packages` write fails the install (#21243).
+                //
+                // ⭐ It rides `failed[]`, this verb's one per-item outcome
+                // carrier, under the source's own `package` item: the clone
+                // could not copy it. So `success` reads false and `failedCount`
+                // counts it, as for any item. The sentence is quoted only when
+                // the refusal declares a client status; a store fault is not
+                // quoted, and the warn below carries its full text, exactly as
+                // the per-item save failure does further down.
+                failed.push({
+                    type: 'package',
+                    name: request.sourcePackageId,
+                    error: `Package '${request.sourcePackageId}' is copied without its package record: installing `
+                        + `'${request.targetPackageId}' was refused, so '${request.targetPackageId}' is not an `
+                        + 'installed package while the items copied into it are bound to it. '
+                        + clientFacingFailureText(e, 'The install failed; the reason is in the server log.'),
+                });
+                console.warn(
+                    `[protocol.duplicatePackage] package record for '${request.targetPackageId}' `
+                    + `(copy of '${request.sourcePackageId}') was not installed: `
+                    + `${typeof e?.code === 'string' ? `${e.code}: ` : ''}${e?.message ?? e}`,
+                );
             }
         }
-
-        const copied: Array<{ type: string; name: string }> = [];
-        const failed: Array<{ type: string; name: string; error: string }> = [];
         // Resolved once for the whole copy: every flow row in this package needs
         // the same engine, and a package with fifty flows should not walk the
         // service table fifty times.
