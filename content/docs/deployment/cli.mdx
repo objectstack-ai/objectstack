@@ -1009,6 +1009,8 @@ occupancy on its own.
 | `needs_confirm` | non-narrowing type change, rebuild a non-unique index whose columns changed | `os migrate apply` — except `manual_column_type_change` (only `os migrate multi-value-columns --apply` runs it), and `manual_widen_varchar_to_text` and `unbuildable_index`, which nothing applies |
 | `destructive` | drop an orphaned column or index, tighten `NOT NULL`, narrow a type, rebuild an index as `UNIQUE`, create a `UNIQUE` index existing rows already violate | `os migrate apply --allow-destructive` |
 
+On a Turso remote primary (`libsql://`), a tightened or relaxed `NOT NULL` and a dropped DEFAULT stay drift, because that transport runs no SQLite table rebuild. `os migrate plan` and `os migrate apply` list each such entry with `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.`, offer `--allow-destructive` only for the destructive changes that database can apply, and count the rest as drift a re-run cannot apply.
+
 `--allow-destructive` refuses some drops until the data they would lose is
 safe. No flag skips these refusals:
 

@@ -327,14 +327,16 @@ export default class MigrateApply extends Command {
       const intended = drift.filter((d) => d.category !== 'destructive' || allowDestructive);
       const deferred = drift.filter((d) => d.category === 'destructive' && !allowDestructive);
 
+      // [#23925] What the driver that reported each entry declares its apply
+      // door cannot perform, as `os migrate plan` reads it. Read for the human
+      // face only (the listing below and the held-back line after the apply);
+      // the --json document, `notApplied`, PARTIAL and the exit code never read
+      // it. Empty for a driver that declares nothing, which reads as it always has.
+      const limits = flags.json ? new Map<ManagedDriftEntry, string>() : collectDriftApplyLimits(stack, drift);
+
       if (!flags.json) {
-        // [#23925] The listing reads what the driver that reported each entry
-        // declares its apply door cannot perform, as `os migrate plan` does: such
-        // an entry shows its finding and that limit, never --allow-destructive.
-        // Empty for a driver that declares nothing, which reads as it always has.
-        // The human listing only: the --json document and everything after the
-        // prompt (`notApplied`, PARTIAL, the exit code) are unchanged.
-        const limits = collectDriftApplyLimits(stack, drift);
+        // [#23925] An entry with a limit shows its finding and that limit, never
+        // --allow-destructive.
         await renderPendingSchemaWork(pending);
         if (limits.size === 0) renderPlan(drift);
         else renderPlan(drift, await describeWithApplyLimits(limits));
@@ -664,9 +666,20 @@ export default class MigrateApply extends Command {
         printSuccess(`Created/extended ${created.length} table(s): ${await summarizePendingSchemaWork(created)}.`);
       }
       printSuccess(`Applied ${applied.length} change(s).`);
-      const heldBack = skipped.length - notApplied.length;
+      // [#23925] Split as the count before the prompt splits `deferred`: a re-run
+      // is offered only for the held-back entries it could apply here, and the
+      // rest are named as drift it could not apply either.
+      const heldBackEntries = skipped.filter((d) => held.has(d));
+      const heldBack = heldBackEntries.filter((d) => !limits.has(d)).length;
+      const heldBackNotReRunnable = heldBackEntries.length - heldBack;
       if (heldBack > 0) {
         printWarning(`Skipped ${heldBack} destructive change(s) (re-run with --allow-destructive to include them).`);
+      }
+      if (heldBackNotReRunnable > 0) {
+        printWarning(
+          `Skipped ${heldBackNotReRunnable} destructive change(s) that a re-run could not apply on this database either: `
+          + 'they remain drift (each says why above).',
+        );
       }
       if (notApplied.length > 0) {
         printWarning(
