@@ -40,7 +40,12 @@ export const entry: SemanticMigration = {
     + 'declarative spelling with zero measured authors, while the capability is already '
     + 'reachable imperatively. Why D3 semantic and not a D2 conversion: a manifest is '
     + 'not a stack collection member (`PLURAL_TO_SINGULAR` has no `packages`/`plugins` '
-    + 'entry), so a conversion would be a transform with no seam that ever runs.',
+    + 'entry), so a conversion would be a transform with no seam that ever runs. A '
+    + 'later ruling narrowed the redirect: the imperative `http.server` mount is the '
+    + 'platform plugins\' own door-building primitive, not an app-author surface — a '
+    + 'code-mounted route gets no caller identity, auth gate, rate limit, namespace '
+    + 'carve-out or OpenAPI entry — so an app declares `defineStack({ apis })`, '
+    + 'computes in a flow, and registers code as a stack function or a connector.',
   acceptanceCriteria:
     'An authored `contributes.routes` is a loud rejection through every spec-validating '
     + 'path — `retiredKey()` types it `never` (tsc error at the authoring site) and the '

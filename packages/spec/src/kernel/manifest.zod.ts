@@ -751,7 +751,10 @@ export const ManifestSchema = strictObject({
    * `drivers`, `fieldTypes`, `functions`, `commands` — and `routes` at
    * commit bc56e1881, its own enforce-or-remove fork, maintainer-ruled Option B
    * 2026-08-22 (remove; author-facing materials redirect to the imperative
-   * `http.server` mount) once the cloud census closed clean (2026-08-24). The
+   * `http.server` mount — narrowed by ruling record 6142279866: that mount is the
+   * platform's own primitive, and an app declares `defineStack({ apis })`,
+   * computes in a flow, and registers code as a stack function or a connector)
+   * once the cloud census closed clean (2026-08-24). The
    * census behind them (recorded in commit be21955ba, re-verified at claim time, three repos with
    * control probes) measured exactly ONE non-test read of
    * `manifest.contributes` in the entire monorepo —

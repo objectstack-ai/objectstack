@@ -29,7 +29,7 @@ import { retiredKey } from '../shared/retired-key';
  * - Microsoft Dynamics: Web API with entity operations
  * - Strapi: Auto-generated REST endpoints from schemas
  * 
- * @example Serving routes from a plugin (imperative `http.server` mount)
+ * @example Serving routes from a platform plugin (imperative `http.server` mount)
  * ```typescript
  * // A PLATFORM plugin mounts its routes in CODE — resolve the `http.server`
  * // service from the plugin context and register handlers on `kernel:ready`
