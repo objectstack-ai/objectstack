@@ -132,7 +132,8 @@ process.exit(2);
 let root: string;
 const fixtures: Record<string, string> = {};
 let caseNo = 0;
-const signalBaseline: Record<'SIGINT' | 'SIGTERM', NodeJS.SignalsListener[]> = { SIGINT: [], SIGTERM: [] };
+let sigintBaseline: unknown[] = [];
+let sigtermBaseline: unknown[] = [];
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-dev-watch-refusal-'));
@@ -140,17 +141,18 @@ beforeAll(() => {
     fixtures[mode] = join(root, `${mode}.mjs`);
     writeFileSync(fixtures[mode], fixtureSource(mode));
   }
-  signalBaseline.SIGINT = process.listeners('SIGINT');
-  signalBaseline.SIGTERM = process.listeners('SIGTERM');
+  sigintBaseline = process.listeners('SIGINT');
+  sigtermBaseline = process.listeners('SIGTERM');
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   // `startWatchRecompile` registers SIGINT/SIGTERM handlers to close its watcher.
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-    for (const l of process.listeners(sig)) {
-      if (!signalBaseline[sig].includes(l)) process.removeListener(sig, l);
-    }
+  for (const l of process.listeners('SIGINT')) {
+    if (!sigintBaseline.includes(l)) process.removeListener('SIGINT', l);
+  }
+  for (const l of process.listeners('SIGTERM')) {
+    if (!sigtermBaseline.includes(l)) process.removeListener('SIGTERM', l);
   }
 });
 
