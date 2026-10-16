@@ -1677,7 +1677,9 @@ function scanApprovalReviseLoops(
 
 /**
  * The minimal `catch` region, measured end to end on the real `AutomationEngine`
- * (commit 8ed9c54b4) and prescribed by both containment rules' `fix:` lines.
+ * (commit 8ed9c54b4), prescribed by both containment rules' `fix:` lines and
+ * written out in `content/docs/automation/flows.mdx` (§"Per-iteration
+ * containment"), so a change to the spelling here changes that page too.
  *
  * `catch` cannot be empty: `FlowRegionSchema.nodes` is `.min(1)`
  * (`control-flow.zod.ts:142`), so `catch: {}` and `catch: { nodes: [] }` are
