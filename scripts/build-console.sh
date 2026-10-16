@@ -321,9 +321,18 @@ pushd "$BUILD_ROOT" > /dev/null
 
 # objectui's root package.json may pin packages that aren't available on
 # every mirror. Fall back to the public registry just for this install.
+#
+# The console build needs objectui's devDependencies, so production mode is
+# forced OFF: an inherited `npm_config_production=true` or an .npmrc
+# `production=true` would otherwise skip them (NODE_ENV=production alone does
+# not, under pnpm 10). Spelled `--config.production=false`, never
+# `--prod=false`: a global pnpm 11+/12 `@pnpm/exe` frontend parses the argv
+# itself before handing off to the version objectui pins, rejects a value on its
+# boolean `--prod` and exits 2 without installing anything. The pinned pnpm and
+# that frontend both accept this spelling.
 NPM_CONFIG_REGISTRY_OVERRIDE="${OBJECTUI_NPM_REGISTRY:-https://registry.npmjs.org}"
 npm_config_registry="$NPM_CONFIG_REGISTRY_OVERRIDE" \
-  pnpm install --frozen-lockfile --prefer-offline --prod=false
+  pnpm install --frozen-lockfile --prefer-offline --config.production=false
 
 # Build the console's workspace deps via turbo, then the SPA itself directly
 # (see DEPS_BUILD_CMD/BUILD_CMD above for why these are split).
