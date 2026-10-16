@@ -26,7 +26,6 @@
 // answers when it is handed a form in those slots anyway.
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { expandViewContainer } from '@objectstack/spec/ui';
@@ -271,14 +270,10 @@ function realProtocolSession() {
     const registry = new SchemaRegistry({ multiTenant: false });
     registry.logLevel = 'silent';
     const rows: Record<string, unknown>[] = [];
+    // Only what the route's reads reach: the registry and the `sys_metadata`
+    // list read the protocol's view list overlays rows from.
     const engine: any = {
         registry,
-        async findOne(table: string, o: { where: Record<string, unknown> }) {
-            // The real engine's predicate: a `findOne` naming no record is refused.
-            assertEngineFindOnePredicate(table, o);
-            if (table !== 'sys_metadata') return null;
-            return rows.find((r) => matchesWhere(r, o.where)) ?? null;
-        },
         async find(table: string, o: { where: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
             const matched = rows.filter((r) => matchesWhere(r, o.where));
