@@ -277,6 +277,29 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
     expect(gatedWheres.some(hasLeaf)).toBe(true);
   });
 
+  it('a member’s historical import (treatAsHistorical) naming a foreign pair stores its thread’s pair', async () => {
+    const posted = await stack.apiAs(token.member, 'POST', `/data/${COMMENT}`, { thread_id: `${OBJ}:${id.mine}`, body: 'ctp import probe' });
+    expect(posted.status, 'fixture comment').toBeLessThan(300);
+    const j = (await posted.json()) as any;
+    const commentId = String(j.id ?? j.record?.id ?? j.data?.id);
+    const res = await stack.apiAs(token.member, 'POST', `/data/${COMMENT}/import`, {
+      format: 'json',
+      writeMode: 'update',
+      matchFields: ['id'],
+      treatAsHistorical: true,
+      rows: [{ id: commentId, object_name: OBJ, record_id: id.other }],
+    });
+    expect(res.status).toBe(200);
+    const report: any = await res.json();
+    const atRest = await ql.findOne(COMMENT, { where: { id: commentId }, context: { ...SYS } });
+    // The import updated the row, and the stored pair is still the thread's.
+    expect({ updated: report.updated, ok: report.results?.[0]?.ok }).toEqual({ updated: 1, ok: true });
+    expect({ object_name: atRest.object_name, record_id: atRest.record_id }).toEqual({ object_name: OBJ, record_id: id.mine });
+    // ...so the writer, who reads `id.other` and not `id.mine`, is not served it.
+    const writerScoped = await list('writer', `$filter=${filterOf({ id: commentId })}&$top=1`);
+    expect(writerScoped.rows).toEqual([]);
+  });
+
   it('a row the backfill has not reached is probed by its thread, not leafed: still served when readable, still hidden when not', async () => {
     const cleared = [...bulk.mine.slice(0, UNSTAMPED), ...bulk.other.slice(0, UNSTAMPED)];
     // Planted below the engine, as a row from before the upgrade is: every

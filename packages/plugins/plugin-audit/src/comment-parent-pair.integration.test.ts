@@ -392,12 +392,13 @@ function findOr(where: any): any[] {
 describe('[ADR-0139 E7] backfillCommentParentPair', () => {
   let kernel: ObjectKernel;
   let engine: ObjectQL;
+  let driver: SqliteWasmDriver;
   const rowIds: string[] = [];
   const stampedAt = new Map<string, unknown>();
   const logger = () => ({ info: vi.fn(), warn: vi.fn() });
 
   beforeAll(async () => {
-    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    driver = new SqliteWasmDriver({ filename: ':memory:' });
     ({ kernel, engine } = await bootKernel(driver));
     engine.registry.registerObject(objectOf(DOC) as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
@@ -449,6 +450,26 @@ describe('[ADR-0139 E7] backfillCommentParentPair', () => {
     const report = await backfillCommentParentPair(engine as any, logger(), { apply: true, pageSize: 2 });
     expect(report).toEqual({ apply: true, scanned: 1, stamped: 0, unparented: 1, failures: 0 });
     expect(await all()).toEqual(before);
+  });
+
+  it('a row re-pointed between the page read and the write keeps the re-pointed pair', async () => {
+    const doc = String((await engine.insert(DOC, { name: 'race' }, { context: SYS })).id);
+    const moved = String((await engine.insert(DOC, { name: 'race target' }, { context: SYS })).id);
+    const id = String((await engine.insert(COMMENT, commentOn(DOC, doc, 'race'), { context: SYS })).id);
+    await driver.update(COMMENT, id, { object_name: null, record_id: null });
+    // The engine the backfill drives re-points the row right after reading the page.
+    const racing = {
+      find: async (...args: any[]) => {
+        const page = await (engine.find as any)(...args);
+        await engine.update(COMMENT, { id, thread_id: `${DOC}:${moved}` }, { context: SYS });
+        return page;
+      },
+      update: (...args: any[]) => (engine.update as any)(...args),
+    };
+    await backfillCommentParentPair(racing as any, logger(), { apply: true, pageSize: 500 });
+    expect(await engine.findOne(COMMENT, { where: { id }, context: SYS })).toMatchObject({
+      thread_id: `${DOC}:${moved}`, object_name: DOC, record_id: moved,
+    });
   });
 
   it('a read the table refuses is a failure, never a clean report', async () => {
