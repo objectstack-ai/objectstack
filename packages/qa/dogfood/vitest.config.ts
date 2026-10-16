@@ -262,6 +262,14 @@ export default defineConfig({
               find: /^@objectstack\/trigger-record-change$/,
               replacement: path.resolve(__dirname, '../../triggers/trigger-record-change/src/index.ts'),
             },
+            // [#23813] `principal-session-console-boot.dogfood.test.ts` mounts
+            // the console with the CLI's own `createConsoleStaticPlugin` — the
+            // pin must serve the console the way THIS checkout's `os serve`
+            // does, not the way the last `pnpm build` of the CLI did.
+            {
+              find: /^@objectstack\/cli\/console$/,
+              replacement: path.resolve(__dirname, '../../cli/src/console.ts'),
+            },
             // [commit ecdfc9411] `schedule-acting-organization.dogfood.test.ts` and
             // `schedule-sweep-organization-scope.dogfood.test.ts` drive
             // `ScheduleTrigger` / `TimeRelativeTrigger` themselves: the pins'
