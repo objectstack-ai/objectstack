@@ -339,6 +339,8 @@ import {
     type DiscoveryRouteHost,
     type OpenApiRouteHost,
 } from './discovery-routes.js';
+// [#23050 slice 8] The email route's body moved to its own module — see its header.
+import { registerEmailEndpoints, type EmailRouteHost } from './email-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -1490,7 +1492,7 @@ export interface MountedRoute extends RouteEntry {
  * directions, so they are already symmetric and giving them a swallow would be
  * a new policy rather than a normalisation.
  */
-async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | undefined> {
+export async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | undefined> {
     try {
         return await call();
     } catch {
@@ -9080,100 +9082,18 @@ export class RestServer {
      *   }
      */
     private registerEmailEndpoints(basePath: string): void {
-        const isScoped = basePath.includes('/environments/:environmentId');
-        this.routeManager.register({
-            method: 'POST',
-            path: `${basePath}/email/send`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-
-                    if (!this.emailServiceProvider) {
-                        res.status(501).json({
-                            code: 'NOT_IMPLEMENTED',
-                            message: 'Email service is not configured on this deployment',
-                        });
-                        return;
-                    }
-                    // [#15405] `seamOrUndefined`, not the retired
-                    // `.catch(() => undefined)`. That handler attaches to the
-                    // promise the call RETURNS, so it can only ever see a
-                    // REJECTION: a host wiring a non-`async` provider — which
-                    // the seam's declared type cannot prevent, and
-                    // `RestServer`'s constructor is the public wiring point —
-                    // throws while the expression is still being evaluated, so
-                    // there is no promise to attach to and the handler is never
-                    // reached (commit add6a1b1c).
-                    //
-                    // ⚠️ NOT reachable from the SHIPPED wiring: the provider
-                    // `rest-api-plugin.ts` hands over is declared `async`.
-                    // Repaired because it is the same retired spelling at an
-                    // embedder-reachable seam, ⛔ not on a claim of live impact.
-                    //
-                    // The ANSWER is deliberately unchanged — absorb to
-                    // `undefined` and take the 501 below. ⛔ Unlike the engine
-                    // seam, this one must NOT go loud: the
-                    // `if (!this.emailServiceProvider)` guard above has already
-                    // answered the wiring question, and "not configured" and
-                    // "configured and unusable" both mean this deployment cannot
-                    // send mail — one 501, no fact lost by folding them.
-                    const emailService = await seamOrUndefined(() => this.emailServiceProvider!(environmentId));
-                    if (!emailService || typeof emailService.send !== 'function') {
-                        res.status(501).json({
-                            code: 'NOT_IMPLEMENTED',
-                            message: 'Email service is not configured on this deployment',
-                        });
-                        return;
-                    }
-
-                    const body = req.body ?? {};
-                    if (!body || typeof body !== 'object') {
-                        res.status(400).json({ code: 'INVALID_REQUEST', error: 'JSON body required' });
-                        return;
-                    }
-                    // Stamp sentBy from the authenticated context when caller didn't supply one.
-                    const input = {
-                        ...body,
-                        ...(body.sentBy === undefined && (context as any)?.userId
-                            ? { sentBy: (context as any).userId }
-                            : {}),
-                    };
-
-                    try {
-                        const result = await emailService.send(input);
-                        if (result?.status === 'sent') {
-                            res.status(200).json(result);
-                        } else {
-                            // failed / queued — still surface to client with 200 so clients can branch on status.
-                            res.status(200).json(result);
-                        }
-                    } catch (err: any) {
-                        // Validation errors from normalizeMessage are surfaced as 400.
-                        const message = String(err?.message ?? err ?? 'send failed');
-                        if (message.startsWith('VALIDATION_FAILED')) {
-                            res.status(400).json({
-                                code: 'VALIDATION_FAILED',
-                                error: message.replace(/^VALIDATION_FAILED:\s*/, ''),
-                            });
-                            return;
-                        }
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] Email send unhandled error:', error);
-                    res.status(500).json({
-                        code: 'EMAIL_SEND_FAILED',
-                        error: String(error?.message ?? error ?? 'send failed').slice(0, 500),
-                    });
-                }
-            },
-            metadata: {
-                summary: 'Send a transactional email via the configured EmailService',
-                tags: ['email'],
-            },
-        });
+        // [#23050 slice 8] The body moved to `email-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `EmailRouteHost`, and that module's header for why
+        // `emailServiceProvider` is a getter).
+        const readEmailServiceProvider = () => this.emailServiceProvider;
+        const host: EmailRouteHost = {
+            routeManager: this.routeManager,
+            get emailServiceProvider() { return readEmailServiceProvider(); },
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+        };
+        registerEmailEndpoints.call(host, basePath);
     }
 
     /**
