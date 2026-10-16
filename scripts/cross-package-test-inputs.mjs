@@ -1171,6 +1171,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/rest/src/**',
       'packages/runtime/src/**',
       'packages/services/service-print/src/**',
+      // print-service-render.dogfood.test.ts runs only where the Console bundle is built.
+      'packages/console/dist/index.html',
       'packages/services/service-realtime/src/**',
       // The three ledgers test/route-ledger-live-mount-parity.dogfood.test.ts
       // IMPORTS, which no read named and nothing declared until #10452 taught
