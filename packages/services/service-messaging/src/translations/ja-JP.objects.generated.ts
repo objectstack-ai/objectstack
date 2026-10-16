@@ -116,7 +116,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_delivery: {
     label: "Notification Delivery",
     pluralLabel: "Notification Deliveries",
-    description: "Durable per-recipient × channel delivery outbox (ADR-0030 Layer 4).",
+    description: "",
     fields: {
       id: {
         label: "Delivery ID"
@@ -190,7 +190,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_preference: {
     label: "Notification Preference",
     pluralLabel: "Notification Preferences",
-    description: "Per-user × topic × channel notification toggle (mute/allow), with admin-global defaults.",
+    description: "",
     fields: {
       id: {
         label: "Preference ID"
@@ -268,7 +268,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
-    description: "Per (topic × channel × locale) render template for notifications.",
+    description: "",
     fields: {
       id: {
         label: "Template ID"
@@ -319,7 +319,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_http_delivery: {
     label: "HTTP Delivery",
     pluralLabel: "HTTP Deliveries",
-    description: "Durable outbox row for one outbound-HTTP attempt (ADR-0018). Managed by @objectstack/service-messaging; do not write directly.",
+    description: "",
     fields: {
       id: {
         label: "Delivery ID",

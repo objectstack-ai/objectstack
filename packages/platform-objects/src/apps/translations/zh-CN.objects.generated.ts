@@ -35,7 +35,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "平台角色",
-        help: "遗留的 better-auth 角色标量（admin、user 等）。ObjectStack 不再写入该字段（ADR-0068 D2）。要授予平台管理员身份，请将该用户已验证的邮箱加入 `OS_PLATFORM_OWNER_EMAIL`；在 `single` 租户态势下，`sys_user_permission_set` 中一条未限定范围的 `admin_full_access` 授权同样可以赋予该身份。"
+        help: "遗留的 better-auth 角色标量（admin、user 等）。ObjectStack 不再写入该字段。要授予平台管理员身份，请将该用户已验证的邮箱加入 `OS_PLATFORM_OWNER_EMAIL`；在 `single` 租户态势下，`sys_user_permission_set` 中一条未限定范围的 `admin_full_access` 授权同样可以赋予该身份。"
       },
       banned: {
         label: "已封禁",
@@ -97,11 +97,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "经理",
-        help: "该用户的直属上级。构成 `own_and_reports` 层级范围所遍历的汇报链（ADR-0057 / @objectstack/security-enterprise）。"
+        help: "该用户的直属上级。构成 `own_and_reports` 层级范围所遍历的汇报链。"
       },
       primary_business_unit_id: {
         label: "主属业务单元",
-        help: "该用户的主属业务单元——sys_business_unit_member.is_primary 的去规范化投影，由 plugin-sharing 维护（ADR-0057 附录 D12）。使用户查找字段无需遍历成员关系关联表即可按业务单元筛选候选人。请勿直接编辑；请通过业务单元成员关系设置。"
+        help: "该用户的主属业务单元——sys_business_unit_member.is_primary 的去规范化投影，由 plugin-sharing 维护。使用户查找字段无需遍历成员关系关联表即可按业务单元筛选候选人。请勿直接编辑；请通过业务单元成员关系设置。"
       },
       source: {
         label: "身份来源",
@@ -537,7 +537,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "上级组织",
-        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用（ADR-0105 D6）。"
+        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。"
       },
       sort_order: {
         label: "排序",
@@ -710,11 +710,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "分配业务单元",
-        help: "受邀者接受邀请后被分配到的业务单元（ADR-0105 D8）。必须位于邀请发起人的委派子树内。"
+        help: "受邀者接受邀请后被分配到的业务单元。必须位于邀请发起人的委派子树内。"
       },
       positions: {
         label: "分配岗位",
-        help: "接受邀请时分配的岗位名称（ADR-0105 D8）。每个岗位的权限集都必须在邀请发起人的 adminScope 允许列表内。"
+        help: "接受邀请时分配的岗位名称。每个岗位的权限集都必须在邀请发起人的 adminScope 允许列表内。"
       }
     },
     _views: {
@@ -848,7 +848,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "业务单元",
     pluralLabel: "业务单元",
-    description: "层级化组织骨架节点（部门 / 事业部 / 业务单元 / 办公地点）。",
+    description: "公司的组织结构——事业部、部门、区域和办公地点——用于划定数据和报表的范围。",
     fields: {
       name: {
         label: "名称"
@@ -1797,7 +1797,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "域名已验证",
-        help: "是否已证明对该邮箱域名的 DNS 所有权（ADR-0135 D6）。在 DNS TXT 记录解析后由“验证域名”设置。由 better-auth 管理——不可直接编辑。仅在本环境启用域名验证时强制执行。"
+        help: "是否已证明对该邮箱域名的 DNS 所有权。在 DNS TXT 记录解析后由“验证域名”设置。由 better-auth 管理——不可直接编辑。仅在本环境启用域名验证时强制执行。"
       },
       oidc_config: {
         label: "OIDC 配置",
@@ -2356,7 +2356,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
-    description: "通知事件——每次 emit() 产生一行（ADR-0030 第 2 层入口）",
+    description: "平台发出的每一条通知，每个事件一行。",
     fields: {
       id: {
         label: "通知 ID"
@@ -2984,7 +2984,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       environment_id: {
         label: "环境（已废弃）",
-        help: "已废弃。覆盖层是环境级的行（ADR-0131 D6），没有租户列。"
+        help: "已废弃。覆盖层是环境级的行，没有租户列。"
       },
       version: {
         label: "版本"
@@ -3090,7 +3090,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_audit: {
     label: "元数据审计",
     pluralLabel: "元数据审计",
-    description: "元数据写入决策的仅追加审计记录（ADR-0010）。",
+    description: "元数据写入决策的仅追加审计记录。",
     fields: {
       id: {
         label: "ID"

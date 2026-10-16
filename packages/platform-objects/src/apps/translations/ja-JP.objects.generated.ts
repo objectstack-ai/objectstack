@@ -35,7 +35,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "プラットフォームロール",
-        help: "レガシーな better-auth ロールスカラー値（admin、user など）。ObjectStack はもはやこの値を書き込みません（ADR-0068 D2）。プラットフォーム管理者権限を付与するには、そのユーザーの確認済みメールアドレスを `OS_PLATFORM_OWNER_EMAIL` に列挙してください。`single` テナンシー態勢では、`sys_user_permission_set` 内のスコープ指定なしの `admin_full_access` 割り当てでも同様にこの権限が付与されます。"
+        help: "レガシーな better-auth ロールスカラー値（admin、user など）。ObjectStack はもはやこの値を書き込みません。プラットフォーム管理者権限を付与するには、そのユーザーの確認済みメールアドレスを `OS_PLATFORM_OWNER_EMAIL` に列挙してください。`single` テナンシー態勢では、`sys_user_permission_set` 内のスコープ指定なしの `admin_full_access` 割り当てでも同様にこの権限が付与されます。"
       },
       banned: {
         label: "利用停止",
@@ -97,11 +97,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "マネージャー",
-        help: "このユーザーの直属のマネージャー。`own_and_reports` 階層スコープがたどるレポートラインを形成します（ADR-0057 / @objectstack/security-enterprise）。"
+        help: "このユーザーの直属のマネージャー。`own_and_reports` 階層スコープがたどるレポートラインを形成します。"
       },
       primary_business_unit_id: {
         label: "主所属ビジネスユニット",
-        help: "ユーザーの主所属ビジネスユニット — sys_business_unit_member.is_primary を非正規化した投影で、plugin-sharing が管理します（ADR-0057 補遺 D12）。ユーザー参照の候補を、メンバーシップの中間テーブルをたどらずにビジネスユニットで絞り込めるようにします。直接編集せず、ビジネスユニットのメンバーシップで設定してください。"
+        help: "ユーザーの主所属ビジネスユニット — sys_business_unit_member.is_primary を非正規化した投影で、plugin-sharing が管理します。ユーザー参照の候補を、メンバーシップの中間テーブルをたどらずにビジネスユニットで絞り込めるようにします。直接編集せず、ビジネスユニットのメンバーシップで設定してください。"
       },
       source: {
         label: "ID ソース",
@@ -537,7 +537,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "親組織",
-        help: "レポート／グループ化のための親。何の権限も付与しません — 組織をまたぐ可視性はメンバーシップから生じ、この参照からは決して生じません（ADR-0105 D6）。"
+        help: "レポート／グループ化のための親。何の権限も付与しません — 組織をまたぐ可視性はメンバーシップから生じ、この参照からは決して生じません。"
       },
       sort_order: {
         label: "並び順",
@@ -710,11 +710,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "配属先ビジネスユニット",
-        help: "承認時に招待されたユーザーが配属されるビジネスユニット（ADR-0105 D8）。発行者の委任されたサブツリー内にある必要があります。"
+        help: "承認時に招待されたユーザーが配属されるビジネスユニット。発行者の委任されたサブツリー内にある必要があります。"
       },
       positions: {
         label: "配属先ポジション",
-        help: "承認時に割り当てられるポジション名（ADR-0105 D8）。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
+        help: "承認時に割り当てられるポジション名。各ポジションの権限セットは、発行者の adminScope で許可されている必要があります。"
       }
     },
     _views: {
@@ -848,7 +848,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "ビジネスユニット",
     pluralLabel: "ビジネスユニット",
-    description: "階層的な組織ツリーノード（部門 / 事業部 / ビジネスユニット / オフィス）。",
+    description: "会社の組織構造（事業部、部門、地域、オフィス）。データとレポートの範囲指定に使われます。",
     fields: {
       name: {
         label: "名前"
@@ -1797,7 +1797,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "ドメイン検証済み",
-        help: "メールドメインの DNS 所有権が証明済みかどうか（ADR-0135 D6）。DNS TXT レコードが解決した後、「ドメインを検証」により設定されます。better-auth が管理し、直接編集はできません。環境でドメイン検証が有効な場合にのみ適用されます。"
+        help: "メールドメインの DNS 所有権が証明済みかどうか。DNS TXT レコードが解決した後、「ドメインを検証」により設定されます。better-auth が管理し、直接編集はできません。環境でドメイン検証が有効な場合にのみ適用されます。"
       },
       oidc_config: {
         label: "OIDC 設定",
@@ -2356,7 +2356,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
-    description: "通知イベント — emit() 1 回につき 1 行（ADR-0030 レイヤー 2 の入口）",
+    description: "プラットフォームが送信したすべての通知。イベントごとに 1 行です。",
     fields: {
       id: {
         label: "通知 ID"
@@ -2984,7 +2984,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       environment_id: {
         label: "環境（非推奨）",
-        help: "非推奨。オーバーレイは環境の行です（ADR-0131 D6）。テナント列はありません。"
+        help: "非推奨。オーバーレイは環境の行です。テナント列はありません。"
       },
       version: {
         label: "バージョン"
@@ -3090,7 +3090,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_audit: {
     label: "メタデータ監査",
     pluralLabel: "メタデータ監査",
-    description: "メタデータ書き込み決定の追記専用監査証跡（ADR-0010）。",
+    description: "メタデータ書き込み決定の追記専用監査証跡。",
     fields: {
       id: {
         label: "ID"
