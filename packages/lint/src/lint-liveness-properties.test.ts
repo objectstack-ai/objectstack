@@ -2070,17 +2070,42 @@ describe('#21127 — a stack authoring `mapping.connectorSource` lints clean, an
     expect(findings.filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE)).toEqual([]);
   });
 
-  it('REAL LEDGER (the control): a `planned` row with `authorWarn` still warns, in the same call', () => {
-    // `page.print` is `planned` + `authorWarn` in tree — the legal shape: a
-    // consumer is being built, keep the key, it does nothing yet. (The control
-    // was `object.externalSharingModel` until #23268 retired it.)
-    const findings = lintLivenessProperties({
+  it('PLANTED (the control): a `planned` row with `authorWarn` still warns, in the same call', () => {
+    // No shipped row carries `planned` + `authorWarn` any more: the last one,
+    // `page.print`, went `live` with the console's print rendering (#23710;
+    // `object.externalSharingModel` held this control before #23268 retired
+    // it). So the legal shape is planted, through the same ledger seam.
+    const findings = lintWithPlantedGroup({
       objects: [FX_ACCOUNT],
-      pages: [{ name: 'invoice_print', print: {} }],
       mappings: [FX_PULL],
+      translations: [{ 'zh-CN': { [SYNTH_WARNED_GROUP]: synthWarnedGroup } }],
     });
     const planned = findings.filter((f) => f.rule === 'liveness-planned-property');
-    expect(planned.map((f) => f.message).join(' | ')).toContain('`print`');
+    expect(planned.map((f) => f.message).join(' | ')).toContain(`\`${SYNTH_WARNED_GROUP}\``);
     expect(findings.filter((f) => f.message.includes('connectorSource'))).toEqual([]);
+  });
+});
+
+// #23710: `page.print` was `planned` + `authorWarn`, so every compile of a page
+// declaring `print` told its author that printing the page prints the screen
+// layout. The console's `PageRenderer` applies the declaration through
+// objectui's `buildPagePrintStylesheet` at the `.objectui-sha` pin, so the row
+// is `live` and the warning is gone.
+describe('#23710 — a page declaring `print` lints without a planned-property warning', () => {
+  it('REAL LEDGER: no finding names `print`, in a call that still warns', () => {
+    expect(authorWarnedProperties('page').has('print')).toBe(false);
+    const findings = lintLivenessProperties({
+      objects: [{ name: 'widget', externalSharingModel: 'read' }],
+      pages: [{
+        name: 'invoice_print',
+        print: { paperSize: 'A4', margins: { top: 15 }, pageNumbers: true, repeatTableHeaders: true },
+      }],
+    });
+    expect(findings.filter((f) => f.rule === 'liveness-planned-property')).toEqual([]);
+    expect(findings.filter((f) => f.message.includes('`print'))).toEqual([]);
+    // Anti-vacuity: the same call, the same ledger load, still raises the
+    // object's `dead` tombstone row, so the silence is a reading.
+    expect(findings.filter((f) => f.message.includes('externalSharingModel'))).toHaveLength(1);
+    expect(findings.filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE)).toEqual([]);
   });
 });

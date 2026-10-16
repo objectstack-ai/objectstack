@@ -1268,15 +1268,15 @@ const PAGE_AUDIENCE_WRONG_LAYER =
 // page numbering, and page-break hints, each mapped to print CSS. A printable
 // block subset is defined beside it and enforced at the authoring doors.
 //
-// What this card does NOT ship, and why the declaration is honest anyway: the
-// browser print mapping, the printable rendering of each block and the record
-// page's print action are card ② (objectui), the headless-Chromium render
-// service and the archive are card ③, and the record-page "generate PDF"
-// action is card ④. Until ② lands, nothing reads `print`. The key is therefore
-// declared with its consumer named in every `.describe()` and carried in the
-// liveness ledger as `planned` with `authorWarn` (`liveness/page.json`), so an
-// author who writes it is told the layout is validated but not yet applied.
-// The REFUSALS are live from this card: the parse refuses a print declaration
+// What this card did NOT ship: the browser print mapping, the printable
+// rendering of each block and the record page's print action are card ②
+// (objectui), the headless-Chromium render service and the archive are card ③,
+// and the record-page "generate PDF" action is card ④. Card ② has landed: the
+// console's `PageRenderer` mounts the print stylesheet objectui's
+// `buildPagePrintStylesheet` builds from every key below, so the liveness
+// ledger carries `print` and its keys as `live` (`liveness/page.json`), citing
+// that reader at the `.objectui-sha` pin. Cards ③ and ④ are still to come.
+// The REFUSALS are live from card ①: the parse refuses a print declaration
 // on a page that does not print its own authored blocks
 // ({@link checkPagePrintComposition}), and `os validate` / `os build` /
 // `os lint` and the metadata save door refuse a block outside the subset
@@ -1402,9 +1402,10 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
  *
  * Minimal by ruling: paper size and orientation, margins, the running header
  * and footer, page numbering and the page-break hints, and nothing else. Every
- * key names its print-CSS mapping and its consumer. Until the console's print
- * rendering lands (card ② of the ruling), nothing reads any of them — the
- * liveness ledger carries each as `planned`.
+ * key names its print-CSS mapping and its consumer. The console's browser print
+ * rendering (card ② of the ruling) applies every one of them — the liveness
+ * ledger carries each as `live`; the server-side PDF renderer (card ③) is to
+ * follow.
  */
 export const PagePrintSchema = lazySchema(() => strictObject({
   surface: 'this print declaration',
@@ -1424,9 +1425,9 @@ export const PagePrintSchema = lazySchema(() => strictObject({
   },
 }, {
   paperSize: z.enum(['A4', 'A5', 'Letter', 'Legal']).optional()
-    .describe("Paper size — the size keyword of the print CSS `@page { size }` rule (A4 when omitted). Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+    .describe("Paper size — the size keyword of the print CSS `@page { size }` rule (A4 when omitted). Applied by the console's browser print rendering; the server-side PDF renderer is to follow."),
   orientation: z.enum(['portrait', 'landscape']).optional()
-    .describe("Sheet orientation — the orientation keyword of the `@page { size }` rule (portrait when omitted). Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+    .describe("Sheet orientation — the orientation keyword of the `@page { size }` rule (portrait when omitted). Applied by the console's browser print rendering; the server-side PDF renderer is to follow."),
   margins: strictObject({
     surface: 'these print margins',
     history: 'A side these margins do not declare would otherwise be dropped in silence, and the sheet would print with the default margin there.',
@@ -1437,17 +1438,17 @@ export const PagePrintSchema = lazySchema(() => strictObject({
     bottom: z.number().min(0).optional().describe('Bottom margin, in millimetres'),
     left: z.number().min(0).optional().describe('Left margin, in millimetres'),
   }).optional()
-    .describe("Sheet margins in MILLIMETRES, one number per side — the `@page { margin }` rule; a side left out takes the renderer's default. Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+    .describe("Sheet margins in MILLIMETRES, one number per side — the `@page { margin }` rule; a side left out takes the renderer's default. Applied by the console's browser print rendering; the server-side PDF renderer is to follow."),
   repeatHeader: z.boolean().optional()
-    .describe("Repeat the page's `header` region (its `regions` entry named `header`) at the top of every printed sheet — the running header. The parse refuses it on a page with no `header` region. Off when omitted: the region prints once, at the top of the first sheet. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Repeat the page's `header` region (its `regions` entry named `header`) at the top of every printed sheet — the running header. The parse refuses it on a page with no `header` region. Off when omitted: the region prints once, at the top of the first sheet. Applied by the console's browser print rendering."),
   repeatFooter: z.boolean().optional()
-    .describe("Repeat the page's `footer` region (its `regions` entry named `footer`) at the bottom of every printed sheet — the running footer. The parse refuses it on a page with no `footer` region. Off when omitted: the region prints once, after the body. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Repeat the page's `footer` region (its `regions` entry named `footer`) at the bottom of every printed sheet — the running footer. The parse refuses it on a page with no `footer` region. Off when omitted: the region prints once, after the body. Applied by the console's browser print rendering."),
   pageNumbers: z.boolean().optional()
-    .describe("Print the sheet number and the sheet count in the bottom margin of every sheet — the `@page` margin box with `counter(page)` and `counter(pages)`. Off when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Print the sheet number and the sheet count in the bottom margin of every sheet — the `@page` margin box with `counter(page)` and `counter(pages)`. Off when omitted. Applied by the console's browser print rendering."),
   repeatTableHeaders: z.boolean().optional()
-    .describe("Page-break hint: repeat a table's column headings at the top of every sheet the table runs onto (`thead { display: table-header-group }`). On when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Page-break hint: repeat a table's column headings at the top of every sheet the table runs onto (`thead { display: table-header-group }`). On when omitted. Applied by the console's browser print rendering."),
   avoidBreakInside: z.boolean().optional()
-    .describe("Page-break hint: keep each block whole on one sheet when it fits, moving it to the next sheet instead of splitting it (`break-inside: avoid` on every block). Off when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Page-break hint: keep each block whole on one sheet when it fits, moving it to the next sheet instead of splitting it (`break-inside: avoid` on every block). Off when omitted. Applied by the console's browser print rendering."),
 }).describe('Print declaration: paper size, orientation, margins, the running header and footer, page numbering and page-break hints. Its presence makes the page a print page, whose blocks must come from the printable block subset.'));
 
 /** The page kinds a print page may take: the one that prints its authored `regions` and nothing else. */
@@ -1723,11 +1724,11 @@ export const PageSchema = lazySchema(() => strictObject({
    * authored in the page's own blocks. See {@link PagePrintSchema} for the
    * keys and their print-CSS mapping, {@link PRINTABLE_PAGE_COMPONENT_TYPES}
    * for the blocks a print page may hold, and {@link checkPagePrintComposition}
-   * for the pages that may carry it. `planned` in the liveness ledger until the
-   * console's print rendering (card ②) reads it.
+   * for the pages that may carry it. `live` in the liveness ledger: the
+   * console's print rendering (card ②) applies it.
    */
   print: PagePrintSchema.optional()
-    .describe("Print declaration — makes this page a print page, a document authored in the page's own blocks: paper size and orientation, margins in millimetres, the running header and footer (the page's own `header` / `footer` regions), page numbers and page-break hints, each mapped to print CSS. A print page is a `kind: 'full'` page of `type: 'record'`, `'home'` or `'app'` with its blocks in `regions`, and every block in it must come from the printable block subset: containers that draw every child (`page:section`, `page:card`, `page:footer`), field blocks (`record:details`, `record:highlights`), the child-record table `record:line_items`, `element:text`, `element:image`, `element:divider`, `element:definition-list`, `element:repeater`, `element:number` and `object-metric`; `os validate` / `os build` / `os lint` and the metadata save door refuse any other block inside it. Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, the declaration is validated but nothing applies it. A list view's print button is `allowPrinting`, not this."),
+    .describe("Print declaration — makes this page a print page, a document authored in the page's own blocks: paper size and orientation, margins in millimetres, the running header and footer (the page's own `header` / `footer` regions), page numbers and page-break hints, each mapped to print CSS. A print page is a `kind: 'full'` page of `type: 'record'`, `'home'` or `'app'` with its blocks in `regions`, and every block in it must come from the printable block subset: containers that draw every child (`page:section`, `page:card`, `page:footer`), field blocks (`record:details`, `record:highlights`), the child-record table `record:line_items`, `element:text`, `element:image`, `element:divider`, `element:definition-list`, `element:repeater`, `element:number` and `object-metric`; `os validate` / `os build` / `os lint` and the metadata save door refuse any other block inside it. Applied by the console's browser print rendering, which prints the page through the browser's own print dialog (where it can be saved as PDF); the server-side PDF renderer is to follow. A list view's print button is `allowPrinting`, not this."),
 
   /**
    * Override semantics for record pages.

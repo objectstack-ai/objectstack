@@ -74,73 +74,97 @@
       "note": "ARIA attributes applied by objectui renderers."
     },
     "print": {
-      "status": "planned",
-      "verifiedAt": "2026-10-08",
-      "authorWarn": true,
-      "authorHint": "Keep it: the print declaration is validated, and the printable block subset is enforced, but no renderer applies the paper, margins, running header and footer or page numbers yet — printing the page today prints the screen layout.",
-      "note": "PLANNED (#22158, card ① of the ruling of record 6051470224 on #8346, letter B′: \"A document is a page with a print declaration; no new template type\"). The declaration lands spec-first with its REFUSALS live — PageSchema's checkPagePrintComposition (packages/spec/src/ui/page.zod.ts#checkPagePrintComposition) refuses `print` on a page that does not print its own authored blocks, and @objectstack/lint's validatePrintPageBlocks (packages/lint/src/validate-print-page-blocks.ts#validatePrintPageBlocks) refuses a block outside PRINTABLE_PAGE_COMPONENT_TYPES inside a print page at os validate / os build / os lint and the page save door — while what the keys CONFIGURE (paper, margins, running header and footer, page numbers, page-break hints) has no reader anywhere yet. `authorWarn` per enforce-or-mark (the externalSharingModel shape): an author is told the layout is not yet applied, at every compile, until the console reads it. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit.",
+      "status": "live",
+      "verifiedAt": "2026-10-16",
+      "evidenceScope": "cross-repo",
+      "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (builds the `@media print` sheet from every key below, plus the two rules every print page needs: everything that is not the print page, an ancestor of it or inside it is hidden on paper, and the ancestors' viewport-height clipping is released); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object); framework packages/spec/src/ui/page.zod.ts#checkPagePrintComposition (the parse refuses `print` on a page that does not print its own authored blocks); packages/lint/src/validate-print-page-blocks.ts#validatePrintPageBlocks (refuses a block outside PRINTABLE_PAGE_COMPONENT_TYPES inside a print page at os validate / os build / os lint and the page save door)",
+      "note": "FLIPPED planned → live 2026-10-16 (#23710). Card ② of the ruling of record 6051470224 on #8346 (letter B′: \"A document is a page with a print declaration; no new template type\") has landed: the console's `PageRenderer` mounts, for a page whose `print` is an object, the print stylesheet `buildPagePrintStylesheet` builds from the declaration, every rule inside `@media print`, so the page on screen is drawn as before and the browser's print dialog (which also saves as PDF) prints the declared paper, margins, running header and footer, page numbers and page-break hints. All eight keys and the four `margins` sides are read; see each child. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against. It was `planned` (verified 2026-10-08) with `authorWarn` per enforce-or-mark: the declaration landed spec-first with its REFUSALS live (the parse's `checkPagePrintComposition`, lint's `validatePrintPageBlocks`) while what the keys configure had no reader. `authorWarn` and `authorHint` are dropped in this edit: a `live` row refuses them, and an author who writes `print` is no longer told the layout is not applied. Still to come, and not this row's: the server-side PDF renderer (card ③) and the record-page \"generate PDF\" action (card ④).",
       "children": {
         "paperSize": {
-          "status": "planned",
-          "verifiedAt": "2026-10-08",
-          "note": "PLANNED — maps to the size keyword of `@page { size }`. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+          "status": "live",
+          "verifiedAt": "2026-10-16",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (the size keyword of `@page { size }`, written by `pageRule` only for an enum member (A4 when omitted or off-vocabulary)); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+          "note": "FLIPPED planned → live 2026-10-16 (#23710). Applied by the console's browser print rendering: the size keyword of `@page { size }`, written by `pageRule` only for an enum member (A4 when omitted or off-vocabulary). It was `planned` (verified 2026-10-08) because the key was declared spec-first (#22158) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
         },
         "orientation": {
-          "status": "planned",
-          "verifiedAt": "2026-10-08",
-          "note": "PLANNED — maps to the orientation keyword of `@page { size }`. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+          "status": "live",
+          "verifiedAt": "2026-10-16",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (the orientation keyword of `@page { size }`, written by `pageRule` only for `portrait` / `landscape` (portrait when omitted)); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+          "note": "FLIPPED planned → live 2026-10-16 (#23710). Applied by the console's browser print rendering: the orientation keyword of `@page { size }`, written by `pageRule` only for `portrait` / `landscape` (portrait when omitted). It was `planned` (verified 2026-10-08) because the key was declared spec-first (#22158) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
         },
         "margins": {
-          "status": "planned",
-          "verifiedAt": "2026-10-08",
-          "note": "PLANNED — maps to `@page { margin }`, one side per key, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit.",
+          "status": "live",
+          "verifiedAt": "2026-10-16",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (one `@page` `margin-<side>` descriptor per declared side, in millimetres, written by `pageRule` only for a finite non-negative number; a side left out keeps the console's default sheet margin); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+          "note": "FLIPPED planned → live 2026-10-16 (#23710). Applied by the console's browser print rendering: one `@page` `margin-<side>` descriptor per declared side, in millimetres, written by `pageRule` only for a finite non-negative number; a side left out keeps the console's default sheet margin. It was `planned` (verified 2026-10-08) because the key was declared spec-first (#22158) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against.",
           "children": {
             "top": {
-              "status": "planned",
-              "verifiedAt": "2026-10-08",
-              "note": "PLANNED — maps to the top value of `@page { margin }`, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+              "status": "live",
+              "verifiedAt": "2026-10-16",
+              "evidenceScope": "cross-repo",
+              "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (`pageRule` writes `margin-top: <n>mm` when `margins.top` is a finite non-negative number); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+              "note": "FLIPPED planned → live 2026-10-16 (#23710): the top sheet margin, in millimetres, written into `@page`. It was `planned` (verified 2026-10-08) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
             },
             "right": {
-              "status": "planned",
-              "verifiedAt": "2026-10-08",
-              "note": "PLANNED — maps to the right value of `@page { margin }`, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+              "status": "live",
+              "verifiedAt": "2026-10-16",
+              "evidenceScope": "cross-repo",
+              "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (`pageRule` writes `margin-right: <n>mm` when `margins.right` is a finite non-negative number); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+              "note": "FLIPPED planned → live 2026-10-16 (#23710): the right sheet margin, in millimetres, written into `@page`. It was `planned` (verified 2026-10-08) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
             },
             "bottom": {
-              "status": "planned",
-              "verifiedAt": "2026-10-08",
-              "note": "PLANNED — maps to the bottom value of `@page { margin }`, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+              "status": "live",
+              "verifiedAt": "2026-10-16",
+              "evidenceScope": "cross-repo",
+              "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (`pageRule` writes `margin-bottom: <n>mm` when `margins.bottom` is a finite non-negative number); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+              "note": "FLIPPED planned → live 2026-10-16 (#23710): the bottom sheet margin, in millimetres, written into `@page`. It was `planned` (verified 2026-10-08) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
             },
             "left": {
-              "status": "planned",
-              "verifiedAt": "2026-10-08",
-              "note": "PLANNED — maps to the left value of `@page { margin }`, in millimetres. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+              "status": "live",
+              "verifiedAt": "2026-10-16",
+              "evidenceScope": "cross-repo",
+              "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (`pageRule` writes `margin-left: <n>mm` when `margins.left` is a finite non-negative number); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+              "note": "FLIPPED planned → live 2026-10-16 (#23710): the left sheet margin, in millimetres, written into `@page`. It was `planned` (verified 2026-10-08) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
             }
           }
         },
         "repeatHeader": {
-          "status": "planned",
-          "verifiedAt": "2026-10-08",
-          "note": "PLANNED — maps to a running header — the page's `header` region repeated on every sheet. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+          "status": "live",
+          "verifiedAt": "2026-10-16",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (the page's own `header` region placed in the `thead` of the running-region table, which the sheet's `runningRegionRules` turn back into a table on paper so the browser repeats it on every sheet); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#RunningRegions (draws the running-region table, `display: contents` on screen, only when the flag is `true` and the region exists)",
+          "note": "FLIPPED planned → live 2026-10-16 (#23710). Applied by the console's browser print rendering: the page's own `header` region placed in the `thead` of the running-region table, which the sheet's `runningRegionRules` turn back into a table on paper so the browser repeats it on every sheet. It was `planned` (verified 2026-10-08) because the key was declared spec-first (#22158) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
         },
         "repeatFooter": {
-          "status": "planned",
-          "verifiedAt": "2026-10-08",
-          "note": "PLANNED — maps to a running footer — the page's `footer` region repeated on every sheet. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+          "status": "live",
+          "verifiedAt": "2026-10-16",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (the page's own `footer` region placed in the `tfoot` of the running-region table, which the sheet's `runningRegionRules` turn back into a table on paper so the browser repeats it on every sheet); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#RunningRegions (draws the running-region table, `display: contents` on screen, only when the flag is `true` and the region exists)",
+          "note": "FLIPPED planned → live 2026-10-16 (#23710). Applied by the console's browser print rendering: the page's own `footer` region placed in the `tfoot` of the running-region table, which the sheet's `runningRegionRules` turn back into a table on paper so the browser repeats it on every sheet. It was `planned` (verified 2026-10-08) because the key was declared spec-first (#22158) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
         },
         "pageNumbers": {
-          "status": "planned",
-          "verifiedAt": "2026-10-08",
-          "note": "PLANNED — maps to an `@page` margin box with `counter(page)` and `counter(pages)`. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+          "status": "live",
+          "verifiedAt": "2026-10-16",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (the `@page` bottom-right margin box with `counter(page)` / `counter(pages)`, written by `pageRule` when the key is `true`); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+          "note": "FLIPPED planned → live 2026-10-16 (#23710). Applied by the console's browser print rendering: the `@page` bottom-right margin box with `counter(page)` / `counter(pages)`, written by `pageRule` when the key is `true`. It was `planned` (verified 2026-10-08) because the key was declared spec-first (#22158) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
         },
         "repeatTableHeaders": {
-          "status": "planned",
-          "verifiedAt": "2026-10-08",
-          "note": "PLANNED — maps to `thead { display: table-header-group }`. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+          "status": "live",
+          "verifiedAt": "2026-10-16",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (`thead { display: table-header-group }` for every table on the page (on when omitted); `false` writes `table-row-group`, which does not repeat); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+          "note": "FLIPPED planned → live 2026-10-16 (#23710). Applied by the console's browser print rendering: `thead { display: table-header-group }` for every table on the page (on when omitted); `false` writes `table-row-group`, which does not repeat. It was `planned` (verified 2026-10-08) because the key was declared spec-first (#22158) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
         },
         "avoidBreakInside": {
-          "status": "planned",
-          "verifiedAt": "2026-10-08",
-          "note": "PLANNED — maps to `break-inside: avoid` on every block. No reader in either repo: the key is new (#22158), so objectui at the `.objectui-sha` pin `a58626c88` and at main `cef0eee` has no `print` read at all. Carrier: card ② of the #8346 ruling (objectui — the print CSS mapping, the printable blocks and the record page's print action), to be filed once this declaration is on main; the server-side renderer is card ③. Flip to `live` citing the console reader at the `.objectui-sha` pin that carries it, and drop `authorWarn` / `authorHint` in that same edit."
+          "status": "live",
+          "verifiedAt": "2026-10-16",
+          "evidenceScope": "cross-repo",
+          "evidence": "objectui @f96f771140f1: packages/components/src/renderers/layout/page-print.ts#buildPagePrintStylesheet (`break-inside: avoid` on every block of a region, written when the key is `true`); objectui @f96f771140f1: packages/components/src/renderers/layout/page.tsx#PageRenderer (mounts the sheet only for a page whose `print` is an object)",
+          "note": "FLIPPED planned → live 2026-10-16 (#23710). Applied by the console's browser print rendering: `break-inside: avoid` on every block of a region, written when the key is `true`. It was `planned` (verified 2026-10-08) because the key was declared spec-first (#22158) with no reader in either repo. The reader landed in objectui 2312bd9a6 (objectui#11958), and the `.objectui-sha` pin f96f771140f1 carries it (`git merge-base --is-ancestor 2312bd9a6 f96f771140f1` answers yes), so every objectui pointer here was read at the pin this repo builds against."
         }
       }
     },
