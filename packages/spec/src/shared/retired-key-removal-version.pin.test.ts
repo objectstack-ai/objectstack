@@ -334,6 +334,28 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ],
   // #23650: retired after 17.7.0, so the v18 train's major.
   'page-header-show-star-removed': [tombstone(PageHeaderProps, 'page:header', 'showStar')],
+  // #23904: the two data-at-rest halves of the #23610 page refusals, retired
+  // after 17.7.0; each prescription is the parse's own refusal at its key — the
+  // one sentence the registry door prints too — and names the release.
+  'page-is-default-off-record-page-removed': [
+    refusal(
+      "isDefault: true on a type 'home' page",
+      () => PageSchema.safeParse({ name: 'sales_home_page', label: 'Sales Home', type: 'home', isDefault: true, regions: [] }),
+      'isDefault',
+    ),
+    refusal(
+      'isDefault: true on a record page bound to no object',
+      () => PageSchema.safeParse({ name: 'draft_record', label: 'Draft', type: 'record', isDefault: true, regions: [] }),
+      'isDefault',
+    ),
+  ],
+  'page-template-full-width-to-default': [
+    refusal(
+      "page template 'full-width'",
+      () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [{ name: 'main', components: [] }] }),
+      'template',
+    ),
+  ],
   // #23543 F3: a loose `config` key under a sibling-block node type, refused by
   // the flow parse; the node's block is complete, so the key is the only issue.
   'flow-node-wait-event-config-lift': [

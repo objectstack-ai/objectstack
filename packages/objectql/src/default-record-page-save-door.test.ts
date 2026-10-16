@@ -297,12 +297,18 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
 // is the page parse's: a non-record page's `isDefault: true`, the retired
 // `full-width` template and a region the template does not place are each
 // refused 422 `INVALID_METADATA` at save. A row ALREADY stored in one of those
-// shapes is read as it was (no conversion touches it and the read path does
-// not refuse it); saving it again is refused until it is fixed.
-const PLACEMENT_SHAPES: ReadonlyArray<[label: string, body: Record<string, unknown>, says: string]> = [
-    ['a home page with `isDefault: true`', { name: 'env_shape', label: 'Shape', type: 'home', isDefault: true, regions: [] }, '`isDefault: true` is refused'],
-    ['the retired `full-width` template', { name: 'env_shape', label: 'Shape', type: 'record', object: 'acme_task', template: 'full-width', regions: [{ name: 'main', components: [] }] }, "`template: 'full-width'` was removed"],
-    ['a `left_sidebar` region on `three-column`', { name: 'env_shape', label: 'Shape', type: 'home', template: 'three-column', regions: [{ name: 'left_sidebar', components: [] }, { name: 'main', components: [] }] }, 'Region `left_sidebar` is refused'],
+// shapes is read back through the stored-row conversion chain (the read path
+// never refuses it): the two shapes with a lossless rewrite come back
+// CONVERTED — the retired D2 entries `page-is-default-off-record-page-removed`
+// and `page-template-full-width-to-default` delete the flag and re-spell the
+// template — while the unplaced region, which has no lossless rewrite, is
+// served as stored. Saving the row as it was stored is refused until it is
+// fixed, whichever way it reads back. `served` is what the read answers for
+// the keys the shape varies.
+const PLACEMENT_SHAPES: ReadonlyArray<[label: string, body: Record<string, unknown>, says: string, served: Record<string, unknown>]> = [
+    ['a home page with `isDefault: true`', { name: 'env_shape', label: 'Shape', type: 'home', isDefault: true, regions: [] }, '`isDefault: true` is refused', { isDefault: undefined, regions: [] }],
+    ['the retired `full-width` template', { name: 'env_shape', label: 'Shape', type: 'record', object: 'acme_task', template: 'full-width', regions: [{ name: 'main', components: [] }] }, "`template: 'full-width'` was removed", { template: 'default', regions: [{ name: 'main', components: [] }] }],
+    ['a `left_sidebar` region on `three-column`', { name: 'env_shape', label: 'Shape', type: 'home', template: 'three-column', regions: [{ name: 'left_sidebar', components: [] }, { name: 'main', components: [] }] }, 'Region `left_sidebar` is refused', { template: 'three-column', regions: [{ name: 'left_sidebar', components: [] }, { name: 'main', components: [] }] }],
 ];
 
 describe.each(TOPOLOGIES)('%s kernel — the page parse at the save door, and rows stored before it (#23610)', (topology) => {
@@ -316,15 +322,14 @@ describe.each(TOPOLOGIES)('%s kernel — the page parse at the save door, and ro
         expect(storedPages()).toEqual([]);
     });
 
-    it.each(PLACEMENT_SHAPES)('%s, ALREADY stored: the read serves the row as stored, and saving it again is refused', async (_label, body) => {
+    it.each(PLACEMENT_SHAPES)('%s, ALREADY stored: the read serves the row through the stored-row conversion chain, and saving it as stored is refused', async (_label, body, _says, served) => {
         const { protocol, save, storeRow } = await boot(topology);
         await storeRow('env_shape', body);
         const read: any = await protocol.getMetaItem({ type: 'page', name: 'env_shape' });
         expect(read?.item?.name).toBe('env_shape');
-        for (const key of ['isDefault', 'template'] as const) {
-            if (key in body) expect(read.item[key]).toEqual(body[key]);
+        for (const [key, value] of Object.entries(served)) {
+            expect(read.item[key], key).toEqual(value);
         }
-        expect(read.item.regions).toEqual(body.regions);
         const again = await save('env_shape', body);
         expect(again.ok, 'the re-save was refused').toBe(false);
         expect((again as { error: any }).error?.status).toBe(422);
