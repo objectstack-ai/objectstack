@@ -29,9 +29,9 @@
  *   `routeManager` reassignment wraps `registerMetadataEndpointsInner`, never
  *   this registrar.
  * - No member goes as a getter, because the body reads no FIELD at request
- *   time. The protocol the door searches is resolved per request by
- *   `resolveProtocol`, a method, and the caller by `resolveExecCtx` and
- *   `enforceAuth`, methods too; all three are closures.
+ *   time. The protocol the door searches and the caller it answers are each
+ *   resolved per request by a METHOD of the class, and every method goes as a
+ *   closure.
  *
  * Module-level helpers stay where they were and are imported:
  * `GLOBAL_SEARCH_PARAMS`, `UNDECLARED_WHOLE_NUMBER_PARAM` and
