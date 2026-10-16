@@ -317,7 +317,12 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
   // MissingDriverPackageError).
   if (/^libsql:\/\//i.test(u)) return 'turso';
   if (/^https?:\/\//i.test(u) && /\.turso\./i.test(u)) return 'turso';
-  if (/^wasm-sqlite:\/\//i.test(u) || /\.wasm\.db$/i.test(u)) return 'sqlite-wasm';
+  if (/^wasm-sqlite:\/\//i.test(u)) return 'sqlite-wasm';
+  // A `*.wasm.db` file name selects the WASM engine only for a FILE: a `file:` /
+  // `sqlite:` URL or a value with no scheme (both returns below). Tested here,
+  // ahead of every scheme check, it let the name rescue a scheme nothing
+  // recognises (`redis://h/x.wasm.db`, `jdbc:x/x.wasm.db`) into a SQLite file.
+  const wasmFile = /\.wasm\.db$/i.test(u);
   // The retired in-memory engine's two schemes — character-for-character the
   // runtime's `detectDriverFromUrl` arm, so the two hosts recognise and refuse
   // the same URLs. Kept ABOVE the sqlite test so it is not shadowed, and
@@ -332,7 +337,7 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
       { recognized: false },
     );
   }
-  if (/^file:/i.test(u) || /^sqlite:/i.test(u)) return 'sqlite';
+  if (/^file:/i.test(u) || /^sqlite:/i.test(u)) return wasmFile ? 'sqlite-wasm' : 'sqlite';
   // What is left with a scheme is refused, naming the scheme and never the URL:
   //  - an unrecognised `<scheme>://` (`redis://…`). Refusing it here, rather
   //    than letting a name that ends `.db` reach SQLite, is what keeps
@@ -355,7 +360,7 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
     );
   }
   // No scheme at all: a SQLite file path — `:memory:`, `./app.db`, `data/app`.
-  return 'sqlite';
+  return wasmFile ? 'sqlite-wasm' : 'sqlite';
 }
 
 /**
@@ -533,10 +538,10 @@ export function resolveStorageDefinition(
   }
 
   if (kind === 'sqlite-wasm') {
-    const filePath = (databaseUrl ?? ':memory:')
+    // The same alias rule as the sqlite arm: `sqlite://x.wasm.db` is `x.wasm.db`.
+    const filePath = normalizeDatabaseUrl(databaseUrl ?? ':memory:')
       .replace(/^file:/, '')
-      .replace(/^wasm-sqlite:\/\//, '')
-      .replace(/^sqlite:/, '');
+      .replace(/^wasm-sqlite:\/\//, '');
     return {
       driverId: 'sqlite-wasm',
       // `persist` passthrough: the CLI kept `on-disconnect` semantics here

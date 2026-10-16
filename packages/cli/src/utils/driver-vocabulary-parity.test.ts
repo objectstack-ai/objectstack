@@ -449,6 +449,7 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
     ['https://my-db.turso.io', 'turso'],
     ['wasm-sqlite://data.db', 'sqlite-wasm'],
     ['./local.wasm.db', 'sqlite-wasm'],
+    ['file:./data/app.wasm.db', 'sqlite-wasm'],
     ['file:./data/app.db', 'sqlite'],
     ['sqlite:./data/app.db', 'sqlite'],
     [':memory:', 'sqlite'],
@@ -487,16 +488,18 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
   });
 
   // An OPAQUE scheme — two or more characters and a `:`, no `//`
-  // (`jdbc:postgresql://…`, `redis:h`). The CLI host refuses it, typed, in dev
-  // and prod. The runtime host's answer is deliberately NOT pinned here: today
-  // its scheme-less arm opens these as a SQLite file at a path made of the URL,
-  // an implementation gap against its own "unknown schemes throw" rule that is
-  // #23765's to close, so asserting either agreement or its current answer
-  // would pin that gap.
+  // (`jdbc:postgresql://…`, `redis:h`) — and any scheme a `*.wasm.db` file name
+  // used to rescue. The CLI host refuses them, typed, in dev and prod. The
+  // runtime host's answer is deliberately NOT pinned here: today it opens these
+  // as a SQLite file at a path made of the URL, an implementation gap against
+  // its own "unknown schemes throw" rule that is #23765's to close, so asserting
+  // either agreement or its current answer would pin that gap.
   it.each([
     ['jdbc:postgresql://localhost:5432/db', 'jdbc:'],
     ['redis:cache', 'redis:'],
-  ])('the CLI host REFUSES the opaque scheme of %s, in dev AND in prod', (url, scheme) => {
+    ['redis://h/app.wasm.db', 'redis://'],
+    ['jdbc:x/app.wasm.db', 'jdbc:'],
+  ])('the CLI host REFUSES %s (scheme %s), in dev AND in prod', (url, scheme) => {
     for (const isDev of [false, true]) {
       const cli = cliUrlVerdict(url, isDev);
       expect(cli.accepted, `the CLI host (isDev=${isDev}) accepted ${url}`).toBe(false);
@@ -513,17 +516,18 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
   // hosts must name the same FILE: `sqlite://x.db` used to open `//x.db` (the
   // filesystem root) on the CLI host while the runtime host opened `x.db`.
   it.each([
-    ['sqlite://x.db', 'x.db'],
-    ['sqlite:x.db', 'x.db'],
-    ['sqlite:///var/lib/objectstack/x.db', '/var/lib/objectstack/x.db'],
-  ])('both hosts open %s as the sqlite file %s, in dev and prod', (url, file) => {
+    ['sqlite://x.db', 'x.db', 'sqlite'],
+    ['sqlite:x.db', 'x.db', 'sqlite'],
+    ['sqlite:///var/lib/objectstack/x.db', '/var/lib/objectstack/x.db', 'sqlite'],
+    ['sqlite://x.wasm.db', 'x.wasm.db', 'sqlite-wasm'],
+  ])('both hosts open %s as the file %s (%s), in dev and prod', (url, file, kind) => {
     process.env.OS_DATABASE_URL = url;
     const runtime = resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' });
-    expect(runtime.driver).toBe('sqlite');
+    expect(runtime.driver).toBe(kind);
     expect(runtime.sqliteFile, `the runtime host's file for ${url}`).toBe(file);
     for (const isDev of [false, true]) {
       const definition = resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev });
-      expect(definition!.driverId).toBe('sqlite');
+      expect(definition!.driverId).toBe(kind);
       expect(definition!.config.filename, `the CLI host's file for ${url} (isDev=${isDev})`).toBe(runtime.sqliteFile);
     }
   });

@@ -52,6 +52,8 @@ describe('inferDriverTypeFromUrl', () => {
     expect(inferDriverTypeFromUrl('https://x.turso.io')).toBe('turso');
     expect(inferDriverTypeFromUrl('wasm-sqlite://data.db')).toBe('sqlite-wasm');
     expect(inferDriverTypeFromUrl('./local.wasm.db')).toBe('sqlite-wasm');
+    expect(inferDriverTypeFromUrl('file:./local.wasm.db')).toBe('sqlite-wasm');
+    expect(inferDriverTypeFromUrl('sqlite:./local.wasm.db')).toBe('sqlite-wasm');
     expect(inferDriverTypeFromUrl('file:./app.db')).toBe('sqlite');
     expect(inferDriverTypeFromUrl('sqlite:./app.db')).toBe('sqlite');
     expect(inferDriverTypeFromUrl('./app.sqlite')).toBe('sqlite');
@@ -117,6 +119,9 @@ describe('inferDriverTypeFromUrl', () => {
     // too, rather than opened as a file at a path made of the URL.
     ['jdbc:postgresql://localhost:5432/db', 'jdbc:'],
     ['redis:cache', 'redis:'],
+    // Nor does a `.wasm.db` name: it selects the WASM engine for a FILE only.
+    ['redis://h/app.wasm.db', 'redis://'],
+    ['jdbc:x/app.wasm.db', 'jdbc:'],
   ])('refuses %s at inference, naming the scheme and the recognised ones', (url, scheme) => {
     let err: unknown;
     try {
@@ -276,6 +281,13 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
     expect(r!.sqliteFilePath).toBe(file);
     // The banner keeps what the operator typed.
     expect(r!.displayUrl).toBe(url);
+  });
+
+  it('reads sqlite://x.wasm.db as the WASM engine on the file x.wasm.db, by the same alias rule', () => {
+    const url = 'sqlite://x.wasm.db';
+    const r = resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev: false });
+    expect(r!.driverId).toBe('sqlite-wasm');
+    expect(r!.config.filename).toBe('x.wasm.db');
   });
 
   it('dev default (no driver) declares sqlite :memory: with NO telemetry sibling', () => {
