@@ -3956,8 +3956,9 @@ type WithFormSectionAlias = { sections?: unknown; groups?: unknown };
 
 /**
  * Fold the legacy `groups` alias onto the canonical `sections` and drop
- * `groups` from the output (#6926) — the whole-array counterpart of
- * `normalizeVisibleWhen`.
+ * `groups` from the output (#6926) — the whole-array counterpart of the
+ * per-node `visibleOn` / `visibility` → `visibleWhen` fold ADR-0089 ran at
+ * the schema boundary through 17.
  *
  * ## What this makes true
  *

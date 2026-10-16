@@ -7,7 +7,7 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
 // Package-internal, like `strict-object` itself — the `shared/index.ts` barrel
 // deliberately does not re-export it, so nothing about the public API surface
 // moves. No cycle back into this file: that module's only runtime import is
-// `shared/visibility.ts`, which imports nothing at runtime.
+// `shared/visibility-strict-options.ts`, which imports nothing at runtime.
 import { SELECT_OPTION_EDITABILITY_GUIDANCE } from '../shared/editability-boundary';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // The ADR-0078 completeness predicate the choice door below applies, read

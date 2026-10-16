@@ -59,6 +59,37 @@ import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plug
 import { assertArmed, armedWhen } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
 
+// [#23977] The boot's FIRST load is paid here, at module scope, which vitest
+// runs during collection with no clock on it, never inside the `beforeAll`
+// below (AGENTS.md, Build & Test: clocked windows measure behaviour, never
+// loading). The first `bootStack` in a process `import()`s the drivers and
+// better-auth lazily and compiles sql.js's WASM: measured on this file, the
+// hook's boot took about 4.2 s cold and about 1.3 s after this warm-up.
+//
+// The shape is `@objectstack/verify`'s own boot warm-up, spelled through the
+// one export it needs: a throwaway app with no objects and the `requires` this
+// file's stack declares, on its own in-memory database, booted with the
+// options the file's boot passes, signed into and signed up on, and stopped
+// before the first hook runs. ⛔ It shares nothing a case asserts on: what
+// stays warm is the module registry, the compiled WASM and the JIT.
+async function payTheBootsFirstLoad(): Promise<void> {
+  const warmUp = await bootStack(
+    {
+      manifest: { id: 'com.example.boot-warm-up', namespace: 'warmup', version: '0.0.1', type: 'app', name: 'Boot Warm-up' },
+      objects: [],
+      requires: ['automation', 'triggers'],
+    },
+    { automation: true },
+  );
+  try {
+    await warmUp.signIn();
+    await warmUp.signUp('boot-warm-up@verify.test');
+  } finally {
+    await warmUp.stop();
+  }
+}
+await payTheBootsFirstLoad();
+
 const OBJ = 'atp_item';
 const APPR = 'atp_appr';
 const CAP_UNMASK = 'atp_unmask';
@@ -467,34 +498,43 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
     expect(await answered('sys_approval_request', { payload_json: { $contains: NOMATCH } })).toBe(0);
   });
 
-  it('control: the unmasking reader filters and groups by every column of a pinned parent, as before', async () => {
+  // [#23977] One case per class, plus the tail, with every probe and assertion
+  // moved intact. As a single case its 35 sequential requests took about 2.7 s
+  // unloaded and crossed vitest's 5000 ms default on a loaded runner. Run
+  // concurrently they took as long as in sequence (the requests are CPU-bound in
+  // this one process), so the case is cut rather than run in parallel.
+  describe('control: the unmasking reader filters and groups by every column of a pinned parent, as before', () => {
     for (const c of CLASSES) {
-      for (const k of activityCases(c)) {
-        const hit = await list('control', 'sys_activity', { object_name: k.parent, [k.column]: { $contains: k.stored } });
-        expect(hit.status, hit.text).toBe(200);
-        expect(hit.rows).toBeGreaterThan(0);
-        const miss = await list('control', 'sys_activity', { object_name: k.parent, [k.column]: { $contains: NOMATCH } });
-        expect(miss.status, miss.text).toBe(200);
-        expect(miss.rows).toBe(0);
-      }
-      for (const k of ledgerCases(c)) {
-        const hit = await list('control', 'sys_audit_log', { object_name: OBJ, [k.column]: { $contains: k.stored } });
-        expect(hit.status, hit.text).toBe(200);
-        expect(hit.rows).toBeGreaterThan(0);
-        const miss = await list('control', 'sys_audit_log', { object_name: OBJ, [k.column]: { $contains: NOMATCH } });
-        expect(miss.status, miss.text).toBe(200);
-        expect(miss.rows).toBe(0);
-      }
-      const snapHit = await list('control', 'sys_approval_request', { object_name: APPR, payload_json: { $contains: SNAP[c] } });
-      expect(snapHit.status, snapHit.text).toBe(200);
-      expect(snapHit.rows).toBe(1);
+      it(`every column of a pinned parent, for the stored values of the ${c} class`, async () => {
+        for (const k of activityCases(c)) {
+          const hit = await list('control', 'sys_activity', { object_name: k.parent, [k.column]: { $contains: k.stored } });
+          expect(hit.status, hit.text).toBe(200);
+          expect(hit.rows).toBeGreaterThan(0);
+          const miss = await list('control', 'sys_activity', { object_name: k.parent, [k.column]: { $contains: NOMATCH } });
+          expect(miss.status, miss.text).toBe(200);
+          expect(miss.rows).toBe(0);
+        }
+        for (const k of ledgerCases(c)) {
+          const hit = await list('control', 'sys_audit_log', { object_name: OBJ, [k.column]: { $contains: k.stored } });
+          expect(hit.status, hit.text).toBe(200);
+          expect(hit.rows).toBeGreaterThan(0);
+          const miss = await list('control', 'sys_audit_log', { object_name: OBJ, [k.column]: { $contains: NOMATCH } });
+          expect(miss.status, miss.text).toBe(200);
+          expect(miss.rows).toBe(0);
+        }
+        const snapHit = await list('control', 'sys_approval_request', { object_name: APPR, payload_json: { $contains: SNAP[c] } });
+        expect(snapHit.status, snapHit.text).toBe(200);
+        expect(snapHit.rows).toBe(1);
+      });
     }
-    const snapMiss = await list('control', 'sys_approval_request', { object_name: APPR, payload_json: { $contains: NOMATCH } });
-    expect(snapMiss.status, snapMiss.text).toBe(200);
-    expect(snapMiss.rows).toBe(0);
-    const grouped = await call('control', 'POST', '/data/sys_activity/query', {
-      where: { object_name: OBJ }, groupBy: ['summary'], aggregations: [{ function: 'count', alias: 'n' }],
+    it('a non-matching approval snapshot filter, and a grouping of the activity stream', async () => {
+      const snapMiss = await list('control', 'sys_approval_request', { object_name: APPR, payload_json: { $contains: NOMATCH } });
+      expect(snapMiss.status, snapMiss.text).toBe(200);
+      expect(snapMiss.rows).toBe(0);
+      const grouped = await call('control', 'POST', '/data/sys_activity/query', {
+        where: { object_name: OBJ }, groupBy: ['summary'], aggregations: [{ function: 'count', alias: 'n' }],
+      });
+      expect(grouped.status, grouped.text).toBe(200);
     });
-    expect(grouped.status, grouped.text).toBe(200);
   });
 });
