@@ -29,6 +29,7 @@ import type {
   IDataEngine,
   II18nService,
   ISecurityService,
+  ISharingService,
   IStorageService,
   IFileAccessDelegate,
   ApiKeyLifecyclePolicy,
@@ -367,7 +368,7 @@ export class StorageServicePlugin implements Plugin {
         // call, the same two services the `sys_attachment` insert gate asks.
         getSharing: () => {
           try {
-            return ctx.getService<any>('sharing');
+            return ctx.getService<ISharingService>('sharing');
           } catch {
             return null;
           }
