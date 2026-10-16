@@ -605,9 +605,12 @@ function refuseRemoteDeferredDdl(): never {
  * The report is accurate about the database, but not every finding is real
  * drift. This face's schema sync (`RemoteTransport`) does not create the NOT NULL
  * constraint a field declares, so a table it created reads as `tighten_not_null`
- * (destructive) against its own declaration. Nor is there a remedy for a
- * destructive entry on this transport: `os migrate apply` arms deferred DDL,
- * which this face refuses. So {@link TursoDriver.driftReportCaveat} says so,
+ * (destructive) against its own declaration. Nor does every destructive entry
+ * have a remedy on this transport: `os migrate apply --allow-destructive` runs
+ * here [#23848] and applies the column drops and index entries this face can
+ * express, but a tightening needs the SQLite table rebuild, which this face
+ * does not run, so the apply names it as not applied. So
+ * {@link TursoDriver.driftReportCaveat} says so,
  * and a caller that would apply or refuse on the report unattended (the
  * `OS_ARTIFACT_URL` boot gate) reads the caveat and does neither. The ceremony
  * is not such a caller: it applies only the column and index drops it named.
@@ -617,7 +620,8 @@ function refuseRemoteDeferredDdl(): never {
 const REMOTE_DRIFT_REPORT_CAVEAT =
   'the Turso REMOTE transport\'s schema sync does not create the NOT NULL constraint a field declares, so ' +
   'this driver\'s drift report can name a tightening its own sync produced, and a destructive entry has no ' +
-  'remedy on this transport (`os migrate apply` refuses against it). The report is for reading; nothing is ' +
+  'remedy on this transport but a column drop or an index change (`os migrate apply --allow-destructive` applies ' +
+  'those and names the rest as not applied). The report is for reading; nothing is ' +
   'applied or refused on it unattended. To review the drift, run `os migrate plan` against a local SQLite ' +
   'copy of this database (a `file:` URL)';
 

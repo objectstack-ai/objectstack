@@ -260,6 +260,31 @@ afterAll(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
+// The control runs FIRST, on purpose: a `--json` boot that FAILS keeps stdout
+// reserved for the document it never wrote (`bootSchemaStack`'s `jsonOutput`),
+// which is right for a one-command process and, in this one, would swallow the
+// control's document whenever a remote case before it failed at its boot (the
+// positive control and the ablation are exactly such runs).
+describe('CONTROL: the same apply on a local SQLite file applies all three, as it always has', () => {
+  it('apply --allow-destructive on a file: exit 0, every entry applied, nothing skipped', async () => {
+    const file = join(dir, 'local.db');
+    await buildFixture(`file:${file}`, (seed) => local(file, seed));
+    expect(await local(file, columnsOf)).toMatchObject({ code: false, memo: true, legacy_23848: false });
+
+    const apply = await run(MigrateApply, ['--database-url', `file:${file}`, '--allow-destructive', '--yes', '--json']);
+    expect(apply.payload.error, JSON.stringify(apply.payload).slice(0, 800)).toBeUndefined();
+    // Only keys this payload carried before #23848: the control is the unchanged behaviour.
+    const said = JSON.stringify(apply.payload).slice(0, 1500);
+    expect(apply.exitCode, said).toBe(0);
+    expect(kinds(apply.payload.applied), said).toEqual([DROP, TIGHTEN, RELAX].sort());
+    expect(kinds(apply.payload.skipped), said).toEqual([]);
+
+    const columns = await local(file, columnsOf);
+    expect(columns).not.toHaveProperty('legacy_23848');
+    expect(columns).toMatchObject({ code: true, memo: false });
+  }, CASE_TIMEOUT_MS);
+});
+
 describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld)', () => {
   beforeAll(async () => {
     const port = await freePort();
@@ -326,24 +351,5 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
     expect(apply.lines).toContain(`${TABLE}.code — tighten_not_null`);
     expect(apply.lines).toContain(`${TABLE}.memo — relax_not_null`);
     expect(apply.lines).toMatch(/PARTIAL/);
-  }, CASE_TIMEOUT_MS);
-});
-
-describe('CONTROL: the same apply on a local SQLite file applies all three, as it always has', () => {
-  it('apply --allow-destructive on a file: exit 0, every entry applied, nothing skipped', async () => {
-    const file = join(dir, 'local.db');
-    await buildFixture(`file:${file}`, (seed) => local(file, seed));
-    expect(await local(file, columnsOf)).toMatchObject({ code: false, memo: true, legacy_23848: false });
-
-    const apply = await run(MigrateApply, ['--database-url', `file:${file}`, '--allow-destructive', '--yes', '--json']);
-    expect(apply.payload.error, JSON.stringify(apply.payload).slice(0, 800)).toBeUndefined();
-    // Only keys this payload carried before #23848: the control is the unchanged behaviour.
-    expect(apply.exitCode).toBe(0);
-    expect(kinds(apply.payload.applied)).toEqual([DROP, TIGHTEN, RELAX].sort());
-    expect(kinds(apply.payload.skipped)).toEqual([]);
-
-    const columns = await local(file, columnsOf);
-    expect(columns).not.toHaveProperty('legacy_23848');
-    expect(columns).toMatchObject({ code: true, memo: false });
   }, CASE_TIMEOUT_MS);
 });
