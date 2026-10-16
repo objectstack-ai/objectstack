@@ -1199,7 +1199,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 674 since #23809: the options repeaters gain `kind`, the option's
       // lifecycle category — one row label on the field form, one on the
       // object form, authored in all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(674);
+      // 673 since #23891: the permission-set form's `managedBy` select left
+      // with its key (retired — nothing read the authored provenance), taking
+      // its label — authored in all three locales — out of the catalog.
+      expect(translated.length, `${locale} positive control`).toBe(673);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
