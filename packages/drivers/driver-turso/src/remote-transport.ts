@@ -1307,6 +1307,21 @@ export class RemoteTransport {
     return result.rows;
   }
 
+  /**
+   * [#23816] Run statements as one libSQL batch and answer each one's rows.
+   *
+   * A `'write'` batch runs inside one transaction on the server: a statement
+   * that fails rolls back every statement before it, so the batch lands whole
+   * or not at all. That is what the remote migration doors rely on to drop an
+   * index and the column it keys, or to drop and re-create an index under one
+   * name, without ever leaving the half-applied state between the two.
+   */
+  async batch(statements: InStatement[], mode: 'read' | 'write'): Promise<Array<ResultSet['rows']>> {
+    const client = await this.ensureConnected();
+    const results = await client.batch(statements, mode);
+    return results.map((result) => result.rows);
+  }
+
   // ===================================
   // CRUD Operations
   // ===================================
@@ -2488,36 +2503,50 @@ export class RemoteTransport {
         continue;
       }
       if (emitted.has(index.name)) continue;
-      // The KEY columns are references and stay gated. The index NAME is not a
-      // reference but one name by definition — the class #14113 escapes for an
-      // alias rather than refuses. It is the one position here an author types
-      // freely (`IndexSchema.name` is any string, and the local face quotes
-      // whatever it is given), so refusing it would fail this face's WHOLE
-      // schema sync over a declaration the other face accepts.
-      for (const column of index.columns) this.assertSafeIdentifier(column);
-      const nameSql = this.aliasIdentifierSql(index.name);
-
-      const nullSafe = new Set(index.nullSafeColumns ?? []);
-      const parts = index.columns.map((c) =>
-        nullSafe.has(c) ? organizationKeyPartSql(`"${c}"`) : `"${c}"`,
-      );
-      // `IF NOT EXISTS` is what makes a concurrent creator (two instances
-      // booting against one database) a no-op rather than an error — and it is
-      // also what makes the per-statement retry in
-      // {@link retrofitDeclaredIndexes} safe under EITHER libsql batch semantic
-      // (transactional: nothing was applied; non-transactional: re-applying is
-      // a no-op).
       planned.push({
         name: index.name,
         table: tableName,
         unique: index.unique,
-        sql:
-          `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${nameSql} ` +
-          `ON "${tableName}" (${parts.join(', ')})`,
+        sql: this.createIndexSql(tableName, index),
       });
       emitted.add(index.name);
     }
     return planned;
+  }
+
+  /**
+   * The `CREATE INDEX` this face issues for one index: the schema sync's
+   * declared indexes ({@link buildDeclaredIndexDDL}) and, since #23816, the
+   * `create_index` / `recreate_index` drift entries `TursoDriver` applies on
+   * the remote face. One emitter for both, so an index the migration door
+   * re-creates is byte-for-byte the one the sync would have created, and the
+   * drift differ reads the two alike.
+   */
+  createIndexSql(
+    tableName: string,
+    index: { name: string; columns: readonly string[]; unique: boolean; nullSafeColumns?: readonly string[] },
+  ): string {
+    // The table and KEY columns are references and stay gated. The index NAME
+    // is not a reference but one name by definition — the class #14113 escapes
+    // for an alias rather than refuses. It is the one position here an author
+    // types freely (`IndexSchema.name` is any string, and the local face quotes
+    // whatever it is given), so refusing it would fail this face's WHOLE schema
+    // sync over a declaration the other face accepts.
+    this.assertSafeIdentifier(tableName);
+    for (const column of index.columns) this.assertSafeIdentifier(column);
+    const nameSql = this.aliasIdentifierSql(index.name);
+
+    const nullSafe = new Set(index.nullSafeColumns ?? []);
+    const parts = index.columns.map((c) =>
+      nullSafe.has(c) ? organizationKeyPartSql(`"${c}"`) : `"${c}"`,
+    );
+    // `IF NOT EXISTS` is what makes a concurrent creator (two instances
+    // booting against one database) a no-op rather than an error — and it is
+    // also what makes the per-statement retry in
+    // {@link retrofitDeclaredIndexes} safe under EITHER libsql batch semantic
+    // (transactional: nothing was applied; non-transactional: re-applying is
+    // a no-op).
+    return `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${nameSql} ON "${tableName}" (${parts.join(', ')})`;
   }
 
   /**
