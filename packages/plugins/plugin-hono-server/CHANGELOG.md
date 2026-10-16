@@ -1,5 +1,158 @@
 # @objectstack/plugin-hono-server
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- e1cefa5: fix(hono): `createHonoApp` answers an escaped throw that declares an ADR-0112 envelope as that envelope, not as `500 INTERNAL_ERROR` (#23365)
+  
+  `@objectstack/hono`'s `createHonoApp` has two catch arms: the auth mount's, and
+  the `${prefix}/*` catch-all's around `HttpDispatcher.dispatch()`. Both answered
+  an escaped throw from its `statusCode` alone, so a producer that declared
+  `status` and a registered `code` lost both on this host. A `GET`, `PATCH` or
+  `DELETE` of `/data/:object/:id` for an id that names no row answered
+  `500 INTERNAL_ERROR` where the standalone REST server answers
+  `404 RECORD_NOT_FOUND`. The `/data` version refusals answered `500` too (a stale
+  `If-Match`'s `409 CONCURRENT_UPDATE`, and `If-Match: ""`'s
+  `400 VALIDATION_FAILED`), and so did an authorization-store outage
+  (`AuthzStoreUnavailableError`, `503 SERVICE_UNAVAILABLE`).
+  
+  **What changed.** Both arms now answer a throw that carries **both** a declared
+  ADR-0112 status (a key of `HttpStatusErrorCodeMap`) **and** a code registered in
+  `ErrorCode` as that envelope. The recognition is `declaredEnvelopeForThrow`, the
+  rule `@objectstack/plugin-hono-server`'s direct-mount routes have used since
+  #16545, so the two Hono doors answer one throw alike by construction: the same
+  two conditions, the same 5xx disclosure filter (`looksLikeInternalErrorLeak`),
+  and `details` and `userMessage` forwarded only when the producer declared them.
+  
+  The rule's other limbs come with it, as they did on the direct-mount door. A
+  validation-shaped throw answers `400 VALIDATION_FAILED` with its `fields[]`. A
+  driver fault the engine has already classified keeps its `500` and now carries
+  the code it declared instead of `INTERNAL_ERROR`. Measured: `GET /data/:object`
+  over an object whose table is missing answers `500 DATABASE_ERROR`, with the
+  same message as before.
+  
+  **What did NOT change**, pinned in the same PR through a real `createHonoApp`
+  over the real dispatcher and protocol (`packages/qa/http-conformance`):
+  
+  - a throw that is **not** such an envelope answers what it answered before. A
+    bare `Error` is still `500 INTERNAL_ERROR` carrying `code` and `message`, with
+    no `cause` in the body, and a throw that declares `statusCode` with no
+    registered code keeps that status;
+  - ⛔ no error code is minted and no ledger row is added.
+  
+  `@objectstack/plugin-hono-server` gains one export, `declaredEnvelopeForThrow`,
+  which was module-private. `createHonoApp` imports it rather than restating the
+  rule. Its behaviour is unchanged.
+  
+  Earlier entries say a `createHonoApp` host still renders the `/data` version
+  refusals as `500`. This change ends that: they are answered `409` and `400` as
+  declared.
+  
+  The `409 CONCURRENT_UPDATE` this host now answers carries `currentVersion` and
+  `currentRecord` in `error.details`, the two fields the standalone REST server's
+  `409` carries; `currentRecord` is the row as the caller reads it.
+  
+  Clause-②: yes (widening)
+
+### Patch Changes
+
+- 19c554d: fix(plugin-hono-server): a `409 CONCURRENT_UPDATE` answered by either Hono door carries `currentVersion`, as the standalone REST server's does (#23531)
+  
+  A stale `If-Match` (or `expectedVersion`) on `PATCH` or `DELETE /data/:object/:id` is refused by the protocol with `409 CONCURRENT_UPDATE`. The standalone REST server's answer carries the server's `currentVersion`, which `wire-format.mdx` documents and a conflict dialog needs: it is the token "Overwrite anyway" sends back as the next `If-Match`. The two Hono doors answered the same refusal without it. They are `@objectstack/hono`'s `createHonoApp`, which answered it `500 INTERNAL_ERROR` (the `@objectstack/hono` entry for #23365 makes it a `409`), and a route mounted on `@objectstack/plugin-hono-server`'s `HonoHttpServer`, which answered it with `code` and `message` only.
+  
+  - FROM `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…"}}` on a `HonoHttpServer` route, and `500` `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"…"}}` on `createHonoApp`
+  - TO `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…","details":{"currentVersion":"…","currentRecord":{…}}}}`
+  
+  The field rides `error.details`, the wrapped envelope's declared context slot. `@objectstack/client` reads a wrapped body's context from there, so `err.details.currentVersion` now carries it on these hosts too. It is read from the classification the REST server applies (`structuredCodeAnswer` in `@objectstack/types`), so it appears only when the conflict stated it. On a `HonoHttpServer` route, status, `code` and `message` are unchanged; on `createHonoApp` they are the `409` the `@objectstack/hono` entry for #23365 states. No other answer changes.
+  
+  `currentRecord` rides beside it, as on the REST server: the row as the caller reads it, which the protocol re-reads under the caller's own context on a version mismatch (#23586).
+  
+  Nothing changes in `@objectstack/hono`'s own code: `createHonoApp` renders through `declaredEnvelopeForThrow` from `@objectstack/plugin-hono-server`.
+  
+  Clause-②: no
+- 5bb9a83: fix(plugin-hono-server): a `409 CONCURRENT_UPDATE` answered by either Hono door carries `currentRecord` as well, the caller's own read of the row, as the standalone REST server's does (#23531)
+  
+  The two Hono doors are `@objectstack/hono`'s `createHonoApp` and a route mounted on `@objectstack/plugin-hono-server`'s `HonoHttpServer`. Their answer to a stale `If-Match` (or `expectedVersion`) on `PATCH` or `DELETE /data/:object/:id` carried neither field: the route answered it with `code` and `message` only, and `createHonoApp` answered it `500 INTERNAL_ERROR`, which the `@objectstack/hono` entry for #23365 makes a `409`. On a version mismatch the protocol now re-reads the row under the caller's own context (#23586), so the record holds only what the caller may read, and these doors forward it beside the server's `currentVersion`.
+  
+  - FROM `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…"}}` on a `HonoHttpServer` route, and `500` `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"…"}}` on `createHonoApp`
+  - TO `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…","details":{"currentVersion":"…","currentRecord":{…}}}}`
+  
+  `currentRecord` is the row as the caller reads it. A field the caller's field-level rules hide is absent from it, and a row the caller's row-level rules hide answers `404 RECORD_NOT_FOUND` with neither field, as the REST server answers. It is read from the classification the REST server applies (`structuredCodeAnswer` in `@objectstack/types`), so it appears only when the conflict stated it, and `@objectstack/client` reads it as `err.details.currentRecord` on these hosts. On a `HonoHttpServer` route, status, `code` and `message` are unchanged; on `createHonoApp` they are the `409` the `@objectstack/hono` entry for #23365 states. No other answer changes.
+  
+  Nothing changes in `@objectstack/hono`'s own code: `createHonoApp` renders through `declaredEnvelopeForThrow` from `@objectstack/plugin-hono-server`.
+  
+  Clause-②: no
+- f7cd580: fix(plugin-hono-server): a structured refusal answered by either Hono door carries the fields the standalone REST server's answer carries, such as `409 DELETE_RESTRICTED`'s `developerMessage`, `dependentObject` and `dependentCount` (#23587)
+  
+  Deleting a record that a `deleteBehavior: 'restrict'` lookup still references is refused by the engine with `409 DELETE_RESTRICTED`. The standalone REST server's answer carries the engine's `developerMessage` (the API names and the `deleteBehavior: 'cascade'` remedy), `dependentObject` and, when the caller may see it, `dependentCount`. The two Hono doors answered the same refusal without them. They are `@objectstack/hono`'s `createHonoApp`, which answered it `500 INTERNAL_ERROR` (the `@objectstack/hono` entry for #23365 makes it a `409`), and a route mounted on `@objectstack/plugin-hono-server`'s `HonoHttpServer`, which answered it with `code` and `message` only.
+  
+  - FROM `{"success":false,"error":{"code":"DELETE_RESTRICTED","message":"…"}}` on a `HonoHttpServer` route, and `500` `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"…"}}` on `createHonoApp`
+  - TO `{"success":false,"error":{"code":"DELETE_RESTRICTED","message":"…","details":{"developerMessage":"…","dependentObject":"…","dependentCount":1}}}`
+  
+  The same rule now covers every refusal the REST server answers with structured fields, not only `409 CONCURRENT_UPDATE`'s `currentVersion`: `400 INVALID_FIELD` carries `field` and `object`, `404 OBJECT_NOT_FOUND` carries `object`, the `403` capability and access refusals (`FEEDS_DISABLED`, `FILES_DISABLED`, `ATTACHMENT_PARENT_ACCESS`, `ATTACHMENT_DELETE_DENIED`, `RECORD_NOT_ACCESSIBLE`) carry `object`, and a `409 METADATA_CONFLICT` thrown out of a direct-mount route carries `currentVersion` (on `createHonoApp` the `/meta` save is answered by the dispatcher itself, which this does not change). The fields ride `error.details`, where `@objectstack/client` reads a wrapped body's context, so `err.details.developerMessage` and its siblings carry them on these hosts too. They are read from the classification the REST server applies (`structuredCodeAnswer` in `@objectstack/types`), so each appears only when the producer stated it. On a `HonoHttpServer` route, status, `code` and `message` are unchanged; on `createHonoApp` they are the declared envelope the `@objectstack/hono` entry for #23365 states. A refusal whose classification answers a different status or code gains nothing. The engine's duplicate insert is the one envelope these doors translate first: its `DUPLICATE_RECORD` is answered `409 UNIQUE_VIOLATION`, the REST server's code, so the classification agrees and its fields ride `details`, as this package's `UNIQUE_VIOLATION` entry states.
+  
+  One field stays off these doors: `object` on `DELETE_RESTRICTED`, `CONCURRENT_UPDATE` and `METADATA_CONFLICT` is the object the request's route named, and these doors answer without a route. The REST server's answer is unchanged.
+  
+  Clause-②: no
+- c9810dd: fix(plugin-hono-server): a repeated unique value answered by either Hono door reports the wire code `UNIQUE_VIOLATION`, not the engine's in-process `DUPLICATE_RECORD`, with `developerMessage`, `object` and `field` (#23587)
+  
+  **Wire change at these doors: `409 DUPLICATE_RECORD` becomes `409 UNIQUE_VIOLATION`.** A client of `@objectstack/hono`'s `createHonoApp` or of a route mounted on `@objectstack/plugin-hono-server`'s `HonoHttpServer` that matched `code === 'DUPLICATE_RECORD'` on a duplicate insert or update must match `code === 'UNIQUE_VIOLATION'` instead, which is what the standalone REST server already answers for the same refusal.
+  
+  Why: the maintainer ruled one wire spelling for a unique-constraint refusal on every route, `UNIQUE_VIOLATION` (recorded in commit 65846bc46). The REST server, the batch rows of `POST /data/:object/batch` and the import runner's rows already report it; the two Hono doors reported the engine's own spelling.
+  
+  - FROM `{"success":false,"error":{"code":"DUPLICATE_RECORD","message":"Duplicate record refused on 'udoc': …"}}`
+  - TO `{"success":false,"error":{"code":"UNIQUE_VIOLATION","message":"Duplicate record refused on 'udoc': …","details":{"developerMessage":"Duplicate record refused on 'udoc': …","object":"udoc"}}}`
+  
+  `details` carries what the REST server's answer carries beside its code, each only when the producer stated it: `developerMessage`, `object`, and `field` when the driver named the conflicting column. The `message` is unchanged: it stays the engine's sentence, as on every other code at these doors. Only the engine's `DuplicateRecordError` is translated, recognised by its registered code and its class name together. A hook that throws the registered `DUPLICATE_RECORD` without being that class keeps its own code. Inside the engine, `DuplicateRecordError.code` is still `DUPLICATE_RECORD`, so an in-process caller (a hook, a flow node) is unaffected. The REST server's answer is unchanged.
+  
+  Clause-②: no
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/observability@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes

@@ -1,5 +1,90 @@
 # @objectstack/plugin-audit
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 69351e9: feat(plugin-audit): the `sys_activity` and `sys_audit_log` read gates write one `ReadableIds` leaf per parent object and do no pre-scan, so a broad read is judged over every row, not a 2,000-row window (ADR-0139 D4, D5)
+  
+  Clause-②: no
+  
+  Both gates serve a row only when the caller may read the record it is about. Until now each read first scanned at most 2,000 candidate rows as the system, then asked which of those rows' parent records the caller could read. Past that window the gate failed closed: the unscanned rows were left out, the list's `total` agreed with the short answer, and a warning said so.
+  
+  Each gate now writes one branch per object the metadata registry holds (outside the audit writer's excluded objects and the gated object itself): `{ object_name: P, record_id: { $in: ReadableIds.of(P) } }`. The engine composes the leaf from the security service's `canReadObject` and `getReadFilter` for `P`, and the SQL drivers evaluate it as one subquery against `P`'s table, inside their own tenant wall. A list, its `total` and a grouped count are each one statement over every row the caller may read. A parent object the caller may not read is answered with no rows, without reading it as the caller, so no denial is logged for it.
+  
+  What a reader sees:
+  
+  - `sys_audit_log`: a broad read is served every row about a record the caller may read, and every row about no record, with a true `total`, whatever the table size. The rows about no record (`config_change`, `import`, `platform_admin_standing_change`, an auth event with no session) are now a filter on the ledger's own columns rather than a list of ids the scan saw. A holder of `view_all_audit_log` is still not narrowed. A row about a session is still served when that session is readable.
+  - `sys_activity`: the gate itself has no window any more, but the stream's withheld-update rule still pre-scans 2,000 rows as the system, so a broad read stays bounded by that rule until it becomes a predicate (ADR-0139 E6). A read about one record is unchanged.
+  - Three classes still read through the bounded probe, chosen before any leaf is written: a delegated (on-behalf-of) caller; a parent an object-scoped read middleware narrows (for example `sys_attachment`, `sys_comment_reaction`, `sys_approval_request` and the settings objects); and a parent bound to another datasource than the gated object, which covers every parent on a deployment that registers the `telemetry` datasource. The whole read also stays on the probe when the security service offers no `canReadObject`, or when none is registered, as before.
+  - On a driver that does not compile the leaf (`driver-mongodb`), a read of either object now fails with `INTERNAL_ERROR` / 500 naming the driver and the leaf, instead of serving a capped list. The gates do not turn that refusal into an empty answer. This is ADR-0139's ruled behaviour until a pipeline form is measured for that driver.
+
+### Patch Changes
+
+- 94924e0: fix(plugin-audit): the `sys_activity` and `sys_audit_log` read gates skip a parent object the caller cannot read without reading it, so the security plugin no longer logs a denial for each skipped object
+  
+  Clause-②: no
+  
+  Both gates serve a row only when the caller can read the record it is about. They decide that once per parent object the query's rows name, by reading that object as the caller. For every object the caller holds no object-level read on, plugin-security refused that read and logged `[Security] Access denied` at WARN: one line per object per read, and again for the list's `total`. The console header's activity feed reads `sys_activity` on every page view, so every non-admin page view logged a line for each platform object the stream names (`sys_migration`, `sys_platform_setting`, `sys_user_permission_set`, and others), and real denials were buried among them.
+  
+  Each gate now asks the security service's `canReadObject` first, with the caller's own context. That is the security middleware's own object-level read check, and it answers without logging. The gate then reads only the objects it admits. An object it refuses contributes no rows, exactly as its refused read did before, so every caller is served the same rows, with the same `total`, as before. A caller's own read of such an object is still refused and still logged, once.
+  
+  The check can only exclude objects. An admitted object is still read as the caller, and that read still decides row scope, sharing and RLS. If `canReadObject` throws, or answers anything other than `true`, that object's rows are excluded and the gate logs a warning naming the object. On a deployment without the security plugin, or with a security service that does not offer `canReadObject`, every parent object is read as the caller, as before.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [989aa48]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [30c33e3]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cd86e41]
+- Updated dependencies [c03077e]
+- Updated dependencies [3bc407d]
+- Updated dependencies [76560a1]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes
