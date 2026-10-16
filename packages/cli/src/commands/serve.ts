@@ -585,8 +585,8 @@ export const MCP_ROUTE_OWNER_PLUGIN = 'com.objectstack.runtime.dispatcher';
  * ## The defect this closes
  *
  * `os serve objectstack.config.ts --no-server` with a config that mounts its
- * own `new HonoServerPlugin(...)` printed `MCP: http://localhost:PORT/api/v1/mcp`
- * and its connect hint, and `GET /api/v1/mcp` answered 404 while
+ * own `HonoServerPlugin` printed `MCP: http://localhost:PORT/api/v1/mcp` and
+ * its connect hint, and `GET /api/v1/mcp` answered 404 while
  * `/api/v1/data/<object>` answered 401: the transport listened, the route did
  * not exist. The dispatcher that mounts it is composed only inside `serve`'s
  * `if (flags.server)` block, and the row was gated on `http.server` (#23623)
