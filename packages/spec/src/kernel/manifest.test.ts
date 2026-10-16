@@ -459,7 +459,7 @@ describe('contributes.routes retirement (ADR-0049 — removed; apps declare `api
       /manifest\.contributes\.routes.*removed in @objectstack\/spec 17.*Delete the key.*does not mount routes on `http\.server`.*defineStack\(\{ apis \}\).*flow.*defineStack\(\{ functions \}\).*connector/s,
     );
     // The retired advice — an app mounting a handler on `kernel:ready` — must not come back.
-    expect(issue!.message).not.toMatch(/kernel:ready|mounted imperatively/);
+    expect(issue!.message).not.toMatch(/kernel:ready|imperativ/);
   });
 
   it('still parses the surviving `kinds` member with `routes` simply absent', () => {

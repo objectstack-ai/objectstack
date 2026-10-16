@@ -31,10 +31,12 @@ Architecture Alignment:
 
 **Serving routes from a plugin (imperative `http.server` mount)**
 ```typescript
-// Routes are mounted in CODE — resolve the `http.server` service from the
-// plugin context and register handlers on `kernel:ready` (the service is
-// registered by plugin-hono-server; `examples/app-showcase`'s
-// recalc-endpoint is a real consumer of this exact shape). The worked
+// A PLATFORM plugin mounts its routes in CODE — resolve the `http.server`
+// service from the plugin context and register handlers on `kernel:ready`
+// (the service is registered by plugin-hono-server). This is the platform's
+// own door-building primitive, not an app-author surface: an app declares
+// `defineStack({ apis })`, computes in a flow, and registers code as a stack
+// function or a connector. The worked
 // manifest example that used to sit here declared `contributes.routes`,
 // which was removed in @objectstack/spec 17 (commit bc56e1881): nothing ever read
 // it, so every route it showed parsed cleanly and served nothing.
