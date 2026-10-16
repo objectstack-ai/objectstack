@@ -204,6 +204,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "线程",
         help: "线程标识——约定格式为 `{object}:{record_id}`（例如 `account:9001`）"
       },
+      object_name: {
+        label: "父对象",
+        help: "`thread_id` 指向的记录所属的对象——由平台写入，作者不可填写"
+      },
+      record_id: {
+        label: "父记录",
+        help: "`thread_id` 指向的记录的 ID——由平台写入，作者不可填写"
+      },
       parent_id: {
         label: "父评论",
         help: "可选的父评论，用于嵌套回复"

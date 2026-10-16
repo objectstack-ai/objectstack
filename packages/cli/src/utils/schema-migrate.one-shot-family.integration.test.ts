@@ -56,6 +56,7 @@ import { bootSchemaStack } from './schema-migrate.js';
 import { buildDataMigrationPlugins } from './data-migration-plugins.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateActivityChangedFields from '../commands/migrate/activity-changed-fields.js';
+import MigrateCommentParentPair from '../commands/migrate/comment-parent-pair.js';
 import MigrateApply from '../commands/migrate/apply.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
@@ -163,6 +164,11 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateActivityChangedFields),
     noWrite: [{ label: 'migrate activity-changed-fields', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate activity-changed-fields --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/comment-parent-pair.ts': {
+    run: invoke(MigrateCommentParentPair),
+    noWrite: [{ label: 'migrate comment-parent-pair', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate comment-parent-pair --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/apply.ts': {
     run: invoke(MigrateApply),
