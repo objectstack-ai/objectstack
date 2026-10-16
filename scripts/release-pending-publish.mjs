@@ -1614,8 +1614,9 @@ async function selfTest() {
     writeFileSync(join(q.dir, '.changeset/late-two.md'), handText);
     const third = annotate(q.dir);
     check(
-      third.already.join() === '.changeset/late-two.md' && third.annotated.join() === '.changeset/late-one.md,.changeset/late-three.md',
-      'the hand-annotated one is "already"; the other two are annotated',
+      third.already.join() === '.changeset/late-two.md' && third.annotated.join() === '.changeset/late-one.md,.changeset/late-three.md' &&
+        ['.changeset/late-one.md', '.changeset/late-three.md'].every((p) => qRead(p).split(LINE).length === 2),
+      'the hand-annotated one is "already"; the other two are annotated, once each, on disk',
     );
     check(qRead('.changeset/late-two.md') === handText, 'and the hand-written line is not rewritten or doubled');
 
@@ -1657,7 +1658,8 @@ async function selfTest() {
     const deep = shallowClone();
     const deepened = annotate(deep, { rounds: [1, 1, 2, 4] });
     check(
-      deepened.verdict === 'done' && deepened.deepenedBy > 0 && deepened.versionCommit === qLanded && deepened.annotated.join() === LATE.join(),
+      deepened.verdict === 'done' && deepened.deepenedBy > 0 && deepened.versionCommit === qLanded && deepened.annotated.join() === LATE.join() &&
+        LATE.every((p) => readFileSync(join(deep, p), 'utf8').split(LINE).length === 2),
       `a depth-1 clone fetches history in bounded rounds until the version commit and its parent are present, then annotates the same three (deepened by ${deepened.deepenedBy})`,
     );
     const cut = shallowClone();
