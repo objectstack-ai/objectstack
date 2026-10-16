@@ -58,6 +58,7 @@ import Database from 'better-sqlite3';
 import { TursoDriver } from '@objectstack/driver-turso';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { isExitSignal } from '../../utils/format.js';
+import { isStdoutReserved } from '../../utils/json-stdout.js';
 import MigrateApply from './apply.js';
 import MigratePlan from './plan.js';
 
@@ -184,6 +185,10 @@ async function run(
   command: typeof MigrateApply | typeof MigratePlan,
   args: string[],
 ): Promise<{ payload: any; lines: string; exitCode: number }> {
+  // A `--json` boot that FAILED keeps stdout reserved for the document it never
+  // wrote, and nothing in this process lifts it: every later case's document
+  // would go unread. Say so, rather than fail on a missing key.
+  expect(isStdoutReserved(), 'an earlier case\'s --json boot failed and left stdout reserved: this case cannot read its output').toBe(false);
   const savedExit = process.exitCode;
   const swallow = ((_chunk: unknown, ...rest: unknown[]) => {
     const cb = rest.find((a) => typeof a === 'function') as (() => void) | undefined;
