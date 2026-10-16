@@ -50,13 +50,22 @@ function standIn(opts: {
         : undefined,
     find: async (object: string, options: any) => {
       finds.push({ object, options });
-      if (opts.findThrows) throw new Error('pre-scan exploded');
-      if (object === 'sys_comment') return (opts.comments ?? []).filter((r) => r.object_name == null);
-      const ids: string[] = (options?.where?.id?.$in ?? []).map(String);
-      return ids.filter((id) => (opts.readable?.[object] ?? []).includes(id)).map((id) => ({ id }));
+      const rows =
+        object === 'sys_comment'
+          ? (opts.comments ?? []).filter((r) => r.object_name == null)
+          : ((options?.where?.id?.$in ?? []) as unknown[])
+              .map(String)
+              .filter((id) => (opts.readable?.[object] ?? []).includes(id))
+              .map((id) => ({ id }));
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
-    findOne: async () => null,
   };
+  if (opts.findThrows) {
+    engine.find = async (object: string, options: any) => {
+      finds.push({ object, options });
+      throw new Error('pre-scan exploded');
+    };
+  }
   if (opts.classify !== false) {
     engine.registry = { getAllObjects: () => (opts.objects ?? ['crm_case', 'sys_comment']).map((name) => ({ name })) };
     engine.hasObjectMiddleware = (object: string) => (opts.middleware ?? []).includes(object);
@@ -199,8 +208,6 @@ describe('[ADR-0139 E7] the parent pair: one planner, stamped on create and on t
         if (options?.object === 'sys_comment') registered.push({ event, handler });
       },
       getSchema: () => ({ fields: declaresPair ? PAIR_FIELDS : { thread_id: {} } }),
-      find: async () => [],
-      findOne: async () => null,
     };
     installCommentAccessHooks(engine, () => null, silentLogger());
     // The stamp is the one handler that exempts no caller: drive every handler as the system.
