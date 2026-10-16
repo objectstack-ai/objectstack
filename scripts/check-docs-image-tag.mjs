@@ -414,8 +414,19 @@ export const DRIVER_PROMISE = {
   readme: 'docker/README.md',
   /** The README section whose first table lists what the image installs. */
   heading: '## Database drivers in the image',
-  /** The Dockerfile command that installs them. Matched on a trimmed line. */
-  installPrefix: 'RUN npm install -g',
+  /**
+   * The Dockerfile command that installs them. Matched at the start of a trimmed
+   * line, after one of `installLeaders` and a space.
+   */
+  installPrefix: 'npm install -g',
+  /**
+   * What may open the install line: `RUN` when the install starts its instruction,
+   * `&&` when an earlier step of the SAME instruction runs first. The image fetches
+   * a pinned npm in that earlier step (#23788). That fetch is an `npm install`
+   * without `-g`, so it is not an anchor, and the gate reads the driver line rather
+   * than the installer line.
+   */
+  installLeaders: ['RUN', '&&'],
   /**
    * Installed packages that are NOT drivers.
    *
@@ -692,21 +703,37 @@ export function splitPackageSpec(spec) {
 }
 
 /**
+ * The leader that opens `line` as the driver install, or `null` when it is not
+ * one: a trimmed line spelled `<leader> npm install -g` for a leader in
+ * `DRIVER_PROMISE.installLeaders`.
+ *
+ * @param {string} line
+ * @returns {string | null}
+ */
+export function installLeader(line) {
+  const trimmed = line.trim();
+  return DRIVER_PROMISE.installLeaders.find(
+    (leader) => trimmed.startsWith(`${leader} ${DRIVER_PROMISE.installPrefix}`),
+  ) ?? null;
+}
+
+/**
  * The drivers `docker/Dockerfile`'s global install puts into the image.
  *
  * Line continuations are joined before tokenising, because the install list is
  * one package per line -- reading only the anchor line would see the CLI and
  * none of the drivers, i.e. report an empty list over a populated one.
  *
- * The command is cut at the first `&&`: `npm cache clean --force` follows on the
- * same logical line and its tokens are not packages.
+ * The command runs from its leader to the next `&&`: `npm cache clean --force`
+ * follows on the same logical line and its tokens are not packages. A `&&` leader
+ * is the separator BEFORE the install, so it is dropped before that cut.
  *
  * @param {string} text
  * @returns {{ found: boolean, line: number, drivers: { name: string, range: string, raw: string }[] }}
  */
 export function extractInstalledDrivers(text) {
   const lines = text.split('\n');
-  const start = lines.findIndex((line) => line.trim().startsWith(DRIVER_PROMISE.installPrefix));
+  const start = lines.findIndex((line) => installLeader(line) !== null);
   if (start === -1) return { found: false, line: 0, drivers: [] };
 
   let joined = '';
@@ -717,7 +744,7 @@ export function extractInstalledDrivers(text) {
     if (!continues) break;
   }
 
-  const command = joined.split('&&')[0];
+  const command = joined.trim().slice(installLeader(lines[start]).length).split('&&')[0];
   const drivers = [];
   for (const token of command.trim().split(/\s+/)) {
     // Quotes are how a `^` range survives some shells; they are not part of the
@@ -813,7 +840,7 @@ export function checkDriverPromise({ root }) {
       file: DRIVER_PROMISE.dockerfile,
       line: 0,
       detail:
-        `no line starts with '${DRIVER_PROMISE.installPrefix}', so this gate cannot see what the image `
+        `no line starts with ${DRIVER_PROMISE.installLeaders.map((leader) => `'${leader} ${DRIVER_PROMISE.installPrefix}'`).join(' or ')}, so this gate cannot see what the image `
         + 'installs and would report OK over a comparison it never made. Either the install was re-spelled '
         + '-- re-anchor DRIVER_PROMISE.installPrefix -- or the image stopped installing drivers, in which '
         + `case delete the '${DRIVER_PROMISE.heading}' section of ${DRIVER_PROMISE.readme} and this limb in `
@@ -2062,6 +2089,67 @@ async function selfTest() {
       ),
       'a Dockerfile whose install line was re-spelled past the anchor is DRIVER-ANCHOR-LOST -- otherwise '
         + `this limb reports OK over a comparison it never made. Got ${JSON.stringify(driverNoInstall.findings.map((f) => f.kind))}`,
+    );
+
+    // #23788: the image fetches a pinned npm earlier in the SAME RUN, so the driver
+    // install opens with `&&`, and the line above it is an `npm install` too. The
+    // anchor must be the driver line, and the installer's spec is not a driver.
+    const PINNED_INSTALLER_INSTALL = [
+      'RUN npm install --prefix /tmp/os-installer-npm --no-save --no-audit --no-fund "npm@11.21.0" \\',
+      ' && export PATH="/tmp/os-installer-npm/node_modules/.bin:$PATH" \\',
+      ' && test "$(npm --version)" = "11.21.0" \\',
+      ' && npm install -g \\',
+      '      @objectstack/cli@${OS_CLI_VERSION} \\',
+      '      "pg@^8.0.0" \\',
+      '      "mysql2@^3.0.0" \\',
+      ' && npm cache clean --force \\',
+      ' && rm -rf /tmp/os-installer-npm',
+    ];
+    const pinnedText = driverDockerfile(PINNED_INSTALLER_INSTALL);
+    const pinnedInstalled = extractInstalledDrivers(pinnedText);
+    const pinnedDriverLine = pinnedText.split('\n').findIndex((l) => l.trim() === '&& npm install -g \\') + 1;
+    const pinnedFetchLine = pinnedText.split('\n').findIndex((l) => l.includes('"npm@11.21.0"')) + 1;
+    assert(
+      pinnedInstalled.found && pinnedDriverLine > 0 && pinnedInstalled.line === pinnedDriverLine
+        && pinnedInstalled.line !== pinnedFetchLine,
+      `with a pinned-npm fetch ahead of it, the anchor is the \`&& npm install -g\` driver line (${pinnedDriverLine}), `
+        + `not the installer line (${pinnedFetchLine}) -- got line ${pinnedInstalled.line}`,
+    );
+    assert(
+      pinnedInstalled.drivers.map((d) => d.raw).join(',') === 'pg@^8.0.0,mysql2@^3.0.0',
+      'the driver line under a `&&` leader yields exactly the two driver specs: the leader is dropped before '
+        + `the cut at the next \`&&\` -- got ${JSON.stringify(pinnedInstalled.drivers.map((d) => d.raw))}`,
+    );
+    assert(
+      !pinnedInstalled.drivers.some((d) => d.name === 'npm' || d.raw.includes('11.21.0')),
+      `the installer's \`npm@11.21.0\` is not a driver -- got ${JSON.stringify(pinnedInstalled.drivers.map((d) => d.raw))}`,
+    );
+    const driverPinned = driverFixture('drv-pinned-installer', PINNED_INSTALLER_INSTALL, CLEAN_ROWS);
+    assert(
+      driverPinned.findings.length === 0
+        && driverPinned.stats.installed === 2 && driverPinned.stats.promised === 2 && driverPinned.stats.matched === 2,
+      'the pinned-installer Dockerfile agreeing with the table is green AND compared 2 against 2 -- '
+        + `got ${JSON.stringify({ findings: driverPinned.findings.map((f) => f.kind), stats: driverPinned.stats })}`,
+    );
+    const driverPinnedDrift = driverFixture('drv-pinned-drift', PINNED_INSTALLER_INSTALL, [
+      '| `postgres://` | `pg@^7.0.0` |',
+      CLEAN_ROWS[1],
+    ]);
+    assert(
+      driverPinnedDrift.findings.length === 1 && driverPinnedDrift.findings[0].kind === 'DRIVER-RANGE-MISMATCH',
+      'a drifted range is still refused when the driver line opens with `&&` -- '
+        + `got ${JSON.stringify(driverPinnedDrift.findings.map((f) => f.kind))}`,
+    );
+    // An npm UPGRADE spelled as a global install ahead of the drivers is an anchor
+    // itself. It is read as the install line and refused, never skipped into a green.
+    const driverGlobalUpgrade = driverFixture('drv-global-npm-upgrade', [
+      'RUN npm install -g npm@11.21.0 \\',
+      ...CLEAN_INSTALL.map((line) => line.replace(/^RUN /, ' && ')),
+    ], CLEAN_ROWS);
+    assert(
+      driverGlobalUpgrade.findings.some((f) => f.kind === 'DRIVER-UNDOCUMENTED' && f.detail.includes('npm@11.21.0')),
+      'a global `npm install -g npm@…` ahead of the driver line is read as the install line and refused '
+        + `(DRIVER-UNDOCUMENTED naming npm@11.21.0) -- got ${JSON.stringify(driverGlobalUpgrade.findings.map((f) => f.kind))}`,
     );
 
     const driverEmptyInstall = driverFixture('drv-emptyinstall', [
