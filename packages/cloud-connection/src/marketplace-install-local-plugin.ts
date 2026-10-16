@@ -740,7 +740,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
         if (entries.length === 0) return;
 
-        let manifestService: { register(m: any): void | Promise<void> } | null = null;
+        let manifestService: { register(m: any, options?: { source?: 'code' | 'marketplace' }): void | Promise<void> } | null = null;
         try {
             manifestService = ctx.getService('manifest') as any;
         } catch {
@@ -777,7 +777,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // the metadata service (late-registration bridge in
                 // ObjectQLPlugin) — wait for that so metadata consumers see
                 // the package as soon as rehydrate reports success.
-                await manifestService!.register(entry.manifest);
+                // [#23972] Every ledger entry is a marketplace install, so its
+                // registry row says so (`source: 'marketplace'`) after a restart
+                // exactly as it did when it was installed.
+                await manifestService!.register(entry.manifest, { source: 'marketplace' });
                 // Sync schemas so the driver creates tables for the newly-
                 // registered objects (idempotent — already-synced tables
                 // are no-ops).
@@ -1551,7 +1554,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // Awaited: register also bridges the manifest's objects into the
             // metadata service — a caller that reads metadata right after a
             // 200 (AI describe_object, Studio object list) must see them.
-            await manifestService.register(manifest);
+            // [#23972] The registry row records where this package came
+            // from: the marketplace (`source: 'marketplace'`).
+            await manifestService.register(manifest, { source: 'marketplace' });
         } catch (err: any) {
             const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard

@@ -56,6 +56,7 @@ import type { IDataDriver } from './data-driver';
 import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-function.zod';
 import type { ServiceObject } from '../data/object.zod';
 import type { BaseEngineOptions, EngineQueryOptions } from '../data/data-engine.zod';
+import type { InstalledPackageSource } from '../kernel/package-registry.zod';
 
 /**
  * The engine's schema-registry view — the members reached through the
@@ -110,8 +111,12 @@ export interface EngineSchemaRegistryView {
     // protocol service writes through.
     /** One installed package by id, or `undefined` — the duplicate-install guard's reader. */
     getPackage(id: string): unknown;
-    /** Register a package manifest in the in-memory registry. */
-    installPackage(manifest: unknown, settings?: Record<string, unknown>): unknown;
+    /**
+     * Register a package manifest in the in-memory registry. `source` is the
+     * caller's statement of where the package came from, stamped on the row; a
+     * value outside the closed set is refused.
+     */
+    installPackage(manifest: unknown, source: InstalledPackageSource, settings?: Record<string, unknown>): unknown;
     /** Drop a package from the registry; `false` when no package had that id. */
     uninstallPackage(id: string): boolean;
     /** Flip a package to enabled; `undefined` when no package had that id. */

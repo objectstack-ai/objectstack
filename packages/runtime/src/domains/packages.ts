@@ -268,6 +268,9 @@ export function createPackagesDomain(deps: DomainHandlerDeps): DomainRoute {
  */
 const INSTALLED_PACKAGE_RESPONSE_FIELDS = [
     'manifest',
+    // [#23972] The origin the registering door stamped on the row — read off
+    // the record as-is, ⛔ never derived here from `writable` or a second list.
+    'source',
     'status',
     'enabled',
     'installedAt',
@@ -1406,7 +1409,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // the primitive's, so no-range and unparsed ranges warn the
                     // same way on both arms.
                     assertProtocolCompat(manifest);
-                    pkg = registry.installPackage(manifest, settings);
+                    // [#23972] The same origin the protocol primitive stamps:
+                    // a package installed through this door is authored.
+                    pkg = registry.installPackage(manifest, 'authored', settings);
                 }
             } catch (err) {
                 // [#21727] The protocol refusal's typed carrier, recognised

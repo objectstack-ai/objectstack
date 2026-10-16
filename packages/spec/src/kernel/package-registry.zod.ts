@@ -47,6 +47,31 @@ export const PackageStatusEnum = z.enum([
 export type PackageStatus = z.input<typeof PackageStatusEnum>;
 
 /**
+ * Where an installed package came from — the closed origin every registry row
+ * carries, stamped by the door that registered it.
+ *
+ * - `code` — registered by the running deployment's own code: a `defineStack()`
+ *   host's packages, a plugin's bundled manifest, a platform package
+ *   (`ObjectQL.registerApp`, the `manifest` service's default).
+ * - `marketplace` — installed from the marketplace: the install-local plugin
+ *   registers it (install and boot rehydrate from its ledger) and says so.
+ * - `authored` — a database-authored package (a Studio base, a duplicate, an
+ *   HTTP install) installed through `installPackage` and rehydrated from
+ *   `sys_packages`.
+ *
+ * ⛔ The value is the PRODUCER's statement, made at the moment it registers the
+ * package; no reader derives it from other keys (`writable`, `manifest.scope`,
+ * a second list). `SchemaRegistry.installPackage` takes it as a required
+ * argument and refuses a value outside this set.
+ */
+export const InstalledPackageSourceSchema = z.enum([
+  'code',
+  'marketplace',
+  'authored',
+]).describe('Where the installed package came from: code (registered by the deployment\'s own code), marketplace (installed from the marketplace), or authored (a database-authored package)');
+export type InstalledPackageSource = z.infer<typeof InstalledPackageSourceSchema>;
+
+/**
  * Installed Package Schema
  * 
  * Wraps a ManifestSchema with runtime lifecycle state.
@@ -84,6 +109,13 @@ export const InstalledPackageSchema = lazySchema(() => z.object({
    * rejected by name: it makes neither stage checkable (Prime Directive #12).
    */
   manifest: ManifestSchema.describe('Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema`'),
+
+  /**
+   * Where this package came from — see {@link InstalledPackageSourceSchema}.
+   * Required: every door that registers a package states it, and the
+   * registry refuses a registration that does not.
+   */
+  source: InstalledPackageSourceSchema,
 
   /**
    * Current lifecycle status.
