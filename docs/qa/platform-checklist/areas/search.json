@@ -682,7 +682,7 @@
       "title": "Global search (GET /api/v1/search) skips what the caller cannot read instead of failing: an unreadable object is never queried, named or counted; a readable object is searched only on fields the caller may query; row scope still narrows every searched object",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -701,7 +701,7 @@
           "why": "supplies the one persona every clause rests on: a non-admin whose read set excludes some objects (acceptance[0]-[2]), narrows showcase_invoice to its own rows (acceptance[3]) and excludes some sys_user search columns (acceptance[4]). Run as a seeded demo persona instead, the clauses fail the same way the recipe's own notes record: one is refused at the object gate and the other reads everything"
         },
         "knownGaps": [
-          "#21880 (open): a field-narrowed search is not fully governed by the narrowing when the optional pinyin search companion is on (OS_SEARCH_PINYIN_ENABLED). Run acceptance[4] with the flag OFF (the stock default). A hit seen with the flag ON is recorded against #21880, not filed as a new finding",
+          "#21880 (open): a field-narrowed search is not fully governed by the narrowing when the optional pinyin search companion is on (OS_SEARCH_PINYIN_ENABLED). Run acceptance[4] with the flag OFF, set EXPLICITLY: boot with OS_SEARCH_PINYIN_ENABLED=false. On the showcase the flag is NOT off by default — unset, it derives ON from the zh-CN entry in i18n.supportedLocales (packages/types/src/env.ts resolveSearchPinyinEnabled; the stock boot loads pinyin-search and backfills the companion). A hit seen with the flag ON is recorded against #21880, not filed as a new finding",
           "the two #21880 cases (acceptance[3] row scope on a searched object, acceptance[4] a term only in a hidden field) have no end-to-end pin yet; #21879's dogfood pins object-level skipping only, and the hidden-field narrowing is unit-pinned. A run of this item is their only end-to-end reading until #21880 adds them",
           "if no stock field satisfies acceptance[4]'s premise (the hidden column holds no value unique to it on this boot), record acceptance[4] blocked(fixture) and score the mechanism from the unit pin. Do not edit sys_user directly to plant one"
         ]
@@ -777,6 +777,12 @@
           "date": "2026-10-06",
           "change": "new: PR #21879 made global search skip the objects and fields a caller cannot read instead of failing the whole request with 403, and no item asserted it. search.console-global-search drives the same route but only for row-level parity. This item adds the object-level skip (never queried, named or counted; an explicit objects= naming the object answers like no such object; the object still refused at its own door), plus the two cases #21880 lists: row scope still narrows a searched object, and a term only in a field hidden from the caller yields no hit. #21880's open pinyin-companion finding is recorded as a knownGap with the flag-off instruction. The persona reuses the area recipe qa-contributor-bound-member",
           "ref": "#21932"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-16",
+          "change": "knownGaps[0] called pinyin OFF 'the stock default' (#23878 checklist-accuracy finding). On the showcase, OS_SEARCH_PINYIN_ENABLED unset derives ON from the zh-CN locale (resolveSearchPinyinEnabled; re-measured on main c91af8ed6: the stock boot loads com.objectstack.plugin.pinyin-search and logs the companion backfill), so the run must set the flag false explicitly for acceptance[4]. Wording only, no re-run owed",
+          "ref": "#24036"
         }
       ]
     }

@@ -9,7 +9,7 @@
       "title": "agent / tool / skill metadata kinds author, persist and list over the meta surface — retired keys reject with prescriptions, the closed agent kind has no runtime write door",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -68,7 +68,7 @@
         {
           "clause": "the runtime write door matches the declared registry posture — ALL sides: PUT ?mode=draft succeeds for a RUNTIME-CREATED skill (and tool) name — one no package ships (allowRuntimeCreate:true); the same PUT against a PACKAGE-SHIPPED skill/tool is refused 403 NOT_OVERRIDABLE (allowEnvironmentOverlay:false, ee58392e1 — ADR-0005 ai row); and the agent kind has NO governed runtime write path (allowRuntimeCreate:false; 'for agents, the code is the record', metadata-plugin.zod.ts — migrateStoredMetadata reports agent rows 'skipped' by design)",
           "oracle": "api",
-          "verify": "the runtime-created skill draft PUT (qa_runtime_skill) returns 200 and the draft is readable via GET /api/v1/meta/skill/qa_runtime_skill?state=draft — ⚠️ the READ parameter is ?state=draft, not ?mode=draft: rest-server.ts keys the draft projection on req.query.state, while ?mode=draft is the WRITE-side parameter, so re-reading with ?mode=draft serves the active item (or 404s when none is active) and reads like the draft never landed. The draft PUT against the package-shipped qa_probe_skill answers 403 code NOT_OVERRIDABLE (sys-metadata-repository.ts assertAllowed, override-artifact intent) — CORRECT, not a bug: a 200 there would be a per-org overlay the registry row forbids. The agent runtime save is refused/unsupported (capture the actual status), and that refusal is recorded as CORRECT, not filed as a bug",
+          "verify": "the runtime-created skill draft PUT (qa_runtime_skill) returns 200 and the draft is readable via GET /api/v1/meta/skill/qa_runtime_skill?state=draft — ⚠️ the READ parameter is ?state=draft, not ?mode=draft: rest-server.ts keys the draft projection on req.query.state, while ?mode=draft is the WRITE-side parameter, and a GET carrying ?mode=draft answers 400 VALIDATION_ERROR ('The \"mode\" query parameter is not supported by this endpoint') — the read door refuses a parameter it does not understand instead of serving the active item. The draft PUT against the package-shipped qa_probe_skill answers 403 code NOT_OVERRIDABLE (sys-metadata-repository.ts assertAllowed, override-artifact intent) — CORRECT, not a bug: a 200 there would be a per-org overlay the registry row forbids. The agent runtime save is refused/unsupported (capture the actual status), and that refusal is recorded as CORRECT, not filed as a bug",
           "evidence": "the three PUT responses (runtime-created skill 200 + its ?state=draft read, package-shipped skill 403, agent refusal)"
         },
         {
@@ -107,6 +107,12 @@
           "date": "2026-10-04",
           "change": "A4 / step 7 re-pointed: the draft PUT targets a RUNTIME-CREATED skill/tool name (200, readable via ?state=draft); the same PUT against the package-shipped probe is 403 NOT_OVERRIDABLE, recorded as correct — tool/skill allowOrgOverride was rolled back to false (metadata-plugin.zod.ts tool/skill registry rows, sys-metadata-repository.ts assertAllowed). Assertion defect: the clause expected an overlay of a package-shipped skill to succeed. Source ee58392e1 (#6608)",
           "ref": "#21735"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "clause 4's verify said a GET with ?mode=draft serves the active item or 404s (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: PUT /meta/skill/qa_runtime_skill_24036?mode=draft → 200 state draft; GET ?state=draft → 200 with the draft; GET ?mode=draft → 400 VALIDATION_ERROR naming the unsupported mode parameter; the bare GET → 404 (no active item). The agent runtime save answers 403 NOT_CREATABLE (code-only type). The read-parameter warning keeps its point with the current answer",
+          "ref": "#24036"
         }
       ]
     },
@@ -115,7 +121,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -165,9 +171,9 @@
           "evidence": "the 401 response incl. headers"
         },
         {
-          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, list_actions, run_action, validate_expression",
+          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, list_actions, run_action, resume_run, validate_expression",
           "oracle": "network",
-          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it — graceful degradation, record which)",
+          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it, and resume_run only when the host cannot resume runs — both graceful degradation; record which)",
           "evidence": "the session trace + tool-name list"
         },
         {
@@ -194,7 +200,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — the #3358 sweep could not drive MCP because the config was off; both sides are now explicit", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-10-16", "change": "clause 5's tool list omitted resume_run (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 with an admin osk_ key: tools/list returns twelve tools, resume_run among them; mcp-http-tools.ts registers it only when the bridge exposes resumeRun, the same optional shape as aggregate_records, so the verify now names that degradation too", "ref": "#24036" }
       ]
     },
     {
@@ -323,7 +330,7 @@
       "title": "MCP run_action requires ai.exposed (fail-closed with the prescription), filters list_actions to exposed+permitted, refuses system objects, and logs the trusted-elevation audit line",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -335,7 +342,7 @@
         ]
       },
       "steps": [
-        "over MCP, call list_actions (no objectName, then objectName: 'showcase_task'); record which actions appear",
+        "over MCP, call list_actions with NO arguments (its input schema is strict and empty: an objectName argument is refused — the tool result is isError with 'MCP error -32602: Input validation error … Unrecognized key(s) on this list_actions call: `objectName`'); record which actions appear",
         "call run_action on the UNDECLARED action (actionName: 'showcase_mark_done', a real recordId); capture the refusal",
         "verify the refusal left zero side effects: read the task over REST — status unchanged",
         "call run_action on the exposed action (actionName: 'showcase_portfolio_snapshot'); capture the result payload ({ ok, scope: 'global', accounts, projects, invoices })",
@@ -388,7 +395,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §A9", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-10-16", "change": "step 1 called list_actions with objectName: 'showcase_task' as a second form (#23878 checklist-accuracy finding). list_actions takes no arguments: re-measured on main c91af8ed6 the objectName call answers isError with MCP error -32602 'Unrecognized key(s) … objectName', while the no-argument call returns [showcase_portfolio_snapshot]. Re-run of the item's clauses on that boot: showcase_mark_done refused with the actionAiExposureError prescription and the task unchanged; showcase_portfolio_snapshot returns accounts 14 / projects 5 / invoices 12, equal to the REST totals; the [action-audit] MCP run_action line names the caller; a sys_* object is refused", "ref": "#24036" }
       ]
     },
     {
@@ -396,14 +404,14 @@
       "title": "MCP validate_expression returns build-accurate errors/warnings/inferred type + in-scope context for every site variant, and fail-closes on unknown/system objects",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "fixtures": {
         "app": "showcase",
         "requires": [
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)",
-          "a seeded object with number + text + date fields to probe against (showcase_task: est_hours/title/created_at qualify)"
+          "a seeded object with number + text + date fields to probe against (showcase_task: estimate_hours/title/created_at qualify)"
         ]
       },
       "variants": [
@@ -413,10 +421,10 @@
         "site: template"
       ],
       "steps": [
-        "over MCP, call validate_expression { objectName: 'showcase_task', expression: 'record.est_hours * 1.1', site: 'formula' } — a sound formula",
-        "call it with a BARE field ref in formula site ('est_hours * 1.1') and with an unknown field ('record.est_hourz * 1'); capture both error sets",
+        "over MCP, call validate_expression { objectName: 'showcase_task', expression: 'record.estimate_hours * 1.1', site: 'formula' } — a sound formula",
+        "call it with a BARE field ref in formula site ('estimate_hours * 1.1') and with an unknown field ('record.estimate_hourz * 1'); capture both error sets",
         "call it with a text field misused in arithmetic ('record.title * 2'); capture the WARNING (not error)",
-        "call the flow_condition site with bare fields ('est_hours > 8') — must validate clean",
+        "call the flow_condition site with bare fields ('estimate_hours > 8') — must validate clean",
         "call it against a nonexistent object and against a sys_* object; capture both refusals",
         "record the inScope payload (dialect/roots/fields/functions) returned alongside each verdict"
       ],
@@ -424,7 +432,7 @@
         {
           "clause": "the sound formula returns ok:true with an inferredType and the in-scope fields/functions — the same verdict `objectstack build` would give (the tool exists so agents self-correct BEFORE authoring, #1928)",
           "oracle": "api",
-          "verify": "response has ok:true, inferredType present, inScope.fields includes est_hours",
+          "verify": "response has ok:true, inferredType present, inScope.fields includes estimate_hours",
           "evidence": "the response"
         },
         {
@@ -436,7 +444,7 @@
         {
           "clause": "site changes the binding rules: bare fields are CORRECT in flow_condition and wrong in formula — the same expression flips verdict across the two sites",
           "oracle": "api",
-          "verify": "'est_hours > 8' ok under flow_condition, error under formula",
+          "verify": "'estimate_hours > 8' ok under flow_condition, error under formula",
           "evidence": "the paired responses"
         },
         {
@@ -457,7 +465,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 §9", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-10-16", "change": "the probe field is showcase_task.estimate_hours, not est_hours (#23878 checklist-accuracy finding): est_hours answers ok:false with unknown-field est_hours, so every step built on it measured a typo, not the validator. Re-run on main c91af8ed6 over MCP HTTP: record.estimate_hours * 1.1 ok:true inferredType number, inScope.fields includes estimate_hours; the bare formula ref is a bare-reference error; estimate_hourz is unknown-field with did-you-mean estimate_hours; record.title * 2 is a type-mismatch WARNING; 'estimate_hours > 8' is clean under flow_condition and a bare-reference error under formula; an unknown object and sys_user are refused", "ref": "#24036" }
       ]
     },
     {
