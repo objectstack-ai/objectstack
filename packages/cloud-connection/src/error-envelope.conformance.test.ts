@@ -95,9 +95,18 @@ function makeC(opts: {
     body?: unknown;
     params?: Record<string, string>;
     headers?: Record<string, string>;
+    /**
+     * [#23914] A body as the client SENT it, served the way Hono 4.13's
+     * `HonoRequest` serves one: `json()` is the cached `text()` then
+     * `JSON.parse`, so a body that does not parse rejects `json()` and still
+     * reads back from `text()`. Takes the place of `body`.
+     */
+    raw?: { contentType: string; text: string };
 } ): { c: any; captured: Captured } {
     const captured: Captured = { status: 0, body: undefined };
     const h = new Headers(opts.headers ?? {});
+    if (opts.raw) h.set('content-type', opts.raw.contentType);
+    const sent = opts.raw ? Promise.resolve(opts.raw.text) : undefined;
     const c: any = {
         req: {
             url: opts.url,
@@ -105,7 +114,8 @@ function makeC(opts: {
             path: new URL(opts.url).pathname,
             raw: new Request(opts.url, { headers: h }),
             header: (n: string) => h.get(n) ?? undefined,
-            json: async () => opts.body ?? {},
+            json: sent ? () => sent.then((t) => JSON.parse(t)) : async () => opts.body ?? {},
+            text: sent ? () => sent : async () => JSON.stringify(opts.body ?? {}),
             param: (n: string) => opts.params?.[n],
             query: () => undefined,
         },
@@ -209,12 +219,12 @@ async function mountCloudConnection(opts: {
 async function driveCloudConnection(
     routes: Map<string, Handler>,
     key: string,
-    opts: { body?: unknown } = {},
+    opts: { body?: unknown; raw?: { contentType: string; text: string } } = {},
 ): Promise<Captured> {
     const handler = routes.get(key);
     if (!handler) throw new Error(`no handler for ${key} (have: ${[...routes.keys()].join(', ')})`);
     const [method, path] = key.split(' ');
-    const { c, captured } = makeC({ url: `${HOST}${path}`, method, body: opts.body });
+    const { c, captured } = makeC({ url: `${HOST}${path}`, method, body: opts.body, raw: opts.raw });
     await handler(c);
     return captured;
 }
@@ -398,6 +408,55 @@ describe('plugin-route door — MarketplaceProxyPlugin error exits (#9267)', () 
         });
         await handler(c, async () => 'NEXT');
         expectDeclaredErrorEnvelope(captured, { status: 502, code: 'MARKETPLACE_PROXY_FAILED' });
+    });
+});
+
+// ── [#23914] An unparseable body is refused, never read as no body ───────────
+
+/**
+ * Each of these routes read its body as `try { body = await c.req.json() }
+ * catch { body = {} }`, so a truncated body was answered as if the client had
+ * sent none — `/bind/poll` with `400 "device_code is required"` for a body that
+ * carried `device_code` and lacked a brace. Now a body sent as
+ * `application/json` that does not parse is refused with its own `400
+ * INVALID_REQUEST`, whose message names the parse failure and echoes nothing.
+ * CONTROL: an empty JSON body is still no body, so the required-field answer
+ * it always gave is unchanged.
+ */
+describe('plugin-route door — CloudConnectionPlugin refuses an unparseable body (#23914)', () => {
+    const json = (text: string) => ({ contentType: 'application/json', text });
+
+    function expectParseRefusal(captured: Captured, sent: string) {
+        expectDeclaredErrorEnvelope(captured, { status: 400, code: 'INVALID_REQUEST' });
+        expect(captured.body.error.message).toMatch(/parsed as JSON/);
+        expect(captured.body.error.message).not.toContain(sent.trim());
+    }
+
+    it('POST /bind/start with a truncated body → 400, before anything else is read', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true });
+        const sent = '{"environment_id": "env-123"';
+        expectParseRefusal(await driveCloudConnection(routes, `POST ${CC}/bind/start`, { raw: json(sent) }), sent);
+    });
+
+    it('POST /bind/poll with a truncated body carrying device_code → the parse refusal, not "device_code is required"', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1' });
+        const sent = '{"device_code": "dc_1"';
+        expectParseRefusal(await driveCloudConnection(routes, `POST ${CC}/bind/poll`, { raw: json(sent) }), sent);
+    });
+
+    it('POST /install with a truncated body carrying package_id → the parse refusal, not "package_id is required"', async () => {
+        const routes = await mountCloudConnection({
+            resolvesEnvironment: true, userId: 'usr_1', controlPlaneApiKey: 'svc-key',
+        });
+        const sent = '{"package_id": "pkg_1"';
+        expectParseRefusal(await driveCloudConnection(routes, `POST ${CC}/install`, { raw: json(sent) }), sent);
+    });
+
+    it('CONTROL — an empty JSON body is still no body: /bind/poll answers its required-field 400', async () => {
+        const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1' });
+        const captured = await driveCloudConnection(routes, `POST ${CC}/bind/poll`, { raw: json('') });
+        expectDeclaredErrorEnvelope(captured, { status: 400, code: 'INVALID_REQUEST' });
+        expect(captured.body.error.message).toMatch(/device_code/);
     });
 });
 
