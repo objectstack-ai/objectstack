@@ -320,6 +320,21 @@ export const StandaloneStackConfigSchema = z.object({
      * turning hydration ON, and this function keeps it on unless told.
      */
     hydrateMetadataFromDb: z.boolean().optional(),
+    /**
+     * [#23816] Boot with schema sync SKIPPED: the `ObjectQLPlugin` option the
+     * `OS_SKIP_SCHEMA_SYNC=1` posture names, passed explicitly. The engine then
+     * runs no CREATE TABLE / ALTER TABLE and tells each driver its objects
+     * DDL-free (`registerObjectMetadata`), which is all the coercion registries
+     * and drift detection need.
+     *
+     * Unset, the plugin keeps reading `OS_SKIP_SCHEMA_SYNC` exactly as before,
+     * so every serving boot is unchanged. `bootSchemaStack` sets it for one
+     * case only: a command that asked for deferred DDL against a datasource
+     * whose transport cannot defer it (the Turso REMOTE transport), and that
+     * declared that a boot with no schema sync serves it as well
+     * (`os migrate organization-ownership`).
+     */
+    skipSchemaSync: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -964,6 +979,9 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             environmentId,
             runPlatformMigrations: cfg.runPlatformMigrations ?? true,
             hydrateMetadataFromDb: cfg.hydrateMetadataFromDb !== false,
+            // [#23816] Only a `true` is passed through, so a serving boot keeps
+            // the plugin's own `OS_SKIP_SCHEMA_SYNC` reading.
+            ...(cfg.skipSchemaSync === true ? { skipSchemaSync: true } : {}),
             // [#21391] Only a `false` is passed through, so a serving boot
             // hands the plugin exactly the options it always did.
             ...(cfg.armLifecycleSweep === false ? { lifecycle: { enabled: false } } : {}),

@@ -135,6 +135,13 @@ export interface SchemaStack {
    * migrate plan` / `apply` print it beside the database in both faces.
    */
   dbSource: DatabaseSource;
+  /**
+   * [#23816] What this boot did with schema sync: `'deferred'` (held back, see
+   * {@link pendingSchemaWork}), `'skipped'` (none attempted, the boot's
+   * `deferredDdlUnsupported: 'skip-schema-sync'` answer for a transport that
+   * cannot defer), or `'performed'` (the ordinary additive sync ran).
+   */
+  schemaSync: 'deferred' | 'skipped' | 'performed';
   managedTableCount: number;
   /** The booted kernel — `getService('objectql')` etc. for one-shot commands
    *  beyond schema migration. */
@@ -380,6 +387,17 @@ class DeferSchemaDdlPlugin {
   /** Every driver this boot deferred, in the order it was armed. */
   readonly drivers: SqlDriverLike[] = [];
 
+  /**
+   * [#23816] `exemptPrimary`: leave the engine's DEFAULT driver un-armed. Set
+   * only by a `skipSchemaSync` boot (`deferredDdlUnsupported:
+   * 'skip-schema-sync'`), where the engine sends that driver no DDL at all and
+   * its transport would refuse the arm. Every other driver is armed as before.
+   */
+  constructor(private readonly options: { exemptPrimary?: boolean } = {}) {}
+
+  /** The driver {@link options}.exemptPrimary leaves un-armed, once `init()` has found it. */
+  private exempt: unknown = null;
+
   /** Engines whose `registerDriver` is shadowed, and what to restore. */
   private readonly shadows: Array<{
     engine: Record<string, unknown>;
@@ -388,6 +406,7 @@ class DeferSchemaDdlPlugin {
   }> = [];
 
   init = async (ctx: any) => {
+    if (this.options.exemptPrimary) this.exempt = defaultDriverOf(ctx);
     for (const name of SQL_DRIVER_SERVICES) {
       try { this.arm(ctx.getService(name)); } catch { /* not registered */ }
     }
@@ -410,6 +429,7 @@ class DeferSchemaDdlPlugin {
   /** Arm one driver. Idempotent; a non-SQL driver has nothing to defer. */
   arm(driver: unknown): void {
     if (!driver || typeof driver !== 'object') return;
+    if (driver === this.exempt) return;
     const d = driver as SqlDriverLike;
     if (this.drivers.includes(d)) return;
     if (typeof d.setDeferredDdl === 'function') {
@@ -476,6 +496,43 @@ class DeferSchemaDdlPlugin {
       else delete engine.registerDriver;
     }
   }
+}
+
+/**
+ * [#23816] The engine's DEFAULT driver — the primary datasource's — read
+ * through the accessors the engine makes public, or `null` when the engine
+ * names none yet.
+ */
+function defaultDriverOf(ctx: { getService?: (name: string) => unknown }): unknown {
+  for (const name of ENGINE_SERVICES) {
+    let engine: { getDefaultDriverName?: () => unknown; getDriverByName?: (name: string) => unknown } | undefined;
+    try { engine = ctx.getService?.(name) as typeof engine; } catch { /* not registered */ }
+    const driverName = engine?.getDefaultDriverName?.();
+    if (typeof driverName === 'string') return engine?.getDriverByName?.(driverName) ?? null;
+  }
+  return null;
+}
+
+/**
+ * [#23816] Does the transport the boot will open for `resolved` refuse
+ * deferred schema DDL? Today exactly the Turso REMOTE transport. The
+ * standalone stack builds a `turso` datasource as `{ url, authToken }`, so
+ * `TursoDriver.detectMode` reads the resolved URL exactly as the driver the
+ * boot constructs will: the driver package answers, not a copy of its rule.
+ *
+ * Loaded lazily, as every driver is from this module (#5726). A package that
+ * cannot be loaded answers `false`, and the boot then fails where it always
+ * has, in `@objectstack/runtime`'s loader, naming the package to install.
+ */
+async function transportRefusesDeferredDdl(resolved: { driver: string; url: string }): Promise<boolean> {
+  if (resolved.driver !== 'turso') return false;
+  let detectMode: ((config: { url: string }) => string) | undefined;
+  try {
+    detectMode = (await import('@objectstack/driver-turso')).TursoDriver.detectMode;
+  } catch {
+    return false;
+  }
+  return detectMode({ url: resolved.url }) === 'remote';
 }
 
 /**
@@ -738,6 +795,32 @@ export async function bootSchemaStack(
      */
     deferSchemaDdl?: boolean;
     /**
+     * [#23816] With {@link deferSchemaDdl}: what the boot does when the
+     * PRIMARY datasource's transport cannot defer schema DDL — the Turso REMOTE
+     * transport (`TursoDriver.detectMode` answers `remote` for the URL this boot
+     * resolved), whose driver refuses the deferral.
+     *
+     *  - `'refuse'` (the default): arm the deferral anyway, so the boot fails
+     *    with the driver's own refusal. Right for every command whose dry run
+     *    lists the held-back work (`os migrate plan` / `apply`): a boot that
+     *    holds nothing back cannot list it.
+     *  - `'skip-schema-sync'`: boot with schema sync SKIPPED instead
+     *    (`skipSchemaSync`, the posture `OS_SKIP_SCHEMA_SYNC=1` names). No DDL is
+     *    held back because none is attempted, and each object is told to its
+     *    driver DDL-free (`registerObjectMetadata`), so drift detection still
+     *    diffs the declared set. The boot reports it ({@link SchemaStack.schemaSync}),
+     *    {@link SchemaStack.pendingSchemaWork} is `[]` and
+     *    {@link SchemaStack.tableAbsent} measures nothing. Only a command that
+     *    needs no table this release would CREATE may ask for it; today that is
+     *    `os migrate organization-ownership`, which runs against an environment
+     *    whose own boot has already run the additive sync.
+     *
+     * Decided from the resolved URL before anything connects, never by catching
+     * the driver's refusal, and only for the primary: any other datasource the
+     * boot connects is still armed, and refuses as before if it cannot defer.
+     */
+    deferredDdlUnsupported?: 'refuse' | 'skip-schema-sync';
+    /**
      * Boot WITHOUT BRINGING A DATABASE INTO EXISTENCE (#6743).
      *
      * `deferSchemaDdl` stopped the boot from writing DDL and seed rows, but the
@@ -836,17 +919,23 @@ export async function bootSchemaStack(
   const envLoad = loadProjectEnvFiles(projectRoot, { dev: opts.serveFlags?.dev === true });
 
   const { createStandaloneStack, Runtime, resolveStandaloneDatabase } = await import('@objectstack/runtime');
-  const defer = opts.deferSchemaDdl === true;
 
   // The inputs the database is resolved from — by `createStandaloneStack`
   // below, the occupancy probe before it, and the telemetry sibling's key.
   const databaseInput = { projectRoot, ...(opts.databaseUrl ? { databaseUrl: opts.databaseUrl } : {}) };
+  const resolvedDatabase = resolveStandaloneDatabase(databaseInput);
+
+  // [#23816] Deferred, skipped, or performed: see `deferredDdlUnsupported`.
+  const skipSchemaSync = opts.deferSchemaDdl === true
+    && opts.deferredDdlUnsupported === 'skip-schema-sync'
+    && (await transportRefusesDeferredDdl(resolvedDatabase));
+  const defer = opts.deferSchemaDdl === true && !skipSchemaSync;
 
   // [#22581] Who named the database: the resolution `createStandaloneStack`
   // makes below (and the occupancy probe made before it), from the same inputs.
   const dbSource = resolveDatabaseSource(
     envLoad,
-    resolveStandaloneDatabase(databaseInput),
+    resolvedDatabase,
     opts.databaseUrl || undefined,
   );
 
@@ -898,6 +987,8 @@ export async function bootSchemaStack(
     runPlatformMigrations: false,
     // [#22371] Off only when the caller asks; see the option.
     ...(opts.hydrateMetadata === false ? { hydrateMetadataFromDb: false } : {}),
+    // [#23816] See `deferredDdlUnsupported`.
+    ...(skipSchemaSync ? { skipSchemaSync: true } : {}),
   });
 
   // No HTTP, no cluster — this is a one-shot schema operation.
@@ -931,7 +1022,9 @@ export async function bootSchemaStack(
     warn: (message) => console.warn(message),
     oneShot: { readOnlyProbe: opts.readOnlyProbe === true },
   })) ?? null;
-  const deferral = defer ? new DeferSchemaDdlPlugin() : null;
+  // [#23816] A skip-sync boot still arms every driver but the primary: any
+  // other datasource's DDL stays held back, as on a deferred boot.
+  const deferral = defer || skipSchemaSync ? new DeferSchemaDdlPlugin({ exemptPrimary: skipSchemaSync }) : null;
   if (deferral) {
     await kernel.use(deferral as any);
   }
@@ -1005,7 +1098,7 @@ export async function bootSchemaStack(
   // so instead of reading as coverage. Runs only when this boot actually
   // composed a host; every other caller is untouched.
   if (opts.composeHostStack === true && composition.notes.length > 0) {
-    const measured = await measureComposedCoverage(kernel, plannedDrivers, defer);
+    const measured = await measureComposedCoverage(kernel, plannedDrivers, defer, { ddlFree: skipSchemaSync });
     composition.coverage = measured.coverage;
     composition.notes.push(...measured.notes);
   }
@@ -1022,7 +1115,8 @@ export async function bootSchemaStack(
   }
   // [#23022] …and the one table outside the object set, `sys_packages`, which
   // no driver deferral can see. Read-only here; `flushSchemaDdl` creates it.
-  let packageTable = deferral ? await planPackageTable(kernel, composition.notes) : null;
+  // Not on a skip-sync boot: the table lives on the primary, which held nothing back.
+  let packageTable = defer ? await planPackageTable(kernel, composition.notes) : null;
   if (packageTable) pendingSchemaWork.push(packageTable.work);
   sortPendingSchemaWork(pendingSchemaWork);
   // [#21529] The tables the held-back sync would create: measured absent.
@@ -1037,6 +1131,7 @@ export async function bootSchemaStack(
     driver,
     dbLabel: describeDb(driver),
     dbSource,
+    schemaSync: defer ? 'deferred' : skipSchemaSync ? 'skipped' : 'performed',
     telemetryDatabase: telemetryDriver ? telemetryDatabase : null,
     drivers: plannedDrivers,
     detectManagedDrift: async (): Promise<ManagedDriftEntry[]> => {
