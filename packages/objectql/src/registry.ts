@@ -44,7 +44,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -5439,9 +5439,27 @@ export class SchemaRegistry {
 
   installPackage(
     manifest: ObjectStackManifest,
+    source: InstalledPackageSource,
     settings?: Record<string, any>,
     scope?: ArtifactInstallScope,
   ): InstalledPackage {
+    // [#23972] `source` is the CALLER's statement of where this package came
+    // from — the door that registers it is the only party that knows
+    // (`registerApp`: code or marketplace; `installPackage` in
+    // `@objectstack/metadata-protocol`, the `POST /packages` fallback and the
+    // `sys_packages` rehydrate: authored). The registry records it and never
+    // infers it, so an untyped caller that omits it, or spells a value outside
+    // the closed set, is refused here — ahead of every check and mutation
+    // below, so a refused call leaves no row behind — rather than recording a
+    // row the read door would serve without an origin.
+    if (!InstalledPackageSourceSchema.safeParse(source).success) {
+      throw new TypeError(
+        `[Registry] installPackage('${String(manifest?.id)}') needs the package's source, one of `
+        + `${InstalledPackageSourceSchema.options.map((v) => `'${v}'`).join(' | ')}; received `
+        + `${source === undefined ? 'none' : JSON.stringify(source)}. The door that registers a package `
+        + `states where it came from; the registry does not guess.`,
+      );
+    }
     // [ADR-0130 D1] The co-owners of this package — the OTHER packages the same
     // release artifact is delivering. Computed once and read by both halves of
     // the install-time pair below, so the relaxation and the refusal cannot
@@ -5567,6 +5585,7 @@ export class SchemaRegistry {
       // equal so the structural projection reports BOTH, without teaching the
       // projection a key name.
       manifest: toRecordManifest(withDeclaredFunctionEntries(manifest)),
+      source,
       ...lifecycle,
       installedAt: now,
       updatedAt: now,

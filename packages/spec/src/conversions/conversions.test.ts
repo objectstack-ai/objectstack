@@ -163,25 +163,21 @@ describe('conversion layer (ADR-0087 D2)', () => {
    * F5-http): it skipped a node whose old name a live executor owned. The
    * engine now refuses to register an executor under a reserved name
    * (`AutomationEngine.registerNodeExecutor`), so no live owner can exist, and
-   * the rewrite is unconditional — a caller's `reservedNodeTypes` naming one of
-   * the three no longer stops it, and no conflict is reported.
+   * the rewrite is unconditional. Protocol 18 removed the conflict channel with
+   * it (#24001): a pass has no live-name set to consult and no conflict sink.
    */
   describe('flow-node-http-callout-rename — the rewrite is unconditional', () => {
-    it('rewrites a reserved name even when the caller lists it as live, reporting no conflict', () => {
+    it('rewrites a reserved name with one notice and nothing else', () => {
       const notices: ConversionNotice[] = [];
-      const conflicts: unknown[] = [];
       const out = applyConversions(
         { flows: [{ name: 'f', nodes: [{ id: 'a', type: 'webhook' }] }] },
         {
           includeRetired: true,
           onNotice: (n) => notices.push(n),
-          onConflict: (c) => conflicts.push(c),
-          reservedNodeTypes: new Set(['webhook']),
         },
       );
       expect((out.flows as any[])[0].nodes[0].type).toBe('http');
       expect(notices.map((n) => n.conversionId)).toEqual(['flow-node-http-callout-rename']);
-      expect(conflicts).toEqual([]);
     });
 
     it('reads the reserved-name table the flow parse refuses with', () => {

@@ -67,6 +67,7 @@ Installed package row whose manifest is the assembled package body
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -166,7 +167,7 @@ Get installed package response
 | **success** | `boolean` | ✅ | Operation success status |
 | **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; declaredCode?: string; message: string; userMessage?: string; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: integer; requestId?: string; traceId?: string }` | optional | Response metadata |
-| **data** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more` | ✅ | Installed package details |
+| **data** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … } \| … +1 more` | ✅ | Installed package details |
 
 ### Nested Shape: `GetInstalledPackageResponse.error`
 
@@ -193,11 +194,10 @@ Get installed package response
 
 ### Nested Shape: `GetInstalledPackageResponse.data[option 1]`
 
-Installed package with runtime lifecycle state
-
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -209,14 +209,14 @@ Installed package with runtime lifecycle state
 | **settings** | `Record<string, any>` | optional | User-provided configuration settings |
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+| **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `GetInstalledPackageResponse.data[option 2]`
-
-Installed package row whose manifest is the assembled package body
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -228,6 +228,7 @@ Installed package row whose manifest is the assembled package body
 | **settings** | `Record<string, any>` | optional | User-provided configuration settings |
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+| **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
 
 
 ---
@@ -242,13 +243,12 @@ This schema accepts one of the following structures:
 
 #### Option 1
 
-Installed package with runtime lifecycle state
-
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema` |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -260,6 +260,7 @@ Installed package with runtime lifecycle state
 | **settings** | `Record<string, any>` | optional | User-provided configuration settings |
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+| **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `InstalledPackageAtEitherStage[option 1].manifest`
 
@@ -306,13 +307,12 @@ Installed package with runtime lifecycle state
 
 #### Option 2
 
-Installed package row whose manifest is the assembled package body
-
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **manifest** | `{ id: string; namespace?: string; defaultDatasource?: string; version: string; … }` | ✅ | The ASSEMBLED package body this row carries, at the stage the registry records it |
+| **source** | `Enum<'code' \| 'marketplace' \| 'authored'>` | ✅ | Where the installed package came from: code (registered by the deployment's own code), marketplace (installed from the marketplace), or authored (a database-authored package) |
 | **status** | `Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>` | optional (default: `"installed"`) | Package state: installed, disabled, installing, upgrading, uninstalling, or error |
 | **enabled** | `boolean` | optional (default: `true`) | Whether the package is currently enabled |
 | **installedAt** | `string` | optional | Installation timestamp |
@@ -324,6 +324,7 @@ Installed package row whose manifest is the assembled package body
 | **settings** | `Record<string, any>` | optional | User-provided configuration settings |
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
+| **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `InstalledPackageAtEitherStage[option 2].manifest`
 
@@ -443,7 +444,7 @@ List installed packages response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **packages** | `({ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … } \| … +1 more)[]` | ✅ | Installed packages |
+| **packages** | `({ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … } \| … +1 more)[]` | ✅ | Installed packages |
 | **total** | `integer` | optional | Total matching packages |
 | **nextCursor** | `string` | optional | Cursor for the next page |
 | **hasMore** | `boolean` | ✅ | Whether more packages are available — this door serves one page, so always `false` |

@@ -35,6 +35,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ソース",
         help: "リクエストの発生元 — ノード駆動の承認では `flow:<flowName|nodeId>`"
       },
+      process_label: {
+        label: "フロー",
+        help: "このリクエストを開いたフローのラベル（リクエストを開いた時点の値）"
+      },
       object_name: {
         label: "オブジェクト"
       },
@@ -70,12 +74,20 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "現在のステップ",
         help: "承認待ちのステップの機械名"
       },
+      current_step_label: {
+        label: "承認ステップ",
+        help: "承認待ちのステップのラベル（リクエストがそのステップに到達した時点の値）"
+      },
       current_step_index: {
         label: "現在のステップ番号"
       },
       pending_approvers: {
         label: "承認待ち承認者",
         help: "現在のステップを処理できるユーザー ID のカンマ区切りリスト"
+      },
+      pending_approver_labels: {
+        label: "承認待ちの相手",
+        help: "リクエストが待っている相手：各承認待ち承認者の名前。スロットが特定の人を指さない場合はそのアドレス"
       },
       payload_json: {
         label: "スナップショット",
@@ -244,6 +256,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ステップ",
         help: "アクション時点のステップの機械名"
       },
+      step_label: {
+        label: "承認ステップ",
+        help: "アクション実行時のステップのラベル"
+      },
+      object_name: {
+        label: "オブジェクト",
+        help: "リクエストの対象レコードのオブジェクト"
+      },
+      record_id: {
+        label: "レコード",
+        help: "リクエストの対象レコード"
+      },
       step_index: {
         label: "ステップ番号"
       },
@@ -272,6 +296,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       acted_as: {
         label: "代表スロット",
         help: "この操作が代表した承認待ちスロット。スロットに保存された表記（ユーザー ID、メールアドレス、またはポジションアドレス）で記録されます。申請者自身の操作、システム操作、管理者オーバーライドなど、スロットを経由せずに許可された操作では空になります。"
+      },
+      acted_as_label: {
+        label: "代理元",
+        help: "このアクションを実行したスロット（表示用）：人を指す場合はその名前、指さない場合はアドレス"
       },
       comment: {
         label: "コメント"

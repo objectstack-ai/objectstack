@@ -60,15 +60,15 @@ describe('SchemaRegistry log-level gating (#3420)', () => {
 
     const info = new SchemaRegistry({ multiTenant: false });
     expect(info.logLevel).toBe('info');
-    info.installPackage(manifest);
-    info.installPackage(manifest); // same-package reload → "Overwriting package"
+    info.installPackage(manifest, 'code');
+    info.installPackage(manifest, 'code'); // same-package reload → "Overwriting package"
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Overwriting package'));
     expect(debug).not.toHaveBeenCalledWith(expect.stringContaining('Overwriting package'));
 
     debug.mockClear();
     const dbg = new SchemaRegistry({ multiTenant: false, logLevel: 'debug' });
-    dbg.installPackage(manifest);
-    dbg.installPackage(manifest);
+    dbg.installPackage(manifest, 'code');
+    dbg.installPackage(manifest, 'code');
     expect(debug).toHaveBeenCalledWith(expect.stringContaining('Overwriting package: com.test'));
   });
 

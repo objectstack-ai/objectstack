@@ -15,6 +15,8 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  collectDriftApplyLimits,
+  describeWithApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
   renderPlan,
@@ -35,6 +37,7 @@ import {
   type UnmanagedTablesReport,
 } from '../../utils/unmanaged-tables.js';
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import {
   resolveTenancyPosture,
   collectGlobalUniques,
@@ -69,6 +72,16 @@ import {
  * transport) used to refuse the plan at its boot. It now boots with schema sync
  * skipped: still nothing written, the drift half read from the database, and
  * the additive half reported as not examined in both faces.
+ *
+ * [#23925] Nor does the plan offer a remedy that database does not have. The
+ * driver that reported each entry declares what its apply door cannot perform
+ * (`SchemaStack.driftApplyLimit`); such an entry is listed with its finding and
+ * that limit instead of `--allow-destructive`, and the footer offers
+ * `--allow-destructive` only for a destructive entry the database can apply.
+ * Read from the declaration, never from the dialect or the transport name. A
+ * driver that declares nothing (every database but a Turso REMOTE one) gets
+ * the plan it always got, byte for byte. The `--json` document is the report
+ * and is unchanged.
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -311,6 +324,22 @@ export default class MigratePlan extends Command {
         console.log('');
       }
 
+      // [#23899] Two kinds of line below claim that this plan wrote no row or
+      // table: the declaration boot's write-guard note (one of the composition
+      // notes, when a plugin's write was refused or a raw command forwarded)
+      // and the unmanaged-table section's closing line. The read-only boot's
+      // connect may still have switched a SQLite file's journal mode
+      // (`SqlDriver.applySqliteJournalMode`, its rule for every connect), which
+      // rewrites the file header and no row, so on a SQLite file each line that
+      // makes the claim is followed by the note naming the switch. A target
+      // that is no SQLite file (PostgreSQL, MySQL) has no header to switch. The
+      // `--json` document above carries the same lines and no note.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      const withJournalNote = (line: string): string =>
+        (line.includes('no row or table') ? `${line}${journalNote}` : line);
+
       printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
       if (stack.telemetryDatabase !== null) printInfo(describeTelemetryDatabase(stack.telemetryDatabase));
       if (schemaSyncSkipped) printWarning(SKIPPED_SCHEMA_SYNC_NOTE);
@@ -318,7 +347,7 @@ export default class MigratePlan extends Command {
       // What the object set was composed from (#12938) — never silent about a
       // host config it could not load, and empty (so this block prints nothing)
       // when there was no deployment to compose.
-      for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
+      for (const note of stack.composition.notes) console.log(chalk.dim(`      ${withJournalNote(note)}`));
       console.log('');
 
       // [#13204] Its own block, above the drift verdict and never folded into
@@ -329,7 +358,7 @@ export default class MigratePlan extends Command {
       const unmanagedLines = renderUnmanagedTables(unmanagedTables);
       if (unmanagedLines.length > 0) {
         printInfo(unmanagedLines[0]!);
-        for (const line of unmanagedLines.slice(1)) console.log(chalk.dim(`      ${line}`));
+        for (const line of unmanagedLines.slice(1)) console.log(chalk.dim(`      ${withJournalNote(line)}`));
         console.log('');
       }
 
@@ -360,12 +389,40 @@ export default class MigratePlan extends Command {
         return;
       }
 
+      // [#23925] What the driver that reported each entry declares its apply
+      // door cannot perform: on the Turso REMOTE transport, every column entry
+      // but a drop (it runs no SQLite table rebuild). Empty for a driver that
+      // declares nothing, and then everything below reads as it always has.
+      const limits = collectDriftApplyLimits(stack, drift);
+
       await renderPendingSchemaWork(pending);
-      renderPlan(drift);
+      if (limits.size === 0) {
+        renderPlan(drift);
+      } else {
+        // Still listed, still counted: it IS drift. Only the remedy changes,
+        // from a command that cannot perform it here to the reason it cannot.
+        renderPlan(drift, await describeWithApplyLimits(limits));
+      }
       if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
       printInfo(summarize(drift));
-      console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
-        chalk.dim(' (add --allow-destructive for drops / tightenings)'));
+      if (limits.size === 0) {
+        console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
+          chalk.dim(' (add --allow-destructive for drops / tightenings)'));
+      } else {
+        // `--allow-destructive` only for a destructive entry this database can
+        // apply; no apply line at all when it can apply nothing listed here.
+        const appliable = drift.filter((d) => !limits.has(d));
+        const appliableDestructive = appliable.filter((d) => d.category === 'destructive').length;
+        if (appliable.length > 0 || pending.length > 0) {
+          console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') + (appliableDestructive > 0
+            ? chalk.dim(` (add --allow-destructive for the ${appliableDestructive} destructive change(s) it can apply on this database)`)
+            : ''));
+        }
+        printWarning(
+          `${limits.size} change(s) above cannot be applied on this database by "os migrate apply" (each says why), `
+          + 'so they remain drift after it runs.',
+        );
+      }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
     } catch (error: any) {

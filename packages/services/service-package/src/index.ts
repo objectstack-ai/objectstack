@@ -678,7 +678,25 @@ export class PackageServicePlugin implements Plugin {
     // from the filesystem. Best-effort and non-fatal.
     try {
       const registry = (objectql as unknown as { registry?: any }).registry;
+      // ADR-0087 D2 — a stored record is data at rest, so it replays the
+      // versioned forward conversion inside the window its own
+      // `engines.protocol` opens, BEFORE the registry judges it. The judge of
+      // that window is the engine's ONE registration-door entry point
+      // (`ObjectQL.convertPackageBodyForward`), reused here, never re-derived:
+      // a record with no declared range comes back by reference and meets the
+      // registry's refusals exactly as before, and the conversion's named
+      // warning is the engine's own. The stored row is not rewritten, so it
+      // converts again at every boot (the ADR-0087 addendum: metadata at rest
+      // replays the chain at every load). Reached through the engine this
+      // plugin already holds, as `registry` is; an engine with no such door
+      // (not ObjectQL) is handed the stored body as before.
+      const convertForward = (objectql as unknown as {
+        convertPackageBodyForward?: (body: unknown) => unknown;
+      }).convertPackageBodyForward?.bind(objectql);
       if (registry?.installPackage && registry?.getPackage) {
+        // Counts the records the registry ACCEPTED in this pass — not the ones
+        // the handshake below refuses, not the ones already registered, and
+        // not the ones the registry refuses (each of those is reported by name).
         let hydrated = 0;
         for (const rec of await packageService.list()) {
           const id = rec?.manifest?.id;
@@ -712,8 +730,26 @@ export class PackageServicePlugin implements Plugin {
                   `'${compat.requiredRange}'; skipping the protocol handshake (ADR-0087).`,
               );
             }
-            registry.installPackage(rec.manifest);
-            hydrated++;
+            // [#23972] `sys_packages` holds the packages `installPackage`
+            // persisted (Studio bases, duplicates, HTTP installs), so every row
+            // it rehydrates is authored — the origin the install stamped.
+            //
+            // One record's refusal is that record's: it is reported by name and
+            // the records after it keep hydrating. It used to throw out of the
+            // whole loop into the catch below, which logged it at `debug` —
+            // and every durable package after the bad one was silently absent.
+            try {
+              registry.installPackage(convertForward ? convertForward(rec.manifest) : rec.manifest, 'authored');
+              hydrated++;
+            } catch (refusal) {
+              logger.error(
+                `Package '${id}' from sys_packages was NOT hydrated into the registry — the registry refused its `
+                  + `stored body: ${(refusal as Error)?.message ?? String(refusal)} It is absent from the registry for `
+                  + `this process while its sys_packages row remains; the other packages hydrate as usual. Install a `
+                  + `corrected build of '${id}' or uninstall it, then restart.`,
+                refusal as Error,
+              );
+            }
           }
         }
         if (hydrated > 0) {

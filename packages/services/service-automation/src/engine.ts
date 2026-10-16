@@ -67,7 +67,7 @@ import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // hand-written `trim()` here is exactly the drift the #15662 campaign built the
 // shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
-import { applyConversionsToFlow, CONVERSION_TODO_CODE, type ConversionNotice, type ConversionConflictNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, CONVERSION_TODO_CODE, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 // [ADR-0126 §7.3, #20761] "Does a code package ship this flow?" is NOT read
 // off a definition here. The subflow guards, the arming gate and the
 // activation door ask {@link AutomationEngine.packagedFlowOwner} — the loader's
@@ -4525,10 +4525,9 @@ export class AutomationEngine implements IAutomationService {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
-        conflicts: ConversionConflictNotice[];
         todos: ConversionTodoNotice[];
     } {
-        const { parsed, storable, notices, conflicts, todos: chainTodos } = this.canonicalizeFlow(name, definition, options);
+        const { parsed, storable, notices, todos: chainTodos } = this.canonicalizeFlow(name, definition, options);
         // The registration checks run when `todos` is first READ, once: the
         // stored pass reads it, and the doors that only want `parsed` or
         // `storable` (the save door, a package duplication, the sync's
@@ -4553,7 +4552,6 @@ export class AutomationEngine implements IAutomationService {
             parsed,
             storable,
             notices,
-            conflicts,
             get todos(): ConversionTodoNotice[] {
                 listedTodos ??= listRegistrationRefusals();
                 return listedTodos;
@@ -4572,7 +4570,6 @@ export class AutomationEngine implements IAutomationService {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
-        conflicts: ConversionConflictNotice[];
         todos: ConversionTodoNotice[];
     } {
         // ADR-0087 D2 — the runtime load seam. A stored flow authored against an
@@ -4580,11 +4577,11 @@ export class AutomationEngine implements IAutomationService {
         // with `config.filters`) is canonicalized on rehydration, BEFORE parse +
         // execution, so the executor only ever sees the canonical shape and a
         // dropped-alias upgrade never silently changes behavior (e.g. an empty
-        // `filter` deleting a whole table). `reservedNodeTypes` is this engine's
-        // live executor registry, handed to any open-namespace node-type rename
-        // that guards against clobbering a live owner. The one such rename, the
-        // callout rename, no longer consults it (#23543 F5-http): its old names
-        // are reserved, and `registerNodeExecutor` refuses an executor under one.
+        // `filter` deleting a whole table). No live executor registry is handed
+        // to the pass: the one open-namespace rename, the callout rename,
+        // reserves its old names instead (#23543 F5-http), and
+        // `registerNodeExecutor` refuses an executor under one, so (#24001) the
+        // conversion-conflict channel it used to feed is gone.
         //
         // `includeRetired` (#3903): this seam rehydrates DATA AT REST — flows
         // stored in `sys_metadata` outlive any load window, and a row written
@@ -4606,25 +4603,14 @@ export class AutomationEngine implements IAutomationService {
         // now means something else. This seam cannot say a body predates such
         // a flip, so it refuses those entries by id, each with its reason on
         // `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION`.
-        const reservedNodeTypes = new Set<string>([
-            ...FLOW_STRUCTURAL_NODE_TYPES,
-            ...this.nodeExecutors.keys(),
-            ...this.actionDescriptors.keys(),
-        ]);
         const notices: ConversionNotice[] = [];
-        const conflicts: ConversionConflictNotice[] = [];
         const todos: ConversionTodoNotice[] = [];
         const converted = applyConversionsToFlow(definition, {
-            reservedNodeTypes,
             includeRetired: options.includeRetired ?? true,
             excludeConversionIds: CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION,
             onNotice: (n) => {
                 notices.push(n);
                 this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`);
-            },
-            onConflict: (c) => {
-                conflicts.push(c);
-                this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`);
             },
             // Collected, not logged: a site listed here is one `registerFlow`
             // refuses below with its own located message.
@@ -4654,7 +4640,6 @@ export class AutomationEngine implements IAutomationService {
             parsed,
             storable: graftConditionEnvelopes(converted, parsed),
             notices,
-            conflicts,
             todos,
         };
     }

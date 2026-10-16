@@ -82,10 +82,10 @@ function manifest(id: string, scope?: 'system' | 'cloud' | 'project') {
  */
 function make() {
     const registry = new SchemaRegistry({ logLevel: 'silent' } as any);
-    registry.installPackage(manifest(PLATFORM_SCOPED, 'system'));
-    registry.installPackage(manifest(CLOUD_SCOPED, 'cloud'));
-    registry.installPackage(manifest(CODE_LOADED, 'project'));
-    registry.installPackage(manifest(WRITABLE, 'project'));
+    registry.installPackage(manifest(PLATFORM_SCOPED, 'system'), 'code');
+    registry.installPackage(manifest(CLOUD_SCOPED, 'cloud'), 'code');
+    registry.installPackage(manifest(CODE_LOADED, 'project'), 'code');
+    registry.installPackage(manifest(WRITABLE, 'project'), 'authored');
 
     // Only the code-loaded package booted from an artifact.
     const manifests = new Map<string, any>([[CODE_LOADED, manifest(CODE_LOADED)]]);
@@ -106,7 +106,7 @@ function make() {
         // that can never go red. With the mint in place, deleting the gate makes
         // those cases fail on the listing, not merely on the status.
         duplicatePackage: vi.fn(async (req: any) => {
-            registry.installPackage(manifest(req.targetPackageId));
+            registry.installPackage(manifest(req.targetPackageId), 'authored');
             // The exact empty-success body the card measured on a running code
             // package: HTTP 200, `success: false`, nothing copied, nothing named
             // as failed.

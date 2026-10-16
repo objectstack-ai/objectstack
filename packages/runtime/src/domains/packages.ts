@@ -268,6 +268,9 @@ export function createPackagesDomain(deps: DomainHandlerDeps): DomainRoute {
  */
 const INSTALLED_PACKAGE_RESPONSE_FIELDS = [
     'manifest',
+    // [#23972] The origin the registering door stamped on the row — read off
+    // the record as-is, ⛔ never derived here from `writable` or a second list.
+    'source',
     'status',
     'enabled',
     'installedAt',
@@ -1378,6 +1381,23 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     response: deps.error(`Package '${pkgId}' already exists`, 409),
                 };
             }
+            // [#24030] ADR-0070 D2 — the READ-ONLY gate, asked for the manifest's
+            // id before either install limb below writes. `overwrite` only ever
+            // bypassed the 409 above; nothing asked whether the id is a package
+            // the deployment ships, so an overwrite over a code-booted or
+            // marketplace-installed id answered 201, replaced its registry row
+            // with an authored one (and, on the protocol limb, wrote its
+            // `sys_packages` row) while `engine.manifests` kept judging it
+            // read-only. Disable, publish, revert and delete refuse that id with
+            // this same answer; ⛔ the rule is not re-derived here — it is
+            // {@link requireWritablePackage}, i.e. {@link isWritablePackage}.
+            //
+            // Placed AFTER the 409, so an install that does not ask to overwrite
+            // keeps its 409 answer for any existing id. An id nothing installed
+            // is writable by the predicate's own rule, so a fresh install —
+            // `overwrite` set or not — answers as before.
+            const readOnly = requireWritablePackage(deps, qlService, pkgId, overwrite ? 'overwrite' : 'install');
+            if (readOnly) return readOnly;
             // ⚠️ The MANIFEST handed on is the one the caller sent, ⛔ not the
             // parsed copy. `ManifestSchema` applies defaults at parse time
             // (`scope`, `defaultDatasource`), and this door has always stored
@@ -1406,7 +1426,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // the primitive's, so no-range and unparsed ranges warn the
                     // same way on both arms.
                     assertProtocolCompat(manifest);
-                    pkg = registry.installPackage(manifest, settings);
+                    // [#23972] The same origin the protocol primitive stamps:
+                    // a package installed through this door is authored.
+                    pkg = registry.installPackage(manifest, 'authored', settings);
                 }
             } catch (err) {
                 // [#21727] The protocol refusal's typed carrier, recognised

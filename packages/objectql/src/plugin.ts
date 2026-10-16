@@ -667,7 +667,12 @@ export class ObjectQLPlugin implements Plugin {
       // register/bridge interleave would bridge a body that the very next
       // package is about to change. For the single-package artifact this is the
       // same one register followed by the same one bridge as before (D7).
-      register: (registeredArtifact: any) => {
+      //
+      // [#23972] `options.source` is where every package in this artifact came
+      // from, stamped on each registry row (`InstalledPackageSchema.source`).
+      // Absent means `'code'`, the deployment's own code (`registerApp`'s
+      // default); the marketplace install-local plugin states `'marketplace'`.
+      register: (registeredArtifact: any, options?: { source?: 'code' | 'marketplace' }) => {
         // ADR-0087 D2 at the registration door, for an artifact that carries
         // `packages[]`: its bodies are strictly parsed by the ordering below
         // BEFORE `registerApp` could convert each one, so a bundle handed here
@@ -734,7 +739,7 @@ export class ObjectQLPlugin implements Plugin {
         }
 
         for (const manifest of ordered) {
-          ql.registerApp(manifest, scope);
+          ql.registerApp(manifest, scope, options?.source);
           ctx.logger.debug('Manifest registered via manifest service', {
             id: manifest.id || manifest.name
           });

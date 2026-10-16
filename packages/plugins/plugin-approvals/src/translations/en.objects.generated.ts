@@ -35,6 +35,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Source",
         help: "Origin of the request — `flow:<flowName|nodeId>` for node-driven approvals"
       },
+      process_label: {
+        label: "Flow",
+        help: "Label of the flow that opened this request, as it stood when the request was opened"
+      },
       object_name: {
         label: "Object"
       },
@@ -70,12 +74,20 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Current Step",
         help: "Machine name of the step awaiting approval"
       },
+      current_step_label: {
+        label: "Approval Step",
+        help: "Label of the step awaiting approval, as it stood when the request reached it"
+      },
       current_step_index: {
         label: "Current Step Index"
       },
       pending_approvers: {
         label: "Pending Approvers",
         help: "Comma-separated user ids who can act on the current step"
+      },
+      pending_approver_labels: {
+        label: "Waiting On",
+        help: "Who the request is waiting on: the name of each pending approver, or the slot address when it names no person"
       },
       payload_json: {
         label: "Snapshot",
@@ -244,6 +256,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Step",
         help: "Machine name of the step at the time of the action"
       },
+      step_label: {
+        label: "Approval Step",
+        help: "Label of the step at the time of the action"
+      },
+      object_name: {
+        label: "Object",
+        help: "Object of the record the request is about"
+      },
+      record_id: {
+        label: "Record",
+        help: "The record the request is about"
+      },
       step_index: {
         label: "Step Index"
       },
@@ -272,6 +296,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       acted_as: {
         label: "Acted As",
         help: "The pending-approver slot this action was taken as, in the slot’s stored spelling: a user id, an email, or a position address. Empty when no slot admitted the action, such as the submitter’s own actions, system actions and admin overrides."
+      },
+      acted_as_label: {
+        label: "Acting As",
+        help: "The slot this action was taken as, for display: the name of the person it names, or its address when it names no person"
       },
       comment: {
         label: "Comment"

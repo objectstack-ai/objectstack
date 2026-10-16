@@ -51,19 +51,19 @@ function makeImpl(overrides?: {
   /**
    * Manifests to replay into the fresh registry before the test runs — a
    * stand-in for the boot hydration `PackageServicePlugin.start()` performs
-   * (`for (const rec of await packageService.list()) registry.installPackage(rec.manifest)`,
+   * (`for (const rec of await packageService.list()) registry.installPackage(rec.manifest, 'authored')`,
    * `packages/services/service-package/src/index.ts`). A host composed with
    * the rows a previous host persisted IS that process after a restart; a host
    * composed with none is a restart that found `sys_packages` empty.
    */
   hydrate?: readonly { id: string; [key: string]: unknown }[];
 }) {
-  const registryCalls: Array<{ manifest: any; settings: any }> = [];
+  const registryCalls: Array<{ manifest: any; source: string; settings: any }> = [];
   const installed = new Map<string, any>();
   const registry = {
-    installPackage: (manifest: any, settings?: any) => {
-      registryCalls.push({ manifest, settings });
-      const pkg = { manifest, status: 'installed', enabled: true };
+    installPackage: (manifest: any, source: string, settings?: any) => {
+      registryCalls.push({ manifest, source, settings });
+      const pkg = { manifest, source, status: 'installed', enabled: true };
       installed.set(manifest.id, pkg);
       return pkg;
     },
@@ -78,7 +78,7 @@ function makeImpl(overrides?: {
   };
   const engine = { registry, find: overrides?.find ?? (async () => []) };
   // Seeded through the registry's own verb, exactly as the boot hydration does.
-  for (const manifest of overrides?.hydrate ?? []) registry.installPackage(manifest);
+  for (const manifest of overrides?.hydrate ?? []) registry.installPackage(manifest, 'authored');
   registryCalls.length = 0; // hydration is the fixture, not an observation
 
   const publish = vi.fn(overrides?.publish ?? (async () => ({ success: true })));

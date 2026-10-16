@@ -1033,9 +1033,9 @@ export class AutomationServicePlugin implements Plugin {
 
         // ── Inert mode (#4454) — an engine, and nothing armed ─────────────────
         // A one-shot tool (`os migrate meta --stored`) needs this engine for one
-        // read-only thing: `reservedNodeTypes`, the live executor registry that
-        // ADR-0078's open-namespace conflict guard consults to tell a rename
-        // from a clobber. It does NOT want the runtime this plugin normally
+        // read-only thing: `canonicalizeStoredFlow`, whose registration preview
+        // judges a plugin node's config against the action descriptor that
+        // node's plugin registered. It does NOT want the runtime this plugin normally
         // brings up, and everything below this line arms something:
         //
         //   • the flow pull calls `registerFlow`, which calls
@@ -1049,10 +1049,10 @@ export class AutomationServicePlugin implements Plugin {
         //     that silently continues someone's paused approval is indefensible.
         //
         // The return is placed AFTER `automation:ready` deliberately: that hook
-        // is how third-party plugins contribute node executors, and a partial
-        // registry would make the conflict guard's answer wrong — it would read
-        // a live custom node type as unowned and rewrite over it. Registry
-        // population is the one thing inert mode must NOT skip.
+        // is how third-party plugins contribute node executors and descriptors,
+        // and a partial registry would make the registration preview's answer
+        // wrong — it would judge a plugin node against no descriptor at all.
+        // Registry population is the one thing inert mode must NOT skip.
         if (this.options.armRuntime === false) {
             ctx.logger.info(
                 '[Automation] inert mode (armRuntime: false) — engine and node registry are up; '

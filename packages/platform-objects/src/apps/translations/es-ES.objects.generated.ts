@@ -142,7 +142,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       ban_user: {
         label: "Bloquear usuario",
@@ -633,7 +643,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       add_member: {
         label: "Añadir miembro",
@@ -751,7 +771,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
-        successMessage: "Invitación enviada a ${result.email}"
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "Cancelar invitación",
@@ -1023,6 +1053,13 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked: {
         label: "Revocado"
+      },
+      revoked_reason: {
+        label: "Motivo de la revocación",
+        help: "Se registra cuando el restablecimiento forzado de la contraseña por parte de un administrador revocó esta clave. Solo un administrador de la plataforma puede restaurar una clave así; su propietario crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
+        options: {
+          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador"
+        }
       },
       key: {
         label: "Clave con hash",

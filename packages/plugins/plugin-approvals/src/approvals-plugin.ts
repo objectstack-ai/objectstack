@@ -17,6 +17,7 @@ import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
   ApprovalService,
   requestVisibilitySourceOf,
+  slotLabelSourceOf,
   ESCALATION_JOB_NAME,
   ESCALATION_SCAN_INTERVAL_MS,
   type ApprovalEngine,
@@ -35,6 +36,7 @@ import { bindRequestChildReadGates, bindRequestReadGate } from './request-read-g
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
+import { backfillApprovalDisplayLabels } from './display-label-backfill.js';
 
 export interface ApprovalsPluginOptions {
   /** Disable runtime registration (schemas still register). */
@@ -501,7 +503,8 @@ export class ApprovalsServicePlugin implements Plugin {
     const slotEngine = engine as ApprovalEngine;
     const backfillSlots = async () => {
       try {
-        const out = await backfillActionSlots(slotEngine);
+        const svc = this.service;
+        const out = await backfillActionSlots(slotEngine, svc ? { labels: slotLabelSourceOf(svc) } : {});
         if (out.literalsMoved > 0 || out.sentinelsCleared > 0 || out.votesStamped > 0) {
           ctx.logger.info('ApprovalsServicePlugin: action slots backfilled', out);
         }
@@ -518,16 +521,41 @@ export class ApprovalsServicePlugin implements Plugin {
       }
     };
 
+    // Display-label backfill (#23889): fill the approval lists' display columns
+    // on rows written before they existed, from stored data and by the live
+    // writers' own rules, null-only and idempotent; see the module. After the
+    // action-slot backfill, whose `acted_as` writes it labels if that pass could
+    // not. `warn`: a failed run leaves list cells blank — visibly — and changes
+    // no fact any decision, filter or index reads; the next boot retries.
+    const backfillDisplayLabels = async () => {
+      try {
+        const svc = this.service;
+        if (!svc) return;
+        const out = await backfillApprovalDisplayLabels(slotEngine, slotLabelSourceOf(svc));
+        if (out.requestsFilled > 0 || out.actionsFilled > 0) {
+          ctx.logger.info('ApprovalsServicePlugin: approval display labels backfilled', out);
+        }
+      } catch (err: any) {
+        ctx.logger.warn?.(
+          '[approvals] display-label backfill failed — approval list cells for rows written before the label '
+          + 'columns stay blank until a later boot fills them',
+          { error: err?.message ?? String(err) },
+        );
+      }
+    };
+
     if (typeof (ctx as any).hook === 'function') {
       (ctx as any).hook('kernel:ready', wireEscalationClock);
       (ctx as any).hook('kernel:ready', mountActionPages);
       (ctx as any).hook('kernel:ready', backfillApproverIndex);
       (ctx as any).hook('kernel:ready', backfillSlots);
+      (ctx as any).hook('kernel:ready', backfillDisplayLabels);
     } else {
       await wireEscalationClock();
       await mountActionPages();
       await backfillApproverIndex();
       await backfillSlots();
+      await backfillDisplayLabels();
     }
 
     // ADR-0019: contribute the `approval` node to the flow engine when one is

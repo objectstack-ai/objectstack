@@ -383,7 +383,7 @@ Install package response
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **package** | `{ manifest: object; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; installedAt?: string; … }` | ✅ | Installed package details |
+| **package** | `{ manifest: object; source: Enum<'code' \| 'marketplace' \| 'authored'>; status?: Enum<'installed' \| 'disabled' \| 'installing' \| 'upgrading' \| 'uninstalling' \| 'error'>; enabled?: boolean; … }` | ✅ | Installed package details |
 | **dependencyResolution** | `{ dependencies: object[]; canProceed: boolean; requiredActions: object[]; installOrder: string[]; … }` | optional | Dependency resolution result |
 | **namespaceConflicts** | `{ type: 'namespace_conflict'; requestedNamespace: string; conflictingPackageId: string; conflictingPackageName: string; … }[]` | optional | Namespace conflicts detected |
 | **message** | `string` | optional | Installation status message |
