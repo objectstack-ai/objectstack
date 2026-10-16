@@ -68,8 +68,11 @@ describe('defineStack — ADR-0087 D2 conversion notices', () => {
   // not about satisfying every downstream cross-reference check. The sink is
   // wired on the single `normalizeStackInput` call that runs BEFORE the strict
   // branch, so both modes go through it.
+  // The flows are deliberately minimal (no label, type or edges) — the
+  // non-strict pass is all that runs on them — so they are cast past the
+  // authoring type rather than padded out.
   const define = (index: number) =>
-    defineStack({ manifest, objects: [obj], flows: [legacyFlowAt(index)] }, { strict: false });
+    defineStack({ manifest, objects: [obj], flows: [legacyFlowAt(index)] as never }, { strict: false });
 
   let warn: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
@@ -106,7 +109,7 @@ describe('defineStack — ADR-0087 D2 conversion notices', () => {
 
   it('stays quiet for a stack that is already canonical', () => {
     defineStack(
-      { manifest, objects: [obj], flows: [{ name: 'conv_canonical', nodes: [{ id: 'n1', type: 'http' }] }] },
+      { manifest, objects: [obj], flows: [{ name: 'conv_canonical', nodes: [{ id: 'n1', type: 'http' }] }] as never },
       { strict: false },
     );
     expect(warn).not.toHaveBeenCalled();
