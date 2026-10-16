@@ -1019,7 +1019,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       end_user_controls: {
         label: "エンドユーザー操作",
-        description: "このビューでエンドユーザーが行える操作——クイックフィルター、フィルタータブ、可視化切り替え（ADR-0047、Airtable Interface 互換）。"
+        description: "このビューでエンドユーザーが行える操作——クイックフィルター、フィルタータブ、可視化切り替え。"
       },
       navigation_sharing: {
         label: "ナビゲーションと共有",
@@ -2330,15 +2330,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "既定の権限セット",
-        helpText: "everyone ポジション向けのアプリ基準です（ADR-0090 D5）。アプリレベルのセットは起動時に自動でバインドされ、パッケージレベルのセットはインストール時に管理者が確認する提案になります。既定は false です。"
+        helpText: "組み込みの everyone ポジションを通じて、サインインするすべてのユーザーにこのセットを付与します。アプリ自身が宣言したセットは起動時に付与され、インストールしたパッケージのセットは管理者が Setup で確認する提案になります。高権限を含むセットはこの方法では付与されません。既定は false です。"
       },
       managedBy: {
         label: "管理元",
-        helpText: "レコードの由来（ADR-0086 D3）。アップグレードをまたいで、このセットを誰が所有するかを示します。"
+        helpText: "このセットの所有者です。Package はパッケージに同梱され、パッケージのアップグレードで更新されることを示します。Platform と User はこの環境で作成され、アップグレードで変更されないことを示します。"
       },
       packageId: {
         label: "所属パッケージ ID",
-        helpText: "パッケージ同梱のセットが属するパッケージ id（ADR-0086 D3）。環境側で作成したセットでは空のままにします。"
+        helpText: "このセットを同梱しているパッケージです。別のパッケージを指す値は拒否されます。この環境で作成したセットでは空のままにします。"
       },
       systemPermissions: {
         label: "システム権限",
@@ -2346,7 +2346,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       adminScope: {
         label: "委任管理スコープ",
-        helpText: "委任管理（ADR-0090 D12）: この権限セットの保持者が 1 つのビジネスユニットのサブツリーを管理できるようにします。businessUnit はサブツリーのルート（sys_business_unit.name）で、必須かつ空白不可です。includeSubtree の既定値は true です。manageAssignments の既定値は false で、有効にすると保持者はそのサブツリー内でユーザーをポジションに割り当て、権限セットを直接付与できます。委任先が付与できるのは assignablePermissionSets に挙げた権限セットだけです。何も委任しない権限セットでは空のままにしてください。"
+        helpText: "委任管理: この権限セットの保持者が 1 つのビジネスユニットのサブツリーを管理できるようにします。businessUnit はサブツリーのルート（sys_business_unit.name）で、必須かつ空白不可です。includeSubtree の既定値は true です。manageAssignments の既定値は false で、有効にすると保持者はそのサブツリー内でユーザーをポジションに割り当て、権限セットを直接付与できます。委任先が付与できるのは assignablePermissionSets に挙げた権限セットだけです。何も委任しない権限セットでは空のままにしてください。"
       },
       objects: {
         label: "オブジェクト権限",
@@ -2391,7 +2391,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       delegatable: {
         label: "セルフ委任を許可",
-        helpText: "保有者が自分でこのポジションを委任できるようにします。期間を区切り、理由の記入が必要です（ADR-0091 D3）。既定は false で、委任は管理者のみです。"
+        helpText: "保有者が自分でこのポジションを委任できるようにします。期間を区切り、理由の記入が必要です。既定は false で、委任は管理者のみです。"
       }
     }
   },
