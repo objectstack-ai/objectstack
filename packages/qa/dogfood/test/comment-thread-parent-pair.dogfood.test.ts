@@ -18,10 +18,12 @@
 // ## The composition
 //
 // `bootStack` with the real `SecurityPlugin`, `ObjectQL`, SQL driver, REST and
-// auth layers, plus `AuditPlugin`. A member owns one private record; a writer
-// owns another the member cannot open. The store holds more than twice the old
-// window of comments on the two records, inserted as the system (the
-// before-insert hook stamps each from its thread).
+// auth layers, plus `AuditPlugin`. A member owns some private records; a
+// writer owns others the member cannot open. Each record carries one comment,
+// so every comment is its own thread: the old probe's window bounded threads,
+// and only a fixture of more than twice the window of THREADS measures it. The
+// comments are inserted as the system (the before-insert hook stamps each from
+// its thread).
 //
 // `@objectstack/plugin-audit` resolves through its BUILT output here.
 // Fixtures are synthetic. ⚠️ No test title states a value.
@@ -41,10 +43,12 @@ const OBJ = 'ctp_item';
 const SYS = { isSystem: true } as const;
 /** The old pre-scan window. */
 const OLD_WINDOW = 2_000;
-/** Comments on the member's record: served to it whole. */
+/** Records the member owns, one comment each: served to it whole. */
 const MINE_BULK = 2_050;
-/** Comments on the writer's record, which the member cannot open. */
+/** Records the writer owns, one comment each, which the member cannot open. */
 const OTHER_BULK = 2_101;
+/** Every fixture comment's author: the filter a fixture read is scoped by. */
+const AUTHOR = 'usr_ctp_fixture';
 /** Rows whose pair is cleared below: the state of a row the backfill has not reached. */
 const UNSTAMPED = 5;
 const BATCH = 250;
@@ -86,6 +90,7 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
   let ql: any;
   const token = { admin: '', member: '', writer: '' };
   const id = { mine: '', other: '' };
+  const users = { member: '', writer: '' };
   const bulk = { mine: [] as string[], other: [] as string[] };
   /** Every read of sys_comment, with whether it ran as the system. */
   const commentReads: Array<{ method: string; system: boolean; where: string; fields: string; leaf: boolean }> = [];
@@ -112,8 +117,8 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
     }
     return { ids, totals: [...totals] };
   };
-  /** Both fixture threads: a read over more than twice the old window of candidates. */
-  const bothThreads = () => ({ thread_id: { $in: [`${OBJ}:${id.mine}`, `${OBJ}:${id.other}`] } });
+  /** Every fixture comment: a read over more than twice the old window of candidate threads. */
+  const bothThreads = () => ({ author_id: AUTHOR });
 
   beforeAll(async () => {
     stack = await bootStack(fixtureStack as unknown as Parameters<typeof bootStack>[0], {
@@ -130,6 +135,7 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
     for (const who of ['member', 'writer'] as const) {
       const email = `ctp-${who}@verify.test`;
       token[who] = await stack.signUp(email, PASSWORD);
+      users[who] = await userIdOf(email);
       const set = await catalogPermissionSet(ql, baselineSet.name);
       expect(set, 'fixture permission set served by the security catalog').toBeTruthy();
       await ql.insert('sys_user_permission_set', { user_id: await userIdOf(email), permission_set: set.name }, { context: { ...SYS } });
@@ -142,21 +148,28 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
     id.mine = await idOf(await stack.apiAs(token.member, 'POST', `/data/${OBJ}`, { name: 'mine' }));
     id.other = await idOf(await stack.apiAs(token.writer, 'POST', `/data/${OBJ}`, { name: 'other' }));
 
-    // The bulk, inserted as the system: the before-insert hook stamps each
-    // comment's pair from its thread.
+    // The bulk, inserted as the system: one record per comment, each owned by
+    // its member, and the before-insert hook stamps each comment's pair from
+    // its thread.
     let n = 0;
-    const plant = async (recordId: string, count: number, into: string[]) => {
+    const plant = async (owner: string, count: number, into: string[]) => {
       for (let i = 0; i < count; i += BATCH) {
-        const rows = Array.from({ length: Math.min(BATCH, count - i) }, () => {
+        const size = Math.min(BATCH, count - i);
+        const records = await ql.insert(
+          OBJ,
+          Array.from({ length: size }, (_, k) => ({ name: `ctp record ${i + k}`, owner_id: owner })),
+          { context: { ...SYS } },
+        );
+        const rows = ((Array.isArray(records) ? records : [records]) as Row[]).map((record) => {
           n += 1;
-          return { thread_id: `${OBJ}:${recordId}`, body: `ctp ${n}`, author_id: 'usr_fixture' };
+          return { thread_id: `${OBJ}:${record.id}`, body: `ctp ${n}`, author_id: AUTHOR };
         });
         const out = await ql.insert(COMMENT, rows, { context: { ...SYS } });
         for (const r of (Array.isArray(out) ? out : [out]) as Row[]) into.push(String(r.id));
       }
     };
-    await plant(id.mine, MINE_BULK, bulk.mine);
-    await plant(id.other, OTHER_BULK, bulk.other);
+    await plant(users.member, MINE_BULK, bulk.mine);
+    await plant(users.writer, OTHER_BULK, bulk.other);
 
     // Registered after AuditPlugin's gate, so it sees each read's WHERE as the gate left it.
     ql.registerMiddleware(async (op: any, next: () => Promise<void>) => {
@@ -189,7 +202,7 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
           const atRest: Row[] = await ql.find(COMMENT, { where: bothThreads(), limit: 10_000, context: { ...SYS } });
           return {
             atRest: atRest.length,
-            stamped: atRest.filter((r) => r.object_name === OBJ && (r.record_id === id.mine || r.record_id === id.other)).length,
+            stamped: atRest.filter((r) => r.object_name === OBJ && r.thread_id === `${OBJ}:${r.record_id}`).length,
           };
         },
         armed: (o) => o.atRest > 2 * OLD_WINDOW && o.stamped === o.atRest,
@@ -198,11 +211,18 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
       armedWhen({
         control: 'the member opens its own record and not the writer’s',
         disarmedBy: 'a member who could open the writer’s record would make the hidden cases below measure nothing',
-        observe: async () => ({
-          mine: (await stack.apiAs(token.member, 'GET', `/data/${OBJ}/${id.mine}`)).status,
-          other: (await stack.apiAs(token.member, 'GET', `/data/${OBJ}/${id.other}`)).status,
-        }),
-        armed: (o) => o.mine === 200 && (o.other === 404 || o.other === 403),
+        observe: async () => {
+          const recordOf = async (commentId: string) =>
+            String((await ql.findOne(COMMENT, { where: { id: commentId }, context: { ...SYS } })).record_id);
+          return {
+            mine: (await stack.apiAs(token.member, 'GET', `/data/${OBJ}/${id.mine}`)).status,
+            other: (await stack.apiAs(token.member, 'GET', `/data/${OBJ}/${id.other}`)).status,
+            bulkMine: (await stack.apiAs(token.member, 'GET', `/data/${OBJ}/${await recordOf(bulk.mine[0])}`)).status,
+            bulkOther: (await stack.apiAs(token.member, 'GET', `/data/${OBJ}/${await recordOf(bulk.other[0])}`)).status,
+          };
+        },
+        armed: (o) =>
+          o.mine === 200 && o.bulkMine === 200 && (o.other === 404 || o.other === 403) && (o.bulkOther === 404 || o.bulkOther === 403),
         describe: (o) => JSON.stringify(o),
       }),
     ]);
@@ -217,6 +237,8 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
     const expected = [...bulk.mine].sort();
     expect(expected.length).toBeGreaterThan(OLD_WINDOW);
     const { ids, totals } = await walk('member', bothThreads());
+    // A reading, recorded beside the verdict.
+    console.log(`E7-DOGFOOD-READING ${JSON.stringify({ visible: expected.length, served: ids.length, totals })}`);
     expect([...ids].sort()).toEqual(expected);
     expect(totals).toEqual([expected.length]);
   });
@@ -225,7 +247,8 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
     const { ids } = await walk('member', bothThreads());
     const served = new Set(ids);
     expect(bulk.other.filter((rowId) => served.has(rowId))).toEqual([]);
-    const scoped = await list('member', `$filter=${filterOf({ thread_id: `${OBJ}:${id.other}` })}&$top=5`);
+    const otherThread = (await ql.findOne(COMMENT, { where: { id: bulk.other[0] }, context: { ...SYS } })).thread_id;
+    const scoped = await list('member', `$filter=${filterOf({ thread_id: otherThread })}&$top=5`);
     expect({ rows: scoped.rows.length, total: scoped.total }).toEqual({ rows: 0, total: 0 });
   });
 
