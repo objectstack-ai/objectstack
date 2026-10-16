@@ -226,7 +226,7 @@ describe('bootSchemaStack({ deferSchemaDdl }) — the boot writes nothing (#3917
       expect(notes).toContain(
         `Immediate DDL was called 1 time(s) during the declaration boot (dropTable() on defer_widget via ${via})`,
       );
-      expect(notes).not.toContain('a plan writes nothing');
+      expect(notes).not.toContain('a plan writes no row or table');
     } finally {
       await stack.shutdown();
     }

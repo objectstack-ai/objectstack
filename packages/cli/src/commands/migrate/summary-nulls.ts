@@ -290,7 +290,18 @@ export default class MigrateSummaryNulls extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
-      printError(error.message || String(error));
+      // [#23899] `INVALID_FIELD` here is `backfillSummaryNulls` refusing a
+      // `--recompute-undefined-on-empty` name it cannot find (its one throw),
+      // which ends "Refused before the walk read or wrote any row." The boot
+      // above ran first in either mode, and its connect may have switched a
+      // SQLite file's journal mode (its header, no row), so on a SQLite file
+      // the refusal is followed by the note naming the switch. The `--json`
+      // envelope above carries the engine's message as it is.
+      const journalNote = error?.code === 'INVALID_FIELD'
+        && describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      printError(`${error.message || String(error)}${journalNote}`);
       this.exit(1);
     } finally {
       await stack.shutdown();

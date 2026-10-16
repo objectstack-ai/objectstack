@@ -649,7 +649,9 @@ What a run guarantees:
   about its code-declared datasources leaves that family a gap. `--apply` then refuses
   and names the family.
 - **Resumable.** A row already sealed under the current binding is skipped as done. A run
-  that stopped part-way finishes the rest when re-run, and a finished run writes nothing.
+  that stopped part-way finishes the rest when re-run, and a finished run writes no
+  `sys_secret` row. On a SQLite file, opening it can still switch its journal mode (to
+  WAL by default), which changes its header only.
 - **Safe against a live deployment.** Each row is written in one statement, and only if
   it still holds the ciphertext the run read. A row a producer changed during the run is
   not overwritten. It is counted, and a re-run picks it up.

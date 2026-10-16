@@ -752,7 +752,7 @@ describe('a plan writes nothing even when the host writes from init() (#13332)',
       // boot, so the outcome claim HELD and is printed with the report.
       // 4 = the host's `kernel:ready` write + the extra plugin's three.
       const notes = stack.composition.notes.join(' ');
-      expect(notes).toContain('Refused 4 write(s) during the declaration boot — a plan writes nothing');
+      expect(notes).toContain('Refused 4 write(s) during the declaration boot — a plan writes no row or table');
       expect(notes).toContain('create() on sys_metadata');
       // …and what was not run is said too.
       expect(notes).toContain(
@@ -827,7 +827,7 @@ describe('a plan writes nothing even when the host writes from init() (#13332)',
       const notes = stack.composition.notes.join(' ');
       expect(notes).toContain('Refused 2 write(s) during the declaration boot:');
       expect(notes).toContain('Raw execute() was called 1 time(s) during the declaration boot');
-      expect(notes).not.toContain('a plan writes nothing');
+      expect(notes).not.toContain('a plan writes no row or table');
 
       // The guard's structural surface carries it too, for `--json` consumers.
       expect(stack.composition.writeGuard?.rawExecutions).toEqual([

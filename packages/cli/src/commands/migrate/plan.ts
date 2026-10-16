@@ -35,6 +35,7 @@ import {
   type UnmanagedTablesReport,
 } from '../../utils/unmanaged-tables.js';
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import {
   resolveTenancyPosture,
   collectGlobalUniques,
@@ -311,6 +312,22 @@ export default class MigratePlan extends Command {
         console.log('');
       }
 
+      // [#23899] Two kinds of line below claim that this plan wrote no row or
+      // table: the declaration boot's write-guard note (one of the composition
+      // notes, when a plugin's write was refused or a raw command forwarded)
+      // and the unmanaged-table section's closing line. The read-only boot's
+      // connect may still have switched a SQLite file's journal mode
+      // (`SqlDriver.applySqliteJournalMode`, its rule for every connect), which
+      // rewrites the file header and no row, so on a SQLite file each line that
+      // makes the claim is followed by the note naming the switch. A target
+      // that is no SQLite file (PostgreSQL, MySQL) has no header to switch. The
+      // `--json` document above carries the same lines and no note.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      const withJournalNote = (line: string): string =>
+        (line.includes('no row or table') ? `${line}${journalNote}` : line);
+
       printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
       if (stack.telemetryDatabase !== null) printInfo(describeTelemetryDatabase(stack.telemetryDatabase));
       if (schemaSyncSkipped) printWarning(SKIPPED_SCHEMA_SYNC_NOTE);
@@ -318,7 +335,7 @@ export default class MigratePlan extends Command {
       // What the object set was composed from (#12938) — never silent about a
       // host config it could not load, and empty (so this block prints nothing)
       // when there was no deployment to compose.
-      for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
+      for (const note of stack.composition.notes) console.log(chalk.dim(`      ${withJournalNote(note)}`));
       console.log('');
 
       // [#13204] Its own block, above the drift verdict and never folded into
@@ -329,7 +346,7 @@ export default class MigratePlan extends Command {
       const unmanagedLines = renderUnmanagedTables(unmanagedTables);
       if (unmanagedLines.length > 0) {
         printInfo(unmanagedLines[0]!);
-        for (const line of unmanagedLines.slice(1)) console.log(chalk.dim(`      ${line}`));
+        for (const line of unmanagedLines.slice(1)) console.log(chalk.dim(`      ${withJournalNote(line)}`));
         console.log('');
       }
 
