@@ -8,7 +8,7 @@ export { Runtime } from './runtime.js';
 export type { RuntimeConfig } from './runtime.js';
 
 // Export Standalone Stack
-export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase } from './standalone-stack.js';
+export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase, sqliteFilenameFromUrl } from './standalone-stack.js';
 export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDatabase } from './standalone-stack.js';
 
 // The dev schema self-heal decision (#21733) — public because `@objectstack/cli`

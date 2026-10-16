@@ -75,6 +75,11 @@ async function confirm(question: string): Promise<boolean> {
  * The boot is the family's read-only boot (`deferSchemaDdl` + `readOnlyProbe`:
  * no DDL, no seed, no database file brought into existence), and the plan
  * itself issues SELECT statements only (`../../utils/organization-ownership-plan.ts`).
+ * On a datasource whose transport cannot defer DDL (the Turso REMOTE
+ * transport) the boot skips schema sync instead (`deferredDdlUnsupported:
+ * 'skip-schema-sync'`, #23816): it attempts no DDL at all, which keeps the same
+ * promise. The environment's own boot has run the additive sync the ceremony
+ * reads; the ceremony needs no table this release would create.
  * It writes no row or table; the one thing it writes is the plan FILE, on the
  * operator's disk, which the ADR asks for: "the plan is written to a file the
  * operator keeps". It never overwrites one — a kept plan is evidence.
@@ -149,8 +154,11 @@ async function confirm(question: string): Promise<boolean> {
  * served platform) so the security catalog it verifies names against is the
  * one the deployment serves, and the schema-drift ceremony proposes the
  * column drops of exactly the objects this release declares without the
- * column. It still holds the boot's own DDL back (`deferSchemaDdl`): the only
- * schema change the ceremony makes is the drops it asked for.
+ * column. It still holds the boot's own DDL back (`deferSchemaDdl`, or on the
+ * Turso REMOTE transport no schema sync at all, as the plan boots): the only
+ * schema change the ceremony makes is the drops it asked for. On that transport
+ * the drops go through the remote face's own drift detector and migration
+ * door (`@objectstack/driver-turso`).
  */
 export default class MigrateOrganizationOwnership extends Command {
   static override description =
@@ -335,6 +343,9 @@ export default class MigrateOrganizationOwnership extends Command {
         jsonOutput: json,
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
         deferSchemaDdl: true,
+        // [#23816] The plan needs no held-back work listed, so a transport that
+        // cannot defer DDL boots with no schema sync instead (still read-only).
+        deferredDdlUnsupported: 'skip-schema-sync',
         readOnlyProbe: true,
       });
     } catch (error: unknown) {
@@ -508,6 +519,8 @@ export default class MigrateOrganizationOwnership extends Command {
         jsonOutput: json,
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
         deferSchemaDdl: true,
+        // [#23816] As the plan boots: no schema sync on a transport that cannot defer DDL.
+        deferredDdlUnsupported: 'skip-schema-sync',
         composeHostStack: true,
         composeServedPlatform: true,
         composeAuthGatedSecurity: true,
@@ -530,7 +543,13 @@ export default class MigrateOrganizationOwnership extends Command {
       // The dialect, once, before the first statement: an unresolved one is
       // refused here, naming the driver, and never read as SQLite.
       const dialect = ceremonyDialectOf(stack.driver);
-      if (stack.tableAbsent('sys_migration')) {
+      const { normalizeRows } = await import('@objectstack/metadata-protocol');
+      // [#23816] A boot that skipped schema sync measured no table absent, so
+      // the ledger's presence is read from the catalog instead.
+      const ledgerAbsent = stack.schemaSync === 'skipped'
+        ? normalizeRows(await exec(columnListSql(dialect), ['sys_migration'])).length === 0
+        : stack.tableAbsent('sys_migration');
+      if (ledgerAbsent) {
         await refuse(
           { reason: 'ledger-absent', table: 'sys_migration', detail: 'the deployment ledger the ceremony checkpoints into does not exist' },
           'Refused: this database has no sys_migration table, where the ceremony records its checkpoint. Boot this ' +
@@ -538,7 +557,6 @@ export default class MigrateOrganizationOwnership extends Command {
         );
         return;
       }
-      const { normalizeRows } = await import('@objectstack/metadata-protocol');
       const { createSecurityCatalogReader } = await import('@objectstack/core');
       const { readDataMigrationFlag, recordDataMigrationRun } = await import('@objectstack/platform-objects/system');
       const kernel = stack.kernel as { getService(name: string): unknown };

@@ -169,6 +169,15 @@ Before you start, make sure you have the following installed:
 That's everything the standard path needs — `npx create-objectstack my-app`
 scaffolds a project with its own TypeScript toolchain and npm scripts.
 
+<Callout type="warn">
+**npm 10 cannot install the CLI right now.** npm 10, the npm that Node 22 ships,
+fails with `Cannot read properties of null (reading 'edgesOut')`. Upgrade npm
+first with `npm install -g npm@11` (npm 11 needs Node 22.9+), or use pnpm.
+Already scaffolded? Upgrade, then run `npm install` in the project.
+[Troubleshooting](/docs/deployment/troubleshooting#cannot-read-properties-of-null-reading-edgesout-from-npm-install)
+has the other fix.
+</Callout>
+
 <Callout type="info">
 **pnpm and TypeScript versions only matter for the framework monorepo.** If you
 clone [`objectstack-ai/objectstack`](https://github.com/objectstack-ai/objectstack)

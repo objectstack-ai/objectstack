@@ -1432,7 +1432,27 @@ export const CEILINGS = new Map([
   // convention (lowering is always legitimate). Lowered 403 → 402 when the
   // retired contract-review label's reporting line left (ruling record
   // 5770886272 on #19061).
-  ['.claude/agents/os-dev.md', 402],
+  // Raised 402 → 404 by the scoped-checklist ruling — an ORDINARY raise, ⛔ not
+  // a cross-file move (card #23665). The text is two rule lines beside the
+  // trigger-shaped rules in 〈本地验证范围〉: a PR that renames or removes an
+  // exported symbol runs the scoped platform-checklist check on its changed
+  // files before push (`node scripts/check-platform-checklist.mjs
+  // --changed-from origin/main`, the mode's own spelling) and records the
+  // verdict line verbatim in its report's `gates` field; the run is not a
+  // derived family — `--commands` never lists it, and `--ran` reports it as
+  // outside the derivation, not an error. Ordered by ruling record 6190922830
+  // on #23653 (letter C, item 3); maintainer, 2026-10-15, verbatim and
+  // untranslated: 「C (推荐)」. The ruling sized the text as one line; measured,
+  // the ruled content does not fit one under the 120-byte cap: the command
+  // alone is 70 B in its code span, the tightest one-line spelling carrying
+  // trigger, command and the `gates` clause is 125 B, and the two lines land
+  // at 119 B and 119 B. Authorized under ruling record 6184799323 on #23606
+  // (letter B, item 1; maintainer 「同意」): a ruling of record that orders text
+  // into a ratcheted file raises that file's ceiling by the measured lines the
+  // text needs, the ruling id and the delta quoted in the raising PR's body.
+  // Not a CROSS_FILE_MOVES destination, so no `ruledRaises` record applies.
+  // Landed count, headroom 0, same convention.
+  ['.claude/agents/os-dev.md', 404],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on

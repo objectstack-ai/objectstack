@@ -14,6 +14,7 @@
 - 析取 ②:有 `pm:queue` 无 `domain:*`(仅多车道仓);析取 ③:有 `domain:*` 无 pm-state。
 - 析取 ④:有 `pm:queue` 与 `domain:*` 而无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2 分钟。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
+- 自贴卡抽查:窗内新派发且 `domain:*` 事件与建卡同分钟者,逐张核车道、三件;⛔ 不凭 actor。
 - 半状态治愈积压 ②③④ 最老优先、P0 嫌疑先行,⛔ 优先最新不适用。
 - 首触定级与三析取 sweep 每 fire 跑到清空:⛔ 无每轮总量预算,清得动就多清。
 - 窗口耗尽未跑完的,下一 fire 从标签状态断点续跑。
@@ -85,7 +86,6 @@
 - 车道席可附证据/前提重验,⛔ 不定级不改标;skills 车道 finding 由该席自分诊,全仓轮跳过。
 - 域分批与 sweep 打包晋级五条照用;每批约定与积压告警见 `references/dispatch-runbook.md`。
 - `pm:retriage` 每 fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘。
-- retriage 维持或改判皆由分诊席同笔摘标;挂标归异议席。
 - retriage 的异议判据认内容(有评论写明所求)⛔ 不认形状(有一条异议评论)。
 - 发版板 `target:<major>`:判据二元,⛔ 不做优先级渐变:不修它,当前 RC 能不能发。
 - 判阻塞四类:① 用户今天就撞的已发布面缺陷;② 公开契约 declared≠enforced。

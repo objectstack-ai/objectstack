@@ -62,8 +62,9 @@
  * builds it like postgres.
  */
 
-import { resolve as resolvePath } from 'node:path';
-import { mkdirSync, existsSync } from 'node:fs';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { existsSync } from 'node:fs';
+import { mkdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
@@ -320,6 +321,21 @@ export const StandaloneStackConfigSchema = z.object({
      * turning hydration ON, and this function keeps it on unless told.
      */
     hydrateMetadataFromDb: z.boolean().optional(),
+    /**
+     * [#23816] Boot with schema sync SKIPPED: the `ObjectQLPlugin` option the
+     * `OS_SKIP_SCHEMA_SYNC=1` posture names, passed explicitly. The engine then
+     * runs no CREATE TABLE / ALTER TABLE and tells each driver its objects
+     * DDL-free (`registerObjectMetadata`), which is all the coercion registries
+     * and drift detection need.
+     *
+     * Unset, the plugin keeps reading `OS_SKIP_SCHEMA_SYNC` exactly as before,
+     * so every serving boot is unchanged. `bootSchemaStack` sets it for one
+     * case only: a command that asked for deferred DDL against a datasource
+     * whose transport cannot defer it (the Turso REMOTE transport), and that
+     * declared that a boot with no schema sync serves it as well
+     * (`os migrate organization-ownership`).
+     */
+    skipSchemaSync: z.boolean().optional(),
 });
 
 export type StandaloneStackConfig = z.input<typeof StandaloneStackConfigSchema>;
@@ -566,14 +582,31 @@ function refuseRetiredMemoryEngine(
     throw new Error(`[StandaloneStack] ${retiredMemoryEngineMessage(selection)}`);
 }
 
-/** URL→filename for the two sqlite kinds. Throws on a URL that isn't a path. */
-function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
+/**
+ * URL→filename for the two sqlite kinds: the ONE rule both hosts turn a SQLite
+ * database URL into a file with. Throws on a URL that isn't a path.
+ *
+ * Takes the URL as {@link resolveStandaloneDatabase} has it, i.e. after
+ * `normalizeDatabaseUrl` (`sqlite:` / `sqlite://` are already `file:`).
+ * `file:` and `file://` are stripped case-insensitively on BOTH kinds, as
+ * {@link detectDriverFromUrl} classifies them (`/^file:/i`): a prefix the
+ * classifier accepts and this strip kept became part of the filename, so
+ * `FILE:./app.db` opened `./FILE:./app.db` and the boot's directory creation
+ * made a `FILE:.` directory — the "bogus directory from a URL" this module's
+ * header rules out.
+ *
+ * Exported because the CLI host (`resolveStorageDefinition` in
+ * `@objectstack/cli`'s `utils/storage-driver.ts`) calls it rather than keeping
+ * a second copy; its copy stripped only `/^file:/`, so `file://NAME` opened
+ * `//NAME` at the filesystem root there while this host opened `NAME`.
+ */
+export function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
     if (kind === 'sqlite-wasm') {
         return dbUrl
             .replace(/^wasm-sqlite:(\/\/)?/i, '')
             .replace(/^file:(\/\/)?/i, '') || ':memory:';
     }
-    const filename = dbUrl.replace(/^file:(\/\/)?/, '');
+    const filename = dbUrl.replace(/^file:(\/\/)?/i, '');
     const scheme = urlSchemeOf(filename);
     if (!filename || scheme) {
         // Names the scheme, never the URL ({@link urlSchemeOf}). This is the
@@ -587,6 +620,91 @@ function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): s
         );
     }
     return filename;
+}
+
+/**
+ * The directory of a file-backed SQLite `default` that this host could not
+ * make (#23737). Module-private on purpose: no package entry exports it.
+ *
+ * `code` is the operating system's (`ENOENT`, `EACCES`, `ENOTDIR`, `EEXIST`,
+ * …) and `cause` the error itself. The message names the database file and
+ * the directory, never the URL: refusals in this file name the scheme, never
+ * the URL, and for the two SQLite schemes the path is all an operator needs.
+ */
+class SqliteDatabaseDirectoryError extends Error {
+    readonly code: string | undefined;
+    readonly filename: string;
+    readonly directory: string;
+    /** The error the operating system answered. */
+    readonly cause: unknown;
+
+    constructor(filename: string, directory: string, cause: unknown) {
+        const reason = cause instanceof Error ? cause.message : String(cause);
+        super(
+            `[StandaloneStack] SQLite database file '${filename}' cannot be created: ` +
+            `its directory '${directory}' could not be made: ${reason}`,
+        );
+        this.name = 'SqliteDatabaseDirectoryError';
+        const code = (cause as { code?: unknown } | null | undefined)?.code;
+        this.code = typeof code === 'string' ? code : undefined;
+        this.filename = filename;
+        this.directory = directory;
+        this.cause = cause;
+    }
+}
+
+/**
+ * The host's filesystem prep for a file-backed SQLite `default` — ADR-0062's
+ * #3826 resolution keeps this `mkdir` a host concern — bounded (#23737).
+ *
+ * ## Why not `mkdirSync(dir, { recursive: true })`
+ *
+ * Node's recursive mkdir (v22.22.0, measured; sync and async alike) never
+ * returns when a level answers `ENOENT` although its parent exists. For
+ * `OS_DATABASE_URL=file:/proc/os-23737/ctl.db` it loops
+ * `mkdir("/proc/os-23737") = ENOENT`, `mkdir("/proc") = EEXIST`, retry —
+ * about 2,000 failing calls a second. The synchronous form held the event loop,
+ * so `os start` printed "Starting server..." and hung: no plugin start timeout
+ * could fire, and the SQL driver's own bounded refusal (#23696) was never
+ * reached.
+ *
+ * The walk below is the one `driver-sql`'s connect runs
+ * (`makeDatabaseDirectory` in `sqlite-database-file.ts`, which that package's
+ * entry does not export — hence this module-private copy): find the nearest
+ * level that exists, then create the missing ones top-down with a
+ * NON-recursive `mkdir`. `EEXIST` on a created level is a concurrent creator
+ * winning the race and is accepted; any other answer is the refusal, at once.
+ * A file holding the nearest existing name answers too: `ENOTDIR` from the
+ * first missing level under it, or `EEXIST` from asking for the directory
+ * itself.
+ */
+async function makeSqliteDatabaseDirectory(filename: string): Promise<void> {
+    const directory = resolvePath(filename, '..');
+    try {
+        const missing: string[] = [];
+        let level = directory;
+        for (;;) {
+            try {
+                if (!(await stat(level)).isDirectory() && missing.length === 0) await mkdir(level);
+                break;
+            } catch (e) {
+                if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
+                missing.push(level);
+                const parent = dirname(level);
+                if (parent === level) break;
+                level = parent;
+            }
+        }
+        for (const each of missing.reverse()) {
+            try {
+                await mkdir(each);
+            } catch (e) {
+                if ((e as { code?: unknown } | null)?.code !== 'EEXIST') throw e;
+            }
+        }
+    } catch (e) {
+        throw new SqliteDatabaseDirectoryError(filename, directory, e);
+    }
 }
 
 /** Which database a standalone boot would talk to, and how. */
@@ -800,7 +918,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         driverId = 'sqlite-wasm';
         const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite-wasm');
         if (filename !== ':memory:') {
-            mkdirSync(resolvePath(filename, '..'), { recursive: true });
+            await makeSqliteDatabaseDirectory(filename);
         }
         driverConfig = { filename };
     } else if (dbDriver === 'sqlite') {
@@ -812,9 +930,10 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // of the write side effect `os migrate plan` was leaving behind, and a
         // `mkdir -p` here would recreate the very directory the driver is about
         // to decline to put a file in. When the file DOES exist the directory
-        // does too, so this costs the mode nothing.
+        // does too, so this costs the mode nothing. Bounded, and refused at once
+        // when the directory cannot be made (#23737, see the helper).
         if (!(cfg.sqliteAbsentFile === 'empty-in-memory' && !existsSync(filename))) {
-            mkdirSync(resolvePath(filename, '..'), { recursive: true });
+            await makeSqliteDatabaseDirectory(filename);
         }
         driverConfig = { filename };
     } else {
@@ -964,6 +1083,9 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
             environmentId,
             runPlatformMigrations: cfg.runPlatformMigrations ?? true,
             hydrateMetadataFromDb: cfg.hydrateMetadataFromDb !== false,
+            // [#23816] Only a `true` is passed through, so a serving boot keeps
+            // the plugin's own `OS_SKIP_SCHEMA_SYNC` reading.
+            ...(cfg.skipSchemaSync === true ? { skipSchemaSync: true } : {}),
             // [#21391] Only a `false` is passed through, so a serving boot
             // hands the plugin exactly the options it always did.
             ...(cfg.armLifecycleSweep === false ? { lifecycle: { enabled: false } } : {}),
