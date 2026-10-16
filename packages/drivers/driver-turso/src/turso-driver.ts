@@ -2002,11 +2002,20 @@ export class TursoDriver extends SqlDriver {
     // as `introspectSchema()` did with "no tables". Now knex refuses to run it
     // (`Unable to acquire a connection`), because there is no connection to
     // run it on. That failure is loud; it never adds a silent answer.
+    //
+    // [#23816] `url` names the DECLARED target, which `SqlDriver` keeps in
+    // `this.config` so `describeDriverConnection` can render it (the CLI's
+    // "which database" label, credential-free: it drops userinfo and the query,
+    // where a libSQL token can ride). Knex reads no `url` key, so it opens
+    // nothing. Without it every remote database was labelled `better-sqlite3`,
+    // and the organization-ownership ceremony's refusal of a plan reviewed
+    // against another database could not tell two remote databases apart.
     if (mode === 'remote') {
       return {
         client: 'better-sqlite3',
         useNullAsDefault: true,
-      };
+        url: config.url,
+      } as SqlDriverConfig;
     }
 
     if (config.url === ':memory:') {
