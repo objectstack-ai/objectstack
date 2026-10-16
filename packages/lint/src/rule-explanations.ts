@@ -2188,7 +2188,7 @@ const SEARCHABLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
 
 /** Which predicates the three ids judge, and the oracle they ask (all three). */
 const PREDICATE_FORM_SCOPE =
-  'Judged: the `visibleWhen` (or `visibleOn`) predicates on a metadata-editing form — a `views[]` ' +
+  'Judged: the `visibleWhen` predicates on a metadata-editing form — a `views[]` ' +
   'form, its default `form` or a `formViews` entry whose data source is `{ provider: \'schema\', ' +
   'schemaId }` — on its sections and fields, nested repeater rows included, where `data` is rebound ' +
   'to the ROW. A path is resolved against the Zod schema of the metadata type the form edits ' +
@@ -2575,7 +2575,12 @@ const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION: RuleExplanation = {
       'row.',
     'Respelled `unique: \'organization\'`, the NULL rows become one platform bucket ' +
       '(`COALESCE(organization_id, \'__global__\')`) that is unique among themselves, which is what ' +
-      'closes the hole.',
+      'closes the hole. The respelling keeps `fields` exactly as they are: the driver makes the listed ' +
+      'organization column NULL-safe in place rather than prepending a second organization key part, ' +
+      'so `[organization_id, email]` then really is "one email per organization".',
+    'Opting in is a physical tightening. It surfaces as a `recreate_index` drift op gated by the ' +
+      'duplicate pre-flight probe (ADR-0120 D4), so pre-existing duplicate NULL-organization rows ' +
+      'block it with a report rather than failing a boot.',
     'Advisory, and never auto-fixed (ADR-0120 D5c): the legacy spelling stays valid indefinitely ' +
       'and forces no drift, and opting in is a real physical tightening that goes through the D4 ' +
       'ceremony, because rows the void constraint admitted may still be there. Not reported: ' +
@@ -2600,6 +2605,10 @@ const UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION: RuleExplanation = {
       '`ObjectSchema.create` and the runtime save door — and this rule refuses it where nothing ' +
       'parses: `os lint`, which judges the normalized stack. Stored metadata that still carries it ' +
       'converts to `unique: \'global\'`, which builds the same physical index.',
+    'Either word is a complete fix. `\'global\'` keeps the index exactly as bare `true` built it; ' +
+      '`\'organization\'` makes the driver prepend the NULL-safe organization key part at ' +
+      'registration, so each organization may hold the value once. ' +
+      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ],
 };
 
@@ -2615,6 +2624,9 @@ const UNIQUE_DOUBLE_DECLARATION_EXPLANATION: RuleExplanation = {
       'the per-organization constraint can never be tripped and one of the two declared intents is ' +
       'silently dead. The same scope on both sides is REDUNDANT — the same index declared twice — ' +
       'and dropping one gives the intent a single home.',
+    'Either way the fix leaves one spelling. Installation-wide uniqueness is `unique: \'global\'`, on ' +
+      'the field or on the declared index; per-organization uniqueness is `unique: \'organization\'`, ' +
+      'preferably field-level on the column, or on the declared index.',
     'A composite declared index is not judged here: listing the organization column is the legacy ' +
       'organization spelling, `unique/legacy-organization-composite`\'s question. Advisory: the ' +
       'stack is well-defined, and the cost is an intent that never takes effect.',
@@ -3385,7 +3397,163 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
     'A warning, not an error: one package\'s lint cannot see the capabilities other installed ' +
       'packages declare, and the reference fails closed anyway, so a dangling one is almost ' +
-      'certainly a typo to surface, not a build to break.',
+      'certainly a typo to surface, not a build to break. If another installed package declares the ' +
+      'capability, the warning is expected: leave the reference as it is.',
+  ],
+};
+
+// ── Object list view mode (`validate-list-view-mode.ts`) ─────────────────────
+
+const LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-filters-in-views-mode',
+  covers: 'why page filter controls do nothing on an object view',
+  paragraphs: [
+    'An object\'s list views render in "views" mode: the ViewTabBar owns navigation, one segmented ' +
+      'tab per named `listViews` entry. Two page filters-mode controls collide with it and are ignored ' +
+      'there (ADR-0047): `quickFilters`, and `userFilters` with `element: "tabs"` or a `tabs` list.',
+    'To fix it, pick what the control was for. Named presets on the object are `listViews` entries, ' +
+      'each one a tab of the bar; value chips over a field are `userFilters` with `element: ' +
+      '"dropdown"`, which an object view does allow; and quick filters or a filters-mode tab strip ' +
+      'belong on a page list (InterfaceListPage, "filters" mode), where no ViewTabBar is drawn.',
+  ],
+};
+
+// ── Liveness ledgers (`lint-liveness-properties.ts`) ─────────────────────────
+
+const LIVENESS_LEDGER_UNREADABLE_EXPLANATION: RuleExplanation = {
+  rule: 'liveness-ledger-unreadable',
+  covers: 'why a missing liveness ledger switches warnings off',
+  paragraphs: [
+    'A metadata type\'s author warnings about declared-but-inert properties are read from its ' +
+      'liveness ledger, the `TYPE.json` file `@objectstack/spec` ships in its `liveness/` directory. ' +
+      'When that file is missing, or does not parse as a ledger, every such warning for the type is ' +
+      'switched off, and this finding is reported once per run for the type.',
+    'This is a packaging fault in the platform, not an authoring error: nothing in the metadata being ' +
+      'linted caused it, and the rule\'s silence about that type means nothing until it is fixed. ' +
+      'Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
+  ],
+};
+
+// ── Page field bindings (`validate-page-field-bindings.ts`) ──────────────────
+
+const PAGE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'page-field-unknown',
+  covers: 'how a page binding names a field',
+  paragraphs: [
+    'A page component binds fields by name, and each name must match one of the bound object\'s ' +
+      'declared fields, or a system field, exactly: a misspelt or renamed field resolves to nothing, ' +
+      'at the cost the message names.',
+    'To fix it, correct the name (the `fix:` line names the nearest declared field when one is ' +
+      'close) or add the field to the object. Not judged here: a dotted relationship path ' +
+      '(`account.name`), which the query engine resolves, and an object this stack does not define.',
+  ],
+};
+
+const PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION: RuleExplanation = {
+  rule: 'page-section-count-not-multi-value',
+  covers: 'which fields a section heading can count',
+  paragraphs: [
+    'A section heading\'s `{{ count }}` counts the values of the field the section is bound to. On a ' +
+      'single-value field it can only ever read 0 or 1: a number that looks like a count and is not one.',
+    'A multi-value field is `multiselect`, `checkboxes` or `tags`, or a `select`, `lookup`, `user`, ' +
+      '`file` or `image` field declared with `multiple: true`. Count one of those; to show a single ' +
+      'value, list the field in the section\'s `fields` instead. Not reported: a dotted relationship ' +
+      'path, or a field whose type this stack cannot resolve.',
+  ],
+};
+
+// ── Flow reference syntax (`lint-flow-patterns.ts`) ──────────────────────────
+
+/** Where a flow node reads `{{ }}`, shared by the two wrong-syntax entries. */
+const FLOW_TEXT_SLOTS =
+  'Double-brace `{{ }}` is the template dialect of a flow\'s text slots only: a notify `title` / ' +
+  '`message` / `actionUrl`, an http `url` and `headers` values, a screen `title` / `description`, an ' +
+  '`end` `message`.';
+
+/** The literals and every other config value, shared by the two wrong-syntax entries. */
+const FLOW_LITERALS =
+  'A node\'s literals (a notify `sourceObject`, `actorId` and `payload`; an http `method`, `durable`, ' +
+  '`timeoutMs` and `signingSecret`) and every config value outside the text and value slots are read as ' +
+  'written: neither `{var}` nor `{{ }}` resolves there, and nothing evaluates a reference, braced or ' +
+  'bare. A brace token in a literal is refused at `objectstack validate` and `registerFlow`, and in ' +
+  '`signingSecret`, whose secret the flow credential store may hold, by the executor\'s parse. Write ' +
+  'the value itself.';
+
+/** What the spelling on the `fix:` line does not show, shared by the two wrong-syntax entries. */
+const FLOW_CEL_CAVEATS =
+  'Two CEL facts the spelling does not show. CEL refuses an absent variable or key where the template ' +
+  'wrote nothing, so guard one that may be absent with `has()`, a step at a time from `vars`, which ' +
+  'holds only the variables the run has bound: `has(vars.a) && has(vars.a.b) ? vars.a.b : null`, which ' +
+  'writes (or, to a callee, hands) `null` where the template wrote nothing. And text with holes is one ' +
+  'CEL concatenation: wrap a hole that is not a string in `string(…)`, and one that may be null in ' +
+  '`coalesce(…, \'\')`, because CEL refuses `+ null`.';
+
+/** A CRUD node's filter operand, shared by the two wrong-syntax entries. */
+const FLOW_FILTER_OPERAND =
+  'A filter operand envelope is evaluated before the query. One that evaluates to `null` refuses the ' +
+  'node, because an absent condition does not narrow a query, it widens it; so where the value may be ' +
+  'absent, route around the node with a `decision` rather than guarding it.';
+
+/** Where an envelope at the string's place would not evaluate, shared by the two wrong-syntax entries. */
+const FLOW_NO_ENVELOPE_POSITIONS =
+  'Where an envelope at the string\'s own place would not evaluate, the `fix:` line names none. A ' +
+  'string inside an object or list literal is stored as the object it spells, so compute the whole ' +
+  'value as one CEL envelope that builds a CEL map or list literal with this string\'s spelling at its ' +
+  'place (wrap each entry in `dyn(…)` where literal and computed values mix). A legacy `assignment` ' +
+  'shape (the `assignments: [{ variable, value }]` array, or variables written as the config\'s own ' +
+  'keys) evaluates nothing, so move the assignments into the canonical `assignments: { … }` map and ' +
+  'write the envelope there.';
+
+const FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION: RuleExplanation = {
+  rule: 'flow-double-brace-interpolation',
+  covers: 'where `{{ }}` is a template, and what replaces it',
+  paragraphs: [
+    FLOW_TEXT_SLOTS + ' Anywhere else in a node\'s config a `{{ }}` renders nothing: the string is stored ' +
+      'or sent as the literal text it spells.',
+    'A value slot (a record write\'s `fields`, an `assignment` value, a filter operand, a callee\'s ' +
+      'input map, a screen\'s prefill or record id, an http `body`) reads a CEL value envelope, ' +
+      '`{ dialect: \'cel\', source: \'…\' }`, and no template: the value-slot refusal reads a `{{ }}` ' +
+      'string\'s outer braces as literal text, so the build refuses it, and the spelling that refusal ' +
+      'gives keeps the braces as text. The `fix:` line names the value-slot judge\'s own spelling of ' +
+      'the holes the string means instead: each `{{ x }}` hole is the CEL path `x`.',
+    FLOW_NO_ENVELOPE_POSITIONS,
+    FLOW_CEL_CAVEATS,
+    FLOW_FILTER_OPERAND,
+    FLOW_LITERALS,
+  ],
+};
+
+const FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION: RuleExplanation = {
+  rule: 'flow-bare-dollar-reference',
+  covers: 'how a bare `$` reference is written in each slot',
+  paragraphs: [
+    'A bare `$name.path` in a flow node\'s config is never resolved: it is stored or sent as the ' +
+      'literal text it spells. How to write the reference depends on the slot the string sits in.',
+    'In a text slot (where `{{ }}` is the template; `os explain flow-double-brace-interpolation` ' +
+      'lists them) it becomes a hole, `{{ $error.message }}`, when the flow engine binds its `$` root. ' +
+      'A hole over any other `$` name is refused: a variable the flow binds itself (a declared ' +
+      'variable, an `assignment` target, an `outputVariable`, a `try_catch` `errorVariable`) is ' +
+      'written without the `$`, and any other value is computed into a variable with an `assignment` ' +
+      'node and written `{{ v }}`.',
+    'In a value slot (a record write\'s `fields`, an `assignment` value, a filter operand, a ' +
+      'callee\'s input map, a screen\'s prefill or record id, an http `body`) the reference is the CEL ' +
+      'value envelope the spec\'s value-slot judge spells for the `{…}` token it names, and the ' +
+      '`fix:` line carries that spelling: a `$` root the engine binds reads as that variable ' +
+      '(`$error.message` is `vars["$error"].message`), and any other `$` root names the flow\'s own ' +
+      'variable, written without the `$` (`$source.id` is `source.id`).',
+    'The run user, `$User.Id`, is `current_user.id`. In a flow that can run without a user (a ' +
+      'schedule, or a record change made by a system write) `current_user` is `null` and that read ' +
+      'fails the run, so write `current_user != null ? current_user.id : null` there; the guarded form ' +
+      'writes `null` where the template wrote nothing, which on `update_record` clears a stored value ' +
+      'the template left alone. In a text slot, compute it into a variable with an `assignment` node ' +
+      '(`assignments: { v: { dialect: \'cel\', source: \'current_user.id\' } }`) and write `{{ v }}`. ' +
+      'Any other `$User` path never resolved: `current_user` carries only `id`, `positions`, ' +
+      '`organizationId` and `isPlatformAdmin`, so read the user record by `current_user.id` with a ' +
+      '`get_record` node (`objectName: \'sys_user\'`) and read the field off its `outputVariable`.',
+    FLOW_NO_ENVELOPE_POSITIONS,
+    FLOW_CEL_CAVEATS,
+    FLOW_FILTER_OPERAND,
+    FLOW_LITERALS,
   ],
 };
 
@@ -4182,6 +4350,12 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
+  [LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION.rule]: LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION,
+  [LIVENESS_LEDGER_UNREADABLE_EXPLANATION.rule]: LIVENESS_LEDGER_UNREADABLE_EXPLANATION,
+  [PAGE_FIELD_UNKNOWN_EXPLANATION.rule]: PAGE_FIELD_UNKNOWN_EXPLANATION,
+  [PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION.rule]: PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION,
+  [FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION.rule]: FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION,
+  [FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION.rule]: FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION,
   [ACTION_NAME_UNDEFINED_EXPLANATION.rule]: ACTION_NAME_UNDEFINED_EXPLANATION,
   [MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION.rule]: MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION,
   [VIEW_CONTAINER_SHAPE_EXPLANATION.rule]: VIEW_CONTAINER_SHAPE_EXPLANATION,

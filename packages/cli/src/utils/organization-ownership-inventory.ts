@@ -197,6 +197,35 @@ const EX: readonly InventoryCensus[] = ['example-census-2026-08-31'];
 const SEEDED = [{ column: 'managed_by', in: ['package', 'platform', 'system'] }] satisfies RowPredicate;
 const AUTHORED = [{ column: 'managed_by', notIn: ['package', 'platform', 'system'] }] satisfies RowPredicate;
 
+/**
+ * The permission sets the security plugin ships (`securityDefaultPermissionSets`,
+ * `@objectstack/plugin-security`), by name. `organization-ownership-inventory.test.ts`
+ * holds this list equal to the plugin's.
+ */
+export const SHIPPED_PERMISSION_SET_NAMES: readonly string[] = [
+  'admin_full_access', 'organization_admin', 'organization_admin_no_bypass', 'member_default', 'viewer_readonly',
+  'mcp_agent_data_read', 'mcp_agent_data_write', 'mcp_agent_restricted',
+];
+
+/**
+ * The shipped sets an install seeded before the seeder stamped its rows
+ * `managed_by: 'platform'` (commit 712e185db, ruled 2026-08-15): the insert
+ * omitted the column, so the object's `defaultValue: 'admin'` filled it, and
+ * every install created earlier holds the shipped sets as `admin` rows that
+ * read as Setup-authored. The ceremony adopts them as the platform seeds they
+ * are — re-owned `platform` at the authored conversion, then deleted as mirrors
+ * once the grants name them — so the shipped definition stands; an edit an
+ * administrator made to one of them in Setup is not carried, and the plan and
+ * the apply both warn, naming each row (ADR-0131, amendment 2026-10-16).
+ */
+export const LEGACY_SHIPPED_SET_SEEDS = [
+  { column: 'managed_by', equals: 'admin' },
+  { column: 'name', in: [...SHIPPED_PERMISSION_SET_NAMES] },
+] satisfies RowPredicate;
+
+/** The `sys_permission_set` category that counts {@link LEGACY_SHIPPED_SET_SEEDS}. */
+export const LEGACY_SHIPPED_SET_SEEDS_CATEGORY = 'legacy-shipped-set-seeds';
+
 const parent = (childKey: string, parentObject: string): Anchor => ({ kind: 'parent', childKey, parentObject });
 const subject = (objectColumn: string, idColumn: string): Anchor => ({ kind: 'subject', objectColumn, idColumn });
 
@@ -350,7 +379,15 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'mirror-deletion',
     citation: `${D3_CATALOG}; ADR-0094 D1 generalized (D2); D10 fate 2`,
     mirror: SEEDED,
-    categories: [{ id: 'authored', label: 'Setup-authored permission sets — converted to environment metadata by C3, never deleted as mirrors', citation: 'ADR-0131 D3', where: AUTHORED }],
+    categories: [
+      { id: 'authored', label: 'Setup-authored permission sets — converted to environment metadata by C3, never deleted as mirrors', citation: 'ADR-0131 D3', where: AUTHORED },
+      {
+        id: LEGACY_SHIPPED_SET_SEEDS_CATEGORY,
+        label: 'shipped permission sets an install seeded before 2026-08-15 as managed_by admin — adopted as platform seeds and deleted as mirrors; a Setup edit to one of them is not carried',
+        citation: 'seed provenance: commit 712e185db (ruled 2026-08-15); ADR-0131, amendment 2026-10-16',
+        where: LEGACY_SHIPPED_SET_SEEDS,
+      },
+    ],
   },
   {
     object: 'sys_capability',

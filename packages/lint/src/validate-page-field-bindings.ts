@@ -124,7 +124,7 @@ import {
   sectionGroupRefs,
   type SectionGroupRef,
 } from './object-field-groups.js';
-import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from './object-graph.js';
+import { indexObjectGraph, recordsOf, resolveFieldPath, suggestName, type ObjectGraph } from './object-graph.js';
 // [#23013] The one answer to "does this field hold several values?" — the
 // predicate storage, the aggregate answer and the generator already ask.
 import { isMultiValueField } from '@objectstack/spec/data';
@@ -377,10 +377,11 @@ export function checkSectionCountRefs(
         `field "${ref.name}" on object "${objectName}" is a single-value \`${type}\` field, so the ` +
         'section heading\'s `{{ count }}` can only ever read 0 or 1 — a number that looks like a ' +
         'count and is not one.',
+      // [#22161] One remedy line; which field types take `multiple: true` is
+      // `os explain page-section-count-not-multi-value`.
       hint:
-        'Count a multi-value field: `multiselect`, `checkboxes` or `tags`, or a `select`, `lookup`, ' +
-        '`user`, `file` or `image` field declared with `multiple: true`. To show a single value, list ' +
-        'the field in the section\'s `fields` instead.',
+        'Count a multi-value field (`multiselect`, `checkboxes`, `tags`, or one declared with ' +
+        '`multiple: true`), or list this field in the section\'s `fields` to show its value.',
     });
   }
   return findings;
@@ -568,10 +569,10 @@ export function checkFieldRefs(
       message:
         `field "${ref.name}" is not a field on object "${objectName}" — ` +
         FIELD_REF_MISS[consequence].unknown,
-      hint:
-        `Fix the field name, or add "${ref.name}" to ${objectName}. ` +
-        `References must match the object's field names exactly.` +
-        (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
+      // [#22161] One remedy line and the nearest declared field; the object's
+      // field list is no longer echoed, and the exact-match rule is
+      // `os explain page-field-unknown`.
+      hint: `Fix the field name, or add "${ref.name}" to ${objectName}.${suggestName(ref.name, known)}`,
     });
   }
   return findings;

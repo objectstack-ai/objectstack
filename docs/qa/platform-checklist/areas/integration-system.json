@@ -856,7 +856,7 @@
         {
           "clause": "the raw transactional send door (POST /api/v1/email/send → IEmailService.send, complementary to the sendTemplate path above) authenticates and validates: an AUTHED well-formed message — { to, subject } plus AT LEAST ONE of `html` / `text` — lands at the dev transport (200 with result.status 'sent'); an ANONYMOUS send is refused 401 UNAUTHENTICATED (the #3963 unconditional gate — the api.requireAuth opt-out is retired); a MALFORMED body is refused 400 with a ledgered envelope code (INVALID_REQUEST for a non-object body, VALIDATION_FAILED for a bad message shape) — never a 500 for caller-fixable input, and a runtime with no email provider answers 501 NOT_IMPLEMENTED rather than a fake success",
           "oracle": "api",
-          "verify": "the three POST /api/v1/email/send responses: authed 200 + dev-transport capture, anonymous 401 UNAUTHENTICATED, malformed 400 with the named code (rest-server.ts registerEmailEndpoints: enforceAuth, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider). ⚠ WIRE KEYS (corrected, run #7690): the send input is SendEmailInput { to, subject, text?, html?, from?, cc?, bcc?, replyTo?, … } (packages/spec/src/contracts/email-service.ts) — NOT `bodyHtml`. `bodyHtml`/`bodyText` are the email-TEMPLATE authoring fields (this item's own variants list at the `body:` and alias lines says so); posting them to this door is refused 400 'VALIDATION_FAILED: at least one of text or html is required' (packages/plugins/plugin-email/src/email-service.ts). A 400 here is the run using the wrong vocabulary, not a product defect — re-send with `html` before filing anything",
+          "verify": "the three POST /api/v1/email/send responses: authed 200 + dev-transport capture, anonymous 401 UNAUTHENTICATED, malformed 400 with the named code (email-routes.ts registerEmailEndpoints: enforceAuth, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider). ⚠ WIRE KEYS (corrected, run #7690): the send input is SendEmailInput { to, subject, text?, html?, from?, cc?, bcc?, replyTo?, … } (packages/spec/src/contracts/email-service.ts) — NOT `bodyHtml`. `bodyHtml`/`bodyText` are the email-TEMPLATE authoring fields (this item's own variants list at the `body:` and alias lines says so); posting them to this door is refused 400 'VALIDATION_FAILED: at least one of text or html is required' (packages/plugins/plugin-email/src/email-service.ts). A 400 here is the run using the wrong vocabulary, not a product defect — re-send with `html` before filing anything",
           "evidence": "the three responses + the dev-transport landing (plus the wrong-vocabulary refusal, if the probe was driven)"
         }
       ],
@@ -877,7 +877,7 @@
         "packages/spec/liveness/email_template.json#requireVars (the whole surface live via #4509; per-prop evidence incl. requireVars, TEMPLATE_INACTIVE, seed-not-clobber, runtime re-materialization)",
         "packages/plugins/plugin-email/src/email-service.ts ((name, locale) + fallback through the registry TemplateLoader; the requireVars and TEMPLATE_INACTIVE gates) + email-template-door.ts (the closed sys_email_template organization door, ADR-0131 D6) — the row projector bootstrap-declared-email-templates.ts was retired with the table projection (#22875)",
         "examples/app-showcase/src/system/emails/index.ts#showcase_task_done_email (showcase_task_done_email fixture)",
-        "packages/rest/src/rest-server.ts#registerEmailEndpoints (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
+        "packages/rest/src/email-routes.ts#registerEmailEndpoints (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
         "packages/rest/src/rest-route-ledger.ts (email family — POST /api/v1/email/send → client email.send)",
         "packages/spec/src/api/error-code-ledger.zod.ts#EMAIL_SEND_FAILED (EMAIL_SEND_FAILED under @objectstack/rest)",
         "packages/spec/src/contracts/email-service.ts#SendEmailInput (SendEmailInput — the WIRE shape of POST /api/v1/email/send: to, subject, text?, html?; 'at least one of text or html must be supplied') + packages/plugins/plugin-email/src/email-service.ts#normalizeMessage (normalizeMessage — where the VALIDATION_FAILED texts come from)"
@@ -1912,6 +1912,149 @@
           "date": "2026-10-13",
           "change": "fixtures.requires[0], acceptance[1].clause, knownGaps[2], acceptance[4] (clause and verify) and source[1] (stale spec, #23166 A1 / A4; parked on #23121, carried by #23169). The provisioned fixture tables carry 7 columns each, and the API and the panel agree, while the DDL declares 5 fields; the clause now reads the count off the API. At objectui 1fb1ced36243, still this repo's .objectui-sha, ValidationPanel's label map (now DIFF_LABEL_KEY) labels 'unreachable', so all 10 diff kinds render labelled and the expected-fail caveat is gone. QA run #23166 passed both clauses",
           "ref": "#23169"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.inbound-mailbox-association",
+      "title": "Inbound mail (new on v18): with requires:[\"mailbox\"] and an IMAP mailbox, a synced message is stored as sys_mail_message and associated with the record whose mailAssociation email field matches (inline forwards by an org member match on the original participants), attachments land as sys_file + sys_attachment, and an unmatched message is visible only to manage_mailboxes holders",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a scratch app with requires:[\"mailbox\"], a contact-like object with an email field marked mailAssociation, and an IMAP mailbox the sync job can reach (a local IMAP double) — there is NO HTTP ingest door, so this needs the IMAP sync composed"
+        ],
+        "knownGaps": [
+          "no in-repo app composes the mailbox service and no IMAP double ships with a stock boot — the live clauses are blocked(fixture) until one does; the Tier-1 pins compose a kernel with an IMAP double and are the evidence in the meantime"
+        ]
+      },
+      "steps": [
+        "configure a sys_mailbox and run the mailbox:imap-sync job",
+        "deliver one message from a contact address, one inline-forwarded by an org member, one with an attachment, one from nobody",
+        "GET /api/v1/data/sys_mail_message and /sys_mail_association as admin and member"
+      ],
+      "acceptance": [
+        {
+          "clause": "mailbox ingest, association, inline-forward matching and attachments — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the contact message is associated with that contact; the inline forward matches the original participants",
+          "oracle": "api",
+          "verify": "association rows",
+          "evidence": "the rows"
+        },
+        {
+          "clause": "the attachment is a sys_file + sys_attachment on the message",
+          "oracle": "api",
+          "verify": "attachment rows",
+          "evidence": "the rows"
+        },
+        {
+          "clause": "the unmatched message → 404 RECORD_NOT_FOUND for the member, visible to the manage_mailboxes holder",
+          "oracle": "api",
+          "verify": "status per persona",
+          "evidence": "two lines"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-mailbox/src/mailbox-service-kernel.test.ts + packages/services/service-mailbox/src/mailbox-sync-kernel.test.ts + packages/services/service-mailbox/src/ingest/inline-forward.test.ts + packages/services/service-mailbox/src/mailbox-attachments-kernel.test.ts + packages/spec/src/data/field-mail-association.test.ts"
+      },
+      "source": [
+        "packages/services/service-mailbox/src/mailbox-service-plugin.ts#MailboxServicePlugin",
+        "packages/services/service-mailbox/src/ingest/mail-ingest-service.ts#MailIngestService",
+        "packages/services/service-mailbox/src/ingest/inline-forward.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22870-field-mail-association, 22870-service-mailbox, 22871-imap-mailbox-sync, 22871-mail-association-live, 22871-mail-ingest-seam, 23215-inline-forward-parse, 23307-mail-attachments, 23306-storage-attach-verb"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.notification-org-and-redeliver-eligibility",
+      "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase notify flow (integration-system.notify-inbox-delivery names one)",
+          "the showcase outbound webhook (shipped inactive) with one delivery"
+        ]
+      },
+      "steps": [
+        "fire the notify flow from a system-context run; GET /api/v1/data/sys_notification and read organization_id",
+        "as the member POST /api/v1/notifications/read with the ADMIN's notification id; read readCount",
+        "POST /api/v1/webhooks/redeliver for a delivery of the inactive webhook",
+        "from the repo root run `os verify --app examples/app-showcase` (or boot from another cwd) and read the MCP connector health"
+      ],
+      "acceptance": [
+        {
+          "clause": "notification org stamping, recipient-only receipts, redeliver eligibility and MCP stdio cwd — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the stored notification carries the record's organization_id and no \"[notify] no organization in scope\" warning is logged",
+          "oracle": "api",
+          "verify": "organization_id + boot log grep",
+          "evidence": "row + grep"
+        },
+        {
+          "clause": "the foreign mark-read answers readCount 0 and writes no receipt",
+          "oracle": "api",
+          "verify": "readCount + receipt rows",
+          "evidence": "answer + rows"
+        },
+        {
+          "clause": "redeliver for the inactive webhook → 409 DELIVERY_NOT_ELIGIBLE",
+          "oracle": "api",
+          "verify": "status + code",
+          "evidence": "the answer"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-messaging/src/notification-organization-follows-event.integration.test.ts + packages/services/service-messaging/src/messaging-service.test.ts + packages/plugins/plugin-webhooks/src/webhook-redeliver-member.test.ts + packages/connectors/connector-mcp/src/mcp-stdio-cwd.test.ts"
+      },
+      "source": [
+        "packages/services/service-messaging/src/messaging-service.ts",
+        "packages/plugins/plugin-webhooks/src/redeliver-guard.ts",
+        "packages/connectors/connector-mcp/src/mcp-provider.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23284-notification-takes-record-organization, 22026-read-receipt-recipient-only, 22804-redeliver-inactive-veto, 22754-spec-webhooks-redeliver-member, 22756-webhooks-redeliver-member, 22423-mcp-stdio-package-cwd, 22434-connector-provider-package-path"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
         }
       ]
     }

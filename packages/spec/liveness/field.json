@@ -54,7 +54,49 @@
     },
     "options": {
       "status": "live",
-      "note": "select options {label,value,description,color,default} — renderers + validation. `description` joined 2026-08-31 (objectui#6153, inheriting the objectui#6140 ruling frame): objectui LookupField searches it on authored static options (LookupField.tsx:526) and recordToOption produces it for fetched options. `icon` is NOT an option key (withdrawn from the object.form options repeater under ADR-0049, #13671; pinned by packages/spec/src/data/field-rows-option-description.test.ts). Read points moved out of spec source (#23434), measured at objectui @d8ec8d6d4f011b11c8eb1e6dbd364ef206711391 and on objectui main with the same answer: objectui @d8ec8d6d4f01 packages/fields/src/index.tsx#SelectCellRenderer (its `renderOne` badge/dot branch reads `option?.label` and `option?.color` off a `SelectOptionMetadata[]`, never `option?.icon`); no field-option render path reads `icon`; the one `opt.icon` read in that tree is the config-panel `ConfigField` vocabulary (a `React.ReactNode` an authored option cannot reach). No per-option `disabled` on the object-field pipeline (packages/spec/src/shared/editability-boundary.ts, the SelectOptionSchema prescription; moved out of spec source, #23434): measured on objectui main @aca27fa, packages/fields/src/widgets/SelectField.tsx#SingleSelectField calls the root `disabled` the single authority and packages/fields/src/widgets/RadioField.tsx#hostGroupProps reads only `props.disabled`; the per-option `disabled` that exists is the SDUI family's own vocabulary, objectui @aca27fa packages/components/src/renderers/form/select.tsx#SelectRenderer."
+      "note": "select options {label,value,description,color,default} — renderers + validation. `description` joined 2026-08-31 (objectui#6153, inheriting the objectui#6140 ruling frame): objectui LookupField searches it on authored static options (LookupField.tsx:526) and recordToOption produces it for fetched options. `icon` is NOT an option key (withdrawn from the object.form options repeater under ADR-0049, #13671; pinned by packages/spec/src/data/field-rows-option-description.test.ts). Read points moved out of spec source (#23434), measured at objectui @d8ec8d6d4f011b11c8eb1e6dbd364ef206711391 and on objectui main with the same answer: objectui @d8ec8d6d4f01 packages/fields/src/index.tsx#SelectCellRenderer (its `renderOne` badge/dot branch reads `option?.label` and `option?.color` off a `SelectOptionMetadata[]`, never `option?.icon`); no field-option render path reads `icon`; the one `opt.icon` read in that tree is the config-panel `ConfigField` vocabulary (a `React.ReactNode` an authored option cannot reach). No per-option `disabled` on the object-field pipeline (packages/spec/src/shared/editability-boundary.ts, the SelectOptionSchema prescription; moved out of spec source, #23434): measured on objectui main @aca27fa, packages/fields/src/widgets/SelectField.tsx#SingleSelectField calls the root `disabled` the single authority and packages/fields/src/widgets/RadioField.tsx#hostGroupProps reads only `props.disabled`; the per-option `disabled` that exists is the SDUI family's own vocabulary, objectui @aca27fa packages/components/src/renderers/form/select.tsx#SelectRenderer. #23809 (2026-10-16) DRILLED this container: `kind` joined the option shape as the one child with no reader yet, so the blanket `live` verdict could no longer cover it and the `field/options` debt row left `undrilled-containers.baseline.json`. The children carry the read points this note already cites.",
+      "children": {
+        "label": {
+          "status": "live",
+          "evidence": "objectui @63d00da: packages/fields/src/index.tsx#SelectCellRenderer",
+          "verifiedAt": "2026-10-16",
+          "note": "The badge text of a select cell (`option?.label`), and every select / radio control's item label."
+        },
+        "value": {
+          "status": "live",
+          "evidence": "packages/objectql/src/validation/record-validator.ts#optionValues",
+          "verifiedAt": "2026-10-16",
+          "note": "The stored code: the record validator refuses a write whose value is not one of the field's option values."
+        },
+        "description": {
+          "status": "live",
+          "evidence": "objectui @63d00da: packages/fields/src/widgets/LookupField.tsx#LookupField",
+          "verifiedAt": "2026-10-16",
+          "note": "Lookup option search matches it beside the label (objectui#6153)."
+        },
+        "color": {
+          "status": "live",
+          "evidence": "objectui @63d00da: packages/fields/src/index.tsx#SelectCellRenderer",
+          "verifiedAt": "2026-10-16",
+          "note": "The badge / dot colour of a select cell (`option?.color`)."
+        },
+        "default": {
+          "status": "live",
+          "evidence": "packages/objectql/src/engine.ts#resolveOptionDefault",
+          "verifiedAt": "2026-10-16",
+          "note": "The insert path falls back to the option marked `default: true` when the field declares no `defaultValue` (#7246)."
+        },
+        "visibleWhen": {
+          "status": "live",
+          "evidence": "packages/objectql/src/validation/rule-validator.ts#evaluateOptionVisibility",
+          "verifiedAt": "2026-10-16",
+          "note": "The one visibility predicate the server also enforces: a write picking an option whose predicate is false, or cannot be evaluated, is refused (ADR-0068, ADR-0137 D2)."
+        },
+        "kind": {
+          "status": "planned",
+          "note": "#23809 (2026-10-16): the option's lifecycle category (`open` / `won` / `lost`), declared contract-first under the maintainer's ruling on that card (「同意」). Its REFUSALS are live at parse: `FieldSchema` refuses it off a single-value select / radio, and `ObjectSchema` refuses a `stageField` whose options do not each declare it (`refuseStageFieldWithoutKinds`). No renderer reads the key yet: the readers are the objectui record path and kanban follow-up card (the path renderer already honours the same vocabulary on `record:path` `stages[].terminal`, objectui @63d00da packages/plugin-detail/src/renderers/record-path.tsx#RecordPath classify) and HotCRM's lead / opportunity declarations. No `authorWarn`: under `stageField` the key is mandatory, so a warning would fire on every compliant stage field. Flip to `live` with the objectui evidence pointer when the path renderer reads `kind` off the stage field's options."
+        }
+      }
     },
     "picklist": {
       "status": "live",
@@ -307,27 +349,33 @@
     },
     "descriptionField": {
       "status": "live",
-      "note": "objectui LookupField — secondary line under each option in the quick-select popover (reads descriptionField || description_field)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField — secondary line under each option in the quick-select popover. The picker reads it camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#descriptionField. Outside the picker, one reader keeps a snake leg behind the declared key: objectui @daeb77fc84: packages/fields/src/resolveActionParams.ts#resolveActionParam reads `descriptionField ?? description_field` when it builds a lookup action param."
     },
     "lookupColumns": {
       "status": "live",
-      "note": "objectui RecordPickerDialog — record-picker table columns; renderer auto-derives from the referenced object when omitted (reads lookupColumns || lookup_columns). The lookup keys' snake_case twins (the docblock above `displayField` in packages/spec/src/data/field.zod.ts, for all seven lookup keys; moved out of spec source, #23434): of the seven, only `lookupColumns`, `lookupPageSize` and `allowCreate` are read as `SNAKE ?? CAMEL`, at objectui @ed971e8 packages/fields/src/widgets/LookupField.tsx#lookupColumns, #lookupPageSize and #explicitAllowCreate (all inside LookupField); `displayField`, `descriptionField`, `lookupFilters` and `dependsOn` are read camelCase-only there; claim dated 2026-09-09."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui RecordPickerDialog — record-picker table columns; renderer auto-derives from the referenced object when omitted. Read camelCase-only. The lookup keys' snake_case twins (the docblock above `displayField` in packages/spec/src/data/field.zod.ts, for all seven lookup keys): none of the seven is read as a snake_case alias by the picker. At objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#lookupColumns, #lookupPageSize, #explicitAllowCreate, #descriptionField, #lookupFilters and #dependsOn, and #declaredDisplayField, read the camelCase key alone (`displayField` keeps `reference_field`, objectui's own leg and not a spec key, behind it); objectui#12157 retired the last three snake reads (`lookup_columns`, `lookup_page_size`, `allow_create`). A stored snake spelling is folded onto the declared key at ingestion: objectui @daeb77fc84: packages/core/src/utils/reference-keys.ts#normalizeSchemaReferenceKeys, applied by packages/app-shell/src/providers/MetadataProvider.tsx to every stored object. Outside the picker two snake legs survive behind the declared key at the same pin: packages/fields/src/resolveActionParams.ts ranks `description_field` and `lookup_filters` after `descriptionField` / `lookupFilters` when it builds a lookup action param, and the metadata-admin ObjectFieldInspector reads `lookup_filters` / `depends_on` after the camelCase key from a stored document. Claim dated 2026-10-16 — a reading of a pinned foreign tree that nothing in this repo re-checks."
     },
     "lookupPageSize": {
       "status": "live",
-      "note": "objectui RecordPickerDialog — rows per page in the record-picker dialog (reads lookupPageSize || lookup_page_size)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui RecordPickerDialog — rows per page in the record-picker dialog. Read camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#lookupPageSize (objectui#12157 retired the `lookup_page_size` read)."
     },
     "lookupFilters": {
       "status": "live",
-      "note": "objectui LookupField + RecordPickerDialog — base scoping filters honoured by BOTH popover and dialog; structured supported form of referenceFilters (reads lookupFilters || lookup_filters)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField + RecordPickerDialog — base scoping filters honoured by BOTH popover and dialog; structured supported form of referenceFilters. The picker reads it camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#lookupFilters. Outside the picker, two readers keep a snake leg behind the declared key: objectui @daeb77fc84: packages/fields/src/resolveActionParams.ts#resolveActionParam reads `lookupFilters ?? lookup_filters` when it builds a lookup action param, and objectui @daeb77fc84: packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx#readLookupFilters reads `lookupFilters ?? lookup_filters` from a stored document."
     },
     "dependsOn": {
       "status": "live",
-      "note": "objectui LookupField — dependent/cascading lookup; restricts candidates by another field's value (reads dependsOn || depends_on)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField — dependent/cascading lookup; restricts candidates by another field's value. The picker reads it camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#dependsOn (objectui#7357 retired the `depends_on` read). Outside the picker, one reader keeps a snake leg behind the declared key: objectui @daeb77fc84: packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx#readDependsOn reads `dependsOn ?? depends_on` from a stored document."
     },
     "allowCreate": {
       "status": "live",
-      "note": "objectui LookupField — opt-in inline quick-create (dataSource.create from typed text) (reads allowCreate || allow_create)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField — opt-in inline quick-create (dataSource.create from typed text). Read camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#explicitAllowCreate (objectui#12157 retired the `allow_create` read)."
     },
     "searchable": {
       "status": "live",

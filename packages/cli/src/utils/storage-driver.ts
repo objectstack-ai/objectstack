@@ -296,8 +296,9 @@ function unsupportedUrlSchemeMessage(scheme: string): string {
  * per URL: `pg://` is postgres, and a value with no scheme is a SQLite file
  * path, whatever its extension. The runtime refuses every other
  * `<scheme>://`, so refusing it here takes away nothing that host means to
- * accept. The one difference is an OPAQUE scheme (`jdbc:…`, `redis:h`), which
- * this host refuses and the runtime host still opens as a file (#23765).
+ * accept. An OPAQUE scheme (`jdbc:…`, `redis:h`) gets the same answer: both
+ * hosts refuse it, naming the scheme, and `driver-vocabulary-parity.test.ts`
+ * holds the two equal.
  */
 export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (!url) return '';
@@ -354,10 +355,10 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
   //    than letting a name that ends `.db` reach SQLite, is what keeps
   //    `redis://h/x.db` refused, as the runtime host refuses it;
   //  - an OPAQUE scheme, two or more characters and a `:` with no `//`
-  //    (`jdbc:postgresql://…`, `redis:h`). The runtime host's scheme-less arm
-  //    opens these as a SQLite file at a path made of the URL. That is an
-  //    implementation gap on that host (#23765), against its own rule that an
-  //    unknown scheme never falls back to SQLite, so it is not copied here.
+  //    (`jdbc:postgresql://…`, `redis:h`), rather than opening a SQLite file at
+  //    a path made of the URL. The runtime host's `detectDriverFromUrl` refuses
+  //    it by the same rule, and `driver-vocabulary-parity.test.ts` holds the
+  //    two equal.
   // A single letter and a `:` is a drive (`C:\data\app`, `C:/data/app`), not
   // a scheme, and stays a path.
   const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(u)?.[0] ?? /^[a-z][a-z0-9+.-]+:/i.exec(u)?.[0];
@@ -643,11 +644,14 @@ export function resolveStorageDefinition(
  * the runtime host's own sentence, which names the scheme and never the URL,
  * minus its `[StandaloneStack]` tag — the shape this host's retired-engine
  * refusal already has (`driver-vocabulary-parity.test.ts` holds both).
- * Two inputs reach that: an explicit `sqlite` selection over a server URL
- * (`OS_DATABASE_DRIVER=sqlite` beside `postgres://user:password@…`), and a
- * `file:` that names no file. Both used to build a definition: the first opened
- * a file at a path made of the URL, credentials included, and the second
- * declared an empty file name. The type is
+ * What reaches that is an explicit `sqlite` or `sqlite-wasm` selection over a
+ * value that is not a file path, which this host's URL inference never sees —
+ * a server URL (`OS_DATABASE_DRIVER=sqlite` beside
+ * `postgres://user:password@…`), an unrecognised `<scheme>://`, or an opaque
+ * scheme (`jdbc:postgresql://…`, `redis:h`) — and, on the `sqlite` kind, a
+ * `file:` that names no file. Each used to build a definition: a non-file value
+ * opened a file at a path made of the URL, credentials included, and the empty
+ * `file:` declared an empty file name. The type is
  * what makes the refusal fatal: `serve.ts` re-throws this class and swallows
  * every other construction error, so a plain `Error` would boot with no
  * storage at all.

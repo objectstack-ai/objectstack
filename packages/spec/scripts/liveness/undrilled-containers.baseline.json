@@ -85,7 +85,6 @@
     "field/inlineColumns.options",
     "field/lookupColumns",
     "field/lookupFilters",
-    "field/options",
     "field/storage",
     "field/summaryOperations",
     "flow/edges",

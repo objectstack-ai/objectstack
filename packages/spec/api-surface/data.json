@@ -714,6 +714,7 @@
     "SeedParsed (type)",
     "SeedSchema (const)",
     "SelectOption (type)",
+    "SelectOptionKind (type)",
     "SelectOptionParsed (type)",
     "SelectOptionSchema (const)",
     "ServiceObject (type)",

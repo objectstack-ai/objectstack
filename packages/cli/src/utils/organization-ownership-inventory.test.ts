@@ -18,10 +18,13 @@ import {
   PLATFORM_OBJECTS_BY_PACKAGE,
   type OrganizationOwnershipSupplementEntry,
 } from '@objectstack/spec/system';
+import { securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import {
   HostFateSupplementRefusal,
+  LEGACY_SHIPPED_SET_SEEDS,
   ORGANIZATION_OWNERSHIP_FATES,
   ORGANIZATION_OWNERSHIP_INVENTORY,
+  SHIPPED_PERMISSION_SET_NAMES,
   inventoryEntryFor,
   mergeHostFateSupplement,
   readHostFateSupplement,
@@ -138,6 +141,14 @@ describe('ADR-0131 D10 inventory — every censused object has one fate and a ci
       if (entry.notNullExempt || entry.cloudCarried) expect(entry.fate, entry.object).toBe('report');
       if (entry.fate === 'attribution') expect(entry.anchors, `${entry.object}: fate 3 names its anchors`).toBeDefined();
     }
+  });
+
+  it('the shipped permission set names are the security plugin\'s, so every legacy admin-stamped seed is adopted', () => {
+    expect([...SHIPPED_PERMISSION_SET_NAMES].sort()).toEqual(securityDefaultPermissionSets.map((set) => set.name).sort());
+    expect(LEGACY_SHIPPED_SET_SEEDS).toEqual([
+      { column: 'managed_by', equals: 'admin' },
+      { column: 'name', in: [...SHIPPED_PERMISSION_SET_NAMES] },
+    ]);
   });
 
   it('every parent and holder an anchor names is itself inventoried', () => {

@@ -1745,6 +1745,7 @@ export async function buildSchemaMigrationPlugins(opts: {
         composed: [...opts.basePlugins, ...plugins],
         artifactRequires: opts.servedPlatform.artifactRequires,
         packageRoot: hostConfigPath ? path.dirname(hostConfigPath) : cwd,
+        ...(opts.serveFlags ? { serveFlags: opts.serveFlags } : {}),
       });
       // The auth family where `serve` registers it — ahead of the host plugins,
       // so a config's own instance of the same name supersedes it here as
@@ -1949,6 +1950,13 @@ async function composeServedPlatform(input: {
   composed: readonly unknown[];
   artifactRequires?: readonly string[];
   packageRoot: string;
+  /**
+   * `serve`'s flags as the command was given them: `--dev` is a development
+   * boot for the auth secret's fallback, exactly as {@link composeAuthGatedSecurity}
+   * reads it — so `--dev` composes the auth family (and with it the audit
+   * plugin's `sys_audit_log`) where `os dev` does, without `NODE_ENV`.
+   */
+  serveFlags?: { readonly dev?: boolean; readonly preset?: string };
 }): Promise<{ authFamily: unknown[]; plugins: unknown[]; notes: string[] }> {
   const { CAPABILITY_PROVIDERS, providesCapability, resolveServedCapabilities } = await import('@objectstack/core');
   const config = input.config ?? {};
@@ -1964,7 +1972,7 @@ async function composeServedPlatform(input: {
   const decision = resolvePlatformAuthComposition({
     plugins: [...input.basePlugins, ...input.hostPlugins],
     tiers: resolveStackTiers({ declaredTiers, requires }),
-    secret: resolveAuthSecret({ isDev: isDevelopmentBoot(undefined) }),
+    secret: resolveAuthSecret({ isDev: isDevelopmentBoot(input.serveFlags?.dev) }),
   });
   if (decision.composes) {
     const { createIdentityObjectsPlugin } = await import('@objectstack/plugin-auth');

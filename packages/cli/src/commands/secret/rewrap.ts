@@ -43,7 +43,7 @@ import { readDeclaredDatasources } from './orphans.js';
  *
  * - **A dry run by default.** It boots read-only (the `os migrate plan` boot),
  *   opens, re-seals and verifies every attributed row in memory, prints
- *   classes and counts, and writes nothing. `--apply` writes.
+ *   classes and counts, and writes no row or table. `--apply` writes.
  * - **Never run for you.** Nothing on any boot or upgrade path invokes it, and
  *   it must not grow such a caller.
  * - **Operator-only.** ⛔ No HTTP surface, so no refusal here answers a

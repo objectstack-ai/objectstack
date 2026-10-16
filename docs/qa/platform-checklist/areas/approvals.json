@@ -1447,6 +1447,153 @@
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "initial — the inbox's keyboard surface (documented in the page's own header and advertised by its hint bar) had no checklist coverage; the load-bearing halves are that r/a land the same server transition as the buttons and that quick-decidability gates hotkeys off rows whose decisions require typed outputs", "ref": "#sweep-2026-08-30" }
       ]
+    },
+    {
+      "id": "approvals.request-page-reply-and-reader-visibility",
+      "title": "Approval requests on v18: the request record page serves record:approval_decision and a Reply action that lands in its timeline, `enable.approvalsVisibleToReaders` lets a plain record reader see the record's requests read-only (and only then), the generic /data door serves request rows by approvals visibility, and titles shown to a reader use only what that reader may read",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a pending showcase approval request the member is NOT an approver on",
+          "for the reader leg: a scratch object (or showcase object via the scratch app) with enable.approvalsVisibleToReaders:true"
+        ],
+        "knownGaps": [
+          "the console clause needs the vendored console — blocked(environment) while the .objectui-sha pin does not build against current spec (see records-forms.v18-semantic-defaults)"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/meta/page/sys_approval_request_detail and find record:approval_decision",
+        "as the pending approver POST /api/v1/approvals/requests/ID/comment {body}; read the timeline",
+        "as the member (non-participant) GET /api/v1/data/sys_approval_request/ID and list with a total",
+        "flip approvalsVisibleToReaders on the scratch object; as a plain reader list that record's requests; flip it off and repeat without restart"
+      ],
+      "acceptance": [
+        {
+          "clause": "request page, reply, reader opt-in, generic-door read gate and reader-scoped titles — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the request page carries record:approval_decision and the reply lands in the timeline (pending approver or submitter only)",
+          "oracle": "api",
+          "verify": "page body + timeline read",
+          "evidence": "excerpts"
+        },
+        {
+          "clause": "a non-participant's by-id read on /data/sys_approval_request → 404 and list totals exclude it",
+          "oracle": "api",
+          "verify": "status + total",
+          "evidence": "answers"
+        },
+        {
+          "clause": "the reader sees requests read-only with no actions only while the flag is on; the inbox is not widened",
+          "oracle": "api",
+          "verify": "list per flag state",
+          "evidence": "two lists"
+        },
+        {
+          "clause": "the console decision panel renders on the request page",
+          "oracle": "screenshot",
+          "verify": "request page after load",
+          "evidence": "one-line description"
+        }
+      ],
+      "traps": [
+        "wrong-persona",
+        "stale-console-bundle"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-approvals/src/sys-approval-request-page.test.ts + packages/spec/src/ui/component-record-approval-decision-22472.test.ts + packages/plugins/plugin-approvals/src/record-reader-opt-in.integration.test.ts + packages/plugins/plugin-approvals/src/request-child-read-gate.integration.test.ts + packages/plugins/plugin-approvals/src/subject-title-reader-fls.integration.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-approvals/src/sys-approval-request.page.ts",
+        "packages/plugins/plugin-approvals/src/request-read-gate.ts#bindRequestReadGate",
+        "packages/plugins/plugin-approvals/src/approval-service.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22472-spec-record-approval-decision, 22473-approval-request-page, 22560-platform-objects-approvals-visible-to-readers-form-row, 22560-plugin-approvals-declared-record-reader-tier, 22560-spec-approvals-visible-to-readers, 22559-approval-request-read-gate, 22589-approval-sibling-read-gates, 23594-subject-title-reader-fls, 23618-approval-title-family-served-fields, 23637-lookup-target-title-row-access"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "approvals.act-door-and-admin-rescue-slate",
+      "title": "Approvals on v18: the email action door /approvals/act works through the dispatcher exactly as the self-hosted mount (GET renders, POST redeems, PUT 405 Allow: GET, POST, a dead link a 200 page, a policy-held session not 403'd before the token), and an approval over an unstaffed position opens on the org administrators as ordinary approvers",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "an approval email action token (dev mail transport capture) for a pending request",
+          "an approval process whose approver is a position nobody holds (scratch process, default onEmptyApprovers)"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/approvals/act?token=T; POST the same; PUT the same; GET with a consumed token",
+        "submit a record into the unstaffed process; as the org admin GET /api/v1/approvals/requests (My Pending); decide it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the dispatcher act door and the admin_rescue slate — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "GET renders the action page, POST redeems, PUT → 405 with Allow: GET, POST, a dead token → a 200 page (not an error envelope)",
+          "oracle": "api",
+          "verify": "status + headers per verb",
+          "evidence": "four lines"
+        },
+        {
+          "clause": "the unstaffed request appears in each org admin's pending list and the decision is recorded via_override:false",
+          "oracle": "api",
+          "verify": "pending list + decision record",
+          "evidence": "excerpts"
+        }
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/runtime/src/domains/approvals-act.test.ts + packages/plugins/plugin-approvals/src/action-page-member.integration.test.ts + packages/plugins/plugin-approvals/src/admin-rescue-named-slate.integration.test.ts + packages/qa/dogfood/test/approval-admin-rescue-slate.dogfood.test.ts"
+      },
+      "source": [
+        "packages/runtime/src/domains/approvals.ts",
+        "packages/core/src/security/auth-gate.ts",
+        "packages/plugins/plugin-approvals/src/approval-service.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22575-spec-approvals-action-page-member, 22577-approvals-act-allowlist, 22578-approvals-action-page-member, 22824-admin-rescue-named-slate"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; approvals.approver-resolution-matrix still says admin_rescue is decidable only via the privileged override — stale against 22824 (reported, not edited here)",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

@@ -34,7 +34,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       permission_set: {
         label: "Conjunto de permisos",
-        help: "[ADR-0131 D4] Nombre de máquina del conjunto de permisos que otorga esta asignación, tal como lo nombra el catálogo de seguridad. Un nombre que el catálogo no contiene se rechaza. NULL solo en una asignación escrita antes de que existiera la columna."
+        help: "Nombre de máquina del conjunto de permisos que otorga esta asignación, tal como lo nombra el catálogo de seguridad. Un nombre que el catálogo no contiene se rechaza. NULL solo en una asignación escrita antes de que existiera la columna."
       },
       organization_id: {
         label: "Organización",
@@ -46,23 +46,23 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Válido desde",
-        help: "[ADR-0091 D1] La concesión está inactiva antes de este instante. Nulo = activa de inmediato. Se aplica en modo fail-closed en el momento de resolución (D2), nunca mediante un trabajo en segundo plano."
+        help: "La concesión está inactiva antes de este instante. Nulo = activa de inmediato. Se aplica en modo fail-closed en el momento de resolución, nunca mediante un trabajo en segundo plano."
       },
       valid_until: {
         label: "Válido hasta",
-        help: "[ADR-0091 D1] La concesión queda inactiva DESDE este instante inclusive (intervalo semiabierto [from, until), UTC). Null = nunca expira. Obligatorio en activaciones de emergencia (D4) y concesiones de agente (D6). Se aplica en el momento de la resolución (D2)."
+        help: "La concesión queda inactiva DESDE este instante inclusive (intervalo semiabierto [from, until), UTC). Null = nunca expira. Obligatorio en activaciones de emergencia y concesiones de agente. Se aplica en el momento de la resolución."
       },
       reason: {
         label: "Motivo",
-        help: "[ADR-0091 D1] Por qué existe esta concesión. Texto libre; OBLIGATORIO en filas de delegación (D3) y de acceso de emergencia (D4). Las concesiones de agente registran aquí la atribución de tarea/ejecución (D6)."
+        help: "Por qué existe esta concesión. Texto libre; OBLIGATORIO en filas de delegación y de acceso de emergencia. Las concesiones de agente registran aquí la atribución de tarea/ejecución."
       },
       last_certified_at: {
         label: "Última certificación",
-        help: "[ADR-0091 D5] Reservada para un futuro flujo de recertificación de accesos, que registraría aquí cuándo se atestiguó por última vez esta concesión. Hoy es inerte: ningún código de la plataforma escribe esta columna ni la lee; ninguna ruta de resolución, control ni regla de lint la consulta, y nada deriva de ella «nunca certificada» ni «certificación obsoleta». Por tanto, un valor nulo significa que el flujo no existe, no que esta concesión no se haya revisado."
+        help: "Reservada para un futuro flujo de recertificación de accesos, que registraría aquí cuándo se atestiguó por última vez esta concesión. Hoy es inerte: ningún código de la plataforma escribe esta columna ni la lee; ninguna ruta de resolución, control ni regla de lint la consulta, y nada deriva de ella «nunca certificada» ni «certificación obsoleta». Por tanto, un valor nulo significa que el flujo no existe, no que esta concesión no se haya revisado."
       },
       certified_by: {
         label: "Certificado por",
-        help: "[ADR-0091 D5] Reservada para ese mismo futuro flujo de recertificación de accesos: el revisor que atestiguaría esta concesión. Hoy es inerte: ningún código de la plataforma la escribe ni la lee. Un valor escrito aquí por un cliente es una anotación sin verificar; la plataforma no comprueba nada sobre él ni concede nada en función de él."
+        help: "Reservada para ese mismo futuro flujo de recertificación de accesos: el revisor que atestiguaría esta concesión. Hoy es inerte: ningún código de la plataforma la escribe ni la lee. Un valor escrito aquí por un cliente es una anotación sin verificar; la plataforma no comprueba nada sobre él ni concede nada en función de él."
       },
       created_at: {
         label: "Creado el"
@@ -80,7 +80,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_user_position: {
     label: "Puesto de usuario",
     pluralLabel: "Puestos de usuario",
-    description: "Asigna un puesto, por nombre, a un usuario. Gestionado por la plataforma (ADR-0057 D4, ADR-0090 D3).",
+    description: "Qué puestos ocupa cada usuario, una fila por asignación.",
     fields: {
       id: {
         label: "ID de asignación",
@@ -100,7 +100,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "Unidad de negocio",
-        help: "[Anexo ADR-0090] Ancla de UN a nivel de asignación: dónde se aplica esta asignación de puesto. Ancla de profundidad para readScope/writeScope, límite de administración delegada (D12) y hecho de auditoría. Nulo = sin anclar (heredado/todo el inquilino); los administradores delegados DEBEN anclar las asignaciones dentro de su subárbol."
+        help: "Ancla de UN a nivel de asignación: dónde se aplica esta asignación de puesto. Ancla de profundidad para readScope/writeScope, límite de administración delegada y hecho de auditoría. Nulo = sin anclar (heredado/todo el inquilino); los administradores delegados DEBEN anclar las asignaciones dentro de su subárbol."
       },
       organization_id: {
         label: "Organización",
@@ -112,27 +112,27 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Válido desde",
-        help: "[ADR-0091 D1] La concesión está inactiva antes de este instante. Nulo = activa de inmediato. Se aplica en modo fail-closed en el momento de resolución (D2), nunca mediante un trabajo en segundo plano."
+        help: "La concesión está inactiva antes de este instante. Nulo = activa de inmediato. Se aplica en modo fail-closed en el momento de resolución, nunca mediante un trabajo en segundo plano."
       },
       valid_until: {
         label: "Válido hasta",
-        help: "[ADR-0091 D1] La concesión está inactiva EN y DESPUÉS de este instante (intervalo semiabierto [from, until), UTC). Nulo = nunca expira. Obligatorio en filas de delegación (D3). Se aplica en el momento de resolución (D2)."
+        help: "La concesión está inactiva EN y DESPUÉS de este instante (intervalo semiabierto [from, until), UTC). Nulo = nunca expira. Obligatorio en filas de delegación. Se aplica en el momento de resolución."
       },
       reason: {
         label: "Motivo",
-        help: "[ADR-0091 D1] Por qué existe esta concesión. Texto libre; OBLIGATORIO en filas de delegación (D3) y de acceso de emergencia (D4)."
+        help: "Por qué existe esta concesión. Texto libre; OBLIGATORIO en filas de delegación y de acceso de emergencia."
       },
       delegated_from: {
         label: "Delegado desde",
-        help: "[ADR-0091 D3] El delegador cuya autoridad porta esta fila (职务代理). Una fila con delegated_from establecido no es delegable ni autorrenovable: las cadenas se cortan en ambos sentidos."
+        help: "El delegador cuya autoridad porta esta fila (职务代理). Una fila con delegated_from establecido no es delegable ni autorrenovable: las cadenas se cortan en ambos sentidos."
       },
       last_certified_at: {
         label: "Última certificación",
-        help: "[ADR-0091 D5] Reservada para un futuro flujo de recertificación de accesos, que registraría aquí cuándo se atestiguó por última vez esta concesión. Hoy es inerte: ningún código de la plataforma escribe esta columna ni la lee; ninguna ruta de resolución, control ni regla de lint la consulta, y nada deriva de ella «nunca certificada» ni «certificación obsoleta». Por tanto, un valor nulo significa que el flujo no existe, no que esta concesión no se haya revisado."
+        help: "Reservada para un futuro flujo de recertificación de accesos, que registraría aquí cuándo se atestiguó por última vez esta concesión. Hoy es inerte: ningún código de la plataforma escribe esta columna ni la lee; ninguna ruta de resolución, control ni regla de lint la consulta, y nada deriva de ella «nunca certificada» ni «certificación obsoleta». Por tanto, un valor nulo significa que el flujo no existe, no que esta concesión no se haya revisado."
       },
       certified_by: {
         label: "Certificado por",
-        help: "[ADR-0091 D5] Reservada para ese mismo futuro flujo de recertificación de accesos: el revisor que atestiguaría esta concesión. Hoy es inerte: ningún código de la plataforma la escribe ni la lee. Un valor escrito aquí por un cliente es una anotación sin verificar; la plataforma no comprueba nada sobre él ni concede nada en función de él."
+        help: "Reservada para ese mismo futuro flujo de recertificación de accesos: el revisor que atestiguaría esta concesión. Hoy es inerte: ningún código de la plataforma la escribe ni la lee. Un valor escrito aquí por un cliente es una anotación sin verificar; la plataforma no comprueba nada sobre él ni concede nada en función de él."
       },
       created_at: {
         label: "Creado el"
@@ -143,7 +143,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       reserved_identity_position: {
-        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are ADR-0068 built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
+        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
       }
     }
   }

@@ -96,7 +96,7 @@ export const SysUserPermissionSet = ObjectSchema.create({
       // a text input where the widget is not registered.
       widget: 'permission-ref',
       description:
-        '[ADR-0131 D4] Machine name of the permission set this grant holds, as the security catalog names it. ' +
+        'Machine name of the permission set this grant holds, as the security catalog names it. ' +
         'A name the catalog does not hold is refused. NULL only on a grant written before the column existed.',
     }),
 
@@ -121,30 +121,33 @@ export const SysUserPermissionSet = ObjectSchema.create({
       description: 'User who granted this permission set.',
     }),
 
+    // [ADR-0091 D1; enforced by the D2 predicate]
     valid_from: Field.datetime({
       label: 'Valid From',
       required: false,
       description:
-        '[ADR-0091 D1] Grant is inactive before this instant. Null = active immediately. ' +
-        'Enforced fail-closed at resolution time (D2) — never by a background job.',
+        'Grant is inactive before this instant. Null = active immediately. ' +
+        'Enforced fail-closed at resolution time — never by a background job.',
     }),
 
+    // [ADR-0091 D1; mandatory on D4 break-glass and D6 agent grants; enforced by the D2 predicate]
     valid_until: Field.datetime({
       label: 'Valid Until',
       required: false,
       description:
-        '[ADR-0091 D1] Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). ' +
-        'Null = never expires. Mandatory on break-glass activations (D4) and agent grants (D6). ' +
-        'Enforced at resolution time (D2).',
+        'Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). ' +
+        'Null = never expires. Mandatory on break-glass activations and agent grants. ' +
+        'Enforced at resolution time.',
     }),
 
     reason: Field.text({
       label: 'Reason',
       required: false,
       maxLength: 500,
+      // [ADR-0091 D1; required on D3 delegation and D4 break-glass rows; D6 agent grants]
       description:
-        '[ADR-0091 D1] Why this grant exists. Free text; REQUIRED on delegation (D3) and break-glass (D4) rows. ' +
-        'Agent grants carry the task/run attribution here (D6).',
+        'Why this grant exists. Free text; REQUIRED on delegation and break-glass rows. ' +
+        'Agent grants carry the task/run attribution here.',
     }),
 
     // [#9730] `delegated_from` was RETIRED from this object (maintainer ruling
@@ -191,11 +194,12 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // than merely omitting the promise: a reader who remembers the old wording
     // has to be told it was wrong, not left to infer it. If D5 is ever
     // implemented, these two descriptions are what must change with it.
+    // [ADR-0091 D5] The recertification pair.
     last_certified_at: Field.datetime({
       label: 'Last Certified At',
       required: false,
       description:
-        '[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. ' +
+        'Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. ' +
         'Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives ' +
         '"never certified" or "certification stale" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed.',
     }),
@@ -204,7 +208,7 @@ export const SysUserPermissionSet = ObjectSchema.create({
       label: 'Certified By',
       required: false,
       description:
-        '[ADR-0091 D5] Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. ' +
+        'Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. ' +
         'Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — ' +
         'the platform checks nothing about it and grants nothing on the strength of it.',
     }),
@@ -249,8 +253,9 @@ export const SysUserPermissionSet = ObjectSchema.create({
       type: 'cross_field',
       name: 'validity_window_order',
       label: 'Validity window ends after it starts',
+      // [ADR-0091 D1/D2] The half-open validity window.
       description:
-        '[ADR-0091 D1/D2] A grant is active in the half-open window [valid_from, valid_until), so a window that '
+        'A grant is active in the half-open window [valid_from, valid_until), so a window that '
         + 'ends at or before it starts grants nothing. Judged on insert, and on an update that moves a bound.',
       fields: ['valid_until', 'valid_from'],
       condition: P`(previous == null || record.valid_from != previous.valid_from || record.valid_until != previous.valid_until) && record.valid_from != null && record.valid_until != null && datetime(record.valid_until) <= datetime(record.valid_from)`,

@@ -1875,6 +1875,345 @@
           "ref": "#23169"
         }
       ]
+    },
+    {
+      "id": "automation.flow-registration-verdict-on-read",
+      "title": "A stored flow the engine refused to register no longer reads as running: GET /meta/flow/:name carries registration {state:\"refused\", reason} beside the authored status, the list carries registrations keyed by name, and a good flow reads registered",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a scratch flow the engine refuses (store it on a scratch boot with OS_ALLOW_UNLINTED_METADATA_WRITES=1, e.g. a node whose config is refused by contract)"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/meta/flow/SHOWCASE_FLOW and read registration",
+        "GET /api/v1/meta/flow/qa_refused_flow and read registration and status",
+        "GET /api/v1/meta/flow and read registrations"
+      ],
+      "acceptance": [
+        {
+          "clause": "the registration verdict on the flow read and list — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a showcase flow reads registration.state registered; the refused scratch flow reads refused with a reason message while status stays as authored",
+          "oracle": "api",
+          "verify": "registration objects",
+          "evidence": "both excerpts"
+        },
+        {
+          "clause": "the list carries registrations keyed by flow name, including the refused one",
+          "oracle": "api",
+          "verify": "registrations map",
+          "evidence": "the map"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/meta-flow-cached-registration.test.ts + packages/services/service-automation/src/flow-refused-registration-read.integration.test.ts"
+      },
+      "source": [
+        "packages/spec/src/api/protocol.zod.ts#FlowRegistrationSchema",
+        "packages/metadata-protocol/src/protocol.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23316-refused-flow-registration-verdict"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "automation.flow-authoring-refusals-v18",
+      "title": "Flow authoring contract on v18, refused at `os validate` AND at PUT /meta/flow: single-brace {…} value tokens (CEL only; text slots use {{ }}), $-prefixed bound variable names, builtin node config keys/values the executor does not declare, dangling or repeated edges, `record`/`user.id` roots a flow cannot bind, retryPolicy.maxRetry, and an anonymous endpoint targeting a runAs:\"system\" flow",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": [
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)",
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "one scratch flow file per refusal arm, each otherwise valid (copy a showcase flow)"
+        ]
+      },
+      "steps": [
+        "for each arm run `os validate` in the scratch app and record exit code + rule id + located path: fields:{owner:\"{record.owner}\"}; notify title \"{record.name}\"; screen field named \"$x\"; create_record outputVariable:42; notify bogusKey; an edge to a removed node; a REST-triggered flow reading record.x; `user.id` in CEL; job retryPolicy:{maxRetry:3}; an authRequired:false flow endpoint targeting a runAs:\"system\" flow",
+        "PUT the same flow bodies to a fresh showcase boot at /api/v1/meta/flow/qa_ARM (scratch names)",
+        "controls: the CEL envelope {dialect:\"cel\",source:\"record.owner\"}, a notify title \"Case {{ record.name }}\", and a query placeholder {current_user_id} in a CRUD filter operand all PASS"
+      ],
+      "acceptance": [
+        {
+          "clause": "every flow authoring refusal at the spec and lint layers — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "each arm fails `os validate` (exit ≠ 0) with its rule (expression-invalid / node-config-refused-by-contract / unrecognized_keys with did-you-mean) at the right path, and the message names the canonical spelling",
+          "oracle": "build",
+          "verify": "exit code + JSON issues per arm",
+          "evidence": "one line per arm"
+        },
+        {
+          "clause": "the same bodies at PUT /meta/flow → 422 INVALID_METADATA and nothing stored",
+          "oracle": "api",
+          "verify": "status + read-back 404",
+          "evidence": "per-arm lines"
+        },
+        {
+          "clause": "the three controls validate and save",
+          "oracle": "build",
+          "verify": "exit 0 / 200",
+          "evidence": "three lines"
+        }
+      ],
+      "negative": [
+        "an arm that validates clean but fails only at run time is a FAIL of the build-door contract"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/spec/src/automation/flow-value-slot-template.test.ts + packages/spec/src/automation/flow-text-slot-template.test.ts + packages/spec/src/automation/flow-builtin-node-config-keys.test.ts + packages/spec/src/automation/flow-builtin-node-config-values.test.ts + packages/spec/src/automation/flow-bound-variable-name.test.ts + packages/spec/src/automation/flow.test.ts + packages/lint/src/validate-expressions.flow-cel-root.test.ts + packages/spec/src/shared/retry-policy.test.ts + packages/spec/src/api/anonymous-elevated-flow-gate.test.ts"
+      },
+      "source": [
+        "packages/spec/src/automation/flow-value-slot-template.ts#flowNodeValueTemplateRefusals",
+        "packages/spec/src/automation/flow-text-slot-template.ts#textSlotTemplateRefusal",
+        "packages/spec/src/automation/flow-node-config-refusals.ts#flowNodeConfigRefusals",
+        "packages/spec/src/api/endpoint-publish-gate.ts#anonymousElevatedFlowPairs",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 19939-flow-callee-input-value-slots, 19939-flow-collection-value-slots, 19939-flow-crud-filter-operands, 19939-flow-http-slots, 19939-flow-notify-value-slots, 19939-flow-screen-value-slots, 19939-flow-single-brace-resolver-deleted, 19939-flow-value-slot-date-macros-refused, 19939-flow-value-slot-run-user-refused, 19939-flow-value-slot-template-dialect-refused, 22110-flow-text-slot-double-brace, 22054-notify-title-template-input, 21898-flow-builtin-node-config-values-refused, 21982-flow-builtin-node-config-undeclared-keys-refused, 21982-flow-script-subflow-config-undeclared-keys-refused, 22088-flow-edge-unresolved-or-repeated-refused, 22642-flow-cel-record-binding, 22677-flow-cel-record-entrance, 22636-flow-cel-record-trigger-no-object-opens, 22477-flow-text-slot-dollar-root-refused, 22502-flow-binding-variable-dollar-name-refused, 22572-flow-binding-name-dollar-refused, 22565-flow-cel-unbound-root-refused, 22343-retry-policy-try-catch-undeclared-keys-refused, 23260-builtin-token-value-judged, 23225-d2b-anonymous-elevated-flow-refused"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "automation.flow-run-semantics-v18",
+      "title": "Flow run semantics on v18: current_user is bound in CEL (null on a schedule run), `record` exists only when the run was handed one, a non-system caller starting a runAs:\"system\" self-triggered flow is refused 403 with nothing run, and a decision with overlapping true edges takes the FIRST",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "scratch flows: a record-triggered flow writing current_user.id; an autolaunched runAs:\"system\" flow; a decision node whose two edges are both true"
+        ]
+      },
+      "steps": [
+        "as the member update a record that fires the record-triggered flow; read the stamped field",
+        "as the member POST /api/v1/automation/qa_elevated/trigger",
+        "trigger the decision flow and read which branch ran (run log)"
+      ],
+      "acceptance": [
+        {
+          "clause": "current_user binding, record binding, elevated-start refusal and first-match decisions — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the record-triggered run stamps the triggering member's id",
+          "oracle": "api",
+          "verify": "read-back of the field",
+          "evidence": "the row"
+        },
+        {
+          "clause": "the member's start of the elevated flow → 403 PERMISSION_DENIED and no run row exists",
+          "oracle": "api",
+          "verify": "status + flow run list",
+          "evidence": "refusal + empty run list"
+        },
+        {
+          "clause": "the decision takes the first true edge only",
+          "oracle": "log",
+          "verify": "run log / run record",
+          "evidence": "the branch line"
+        }
+      ],
+      "negative": [
+        "a non-system caller successfully running a runAs:\"system\" flow is a privilege-escalation FAIL — carve-out applies"
+      ],
+      "traps": [
+        "wrong-persona",
+        "eventual-consistency"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-automation/src/flow-cel-current-user.test.ts + packages/services/service-automation/src/flow-cel-record-binding.test.ts + packages/runtime/src/action-flow-elevated-door.test.ts + packages/runtime/src/endpoint-flow-elevated-door.test.ts + packages/services/service-automation/src/builtin/decision-overlapping-edge-conditions.pin.test.ts"
+      },
+      "source": [
+        "packages/runtime/src/flow-start-admission.ts#refusesElevatedSelfTriggeredStart",
+        "packages/services/service-automation/src/engine.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22310-elevated-flow-trigger-door, 22407-flow-door-elevated-start, 19939-flow-value-slot-run-user-refused"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; D3 entry flow-decision-edge-branching-first-match",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "automation.inbound-hook-timestamped-signature",
+      "title": "Inbound flow hooks accept ONLY the timestamped signature (t=,v1=): a body-only sha256= HMAC, a stale timestamp, an unknown flow and a wrong hook id all answer the SAME 401, and nothing is enqueued",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "anonymous caller (no cookie, no bearer, no x-api-key)",
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a showcase flow with an inbound hook and its secret (automation.trigger-type-matrix names the fixture)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/automation/hooks/FLOW/HOOK with a valid t=,v1= signature (202)",
+        "POST with a body-only sha256= HMAC; with t older than 300 s; to an unknown flow; with a wrong hook id",
+        "list flow runs before/after"
+      ],
+      "acceptance": [
+        {
+          "clause": "the timestamped-signature-only hook door — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the valid signature → 202 {accepted, messageId}",
+          "oracle": "api",
+          "verify": "status + body",
+          "evidence": "the answer"
+        },
+        {
+          "clause": "the four refusal arms answer byte-identical 401 INVALID_SIGNATURE bodies and enqueue nothing",
+          "oracle": "api",
+          "verify": "byte-compare bodies; run count unchanged",
+          "evidence": "the bodies + counts"
+        }
+      ],
+      "traps": [
+        "clock-skew"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/triggers/trigger-api/src/inbound-hook-member.test.ts + packages/core/src/security/http-signature.test.ts + packages/runtime/src/domains/automation-hooks.test.ts"
+      },
+      "source": [
+        "packages/triggers/trigger-api/src/api-trigger.ts",
+        "packages/core/src/security/http-signature.ts#verifyHttpSignature",
+        "packages/runtime/src/domains/automation-hooks.ts#handleInboundHookRequest",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22769-versioned-http-signature, 22772-spec-trigger-api-inbound-hook-member, 22773-automation-hooks-domain, 22774-inbound-hook-member, 22806-uniform-hook-refusal, 22826-refuse-body-only-signature"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; automation.trigger-type-matrix deferred the body-only refusal to a follow-up that has since landed",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "automation.scheduled-work-opt-in",
+      "title": "Scheduled work is OFF on a stock v18 boot unless OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true: schedule triggers bind and fire only with the flag, and the boot says which (D3 schedule-flow-acting-organization-required)",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a second boot with OS_AUTOMATION_SCHEDULED_WORK_ENABLED=true"
+        ]
+      },
+      "steps": [
+        "boot without the flag; read the boot log scheduled-work line; wait two schedule intervals of a showcase scheduled flow / job and list its runs",
+        "boot with the flag; repeat"
+      ],
+      "acceptance": [
+        {
+          "clause": "the per-kernel scheduled-work policy — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "without the flag no scheduled run occurs and the boot log states scheduled work is off",
+          "oracle": "log",
+          "verify": "boot line + run list after two intervals",
+          "evidence": "line + empty list"
+        },
+        {
+          "clause": "with the flag the scheduled flow runs on its interval",
+          "oracle": "api",
+          "verify": "run list after two intervals",
+          "evidence": "the runs"
+        }
+      ],
+      "traps": [
+        "eventual-consistency",
+        "clock-skew"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/triggers/trigger-schedule/src/per-kernel-scheduled-work-policy.test.ts + packages/services/service-automation/src/per-kernel-scheduled-work-policy.test.ts"
+      },
+      "source": [
+        "packages/types/src/env.ts",
+        "packages/spec/src/migrations/entries/semantic/18.schedule-flow-acting-organization-required.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; automation.trigger-type-matrix, automation.time-relative-trigger and platform-core.notification-center assume scheduled work fires on a stock boot — they need the flag (reported, not edited here)",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

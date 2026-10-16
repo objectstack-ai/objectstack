@@ -15,6 +15,13 @@
  * the services-table canonicalizer stub from protocol.flow-canonicalizer.test
  * — the existing flow-canonicalizer harness mocks `saveMetaItem` itself, which
  * a fix INSIDE `saveMetaItem` cannot use.
+ *
+ * [#23775, ruling B] The healing is a RE-SAVE's: a flow with no stored row at
+ * the save's address is authored input, canonicalized without the entries
+ * retired from the authoring funnel, so a retired spelling on a new flow is
+ * refused (the last describe block). The pins below that heal or keep a legacy
+ * spelling therefore seed the stored row they re-save ({@link seedStoredFlow}),
+ * the only way a retired spelling is still at rest today.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // [#5619] `assertEngine{Delete,Update}Dispatch` are the producer's OWN write-verb
@@ -30,6 +37,7 @@ import {
   assertEngineDeleteDispatch,
   assertEngineUpdateDispatch, assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
+import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /** A flow body that passes `saveMetaItem`'s schema gate. */
@@ -45,11 +53,20 @@ const flowBody = (config: Record<string, unknown>) => ({
 /**
  * Stands in for `AutomationEngine.canonicalizeStoredFlow` — same contract,
  * including the copy-on-write identity an unchanged body comes back with.
+ *
+ * [#23775] …and its `includeRetired` option. `filters` → `filter` is retired
+ * from the authoring funnel (`flow-node-crud-filter-alias`), so with the window
+ * closed the engine leaves `filters` in place and its strict parse throws, as
+ * `service-automation`'s `canonicalize-stored-flow.test.ts` pins for the real
+ * engine. The door then judges the body itself, with the spec's own schema.
  */
-const canonicalizeStoredFlow = (_name: string, body: any) => {
+const canonicalizeStoredFlow = (_name: string, body: any, options: { includeRetired?: boolean } = {}) => {
     const node = body?.nodes?.[0];
     if (!node || !('filters' in (node.config ?? {}))) {
         return { storable: body, notices: [], conflicts: [] };
+    }
+    if (options.includeRetired === false) {
+        throw new Error('Unrecognized key(s) on this delete_record node config: `filters`');
     }
     const { filters, ...rest } = node.config;
     return {
@@ -159,13 +176,32 @@ function makeStubEngine() {
 function makeProtocol(services: Map<string, any> = new Map()) {
     const { engine, rows } = makeStubEngine();
     const protocol = new ObjectStackProtocolImplementation(engine, () => services);
-    return { protocol, rows, services };
+    return { protocol, rows, services, engine };
 }
 
-const storedFlow = (rows: Map<string, Row>) => {
-    const row = Array.from(rows.values()).find((r) => r.type === 'flow');
+/** The flow row at one lifecycle (the active one unless asked). */
+const storedFlow = (rows: Map<string, Row>, state: 'active' | 'draft' = 'active') => {
+    const row = Array.from(rows.values()).find((r) => r.type === 'flow' && r.state === state);
     return row ? { row, body: JSON.parse(row.metadata) } : undefined;
 };
+
+/**
+ * [#23775] A flow row AT REST, written straight to the store as `put` stamps
+ * one — how a retired spelling is still stored: the door refuses it on a new
+ * flow, so no save can mint one.
+ */
+async function seedStoredFlow(engine: any, body: Record<string, unknown>, state: 'active' | 'draft' = 'active') {
+    await engine.insert('sys_metadata', {
+        type: 'flow',
+        name: 'purge_flow',
+        organization_id: null,
+        package_id: null,
+        state,
+        metadata: JSON.stringify(body),
+        checksum: hashSpec(body, 'flow'),
+        version: 1,
+    });
+}
 
 const save = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
     protocol.saveMetaItem({ type: 'flow', name: 'purge_flow', item, ...extra });
@@ -187,10 +223,11 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         .map((c: unknown[]) => String(c[0]))
         .filter((m: string) => m.includes('WITHOUT canonicalization'));
 
-    it('a legacy dialect is healed by the save — the promise every other type already keeps', async () => {
-        const { protocol, rows } = makeProtocol(
+    it('a stored legacy dialect is healed by its re-save — the promise every other type already keeps', async () => {
+        const { protocol, rows, engine } = makeProtocol(
             new Map([['automation', { canonicalizeStoredFlow }]]),
         );
+        await seedStoredFlow(engine, legacyBody());
 
         const result = await save(protocol, legacyBody());
 
@@ -231,9 +268,10 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         // detection, control-flow regions). A WIP draft that saves fine today
         // must not become unsaveable.
         const throwing = () => { throw new Error('cycle detected: n1 → n1'); };
-        const { protocol, rows } = makeProtocol(
+        const { protocol, rows, engine } = makeProtocol(
             new Map([['automation', { canonicalizeStoredFlow: throwing }]]),
         );
+        await seedStoredFlow(engine, legacyBody());
 
         const result = await save(protocol, legacyBody());
 
@@ -253,11 +291,13 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         expect(rows.size).toBe(0);
     });
 
-    it('no automation service reachable → saved exactly as today', async () => {
+    it('no automation service reachable → a stored row re-saves exactly as today', async () => {
         // A control-plane / metadata-only host must not start refusing flow
         // writes it accepted yesterday. The row is then no better than before —
-        // `os migrate meta --stored` reports it.
-        const { protocol, rows } = makeProtocol(new Map());
+        // `os migrate meta --stored` reports it. [#23775] A NEW flow's retired
+        // spelling is refused here as on an engine host (the last block).
+        const { protocol, rows, engine } = makeProtocol(new Map());
+        await seedStoredFlow(engine, legacyBody());
 
         const result = await save(protocol, legacyBody());
 
@@ -278,35 +318,41 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         expect(storedFlow(rows)!.body).toEqual(body);
     });
 
-    it('draft mode canonicalizes the same way', async () => {
-        const { protocol, rows } = makeProtocol(
+    it('draft mode canonicalizes the same way — Studio\'s first draft over a stored active row', async () => {
+        // [#23775] Studio's flow designer saves drafts: its first edit of a
+        // stored flow has no draft row yet, and the active row the draft
+        // overlays is what makes it a re-save rather than a new flow.
+        const { protocol, rows, engine } = makeProtocol(
             new Map([['automation', { canonicalizeStoredFlow }]]),
         );
+        await seedStoredFlow(engine, legacyBody(), 'active');
 
         const result = await save(protocol, legacyBody(), { mode: 'draft' });
 
         expect(result.success).toBe(true);
-        const stored = storedFlow(rows)!;
+        const stored = storedFlow(rows, 'draft')!;
         expect(stored.row.state).toBe('draft');
         expect(stored.body.nodes[0].config).toEqual({ objectName: 'lead', filter: { status: 'stale' } });
     });
 
     it('draft mode keeps the throw-fallback too — a WIP cycle stays saveable', async () => {
         const throwing = () => { throw new Error('cycle detected: n1 → n1'); };
-        const { protocol, rows } = makeProtocol(
+        const { protocol, rows, engine } = makeProtocol(
             new Map([['automation', { canonicalizeStoredFlow: throwing }]]),
         );
+        await seedStoredFlow(engine, legacyBody(), 'active');
 
         const result = await save(protocol, legacyBody(), { mode: 'draft' });
 
         expect(result.success).toBe(true);
-        expect(storedFlow(rows)!.body.nodes[0].config).toHaveProperty('filters');
+        expect(storedFlow(rows, 'draft')!.body.nodes[0].config).toHaveProperty('filters');
     });
 
     it('resolution is LAZY — a service registered after construction is still found', async () => {
         const services = new Map<string, any>();
-        const { protocol, rows } = makeProtocol(services);
+        const { protocol, rows, engine } = makeProtocol(services);
         services.set('automation', { canonicalizeStoredFlow });
+        await seedStoredFlow(engine, legacyBody());
 
         await save(protocol, legacyBody());
 
@@ -315,9 +361,10 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
 
     it('the canonicalizer is called with the request NAME, not the body', async () => {
         const spy = vi.fn(canonicalizeStoredFlow);
-        const { protocol } = makeProtocol(
+        const { protocol, engine } = makeProtocol(
             new Map([['automation', { canonicalizeStoredFlow: spy }]]),
         );
+        await seedStoredFlow(engine, legacyBody());
         await save(protocol, legacyBody());
         expect(spy.mock.calls[0][0]).toBe('purge_flow');
     });
@@ -331,9 +378,10 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         // re-persisted verbatim while the boot warning told the author that
         // re-saving would fix it.
         const throwing = () => { throw new Error('cycle detected: n1 → n1'); };
-        const { protocol } = makeProtocol(
+        const { protocol, engine } = makeProtocol(
             new Map([['automation', { canonicalizeStoredFlow: throwing }]]),
         );
+        await seedStoredFlow(engine, legacyBody());
 
         await save(protocol, legacyBody());
 
@@ -346,9 +394,10 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
 
     it('the fallback warning is deduped per flow — Studio autosave must not spam', async () => {
         const throwing = () => { throw new Error('cycle detected: n1 → n1'); };
-        const { protocol } = makeProtocol(
+        const { protocol, engine } = makeProtocol(
             new Map([['automation', { canonicalizeStoredFlow: throwing }]]),
         );
+        await seedStoredFlow(engine, legacyBody());
 
         await save(protocol, legacyBody());
         await save(protocol, legacyBody());
@@ -358,9 +407,10 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
     });
 
     it('the clean path stays silent — a healed row needs no warning', async () => {
-        const { protocol } = makeProtocol(
+        const { protocol, engine } = makeProtocol(
             new Map([['automation', { canonicalizeStoredFlow }]]),
         );
+        await seedStoredFlow(engine, legacyBody());
 
         await save(protocol, legacyBody());
 
@@ -390,7 +440,8 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
     it('a host with no automation service stays silent — nothing was skipped', async () => {
         // There is no canonicalizer to fall back FROM; `os migrate meta
         // --stored` is what reports these rows.
-        const { protocol } = makeProtocol(new Map());
+        const { protocol, engine } = makeProtocol(new Map());
+        await seedStoredFlow(engine, legacyBody());
 
         await save(protocol, legacyBody());
 
@@ -405,9 +456,11 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
      * canonicalizer converts first (`registerFlow`'s full chain, retired
      * entries included) would be refused here, and only here: a verdict that
      * depended on whether the host runs an automation service. So the fallback
-     * replays that same full chain (#23487) — for the seven flow spellings
-     * retired from the authoring funnel at 18 and for those retired before
-     * them alike. What is STORED stays the raw body.
+     * replays that same full chain (#23487) for a re-save of a stored row — for
+     * the seven flow spellings retired from the authoring funnel at 18 and for
+     * those retired before them alike. What is STORED stays the raw body.
+     * [#23775] Each pin re-saves the stored row it seeds: a new flow's retired
+     * spelling is refused by both hosts alike (the last block).
      */
     describe('[#21982] the fallback gate judges the D2-converted body, and stores the raw one', () => {
         const scriptBody = (config: Record<string, unknown>) => ({
@@ -424,7 +477,8 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
         };
 
         it('a legacy script `functionName` body saves on a host with no automation service, stored raw', async () => {
-            const { protocol, rows } = makeProtocol(new Map());
+            const { protocol, rows, engine } = makeProtocol(new Map());
+            await seedStoredFlow(engine, scriptBody({ functionName: 'helpdesk.triage' }));
 
             const result = await save(protocol, scriptBody({ functionName: 'helpdesk.triage' }));
 
@@ -439,35 +493,40 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
             // fallback used to judge it in the authoring posture and refuse it
             // 422; the service-backed path replays the entry and heals it. Since
             // #23487 the fallback replays the same chain, so both hosts agree.
-            const { protocol, rows } = makeProtocol(new Map());
+            const { protocol, rows, engine } = makeProtocol(new Map());
+            const body = { ...flowBody({ objectName: 'lead', filter: { status: 'stale' } }), active: false };
+            await seedStoredFlow(engine, body);
 
-            const result = await save(protocol, { ...flowBody({ objectName: 'lead', filter: { status: 'stale' } }), active: false });
+            const result = await save(protocol, body);
 
             expect(result.success).toBe(true);
             expect(storedFlow(rows)!.body.active).toBe(false);
         });
 
         it('an undeclared key on delete_record is refused 422 INVALID_METADATA at its path — the alias beside it is not', async () => {
-            const { protocol, rows } = makeProtocol(new Map());
+            const { protocol, rows, engine } = makeProtocol(new Map());
+            await seedStoredFlow(engine, legacyBody());
 
             const err = await issuesOf(save(protocol, flowBody({ objectName: 'lead', filters: { status: 'stale' }, bogusKey: 1 })));
 
             expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
             expect((err.issues ?? []).map((i) => i.path)).toEqual(['nodes.0.config.bogusKey']);
-            expect(rows.size).toBe(0);
+            // The stored row is the one seeded: the refused save wrote nothing.
+            expect(storedFlow(rows)!.body).toEqual(legacyBody());
         });
 
         it('a canonicalizer throw still refuses a body the gate rejects after conversion', async () => {
             const throwing = () => { throw new Error('cycle detected: n1 → n1'); };
-            const { protocol, rows } = makeProtocol(
+            const { protocol, rows, engine } = makeProtocol(
                 new Map([['automation', { canonicalizeStoredFlow: throwing }]]),
             );
+            await seedStoredFlow(engine, legacyBody());
 
             const err = await issuesOf(save(protocol, flowBody({ objectName: 'lead', filters: { status: 'stale' }, bogusKey: 1 })));
 
             expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
             expect((err.issues ?? []).map((i) => i.path)).toEqual(['nodes.0.config.bogusKey']);
-            expect(rows.size).toBe(0);
+            expect(storedFlow(rows)!.body).toEqual(legacyBody());
         });
     });
 
@@ -483,5 +542,123 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
             item: { name: 'case_grid', type: 'grid', label: 'Cases', columns: ['id', 'title'], object: 'case', viewKind: 'list' },
         });
         expect(spy).not.toHaveBeenCalled();
+    });
+
+    /**
+     * [#23775, ruling B; ADR-0087 addendum 2026-07-31] A flow with no stored
+     * row at the save's address is authored input: the canonicalizer runs
+     * without the retired entries, so a retired spelling meets the parse
+     * refusal — `422 INVALID_METADATA`, located, naming the key it moved to,
+     * the text the authoring funnel (`os validate`) prints — while a re-save
+     * of a stored row keeps the full chain. Pinned on both hosts: an engine's
+     * canonicalizer (the option-faithful stub) and none (the fallback).
+     */
+    describe('[#23775] a NEW flow is judged as authored input; a stored row keeps the full chain', () => {
+        const hosts = {
+            'an automation service': () => new Map([['automation', { canonicalizeStoredFlow }]]),
+            'no automation service': () => new Map(),
+        } as const;
+        const refusalOf = async (promise: Promise<unknown>) => {
+            try {
+                await promise;
+            } catch (err) {
+                return err as { code?: unknown; status?: unknown; issues?: Array<{ path: string; message: string }> };
+            }
+            throw new Error('expected the save to be refused');
+        };
+        const filtersIssue = (err: { issues?: Array<{ path: string; message: string }> }) =>
+            (err.issues ?? []).find((i) => i.path === 'nodes.0.config.filters');
+
+        for (const [host, services] of Object.entries(hosts)) {
+            it(`${host}: a retired spelling on a new flow is refused 422 INVALID_METADATA at its path, naming the new key, and nothing is stored`, async () => {
+                const { protocol, rows } = makeProtocol(services());
+
+                const err = await refusalOf(save(protocol, legacyBody()));
+
+                expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+                const hit = filtersIssue(err);
+                expect(hit, JSON.stringify(err.issues)).toBeDefined();
+                expect(hit!.message).toContain('`filter`');
+                expect(rows.size).toBe(0);
+                // Refused, so never "saved WITHOUT canonicalization" (#4580's line).
+                expect(fallbackWarnings()).toHaveLength(0);
+            });
+
+            it(`${host}: draft mode does not change it — a new draft with a retired spelling is refused too`, async () => {
+                const { protocol, rows } = makeProtocol(services());
+
+                const err = await refusalOf(save(protocol, legacyBody(), { mode: 'draft' }));
+
+                expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+                expect(filtersIssue(err)).toBeDefined();
+                expect(rows.size).toBe(0);
+            });
+
+            it(`${host}: a new flow in the canonical spelling saves`, async () => {
+                const { protocol, rows } = makeProtocol(services());
+                const body = flowBody({ objectName: 'lead', filter: { status: 'stale' } });
+
+                const result = await save(protocol, body);
+
+                expect(result.success).toBe(true);
+                expect(storedFlow(rows)!.body).toEqual(body);
+            });
+
+            it(`${host}: a stored legacy row re-saves, and is served`, async () => {
+                const { protocol, engine } = makeProtocol(services());
+                await seedStoredFlow(engine, legacyBody());
+
+                const result = await save(protocol, { ...legacyBody(), label: 'Purge Stale Leads (edited)' });
+
+                expect(result.success).toBe(true);
+                const served = (await protocol.getMetaItem({ type: 'flow', name: 'purge_flow' }) as any).item;
+                expect(served.label).toBe('Purge Stale Leads (edited)');
+            });
+
+            it(`${host}: a stored legacy DRAFT re-saves in draft mode`, async () => {
+                const { protocol, rows, engine } = makeProtocol(services());
+                await seedStoredFlow(engine, legacyBody(), 'draft');
+
+                const result = await save(protocol, legacyBody(), { mode: 'draft' });
+
+                expect(result.success).toBe(true);
+                expect(storedFlow(rows, 'draft')).toBeDefined();
+            });
+        }
+
+        it('the canonicalizer is asked for the authoring posture on a new flow and for the full chain on a re-save', async () => {
+            const spy = vi.fn(canonicalizeStoredFlow);
+            const { protocol, engine } = makeProtocol(new Map([['automation', { canonicalizeStoredFlow: spy }]]));
+            const body = flowBody({ objectName: 'lead', filter: { status: 'stale' } });
+
+            await save(protocol, body);
+            expect(spy.mock.lastCall?.[2]).toEqual({ includeRetired: false });
+
+            await seedStoredFlow(engine, legacyBody(), 'draft');
+            await save(protocol, legacyBody(), { mode: 'draft' });
+            expect(spy.mock.lastCall?.[2]).toEqual({ includeRetired: true });
+        });
+
+        it('the refusal is the authoring funnel\'s own text: the issue `os validate` gets for the same flow', async () => {
+            const { protocol } = makeProtocol(new Map());
+            const err = await refusalOf(save(protocol, legacyBody()));
+
+            const authored = ObjectStackDefinitionSchema.safeParse(normalizeStackInput({ flows: [legacyBody()] }));
+            expect(authored.success).toBe(false);
+            const funnel = (authored.error?.issues ?? []).find((i) => i.path.join('.') === 'flows.0.nodes.0.config.filters');
+            expect(funnel, JSON.stringify(authored.error?.issues)).toBeDefined();
+            expect(filtersIssue(err)!.message).toBe(funnel!.message);
+        });
+
+        for (const writeFace of ['package-duplicate', 'package-unmanaged-import'] as const) {
+            it(`a server-stated write (\`${writeFace}\`) carries a body at rest: judged in the full chain on a host with no automation service, as an engine host's caller canonicalizes it`, async () => {
+                const { protocol, rows } = makeProtocol(new Map());
+
+                const result = await save(protocol, legacyBody(), { writeFace });
+
+                expect(result.success).toBe(true);
+                expect(storedFlow(rows)!.body.nodes[0].config).toHaveProperty('filters');
+            });
+        }
     });
 });

@@ -103,6 +103,7 @@ export type {
   SuggestionSyncOutcome,
   SuggestionReconcileOutcome,
   WithheldAcceptance,
+  DeploymentAcceptance,
 } from './suggested-audience-bindings.js';
 // [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce 式)」]
 // Lock the base, clone to customize: the write-door provenance rule and its

@@ -23,9 +23,11 @@
  *   2. every leaf of the four committed `objects` bundles;
  *   3. the type-level `label` / `description` of the four `metadataForms`
  *      bundles — the sentence a Setup metadata page (Positions, Capabilities,
- *      Permission Sets) shows under its title. Section descriptions and field
- *      `helpText` of those forms are the spec's form copy and are not judged
- *      here;
+ *      Permission Sets) shows under its title, plus the six form leaves named
+ *      in `FORM_HELP_LEAVES` (the Permission Sets and Positions help texts and
+ *      the view form's End-user controls description). The other section
+ *      descriptions and field `helpText` of those forms are the spec's form
+ *      copy and are not judged here;
  *   4. `SETUP_APP` and this package's `SETUP_NAV_CONTRIBUTIONS`, and the
  *      hand-authored `apps.setup` subtree of each locale.
  *
@@ -170,6 +172,55 @@ describe('Setup copy carries no design-record vocabulary', () => {
     }
     expect(forms.capability?.description, 'the Capability page sentence is in the population').toBeTypeOf('string');
     expect(offenders(strings)).toEqual([]);
+  });
+
+  // The help texts an admin reads on Setup's Permission Sets and Positions edit
+  // forms, and the view form's End-user controls section. Each one carried a
+  // decision-record reference until the spec form source moved it into the
+  // comment beside the row; `en` is regenerated from that source, so judging
+  // the four bundles judges the source too.
+  const FORM_HELP_LEAVES = [
+    ['permission', 'fields', 'isDefault', 'helpText'],
+    ['permission', 'fields', 'managedBy', 'helpText'],
+    ['permission', 'fields', 'packageId', 'helpText'],
+    ['permission', 'fields', 'adminScope', 'helpText'],
+    ['position', 'fields', 'delegatable', 'helpText'],
+    ['view', 'sections', 'end_user_controls', 'description'],
+  ] as const;
+
+  function formHelpLeaves(bundle: unknown, locale: string): Array<[string, string]> {
+    return FORM_HELP_LEAVES.map((path) => {
+      const value = path.reduce<unknown>((node, key) => (node as Record<string, unknown> | undefined)?.[key], bundle);
+      const at = `${locale}.metadataForms.${path.join('.')}`;
+      expect(value, `${at} is in the population`).toBeTypeOf('string');
+      return [at, value as string];
+    });
+  }
+
+  it.each(Object.keys(FORM_BUNDLES))('the Permission Set, Position and view form help texts of the %s metadataForms bundle', (locale) => {
+    const strings = formHelpLeaves(FORM_BUNDLES[locale as keyof typeof FORM_BUNDLES], locale);
+    expect(strings).toHaveLength(FORM_HELP_LEAVES.length);
+    expect(offenders(strings)).toEqual([]);
+  });
+
+  it('the form help-text assertion fires on the prose it replaced', () => {
+    // Dark leg: the same walk over a bundle carrying the replaced wording must
+    // name every leaf, so a walk that reaches nothing cannot pass above.
+    const replaced = {
+      permission: { fields: {
+        isDefault: { helpText: 'App baseline for the everyone position (ADR-0090 D5): an app-level set is auto-bound at boot.' },
+        managedBy: { helpText: 'Record provenance (ADR-0086 D3): who owns this set across upgrades.' },
+        packageId: { helpText: 'Owning package id for a package-shipped set (ADR-0086 D3).' },
+        adminScope: { helpText: 'Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree.' },
+      } },
+      position: { fields: {
+        delegatable: { helpText: 'Holders may delegate this position themselves, time-boxed and with a reason (ADR-0091 D3).' },
+      } },
+      view: { sections: {
+        end_user_controls: { description: 'What end users can do on this view (ADR-0047, Airtable Interface parity).' },
+      } },
+    };
+    expect(offenders(formHelpLeaves(replaced, 'replaced'))).toHaveLength(FORM_HELP_LEAVES.length);
   });
 
   it('the Setup app, its nav contributions, and every locale\'s apps.setup translations', () => {

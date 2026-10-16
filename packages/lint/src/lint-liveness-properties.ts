@@ -655,10 +655,10 @@ function ledgerFaultFindings(faults: ReadonlyMap<string, LedgerFault>): Liveness
     message:
       `every author warning for \`${type}\` metadata is switched off: ${LEDGER_FAULT_CAUSE[fault]} ` +
       `(expected \`${type}.json\` beside the other liveness ledgers \`@objectstack/spec\` ships).`,
-    hint:
-      'This is a packaging fault in the platform, not an authoring error: nothing in the metadata ' +
-      'being linted caused it, and this rule’s silence about this type means nothing until it is ' +
-      'fixed. Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
+    // [#22161] One remedy line; that this is a platform packaging fault and
+    // what the rule's silence means until it is fixed is
+    // `os explain liveness-ledger-unreadable`.
+    hint: 'Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
     rule: LIVENESS_LEDGER_UNREADABLE,
   }));
 }

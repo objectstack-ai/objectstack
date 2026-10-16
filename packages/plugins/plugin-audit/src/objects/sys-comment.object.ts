@@ -7,7 +7,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * Generic threaded discussion attached to any record via `thread_id`.
  * `thread_id` is conventionally formatted as `{object}:{record_id}`
- * (e.g. `sys_user:abc123`, `account:9001`) so a single index covers
+ * (e.g. `account:9001`) so a single index covers
  * "all comments on this record" lookups across every object.
  *
  * Distinct from `feed_item` (Salesforce-style Chatter timeline that
@@ -152,7 +152,7 @@ export const SysComment = ObjectSchema.create({
       searchable: true,
       maxLength: 255,
       description:
-        'Thread identifier — conventionally `{object}:{record_id}` (e.g. `sys_user:abc123`)',
+        'Thread identifier — conventionally `{object}:{record_id}` (e.g. `account:9001`)',
       group: 'Thread',
     }),
 

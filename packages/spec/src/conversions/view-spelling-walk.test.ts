@@ -29,6 +29,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { ALL_CONVERSIONS } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
 import type { ConversionNotice } from './types.js';
 
@@ -71,6 +72,15 @@ const formSpellings = (payload: Dict) => ({
 });
 
 describe('view conversions reach the ViewItem-record spelling ({ viewKind, config })', () => {
+  // #23543 F4: `view-visibleOn-to-visibleWhen` left the load path at 18 (the
+  // key is a tombstone now). This seam replays retired entries, so the
+  // `visibleOn` cases below are what keep a stored row written before 18
+  // loading — in every spelling.
+  it('the `visibleOn` rename is retired from the load path, and this seam still replays it', () => {
+    expect(ALL_CONVERSIONS.find((c) => c.id === 'view-visibleOn-to-visibleWhen'))
+      .toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
+  });
+
   it('renames `visibleOn` inside a record `config` exactly as inside a container `form`', () => {
     const payload = {
       type: 'simple',

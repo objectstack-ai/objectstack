@@ -673,7 +673,10 @@ describe('#19403 round 4 — the blind spot, FOURTH shape: a type-level coverage
     // `width`, `defaultHidden`), all twelve of their translated labels
     // authored by the same flight, so the loop below still reads every one of
     // them translated.
-    expect(ROW_PROPERTIES.length).toBe(10);
+    //
+    // 11 since #23809: the `options` repeater gained `kind`, the option's
+    // lifecycle category, its label authored in all three locales.
+    expect(ROW_PROPERTIES.length).toBe(11);
     expect(ROW_PROPERTIES).toContain('options.color');
     expect(ROW_PROPERTIES).toContain('options.visibleWhen');
     expect(ROW_PROPERTIES).toContain('inlineColumns.defaultHidden');

@@ -16,6 +16,7 @@ import {
   assessArtifactStaleness,
   formatMtimeGap,
 } from '../utils/dev-restart.js';
+import { isOrganizationOwnershipRequiredMessage, upgradeDevelopmentDatabase } from '../utils/dev-organization-ownership-upgrade.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
 // THE artifact precedence, written once (#21501) — shared with `start`, and
 // with the `serve` child this command spawns. ⛔ No rung of it is restated here.
@@ -742,6 +743,13 @@ export default class Dev extends Command {
       // load is the one path that applies the whole artifact, so the
       // coordinator restarts the serve child after each successful rebuild
       // (nodemon-style, default-on; opt out with --no-restart).
+      // [ADR-0131 D10, development exception] A serve child refused for the
+      // v17 organization-ownership shape says so before it exits; the
+      // coordinator then asks `recover` below, which copies the development
+      // database, runs the ceremony on it and boots the server again — once
+      // per session (`utils/dev-organization-ownership-upgrade.ts`).
+      let ownershipUpgrade: 'none' | 'pending' | 'attempted' = 'none';
+      let upgradedBoot = false;
       const spawnServeChild = (info: { restartIndex: number }) => {
         const child = spawn(
           process.execPath,
@@ -774,12 +782,21 @@ export default class Dev extends Command {
           // announcement carries no port and has nothing to do with the block
           // below. See {@link forwardSeedSettledToParent}.
           if (forwardSeedSettledToParent(msg)) return;
+          if (isOrganizationOwnershipRequiredMessage(msg)) {
+            if (ownershipUpgrade === 'none') ownershipUpgrade = 'pending';
+            return;
+          }
           if (msg?.type === 'objectstack:listening' && msg.port) {
             const actual = String(msg.port);
             if (actual !== requestedPort) {
               console.log(chalk.dim(`  ↪ server bound to port ${actual} (requested ${requestedPort})`));
             }
-            if (info.restartIndex > 0) {
+            if (upgradedBoot) {
+              // The first child to listen after the upgrade: the boot the
+              // developer started, so it gets the initial boot's hint below.
+              upgradedBoot = false;
+              console.log(chalk.green('  ✓ server started on the upgraded database'));
+            } else if (info.restartIndex > 0) {
               // A restarted child is listening — the running server matches
               // dist/objectstack.json again. The MCP hint below is boot
               // noise on a restart, so it prints on the initial boot only.
@@ -816,6 +833,32 @@ export default class Dev extends Command {
       const coordinator = new ServeRestartCoordinator({
         spawnChild: spawnServeChild,
         exitParent: (code) => process.exit(code),
+        recover: async () => {
+          if (ownershipUpgrade !== 'pending') return false;
+          ownershipUpgrade = 'attempted';
+          console.log(chalk.yellow(
+            '  ⟳ This development database is still in the v17 organization-ownership shape — upgrading it in place '
+              + '(a copy is kept first)…',
+          ));
+          const { resolveStandaloneDatabase } = await import('@objectstack/runtime');
+          let sqliteFile: string | null = null;
+          try {
+            sqliteFile = resolveStandaloneDatabase({ projectRoot: process.cwd(), databaseUrl: effectiveDb }).sqliteFile;
+          } catch {
+            sqliteFile = null;
+          }
+          const result = upgradeDevelopmentDatabase({
+            binPath,
+            databaseUrl: effectiveDb,
+            sqliteFile,
+            env: localEnv,
+            cwd: process.cwd(),
+          });
+          for (const warning of result.warnings) console.log(chalk.yellow(`  ⚠ ${warning}`));
+          for (const line of result.lines) console.log(result.ok ? chalk.green(`  ✓ ${line}`) : chalk.red(`  ✗ ${line}`));
+          if (result.ok) upgradedBoot = true;
+          return result.ok;
+        },
         log: (line) => {
           const trimmed = line.trimStart();
           if (trimmed.startsWith('✗')) console.log(chalk.red(line));
@@ -997,15 +1040,40 @@ export default class Dev extends Command {
           : `${changed.length} files`;
         console.log(chalk.dim(`\n  ↻ recompiling (${label})...`));
         const t0 = Date.now();
+        // BOTH streams are captured, and both are printed when the compile
+        // fails (#23820). `compile` renders its text face — refusals included — on
+        // STDOUT through `printError`, the convention `utils/format.ts` states
+        // for a command rendering its own text face; only the shared helpers
+        // that cannot see `--json` use stderr. Capturing stderr alone dropped
+        // the one message that says what to fix: a refused save printed a bare
+        // `✗ compile failed`, while `pnpm build` on the same tree printed the
+        // refusal. What is shown is the compile's whole output, unfiltered —
+        // the lines `pnpm build` prints, in the same words — because picking
+        // "the refusal" out of it would mean parsing another command's text
+        // face here. A successful compile's output is still discarded, so that
+        // path prints exactly what it did. `--verbose` keeps inheriting both
+        // streams, so the output is already on screen and nothing is repeated.
+        // `maxBuffer` is raised because a pipe that fills spawnSync's 1 MiB
+        // default kills the child: a large but successful compile would turn
+        // into a failed one.
         const r = spawnSync(
           process.execPath,
           [opts.binPath, 'compile', '--output', opts.artifactPath],
-          { stdio: opts.verbose ? 'inherit' : ['ignore', 'ignore', 'pipe'], env: process.env },
+          {
+            stdio: opts.verbose ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+            env: process.env,
+            maxBuffer: 64 * 1024 * 1024,
+          },
         );
         const dt = Date.now() - t0;
         if (r.status !== 0) {
-          const stderr = r.stderr?.toString().trim();
-          console.log(chalk.red(`  ✗ compile failed (${dt}ms)${stderr ? '\n' + stderr : ''}`));
+          // stdout first, then stderr: the two pipes are read separately, so
+          // their interleaving is not recoverable.
+          const output = [r.stdout, r.stderr]
+            .map((b) => b?.toString().replace(/^\s*\n/, '').trimEnd())
+            .filter(Boolean)
+            .join('\n');
+          console.log(chalk.red(`  ✗ compile failed (${dt}ms)${output ? '\n' + output : ''}`));
           // A failed compile writes no artifact — the running server still
           // matches dist/objectstack.json, so no restart and no warning.
         } else {

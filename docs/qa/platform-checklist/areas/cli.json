@@ -1716,6 +1716,359 @@
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (sweep 2026-08-30, angle 2): the autoMigrate off|safe policy had no coverage although it is the one path that mutates a dev database at boot. Grounded verify-first, correcting the register's sketch on two points: (1) 'safe' is the LOOSEN-only subset (relax NOT NULL, widen varchar, index ops, clean-probe tighten) — not 'additive' diffs; (2) the register's sql-driver.ts/4652-4654 cites the config/field declarations, but the enforcement lives in reconcileAndWarnDrift with the managed-mode gate, the production force-off warning, and allowDestructive:false — all now pinned as clauses. The dev-injection arm (storage-driver.ts / serve.ts, 'safe' only when isDev) was found while grounding and added as its own clause so a keyless dev boot's self-heal is not misread as a driver default. enumSource pins SqlAutoMigrateSchema expect 2", "ref": "#sweep-2026-08-30" }
       ]
+    },
+    {
+      "id": "cli.migrate-meta-write-stored-and-all",
+      "title": "`os migrate meta` on v18: `--from 17 --write` rewrites the provable mechanical edits in place (byte-preserving otherwise), lists what it cannot write with a reason and restores + exits 1 when a re-run disagrees; `--stored` lists a TODO per refused stored shape; and provably-absent semantic notices collapse into one line that `--all` expands",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": [
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a scratch app carrying v17 spellings (e.g. an element with a flat object/filter data-binding, an object-grid defaultFilters)",
+          "a scratch DB with a stored refused shape for the --stored leg"
+        ]
+      },
+      "steps": [
+        "checksum the sources; `os migrate meta --from 17` (report only); checksum again",
+        "`os migrate meta --from 17 --write --json`; read write.manual[]; diff the sources; re-run (idempotent)",
+        "`os migrate meta --from 17` vs `--all` on a stack without jobs/agents",
+        "`os migrate meta --stored --json` against the scratch DB"
+      ],
+      "acceptance": [
+        {
+          "clause": "--write, --stored TODOs and the relevance predicate — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the report-only run leaves every source byte-identical",
+          "oracle": "build",
+          "verify": "checksums before == after",
+          "evidence": "the checksums"
+        },
+        {
+          "clause": "--write applies the mechanical edits, leaves the rest byte-identical, lists manual sites with a kind, and a second run makes no edits",
+          "oracle": "build",
+          "verify": "git diff of the scratch tree + JSON + second run",
+          "evidence": "diffstat + JSON excerpt"
+        },
+        {
+          "clause": "absent notices are one line naming --all; --all lists them",
+          "oracle": "build",
+          "verify": "both outputs",
+          "evidence": "excerpts"
+        },
+        {
+          "clause": "--stored prints a TODO per refused stored shape instead of counting it canonical",
+          "oracle": "build",
+          "verify": "output",
+          "evidence": "excerpt"
+        }
+      ],
+      "traps": [
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/test/migrate-meta-write.test.ts + packages/cli/src/commands/migrate/meta.report-order.test.ts + packages/spec/src/migrations/semantic-relevance.test.ts + packages/services/service-automation/src/canonicalize-stored-flow.test.ts + packages/spec/src/conversions/refused-shapes.test.ts"
+      },
+      "source": [
+        "packages/cli/src/commands/migrate/meta.ts",
+        "packages/spec/src/migrations/chain.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 9591-migrate-meta-write, 23269-v18-stored-row-fates, 23317-stored-preview-gaps, 22072-migrate-meta-relevance-predicate"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; cli.migrate-meta-codemod still asserts that no --write exists (its restart condition has fired) — reported, not edited here",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "cli.organization-ownership-ceremony",
+      "title": "The v18 upgrade ceremony `os migrate organization-ownership`: a bare run writes a plan and changes nothing, --apply demands a reviewed --plan-file (and --backup-taken), refuses a mismatched plan, an open SQLite holder (database-busy) and an unresolved dialect, checkpoints its steps, and `os migrate apply --allow-destructive` holds every organization_id drop until the ceremony marker is verified; then `os migrate comment-reactions --apply` converts reactions idempotently — end to end, plan → backup → apply → v18 boot",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "cli",
+      "personas": [
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a COPY of a v17-shaped SQLite DB (platform-core.v18-boot-refusals names how to get one) — never the original"
+        ]
+      },
+      "steps": [
+        "`os migrate organization-ownership` on the copy; read the plan file; checksum the DB before/after",
+        "`--apply` without --plan-file; with a plan for another DB; with the DB open in a second process",
+        "`--apply --plan-file PLAN --backup-taken`; read sys_migration row adr-0131-organization-ownership",
+        "`os migrate apply --allow-destructive` before and after the marker is verified",
+        "`os migrate comment-reactions --apply` twice",
+        "`os serve` on the migrated copy — it must boot (platform-core.v18-boot-refusals is the before-state)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the ceremony's plan, refusals, checkpoints, drop gate and reactions conversion — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the bare run writes organization-ownership-plan-*.json and the DB checksum is unchanged",
+          "oracle": "build",
+          "verify": "file + checksums",
+          "evidence": "plan name + checksums"
+        },
+        {
+          "clause": "--apply without a plan → plan-file-required; a mismatched plan → plan-*-mismatch; an open holder → database-busy (exit 1, nothing applied)",
+          "oracle": "build",
+          "verify": "exit code + reason per arm",
+          "evidence": "per-arm lines"
+        },
+        {
+          "clause": "the reviewed apply checkpoints in sys_migration and the drop gate withholds organization_id drops until then",
+          "oracle": "build",
+          "verify": "sys_migration row + apply output",
+          "evidence": "excerpts"
+        },
+        {
+          "clause": "the migrated copy boots under v18",
+          "oracle": "log",
+          "verify": "boot output reaches listening",
+          "evidence": "the line"
+        }
+      ],
+      "negative": [
+        "any ceremony arm that alters the DB while refusing is a data-integrity FAIL"
+      ],
+      "traps": [
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/src/commands/migrate/organization-ownership.apply-flags.test.ts + packages/cli/src/utils/organization-ownership-apply.test.ts + packages/cli/src/commands/migrate/organization-ownership.occupancy.integration.test.ts + packages/cli/src/commands/migrate/organization-ownership.dialect.test.ts + packages/cli/src/commands/migrate/apply-organization-ownership-gate.integration.test.ts + packages/cli/src/commands/migrate/comment-reactions.integration.test.ts + packages/cli/src/utils/organization-ownership-host-supplement.integration.test.ts"
+      },
+      "source": [
+        "packages/cli/src/commands/migrate/organization-ownership.ts",
+        "packages/spec/src/system/fate-supplement.zod.ts#OrganizationOwnershipSupplementSchema",
+        "packages/cli/src/utils/organization-ownership-drop-gate.ts",
+        "docs/adr/0131-total-organization-ownership-no-null-organization-id.md",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22617-cli-organization-ownership-plan, 22937-cli-ceremony-promotions, 22937-cli-organization-ownership-apply, 22937-core-email-template-row-definition, 22937-core-row-definition-mappers, 15211-ceremony-metadata-promotion, 15211-cli-apply-reviewed-plan, 23280-host-fate-supplement, 23400-ownership-occupancy-gate, 23429-sys-metadata-family-organization-column-retired, 23558-ceremony-dialect-resolver, 23684-drop-gate-host-tables, 23281-comment-reactions-upgrade-conversion"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "cli.meta-package-flags-and-explain",
+      "title": "CLI authoring commands on v18: `os meta delete|register --package ID` address one package's row (an empty --package is refused before send), `os meta register --force` passes a 409 DESTRUCTIVE_CHANGE, a no-op delete prints \"Nothing deleted\", and `os explain RULE_ID` explains a lint rule (unknown id exits 1)",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": [
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)",
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the CLI pointed at the fresh boot (OS_URL / --url and a login token)"
+        ]
+      },
+      "steps": [
+        "`os meta register view --data qa_view.json --package com.example.showcase`; `os meta delete view qa_view --package \"\"`",
+        "`os meta register object --data destructive.json` then with `--force`",
+        "`os meta delete view qa_absent_view`",
+        "`os explain field-no-consumers`, `os explain field-no-consumers --json`, `os explain`, `os explain no_such_rule`"
+      ],
+      "acceptance": [
+        {
+          "clause": "package addressing, --force, the no-op line and rule explain — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "--package sends ?package= and an empty one is refused before any request",
+          "oracle": "build",
+          "verify": "CLI output + server log",
+          "evidence": "excerpts"
+        },
+        {
+          "clause": "without --force the destructive register fails with a hint; with it, it passes",
+          "oracle": "build",
+          "verify": "exit codes + output",
+          "evidence": "both outputs"
+        },
+        {
+          "clause": "`os explain` prints {rule, covers, paragraphs} with --json, lists ids with no argument, exits 1 on an unknown id",
+          "oracle": "build",
+          "verify": "exit codes + output",
+          "evidence": "per-call lines"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/src/commands/meta/register-package.test.ts + packages/cli/src/commands/meta/delete-reset-carriers.test.ts + packages/cli/src/commands/meta/register-force.test.ts + packages/cli/test/explain-rule-id.test.ts + packages/cli/src/commands/meta/delete-noop-line.test.ts"
+      },
+      "source": [
+        "packages/cli/src/commands/explain.ts",
+        "packages/lint/src/rule-explanations.ts#RULE_EXPLANATIONS",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23293-client-delete-package, 23350-cli-meta-package-flag, 23480-cli-meta-register-force, 23658-client-publish-package, 23479-meta-delete-noop-line, 22161-functional-completeness-one-line, 22161-lint-slice-10-one-line, 22161-lint-slice-11-one-line-fix, 22161-lint-slice-12-one-line-fix, 22161-lint-slice-13-one-line-fix, 22161-lint-slice-14-one-line-fix, 22161-lint-slice-15-one-line-fix, 22161-lint-slice-16-one-line-fix, 22161-lint-slice-2-one-line, 22161-lint-slice-3-one-line, 22161-lint-slice-4-one-line, 22161-lint-slice-5-one-line, 22161-lint-slice-6-one-line, 22161-lint-slice-7-one-line, 22161-lint-slice-8-one-line, 22161-lint-slice-9-one-line, 22161-rule-message-one-line, 22161-s17-widget-binding-fix-lines, 22161-spec-approver-type-describe"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "cli.validate-v18-authoring-verdicts",
+      "title": "`os validate` / `os build` verdicts new on v18: an unknown seed record key (with did-you-mean), a misspelt record[…] / previous[…] field, a duplicate stack entry name, a controlled_by_parent object without exactly one required master_detail (also through objectExtensions), a component-props finding (now an error), and a credential in stack email/sms config each fail the build",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": [
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "one scratch edit per arm, reverted between arms"
+        ]
+      },
+      "steps": [
+        "for each arm run `os validate --json` and `os build`, recording exit code + rule id + path: seed key created_atx; record[\"typo\"] in a validation; two datasources named alike; a cbp object whose master_detail is not required; an object-grid with defaultFilters; email:{apiKey:\"x\"}",
+        "controls: seed key created_at, record.name == \"record.typo\", email.provider — all pass"
+      ],
+      "acceptance": [
+        {
+          "clause": "each new build verdict — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "each arm fails validate (exit ≠ 0, no \"Validation passed\") with its rule at the right path and build refuses",
+          "oracle": "build",
+          "verify": "exit codes + issue per arm",
+          "evidence": "per-arm lines"
+        },
+        {
+          "clause": "the controls pass",
+          "oracle": "build",
+          "verify": "exit 0",
+          "evidence": "three lines"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/spec/src/data/define-seed-record-keys.test.ts + packages/formula/src/validate-field-existence-spellings.test.ts + packages/spec/src/stack-duplicate-entry.test.ts + packages/lint/src/data-model-rules.master-detail-required.test.ts + packages/spec/src/stack-cbp-extension-master.test.ts + packages/lint/src/validate-component-props.test.ts + packages/spec/src/stack-email-sms.test.ts"
+      },
+      "source": [
+        "packages/spec/src/data/seed.zod.ts#defineSeed",
+        "packages/spec/src/stack.zod.ts#collectDuplicateEntryErrors",
+        "packages/spec/src/data/controlled-by-parent-master.ts#controlledByParentMasterRefusal",
+        "packages/spec/src/system/email-config.zod.ts#StackEmailConfigSchema",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22149-define-seed-record-keys, 22212-lint-sibling-spellings, 22428-field-existence-every-spelling, 22386-spec-object-attached-on-read, 22386-validator-attached-on-read-leaf, 22902-stack-functions-array-duplicate-name-refused, 22934-stack-collection-duplicate-entry-refused, 23210-cbp-extension-merged-master, 9139-cbp-master-detail-required-error, 23100-cbp-one-required-master, 23026-retired-component-prop-refused, 23147-component-props-every-finding-refused, 22748-stack-email-sms-door"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "cli.verify-derived-proof-families",
+      "title": "`os verify` gains five derived proof families on v18 — --reference-shapes, --delete-behaviors, --unique-scopes, --parent-write-reach, --dashboard-windows — each clean (exit 0) on the showcase with its report in --json, and non-zero on a planted defect",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": [
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot"
+        ]
+      },
+      "steps": [
+        "in examples/app-showcase run `os verify --reference-shapes --json` and each of the other four flags",
+        "in the scratch copy plant a wrong deleteBehavior and rerun --delete-behaviors"
+      ],
+      "acceptance": [
+        {
+          "clause": "the five verify families — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "each family exits 0 with hardFailures 0 on the showcase and its report is present in --json",
+          "oracle": "build",
+          "verify": "exit code + JSON key per family",
+          "evidence": "five lines"
+        },
+        {
+          "clause": "the planted defect makes --delete-behaviors exit non-zero naming it",
+          "oracle": "build",
+          "verify": "exit code + output",
+          "evidence": "excerpt"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/test/verify-reference-shapes.test.ts + packages/cli/test/verify-delete-behaviors.test.ts + packages/cli/test/verify-unique-scopes.test.ts + packages/cli/test/verify-parent-write-reach.test.ts + packages/cli/test/verify-dashboard-windows.test.ts"
+      },
+      "source": [
+        "packages/cli/src/commands/verify.ts",
+        "packages/verify/src/delete-behavior.ts#runDeleteBehaviorProofs",
+        "packages/verify/src/reference-shape.ts#runReferenceShapeProofs",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 15953-verify-dashboard-window-family, 15953-verify-dashboard-window-now-removed, 15953-verify-delete-behavior-family, 15953-verify-parent-write-reach-family, 15953-verify-reference-shape-family, 15953-verify-unique-scope-family"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

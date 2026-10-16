@@ -41,7 +41,9 @@ export const SysUserPosition = ObjectSchema.create({
   // default is full CRUD, so no `userActions` block is needed — the affordance is
   // a declaration only; the DelegatedAdminGate is the authz.
   managedBy: 'system-data',
-  description: 'Assigns a position, by name, to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).',
+  // [ADR-0057 D4, ADR-0090 D3] The platform-owned assignment record, in the
+  // words Setup shows.
+  description: 'Which positions each user holds, one row per assignment.',
   // [ADR-0079] The record title is `display_title`, a text formula over the
   // same two columns `titleFormat` names. With no pointer declared, the
   // registry's designate-only pass stamped `nameField: 'id'` (the first
@@ -92,12 +94,13 @@ export const SysUserPosition = ObjectSchema.create({
       description: 'Position machine name, resolved in the security catalog.',
     }),
 
+    // [ADR-0090 Addendum; the delegated-admin boundary is ADR-0090 D12]
     business_unit_id: Field.lookup('sys_business_unit', {
       label: 'Business Unit',
       required: false,
       description:
-        '[ADR-0090 Addendum] Assignment-level BU anchor: where this position assignment applies. ' +
-        'Depth anchor for readScope/writeScope, delegated-admin boundary (D12), and audit fact. ' +
+        'Assignment-level BU anchor: where this position assignment applies. ' +
+        'Depth anchor for readScope/writeScope, delegated-admin boundary, and audit fact. ' +
         'Null = unanchored (legacy/tenant-wide); delegated admins MUST anchor assignments inside their subtree.',
     }),
 
@@ -121,35 +124,38 @@ export const SysUserPosition = ObjectSchema.create({
       description: 'User who granted this position assignment (stamped by the delegated-admin gate for delegate writes).',
     }),
 
+    // [ADR-0091 D1; enforced by the D2 predicate]
     valid_from: Field.datetime({
       label: 'Valid From',
       required: false,
       description:
-        '[ADR-0091 D1] Grant is inactive before this instant. Null = active immediately. ' +
-        'Enforced fail-closed at resolution time (D2) — never by a background job.',
+        'Grant is inactive before this instant. Null = active immediately. ' +
+        'Enforced fail-closed at resolution time — never by a background job.',
     }),
 
+    // [ADR-0091 D1; mandatory on D3 delegation rows; enforced by the D2 predicate]
     valid_until: Field.datetime({
       label: 'Valid Until',
       required: false,
       description:
-        '[ADR-0091 D1] Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). ' +
-        'Null = never expires. Mandatory on delegation rows (D3). Enforced at resolution time (D2).',
+        'Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). ' +
+        'Null = never expires. Mandatory on delegation rows. Enforced at resolution time.',
     }),
 
     reason: Field.text({
       label: 'Reason',
       required: false,
       maxLength: 500,
-      description:
-        '[ADR-0091 D1] Why this grant exists. Free text; REQUIRED on delegation (D3) and break-glass (D4) rows.',
+      // [ADR-0091 D1; required on D3 delegation and D4 break-glass rows]
+      description: 'Why this grant exists. Free text; REQUIRED on delegation and break-glass rows.',
     }),
 
+    // [ADR-0091 D3] Delegation of duty.
     delegated_from: Field.lookup('sys_user', {
       label: 'Delegated From',
       required: false,
       description:
-        '[ADR-0091 D3] The delegator whose authority this row carries (职务代理). ' +
+        'The delegator whose authority this row carries (职务代理). ' +
         'A row with delegated_from set is not itself delegatable and not self-renewable — chains are cut both ways.',
     }),
 
@@ -167,11 +173,12 @@ export const SysUserPosition = ObjectSchema.create({
     // ruling, 2026-08-13): the claim is withdrawn in prose rather than the
     // workflow built or the columns dropped. Full rationale sits with the
     // sibling declaration in sys-user-permission-set.object.ts.
+    // [ADR-0091 D5] The recertification pair.
     last_certified_at: Field.datetime({
       label: 'Last Certified At',
       required: false,
       description:
-        '[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. ' +
+        'Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. ' +
         'Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives ' +
         '"never certified" or "certification stale" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed.',
     }),
@@ -180,7 +187,7 @@ export const SysUserPosition = ObjectSchema.create({
       label: 'Certified By',
       required: false,
       description:
-        '[ADR-0091 D5] Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. ' +
+        'Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. ' +
         'Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — ' +
         'the platform checks nothing about it and grants nothing on the strength of it.',
     }),
@@ -248,8 +255,9 @@ export const SysUserPosition = ObjectSchema.create({
       type: 'script',
       name: 'reserved_identity_position',
       label: 'Reserved built-in identity name',
+      // [ADR-0068 D2] The built-in identity names.
       description:
-        'ADR-0068 D2 built-in identity names are a projection with their own sources of truth. A stored '
+        'Built-in identity names are a projection with their own sources of truth. A stored '
         + 'assignment row spelling one grants nothing and misrepresents the holder, so it is refused.',
       condition: { dialect: 'cel', source: `record.position in ${reservedIdentityNamesCelList()}` },
       severity: 'error',
