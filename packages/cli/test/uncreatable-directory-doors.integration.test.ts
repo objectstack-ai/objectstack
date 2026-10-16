@@ -81,13 +81,14 @@ function runCli(args: string[], env: Record<string, string>): Promise<Run> {
     const child = spawn(process.execPath, [RUN_JS, ...args], {
       cwd: workdir,
       detached: true,
-      // Declared in full: no NODE_ENV (the built entry must resolve `dist/`),
-      // no vitest worker variables, and a HOME of this file's own.
+      // Declared in full: no vitest worker variables, a HOME of this file's
+      // own, and `NODE_ENV` unset — the built entry must resolve `dist/`.
       env: {
         PATH: process.env.PATH ?? '',
         HOME: join(workdir, 'user-home'),
         NO_COLOR: '1',
         ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+        NODE_ENV: undefined,
         ...env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
