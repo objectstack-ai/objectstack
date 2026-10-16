@@ -2202,7 +2202,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API Endpoint",
-    description: "A stable HTTP URL that other systems call to reach flows, scripts and data in the app"
+    description: "A stable HTTP URL that other systems call to run a flow or work with records in the app"
   },
   translation: {
     label: "Translation"
@@ -2282,11 +2282,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Documentation",
-    description: "A help page written in Markdown that a package ships for its users to read"
+    description: "A help page written in Markdown that a package ships or you write yourself"
   },
   book: {
     label: "Documentation Book",
-    description: "A table of contents that groups the help pages of a package into ordered sections"
+    description: "A table of contents that groups help pages into ordered sections"
   },
   permission: {
     label: "Permission Set",
