@@ -10,7 +10,15 @@ import type {
   IObjectQLEngine,
   IStorageService,
 } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { StorageMetadataStore, type StorageWriteContext } from './metadata-store.js';
+// The attach rule's one verdict (parent EDIT), asked here before a producer
+// spends work on a file it could not attach.
+import {
+  mayEditAttachmentParent,
+  type AttachmentSecurityLike,
+  type AttachmentSharingLike,
+} from './attachment-access-hooks.js';
 // The package's one answer to "which organization is this record walled
 // into?", read off the registered schema — never a hard-coded column.
 import { createWallOrganizationResolver } from './backfill-sys-file-organizations.js';
@@ -101,7 +109,41 @@ export interface FileAttachmentServiceDeps {
   getStorage(): IStorageService | null;
   /** The `storage` namespace's Limits group as last read — the upload doors' own source. */
   getLimitsSnapshot(): StorageLimitsSnapshot | undefined;
-  logger: { warn(message: string): void };
+  logger: { warn(message: string): void; debug?(message: string): void };
+  /** The sharing service, for the attach rule's verdict ({@link FileAttachmentService.mayAttach}). */
+  getSharing?(): AttachmentSharingLike | null | undefined;
+  /** The security service, for the attach rule's master-detail check. */
+  getSecurity?(): AttachmentSecurityLike | null | undefined;
+}
+
+/**
+ * The caller-scoped face of the `file-attachments` service: the same one
+ * writer, run AS THE REQUESTING USER instead of as the system. A package-local
+ * contract of `@objectstack/service-storage`, reached through the same
+ * `FILE_ATTACHMENT_SERVICE` slot (the registered service implements both).
+ *
+ * For a producer acting for a signed-in user (a record printed to a PDF): the
+ * parent is read as the caller, the `sys_attachment` insert runs under the
+ * caller's context — so every gate on it judges the caller (the parent-EDIT
+ * attach rule, the `enable.files` opt-in) and it is stamped `uploaded_by` the
+ * caller — and the `sys_file` row is owned by the caller.
+ */
+export interface ICallerFileAttachmentService {
+  /**
+   * Would the attach rule let `context` attach a file to the record? The
+   * verdict the `sys_attachment` insert gate itself asks (parent EDIT), with
+   * no write — for a producer to refuse before it spends work on the file.
+   */
+  mayAttach(parentObject: string, parentId: string, context: ExecutionContext): Promise<boolean>;
+  /**
+   * {@link IFileAttachmentService.attachFile}, as `context`'s user. Refuses as
+   * `attachFile` does, plus: a parent the caller cannot read answers
+   * `RECORD_NOT_FOUND` / `404`, and the attach rule's refusal
+   * (`ATTACHMENT_PARENT_ACCESS` / `403`) is the insert gate's own. A context
+   * without a user, or the system context, is refused `PERMISSION_DENIED` /
+   * `403`: the system has `attachFile`.
+   */
+  attachFileAs(input: AttachFileInput, context: ExecutionContext): Promise<AttachedFile>;
 }
 
 /** The upload scope of every file this verb writes: the attachments surface. */
@@ -121,6 +163,19 @@ function refuse(code: StandardErrorCode | RegisteredErrorCode, status: number, m
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+/** The caller-scoped verbs serve a user; the system has `attachFile`. */
+function requireUserContext(context: ExecutionContext): ExecutionContext {
+  if (!context || typeof context !== 'object' || context.isSystem === true || !nonEmptyString(context.userId)) {
+    refuse(
+      'PERMISSION_DENIED',
+      403,
+      'attachFileAs / mayAttach act as a signed-in user: the context carries no user, or is the system context ' +
+        '(which attaches through attachFile).',
+    );
+  }
+  return context;
 }
 
 /**
@@ -145,10 +200,37 @@ function validateAttachFileInput(input: AttachFileInput): AttachFileInput {
   return input;
 }
 
-export class FileAttachmentService implements IFileAttachmentService {
+export class FileAttachmentService implements IFileAttachmentService, ICallerFileAttachmentService {
   constructor(private readonly deps: FileAttachmentServiceDeps) {}
 
   async attachFile(input: AttachFileInput): Promise<AttachedFile> {
+    return this.attach(input, null);
+  }
+
+  async attachFileAs(input: AttachFileInput, context: ExecutionContext): Promise<AttachedFile> {
+    return this.attach(input, requireUserContext(context));
+  }
+
+  async mayAttach(parentObject: string, parentId: string, context: ExecutionContext): Promise<boolean> {
+    const caller = requireUserContext(context);
+    const engine = this.deps.getEngine();
+    if (!engine) refuse('SERVICE_UNAVAILABLE', 503, NOT_READY_MESSAGE);
+    return mayEditAttachmentParent(
+      {
+        getSharing: () => this.deps.getSharing?.(),
+        getSecurity: () => this.deps.getSecurity?.(),
+        logger: this.deps.logger,
+      },
+      parentObject,
+      parentId,
+      caller,
+      'attach',
+      () => engine.findOne(parentObject, { where: { id: parentId } }, { context: caller }),
+    );
+  }
+
+  /** The one write path: as the system (`caller` null), or as the caller. */
+  private async attach(input: AttachFileInput, caller: ExecutionContext | null): Promise<AttachedFile> {
     const request = validateAttachFileInput(input);
     const engine = this.deps.getEngine();
     const storage = this.deps.getStorage();
@@ -164,7 +246,7 @@ export class FileAttachmentService implements IFileAttachmentService {
     if (tooLarge !== null) refuse(UPLOAD_TOO_LARGE_CODE, UPLOAD_TOO_LARGE_STATUS, tooLarge);
 
     // ② The parent, and the organization both rows are written in.
-    const organizationId = await this.organizationOfParent(engine, request);
+    const organizationId = await this.organizationOfParent(engine, request, caller);
     const writeContext: StorageWriteContext = { organizationId };
     const store = new StorageMetadataStore(engine);
 
@@ -181,6 +263,7 @@ export class FileAttachmentService implements IFileAttachmentService {
         scope: ATTACHMENTS_SCOPE,
         acl: 'private',
         status: 'pending',
+        ...(caller ? { owner_id: caller.userId as string } : {}),
       },
       writeContext,
     );
@@ -197,7 +280,7 @@ export class FileAttachmentService implements IFileAttachmentService {
     let attachmentId: string | undefined;
     let ownedUnit = false;
     try {
-      await this.inOneUnit(engine, organizationId, async (context, owned) => {
+      await this.inOneUnit(engine, organizationId, caller, async (context, owned) => {
         ownedUnit = owned;
         const row = (await engine.insert(
           'sys_attachment',
@@ -241,12 +324,24 @@ export class FileAttachmentService implements IFileAttachmentService {
    * caller's (`null` for none). A parent that does not exist, or that is walled
    * into another organization than the caller's, is refused with one answer.
    */
-  private async organizationOfParent(engine: FileAttachmentEngine, request: AttachFileInput): Promise<string | null> {
-    const parent = await engine.findOne(
-      request.parentObject,
-      { where: { id: request.parentId } },
-      { context: { isSystem: true } },
-    );
+  private async organizationOfParent(
+    engine: FileAttachmentEngine,
+    request: AttachFileInput,
+    caller: ExecutionContext | null,
+  ): Promise<string | null> {
+    let parent: Record<string, unknown> | null;
+    try {
+      parent = await engine.findOne(
+        request.parentObject,
+        { where: { id: request.parentId } },
+        { context: caller ?? { isSystem: true } },
+      );
+    } catch (err) {
+      // A caller refused the read answers exactly as a record that does not
+      // exist: never a 403 that tells the two apart.
+      if (caller && (err as { status?: unknown })?.status === 403) parent = null;
+      else throw err;
+    }
     const parentOrganization = parent
       ? createWallOrganizationResolver(engine).organizationOf(request.parentObject, parent)
       : null;
@@ -273,10 +368,17 @@ export class FileAttachmentService implements IFileAttachmentService {
   private async inOneUnit(
     engine: FileAttachmentEngine,
     organizationId: string | null,
+    caller: ExecutionContext | null,
     work: (context: Record<string, unknown>, owned: boolean) => Promise<void>,
   ): Promise<void> {
-    const base: Record<string, unknown> =
-      organizationId === null ? { isSystem: true } : { isSystem: true, tenantId: organizationId };
+    // As the caller: the caller's own context, unchanged, so every gate on the
+    // insert judges the caller. As the system: the system, in the parent's
+    // organization.
+    const base: Record<string, unknown> = caller
+      ? (caller as Record<string, unknown>)
+      : organizationId === null
+        ? { isSystem: true }
+        : { isSystem: true, tenantId: organizationId };
     if (typeof engine.transaction !== 'function') {
       await work(base, false);
       return;

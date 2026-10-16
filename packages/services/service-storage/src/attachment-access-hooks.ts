@@ -312,6 +312,76 @@ function callerContext(ctx: any): ExecutionContext {
   return { userId: s.userId, tenantId: s.organizationId, positions: s.positions };
 }
 
+/** What {@link mayEditAttachmentParent} composes over, each resolved per call. */
+export interface AttachmentParentVerdictDeps {
+  getSharing: () => AttachmentSharingLike | null | undefined;
+  getSecurity?: () => AttachmentSecurityLike | null | undefined;
+  logger: Pick<AttachmentLifecycleLogger, 'debug'>;
+}
+
+/**
+ * May the caller EDIT the parent record `(object, recordId)`? The one
+ * question the attach rule, the row rule's parent-editor limb and the
+ * re-point's attach rule all ask — see "Parent EDIT" in the module header for
+ * the composition and why each outcome lands where it does. Exported so the
+ * caller-scoped attach verb (`FileAttachmentService.mayAttach`) asks the SAME
+ * question before a producer spends work on a file it could not attach.
+ *
+ * `recordId` is the value the limb holds (the degraded read probe keeps the
+ * shape each limb always queried with); the sharing and security services
+ * are handed its string form, as `canEdit` always was. `readParent` is the
+ * degraded mode's caller-scoped read of the parent.
+ */
+export async function mayEditAttachmentParent(
+  deps: AttachmentParentVerdictDeps,
+  object: string,
+  recordId: unknown,
+  callerCtx: ExecutionContext,
+  limb: string,
+  readParent: () => Promise<unknown>,
+): Promise<boolean> {
+  const { getSharing, getSecurity, logger } = deps;
+  const sharing = getSharing();
+  if (!sharing || typeof sharing.checkEdit !== 'function') {
+    // Degraded mode (no sharing service): caller-scoped parent READ
+    // visibility — still strictly tighter than no gate.
+    logger.debug?.(`[storage] attachment access: sharing service absent — ${limb} gated on parent read visibility`);
+    try {
+      return !!(await readParent());
+    } catch {
+      return false;
+    }
+  }
+  const verdict = await sharing.checkEdit(object, String(recordId), callerCtx);
+  if (verdict === 'allow') return true;
+  // `deny`, and anything that is not one of the three verdicts, refuses.
+  if (verdict !== 'abstain') return false;
+
+  // Record sharing does not enforce on this parent. Whether that is
+  // permission is the master-detail check's question (ADR-0055): it answers
+  // `not_applicable` for a parent that derives nothing from a master.
+  let security: AttachmentSecurityLike | null | undefined;
+  try {
+    security = getSecurity?.();
+  } catch {
+    security = undefined;
+  }
+  if (!security || typeof security.checkControlledByParentWrite !== 'function') {
+    // No master-detail check is composed in this kernel, and the parent's own
+    // update meets none either. ⛔ Not "the master was judged editable" —
+    // nothing measured it.
+    logger.debug?.(
+      `[storage] attachment access: record sharing abstains on ${object} and the security service composes no ` +
+        `master-detail write check — ${limb} admitted on the abstention, as the parent's own update would be`,
+    );
+    return true;
+  }
+  // A rejection (a datasource fault, a context the write path refuses) is a
+  // refusal of the request, and propagates as it is.
+  const answer = await security.checkControlledByParentWrite(object, String(recordId), callerCtx);
+  return answer.outcome === 'allow' || answer.outcome === 'not_applicable';
+}
+
 /**
  * Install the write-side gates on `sys_attachment` (insert / update / delete).
  *
@@ -352,53 +422,16 @@ export function installAttachmentAccessHooks(
    * shape each limb always queried with); the sharing and security services
    * are handed its string form, as `canEdit` always was.
    */
-  const mayEditParent = async (
+  const mayEditParent = (
     ctx: any,
     object: string,
     recordId: unknown,
     callerCtx: ExecutionContext,
     limb: string,
-  ): Promise<boolean> => {
-    const sharing = getSharing();
-    if (!sharing || typeof sharing.checkEdit !== 'function') {
-      // Degraded mode (no sharing service): caller-scoped parent READ
-      // visibility — still strictly tighter than no gate.
-      logger.debug?.(`[storage] attachment access: sharing service absent — ${limb} gated on parent read visibility`);
-      try {
-        return !!(await ctx.api.object(object).findOne({ where: { id: recordId } }));
-      } catch {
-        return false;
-      }
-    }
-    const verdict = await sharing.checkEdit(object, String(recordId), callerCtx);
-    if (verdict === 'allow') return true;
-    // `deny`, and anything that is not one of the three verdicts, refuses.
-    if (verdict !== 'abstain') return false;
-
-    // Record sharing does not enforce on this parent. Whether that is
-    // permission is the master-detail check's question (ADR-0055): it answers
-    // `not_applicable` for a parent that derives nothing from a master.
-    let security: AttachmentSecurityLike | null | undefined;
-    try {
-      security = getSecurity?.();
-    } catch {
-      security = undefined;
-    }
-    if (!security || typeof security.checkControlledByParentWrite !== 'function') {
-      // No master-detail check is composed in this kernel, and the parent's own
-      // update meets none either. ⛔ Not "the master was judged editable" —
-      // nothing measured it.
-      logger.debug?.(
-        `[storage] attachment access: record sharing abstains on ${object} and the security service composes no ` +
-          `master-detail write check — ${limb} admitted on the abstention, as the parent's own update would be`,
-      );
-      return true;
-    }
-    // A rejection (a datasource fault, a context the write path refuses) is a
-    // refusal of the request, and propagates as it is.
-    const answer = await security.checkControlledByParentWrite(object, String(recordId), callerCtx);
-    return answer.outcome === 'allow' || answer.outcome === 'not_applicable';
-  };
+  ): Promise<boolean> =>
+    mayEditAttachmentParent({ getSharing, getSecurity, logger }, object, recordId, callerCtx, limb, () =>
+      ctx.api.object(object).findOne({ where: { id: recordId } }),
+    );
 
   /** Resolve every sys_attachment row a write matches, under SYSTEM context
    * — the caller may legitimately be unable to READ rows they are allowed to

@@ -363,6 +363,22 @@ export class StorageServicePlugin implements Plugin {
         getStorage: () => storage,
         getLimitsSnapshot: () => storage.getLimitsSnapshot(),
         logger: ctx.logger,
+        // The attach rule's verdict for the caller-scoped verbs, resolved per
+        // call, the same two services the `sys_attachment` insert gate asks.
+        getSharing: () => {
+          try {
+            return ctx.getService<any>('sharing');
+          } catch {
+            return null;
+          }
+        },
+        getSecurity: () => {
+          try {
+            return ctx.getService<ISecurityService>('security');
+          } catch {
+            return null;
+          }
+        },
       }),
     );
     ctx.logger.info(
