@@ -102,6 +102,21 @@ function setting(option: string | undefined, env: string | undefined): string | 
  * path or query, which may carry a token. An endpoint that does not parse is
  * described as such, without its text.
  */
+/**
+ * The console URL as a log line or a status may name it: its scheme and host,
+ * never its path, credentials or query — or, for a value that does not parse,
+ * a statement that it does not, never the value.
+ */
+export function describeConsoleUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return '(a value that is not a URL)';
+  }
+}
+
+/** {@link describeConsoleUrl}'s counterpart for the remote endpoint. */
 export function describeEndpoint(endpoint: string): string {
   try {
     const url = new URL(endpoint);
@@ -187,14 +202,14 @@ export function resolvePrintPlacement(
     return {
       state: 'misconfigured',
       placement,
-      reason: `${PRINT_CONSOLE_URL_ENV} (or consoleUrl) must be an http:// or https:// URL; it is '${consoleUrl}'.`,
+      reason: `${PRINT_CONSOLE_URL_ENV} (or consoleUrl) must be an http:// or https:// URL; it is ${describeConsoleUrl(consoleUrl)}.`,
     };
   }
   if (parsedConsole.search !== '' || parsedConsole.hash !== '') {
     return {
       state: 'misconfigured',
       placement,
-      reason: `${PRINT_CONSOLE_URL_ENV} (or consoleUrl) must be the console's base URL, with no query or fragment; it is '${consoleUrl}'.`,
+      reason: `${PRINT_CONSOLE_URL_ENV} (or consoleUrl) must be the console's base URL, with no query or fragment; it is ${describeConsoleUrl(consoleUrl)} with a query or fragment.`,
     };
   }
 

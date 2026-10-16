@@ -110,6 +110,16 @@ describe('PrintServicePlugin.start — absence is loud, once', () => {
     expect(logged.some((l) => l.level === 'info')).toBe(false);
   }, 30_000);
 
+  it('a console URL carrying credentials and a non-numeric port reaches no log line and no status', async () => {
+    const { logged, service } = await boot({
+      chromiumPath: '/nonexistent/chromium-for-print-test',
+      consoleUrl: 'http://print:topsecret@127.0.0.1:abc/_console',
+    });
+    expect(logged.filter((l) => l.level === 'warn')).toHaveLength(1);
+    expect(JSON.stringify(logged)).not.toContain('topsecret');
+    expect(JSON.stringify(service.status())).not.toContain('topsecret');
+  });
+
   it('a remote endpoint nobody answers: one warn naming its host, never its token', async () => {
     const { logged, service } = await boot({
       browserEndpoint: `ws://127.0.0.1:9/devtools/browser/x?token=${SECRET}`,

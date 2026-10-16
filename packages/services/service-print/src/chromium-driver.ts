@@ -9,12 +9,28 @@ import type { PrintSessionCookie } from './principal-session.js';
  * `playwright-core` (pinned exact on this package only), in either placement
  * {@link ResolvedPrintPlacement} names.
  *
- *  - **local** — `chromium.launch({ executablePath })`, one browser per render,
- *    closed in a `finally`.
+ *  - **local** — `chromium.launchServer({ executablePath })` and a connection to
+ *    it, one browser process per render. Disposed by closing the connection
+ *    and the server; a process whose close does not settle within
+ *    {@link CLOSE_GRACE_MS} is killed.
  *  - **remote** — `chromium.connectOverCDP(endpoint)`, one connection per
- *    render. Closing a connected browser disconnects from it and leaves the
- *    remote browser running; the context this render opened is closed first,
- *    so its cookies leave the remote browser with it.
+ *    render. The context this render opened is closed first, so its cookies
+ *    leave the remote browser with it; then the connection is closed, which
+ *    leaves the remote browser running. Each close waits at most
+ *    {@link CLOSE_GRACE_MS}: playwright opens a CDP context with
+ *    `disposeOnDetach`, so dropping the connection disposes the context even
+ *    when the browser no longer answers its close.
+ *
+ * ## The budget, and what it bounds
+ *
+ * Every step of a render — open, the context, the cookie, the page, the load,
+ * the ready wait, the fonts and the PDF — runs inside ONE deadline (the
+ * caller's `timeoutMs`): a browser that stalls on any of them answers
+ * `TIMEOUT` / `504` when the deadline passes. The cleanup that follows is
+ * bounded too, by {@link CLOSE_GRACE_MS} per close, so the call returns within
+ * the budget plus the grace periods even when the browser answers nothing
+ * more. A browser that arrives after the deadline (an open that settled
+ * late) is disposed by the abandoned render itself, never kept.
  *
  * Both placements run the SAME render code after the browser is open — the
  * remote placement is not a second driver, only a second way to reach the one
@@ -79,9 +95,38 @@ interface PageHandle {
   evaluate(fn: string): Promise<unknown>;
   pdf(options: { preferCSSPageSize: boolean; printBackground: boolean }): Promise<Buffer>;
 }
+/** The subset of playwright-core's browser server this driver uses (local placement). */
+interface ServerHandle {
+  wsEndpoint(): string;
+  close(): Promise<void>;
+  kill(): Promise<void>;
+}
 interface ChromiumLauncher {
-  launch(options: { executablePath: string; headless: boolean; timeout: number }): Promise<BrowserHandle>;
+  launchServer(options: { executablePath: string; headless: boolean; timeout: number }): Promise<ServerHandle>;
+  connect(wsEndpoint: string, options: { timeout: number }): Promise<BrowserHandle>;
   connectOverCDP(endpoint: string, options: { timeout: number }): Promise<BrowserHandle>;
+}
+
+/** How long each close in a cleanup may take before the driver stops waiting for it. */
+export const CLOSE_GRACE_MS = 2_000;
+
+/** Whether `promise` settles within `ms`; it is never awaited past that. */
+async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([promise.then(() => true, () => true), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** An open browser, and the bounded way to let go of it. */
+interface OpenBrowser {
+  browser: BrowserHandle;
+  dispose(): Promise<void>;
 }
 
 /**
@@ -153,6 +198,7 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
   constructor(
     private readonly resolved: ResolvedPrintPlacement,
     private readonly launcher: () => Promise<ChromiumLauncher>,
+    private readonly closeGraceMs: number,
   ) {
     this.placement = resolved.placement;
   }
@@ -164,26 +210,45 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
       : `the remote endpoint ${describeEndpoint(this.resolved.target)}`;
   }
 
-  private async open(timeoutMs: number): Promise<BrowserHandle> {
+  private async open(timeoutMs: number): Promise<OpenBrowser> {
     const chromium = await this.launcher();
-    return this.placement === 'local'
-      ? chromium.launch({ executablePath: this.resolved.target, headless: true, timeout: timeoutMs })
-      : chromium.connectOverCDP(this.resolved.target, { timeout: timeoutMs });
+    const grace = this.closeGraceMs;
+    if (this.placement === 'remote') {
+      const browser = await chromium.connectOverCDP(this.resolved.target, { timeout: timeoutMs });
+      return { browser, dispose: async () => void (await settlesWithin(browser.close(), grace)) };
+    }
+    const server = await chromium.launchServer({ executablePath: this.resolved.target, headless: true, timeout: timeoutMs });
+    let browser: BrowserHandle;
+    try {
+      browser = await chromium.connect(server.wsEndpoint(), { timeout: timeoutMs });
+    } catch (err) {
+      if (!(await settlesWithin(server.close(), grace))) await settlesWithin(server.kill(), grace);
+      throw err;
+    }
+    return {
+      browser,
+      dispose: async () => {
+        await settlesWithin(browser.close(), grace);
+        // The process this render launched: closed, or killed when the close
+        // does not settle.
+        if (!(await settlesWithin(server.close(), grace))) await settlesWithin(server.kill(), grace);
+      },
+    };
   }
 
   async probe(timeoutMs: number): Promise<{ version: string }> {
-    let browser: BrowserHandle;
+    let opened: OpenBrowser;
     try {
-      browser = await this.open(timeoutMs);
+      opened = await this.open(timeoutMs);
     } catch (err) {
       throw new Error(
         `Chromium could not be reached at ${this.where()}: ${redact(String((err as Error)?.message ?? err), [this.resolved.target])}`,
       );
     }
     try {
-      return { version: browser.version() };
+      return { version: opened.browser.version() };
     } finally {
-      await browser.close().catch(() => undefined);
+      await opened.dispose();
     }
   }
 
@@ -191,22 +256,40 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
     const secrets = [this.resolved.target, input.cookie.value];
     const started = Date.now();
     const remaining = (): number => Math.max(1, input.timeoutMs - (Date.now() - started));
-    const handles: { browser?: BrowserHandle; context?: ContextHandle } = {};
-    // Every step of the render — open, the context, the cookie, the page, the
-    // load, the ready wait, the fonts and the PDF — runs inside ONE deadline:
-    // a browser that stalls on any of them answers TIMEOUT within the budget.
+    const grace = this.closeGraceMs;
+    const held: { opened?: OpenBrowser; context?: ContextHandle } = {};
+    let abandoned = false;
+    /** Let go of everything this render holds, each close bounded. */
+    const release = async (): Promise<void> => {
+      const { opened, context } = held;
+      held.opened = undefined;
+      held.context = undefined;
+      // The context first: on the remote placement it holds the session cookie
+      // inside a browser this process does not own.
+      if (context) await settlesWithin(context.close(), grace);
+      if (opened) await opened.dispose();
+    };
+    /** After a step settles: an abandoned render releases what it just got, and stops. */
+    const stillWanted = async (): Promise<void> => {
+      if (abandoned) {
+        await release();
+        throw Object.assign(new Error('the render was abandoned at its deadline'), { name: 'TimeoutError' });
+      }
+    };
     const render = (async (): Promise<Buffer> => {
-      handles.browser = await this.open(remaining());
-      handles.context = await handles.browser.newContext();
-      await handles.context.addCookies([cookieFor(input.url, input.cookie)]);
-      const page = await handles.context.newPage();
+      held.opened = await this.open(remaining());
+      await stillWanted();
+      held.context = await held.opened.browser.newContext();
+      await stillWanted();
+      await held.context.addCookies([cookieFor(input.url, input.cookie)]);
+      const page = await held.context.newPage();
       await page.goto(input.url, { waitUntil: 'load', timeout: remaining() });
       await page.waitForFunction(PRINT_READY_PREDICATE, undefined, { timeout: remaining(), polling: POLL_INTERVAL_MS });
       await page.evaluate(FONTS_READY);
       return page.pdf({ preferCSSPageSize: true, printBackground: true });
     })();
     // Once the deadline answers, a late rejection of the abandoned render is
-    // expected (the cleanup below closes what it was waiting on).
+    // expected: it is the abandoned render releasing what it opened late.
     render.catch(() => undefined);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_, reject) => {
@@ -235,23 +318,22 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
       );
     } finally {
       clearTimeout(timer);
-      // The context first: on the remote placement it holds the session cookie
-      // inside a browser this process does not own.
-      if (handles.context) await handles.context.close().catch(() => undefined);
-      if (handles.browser) await handles.browser.close().catch(() => undefined);
+      abandoned = true;
+      await release();
     }
   }
 }
 
 /**
- * The driver for a resolved placement. `launcher` exists for tests that
- * observe the calls; a deployment never passes it.
+ * The driver for a resolved placement. `launcher` and `options` exist for
+ * tests that stage a browser; a deployment passes neither.
  */
 export function createChromiumDriver(
   resolved: ResolvedPrintPlacement,
   launcher: () => Promise<ChromiumLauncher> = loadLauncher,
+  options: { closeGraceMs?: number } = {},
 ): ChromiumDriver {
-  return new PlaywrightChromiumDriver(resolved, launcher);
+  return new PlaywrightChromiumDriver(resolved, launcher, options.closeGraceMs ?? CLOSE_GRACE_MS);
 }
 
-export type { ChromiumLauncher, BrowserHandle, ContextHandle, PageHandle };
+export type { ChromiumLauncher, BrowserHandle, ContextHandle, PageHandle, ServerHandle };

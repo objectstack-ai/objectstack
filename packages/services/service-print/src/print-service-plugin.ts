@@ -4,6 +4,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { FILE_ATTACHMENT_SERVICE, type IAuthService, type IFileAttachmentService } from '@objectstack/spec/contracts';
 import { createChromiumDriver } from './chromium-driver.js';
 import {
+  describeConsoleUrl,
   describeEndpoint,
   resolvePrintPlacement,
   type PrintPlacementOptions,
@@ -96,7 +97,7 @@ export class PrintServicePlugin implements Plugin {
       ctx.logger.warn(`PrintServicePlugin: printing is off until this is fixed — ${probed.reason}`);
       return;
     }
-    ctx.logger.info(`PrintServicePlugin: Chromium ${probed.version} on the ${where}; console at ${resolved.consoleUrl}`);
+    ctx.logger.info(`PrintServicePlugin: Chromium ${probed.version} on the ${where}; console at ${describeConsoleUrl(resolved.consoleUrl)}`);
     ctx.hook('kernel:ready', async () => {
       const ready = service.status();
       if (ready.state !== 'ready') {

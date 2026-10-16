@@ -67,6 +67,22 @@ describe('resolvePrintPlacement — one engine, two placements', () => {
     }
   });
 
+  it('a console URL is never echoed: credentials with a non-numeric port, and a query, are described by scheme and host or as unparseable', () => {
+    const unparseable = resolvePrintPlacement({ chromiumPath: '/c', consoleUrl: 'http://print:topsecret@127.0.0.1:abc/_console' }, {});
+    expect(unparseable.state).toBe('misconfigured');
+    if (unparseable.state === 'misconfigured') {
+      expect(unparseable.reason).toContain('(a value that is not a URL)');
+      expect(unparseable.reason).not.toContain('topsecret');
+      expect(unparseable.reason).not.toContain('print:');
+    }
+    const query = resolvePrintPlacement({ chromiumPath: '/c', consoleUrl: 'http://127.0.0.1:3000/_console?token=topsecret' }, {});
+    expect(query.state).toBe('misconfigured');
+    if (query.state === 'misconfigured') {
+      expect(query.reason).toContain('http://127.0.0.1:3000');
+      expect(query.reason).not.toContain('topsecret');
+    }
+  });
+
   it('a console URL carrying credentials is misconfigured, and the credentials are not echoed', () => {
     const r = resolvePrintPlacement({ chromiumPath: '/c', consoleUrl: 'http://print:hunter2-secret@127.0.0.1:3000/_console' }, {});
     expect(r.state).toBe('misconfigured');

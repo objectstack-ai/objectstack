@@ -29,10 +29,13 @@ interface Stage {
   newContext?: () => Promise<unknown>;
   pdf?: () => Promise<Buffer>;
   connect?: () => Promise<unknown>;
+  contextClose?: () => Promise<void>;
+  browserClose?: () => Promise<void>;
+  serverClose?: () => Promise<void>;
 }
 
 function stagedLauncher(stage: Stage) {
-  const closed = { context: 0, browser: 0 };
+  const closed = { context: 0, browser: 0, server: 0, killed: 0 };
   const page = {
     goto: vi.fn(stage.goto ?? (async () => undefined)),
     waitForFunction: vi.fn(async () => undefined),
@@ -44,6 +47,7 @@ function stagedLauncher(stage: Stage) {
     newPage: vi.fn(async () => page),
     close: vi.fn(async () => {
       closed.context++;
+      if (stage.contextClose) await stage.contextClose();
     }),
   };
   const browser = {
@@ -51,13 +55,25 @@ function stagedLauncher(stage: Stage) {
     newContext: vi.fn(stage.newContext ?? (async () => context)),
     close: vi.fn(async () => {
       closed.browser++;
+      if (stage.browserClose) await stage.browserClose();
+    }),
+  };
+  const server = {
+    wsEndpoint: () => 'ws://127.0.0.1:40001/local-server',
+    close: vi.fn(async () => {
+      closed.server++;
+      if (stage.serverClose) await stage.serverClose();
+    }),
+    kill: vi.fn(async () => {
+      closed.killed++;
     }),
   };
   const launcher = {
-    launch: vi.fn(async () => browser),
+    launchServer: vi.fn(async () => server),
+    connect: vi.fn(stage.connect ?? (async () => browser)),
     connectOverCDP: vi.fn(stage.connect ?? (async () => browser)),
   } as unknown as ChromiumLauncher;
-  return { launcher: async () => launcher, closed, page };
+  return { launcher: async () => launcher, closed, page, browser };
 }
 
 async function refusalOf(p: Promise<unknown>): Promise<{ code?: unknown; status?: unknown; message: string }> {
@@ -82,7 +98,7 @@ describe('the driver redacts the session cookie from an engine error', () => {
     expect([r.code, r.status]).toEqual(['INTERNAL_ERROR', 500]);
     expect(r.message).toContain('[redacted]');
     expect(r.message).not.toContain(COOKIE.value);
-    expect(closed).toEqual({ context: 1, browser: 1 });
+    expect(closed).toMatchObject({ context: 1, browser: 1, server: 1, killed: 0 });
   });
 
   it('a remote endpoint carrying a token is redacted from an engine error, and never named beyond scheme and host', async () => {
@@ -118,4 +134,60 @@ describe('one budget bounds the whole render', () => {
       expect(r.message).not.toContain(COOKIE.value);
     });
   }
+});
+
+describe('the cleanup after the deadline is bounded, and nothing opened late is kept', () => {
+  const GRACE = 100;
+
+  it('remote: a context and a connection whose close never settles — the call still answers TIMEOUT within budget plus grace', async () => {
+    const { launcher, closed } = stagedLauncher({
+      pdf: () => never<Buffer>(),
+      contextClose: () => never(),
+      browserClose: () => never(),
+    });
+    const driver = createChromiumDriver({ placement: 'remote', target: 'ws://127.0.0.1:9222/x', consoleUrl: 'x' }, launcher, {
+      closeGraceMs: GRACE,
+    });
+    const started = Date.now();
+    const r = await refusalOf(driver.renderPdf({ url: URL_, cookie: COOKIE, timeoutMs: 300 }));
+    const elapsed = Date.now() - started;
+    expect([r.code, r.status]).toEqual(['TIMEOUT', 504]);
+    expect(elapsed).toBeLessThan(300 + 2 * GRACE + 500);
+    expect(closed).toMatchObject({ context: 1, browser: 1 });
+  });
+
+  it('local: a browser process whose close never settles is killed, and the call still answers within budget plus grace', async () => {
+    const { launcher, closed } = stagedLauncher({
+      pdf: () => never<Buffer>(),
+      browserClose: () => never(),
+      serverClose: () => never(),
+    });
+    const driver = createChromiumDriver({ placement: 'local', target: '/usr/bin/chromium', consoleUrl: 'x' }, launcher, {
+      closeGraceMs: GRACE,
+    });
+    const started = Date.now();
+    const r = await refusalOf(driver.renderPdf({ url: URL_, cookie: COOKIE, timeoutMs: 300 }));
+    const elapsed = Date.now() - started;
+    expect([r.code, r.status]).toEqual(['TIMEOUT', 504]);
+    expect(elapsed).toBeLessThan(300 + 4 * GRACE + 500);
+    expect(closed).toMatchObject({ server: 1, killed: 1 });
+  });
+
+  it('an open that settles after the deadline is closed by the abandoned render, and never given a context', async () => {
+    let arrive!: () => void;
+    const arrived = new Promise<void>((r) => (arrive = r));
+    const ref: { browser?: unknown } = {};
+    const { launcher, closed, browser } = stagedLauncher({ connect: () => arrived.then(() => ref.browser) });
+    ref.browser = browser;
+    const driver = createChromiumDriver({ placement: 'remote', target: 'ws://127.0.0.1:9222/x', consoleUrl: 'x' }, launcher, {
+      closeGraceMs: GRACE,
+    });
+    const r = await refusalOf(driver.renderPdf({ url: URL_, cookie: COOKIE, timeoutMs: 200 }));
+    expect([r.code, r.status]).toEqual(['TIMEOUT', 504]);
+    expect(closed.browser).toBe(0);
+    arrive();
+    await new Promise((r2) => setTimeout(r2, 50));
+    expect(closed.browser).toBe(1);
+    expect(browser.newContext).not.toHaveBeenCalled();
+  });
 });
