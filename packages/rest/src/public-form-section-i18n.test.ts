@@ -150,6 +150,8 @@ describe('[#23497] GET /forms/:slug — section headings are localized under Acc
     it('zh-CN: a named section with a `_sections` key is served its translated label and description', async () => {
         const res = await buildServer(formView()).get('zh-CN');
         expect(section(res, 0)).toMatchObject({ name: 'about', label: ABOUT_ZH, description: ABOUT_DESC_ZH });
+        // The translated section is the one the strip ran over: its lookup is gone.
+        expect(section(res, 0).fields).toEqual(['subject']);
     });
 
     it('zh-CN: a named section whose key the bundle lacks keeps its authored label and description', async () => {
@@ -196,9 +198,8 @@ describe('[#23497] GET /forms/:slug — section headings are localized under Acc
         expect(en.body.objectSchema.fields.subject.label).toBe('Subject');
     });
 
-    it('CONTROL: the lookup strip still removes a lookup field from a translated section', async () => {
+    it('CONTROL: under zh-CN the lookup strip still removes a lookup field from its section', async () => {
         const res = await buildServer(formView()).get('zh-CN');
-        expect(section(res, 0).label).toBe(ABOUT_ZH);
         expect(renderedFields(res)).toEqual([['subject'], ['email'], ['status']]);
     });
 
