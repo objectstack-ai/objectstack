@@ -163,7 +163,10 @@ async function bootHoldStop(cwd: string, leg: Record<string, string>, args: stri
 
   let output = '';
   const messages: IpcMessage[] = [];
-  let bannerAt: number | null = null;
+  // `as`, not an annotation: assigned in a listener, so TypeScript must not narrow it to `null` here.
+  let bannerAt = null as number | null;
+  /** Milliseconds since the banner's last line printed. */
+  const sinceBanner = () => (bannerAt === null ? Number.NaN : Date.now() - bannerAt);
   const exited = new Promise<Exit>((done) => child.once('exit', (code, signal) => done({ code, signal })));
   let onProgress = () => {};
   const progressed = () => onProgress();
@@ -201,12 +204,12 @@ async function bootHoldStop(cwd: string, leg: Record<string, string>, args: stri
             : `serve exited ${first.code ?? first.signal} before its banner`) + seen(),
         );
       }
-      return { output, messages, exitedOnItsOwn: { ...first, msAfterBanner: Date.now() - bannerAt }, stopped: null };
+      return { output, messages, exitedOnItsOwn: { ...first, msAfterBanner: sinceBanner() }, stopped: null };
     }
 
     const held = await Promise.race([exited, sleep(HOLD_WINDOW_MS)]);
     if (held !== 'elapsed') {
-      return { output, messages, exitedOnItsOwn: { ...held, msAfterBanner: Date.now() - (bannerAt as number) }, stopped: null };
+      return { output, messages, exitedOnItsOwn: { ...held, msAfterBanner: sinceBanner() }, stopped: null };
     }
 
     child.kill('SIGTERM');
