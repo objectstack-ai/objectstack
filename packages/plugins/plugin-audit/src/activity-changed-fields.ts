@@ -150,9 +150,27 @@ export function planActivityStamp(metadata: unknown): ActivityStamp | null {
   return { changed_fields, milestone_key };
 }
 
-/** The engine slice the stamping hook registers on. */
+/** The engine slice the stamping hook registers on, and reads the registered `sys_activity` from. */
 export interface ActivityStampHookEngine {
   registerHook(event: string, handler: (ctx: any) => void | Promise<void>, options?: { object?: string; packageId?: string }): void;
+  getSchema?(object: string): unknown;
+}
+
+/**
+ * Whether the REGISTERED `sys_activity` declares both stamped columns. Read on
+ * every call, never cached: a composition that registers its own earlier
+ * definition of the object (a test harness, a host override) has no column to
+ * stamp, and an insert naming one would be refused as an unknown field.
+ */
+export function declaresActivityStampColumns(engine: { getSchema?(object: string): unknown }): boolean {
+  let fields: unknown;
+  try {
+    const schema = typeof engine.getSchema === 'function' ? engine.getSchema('sys_activity') : undefined;
+    fields = isRecord(schema) ? schema.fields : undefined;
+  } catch {
+    return false;
+  }
+  return isRecord(fields) && ACTIVITY_STAMPED_COLUMNS.every((column) => column in fields);
 }
 
 /** Stamp one row in place: the planner's answer, over whatever the writer sent. */
@@ -175,6 +193,7 @@ export function installActivityStampHook(engine: ActivityStampHookEngine, packag
   engine.registerHook(
     'beforeInsert',
     (ctx: any) => {
+      if (!declaresActivityStampColumns(engine)) return;
       const data = ctx?.input?.data;
       for (const row of Array.isArray(data) ? data : [data]) if (isRecord(row)) stampActivityRow(row);
     },

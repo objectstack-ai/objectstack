@@ -89,6 +89,7 @@ import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
 // withheld-row rule reads, shared with the before-insert hook and the backfill.
 import {
   declaredMilestoneWatchedFields,
+  declaresActivityStampColumns,
   installActivityStampHook,
   planActivityStamp,
 } from './activity-changed-fields.js';
@@ -2128,7 +2129,9 @@ export function installAuditWriters(
       // [ADR-0139 E6] The two writer-stamped columns the withheld-row rule is
       // a predicate over, from the metadata this row records (the
       // before-insert hook re-derives them by the same planner).
-      ...(planActivityStamp(activityMetadata) ?? { changed_fields: null, milestone_key: null }),
+      ...(declaresActivityStampColumns(engine as any)
+        ? (planActivityStamp(activityMetadata) ?? { changed_fields: null, milestone_key: null })
+        : {}),
     };
     // Same rationale as auditRow: stamp the tenant column so RLS matches the
     // recipient's organization on read — but only when the (auto-injected)

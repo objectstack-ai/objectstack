@@ -351,6 +351,39 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     expect((await read(MEMBER)).map((r) => r.id)).toContain(id);
   });
 
+  // ── [ADR-0139 E6] the stamped columns: served narrowed, never probed ─────
+
+  it('[ADR-0139 E6] the recorded change\'s key set is served narrowed to the fields the reader is served', async () => {
+    const memberRow = (await read(MEMBER)).find((r) => r.id === rowIds.mixed);
+    const adminRow = (await read(ADMIN)).find((r) => r.id === rowIds.mixed);
+    expect(memberRow?.changed_fields).toEqual(['f_open']);
+    expect(adminRow?.changed_fields).toEqual(['f_admin', 'f_open']);
+  });
+
+  it('[ADR-0139 E6] a membership probe on either stamped column is refused to a reader withheld a parent field, matching or not', async () => {
+    for (const where of [
+      { changed_fields: { $contains: 'f_admin' } },
+      { changed_fields: { $contains: 'f_none' } },
+      { milestone_key: { $null: false } },
+    ]) {
+      const pinned = { ...scoped(ITEM, ids.item), ...where };
+      for (const run of [
+        () => engine.find(ACTIVITY, { where: pinned, context: MEMBER }),
+        () => engine.count(ACTIVITY, { where: pinned }, { context: MEMBER }),
+      ]) {
+        await expect(run(), JSON.stringify(where)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      }
+    }
+  });
+
+  it('[ADR-0139 E6] control: a reader served every field filters by the key set, as by any column', async () => {
+    const rows = (await engine.find(ACTIVITY, {
+      where: { ...scoped(ITEM, ids.item), changed_fields: { $contains: 'f_admin2' } },
+      context: ADMIN,
+    })) as Row[];
+    expect(rows.map((r) => r.id)).toEqual([rowIds.withheld]);
+  });
+
   it('a system read is not narrowed', async () => {
     expect((await read(SYS)).map((r) => r.id)).toContain(rowIds.withheld);
   });
