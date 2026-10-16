@@ -103,6 +103,7 @@ import {
 } from './admin-impersonate-endpoint.js';
 import { judgeHeldSession } from './platform-admin-gate.js';
 import {
+  carriesPrincipalSession,
   holdPrincipalSessionExpiry,
   mintPrincipalSession,
   type PrincipalSessionAuthContext,
@@ -1528,7 +1529,7 @@ export class AuthManager {
    */
   private async createAuthInstance(): Promise<Auth<any>> {
     const { betterAuth } = await import('better-auth');
-    const { createAuthMiddleware } = await import('better-auth/api');
+    const { createAuthMiddleware, setShouldSkipSessionRefresh } = await import('better-auth/api');
     const plugins = await this.buildPluginList();
     const passwordHasher = await this.resolvePasswordHasher();
     const betterAuthConfig: BetterAuthOptions = {
@@ -2063,6 +2064,17 @@ export class AuthManager {
             const actor = await this.resolveActor(ctx);
             return actor?.userId ?? null;
           });
+
+          // ── #23813: a minted principal session is never refreshed ───────
+          // Also FIRST: the switch must be set before anything in this
+          // request reads the session (the actor resolver above may, later).
+          // A renewal of a minted session writes the row and re-sets its
+          // cookie, so `bearer()` answers `set-auth-token` on every request
+          // and the console re-resolves identity forever. Request-scoped
+          // (better-auth's own state), so it reaches the nested session reads
+          // of every endpoint on both lanes and in-process — see
+          // `principal-session-mint.ts` (3b).
+          if (carriesPrincipalSession(ctx)) await setShouldSkipSessionRefresh(true);
 
           // ── #2780: per-number OTP send guard (admission control) ─────
           // MUST run BEFORE the phone-number endpoints: better-auth's

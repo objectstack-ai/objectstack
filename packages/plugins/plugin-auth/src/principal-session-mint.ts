@@ -54,6 +54,20 @@
  *     token, which carries {@link PRINCIPAL_SESSION_TOKEN_PREFIX} — set here,
  *     by the server, and stored on the row, so every node agrees.
  *
+ *  3b. **No renewal at all on a read** (#23813). Holding `expiresAt` is not
+ *     enough: the renewal still writes the row (`updatedAt`), re-sets the
+ *     session cookie with a 7-day `Max-Age`, and so makes `bearer()` answer
+ *     `set-auth-token` on EVERY request — which the console reads as a token
+ *     rotation and re-resolves identity on, then re-reads its organizations,
+ *     whose reads renew again: the console never leaves boot. So a request
+ *     that carries a minted session ({@link carriesPrincipalSession}) is told
+ *     to skip the refresh outright, through better-auth's own per-request
+ *     switch (`setShouldSkipSessionRefresh`, the one its Next.js plugin sets
+ *     for RSC reads), from the global before-hook that every endpoint passes
+ *     first — `get-session` and every endpoint that reads the session, on the
+ *     cookie lane, the bearer lane and in-process. The hold above stays as
+ *     the backstop for any renewal that does not ask that switch.
+ *
  *  4. **The revoke.** Bound to the one session minted, idempotent, and a
  *     plain `internalAdapter.deleteSession`: afterwards the token and the
  *     cookie resolve no session on either lane.
@@ -88,6 +102,40 @@ export const PRINCIPAL_SESSION_TOKEN_PREFIX = 'psm_';
 /** True when `token` is a minted principal session's token. */
 export function isPrincipalSessionToken(token: unknown): boolean {
   return typeof token === 'string' && token.startsWith(PRINCIPAL_SESSION_TOKEN_PREFIX);
+}
+
+/**
+ * [#23813] True when a better-auth endpoint context carries a minted principal
+ * session — as the session cookie (its signed value starts with the raw
+ * token) or as `Authorization: Bearer` (signed, URL-encoded or raw; the brand
+ * leads every spelling). Read off the request before `bearer()` folds the
+ * header into the cookie, so both lanes answer the same.
+ *
+ * Unverified on purpose: the one thing it decides is that this request does
+ * not renew the session, which grants nothing. A forged brand resolves no
+ * session at all (no other token carries it), and the signature is still
+ * checked where the session is read.
+ */
+export function carriesPrincipalSession(ctx: unknown): boolean {
+  const c = ctx as {
+    headers?: { get?(name: string): string | null };
+    request?: { headers?: { get?(name: string): string | null } };
+    context?: { authCookies?: { sessionToken?: { name?: string } } };
+  };
+  const header = (name: string): string => c?.headers?.get?.(name) ?? c?.request?.headers?.get?.(name) ?? '';
+
+  const bearer = /^Bearer\s+(\S+)/i.exec(header('authorization'));
+  if (bearer && isPrincipalSessionToken(bearer[1])) return true;
+
+  const cookieName = c?.context?.authCookies?.sessionToken?.name;
+  if (!cookieName) return false;
+  for (const pair of header('cookie').split(';')) {
+    const eq = pair.indexOf('=');
+    if (eq > 0 && pair.slice(0, eq).trim() === cookieName && isPrincipalSessionToken(pair.slice(eq + 1).trim())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
