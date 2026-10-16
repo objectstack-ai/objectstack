@@ -1939,7 +1939,7 @@ function refuseDishonestReferenceDeletedWhen(
 /**
  * [#23809, maintainer ruling on the card: 「同意」] The field an object's
  * `stageField` names declares a `kind` on EVERY option — `open`, `won` or
- * `lost` (`SelectOptionKindSchema`). Every renderer of the stage field (the
+ * `lost` (`SelectOption.kind`). Every renderer of the stage field (the
  * record path, the kanban column order, the "closed" filters, the won / lost
  * measures) reads that kind to tell the steps from the two ends, so an option
  * without one would be drawn by the old guess from its spelling — the defect

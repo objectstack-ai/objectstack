@@ -563,7 +563,6 @@
     "ui/FormSection:visibleWhen",
     "ui/FormSelectOption:color",
     "ui/FormSelectOption:description",
-    "ui/FormSelectOption:kind",
     "ui/FormSelectOption:label",
     "ui/FormSelectOption:value",
     "ui/FormSelectOption:visibleWhen",

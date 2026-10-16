@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { FieldSchema, SelectOptionKindSchema, SelectOptionSchema } from './field.zod';
+import { FieldSchema, SelectOptionSchema, type SelectOptionKind } from './field.zod';
 import { ObjectSchema } from './object.zod';
 import { PicklistSchema } from './picklist.zod';
 
@@ -44,7 +44,8 @@ function issuesOf(result: { success: boolean; error?: { issues: Array<{ path: Pr
 
 describe('SelectOption.kind — the closed lifecycle vocabulary', () => {
   it('is exactly open | won | lost', () => {
-    expect(SelectOptionKindSchema.options).toEqual(['open', 'won', 'lost']);
+    const kinds: SelectOptionKind[] = ['open', 'won', 'lost'];
+    expect(SelectOptionSchema.shape.kind.unwrap().options).toEqual(kinds);
   });
 
   it('an option with a terminal kind parses, and keeps it', () => {
@@ -168,6 +169,6 @@ describe('ObjectSchema — every option of the stageField declares kind', () => 
     expect(() => ObjectSchema.create(lead({
       type: 'select',
       options: [{ label: 'New', value: 'new' }],
-    }) as Parameters<typeof ObjectSchema.create>[0])).toThrow(/Option 'new'/);
+    }) as unknown as Parameters<typeof ObjectSchema.create>[0])).toThrow(/Option 'new'/);
   });
 });

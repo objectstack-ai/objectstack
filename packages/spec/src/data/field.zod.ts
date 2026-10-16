@@ -323,25 +323,6 @@ const FIELD_HISTORY =
   + 'minus whatever the key was meant to constrain, protect or compute.';
 
 /**
- * The lifecycle category a select option declares (`SelectOption.kind`, #23809):
- * one closed vocabulary for every object on the platform.
- *
- * - `open` — a step on the way (New, Contacted, In Progress, Negotiation).
- * - `won`  — the SUCCESSFUL end, for every object: a deal's Closed Won, a
- *   lead's Converted, a task's Done, a case's Resolved.
- * - `lost` — the UNSUCCESSFUL end, for every object: Closed Lost, Unqualified,
- *   Cancelled, Closed Unresolved.
- *
- * The spelling is the one the page layer already ships: `record:path`
- * `stages[].terminal` (`ui/component.zod.ts`) takes `won` / `lost`, and
- * objectui's record path renderer honours it ahead of its value-spelling
- * heuristic. One fact keeps one vocabulary from the data layer to the page,
- * with no conversion between two spellings.
- */
-export const SelectOptionKindSchema = z.enum(['open', 'won', 'lost']);
-export type SelectOptionKind = z.infer<typeof SelectOptionKindSchema>;
-
-/**
  * ## An option is offered or withheld — it is never "shown but unselectable"
  * (#8201 — boundary, not gap)
  *
@@ -436,12 +417,23 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false, or cannot be evaluated — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and every write picking the option would be refused, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference.").meta({ title: 'Visible When' }),
   /**
-   * The lifecycle category of this option ({@link SelectOptionKindSchema}):
-   * `open` (a step on the way), `won` (the successful end) or `lost` (the
-   * unsuccessful end). Declared once on the option and read by every renderer
-   * of the object's `stageField` — the record path, the kanban column order,
-   * the "closed" filters, the dashboard won / lost measures — instead of a
-   * renderer guessing a terminus from the value's spelling (`closed_won`).
+   * The lifecycle category of this option (#23809) — one closed vocabulary for
+   * every object on the platform:
+   *
+   * - `open` — a step on the way (New, Contacted, In Progress, Negotiation).
+   * - `won`  — the SUCCESSFUL end, for every object: a deal's Closed Won, a
+   *   lead's Converted, a task's Done, a case's Resolved.
+   * - `lost` — the UNSUCCESSFUL end, for every object: Closed Lost,
+   *   Unqualified, Cancelled, Closed Unresolved.
+   *
+   * Declared once on the option and read by every renderer of the object's
+   * `stageField` — the record path, the kanban column order, the "closed"
+   * filters, the dashboard won / lost measures — instead of a renderer
+   * guessing a terminus from the value's spelling (`closed_won`). The spelling
+   * is the one the page layer already ships: `record:path` `stages[].terminal`
+   * (`ui/component.zod.ts`) takes `won` / `lost`, and objectui's record path
+   * renderer honours it ahead of its spelling heuristic — one fact, one
+   * vocabulary from the data layer to the page, no conversion between two.
    *
    * - On a plain single-choice field the key is optional, and an ABSENT kind
    *   reads as `open`. Nothing writes that default in at parse: absent stays
@@ -454,9 +446,10 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * - Only a single-value `select` / `radio` field's options take it (a
    *   lifecycle is one value per record); `FieldSchema` refuses it on any
    *   other field's options. A shared `picklist`'s options take it too — the
-   *   same shape, reused verbatim.
+   *   same shape, reused verbatim. A form view's option list does not
+   *   (`FormSelectOptionSchema`): the lifecycle is the object field's.
    */
-  kind: SelectOptionKindSchema.optional().describe("Lifecycle category of this option: 'open' (a step on the way), 'won' (the successful end: a deal's Closed Won, a task's Done, a case's Resolved) or 'lost' (the unsuccessful end: Closed Lost, Cancelled, Unqualified). Absent reads as 'open'. Required on every option of the field an object's `stageField` names. Only on a single-value `select` / `radio` field.").meta({ title: 'Kind' }),
+  kind: z.enum(['open', 'won', 'lost']).optional().describe("Lifecycle category of this option: 'open' (a step on the way), 'won' (the successful end: a deal's Closed Won, a task's Done, a case's Resolved) or 'lost' (the unsuccessful end: Closed Lost, Cancelled, Unqualified). Absent reads as 'open'. Required on every option of the field an object's `stageField` names. Only on a single-value `select` / `radio` field.").meta({ title: 'Kind' }),
 }));
 
 /**
@@ -2995,6 +2988,8 @@ export type FieldParsed = z.infer<typeof FieldSchema>;
 export type SelectOption = z.input<typeof SelectOptionSchema>;
 /** Post-parse shape of {@link SelectOption} — defaults applied, transforms run (ADR-0122). */
 export type SelectOptionParsed = z.infer<typeof SelectOptionSchema>;
+/** The lifecycle category a select option declares (`SelectOption.kind`, #23809). */
+export type SelectOptionKind = NonNullable<SelectOptionParsed['kind']>;
 /** One authored `inlineColumns` entry (#9227) — the strict, name-keyed inline grid column. */
 export type InlineGridColumn = z.input<typeof InlineGridColumnSchema>;
 /** Post-parse shape of {@link InlineGridColumn} — bare-string CEL predicates normalized to Expression envelopes (ADR-0122). */

@@ -160,7 +160,6 @@
     "data/SeedLoaderResult",
     "data/SeedMode",
     "data/SelectOption",
-    "data/SelectOptionKind",
     "data/SetOperator",
     "data/ShardingConfig",
     "data/SortNode",
