@@ -288,10 +288,11 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // `plugin-route` door (stamped through a constant in an object literal, the
     // shape `objlit` could not see), and #9246 registered it under
     // `@objectstack/cloud-connection`, ratcheting that row out the same way.
-    // #9460's further-widened scan then reported two sites at once —
-    // `FLOW_CONVERSION_CONFLICT` and `owd_widening_forbidden` — and #9567
-    // registered the former under `@objectstack/metadata-protocol`, ratcheting
-    // only that row out; `owd_widening_forbidden`'s lowercase spelling is a
+    // #9460's further-widened scan then reported two sites at once — the flow
+    // save door's conversion-conflict 409 and `owd_widening_forbidden` — and
+    // #9567 registered the former under `@objectstack/metadata-protocol`,
+    // ratcheting only that row out (the code itself retired with its last
+    // producer in protocol 18, #24001); `owd_widening_forbidden`'s lowercase spelling is a
     // naming decision, not a plain admission, so it stays pending below. A
     // future unswept producer lands here as an `unclassified-site` finding and
     // gets a new row (then a spec-lane registration, then the row comes out
@@ -595,18 +596,6 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'by `artifact-forward-conversion.test.ts`.',
     },
     {
-        code: 'OS_METADATA_CONVERSION_CONFLICT',
-        file: 'packages/spec/src/conversions/apply.ts',
-        shape: 'objlitconst',
-        door: 'none',
-        verdict: 'foreign-vocabulary',
-        why:
-            'The conflict twin of the OS_METADATA_CONVERTED row: handed to `onConflict` when a rename ' +
-            "target is a live name owned by something else, so the conversion refuses to rewrite it and " +
-            'surfaces a loud diagnostic instead (ADR-0078: never silent). A callback payload, not a ' +
-            'thrown error and not a response body.',
-    },
-    {
         code: 'OS_METADATA_CONVERSION_TODO',
         file: 'packages/spec/src/conversions/apply.ts',
         shape: 'objlitconst',
@@ -669,8 +658,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // not SEE the site before it learned the stamp shape below (a
     // code-carrying helper), so "no finding" meant "not looked at", which is
     // the failure this gate exists to prevent. Its sibling from the same
-    // #9460 batch, `FLOW_CONVERSION_CONFLICT`, ratcheted out via #9567 (see
-    // the running log above); this one stays pending because admitting it AS
+    // #9460 batch, the flow save door's conversion-conflict 409, ratcheted out
+    // via #9567 (see the running log above); this one stays pending because admitting it AS
     // SPELLED is what ADR-0112 D1 forbids — the rename-or-keep-the-#9106-demote
     // call is the spec lane's and is not resolved here.
     {

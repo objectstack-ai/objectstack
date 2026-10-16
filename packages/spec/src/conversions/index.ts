@@ -10,12 +10,9 @@
  */
 
 export {
-  CONVERSION_CONFLICT_CODE,
   CONVERSION_NOTICE_CODE,
   CONVERSION_TODO_CODE,
   type ConversionApplication,
-  type ConversionConflictDetail,
-  type ConversionConflictNotice,
   type ConversionContext,
   type ConversionFixture,
   type ConversionNotice,

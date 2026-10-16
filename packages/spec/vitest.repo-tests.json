@@ -31,6 +31,7 @@
   "src/api/export-job-family-retirement.test.ts",
   "src/api/rest-api-config-dead-keys-retirement.test.ts",
   "src/contracts/record-share-guest-recipient-census.test.ts",
+  "src/conversions/conversion-conflict-channel-retirement.test.ts",
   "src/data/api-methods-batch-conformance.test.ts",
   "src/data/cube-member-inner-name-retirement.test.ts",
   "src/data/cube-refresh-key-retirement.test.ts",

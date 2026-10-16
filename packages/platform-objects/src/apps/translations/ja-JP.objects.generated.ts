@@ -1054,6 +1054,13 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       revoked: {
         label: "失効済み"
       },
+      revoked_reason: {
+        label: "失効理由",
+        help: "管理者によるパスワードの強制リセットでこのキーが失効したときに記録されます。このようなキーを復元できるのはプラットフォーム管理者のみで、所有者は新しいキーを作成します。キーを復元するとクリアされます。API キー一覧から失効させたキーでは空です。",
+        options: {
+          admin_password_reset: "管理者によるパスワードの強制リセット"
+        }
+      },
       key: {
         label: "ハッシュ済みキー",
         help: "ハッシュ済み API キー値 — クライアントには公開されません"

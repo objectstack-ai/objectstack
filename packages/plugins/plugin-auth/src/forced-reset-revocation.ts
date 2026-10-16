@@ -24,7 +24,13 @@
  *   session read then answers `null` and the next request is unauthenticated.
  * - Every unrevoked `sys_api_key` row the user owns is revoked: `revoked: true`,
  *   the flag the key-admission seam (`resolveApiKeyAdmission`) filters on, so
- *   the very next call with the key resolves no principal.
+ *   the very next call with the key resolves no principal. The same write
+ *   stamps `revoked_reason: admin_password_reset`, the one place that reason
+ *   is ever set: it is what tells the restore door
+ *   (`api-key-restore-guard.ts`) that only a platform administrator may reopen
+ *   the key, because the reset may answer a compromise and the owner's account
+ *   is the one in question. A key already revoked before the reset is not
+ *   written, so its reason (none) stays truthful.
  *
  * Unlike the posture refusal (ruling item 4, "the refusal is not a
  * revocation"), this IS a revocation: a revoked key stays revoked after the
@@ -42,7 +48,11 @@
 
 import { SystemObjectName } from '@objectstack/spec/system';
 
-/** The `revoke_reason` a session ended by an administrator's forced reset records. */
+/**
+ * The reason an administrator's forced reset records: `sys_session.revoke_reason`
+ * on each session it ends, and `sys_api_key.revoked_reason` on each key it
+ * revokes. One value, both tables.
+ */
 export const FORCED_RESET_REVOKE_REASON = 'admin_password_reset';
 
 /** How many rows of one kind this revocation will consider for one user. */
@@ -154,7 +164,11 @@ export async function revokeSessionsAndApiKeys(
     for (const row of keys.slice(0, maxScan)) {
       if (!row.id) continue;
       try {
-        await engine.update(SystemObjectName.API_KEY, { id: String(row.id), revoked: true }, { context: SYSTEM_CTX });
+        await engine.update(
+          SystemObjectName.API_KEY,
+          { id: String(row.id), revoked: true, revoked_reason: FORCED_RESET_REVOKE_REASON },
+          { context: SYSTEM_CTX },
+        );
         outcome.apiKeys += 1;
       } catch {
         outcome.failed += 1;

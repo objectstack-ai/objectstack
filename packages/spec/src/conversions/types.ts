@@ -27,14 +27,15 @@
 /** Stable code stamped on every conversion notice — greppable, MCP-serializable. */
 export const CONVERSION_NOTICE_CODE = 'OS_METADATA_CONVERTED' as const;
 
-/**
- * Stable code for a **conversion conflict** — a rename whose old token is, in
- * this environment, a *live* name owned by something else (e.g. a third-party
- * flow-node executor registered under a since-retired official node type). The
- * conversion refuses to rewrite it (which would silently break that owner) and
- * instead surfaces this loud, actionable diagnostic (ADR-0078: never silent).
- */
-export const CONVERSION_CONFLICT_CODE = 'OS_METADATA_CONVERSION_CONFLICT' as const;
+// [#24001] There is no conversion-CONFLICT channel (ADR-0078's "refuse to
+// rewrite a live name" guard) any more: its code, its two notice types and the
+// context's live-name set and sink were removed in protocol 18. Its only
+// producer, the live-executor guard on the flow-node HTTP callout rename, went
+// when protocol 18 reserved the three old names (`FLOW_RESERVED_NODE_TYPES`),
+// so no live owner can collide with a rename. A future rename over an open
+// namespace reserves its old names the same way: a registration refusal, never
+// a conversion conflict. The D3 entry `conversion-conflict-channel-removed`
+// names what left.
 
 /**
  * Stable code for a **conversion TODO** — a site a conversion recognised as a
@@ -92,30 +93,6 @@ export interface ConversionApplication {
   path: string;
 }
 
-/** The per-conflict detail a conversion reports when it refuses to rewrite a live name. */
-export interface ConversionConflictDetail {
-  /** The reserved/retired token that is currently a live name owned by something else. */
-  token: string;
-  /** Where the conflicting site is, e.g. `flows[0].nodes[2].type`. */
-  path: string;
-  /** Why the rewrite was refused (actionable — tells the owner what to do). */
-  reason: string;
-}
-
-/**
- * A structured conflict notice: a rename was **refused** because its old token
- * is a live name in this environment. Same machine-first shape as
- * {@link ConversionNotice}; different code.
- */
-export interface ConversionConflictNotice {
-  code: typeof CONVERSION_CONFLICT_CODE;
-  conversionId: string;
-  surface: string;
-  token: string;
-  path: string;
-  message: string;
-}
-
 /**
  * The per-site detail a conversion reports when it recognises a pre-protocol
  * shape on its surface and leaves it as stored, because no lossless rewrite
@@ -129,7 +106,7 @@ export interface ConversionTodoDetail {
   /**
    * Why no lossless rewrite exists — naming the part that blocks it (the
    * combinator, the operator, the key) and the node it sits on — and what the
-   * hand rewrite has to decide. Actionable, like a conflict's `reason`.
+   * hand rewrite has to decide. Actionable: it tells the owner what to do.
    */
   reason: string;
 }
@@ -163,21 +140,10 @@ export interface ConversionTodoNotice {
 }
 
 /**
- * Environment-supplied context for a conversion pass. Empty on the pure
- * build/validate seam (no runtime registry to consult); populated on the
- * runtime load seam (`engine.registerFlow`) so a rename over an *open*
- * namespace (flow node types) can detect a collision with a live owner instead
- * of silently clobbering it.
+ * Caller-supplied context for a conversion pass: the sinks a conversion may
+ * report through besides `emit`. Empty unless the caller asked for TODOs.
  */
 export interface ConversionContext {
-  /**
-   * Node types that are *live* in this environment (registered executors +
-   * action descriptors + structural types). A node-type rename whose old token
-   * is in this set is a conflict, not a conversion.
-   */
-  reservedNodeTypes?: ReadonlySet<string>;
-  /** Sink for a refused rewrite (see {@link ConversionConflictDetail}). */
-  reportConflict?: (detail: ConversionConflictDetail) => void;
   /**
    * Sink for a site left as stored because no lossless rewrite exists (see
    * {@link ConversionTodoDetail}). Absent unless the caller asked for TODOs; a
@@ -217,10 +183,7 @@ interface MetadataConversionBody {
   summary: string;
   /**
    * Apply the conversion to a normalized stack, immutably. Returns the (possibly
-   * new) stack and calls `emit` once per rewritten site. A conversion over an
-   * open namespace consults `context` (when supplied) to refuse — and report via
-   * `context.reportConflict` — a rewrite whose old token is a live name; a
-   * conversion over a closed surface ignores `context`. A conversion that
+   * new) stack and calls `emit` once per rewritten site. A conversion that
    * recognises a pre-protocol shape on its surface but has no lossless rewrite
    * for it leaves the site unchanged and reports it via `context.reportTodo`.
    */
