@@ -32,6 +32,13 @@
 //   5. The boundary: the declared-datasource and `TURSO_DATABASE_URL` rungs hand
 //      the rule their URL without `normalizeDatabaseUrl`, so there a `sqlite:`
 //      alias is refused as a scheme rather than opened as a file of that name.
+//   6. The remedy after the first clause names what the operator can change.
+//      Over a scheme: a `file:` path for the selected kind, or a driver that
+//      matches the URL, by unsetting the selection or setting it to the URL's
+//      driver, naming every door a selection comes through. It used to tell an
+//      operator who had set `OS_DATABASE_DRIVER` to "set OS_DATABASE_DRIVER
+//      explicitly". Over a `file:` that names no file: the file, and no driver
+//      change, whether the URL or a selection chose the kind.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -240,6 +247,71 @@ describe('the one file name that changes answer: a first segment holding a colon
       expect(run(kind, 'file:backup:2026.db').sqliteFile).toBe('backup:2026.db');
     }
   });
+});
+
+/**
+ * The advice after the refusal's first clause. Fails the case when the message
+ * does not open with that clause for `kind` and `why`, so a remedy read here is
+ * never the remainder of some other sentence.
+ */
+function remedyOf(err: Error, kind: SqliteKind, why: string): string {
+  const firstClause = `[StandaloneStack] ${kind} driver was selected but the URL does not look like a file path (${why}). `;
+  expect(err.message.startsWith(firstClause), `the refusal does not open with: ${firstClause}`).toBe(true);
+  return err.message.slice(firstClause.length);
+}
+
+describe('the remedy names what the operator can change', () => {
+  // Over a scheme the selected kind cannot open. The selection reaches this
+  // refusal through OS_DATABASE_DRIVER (which `--database-driver` sets) or the
+  // databaseDriver option, so the remedy names all three and assumes none.
+  it.each(KINDS.flatMap((kind) => Object.keys(DOORS).flatMap((door) => [
+    [kind, door, 'jdbc:postgresql://127.0.0.1:5999/db', 'jdbc:'],
+    [kind, door, `postgres://${USER}:${SECRET}@127.0.0.1:5999/db`, 'postgres://'],
+  ] as const)))('%s via %s over %s: a file: path for the kind, or a driver that matches the URL', (kind, door, url, scheme) => {
+    const err = refusalOf(() => DOORS[door as keyof typeof DOORS](kind, url));
+    const remedy = remedyOf(err, kind, `its scheme is "${scheme}"`);
+    expect(remedy).toContain(`file:/path/to/db.sqlite to keep the ${kind} driver`);
+    // Both moves that hand the URL a driver it matches: unset, or set to it.
+    expect(remedy).toContain('use a driver that matches the URL');
+    expect(remedy).toContain('unset the driver selection');
+    expect(remedy).toContain('so the URL selects it');
+    expect(remedy).toContain("set the selection to the URL's driver");
+    for (const selection of ['OS_DATABASE_DRIVER', '--database-driver', 'databaseDriver']) {
+      expect(remedy, `the remedy does not name ${selection}`).toContain(selection);
+    }
+    expect(remedy).not.toContain('explicitly');
+  });
+
+  it.each(KINDS)('the exported rule gives %s the same remedy the doors give', (kind) => {
+    const viaRule = refusalOf(() => sqliteFilenameFromUrl('redis:h', kind)).message;
+    const viaDoor = refusalOf(() => DOORS['OS_DATABASE_DRIVER and OS_DATABASE_URL'](kind, 'redis:h')).message;
+    expect(viaRule).toBe(viaDoor);
+    expect(remedyOf(new Error(viaRule), kind, 'its scheme is "redis:"')).toContain('unset the driver selection');
+  });
+
+  // A `file:` that names no file. A `file:` URL is a SQLite URL whichever way
+  // the kind was chosen, so the remedy is the file and never a driver change:
+  // unsetting the selection would hand the URL straight back to the `sqlite`
+  // kind. Only the `sqlite` kind meets this arm; on `sqlite-wasm` an empty name
+  // is `:memory:` (CONTROL above).
+  const NO_FILE = {
+    'the databaseUrl option, no selection': (url: string) =>
+      resolveStandaloneDatabase({ databaseUrl: url, artifactPath: join(root, 'none.json') }),
+    'OS_DATABASE_URL, no selection': (url: string) => {
+      process.env.OS_DATABASE_URL = url;
+      return resolveStandaloneDatabase({ artifactPath: join(root, 'none.json') });
+    },
+    ...Object.fromEntries(Object.entries(DOORS).map(([door, run]) => [`an explicit sqlite via ${door}`, (url: string) => run('sqlite', url)])),
+  } as Record<string, (url: string) => unknown>;
+  it.each(Object.keys(NO_FILE).flatMap((door) => [[door, 'file:'], [door, 'FILE:']] as const))(
+    'via %s, %s names the file to write and no driver change',
+    (door, url) => {
+      const remedy = remedyOf(refusalOf(() => NO_FILE[door](url)), 'sqlite', 'it names no file after "file:"');
+      expect(remedy).toContain('file:/path/to/db.sqlite');
+      expect(remedy).toContain('Name the file after "file:"');
+      expect(remedy).not.toContain('driver');
+    },
+  );
 });
 
 describe('the boundary: rungs that do not normalize the URL', () => {
