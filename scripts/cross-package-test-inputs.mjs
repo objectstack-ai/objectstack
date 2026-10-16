@@ -924,6 +924,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     },
   },
   '@objectstack/cloud-connection': {
+    // src/marketplace-install-local-convert-forward.test.ts reads HotCRM 4.0.1's
+    // published page shape from `@objectstack/objectql`'s fixture -- the ONE
+    // copy of that artifact, which the registration door's own pin reads too --
+    // to drive the marketplace install's ADR-0087 D2 conversion over the real
+    // engine. A change to the fixture changes what this suite measures.
+    //
     // src/canonical-expression-envelopes.test.ts (#12267) imports `maskComments`
     // from `js-comment-mask.mjs` to decide which text in this package's `src/` is
     // a comment and which is a `Page` declaration — the same conversion #9367
@@ -934,6 +940,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // verdict is a function of it too — the reason the `@objectstack/cli` entry
     // above declares the pair rather than the module alone.
     globs: [
+      'packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json',
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
     ],
@@ -1325,6 +1332,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the scan itself.
       'docs/**': ['packages/rest/src/meta-state-route-doc-spelling.test.ts'],
     },
+  },
+  '@objectstack/service-package': {
+    // src/hydration-convert-forward.test.ts reads HotCRM 4.0.1's published page
+    // shape from `@objectstack/objectql`'s fixture -- the ONE copy of that
+    // artifact -- to drive the `sys_packages` boot hydration's ADR-0087 D2
+    // conversion over the real engine and driver.
+    globs: ['packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json'],
   },
   '@objectstack/service-automation': {
     // src/connector-pull.integration.test.ts (#20919) drives the connector sync
