@@ -234,6 +234,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "Updated At"
       }
+    },
+    _views: {
+      all: {
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay preferencias",
+          message: "No se silencia nada hasta que se añade una preferencia; añade una para silenciar o permitir un tema en un canal, para un usuario o como valor predeterminado para todos."
+        }
+      }
     }
   },
   sys_notification_subscription: {
@@ -262,6 +271,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Created At"
+      }
+    },
+    _views: {
+      all: {
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay suscripciones",
+          message: "Una suscripción registra que un rol, un equipo o un usuario sigue un tema de notificación."
+        }
       }
     }
   },
@@ -313,6 +331,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay plantillas",
+          message: "Añade una plantilla por tema, canal e idioma; mientras tanto, la notificación se envía con el título y el cuerpo que proporciona su remitente."
+        }
       }
     }
   },

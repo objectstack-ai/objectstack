@@ -464,15 +464,12 @@ export function lintUnscopedDeclaredIndexes(objects: any[]): LocatedLintIssue[] 
           `"${obj.name}" index${indexLabel} [${cols}] has bare \`unique: true\`, an unstated scope protocol 18 ` +
           `refuses (ADR-0120): it built the index installation-wide`,
         path: `objects[${i}].indexes[${j}]`,
+        // [#22161] One remedy line. What `'organization'` makes the driver
+        // build, and the `os migrate meta` route for existing sources (the
+        // house sentence), are `os explain` text.
         fix:
-          `State the scope: \`unique: 'global'\` (installation-wide — the exact index bare \`true\` built) or ` +
-          `\`unique: 'organization'\` (one holder per organization — the driver prepends the NULL-safe ` +
-          `organization key part at registration). ` +
-          // The house sentence, plain-quoted (not a template literal) so this site
-          // is judged by `retired-key-migrate-sentence.test.ts`'s scan of this
-          // package: escaped template backticks hide it from that scan.
-          'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; '
-          + '`--write` applies the ones it can prove, and you apply the rest by hand.',
+          "State the scope: `unique: 'global'` (installation-wide — the exact index bare `true` built) or " +
+          "`unique: 'organization'` (one holder per organization).",
       });
     }
   }
@@ -554,17 +551,18 @@ export function lintUniqueDeclarations(objects: any[]): LocatedLintIssue[] {
         fix =
           fScope === 'global'
             ? `Keep ONE spelling of installation-wide uniqueness: \`unique: 'global'\` on '${name}', or the declared index — not both.`
-            : `Keep ONE spelling of per-organization uniqueness: \`unique: 'organization'\` on '${name}' (preferred), or the declared \`'organization'\` index — not both.`;
+            : `Keep ONE spelling of per-organization uniqueness: \`unique: 'organization'\` on '${name}' (preferred), or the declared index — not both.`;
       } else {
         // Different scopes — the installation-wide side is physically stricter
         // and wins; the per-organization intent is dead on arrival.
         message =
           `"${obj.name}.${name}" field ${fieldSpelling} and index${indexLabel} ${indexSpelling} CONTRADICT: ` +
           `the installation-wide one wins, so the per-organization intent is silently dead`;
+        // [#22161] One remedy line; where each spelling may live is
+        // `os explain` text.
         fix =
-          `Pick ONE scope and say it once: for installation-wide uniqueness keep \`unique: 'global'\` and drop the ` +
-          `per-organization declaration; for per-organization uniqueness set \`unique: 'organization'\` (field-level on ` +
-          `'${name}', or on the declared index) and drop the installation-wide one.`;
+          "Pick ONE scope and say it once: keep `unique: 'global'` and drop the per-organization side, or set " +
+          "`unique: 'organization'` and drop the installation-wide one.";
       }
 
       issues.push({
@@ -632,7 +630,6 @@ export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIss
       if (!cols.includes(tenantColumn)) continue;
 
       const indexLabel = typeof idx?.name === 'string' && idx.name.trim() ? ` '${idx.name.trim()}'` : '';
-      const rest = cols.filter((c: string) => c !== tenantColumn);
       issues.push({
         severity: 'warning',
         rule: UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
@@ -643,13 +640,11 @@ export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIss
           `"${obj.name}" index${indexLabel} [${cols.join(', ')}] lists the organization column, and SQL ` +
           `UNIQUE is NULL-distinct: on every row whose '${tenantColumn}' is NULL it enforces nothing`,
         path: `objects[${i}].indexes[${j}]`,
+        // [#22161] One remedy line; what the respelling builds, what the
+        // probe reports and why leaving it is valid are `os explain` text.
         fix:
-          `State the scope instead: \`unique: 'organization'\` on this index (keep \`fields\` exactly as they are — the ` +
-          `driver makes the listed '${tenantColumn}' NULL-safe in place rather than prepending a second organization key ` +
-          `part). ${rest.length > 0 ? `The constraint then really is "one ${rest.join(' + ')} per organization". ` : ''}` +
-          `Opting in is a physical tightening: it surfaces as a \`recreate_index\` drift op gated by the duplicate ` +
-          `pre-flight probe (ADR-0120 D4), so pre-existing duplicate NULL-organization rows block it with a report ` +
-          `rather than failing a boot. Leaving it as-is stays valid indefinitely and forces no drift.`,
+          "Respell it `unique: 'organization'` and keep `fields` exactly as they are; opting in is a " +
+          '`recreate_index` gated by the duplicate pre-flight probe (ADR-0120 D4).',
       });
     }
   }
@@ -737,11 +732,11 @@ export function lintDataModel(objects: any[]): LintIssue[] {
         rule: 'object/missing-name-field',
         message: `Object "${obj.name}" has no nameField and no name-like field — records will display as raw IDs`,
         path: `${objPath}.fields`,
+        // [#22161] One remedy line; why `titleFormat` does not count is
+        // `title-format-retired`'s `os explain` text.
         fix:
-          `Set \`nameField: '<field>'\` — ADR-0079's canonical primary-title pointer — to a stored ` +
-          `text/autonumber field, or to a formula field with \`returnType: 'text'\` for a composite ` +
-          `title. A \`titleFormat\` template does NOT count: it is retired (ADR-0079) and render-only, ` +
-          `so the server can neither return nor query the title it renders.`,
+          "Set `nameField: '<field>'` (ADR-0079's title pointer) to a stored text/autonumber field or a " +
+          "`returnType: 'text'` formula; `titleFormat` does not count (`os explain title-format-retired`).",
       });
     }
 
@@ -771,9 +766,8 @@ export function lintDataModel(objects: any[]): LintIssue[] {
             message: `${type} field "${obj.name}.${fieldName}" has no options`,
             path: `${fieldPath}.options`,
             fix:
-              "Give the field ONE options source: inline `options: [{ label: '…', value: '…' }]`, or " +
-              "`picklist: '<name>'` naming a shared list — never both, because a field declaring " +
-              '`options` beside `picklist` is refused.',
+              "Give the field ONE options source: inline `options: [{ label: '…', value: '…' }]` or " +
+              "`picklist: '<name>'` naming a shared list — never both: `options` beside `picklist` is refused.",
           });
         }
       }
@@ -832,11 +826,11 @@ export function lintDataModel(objects: any[]): LintIssue[] {
                 `${fn}(${childName}.${childFieldName}), a ${childType} field: ${fn} answers in the ` +
                 `child field's own type, but a summary field stores a finite number`,
               path: `${fieldPath}.summaryOperations.field`,
+              // [#22161] One remedy line; why min/max over those answer with a
+              // number and `count` reads no value is `os explain` text.
               fix:
-                `Aggregate a numeric or boolean child field instead (min/max over those answer ` +
-                `with a number), or use function: 'count' — which reads no value off the field. ` +
-                `To carry a ${childType} on "${obj.name}", declare a ${childType} field and ` +
-                `maintain it from a flow; a roll-up cannot store one.`,
+                `Aggregate a numeric or boolean child field, or use function: 'count'; a roll-up cannot ` +
+                `store a ${childType}, so declare a ${childType} field and maintain it from a flow.`,
             });
           }
         }

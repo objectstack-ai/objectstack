@@ -58,6 +58,10 @@ import { SysUserDetailPage } from '../pages/sys-user.page.js';
  *    that reads codes back; there is no re-reveal endpoint to add.
  *  - `/two-factor/enable` returns the otpauth URI carrying the plaintext TOTP
  *    secret, which is likewise stored encrypted and never re-served.
+ *  - `/api/v1/keys` (`@objectstack/runtime` `domains/keys.ts`, the only API-key
+ *    mint path) answers the raw key once as `data.key`; `sys_api_key.key`
+ *    stores only its sha256 hash and is `internal`, so no read returns it.
+ *    `sys_api_key.create_api_key` targets it.
  *
  * ⛔ Adding a row here without a `resultDialog` on the actions that target it
  * is meant to fail. That is the point of the table.
@@ -65,6 +69,7 @@ import { SysUserDetailPage } from '../pages/sys-user.page.js';
 const ONE_SHOT_ROUTES: Record<string, readonly string[]> = {
   '/api/v1/auth/two-factor/enable': ['totpURI', 'backupCodes'],
   '/api/v1/auth/two-factor/generate-backup-codes': ['backupCodes'],
+  '/api/v1/keys': ['key'],
 };
 
 /** Every action declared on every exported identity object, tagged with its object. */

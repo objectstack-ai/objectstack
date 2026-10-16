@@ -25,6 +25,7 @@
       "mcp__Claude_Code_Remote__get_session",
       "mcp__Claude_Code_Remote__list_sessions",
       "mcp__Claude_Code_Remote__create_trigger",
+      "Edit(//home/user/objectstack-issue-*/.changeset/pre/**)",
       "Bash(agent-browser snapshot *)",
       "Bash(agent-browser skills *)",
       "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/issues/*/labels *)",

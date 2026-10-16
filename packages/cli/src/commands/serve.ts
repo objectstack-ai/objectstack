@@ -502,6 +502,10 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
  * port, all return `requestedPort` — exactly what every channel published
  * before this function existed. This repair may not narrow what boots.
  *
+ * ⚠️ On the first of those — no transport at all — the number names nothing
+ * that listens, so `serve` publishes it on no channel (#23743): the publish
+ * site is gated on {@link resolveHttpServerComposition}, not on this value.
+ *
  * ⛔ `0` is NOT accepted as an ANSWER here, though it is a legal REQUEST: no
  * socket is ever bound to port 0, so a transport reporting it has not listened
  * yet (`HonoHttpServer.getPort()` falls back to its constructor argument until
@@ -566,7 +570,58 @@ export function resolveHttpServerComposition(
   return serverFlag ? 'not-composed' : 'skipped-by-no-server';
 }
 
-/** The `objectstack:listening` IPC message the `os dev` parent waits for. */
+/**
+ * The plugin that mounts `/api/v1/mcp` (and `/api/v1/mcp/skill`): the runtime
+ * dispatcher, `createDispatcherPlugin` in `@objectstack/runtime`. The same
+ * name `HonoServerPlugin` asks the kernel about before it warns that no data
+ * or discovery API is mounted.
+ */
+export const MCP_ROUTE_OWNER_PLUGIN = 'com.objectstack.runtime.dispatcher';
+
+/**
+ * Whether the plugin that mounts the MCP route is composed on this boot
+ * (#23743), for the ready banner's `MCP:` row.
+ *
+ * ## The defect this closes
+ *
+ * `os serve objectstack.config.ts --no-server` with a config that mounts its
+ * own `HonoServerPlugin` printed `MCP: http://localhost:PORT/api/v1/mcp` and
+ * its connect hint, and `GET /api/v1/mcp` answered 404 while
+ * `/api/v1/data/<object>` answered 401: the transport listened, the route did
+ * not exist. The dispatcher that mounts it is composed only inside `serve`'s
+ * `if (flags.server)` block, and the row was gated on `http.server` (#23623)
+ * and on the MCP switch, neither of which says whether the route is mounted.
+ *
+ * ## Why this read
+ *
+ * Read off the booted kernel, like {@link readComposedHttpServer}, so a config
+ * that mounts its own dispatcher is answered too. The dispatcher registers no
+ * service (it only consumes `http.server`), so the kernel's plugin registry is
+ * the read: `hasPlugin` answers for every `kernel.use()` already made, and by
+ * the time the banner prints every one has been. The dispatcher mounts the
+ * route in its own `start()` only when an `http.server` is registered, so the
+ * caller pairs this with a composed transport.
+ *
+ * `false` when the kernel cannot answer (no `hasPlugin`, or it throws): an
+ * unanswerable question must not print a URL an AI client will be pointed at.
+ */
+export function readComposedMcpRouteOwner(
+  kernel: { hasPlugin?: (name: string) => boolean } | undefined,
+): boolean {
+  try {
+    return typeof kernel?.hasPlugin === 'function' && kernel.hasPlugin(MCP_ROUTE_OWNER_PLUGIN) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The `objectstack:listening` IPC message the `os dev` parent waits for.
+ *
+ * Sent only when an HTTP transport is composed (#23743): its documented
+ * meaning is "The HTTP server is bound", so a boot that binds none sends no
+ * such message rather than one naming a port nothing listens on.
+ */
 export interface ListeningMessage {
   type: 'objectstack:listening';
   port: number;
@@ -601,6 +656,11 @@ export interface ListeningMessage {
  * released after {@link publishBoundPort} has driven its three channels, so a
  * parent that waits for `objectstack:listening` first can never miss this one by
  * being late. See {@link createSeedSettlementAnnouncer}.
+ *
+ * On a boot that binds no HTTP server no {@link ListeningMessage} is sent at
+ * all (#23743), and this one still is — it is then the boot's only message. A
+ * kernel-only boot still seeds, and a parent waiting for the settle must not
+ * hang for want of a listening message that is never coming.
  *
  * ## ⭐ `suppressed` is what keeps a waiting parent from hanging forever
  *
@@ -783,6 +843,9 @@ export interface BoundPortChannels {
 
 /**
  * Publish the bound port on all three channels, in the one order that is safe.
+ *
+ * Driven only when an HTTP transport is composed (#23743): a boot with none has
+ * no bound port to publish, and prints the banner alone.
  *
  * ## The bug this shape exists to make impossible
  *
@@ -5423,10 +5486,20 @@ export default class Serve extends Command {
       // other while disagreeing with the socket.
       const boundPort = resolveBoundPort(kernel, port);
       // [#23623] …and whether there is a transport at all, from the same read
-      // ({@link readComposedHttpServer}). Only the banner takes it: on a boot
-      // with none, its address rows give way to one line saying so. ⛔ The IPC
-      // message and the runtime state file below are not changed by it.
+      // ({@link readComposedHttpServer}). On a boot with none, the banner's
+      // address rows give way to one line saying so (#23623), and nothing is
+      // published on the two machine channels either (#23743): see the
+      // publish site below. ⭐ ONE predicate for all three channels, so the
+      // banner, the IPC message and the state file cannot disagree about
+      // whether there is an address at all.
       const httpServer = resolveHttpServerComposition(kernel, flags.server);
+      // [#23743] …and whether `/api/v1/mcp` is mounted, for the banner's `MCP:`
+      // row. A composed transport is not enough: the route's owner is the
+      // runtime dispatcher, which this command composes only under `--server`,
+      // so a config that mounts its own `HonoServerPlugin` under `--no-server`
+      // listens while `/api/v1/mcp` answers 404. See
+      // {@link readComposedMcpRouteOwner}.
+      const mcpRouteMounted = httpServer === 'composed' && readComposedMcpRouteOwner(kernel);
 
       // ── Clean startup summary ──────────────────────────────────────
       // #8978 — the Config:/Artifact: row must name what actually booted,
@@ -5522,8 +5595,10 @@ export default class Serve extends Command {
         // AI client can connect to operate the running app. Same decision point
         // that auto-loads the plugin + gates the route. It is not the whole
         // answer: with no HTTP server composed nothing serves the route, and
-        // the banner drops the row on `httpServer` (#23623).
-        mcpEnabled: isMcpServerEnabled(),
+        // the banner drops the row on `httpServer` (#23623); with a server but
+        // no dispatcher, the route is not mounted and answers 404, so the row
+        // also needs `mcpRouteMounted` (#23743).
+        mcpEnabled: isMcpServerEnabled() && mcpRouteMounted,
       });
 
       // ── Publish the actually-bound port ────────────────────────────
@@ -5550,7 +5625,26 @@ export default class Serve extends Command {
       // message that makes the `os dev` parent print into the same terminal
       // (#22410). {@link publishBoundPort} carries both races the old orders
       // lost, and the reason neither repair is a reader-side poll or a timer.
-      publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);
+      //
+      // [#23743] …and all of that only when a transport BOUND a port. With
+      // none composed (`--no-server` and no config-mounted transport, or a
+      // transport plugin that did not load), `boundPort` is the REQUESTED
+      // number — {@link resolveBoundPort} falls back to it by design — and
+      // nothing listens there. `objectstack:listening` is documented as "The
+      // HTTP server is bound" (`content/docs/deployment/cli.mdx`), so such a
+      // boot sends no such message, and it writes no runtime state file either:
+      // that file's whole payload answers "is my server running, and where?",
+      // and a missing file is the loud, correct answer when there is none
+      // ({@link runtimeStateFileName}). ⛔ No "unbound" record instead: the
+      // payload stays the one shape every reader already parses. The banner
+      // still prints, and says once that no address is served (#23623).
+      // ⭐ Gated on the SAME `httpServer` the banner's address rows read, so
+      // the three channels cannot disagree about whether there is an address.
+      if (httpServer === 'composed') {
+        publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);
+      } else {
+        printBanner();
+      }
 
       // ── …and one beat later, whether the APP is ready too (#17329) ──
       // ⭐ AFTER the line above, and that is the whole of the ordering
@@ -5559,6 +5653,12 @@ export default class Serve extends Command {
       // sent before this call. On the ordinary in-budget boot seeding settled
       // minutes of CPU ago and this releases the latched message immediately;
       // past the budget it arms and the `app:seeded` hook speaks later.
+      //
+      // [#23743] On a boot that binds no HTTP server no `objectstack:listening`
+      // is sent at all, and this message is still sent: it is then the boot's
+      // only message. A kernel-only boot still seeds, and a parent waiting for
+      // the settle must not wait forever for a message that is never coming —
+      // the rule {@link SeedSettledMessage} exists for.
       //
       // ⛔ NOT a fourth channel inside `publishBoundPort`. Those three are one
       // publication of ONE number, ordered so the file exists before anything
