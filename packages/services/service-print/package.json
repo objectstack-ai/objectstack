@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-print",
-  "version": "18.0.0-next.1",
+  "version": "18.0.0-next.2",
   "license": "Apache-2.0",
   "description": "Print Service for ObjectStack — renders a record's print page in headless Chromium under the requesting user's own principal and archives the PDF as a file attached to the record.",
   "type": "module",
