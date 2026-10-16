@@ -214,8 +214,8 @@ describe('#23889 — the boot-time display-label backfill', () => {
     const warn: string[] = [];
     // The same engine, except that every `sys_user` read fails.
     const failing: any = Object.create(engine);
-    failing.find = (object: string, options: unknown) =>
-      object === 'sys_user' ? Promise.reject(new Error('sys_user unavailable')) : engine.find(object, options as any);
+    failing.find = (object: string, options: EngineQueryOptions) =>
+      object === 'sys_user' ? Promise.reject(new Error('sys_user unavailable')) : engine.find(object, options);
     const broken = new ApprovalService({ engine: failing, logger: { ...quiet, warn: (m: string) => { warn.push(m); } } as any });
 
     const labels = slotLabelSourceOf(broken);
