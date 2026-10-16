@@ -573,6 +573,8 @@ diverged (#3903). This addendum extends the contract to data at rest:
 
 > **2026-10-16 note** (#23775, ruling B) — the flow save door draws this line by one predicate: `saveMetaItem` canonicalizes a flow with **no stored row at the save's address** (the row the save overwrites, or for a draft with none yet the active row it overlays) **without** retired entries, so a retired spelling meets the parse refusal (`422 INVALID_METADATA`, located, the text `os validate` prints), while a re-save of a stored row — and the server's own writes of bodies at rest — keep the full chain.
 
+> **2026-10-16 note** (#23903, ruling B′) — a re-save is judged as authored input too when its request fires a retired entry the stored row does not: a retired hit (the entry, the spelling it rewrote, and its site, with a node's `id` standing for its index) that no stored row of the save's baseline carries (for a draft, the active row it overlays as well as its own) sends the whole body through the chain **without** retired entries and so to the same refusal, while a re-save whose retired hits the stored row all carries keeps the full chain.
+
 ## Addendum (2026-08-01) — the stored chain gets a finish line (#4327)
 
 The addendum above makes a legacy row read canonical *forever*, which is the
