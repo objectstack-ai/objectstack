@@ -3887,7 +3887,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * `visibleWhen` and `collapse`, and a wizard step has no slot for either.
    */
   group: SectionGroupKeySchema.optional().describe(
-    'Field group key (snake_case) whose members and presentation this section inherits, from the bound object\'s `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics.',
+    'Field group key (snake_case) whose members and presentation this section inherits, from the bound object\'s `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics.',
   ),
   /**
    * The section's members, enumerated.
@@ -3908,15 +3908,16 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   // in the list because the derived section's `key` IS the group key, which is
   // already the object's i18n anchor for that heading
   // (`objects.<object>._sections.<key>`, `deriveFieldGroupLayout`'s `key`)
-  // — a second name would give one section two lookup identities. `visibleOn`
-  // rides along because this refinement runs BEFORE the `.transform` that folds
-  // it onto `visibleWhen`, so the deprecated spelling must be named here or it
-  // would be the one way to smuggle a section-level predicate past the rule.
+  // — a second name would give one section two lookup identities. The retired
+  // `visibleOn` is not listed: until 18 a `.transform` folded it onto
+  // `visibleWhen` AFTER this refinement, so it had to be named here; now its
+  // tombstone refuses it at the key, and this refinement never runs on a
+  // section that wrote it (#23543 F4, measured: one issue, at `visibleOn`).
   //
   // NOT in the list, deliberately: `columns` and `pane`. Those are how THIS
   // form lays the section out and the group declares nothing about them, so
   // there is no second source to create.
-  derivedKeys: ['name', 'label', 'description', 'visibleWhen', 'visibleOn'],
+  derivedKeys: ['name', 'label', 'description', 'visibleWhen'],
   // `collapsible` / `collapsed` carry `.default(false)`, so an authored `false`
   // is already indistinguishable from the default by the time this runs — the
   // same asymmetry #13704 records for the wizard step keys, and it costs

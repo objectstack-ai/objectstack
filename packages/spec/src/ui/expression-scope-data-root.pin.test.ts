@@ -51,13 +51,13 @@ const componentSource = fs.readFileSync(path.resolve(HERE, 'component.zod.ts'), 
 /**
  * The published description of `PageComponentSchema.visibleWhen`.
  *
- * ⚠️ NOT `.shape` — ADR-0089 D3a made this schema a `.strict().transform(…)`
- * pipe, so the object carrying the property descriptions is its INPUT side.
+ * Read off `.shape`: the schema is a plain closed object since its
+ * `visibility` fold (a `.transform` pipe) retired with the key (#23543 F4).
  */
 const visibleWhenDescription = (): string => {
   const shape = (PageComponentSchema as unknown as {
-    def: { in: { shape: Record<string, { description?: string }> } };
-  }).def.in.shape;
+    shape: Record<string, { description?: string }>;
+  }).shape;
   const d = shape.visibleWhen.description;
   expect(d, 'the describe() must exist — this pin is about its content').toBeTruthy();
   return d!;
