@@ -957,11 +957,13 @@ export function ownerDir(owner, workspacePkgs) {
  *
  * @param {string} owner
  * @param {string} script
- * @param {{ silent?: boolean }} [options] `silent` adds `-s`, for a spawn rather than advice
+ * @param {{ silent?: boolean }} [options] `silent` adds `--silent`, for a spawn rather than
+ *   advice — never `-s`, which a global pnpm 11+ `@pnpm/exe` frontend rejects before the
+ *   pinned pnpm ever runs
  * @returns {string}
  */
 export function ownerRunCommand(owner, script, { silent = false } = {}) {
-  const s = silent ? ' -s' : '';
+  const s = silent ? ' --silent' : '';
   return owner === ROOT_OWNER ? `pnpm${s} ${script}` : `pnpm${s} --filter ${owner} ${script}`;
 }
 

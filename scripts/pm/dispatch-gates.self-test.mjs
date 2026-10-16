@@ -8728,7 +8728,7 @@ export function selfTest({ tier = 'full' } = {}) {
     "const r1 = spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' });", // followed: argv array, component NAMED
     "const r2 = execFileSync('node', [join(ROOT, 'scripts/invoked-as.mjs')]);", // followed: component written out
     "const r3 = spawnSync('git', ['ls-files'], { cwd: ROOT });", // a program that is not in this tree
-    'const r4 = execSync(`pnpm -s ${script}`);', // shell form: a command STRING, never scanned
+    'const r4 = execSync(`pnpm --silent ${script}`);', // shell form: a command STRING, never scanned
     "const r5 = spawnSync(process.execPath, [join(ROOT, 'package.json')]);", // tracked, but not program text
     "const r6 = spawnSync(process.execPath, [join(ROOT, 'scripts/does-not-exist.mjs')]);", // resolves, untracked
     "const r7 = spawnSync(process.execPath, [join(ROOT, 'scripts/fixture.mjs')]);", // itself: the identity key owns it

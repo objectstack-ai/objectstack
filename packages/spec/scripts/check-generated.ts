@@ -684,7 +684,10 @@ function runScript(script: string): { ok: boolean; output: string } {
   // the build alone; every gate keeps the caller's environment.
   if (script === SPEC_BUILD) delete env.OS_SKIP_DTS;
   try {
-    const output = execSync(`pnpm -s ${script}`, { cwd: pkgRoot, env, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+    // `--silent`, never `-s`: a global pnpm 11+/12 `@pnpm/exe` frontend parses the
+    // argv before handing off to the pinned pnpm and rejects `-s` with exit 2, which
+    // reads here as every gate stale.
+    const output = execSync(`pnpm --silent ${script}`, { cwd: pkgRoot, env, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
     return { ok: true, output };
   } catch (err: any) {
     return { ok: false, output: `${err?.stdout?.toString() ?? ''}${err?.stderr?.toString() ?? ''}`.trim() };

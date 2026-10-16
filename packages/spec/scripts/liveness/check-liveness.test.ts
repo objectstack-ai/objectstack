@@ -1626,6 +1626,22 @@ function liveRows(shape: 'container' | 'child'): WarnCarrier[] {
   return out;
 }
 
+/** Every `planned` row (top-level or drilled child) that does not already opt into `authorWarn`, sorted. */
+function plannedRows(): WarnCarrier[] {
+  const out: WarnCarrier[] = [];
+  for (const file of readdirSync(LEDGERS).filter((f) => f.endsWith('.json')).sort()) {
+    const type = file.slice(0, -'.json'.length);
+    const props: Record<string, any> = JSON.parse(readFileSync(path.join(LEDGERS, file), 'utf8')).props ?? {};
+    for (const [prop, row] of Object.entries(props)) {
+      if (row?.status === 'planned' && row?.authorWarn !== true) out.push({ type, path: prop });
+      for (const [child, crow] of Object.entries<any>(row?.children ?? {})) {
+        if (crow?.status === 'planned' && crow?.authorWarn !== true) out.push({ type, path: `${prop}.${child}` });
+      }
+    }
+  }
+  return out;
+}
+
 describe('check:liveness — a `live` row may not opt into `authorWarn` (#21127)', () => {
   let tmp: string;
 
@@ -1652,19 +1668,33 @@ describe('check:liveness — a `live` row may not opt into `authorWarn` (#21127)
 
   // THE CONTROL, and the census. Green on a verbatim copy, and the line names
   // the population it asked: a `planned` row with `authorWarn` is the legal
-  // shape (a consumer is being built — keep the key, it does nothing yet), so
-  // the shipped ledgers carry some and the gate leaves them alone.
-  it('is green on the shipped ledgers, which carry warned `planned` rows and no warned `live` one', () => {
-    const { status, output } = runGate();
-    expect(status, output).toBe(0);
-    expect(output).toContain('no `live` row opts into an author warning');
-    const line = output.split('\n').find((l) => l.startsWith('author warnings:')) ?? '';
-    expect(line, 'the gate must publish the population it asked').not.toBe('');
-    const reached = Number(/^author warnings: (\d+) /.exec(line)?.[1] ?? 0);
-    expect(reached, 'a walk reaching zero warned rows is a degraded walk, not a clean tree').toBeGreaterThan(0);
-    expect(line).toMatch(/\bplanned [1-9]\d*\b/);
-    expect(line).toContain('; 0 on a `live` row.');
-    expect(line).not.toContain('FORBIDDEN');
+  // shape (a consumer is being built — keep the key, it does nothing yet), and
+  // the gate leaves it alone. The shipped ledgers no longer carry one (#23710
+  // flipped the last, `page.print`, `live`), so the walk's reach is proved on a
+  // copy with one shipped `planned` row marked: the census must count it, or
+  // the walk is degraded.
+  it('is green on the shipped ledgers, and on a warned `planned` row, which the census counts', () => {
+    const authorWarnLine = (output: string) => output.split('\n').find((l) => l.startsWith('author warnings:')) ?? '';
+    const reachedOf = (line: string) => Number(/^author warnings: (\d+) /.exec(line)?.[1] ?? Number.NaN);
+
+    const shipped = runGate();
+    expect(shipped.status, shipped.output).toBe(0);
+    expect(shipped.output).toContain('no `live` row opts into an author warning');
+    const shippedLine = authorWarnLine(shipped.output);
+    expect(shippedLine, 'the gate must publish the population it asked').not.toBe('');
+    expect(shippedLine).toContain('; 0 on a `live` row.');
+    expect(shippedLine).not.toContain('FORBIDDEN');
+
+    const [carrier] = plannedRows();
+    expect(carrier, 'no `planned` row in the shipped ledgers to carry the sample').toBeDefined();
+    const planted = runGate(sampleWarned('planned', carrier));
+    expect(planted.status, planted.output).toBe(0);
+    const plantedLine = authorWarnLine(planted.output);
+    expect(reachedOf(plantedLine), 'a walk that does not count the marked row is a degraded walk, not a clean tree')
+      .toBe(reachedOf(shippedLine) + 1);
+    expect(plantedLine).toMatch(/\bplanned [1-9]\d*\b/);
+    expect(plantedLine).toContain('; 0 on a `live` row.');
+    expect(plantedLine).not.toContain('FORBIDDEN');
   });
 
   // The regression's own shape: a `live` CONTAINER row, whose status the graded

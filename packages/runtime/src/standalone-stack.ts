@@ -396,6 +396,21 @@ export interface StandaloneStackResult {
 
 type ResolvedDriverKind = z.infer<typeof StandaloneDatabaseDriverSchema>;
 
+/**
+ * The `<scheme>://` a database URL opens with, or `undefined` when it has none.
+ *
+ * Every refusal in this host that is about a URL names THIS, never the URL.
+ * The URL is where the postgres / mysql / mongodb credentials ride
+ * (`user:password@host`, `?authToken=…`), and these refusals are printed to
+ * the console and the boot log on the way out, which a deployment may ship to
+ * a log aggregator. A scheme is letters, digits and `+ - .` up to the first
+ * `://`, so it cannot hold a userinfo, a host, a path or a query: naming it
+ * cannot echo a credential, whatever the rest of the URL carries.
+ */
+function urlSchemeOf(dbUrl: string): string | undefined {
+    return /^[a-z][a-z0-9+.-]*:\/\//i.exec(dbUrl)?.[0];
+}
+
 function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     // The in-memory (mingo) engine's two schemes — character-for-character the
     // CLI's `inferDriverTypeFromUrl` regex, for the reason the mysql and turso
@@ -428,9 +443,11 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (/\.wasm\.db$/i.test(dbUrl)) return 'sqlite-wasm';
     if (/^file:/i.test(dbUrl)) return 'sqlite';
     // Bare path without a scheme — treat as a sqlite file path.
-    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(dbUrl)) return 'sqlite';
+    const scheme = urlSchemeOf(dbUrl);
+    if (!scheme) return 'sqlite';
+    // Names the scheme, never the URL ({@link urlSchemeOf}).
     throw new Error(
-        `[StandaloneStack] Unsupported database URL scheme: ${dbUrl}. ` +
+        `[StandaloneStack] Unsupported database URL scheme "${scheme}". ` +
         `Supported schemes: postgres://, pg://, mysql://, mysql2://, ` +
         `mongodb://, mongodb+srv://, ` +
         `libsql:// (optional @objectstack/driver-turso), file: ` +
@@ -536,11 +553,16 @@ function refuseRetiredMemoryEngine(
     resolution: { source: ProjectDatabaseUrlSource; datasourceName?: string },
 ): BootDriverKind {
     if (driver !== 'memory') return driver;
+    // The URL's scheme, never the URL ({@link urlSchemeOf}): `memory://` and
+    // `mingo://` accept anything after the `//`, a `user:password@` included.
+    // `driver` is `memory` only when {@link detectDriverFromUrl} matched one of
+    // the two, so there is always a scheme to name.
+    const scheme = urlSchemeOf(url) ?? '';
     const selection = resolution.source === 'config-datasource'
-        ? `The project's default datasource "${resolution.datasourceName ?? 'default'}" (driver: memory, URL "${url}")`
+        ? `The project's default datasource "${resolution.datasourceName ?? 'default'}" (driver: memory, URL scheme "${scheme}")`
         : resolution.source === 'env'
-            ? `OS_DATABASE_URL "${url}"`
-            : `The database URL "${url}"`;
+            ? `An OS_DATABASE_URL with the "${scheme}" scheme`
+            : `A database URL with the "${scheme}" scheme`;
     throw new Error(`[StandaloneStack] ${retiredMemoryEngineMessage(selection)}`);
 }
 
@@ -552,9 +574,15 @@ function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): s
             .replace(/^file:(\/\/)?/i, '') || ':memory:';
     }
     const filename = dbUrl.replace(/^file:(\/\/)?/, '');
-    if (!filename || /^[a-z][a-z0-9+.-]*:\/\//i.test(filename)) {
+    const scheme = urlSchemeOf(filename);
+    if (!filename || scheme) {
+        // Names the scheme, never the URL ({@link urlSchemeOf}). This is the
+        // refusal an explicit `sqlite` selection meets over a server URL
+        // (`OS_DATABASE_DRIVER=sqlite` beside a `postgres://user:password@…`),
+        // so the URL it would otherwise echo is exactly the credentialed kind.
+        const why = scheme ? `its scheme is "${scheme}"` : 'it names no file after "file:"';
         throw new Error(
-            `[StandaloneStack] sqlite driver was selected but the URL does not look like a file path: "${dbUrl}". ` +
+            `[StandaloneStack] sqlite driver was selected but the URL does not look like a file path (${why}). ` +
             `Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.`
         );
     }
