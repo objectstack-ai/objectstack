@@ -2575,7 +2575,12 @@ const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION: RuleExplanation = {
       'row.',
     'Respelled `unique: \'organization\'`, the NULL rows become one platform bucket ' +
       '(`COALESCE(organization_id, \'__global__\')`) that is unique among themselves, which is what ' +
-      'closes the hole.',
+      'closes the hole. The respelling keeps `fields` exactly as they are: the driver makes the listed ' +
+      'organization column NULL-safe in place rather than prepending a second organization key part, ' +
+      'so `[organization_id, email]` then really is "one email per organization".',
+    'Opting in is a physical tightening. It surfaces as a `recreate_index` drift op gated by the ' +
+      'duplicate pre-flight probe (ADR-0120 D4), so pre-existing duplicate NULL-organization rows ' +
+      'block it with a report rather than failing a boot.',
     'Advisory, and never auto-fixed (ADR-0120 D5c): the legacy spelling stays valid indefinitely ' +
       'and forces no drift, and opting in is a real physical tightening that goes through the D4 ' +
       'ceremony, because rows the void constraint admitted may still be there. Not reported: ' +
@@ -2600,6 +2605,10 @@ const UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION: RuleExplanation = {
       '`ObjectSchema.create` and the runtime save door — and this rule refuses it where nothing ' +
       'parses: `os lint`, which judges the normalized stack. Stored metadata that still carries it ' +
       'converts to `unique: \'global\'`, which builds the same physical index.',
+    'Either word is a complete fix. `\'global\'` keeps the index exactly as bare `true` built it; ' +
+      '`\'organization\'` makes the driver prepend the NULL-safe organization key part at ' +
+      'registration, so each organization may hold the value once. ' +
+      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ],
 };
 
@@ -2615,6 +2624,9 @@ const UNIQUE_DOUBLE_DECLARATION_EXPLANATION: RuleExplanation = {
       'the per-organization constraint can never be tripped and one of the two declared intents is ' +
       'silently dead. The same scope on both sides is REDUNDANT — the same index declared twice — ' +
       'and dropping one gives the intent a single home.',
+    'Either way the fix leaves one spelling. Installation-wide uniqueness is `unique: \'global\'`, on ' +
+      'the field or on the declared index; per-organization uniqueness is `unique: \'organization\'`, ' +
+      'preferably field-level on the column, or on the declared index.',
     'A composite declared index is not judged here: listing the organization column is the legacy ' +
       'organization spelling, `unique/legacy-organization-composite`\'s question. Advisory: the ' +
       'stack is well-defined, and the cost is an intent that never takes effect.',
