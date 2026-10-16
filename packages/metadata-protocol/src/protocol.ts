@@ -19784,19 +19784,17 @@ export class ObjectStackProtocolImplementation implements
             // or discard naming none resolves by the rows the earlier steps
             // leave. With the rows and the package drafts gone, the address is
             // the package-unbound draft (`packagelessDraftAddress`).
+            // Every step is a request, in order, spelled as the row deletes
+            // above are, so one row and two drafts fit the REST message bound.
             const drafts = [...new Set(state.strandedDrafts ?? [])].sort();
-            const list = (pkgs: readonly string[]) => pkgs.map((pkg) => `'${pkg}'`).join(', ');
-            const what = [
-                ...(rows.length > 0 ? [`delete its row${rows.length > 1 ? 's' : ''} bound to ${list(rows)}`] : []),
-                ...(drafts.length > 0 ? [`discard its draft${drafts.length > 1 ? 's' : ''} bound to ${list(drafts)}`] : []),
-            ].join(' and ');
             const steps = [
-                ...rows.map((pkg) => `DELETE ${path}?package=${pkg}`),
-                ...drafts.map((pkg) => `DELETE ${path}?state=draft&package=${pkg}`),
-            ].join(', then ');
+                ...rows.map((pkg) => `?package=${pkg}`),
+                ...drafts.map((pkg, i) => `?state=draft&package=${pkg}${i === 0 ? ' (the draft discard)' : ''}`),
+            ];
             message = `A draft save naming no package of object '${name}' writes a draft bound to '${q}', which no `
-                + 'publish can serve: the object is served by its definition bound to no package. First '
-                + `${what} (REST: ${steps}), then send this save again: it then writes the package-less draft.` + tail;
+                + 'publish can serve: the object is served by its package-less definition. First '
+                + `DELETE ${path}${steps.join(', then ')}, then send this save again: it writes the package-less `
+                + 'draft.' + tail;
         } else if (rows.length > 0 && state.namedNoPackage) {
             // A save naming no package is addressed to the one binding present.
             message = `A save naming no package of object '${name}' is addressed to its stored definition bound to `
