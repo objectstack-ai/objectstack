@@ -102,6 +102,13 @@ const EXPECTED: Record<string, Record<string, string | undefined>> = {
 
 const LOCALES = ['en', 'zh-CN'] as const;
 
+/** One row per (locale, view), so a label-less row and an authored or translated row fail apart. */
+const CELLS = LOCALES.flatMap((locale) => [BARE, NAMED, TAGGED, SELF].map((name) => ({
+    locale,
+    name,
+    expected: EXPECTED[locale][name] === undefined ? 'no label' : JSON.stringify(EXPECTED[locale][name]),
+})));
+
 /** The served `label`, asserting the key is absent where nothing was authored or translated. */
 function expectServedLabel(doc: any, name: string, locale: string): void {
     const expected = EXPECTED[locale][name];
@@ -216,18 +223,13 @@ function makeHost(i18n: unknown = i18nService) {
 }
 
 describe('#23967 §1 the standalone routes — GET /meta/view/NAME and GET /meta/view', () => {
-    it.each(LOCALES)('GET /meta/view/%s… — every view is served its authored or translated label, and a label-less one none', async (locale) => {
-        const host = makeHost();
-        for (const name of [BARE, NAMED, TAGGED, SELF]) {
-            expectServedLabel(await host.item(name, locale), name, locale);
-        }
+    it.each(CELLS)('GET /meta/view/$name, Accept-Language $locale: served $expected', async ({ locale, name }) => {
+        expectServedLabel(await makeHost().item(name, locale), name, locale);
     });
 
-    it.each(LOCALES)('GET /meta/view in %s — the list serves the same labels as the item read', async (locale) => {
+    it.each(CELLS)('GET /meta/view, Accept-Language $locale: $name served $expected', async ({ locale, name }) => {
         const page = await makeHost().list(locale);
-        for (const name of [BARE, NAMED, TAGGED, SELF]) {
-            expectServedLabel(page.find((d) => d?.name === name), name, locale);
-        }
+        expectServedLabel(page.find((d) => d?.name === name), name, locale);
     });
 
     it('the card\'s read: GET /meta/view/recheck_gate.default carries no `label` equal to its name, with no Accept-Language and no catalog', async () => {
@@ -239,8 +241,12 @@ describe('#23967 §1 the standalone routes — GET /meta/view/NAME and GET /meta
         expect('label' in item).toBe(false);
         const listed = (await host.list()).find((d) => d?.name === BARE);
         expect('label' in listed).toBe(false);
-        // The authored one is untouched on the same deployment.
+    });
+
+    it('…while the authored label on the same deployment is served as authored, on both reads', async () => {
+        const host = makeHost(bundlelessI18n);
         expect((await host.item(NAMED)).label).toBe('All gates');
+        expect((await host.list()).find((d) => d?.name === NAMED)?.label).toBe('All gates');
     });
 });
 
@@ -257,23 +263,19 @@ function sources(locale: string | undefined, i18n: unknown = i18nService): MetaL
 }
 
 describe('#23967 §2 translateMetaEnvelope / translateMetaList — the dispatcher\'s item and list translation', () => {
-    it.each(LOCALES)('translateMetaEnvelope in %s: the item under `item` carries the same labels', async (locale) => {
-        for (const view of VIEWS()) {
-            const body = await translateMetaEnvelope(sources(locale), 'view', { type: 'view', name: view.name }, view);
-            expect(body.name).toBe(view.name);
-            expectServedLabel(body.item, view.name, locale);
-        }
+    it.each(CELLS)('translateMetaEnvelope, $locale: $name served $expected under `item`', async ({ locale, name }) => {
+        const view = VIEWS().find((v) => v.name === name)!;
+        const body = await translateMetaEnvelope(sources(locale), 'view', { type: 'view', name }, view);
+        expect(body.name).toBe(name);
+        expectServedLabel(body.item, name, locale);
     });
 
-    it.each(LOCALES)('translateMetaList in %s: a bare array and the `{ type, items }` envelope alike', async (locale) => {
+    it.each(CELLS)('translateMetaList, $locale: $name served $expected, in a bare array and in the `{ type, items }` envelope', async ({ locale, name }) => {
         const bare = (await translateMetaList(sources(locale), 'view', VIEWS())) as any[];
         const enveloped = (await translateMetaList(sources(locale), 'view', { type: 'view', items: VIEWS() })) as any;
         expect(enveloped.type).toBe('view');
-        for (const page of [bare, enveloped.items as any[]]) {
-            for (const view of VIEWS()) {
-                expectServedLabel(page.find((d) => d.name === view.name), view.name, locale);
-            }
-        }
+        expectServedLabel(bare.find((d) => d.name === name), name, locale);
+        expectServedLabel((enveloped.items as any[]).find((d) => d.name === name), name, locale);
     });
 
     it('with no catalog registered, a label-less view is served none on both reads', async () => {
