@@ -189,11 +189,20 @@ describe('#23889 — the boot-time display-label backfill', () => {
 
   it('(c) never overwrites a column a live writer filled; an orphaned action keeps a null pointer and its own step name', async () => {
     await engine.update('sys_approval_request', { id: 'areq_open', process_label: 'Live label' }, { context: SYSTEM } as any);
+    // An action whose step label and acting-as label a writer already stored,
+    // different from what its request would give: the fill copies only its
+    // null pointer columns and leaves both labels as stored.
+    await engine.update('sys_approval_action', {
+      id: 'a_vote', step_label: 'Recorded step', acted_as_label: 'Recorded name',
+    }, { context: SYSTEM } as any);
     const svc = new ApprovalService({ engine: engine as any, logger: quiet as any });
     const out = await backfillApprovalDisplayLabels(engine as any, slotLabelSourceOf(svc));
     expect(out.requestsFilled).toBe(2);
 
     expect((await row('sys_approval_request', 'areq_open')).process_label).toBe('Live label');
+    expect(await row('sys_approval_action', 'a_vote')).toMatchObject({
+      step_label: 'Recorded step', acted_as_label: 'Recorded name', object_name: 'crm_deal', record_id: 'D_done',
+    });
     expect(await row('sys_approval_action', 'a_orphan')).toMatchObject({
       step_label: 'Final Check', object_name: null, record_id: null, acted_as_label: null,
     });
