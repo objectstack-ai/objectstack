@@ -6,15 +6,26 @@
 // wait is 30s per query on the request path. SqlDriver now bounds it by default,
 // while leaving a host's own choice alone.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import net from 'node:net';
 import { SqlDriver } from './sql-driver.js';
 
-/** A listener that accepts sockets and then says nothing, ever. */
+/**
+ * A listener that accepts sockets and then says nothing, ever. `accepted`
+ * settles once the first socket is held — the moment the connection attempt
+ * is a TCP connection that will never see a handshake.
+ */
 function blackHole() {
   const held: net.Socket[] = [];
-  const server = net.createServer((sock) => { sock.on('error', () => {}); held.push(sock); });
+  let firstAccepted!: () => void;
+  const accepted = new Promise<void>((resolve) => { firstAccepted = resolve; });
+  const server = net.createServer((sock) => {
+    sock.on('error', () => {});
+    held.push(sock);
+    firstAccepted();
+  });
   return {
+    accepted,
     listen: () => new Promise<number>((resolve) => {
       server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port));
     }),
@@ -199,6 +210,16 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
   it('actually bounds a query against a black-holing endpoint', async () => {
     const bh = blackHole();
     const port = await bh.listen();
+    // The endpoint is real: a loopback listener that holds the accepted socket
+    // and never answers, so only the driver's own bound can end the attempt.
+    // The CLOCK is faked (setTimeout/clearTimeout only — `net` I/O and the
+    // microtask queue stay real), because the default bound is a 10s wall-clock
+    // timer and waiting it out was the whole 10s this file used to cost. Fake
+    // time still proves the bound: pg arms `connectionTimeoutMillis` and tarn
+    // arms `createTimeoutMillis` on the faked `setTimeout`, so whichever
+    // fires — or none, for an unbounded connect — shows in how far the fake
+    // clock has to move before the query settles.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       // The default is 10s; unbounded would be knex/tarn's 30s.
       const d = make({
@@ -206,25 +227,44 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
         connection: `postgres://u:p@127.0.0.1:${port}/d`,
         pool: { min: 0, max: 2 },
       });
-      const started = Date.now();
-      const err = await (d as any).knex.raw('SELECT 1').then(
+      let err: Error | undefined;
+      const outcome = (d as any).knex.raw('SELECT 1').then(
         () => { throw new Error('query resolved but should have failed'); },
-        (e: Error) => e,
+        (e: Error) => { err = e; },
       );
-      const elapsed = Date.now() - started;
+
+      // Real I/O: do not move the clock until the server holds the socket, so
+      // the attempt being timed is a connection that was accepted and then
+      // went silent — not one that never started.
+      await bh.accepted;
+
+      // Move the fake clock in steps until the query settles, never past 20s.
+      // Each step also lets a real macrotask run, so the socket teardown and
+      // the rejection it causes land before the next step is judged.
+      let elapsed = 0;
+      while (err === undefined && elapsed < 20_000) {
+        await vi.advanceTimersByTimeAsync(500);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        elapsed += 500;
+      }
+      expect(err, 'still pending after 20s of fake time — the connect is unbounded').toBeDefined();
+      await outcome; // surfaces the "resolved but should have failed" throw, if any
 
       // The pg-level timeout fires first (10s), so the message names the
       // connection attempt rather than blaming pool sizing. Guarding against
       // the regression is the point: knex's own wording would send an operator
       // to tune `pool.max` while the network is what is broken.
-      expect(err.message).toContain('timeout expired');
-      expect(err.message).not.toContain('pool is probably full');
+      expect(err!.message).toContain('timeout expired');
+      expect(err!.message).not.toContain('pool is probably full');
       expect(elapsed).toBeGreaterThan(8_000);
       expect(elapsed).toBeLessThan(20_000);
     } finally {
+      // Real timers back BEFORE afterEach disconnects the driver and the
+      // listener closes: teardown must not depend on a clock nobody advances.
+      vi.useRealTimers();
       bh.close();
     }
-  }, 40_000);
+  }, 15_000);
 
   it('does not disturb a working sqlite connection', async () => {
     const d = make({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
