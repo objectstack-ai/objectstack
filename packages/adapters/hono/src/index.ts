@@ -318,16 +318,69 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
  * holds the body's bytes, so a body is buffered twice instead of once for the
  * life of the request. These are API bodies the old path already buffered
  * whole; nothing here streams.
+ *
+ * ## A declared JSON body that does not parse is refused (#23914)
+ *
+ * …and is no longer `{}`. That `{}` reached the data domain as an empty query,
+ * so a truncated `POST /data/:object/query` answered `200` with every row the
+ * caller could read, and a truncated `PATCH` answered `200` for an update that
+ * changed nothing. Now a body whose `Content-Type` declares
+ * `application/json` (matched case-insensitively), is not blank, and does not
+ * parse throws {@link RequestBodyRefusal}: a declared `400` with the
+ * registered code `INVALID_REQUEST`, which both arms that call this answer
+ * through `thrownJson` as the ADR-0112 envelope, before `dispatch()` runs.
+ * `@objectstack/plugin-hono-server` answers the same body with the same `code`
+ * and `message` (`hono-body-refusal.test.ts` drives both doors).
+ *
+ * Every other input is read exactly as before, deliberately:
+ * - an empty or whitespace-only body is `{}` (an empty query);
+ * - a body that does not declare JSON keeps the content-type-blind parse and
+ *   its `{}` on failure, because the domains that forward the request read
+ *   their own bytes from it — the `/approvals/act` form `POST` above all — and
+ *   this adapter cannot tell them from the domains that read `body`.
  */
 async function readDispatchBody(c: Context): Promise<any> {
+  const declaresJson = (c.req.header('content-type') ?? '').toLowerCase().includes('application/json');
   const raw = c.req.raw;
-  if (raw.bodyUsed) return c.req.json().catch(() => ({}));
+  let text: string;
   try {
-    return JSON.parse(await raw.clone().text());
+    // A body something upstream already read through `c.req` is in Hono's
+    // body cache, which is the only copy left; `text()` reads that cache.
+    text = raw.bodyUsed ? await c.req.text() : await raw.clone().text();
   } catch {
+    if (declaresJson) throw new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE);
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (declaresJson && text.trim() !== '') throw new RequestBodyRefusal(MALFORMED_JSON_BODY_MESSAGE);
     return {};
   }
 }
+
+/**
+ * [#23914] The refusal {@link readDispatchBody} throws: a DECLARED ADR-0112
+ * throw (`status` and the registered `INVALID_REQUEST`), so `thrownJson`
+ * renders it through `declaredEnvelopeForThrow`. Module-private, like its twin
+ * in `@objectstack/plugin-hono-server` (`src/request-body.ts`); the messages
+ * are the twin's, word for word, and a test holds the two doors' answers equal.
+ */
+class RequestBodyRefusal extends Error {
+  readonly status = 400;
+  readonly code = 'INVALID_REQUEST';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequestBodyRefusal';
+  }
+}
+
+const MALFORMED_JSON_BODY_MESSAGE =
+  'The request body could not be parsed as JSON (it was sent as application/json). It was refused rather than '
+  + 'read as an empty body: send a well-formed JSON document, or no body at all.';
+
+const UNREADABLE_BODY_MESSAGE = 'The request body could not be read. It was refused rather than read as an empty body.';
 
 /**
  * The query the catch-all hands `dispatch()`: a REPEATED name as an array, a
