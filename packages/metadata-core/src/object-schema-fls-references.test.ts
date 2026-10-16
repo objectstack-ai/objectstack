@@ -707,3 +707,10 @@ describe('[ADR-0106] the shared contract table, driven through the bare projecti
         });
     }
 });
+
+describe('the published contract fixture is an object the spec accepts', () => {
+    it('`FLS_CONTRACT_OBJECT` parses through `ObjectSchema` (its stage field declares every option\'s `kind`, #23809)', () => {
+        const parsed = ObjectSchema.safeParse(FLS_CONTRACT_OBJECT);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    });
+});

@@ -1,5 +1,7 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/platform-objects': patch
+'@objectstack/metadata-core': patch
 ---
 
 feat(spec)!: a select option declares its lifecycle `kind` (`open` / `won` / `lost`), and every option of an object's `stageField` must declare it
@@ -23,5 +25,10 @@ Migration: add `kind` to each option of the stage field, marking each terminal s
 No conversion makes this edit, because which option ends a record's life successfully is the author's to say. `os migrate meta` lists the D3 entry `stage-field-option-kind-required` with the prescription.
 
 The Studio object designer's options repeater offers `kind`; the field form's options repeater lists it.
+
+The other packages follow the new key:
+
+- **`@objectstack/platform-objects`.** The metadata-form translation bundles (`./metadata-translations`) carry the options repeater's new `kind` row, with its label and help text in zh-CN, ja-JP and es-ES.
+- **`@objectstack/metadata-core`.** The published contract fixture `FLS_CONTRACT_OBJECT` (`@objectstack/metadata-core/testing`) names `salary_grade` as its `stageField`, so its two options now declare `kind: 'open'` and the fixture still parses through `ObjectSchema`.
 
 <!-- adr-0087: registered stage-field-option-kind-required -->

@@ -2885,13 +2885,16 @@ const ObjectSchemaBase = strictObject(
    * path/stepper today; kanban default grouping, list badges and report
    * bucketing are natural future consumers.
    *
-   * [#23809] The named field is a single-value `select` / `radio` whose inline
-   * options EACH declare their lifecycle `kind` (`open` / `won` / `lost`), so
-   * those consumers tell the steps from the two ends by declaration, not by
-   * the value's spelling. Refused at parse otherwise — see
-   * `refuseStageFieldWithoutKinds`.
+   * [#23809] When the named field carries options, it must be a single-value
+   * `select` / `radio` whose inline options EACH declare their lifecycle `kind`
+   * (`open` / `won` / `lost`), so those consumers tell the steps from the two
+   * ends by declaration, not by the value's spelling. The parse refuses such a
+   * field with an option lacking `kind`, a `picklist`-backed one, and a
+   * multi-value one (see `refuseStageFieldWithoutKinds`). Not judged here:
+   * `false`, a name that resolves to no declared field (the lint
+   * `semantic-roles` rule reports it), and a field with no options at all.
    */
-  stageField: z.union([z.string(), z.literal(false)]).optional().describe("[ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. The named field is a single-value `select` / `radio` with inline `options`, and every option declares its `kind` ('open' / 'won' / 'lost'); refused otherwise."),
+  stageField: z.union([z.string(), z.literal(false)]).optional().describe("[ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. When the named field carries options, it must be a single-value `select` / `radio` with inline `options`, each declaring its `kind` ('open' / 'won' / 'lost'); a picklist-backed or multi-value stage field is refused. A name that resolves to no declared field, or a field with no options, is not judged at parse."),
 
   /**
    * Cross-renderer EDIT-INTERACTION intent: whether a record of this object is
