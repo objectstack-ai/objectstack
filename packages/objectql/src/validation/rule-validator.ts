@@ -3243,9 +3243,11 @@ function writesOnlyInjectedSystemColumns(
 
 /**
  * The `previous` root of a rule's CEL scope: a row, `null`, or unbound
- * (`undefined`). See {@link previousBinding}.
+ * (`undefined`). See {@link previousBinding}. Package-internal export: a
+ * declarative hook condition binds the same root (`pickPreviousPayload`,
+ * `hook-wrappers.ts`).
  */
-type PreviousBinding = Record<string, unknown> | null | undefined;
+export type PreviousBinding = Record<string, unknown> | null | undefined;
 
 /**
  * [#23910] What `previous` IS for one evaluation — decided here, once, by
@@ -3299,8 +3301,12 @@ function previousBinding(
  * the channel the flow engine binds its own `previous: null` through —
  * because `EvalContext.previous` is typed for a row. `undefined` is simply
  * omitted, which is what leaves the root unbound.
+ *
+ * Package-internal export: a declarative hook condition is evaluated in this
+ * same scope (`hook-wrappers.ts`), so the two surfaces cannot drift apart on
+ * what `previous` is.
  */
-function ruleScope(
+export function ruleScope(
   record: Record<string, unknown>,
   previous: PreviousBinding,
   extra?: Record<string, unknown>,
@@ -3320,12 +3326,15 @@ function ruleScope(
  * supplied" sends the author to a payload that did supply it. On insert the
  * record is total over the declared fields, so a declared key that faults can
  * only have been read off `previous`. The repair is a guard, either way round.
+ *
+ * Package-internal export: a declarative hook condition's refusal words the
+ * same read the same way (`unevaluableConditionError`, `hook-wrappers.ts`).
  */
-function nullPreviousReadDetail(
+export function nullPreviousReadDetail(
   error: { kind: string; message: string },
   pred: string | Expression,
   previous: PreviousBinding,
-  fields: Record<string, ConditionalFieldDef> | undefined,
+  fields: Record<string, unknown> | undefined,
   what: string,
 ): string | undefined {
   if (previous !== null || !fields) return undefined;
@@ -3336,7 +3345,7 @@ function nullPreviousReadDetail(
   if (!reads || !(reads.bareFields.has(key) || reads.traversals.has(key))) return undefined;
   return ` The ${what} reads 'previous.${key}', and an insert has no prior row: \`previous\` is null there.`
     + ' Guard the read — `previous == null || …` to judge an insert, `previous != null && …` to skip one —'
-    + ' so the rule decides an insert without it.';
+    + ` so the ${what} decides an insert without it.`;
 }
 
 /**
