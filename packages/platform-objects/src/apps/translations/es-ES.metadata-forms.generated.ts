@@ -2332,10 +2332,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Predeterminado",
         helpText: "Concede este conjunto a todos los que inician sesión, mediante la posición integrada everyone. Un conjunto que declara la propia aplicación se concede al arrancar; uno de un paquete instalado se convierte en una sugerencia que un administrador confirma en Setup. Un conjunto con permisos de alto privilegio nunca se concede así. false por defecto."
       },
-      managedBy: {
-        label: "Gestionado por",
-        helpText: "Quién es el propietario de este conjunto: Package indica que se distribuye con un paquete y que las actualizaciones del paquete lo modifican; Platform y User indican que se creó en este entorno y que las actualizaciones no lo tocan."
-      },
       packageId: {
         label: "ID de paquete",
         helpText: "El paquete que distribuye este conjunto; un valor que nombra otro paquete se rechaza. Déjalo vacío para un conjunto creado en este entorno."

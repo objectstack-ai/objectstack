@@ -2593,6 +2593,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`permission-rls-tags-retired`.',
   },
   {
+    id: 'permission-set-managed-by-retired',
+    order: 99,
+    text:
+      'It also retires the permission set\'s authored `managedBy` (ADR-0049 enforce-or-remove; ADR-0086 D3): '
+      + 'the per-record provenance `package` / `platform` / `user`, which nothing ever read — the retired '
+      + 'seeder stamped the `sys_permission_set.managed_by` column without reading the key, and the '
+      + 'packaged-set lock decides provenance from the package\'s artifact — while Setup\'s form promised '
+      + 'that package upgrades update a `package` set and leave the others alone. It is a `retiredKey()` '
+      + 'tombstone on `PermissionSetSchema`, its form row leaves Setup, and the D2 conversion '
+      + '`permission-set-managed-by-removed` strips it from authored sets, stored rows and built artifacts, '
+      + 'retired from the load path. The column is a different surface and is unchanged. Its D3 record is '
+      + 'the semantic entry `permission-set-managed-by-retired`.',
+  },
+  {
     id: 'platform-global-object-organization-column-retired',
     order: 89,
     text:

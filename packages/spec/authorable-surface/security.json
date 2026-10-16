@@ -121,7 +121,7 @@
     "security/PermissionSet:fields",
     "security/PermissionSet:isDefault",
     "security/PermissionSet:label",
-    "security/PermissionSet:managedBy",
+    "security/PermissionSet:managedBy [RETIRED]",
     "security/PermissionSet:name",
     "security/PermissionSet:objects",
     "security/PermissionSet:packageId",

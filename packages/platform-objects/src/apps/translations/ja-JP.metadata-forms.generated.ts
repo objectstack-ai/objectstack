@@ -2332,10 +2332,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "既定の権限セット",
         helpText: "組み込みの everyone ポジションを通じて、サインインするすべてのユーザーにこのセットを付与します。アプリ自身が宣言したセットは起動時に付与され、インストールしたパッケージのセットは管理者が Setup で確認する提案になります。高権限を含むセットはこの方法では付与されません。既定は false です。"
       },
-      managedBy: {
-        label: "管理元",
-        helpText: "このセットの所有者です。Package はパッケージに同梱され、パッケージのアップグレードで更新されることを示します。Platform と User はこの環境で作成され、アップグレードで変更されないことを示します。"
-      },
       packageId: {
         label: "所属パッケージ ID",
         helpText: "このセットを同梱しているパッケージです。別のパッケージを指す値は拒否されます。この環境で作成したセットでは空のままにします。"
