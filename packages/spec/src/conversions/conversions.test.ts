@@ -16,7 +16,7 @@ import { ElementButtonPropsSchema, PageHeaderProps, PageTabsProps } from '../ui/
 import { PageSchema } from '../ui/page.zod.js';
 import { defineStack } from '../stack.zod.js';
 import { applyMetaMigrations } from '../migrations/chain.js';
-import { applyConversions, collectConversionNotices } from './apply.js';
+import { applyConversions, applyConversionsToFlow, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
 import { renameConfigKey, renameKey } from './walk.js';
@@ -400,9 +400,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
     it('every entry whose window ran out before 18 is retired or kept by name', () => {
       const kept = ALL_CONVERSIONS.filter((c) => c.toMajor < 18 && !c.retiredFromLoadPath).map((c) => c.id).sort();
       expect(kept).toEqual([
-        'flow-node-connector-config-lift',
         'flow-node-http-callout-rename',
-        'flow-node-wait-event-config-lift',
         'page-component-visibility-to-visibleWhen',
         'retry-policy-converged',
         'view-visibleOn-to-visibleWhen',
@@ -419,6 +417,10 @@ describe('conversion layer (ADR-0087 D2)', () => {
         'datasource-driver-mongo-to-mongodb',
         // #23543 F5-jsx: retired once `jsx` itself was retired as a page kind.
         'page-kind-jsx-to-html',
+        // #23543 F3: retired once the flow parse refused the loose `config`
+        // keys and each lift deleted the keys its block shadows.
+        'flow-node-wait-event-config-lift',
+        'flow-node-connector-config-lift',
       ]) {
         expect(ALL_CONVERSIONS.find((c) => c.id === id), id).toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
       }
@@ -851,6 +853,10 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
+  // #23543 F3 retired both sibling-block lifts at 18. Every lift case below
+  // replays the chain the way a stored flow meets it (`includeRetired`, the
+  // automation engine's rehydration seam); the last describe pins the three
+  // claims the retirement makes together.
   describe('flow-node-wait-event-config-lift (PD #12 retirement)', () => {
     /**
      * One `wait` node in a flow that `FlowSchema` can actually parse — `label` is
@@ -872,45 +878,55 @@ describe('conversion layer (ADR-0087 D2)', () => {
       ],
     });
     const waitNodeOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1];
+    const stored = (stack: Record<string, unknown>) => collectConversionNotices(stack, { includeRetired: true });
 
     it('lifts the undeclared `duration` / `signal` spellings onto the declared block', () => {
-      const { stack, notices } = collectConversionNotices(waitFlow({ config: { duration: 'PT1M' } }));
+      const { stack, notices } = stored(waitFlow({ config: { duration: 'PT1M' } }));
       expect(waitNodeOf(stack).waitEventConfig).toEqual({ timerDuration: 'PT1M', eventType: 'timer' });
       expect(waitNodeOf(stack).config).toEqual({});
       expect(notices).toHaveLength(1);
 
-      const sig = collectConversionNotices(waitFlow({ config: { eventType: 'signal', signal: 'order_paid' } }));
+      const sig = stored(waitFlow({ config: { eventType: 'signal', signal: 'order_paid' } }));
       expect(waitNodeOf(sig.stack).waitEventConfig).toEqual({ eventType: 'signal', signalName: 'order_paid' });
       expect(sig.notices).toHaveLength(2);
     });
 
-    it('lets a declared value win and leaves its loose counterpart shadowed in place', () => {
-      const { stack, notices } = collectConversionNotices(
+    it('lets a declared value win and deletes its shadowed loose counterpart', () => {
+      const { stack, notices } = stored(
         waitFlow({
           waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
-          config: { duration: 'PT9M', timeoutMs: 60_000 },
+          // (Not `timeoutMs` as the second key: with the full chain replayed,
+          // protocol 17's `flow-node-wait-timeout-keys-removed` deletes it
+          // from the block again.)
+          config: { duration: 'PT9M', signalName: 'order_paid' },
         }),
       );
       expect(waitNodeOf(stack).waitEventConfig).toEqual({
         eventType: 'timer',
         timerDuration: 'PT5M',
-        timeoutMs: 60_000,
+        signalName: 'order_paid',
       });
-      // The loose counterpart is not deleted. NOTE this is the wait-node LIFT
-      // (a loose key into a declared block), not a `renameKey` alias pair, so
-      // #4923's by-value split does not reach it — see the comment on
-      // WAIT_EVENT_CONFIG_LIFTS.
-      expect(waitNodeOf(stack).config).toEqual({ duration: 'PT9M' });
-      expect(notices).toHaveLength(1);
+      // #23543 F3: the shadowed loose key is deleted, not left in place — the
+      // flow parse refuses every named loose key since 18, so a kept one would
+      // stop the stored flow loading. One notice per key: the lift and the drop.
+      expect(waitNodeOf(stack).config).toEqual({});
+      expect(notices.map((n) => n.to)).toEqual([
+        '(removed — `waitEventConfig.timerDuration` already set, so it was never read)',
+        'waitEventConfig.signalName',
+      ]);
     });
 
-    it('prefers the declared spelling over the undeclared one among loose keys', () => {
-      const { stack } = collectConversionNotices(
-        waitFlow({ config: { timerDuration: 'PT1H', duration: 'PT2H' } }),
-      );
+    it('prefers the declared spelling over the undeclared one among loose keys, and drops the loser', () => {
+      const { stack } = stored(waitFlow({ config: { timerDuration: 'PT1H', duration: 'PT2H' } }));
       expect(waitNodeOf(stack).waitEventConfig.timerDuration).toBe('PT1H');
-      // `duration` was never reachable past the `??` chain either — left as-is.
-      expect(waitNodeOf(stack).config).toEqual({ duration: 'PT2H' });
+      // `duration` was never reachable past the `??` chain either — deleted.
+      expect(waitNodeOf(stack).config).toEqual({});
+    });
+
+    it('a loose `null` is skipped by the precedence and deleted, as the `??` chain skipped it', () => {
+      const { stack } = stored(waitFlow({ config: { timerDuration: null, duration: 'PT2H', note: 'keep me' } }));
+      expect(waitNodeOf(stack).waitEventConfig).toEqual({ timerDuration: 'PT2H', eventType: 'timer' });
+      expect(waitNodeOf(stack).config).toEqual({ note: 'keep me' });
     });
 
     /**
@@ -919,9 +935,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
      * the combination the ledger's candidate order has to get right.
      */
     it('lifts the showcase shape: declared key names in a loose `config`', () => {
-      const { stack, notices } = collectConversionNotices(
-        waitFlow({ config: { eventType: 'signal', signalName: 'budget_revision' } }),
-      );
+      const { stack, notices } = stored(waitFlow({ config: { eventType: 'signal', signalName: 'budget_revision' } }));
       expect(waitNodeOf(stack).waitEventConfig).toEqual({
         eventType: 'signal',
         signalName: 'budget_revision',
@@ -933,13 +947,13 @@ describe('conversion layer (ADR-0087 D2)', () => {
 
     it('leaves a wait node with nothing to lift completely untouched', () => {
       const before = waitFlow({ waitEventConfig: { eventType: 'manual' }, config: { note: 'keep me' } });
-      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      const { stack, notices } = stored(structuredClone(before));
       expect(waitNodeOf(stack)).toEqual(waitNodeOf(before as any));
       expect(notices).toHaveLength(0);
     });
 
     it('only touches `wait` — the same keys on another node type are not its surface', () => {
-      const { stack, notices } = collectConversionNotices({
+      const { stack, notices } = stored({
         flows: [{ name: 'f', nodes: [{ id: 'a', type: 'custom', config: { duration: 'PT1M' } }] }],
       });
       expect((stack.flows as any[])[0].nodes[0].config).toEqual({ duration: 'PT1M' });
@@ -954,13 +968,157 @@ describe('conversion layer (ADR-0087 D2)', () => {
      * default does not.
      */
     it('produces a flow the loader can still parse (negative control: no eventType would not)', () => {
-      const { stack } = collectConversionNotices(waitFlow({ config: { duration: 'PT1M' } }));
+      const { stack } = stored(waitFlow({ config: { duration: 'PT1M' } }));
       const converted = (stack.flows as any[])[0];
       expect(() => FlowSchema.parse(converted)).not.toThrow();
 
       const withoutDefault = structuredClone(converted);
       delete withoutDefault.nodes[1].waitEventConfig.eventType;
       expect(() => FlowSchema.parse(withoutDefault)).toThrow();
+    });
+  });
+
+  describe('flow-node-connector-config-lift (stored rows)', () => {
+    const connectorFlow = (node: Record<string, unknown>) => ({
+      flows: [
+        {
+          name: 'notify_slack',
+          label: 'Notify Slack',
+          type: 'autolaunched',
+          edges: [],
+          nodes: [
+            { id: 'n1', type: 'start', label: 'Start' },
+            { id: 'c', type: 'connector_action', label: 'Call', ...node },
+          ],
+        },
+      ],
+    });
+    const nodeOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1];
+    const stored = (stack: Record<string, unknown>) => collectConversionNotices(stack, { includeRetired: true });
+
+    it('lifts the mis-taught trio into the block', () => {
+      const { stack, notices } = stored(
+        connectorFlow({ config: { connectorId: 'slack', actionId: 'chat.postMessage', input: { text: 'Hi' } } }),
+      );
+      expect(nodeOf(stack).connectorConfig).toEqual({ connectorId: 'slack', actionId: 'chat.postMessage', input: { text: 'Hi' } });
+      expect(nodeOf(stack).config).toEqual({});
+      expect(notices).toHaveLength(3);
+      expect(FlowSchema.safeParse((stack.flows as any[])[0]).success).toBe(true);
+    });
+
+    it('deletes a loose key the complete block shadows, and lifts the one it does not', () => {
+      const { stack, notices } = stored(
+        connectorFlow({
+          connectorConfig: { connectorId: 'rest', actionId: 'get' },
+          config: { connectorId: 'ignored', input: { path: '/health' }, note: 'keep me' },
+        }),
+      );
+      expect(nodeOf(stack).connectorConfig).toEqual({ connectorId: 'rest', actionId: 'get', input: { path: '/health' } });
+      expect(nodeOf(stack).config).toEqual({ note: 'keep me' });
+      expect(notices.map((n) => n.from).sort()).toEqual(['config.connectorId', 'config.input']);
+    });
+
+    it('the completeness guard leaves a node it cannot complete untouched — it fails to load either way', () => {
+      const before = connectorFlow({ config: { connectorId: 'slack' } });
+      const { stack, notices } = stored(structuredClone(before));
+      expect(nodeOf(stack)).toEqual(nodeOf(before));
+      expect(notices).toHaveLength(0);
+      const parsed = FlowSchema.safeParse((stack.flows as any[])[0]);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.connectorConfig', 'nodes.1.config.connectorId']);
+    });
+  });
+
+  // #23543 F3 — the retirement's three claims, for both node types: a STORED
+  // flow (the `includeRetired` seams) still loads, shadowed loose key and all;
+  // the authoring funnel no longer rewrites an authored loose key; and an
+  // authored loose key meets the prescription naming its block key instead.
+  describe('the sibling-block lifts are retired (#23543 F3)', () => {
+    const flowOf = (node: Record<string, unknown>) => ({
+      name: 'settle',
+      label: 'Settle',
+      type: 'autolaunched',
+      edges: [],
+      nodes: [
+        { id: 'n1', type: 'start', label: 'Start' },
+        { label: 'Step', ...node },
+      ],
+    });
+    const LOOSE_WAIT = { id: 'w', type: 'wait', config: { eventType: 'signal', signal: 'order_paid' } };
+    const SHADOWED_WAIT = {
+      id: 'w',
+      type: 'wait',
+      waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+      config: { duration: 'PT9M' },
+    };
+    const LOOSE_CONNECTOR = { id: 'c', type: 'connector_action', config: { connectorId: 'slack', actionId: 'chat.postMessage' } };
+    const SHADOWED_CONNECTOR = {
+      id: 'c',
+      type: 'connector_action',
+      connectorConfig: { connectorId: 'slack', actionId: 'chat.postMessage', input: { text: 'Hi' } },
+      config: { input: { text: 'stale' } },
+    };
+
+    it.each([
+      ['a loose-only wait row', LOOSE_WAIT, { waitEventConfig: { eventType: 'signal', signalName: 'order_paid' }, config: {} }],
+      ['a wait row whose block shadows a loose key', SHADOWED_WAIT, { waitEventConfig: SHADOWED_WAIT.waitEventConfig, config: {} }],
+      ['a loose-only connector row', LOOSE_CONNECTOR, { connectorConfig: LOOSE_CONNECTOR.config, config: {} }],
+      ['a connector row whose block shadows a loose key', SHADOWED_CONNECTOR, { connectorConfig: SHADOWED_CONNECTOR.connectorConfig, config: {} }],
+    ])('%s still loads at the rehydration seam, with the block alone', (_name, node, expected) => {
+      const raw = flowOf(node);
+      // The stored row as written is what the parse now refuses …
+      expect(FlowSchema.safeParse(raw).success).toBe(false);
+      // … and the seam's replay (the automation engine's call) makes it load.
+      const converted = applyConversionsToFlow(structuredClone(raw), { includeRetired: true }) as ReturnType<typeof flowOf>;
+      expect(converted.nodes[1]).toMatchObject(expected);
+      expect(FlowSchema.safeParse(converted).success).toBe(true);
+    });
+
+    it('is retired from the load path — the authoring funnel no longer lifts an authored loose key', () => {
+      for (const node of [LOOSE_WAIT, SHADOWED_WAIT, LOOSE_CONNECTOR, SHADOWED_CONNECTOR]) {
+        const before = { flows: [flowOf(node)] };
+        const { stack, notices } = collectConversionNotices(structuredClone(before));
+        expect(stack, node.type).toEqual(before);
+        expect(notices, node.type).toHaveLength(0);
+      }
+    });
+
+    it.each([
+      ['wait', SHADOWED_WAIT, 'nodes.1.config.duration', "A `wait` node's `config.duration` was removed in @objectstack/spec 18", '`waitEventConfig.timerDuration`'],
+      ['connector_action', SHADOWED_CONNECTOR, 'nodes.1.config.input', "A `connector_action` node's `config.input` was removed in @objectstack/spec 18", '`connectorConfig.input`'],
+    ])('an authored loose key on a %s node reaches defineStack as written and is refused naming its block key', (_type, node, path, first, target) => {
+      let refusal: unknown;
+      try {
+        defineStack({ flows: [flowOf(node)] } as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      // The loose key is the ONE issue: the block is complete, so the refusal
+      // is about the location alone.
+      expect(issues.map((i) => i.path.join('.'))).toEqual([`flows.0.${path}`]);
+      expect(issues[0]!.message.startsWith(first)).toBe(true);
+      expect(issues[0]!.message).toContain(`Move it to ${target}`);
+    });
+
+    it('refuses every named loose key and no other — the table is the lifts\' own', () => {
+      const parsed = FlowSchema.safeParse(flowOf({
+        id: 'w',
+        type: 'wait',
+        waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+        config: { eventType: 'timer', timerDuration: 'PT1M', duration: 'PT1M', signalName: 's', signal: 's', timeoutMs: 1, note: 'not a lifted key' },
+      }));
+      expect(parsed.success).toBe(false);
+      expect(parsed.error!.issues.map((i) => i.path.slice(3).join('.')).sort()).toEqual(
+        ['duration', 'eventType', 'signal', 'signalName', 'timeoutMs', 'timerDuration'],
+      );
+      // CONTROL — the declared blocks alone parse, and the same keys under
+      // another node type's `config` are not this refusal's.
+      expect(FlowSchema.safeParse(flowOf({ id: 'w', type: 'wait', waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' } })).success).toBe(true);
+      expect(FlowSchema.safeParse(flowOf({ id: 'c', type: 'connector_action', connectorConfig: SHADOWED_CONNECTOR.connectorConfig })).success).toBe(true);
+      const other = FlowSchema.safeParse(flowOf({ id: 'a', type: 'assignment', config: { input: 1, duration: 'PT1M' } }));
+      expect(other.success ? [] : other.error.issues.map((i) => i.message)).not.toContainEqual(expect.stringContaining('was removed in @objectstack/spec 18'));
     });
   });
 

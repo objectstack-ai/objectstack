@@ -125,10 +125,12 @@ describe('connector_action (baseline node)', () => {
 
     // #4045 — this proves the CONVERSION, not executor tolerance. The executor
     // reads only the declared `connectorConfig` block; the config-authored trio
-    // reaches it because `registerFlow` applies
-    // `flow-node-connector-config-lift`, which lifts it. This is the exact
-    // shape the descriptor's former configSchema mis-taught the schema-driven
-    // Studio form to write.
+    // reaches it because `registerFlow` — the rehydration seam a stored flow
+    // meets — replays `flow-node-connector-config-lift`, which lifts it. That
+    // entry left the authoring load path at 18 (#23543 F3): `defineStack` /
+    // `os validate` refuse this shape now, and only a stored row is lifted.
+    // This is the exact shape the descriptor's former configSchema mis-taught
+    // the schema-driven Studio form to write.
     it('accepts the mis-taught config.{connectorId,actionId,input} shape via the lift', async () => {
         let received: Record<string, unknown> | undefined;
         engine.registerConnector(fakeConnector(), {
@@ -161,6 +163,47 @@ describe('connector_action (baseline node)', () => {
         const result = await engine.execute('lifted_flow');
         expect(result.success).toBe(true);
         expect(received).toEqual({ message: 'hi' });
+    });
+
+    // #23543 F3 — a stored row whose complete block shadows a loose key: the
+    // flow parse refuses every loose key under `config` since 18, so the lift
+    // deletes the shadowed one at this seam, and the row registers and runs
+    // with the block's input alone — never the stale loose one.
+    it('registers a stored row whose block shadows a loose `config.input`, and dispatches the block\'s input', async () => {
+        let received: Record<string, unknown> | undefined;
+        engine.registerConnector(fakeConnector(), {
+            async echo(input) {
+                received = input;
+                return { ok: true };
+            },
+        });
+
+        engine.registerFlow('shadowed_flow', {
+            name: 'shadowed_flow',
+            label: 'Shadowed Flow',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'call',
+                    type: 'connector_action',
+                    label: 'Shadowed',
+                    connectorConfig: { connectorId: 'fake', actionId: 'echo', input: { message: 'block' } },
+                    config: { input: { message: 'stale' } },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'call' },
+                { id: 'e2', source: 'call', target: 'end' },
+            ],
+        });
+
+        const node = (await engine.getFlow('shadowed_flow'))!.nodes.find((n) => n.id === 'call')!;
+        expect(node.config).toEqual({});
+        const result = await engine.execute('shadowed_flow');
+        expect(result.success).toBe(true);
+        expect(received).toEqual({ message: 'block' });
     });
 
     // #4045 — `input` is optional in the spec block because the executor

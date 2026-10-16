@@ -34,7 +34,9 @@
  * Every row drives BOTH faces through the real stack — the real
  * `SecurityPlugin`, a real `ObjectQL` over a real SQL driver (better-sqlite3,
  * one in-memory database per rig) — and asserts enforcement's own outcome as
- * well, so a row cannot go green by both faces drifting together. The rows are
+ * well, so a row cannot go green by both faces drifting together. A row that
+ * can write boots its own rig; the principal rows, which only read, share one
+ * rig per posture source ({@link withPrincipal}). The rows are
  * the explain-versus-enforce family's shapes so far: the record-grained write
  * verdict's inputs (#19963), the record-grained read verdict's read depth
  * (#19986), a shared dependency that throws (#20002), the record matcher under
@@ -75,7 +77,8 @@
  * built `dist/` here, as this package's other suites read them.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterAll } from 'vitest';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveAuthzContext, assembleExecutionContext } from '@objectstack/core';
@@ -94,6 +97,22 @@ import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
+
+/**
+ * Releases the `AsyncLocalStorage` instances a torn-down rig's engine and
+ * plugin hold. On Node 22 a storage runs on `async_hooks`: once it has served a
+ * `run()` it stays on a process-wide list that EVERY later promise creation
+ * walks, until `disable()`. `ObjectQL` holds three and `SecurityPlugin` one,
+ * and neither `destroy()` disables them, so each rig this table tore down left
+ * its storages behind and every later row paid to walk all of them. Called
+ * after the rig's last row is judged, on objects nothing uses again, so it
+ * changes nothing any row observes.
+ */
+const releaseAsyncContexts = (...owners: object[]): void => {
+  for (const owner of owners) {
+    for (const value of Object.values(owner)) if (value instanceof AsyncLocalStorage) value.disable();
+  }
+};
 
 // ── the two faces ─────────────────────────────────────────────────────────
 
@@ -322,7 +341,10 @@ async function bootRls(predicate: string, opts: { grantCrud?: boolean } = {}) {
     readAs: async (filter: unknown) =>
       ((await engine.find(OBJ, { ...(filter ? { where: filter } : {}), context: { isSystem: true } } as never)) as Array<{ id: string }>)
         .map((r) => String(r.id)).sort(),
-    teardown: async () => { try { await engine.destroy(); } catch { /* noop */ } },
+    teardown: async () => {
+      try { await engine.destroy(); } catch { /* noop */ }
+      releaseAsyncContexts(engine, plugin);
+    },
   };
 }
 
@@ -519,7 +541,10 @@ async function bootPrincipal(source: PostureSource) {
       ((await engine.find(objects[object], { ...(filter ? { where: filter } : {}), context: { isSystem: true } } as never)) as Array<{ id: string }>)
         .map((r) => String(r.id)).sort(),
     tenantOf: async (userId: string) => (await enforced(userId)).tenantId,
-    teardown: async () => { try { await engine.destroy(); } catch { /* noop */ } },
+    teardown: async () => {
+      try { await engine.destroy(); } catch { /* noop */ }
+      releaseAsyncContexts(engine, plugin);
+    },
   };
 }
 
@@ -622,7 +647,10 @@ async function bootSharing(opts: { faultReadFilter?: boolean } = {}) {
     find: (caller: object, id: string) => rowsOf(engine.find(LINE, { where: { id }, context: { ...caller } } as never)),
     update: (caller: object, id: string) =>
       landed(engine.update(LINE, { name: 'renamed' }, { where: { id }, context: { ...caller } } as never)),
-    teardown: async () => { try { await engine.destroy(); } catch { /* noop */ } },
+    teardown: async () => {
+      try { await engine.destroy(); } catch { /* noop */ }
+      releaseAsyncContexts(engine, plugin);
+    },
   };
 }
 
@@ -650,7 +678,11 @@ interface Row {
   run: RowRun;
 }
 
-/** A row's run: boots its own rig, and hands back the teardown the table calls once the row is judged. */
+/**
+ * A row's run: boots its own rig, or takes its posture source's shared one (a
+ * principal row), and hands back the teardown the table calls once the row is
+ * judged: the rig's own, or none for the shared rig, torn down after the table.
+ */
 type RowRun = () => Promise<RowFaces & { teardown: () => Promise<void> }>;
 interface RowFaces {
   explain: Explained;
@@ -671,9 +703,31 @@ const withSharing = (
   const rig = await bootSharing(opts);
   try { return { ...(await f(rig)), teardown: rig.teardown }; } catch (e) { await rig.teardown(); throw e; }
 };
+/**
+ * One principal rig per posture source, booted by the source's first row and
+ * shared by the rest. Every principal row only READS: explain, the explained
+ * user's own find, the sets enforcement resolves, and a system read of an
+ * explained filter. None of them writes a row, a grant or a policy, so a row
+ * reads the state the rig was booted with, as if the rig were its own. A row
+ * that can write (the RLS and sharing rigs) still boots its own. Booting all 60
+ * principal rows' rigs was most of this file's wall.
+ */
+const principalRigs = new Map<string, Promise<PrincipalRig>>();
+const sharedPrincipalRig = (source: PostureSource): Promise<PrincipalRig> => {
+  const key = JSON.stringify(source);
+  let rig = principalRigs.get(key);
+  if (!rig) {
+    rig = bootPrincipal(source);
+    principalRigs.set(key, rig);
+  }
+  return rig;
+};
+afterAll(async () => {
+  for (const rig of principalRigs.values()) await (await rig.catch(() => undefined))?.teardown();
+});
 const withPrincipal = (source: PostureSource, f: (rig: PrincipalRig) => Promise<RowFaces>): RowRun => async () => {
-  const rig = await bootPrincipal(source);
-  try { return { ...(await f(rig)), teardown: rig.teardown }; } catch (e) { await rig.teardown(); throw e; }
+  const rig = await sharedPrincipalRig(source);
+  return { ...(await f(rig)), teardown: async () => undefined };
 };
 
 const REFUSED_INVALID: Enforced = { kind: 'refused', ...INVALID };

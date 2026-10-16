@@ -58,13 +58,18 @@ describe('FlowSchema refuses a connector_action node with no connectorConfig blo
     ]);
   });
 
-  it('the keys written under `config` instead: refused at the block, and told to move them', () => {
-    // A direct parse meets the pre-conversion spelling, like every other
-    // tombstone; `registerFlow` and `objectstack validate` convert a complete
-    // pair into the block first (the `flow-node-connector-config-lift` D2 entry).
+  it('the keys written under `config` instead: refused at the block and at each loose key, and told to move them', () => {
+    // Every authoring door meets this spelling as written: the
+    // `flow-node-connector-config-lift` D2 entry left the load path at 18
+    // (#23543 F3), and only a stored row's rehydration seam still lifts it.
     const issues = issuesOf(flowWith(connector({ config: { connectorId: 'slack', actionId: 'chat.postMessage' } })));
-    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['nodes', 1, 'connectorConfig']]]);
+    expect(issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 1, 'connectorConfig']],
+      ['custom', ['nodes', 1, 'config', 'connectorId']],
+      ['custom', ['nodes', 1, 'config', 'actionId']],
+    ]);
     expect(issues[0].message).toContain('from `config` into the block');
+    expect(issues[1].message).toContain('Move it to `connectorConfig.connectorId`');
   });
 });
 

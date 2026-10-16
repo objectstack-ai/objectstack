@@ -227,9 +227,10 @@ export function registerWaitNode(engine: AutomationEngine, ctx: PluginContext): 
       // The loose `config.*` back door this used to also read — six keys, two of
       // them (`duration`, `signal`) spellings the spec never declared — graduated
       // into the ADR-0087 D2 conversion layer as
-      // `flow-node-wait-event-config-lift` (#4045). It is rewritten at load,
-      // including the `registerFlow` rehydration seam, so there is nothing left
-      // to fall back to here (PD #12: no consumer-side fallbacks).
+      // `flow-node-wait-event-config-lift` (#4045). Since 18 the flow parse
+      // refuses those keys at authoring, and a stored flow's are rewritten at
+      // the `registerFlow` rehydration seam, so there is nothing left to fall
+      // back to here (PD #12: no consumer-side fallbacks).
       //
       // ── REVERSAL (#17928) ────────────────────────────────────────────────
       // Until this change the two lines below read `(node.waitEventConfig ?? {})`
