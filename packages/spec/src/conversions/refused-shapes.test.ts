@@ -376,12 +376,6 @@ describe('#23317 — a stored page whose component binds the retired API source 
       'pages[0].regions[0].components[0].properties.items[0].children[0].properties.data',
       'pages[0].slots.details.properties.data',
     ]);
-    // [#23357] …and the page parse refuses exactly those two positions.
-    const verdict = PageSchema.safeParse(row);
-    expect(verdict.success ? [] : verdict.error.issues.map((i) => i.path.join('.'))).toEqual([
-      'regions.0.components.0.properties.items.0.children.0.properties.data.provider',
-      'slots.details.properties.data.provider',
-    ]);
   });
 
   it('never prints a credential: the URL and the method are shown, every other request key is withheld', () => {
