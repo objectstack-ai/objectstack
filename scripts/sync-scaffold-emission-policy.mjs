@@ -152,6 +152,18 @@ export const POLICY_STAMPS = [
     // plugin scaffolds of `os init` and `os create` emit. The comment on the
     // constant holds why it is `~4.0.0` (npm 10 cannot install `^4.0.0`).
   },
+  {
+    key: 'overrides.vitest',
+    block: 'overrides',
+    field: 'vitest',
+    constant: 'SCAFFOLD_VITEST_RANGE',
+    // The npm override every standalone `os init` / `os create` manifest
+    // emits from this same constant (`SCAFFOLD_NPM_OVERRIDES`, whose comment
+    // holds the npm 10 crash it prevents). Stamped rather than hand-kept for
+    // a second reason as well: npm refuses an override that differs from the
+    // direct `devDependencies.vitest` (`EOVERRIDE`), so the two rows above and
+    // here must move together, and only generation makes them.
+  },
 ];
 
 /**
@@ -600,7 +612,7 @@ function main() {
 // ordinary work — and a battery BELOW its floor means cases stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'A: a CLEAN corpus is REACHED, and left byte-identical and UNWRITTEN': 6,
-  'B: DRIFT is rewritten, and --check reds on it first': 8,
+  'B: DRIFT is rewritten, and --check reds on it first': 9,
   'C: a renamed policy constant is a hard failure, never a silent skip': 3,
   'D: a template omitting a stamped key exits 1 naming the path': 3,
   'E: an unparseable template package.json exits 1 naming it': 2,
@@ -608,8 +620,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'G: the stamp table and the sibling rewriter do not both own a value': 2,
   'H: the PUBLISHED restatement is READ — and never written': 16,
   'I: the restatement table cannot go vacuous or invent a policy value': 4,
+  'J: the npm OVERRIDE is stamped on its own — its drift reds even when devDependencies agrees': 10,
 });
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 const SELF_TEST_VERDICT = 'sync-scaffold-emission-policy self-test reached its verdict';
 
@@ -632,7 +645,11 @@ function policySource(policy = SELF_TEST_POLICY) {
   ].join('\n');
 }
 
-function templatePkg(policy) {
+/**
+ * A fixture template `package.json`. `overrideVitest` lets one case drift the
+ * override ALONE while `devDependencies.vitest` still agrees with the policy.
+ */
+function templatePkg(policy, { overrideVitest } = {}) {
   return `${JSON.stringify(
     {
       name: 'objectstack-fixture',
@@ -644,6 +661,7 @@ function templatePkg(policy) {
         typescript: policy.SCAFFOLD_TYPESCRIPT_RANGE,
         vitest: policy.SCAFFOLD_VITEST_RANGE,
       },
+      overrides: { vitest: overrideVitest ?? policy.SCAFFOLD_VITEST_RANGE },
     },
     null,
     2,
@@ -694,7 +712,13 @@ function restatementDoc({
 
 function buildFixture(
   dir,
-  { templates = ['blank', 'second'], policy = SELF_TEST_POLICY, templatePolicy = policy, restatement = {} } = {},
+  {
+    templates = ['blank', 'second'],
+    policy = SELF_TEST_POLICY,
+    templatePolicy = policy,
+    overrideVitest,
+    restatement = {},
+  } = {},
 ) {
   const scripts = join(dir, 'scripts');
   mkdirSync(scripts, { recursive: true });
@@ -705,7 +729,7 @@ function buildFixture(
   writeFileSync(join(dir, POLICY_SOURCE), policySource(policy));
   for (const template of templates) {
     mkdirSync(join(dir, TEMPLATE_DIR, template), { recursive: true });
-    writeFileSync(join(dir, TEMPLATE_DIR, template, TEMPLATE_PKG_FILE), templatePkg(templatePolicy));
+    writeFileSync(join(dir, TEMPLATE_DIR, template, TEMPLATE_PKG_FILE), templatePkg(templatePolicy, { overrideVitest }));
   }
   const carrier = join(dir, PUBLISHED_RESTATEMENTS[0].path);
   mkdirSync(dirname(carrier), { recursive: true });
@@ -775,11 +799,19 @@ function selfTest() {
         after.every(
           (t) =>
             t.includes('"typescript": "^9.9.9"') &&
-            t.includes('"vitest": "~8.8.0"') &&
             t.includes('"pnpm": ">=99.1"') &&
             t.includes('"@objectstack/spec": "^17.0.0"'),
         ),
         'EVERY template now emits the policy, with the @objectstack/* ranges untouched',
+      );
+      // Parsed, not substring-matched: `vitest` is stamped into TWO blocks, so
+      // a `"vitest": "~8.8.0"` substring would hold with either one still stale.
+      ok(
+        after.every((t) => {
+          const pkg = JSON.parse(t);
+          return pkg.devDependencies.vitest === '~8.8.0' && pkg.overrides.vitest === '~8.8.0';
+        }),
+        'BOTH vitest stamps — devDependencies.vitest and overrides.vitest — now read the policy',
       );
       ok(runFixture(script, ['--check']).status === 0, '--check is green after the rewrite (idempotent)');
     },
@@ -904,6 +936,47 @@ function selfTest() {
   }
   ok(refusedEmpty, 'an EMPTY table is refused rather than reported as "everything checked"');
 
+  // The override is the one stamp whose drift a sibling key MASKS: the same
+  // field name sits in `devDependencies`, already correct, so a check that read
+  // "is vitest right?" anywhere in the file would pass. This battery drifts the
+  // override ALONE and requires the verdict to name that block.
+  open('J: the npm OVERRIDE is stamped on its own — its drift reds even when devDependencies agrees');
+  sandbox(
+    (dir, script) => {
+      const before = readTemplates(dir);
+      const parsed = JSON.parse(before[0]);
+      ok(
+        parsed.overrides.vitest === '^1.1.0' && parsed.devDependencies.vitest === '~8.8.0',
+        'the fixture drifts the override ALONE — devDependencies.vitest already reads the policy',
+      );
+      const check = runFixture(script, ['--check']);
+      ok(check.status === 1, '--check EXITS 1 when only the override has drifted');
+      ok(check.output.includes('overrides.vitest is "^1.1.0"'), '--check names the override block and its found value');
+      ok(!check.output.includes('devDependencies.vitest is'), '--check does not blame the agreeing devDependencies.vitest');
+      ok(readTemplates(dir).every((t, i) => t === before[i]), '--check WROTE NOTHING');
+      const write = runFixture(script);
+      ok(write.status === 0, 'the write run exits 0');
+      const after = readTemplates(dir);
+      ok(
+        after.every((t, i) => t === before[i].replace('"vitest": "^1.1.0"', '"vitest": "~8.8.0"')),
+        'the rewrite touches the override span and NOTHING else, byte for byte',
+      );
+      ok(runFixture(script, ['--check']).status === 0, '--check is green after the rewrite (idempotent)');
+    },
+    { overrideVitest: STALE.SCAFFOLD_VITEST_RANGE },
+  );
+  sandbox((dir, script) => {
+    const pkg = JSON.parse(readFileSync(join(dir, TEMPLATE_DIR, 'second', TEMPLATE_PKG_FILE), 'utf8'));
+    delete pkg.overrides;
+    writeFileSync(join(dir, TEMPLATE_DIR, 'second', TEMPLATE_PKG_FILE), `${JSON.stringify(pkg, null, 2)}\n`);
+    const r = runFixture(script, ['--check']);
+    ok(r.status === 1, 'a template that drops the overrides block EXITS 1 — never a silent exemption');
+    ok(
+      r.output.includes('second/package.json') && r.output.includes('declares no `overrides.vitest`'),
+      'the failure names the template path and the missing override key',
+    );
+  });
+
   const missing = Object.keys(SELF_TEST_BATTERIES).filter((n) => !opened.has(n));
   const extra = [...opened.keys()].filter((n) => !(n in SELF_TEST_BATTERIES));
   const below = [...opened].filter(([n, c]) => n in SELF_TEST_BATTERIES && c < SELF_TEST_BATTERIES[n]);
@@ -927,7 +1000,8 @@ function selfTest() {
       'BEFORE the rewrite and green after it; and a renamed policy constant, a template omitting a stamped key, ' +
       'an unparseable template and an empty templates directory are each observed exiting 1 and naming the path. ' +
       'The PUBLISHED restatement is observed COUNTED in the verdict, reddening --check when its fence drifts, ' +
-      'naming that fence, and left byte-identical and unreached by the write run.',
+      'naming that fence, and left byte-identical and unreached by the write run. The npm OVERRIDE is observed ' +
+      'reddening --check on its own drift while devDependencies.vitest agrees, and rewritten alone.',
   );
   return SELF_TEST_VERDICT;
 }

@@ -288,8 +288,9 @@ export const SysSsoProvider = ObjectSchema.create({
       label: 'Domain Verified',
       defaultValue: false,
       readonly: true,
+      // ADR-0135 D6 — domain verification (see the actions below).
       description:
-        'Whether DNS ownership of the email domain has been proven (ADR-0135 D6). Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment.',
+        'Whether DNS ownership of the email domain has been proven. Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment.',
       group: 'Identity',
     }),
 
