@@ -416,7 +416,7 @@
       "title": "Metadata authoring round-trip: draft → publish on a WRITABLE package; read-only packages and locked types are server-side refused",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -428,19 +428,19 @@
       },
       "steps": [
         "create a writable package (Studio package switcher → new, or POST /api/v1/packages); record its id",
-        "save a draft view into it: PUT /api/v1/meta/view/os_qa_view_<runid> with a minimal valid ListView body bound to showcase_task and the writable packageId; capture the response",
+        "save a draft view into it: PUT /api/v1/meta/view/showcase_task.os_qa_view_RUNID?mode=draft&package=PKG with a minimal valid ListView body bound to showcase_task; capture the response. Two spellings matter: a view's name is qualified OBJECT.view (a bare os_qa_view_RUNID is refused), and ?mode=draft is what makes it a draft — a plain PUT saves state=active, which /meta/_drafts never lists",
         "GET /api/v1/meta/_drafts and confirm the draft is listed",
-        "publish: POST /api/v1/packages/<id>/publish-drafts; then GET /api/v1/meta/view/os_qa_view_<runid>/published and capture it",
+        "publish: POST /api/v1/packages/<id>/publish-drafts; then GET /api/v1/meta/view/showcase_task.os_qa_view_RUNID/published and capture it",
         "verify in the console that the published view is live for showcase_task (reload, open the view switcher)",
         "denied side A: attempt the same runtime create targeting the read-only CODE package; capture the refusal (expect writable_package_required — ADR-0070 D1)",
         "denied side B: attempt a PUT overlay against a PACKAGED object item (type 'object' has allowEnvironmentOverlay: false); capture the refusal (expect HTTP 403 not_overridable)",
-        "Studio browser half: create a new record page via Studio bound to an object and capture the PUT /api/v1/meta/page/... it issues"
+        "Studio browser half: open the page create form at /_console/apps/showcase_app/metadata/page/new — its Page type defaults to 'list', so set it to 'record' and pick an object (a record page is what gets seeded from the default record layout) — create the page, and capture the PUT /api/v1/meta/page/... it issues"
       ],
       "acceptance": [
         {
           "clause": "a draft saved via PUT /api/v1/meta/view/:name persists and is listed by GET /api/v1/meta/_drafts",
           "oracle": "api",
-          "verify": "the PUT succeeds; the drafts listing contains os_qa_view_<runid> (routes per packages/runtime/src/route-ledger.ts: PUT /meta/:type/:name, GET /meta/_drafts)",
+          "verify": "the PUT answers state=draft; the drafts listing contains showcase_task.os_qa_view_RUNID (routes per packages/runtime/src/route-ledger.ts: PUT /meta/:type/:name, GET /meta/_drafts)",
           "evidence": "PUT response + drafts listing"
         },
         {
@@ -470,7 +470,7 @@
         {
           "clause": "a malformed body is refused by schema validation, never stored: a PUT with an invalid shape for the type answers a named validation error (validateOnWrite; the #5206 lesson — an unvalidated store is the defect)",
           "oracle": "api",
-          "verify": "PUT /api/v1/meta/view/os_qa_bad_<runid> with a nonsense body (e.g. columns: 42) → 4xx naming the validation failure; a subsequent GET finds no stored item",
+          "verify": "PUT /api/v1/meta/view/showcase_task.os_qa_bad_RUNID with a nonsense body (e.g. columns: 42) → 4xx naming the validation failure; a subsequent GET finds no stored item",
           "evidence": "the refusal + the empty GET"
         }
       ],
@@ -501,7 +501,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — grounds the Studio authoring pipeline end-to-end with both deny gates as first-class clauses", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "annotated the objectui e2e/live/studio-record-page.spec.ts half of this item's automated.ref as STALE (run #7695): it fills the Object control as an input when it is now a role=combobox button, so it fails against the current surface, not against a defect. The Studio-designer clause now says drive it by hand until the spec is re-pointed; the dogfood pin and studio-object-designer.spec.ts are unaffected. Re-pointing lives in objectui (cross-repo half of #7753 item 6)", "ref": "#7753" }
+        { "revision": 2, "date": "2026-08-11", "change": "annotated the objectui e2e/live/studio-record-page.spec.ts half of this item's automated.ref as STALE (run #7695): it fills the Object control as an input when it is now a role=combobox button, so it fails against the current surface, not against a defect. The Studio-designer clause now says drive it by hand until the spec is re-pointed; the dogfood pin and studio-object-designer.spec.ts are unaffected. Re-pointing lives in objectui (cross-repo half of #7753 item 6)", "ref": "#7753" },
+        { "revision": 3, "date": "2026-10-16", "change": "steps[1], [3] and [7] and acceptance[0].verify and [5].verify re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). A plain PUT /meta/view/NAME saves state=active, so the draft never appeared in /meta/_drafts — ?mode=draft is required — and a view's name must be qualified OBJECT.view (#23939 used showcase_task.os_qa_view_RUNID). The Studio half now names the create form (/_console/apps/showcase_app/metadata/page/new) and its 'list' default, which has to be set to 'record' for a record page. Not loosened: every clause still scores the same server reads", "ref": "#24036" }
       ]
     },
     {
@@ -632,7 +633,7 @@
       "title": "Settings hub round-trip: a value saves, PERSISTS, reaches an observable consumer, audits, env-locks, tests honestly, and stores secrets as handles served MASKED — anonymous denied",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -651,18 +652,18 @@
       },
       "steps": [
         "as admin, GET /api/settings — capture the visible manifests (the 11 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
-        "pick localization (an OBSERVABLE-CONSUMER namespace — packages/core/src/security/resolve-authz-context.ts reads localization.timezone/locale/currency onto ExecutionContext). GET /api/settings/localization — capture {manifest, values}; note timezone value 'UTC' with source 'default'",
-        "change it: PUT /api/settings/localization { timezone: 'Asia/Tokyo' }; re-read GET /api/settings/localization and confirm the value persists and source FLIPS default→tenant (localization scope is 'tenant')",
-        "prove EFFECT (not just the saved form): re-derive an ExecutionContext-dependent output — an analytics date-bucket aggregate or a today()/rendered-datetime on showcase_task — and confirm it now resolves against Asia/Tokyo, not UTC. If the deployment surfaces no observable localization effect, fall back to branding.workspace_name visible in the console shell — but never tick effect off the form alone",
+        "pick localization (an OBSERVABLE-CONSUMER namespace — packages/core/src/security/resolve-authz-context.ts reads localization.timezone/locale/currency onto ExecutionContext). GET /api/settings/localization — capture {manifest, values}; note the timezone value and its source. On an `os dev --seed-admin` boot the dev seed has ALREADY written the host's zone (UTC in these containers) at tenant scope (packages/plugins/plugin-auth/src/auth-plugin.ts, #23175), so source reads 'tenant' before any PUT; only a boot without the dev seed starts at 'default'",
+        "change it: PUT /api/settings/localization { timezone: 'Asia/Tokyo' }; re-read GET /api/settings/localization and confirm the value persists and source is the scope, 'tenant' (localization scope is 'tenant'): on a dev-seeded boot the source already read 'tenant', so the value is what round-trips; on an unseeded boot the source flips from 'default'. For the console badge (steps[5]) pick a localization key the dev seed did NOT write (e.g. default_country), so its source starts at 'default'",
+        "prove EFFECT (not just the saved form): re-derive an ExecutionContext-dependent output and confirm it now resolves against the saved zone, not UTC. Two stock consumers serve: GET /api/v1/auth/me/localization (the resolved timezone the session carries), and a datetime the console renders — e.g. showcase_field_zoo's f_datetime on its record page, which shifts by exactly the zone offset. ⛔ The analytics date bucket has no stock observable (the only date-typed time dimension is due_date, and the seeded admin holds no export grant), so do not reach for it. If no localization effect is observable at all, fall back to branding.workspace_name visible in the console shell — but never tick effect off the form alone",
         "audit: GET /api/v1/data/sys_setting_audit filtered to namespace=localization,key=timezone — a row exists with action='set', source='api', actor_id=<admin>, new_hash set (SettingsServicePlugin.buildAuditWriter → sys_setting_audit)",
-        "source badge: open /apps/setup/system/settings/localization and confirm the timezone field's source indicator flips from default to the persisted scope after save; screenshot",
+        "source badge: open /apps/setup/system/settings/localization and confirm a field's source indicator flips from default to the persisted scope after save — use a key whose source was still 'default' before the save (e.g. default_country; on a dev-seeded boot the timezone is already tenant-scoped, steps[1]); screenshot",
         "env-lock: set OS_LOCALIZATION_TIMEZONE=Europe/Paris (envKeyOf convention: OS_<NAMESPACE>_<KEY>, settings-service.types.ts) and restart; GET /api/settings/localization now reports timezone source='env', locked=true, lockedReason 'Set via env: OS_LOCALIZATION_TIMEZONE', and the console renders the EnvLockBadge; PUT /api/settings/localization { timezone: 'UTC' } is REFUSED 409 SETTINGS_LOCKED (server-side, effectiveEnvOverride)",
         "test action at the dev transport: POST /api/settings/mail/test with provider=log (or no email plugin mounted) — the handler answers ok:false and NO mail is faked (mail.manifest.ts mailTestActionHandler / plugin-email honest degradation, framework#5087)",
         "secret handling — AT REST: on a namespace with an encrypted specifier (mail.smtp_password or ai.*_api_key — type 'password' or encrypted:true), PUT a value; then read sys_secret + sys_setting — the ciphertext lands in sys_secret keyed by a 'sec_' handle and sys_setting.value_enc holds the handle id, NOT plaintext",
         "secret handling — the MASKED READ (positive contract, #7522/PR #7554): GET /api/settings/<ns> and check what IS served, not merely that plaintext is absent — the SET secret's values.<key>.value is exactly SETTINGS_SECRET_MASK ('••••••••', eight U+2022 BULLETs — settings-secret-redaction.ts); an UNSET secret's value is still null (the redaction is presence-preserving, and the console renders 'configured vs not configured' from exactly this field); EVERY cascadeChain entry of a secret-backed key is the mask or null (walk a namespace whose scope is 'user' so the chain carries more than one entry); and the whole serialised body contains no plaintext. Do BOTH specifier flavours — type:'password' AND an explicit encrypted:true",
         "secret handling — metadata survives the redaction: on an env-pinned secret (OS_<NAMESPACE>_<KEY>) confirm the GET still reports source='env', locked=true and lockedReason naming that env var WHILE value is the mask, and that PUT is still refused 409 SETTINGS_LOCKED — masking must not disturb the lock affordances",
         "secret handling — the ECHOED-MASK round-trip (the half a redaction fix most often breaks): PUT the mask straight back in BOTH shapes the console can send — { <key>: '••••••••' } and the read-shape envelope { values: { <key>: { value: '••••••••' } } } — and confirm 200 plus an UNCHANGED stored secret: re-read it through an in-process consumer (settings client / getNamespace, which is deliberately NOT redacted) and confirm it is still the original plaintext, and that no new sys_secret ciphertext row appeared. Then PUT a genuinely NEW secret: it takes effect, but the PUT RESPONSE is redacted too. Control: a NON-encrypted key whose value genuinely is '••••••••' is written verbatim — the drop is scoped to secret keys and must not swallow a legal write",
-        "anonymous deny: GET /api/settings/localization with no session → 403 SETTINGS_FORBIDDEN (assertPermitted read); GET /api/settings (list) as anon returns an EMPTY manifest set — zero namespaces enumerated (Finding-1 secure default)",
+        "anonymous deny: GET /api/settings/localization with no session → 401 UNAUTHENTICATED, and GET /api/settings (list) as anon → 401 UNAUTHENTICATED too — the platform's anonymous floor answers both routes before the settings permission check ever runs (ADR-0056 D2; packages/core/src/security/anonymous-deny.ts, settings-routes.ts), so no namespace is enumerated (Finding-1 secure default)",
         "guardrails: PUT /api/settings/localization { timezone: 'Mars/Phobos' } → 400 SETTINGS_VALIDATION invalid_option (declared options table); PUT { bogus_key: 1 } → 400 UNKNOWN_KEY"
       ],
       "acceptance": [
@@ -709,9 +710,9 @@
           "evidence": "the action response"
         },
         {
-          "clause": "an encrypted specifier's value lands in sys_secret as a handle, never plaintext: sys_setting.value_enc holds a 'sec_' handle id and sys_secret holds the ciphertext",
+          "clause": "an encrypted specifier's value lands in sys_secret as a handle, never plaintext: the settings row's value_enc holds a 'sec_' handle id and sys_secret holds the ciphertext. Which settings table holds the row follows the namespace's scope: a GLOBAL-scope namespace (mail, ai, sms, storage, auth, knowledge) lands in sys_platform_setting, a tenant- or user-scope one in sys_setting",
           "oracle": "api",
-          "verify": "the sys_secret row (id starts 'sec_', ciphertext present) + sys_setting.value_enc = that handle (materialiseRow dereferences through sys_secret)",
+          "verify": "the sys_secret row (id starts 'sec_', ciphertext present) + the settings row's value_enc = that handle, value null (materialiseRow dereferences through sys_secret) — read it from sys_platform_setting for mail.smtp_password / ai.*_api_key (global scope), never from sys_setting, which holds tenant/user rows only",
           "evidence": "the sys_secret row + sys_setting.value_enc"
         },
         {
@@ -733,10 +734,10 @@
           "evidence": "the echoed-mask PUT responses + the resolved in-process value + the sys_secret inventory before/after + the new-secret PUT response"
         },
         {
-          "clause": "anonymous is denied: GET /api/settings/:namespace → 403 SETTINGS_FORBIDDEN, and GET /api/settings lists ZERO namespaces for an unauthenticated caller (no enumeration — Finding-1)",
+          "clause": "anonymous is denied before any namespace is touched: GET /api/settings/:namespace and GET /api/settings each answer 401 UNAUTHENTICATED for an unauthenticated caller — the anonymous floor (ADR-0056 D2) decides first, so no namespace is enumerated (Finding-1)",
           "oracle": "api",
-          "verify": "the two anonymous responses",
-          "evidence": "the 403 + the empty list"
+          "verify": "the two anonymous responses: status 401 and error.code UNAUTHENTICATED on each, with no manifest or value in either body. A 200 (any body), or a 403 SETTINGS_FORBIDDEN that means the floor did not run first, is a FAIL",
+          "evidence": "the two 401 bodies"
         },
         {
           "clause": "each of the 11 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
@@ -782,7 +783,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — settings hub round-trip with persistence + observable-consumer effect (honoring the ai.json form-is-not-effect caveat), sys_setting_audit, env-lock server refusal, honest test action, sys_secret handle-not-plaintext, anonymous deny", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "secret clauses strengthened from negative-only ('never returns the plaintext', which omission and a vanished key also satisfy) to the POSITIVE contract #7522/PR #7554 pinned at the route level: set→mask / unset→null presence-preserving, masking across values.<key>.value AND every cascadeChain entry, source/locked/lockedReason unchanged, both specifier flavours, plus the distinct echoed-mask-PUT-is-a-no-op round-trip clause and the in-process-path-is-NOT-masked guard", "ref": "#7573" },
-        { "revision": 3, "date": "2026-08-18", "change": "corrected the open-framework namespace count from 10 to 11 in the fixture list, step 0 and the per-namespace clause. builtinSettingsManifests holds 10, but lifecycle is registered separately by ObjectQLPlugin at kernel:ready (packages/objectql/src/lifecycle/lifecycle-settings.ts, 5 specifiers) and is served alongside them — so a runner enumerating only the manifests directory undercounts, and the clause could never be satisfied as written (#9453 CF-7)", "ref": "#9386" }
+        { "revision": 3, "date": "2026-08-18", "change": "corrected the open-framework namespace count from 10 to 11 in the fixture list, step 0 and the per-namespace clause. builtinSettingsManifests holds 10, but lifecycle is registered separately by ObjectQLPlugin at kernel:ready (packages/objectql/src/lifecycle/lifecycle-settings.ts, 5 specifiers) and is served alongside them — so a runner enumerating only the manifests directory undercounts, and the clause could never be satisfied as written (#9453 CF-7)", "ref": "#9386" },
+        { "revision": 4, "date": "2026-10-16", "change": "steps[1], [2], [3], [5] and [12] and acceptance[7] (clause, verify) and [11] (clause, verify, evidence) re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). Four premises had moved: the `os dev --seed-admin` dev seed writes the host zone into localization.timezone at tenant scope (#23175), so the source is 'tenant' before any PUT and the badge flip needs a key the seed did not write (#23939 used default_country); the analytics date bucket has no stock observable, so the effect step names the two consumers #23939 used (auth/me/localization and a rendered datetime); global-scope secrets live in sys_platform_setting.value_enc, not sys_setting; and an anonymous caller meets the ADR-0056 D2 floor first, 401 UNAUTHENTICATED on both routes, not 403 SETTINGS_FORBIDDEN. Not loosened: anonymous must still be refused on both routes with no namespace enumerated, and a secret must still never be plaintext", "ref": "#24036" }
       ]
     },
     {
@@ -884,18 +886,18 @@
       "title": "Notification center (bell / InboxPopover): badge counts distinct unread topics + pending approvals, repeats coalesce, per-group and global mark-read drop the badge",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a recurring notification that produces many identical rows (the showcase_scheduled_digest firing once a minute — the exact flood inboxGrouping.ts was written for), so the topic-coalescing is exercised rather than assumed",
+          "a recurring notification that produces many identical rows, so the topic-coalescing is exercised rather than assumed. The showcase_scheduled_digest flow (once a minute — the exact flood inboxGrouping.ts was written for) fires only on a boot that exports OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1: by default a stock boot leaves packaged schedules unbound by deployment policy, so without the switch no digest row ever lands. Boot with it exported, or coalesce on the repeated rows the stock seed already delivers (QA run #23939 used the three seeded approval.requested rows) and record which",
           "at least one pending approval request (sys_approval_request / my_pending) so the approvals portion of the badge and the Approvals tab have something to show"
         ],
         "knownGaps": [
-          "rows without a notification_id (legacy/synthetic inbox rows) flip read optimistically but do NOT persist server-side — read-state lives in sys_notification_receipt keyed by the L2 event id (ADR-0030), so only rows carrying a notification_id survive reload. Verify persistence on a keyed row, and record synthetic rows as expected-non-persistent"
+          "rows without a notification_id (legacy/synthetic inbox rows) flip read optimistically but do NOT persist server-side — read-state lives in sys_notification_receipt keyed by the L2 event id (ADR-0030), so only rows backed by a notification_id survive reload. ⚠ The GET /notifications payload carries NO notification_id field: each row's `id` IS that event id when the inbox message has one, else the message's own id (packages/services/service-messaging/src/messaging-service.ts listInbox), so a keyed row cannot be picked out of the payload. Prove persistence on the observable instead — the marked row reads read: true after a reload — and when a row flips back, tell a synthetic row from the receipt bug by reading its backing sys_inbox_message row's notification_id as admin"
         ]
       },
       "steps": [
@@ -907,7 +909,7 @@
         "per-group mark-read: click a group's 'Mark read' → capture POST /api/v1/notifications/read {ids:[...]} on the wire (ONE request for the whole group, not N); the group's unread dot clears and the badge drops by one topic",
         "global mark-all-read: click 'Mark all read' → capture POST /api/v1/notifications/read/all; the notifications portion of the badge drops to 0; the approvals portion is unaffected",
         "Approvals tab: confirm it lists/points at the pending approval request(s) and pendingApprovalsCount equals the sys_approval_request my_pending count",
-        "persistence: reload; read-state persists for rows carrying a notification_id (sys_notification_receipt upsert, ADR-0030); synthetic rows without one flip only optimistically (knownGap)"
+        "persistence: reload; read-state persists — the marked rows read read: true in the post-reload GET /notifications (sys_notification_receipt upsert, ADR-0030); a row that flips back is either synthetic (its sys_inbox_message row has no notification_id — knownGap) or the receipt bug"
       ],
       "acceptance": [
         {
@@ -949,7 +951,7 @@
         {
           "clause": "read-state PERSISTS across reload for rows carrying a notification_id (sys_notification_receipt upsert, ADR-0030) — after mark-read + reload the keyed row stays read; a mark-read that reverts on the next poll is the pre-ADR-0030 receipt bug",
           "oracle": "network",
-          "verify": "the post-reload GET /notifications shows the keyed row still read",
+          "verify": "the post-reload GET /notifications shows the marked row still read: true; for any row that reverts, the backing sys_inbox_message row's notification_id decides between a synthetic row (none — expected) and the receipt bug (present — FAIL)",
           "evidence": "the post-reload payload"
         }
       ],
@@ -969,7 +971,8 @@
         "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — bell/InboxPopover: topic-based badge (#2765), (topic,title) coalescing, per-group + global mark-read on the wire, approvals tab, receipt persistence; cross-referenced with i18n + approvals notification items", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — bell/InboxPopover: topic-based badge (#2765), (topic,title) coalescing, per-group + global mark-read on the wire, approvals tab, receipt persistence; cross-referenced with i18n + approvals notification items", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-16", "change": "fixtures.requires[0], knownGaps[0], steps[8] and acceptance[6].verify re-pointed (checklist-accuracy findings and fixture gap of QA run #23939, wave #23878, and #23879). The showcase_scheduled_digest fixture never fires on a default boot — OS_AUTOMATION_SCHEDULED_WORK_ENABLED leaves packaged schedules unbound — so the requirement names the switch and the fallback #23939 used (the seeded approval.requested rows). The payload's rows carry no notification_id field — the row id IS the event id when one exists — so 'verify persistence on a keyed row' could not be followed; persistence is proven on read: true after reload, and a reverting row is classified through its backing sys_inbox_message row. Not loosened: a keyed row that reverts is still the receipt bug and FAILS", "ref": "#24036" }
       ]
     },
     {
@@ -977,7 +980,7 @@
       "title": "Shell nav personalization: sidebar collapse, pins and the user's pinned order, favorites and recents each persist and stay navigable across reload; the header's crumbs follow the route and rebuild on reload; the authored menu keeps the app's order",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -990,9 +993,9 @@
       },
       "steps": [
         "sidebar collapse: toggle the sidebar to icon (collapsed) mode; confirm nav items still NAVIGATE in icon mode; reload — the collapsed state persists (cookie sidebar_state, packages/components/src/ui/sidebar.tsx SIDEBAR_COOKIE_NAME)",
-        "nav pin/unpin: pin a nav item (UnifiedSidebar → useNavPins.togglePin → favorite id nav:<navId>, backed by FavoritesProvider/UserDataAdapter); it appears in the Pinned section; reload — the pin persists (syncs via UserDataAdapter; migrates the legacy objectui-nav-pins key); unpin removes it",
+        "nav pin/unpin: pin a nav item through that entry's own More actions menu → 'Add to favorites' (there is no hover pin button on the row) (UnifiedSidebar → useNavPins.togglePin → favorite id nav:<navId>, backed by FavoritesProvider/UserDataAdapter); it appears in the Pinned section; reload — the pin persists (syncs via UserDataAdapter; migrates the legacy objectui-nav-pins key); unpin through the same menu's 'Remove from favorites' removes it",
         "pinned order (desktop only): with at least three entries pinned, reorder them inside the Pinned section — the group NavigationRenderer draws above the menu, headed console.nav.favorites ('Favorites' in en, 「收藏」 in zh, a star icon), not the content-favorites group UnifiedSidebar draws below Recent. By pointer: drag a pinned row by the row itself (no grip at rest; the row's link carries cursor-grab; a press becomes a drag only after 5px of travel; a 2px insertion line, data-drop-indicator, marks where it lands). By keyboard: focus a pinned row's link, Space picks it up, the arrow keys move it, Space drops it, Escape cancels; Enter is not a drag key, it follows the link. Reload — the pinned order persists: NavigationRenderer onPinnedReorder → useNavPins.reorderPins → FavoritesProvider reorderNavPins stores it as the order of the type 'nav' favorites (nav:<navId>) in the UserDataAdapter-backed favorites list. A new pin joins the end; an unpin leaves the others in order",
-        "favorites star/unstar: star an object/record as a favorite (useFavorites / FavoritesProvider); it appears in favorites; reload — persists; unstar removes it",
+        "favorites star/unstar: favorite a record through its record header's More actions menu → 'Add to favorites' (there is no star button in the header) (useFavorites / FavoritesProvider); it appears in favorites; reload — persists; 'Remove from favorites' in the same menu removes it",
         "recents rail: visit several records/objects/dashboards; the sidebar Recent section (collapsed by default, top 5 — useTrackRouteAsRecent → RecentItemsProvider, localStorage objectui-recent-items scoped by userId, hydrates UserDataAdapter) lists them; reload — recents survive",
         "header crumbs follow the route (objectui AppHeader at the console pin, objectui#12461 / #12526 / #12273), at a viewport at least 640px wide (the crumbs are drawn from `sm` up): open a report (the sidebar's Hours by Status entry, …/report/showcase_hours_by_status) — after the app pill and its PREVIEW chip the bar draws exactly ONE crumb, the report's label, and no 「Reports」 type crumb; open a system route (…/system/settings) — 'System' then 'Settings'; open a record detail (…/<object>/record/<id>) — NO separator and no crumb after the chip, while the record's page header names it. The crumbs are plain text, none of them a link (the app pill's switcher is the way back to the app). Reload each route — the same crumbs rebuild from the route",
         "authored menu (any viewport): the app's own menu — every row outside the Pinned section — offers no reorder: no drag grip, no aria-roledescription=\"sortable\", no aria-describedby=\"nav-pinned\" (the pinned list's DndContext id, which names dnd-kit's drag instructions) and no cursor-grab on its links, and dragging a menu row moves nothing (a browser's native link-drag ghost is not a reorder). Its order is the app's authored navigation order: each level sorted by order, lower first, ties in authored array order (objectui packages/layout/src/navOrder.ts byNavOrder). Then plant the retired per-user key — localStorage objectui-nav-order-<app name> holding a JSON map of __root__ and each group id to that level's ids reversed, the shape the retired useNavOrder read — and reload: the menu order does not change, because UnifiedSidebar no longer reads the key",
@@ -1072,6 +1075,12 @@
           "date": "2026-10-16",
           "change": "stale clause re-pointed (#23950, from QA run #23939): acceptance[5] pinned app/section/record breadcrumbs on a RECORD route, each crumb navigable, but objectui#12461 removed every crumb after the app pill on an object route (its list, a view, a record): the page header is the one place that page is named, so the record route drew none and the clause went red against a correct console. Re-pointed to the header contract the console pin (daeb77fc) ships, per objectui packages/app-shell/src/layout/AppHeader.tsx: a report route draws one crumb, the report's label (no type crumb, objectui#12273); a system/* route draws System then its section; an object route draws none (objectui#12461; a dashboard or page route none either, objectui#12526); the crumbs are plain text, so 'each crumb navigates' is withdrawn by that contract, not relaxed; and every route's crumbs rebuild on reload. The clause still fails if a crumb comes back on an object route, if a report or system route loses its crumb, or if a type crumb returns. Step 6, the title, the inert-crumb negative (a non-link crumb is now the design) and the AppHeader source line follow. The pin moved to f8267df9 while this revision was open (#23973); AppHeader there draws the same crumbs after the chip, so the clause is unchanged by it",
           "ref": "#23950"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "steps[1] and [3] name the affordances that exist (checklist-accuracy residual of QA run #23939, wave #23878; QA run #23998 drove them). A nav entry is pinned through its own More actions menu ('Add to favorites') and a record is favorited through the record header's More actions menu — there is no hover pin button and no star button, so the steps described gestures a runner could not find. The clauses are unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -1080,7 +1089,7 @@
       "title": "App management: the launcher/App Switcher filters by active+hidden, isDefault drives post-login landing, and AppManagementPage writes through the metadata API — a code-package app refuses Disable/Set-default with an error toast, and its Delete is a reset:false no-op the page must not report as a deletion",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1093,7 +1102,7 @@
           "a writable package to author an app overlay into (POST /api/v1/packages) so the active/isDefault EFFECT can be exercised at the metadata layer — the seeded showcase/platform apps are read-only code packages (ADR-0070)"
         ],
         "knownGaps": [
-          "AppManagementPage's Enable/Disable/Set-default/Delete/Bulk handlers write through the metadata API (objectui apps/console/src/pages/system/AppManagementPage.tsx — meta.saveItem → PUT /api/v1/meta/app/{name}, meta.deleteItem → DELETE /api/v1/meta/app/{name}; wired by objectui 3b7d1cc6d7, #4233 / #4300, before the 17.6.0 console pin) and report success only once the call resolves. The seeded showcase/platform apps are read-only code-package apps: on them Disable and Set-default answer 403 NOT_OVERRIDABLE, and Delete answers 200 reset:false, which changes nothing. So the launcher/landing EFFECT is still exercised at the metadata layer on a writable-package overlay, and the page is probed for honest reporting on the refusals"
+          "AppManagementPage's Enable/Disable/Set-default/Delete/Bulk handlers write through the metadata API (objectui apps/console/src/pages/system/AppManagementPage.tsx — meta.saveItem → PUT /api/v1/meta/app/{name}, meta.deleteItem → DELETE /api/v1/meta/app/{name}; wired by objectui 3b7d1cc6d7, #4233 / #4300, before the 17.6.0 console pin) and report success only once the call resolves. The seeded showcase/platform apps are read-only code-package apps: on them Disable and Set-default answer 403 ITEM_LOCKED (the write names the app's read-only base package — ADR-0010 lock), and Delete answers 200 reset:false, which changes nothing; at the console pin the page reads that reset:false and says so in a neutral toast (QA run #23939 read 'Nothing to delete for Showcase'). So the launcher/landing EFFECT is still exercised at the metadata layer on a writable-package overlay, and the page is probed for honest reporting on the refusals"
         ]
       },
       "steps": [
@@ -1102,8 +1111,8 @@
         "prove DEFAULT→landing: the isDefault app drives post-login landing — confirm login lands on the current default app, and that changing which app is isDefault (at the metadata layer) changes the post-login landing route",
         "member view: as a plain member the App Switcher shows only accessible apps (Setup/Studio absent by App.requiredPermissions); disabled/hidden apps also absent",
         "open Setup → Apps → Applications (AppManagementPage) as admin; it lists configured apps with Active/Default badges and per-row controls",
-        "honest-reporting probe on a seeded (code-package) app: click Disable in AppManagementPage → the page issues PUT /api/v1/meta/app/{name}, which answers 403 NOT_OVERRIDABLE; an error toast carries the server's reason, and GET /api/v1/meta/app shows the app unchanged on reload",
-        "same probe for Set-default (PUT → 403 NOT_OVERRIDABLE, error toast, metadata unchanged) and Delete (DELETE /api/v1/meta/app/{name} → 200 with reset:false, a no-op: the app is still listed on reload, and the page must NOT report it deleted). Then click Disable on the writable-package app from step 2 and confirm the toggle takes real effect (the launcher drops it)"
+        "honest-reporting probe on a seeded (code-package) app: click Disable in AppManagementPage → the page issues PUT /api/v1/meta/app/{name}, which answers 403 ITEM_LOCKED; an error toast carries the server's reason, and GET /api/v1/meta/app shows the app unchanged on reload",
+        "same probe for Set-default (PUT → 403 ITEM_LOCKED, error toast, metadata unchanged) and Delete (DELETE /api/v1/meta/app/{name} → 200 with reset:false, a no-op: the app is still listed on reload, and the page must NOT report it deleted — it shows a neutral nothing-to-delete toast). Then click Disable on the writable-package app from step 2 and confirm the toggle takes real effect (the launcher drops it)"
       ],
       "acceptance": [
         {
@@ -1137,9 +1146,9 @@
           "evidence": "the page screenshot"
         },
         {
-          "clause": "AppManagementPage writes through PUT/DELETE /api/v1/meta/app/{name}: on a code-package app Disable/Set-default return 403 NOT_OVERRIDABLE with an error toast and /meta/app is unchanged on reload; Delete returns 200 reset:false (a no-op) and the page must not report the app as deleted.",
+          "clause": "AppManagementPage writes through PUT/DELETE /api/v1/meta/app/{name}: on a code-package app Disable/Set-default return 403 ITEM_LOCKED with an error toast and /meta/app is unchanged on reload; Delete returns 200 reset:false (a no-op) and the page must not report the app as deleted.",
           "oracle": "network",
-          "verify": "the network trace shows the PUT for Disable and for Set-default answering 403 NOT_OVERRIDABLE and the DELETE answering 200 with reset:false; an error toast for each refused PUT; /meta/app unchanged on reload; after the Delete, no 'deleted' success and the app still listed. ⚠️ At objectui 9dfaca6543 handleDelete shows the '{name} deleted' success toast whenever deleteItem resolves, without reading reset, so expect the Delete half to FAIL there (the open candidate the run's verifier recorded). Score it as observed; do not soften the clause",
+          "verify": "the network trace shows the PUT for Disable and for Set-default answering 403 with error.code ITEM_LOCKED and the DELETE answering 200 with reset:false; an error toast for each refused PUT; /meta/app unchanged on reload; after the Delete, no 'deleted' success and the app still listed. At the console pin handleDelete reads reset (objectui apps/console/src/pages/system/AppManagementPage.tsx): on reset:false it shows a neutral toast carrying the server's own sentence and no success — a '{name} deleted' success after a reset:false answer is the FAIL. Score the status and code, never the toast wording",
           "evidence": "the three write traces + the toasts + the unchanged meta + the post-Delete page"
         }
       ],
@@ -1158,7 +1167,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — launcher active+hidden filter and isDefault→landing proven at the metadata layer, with the AppManagementPage toggle recorded as a client-only stub (expected-fail probe) rather than faked", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-05", "change": "clause 6, negative 1, the stub knownGap, steps 2, 6 and 7 and the title re-pointed (stale, #21784 VF5). objectui 3b7d1cc6d7 (#4233 / #4300, 2026-08-11) wired AppManagementPage to real saveItem / deleteItem before the 17.6.0 console pin, so the 'client-only stub' clause was already stale at 17.6.0. The clause uses the verifier's wording, and negative 1 is derived from it: the page writes through PUT/DELETE /api/v1/meta/app/{name}, a code-package app refuses Disable/Set-default with 403 NOT_OVERRIDABLE, and Delete answers 200 reset:false, a no-op. The 'must not report the app as deleted' half is expected to fail at objectui 9dfaca6543, because handleDelete toasts success without reading reset; the clause says so rather than softening. The member persona now reads invite + sign-up (stock invite_only)", "ref": "#21797" }
+        { "revision": 2, "date": "2026-10-05", "change": "clause 6, negative 1, the stub knownGap, steps 2, 6 and 7 and the title re-pointed (stale, #21784 VF5). objectui 3b7d1cc6d7 (#4233 / #4300, 2026-08-11) wired AppManagementPage to real saveItem / deleteItem before the 17.6.0 console pin, so the 'client-only stub' clause was already stale at 17.6.0. The clause uses the verifier's wording, and negative 1 is derived from it: the page writes through PUT/DELETE /api/v1/meta/app/{name}, a code-package app refuses Disable/Set-default with 403 NOT_OVERRIDABLE, and Delete answers 200 reset:false, a no-op. The 'must not report the app as deleted' half is expected to fail at objectui 9dfaca6543, because handleDelete toasts success without reading reset; the clause says so rather than softening. The member persona now reads invite + sign-up (stock invite_only)", "ref": "#21797" },
+        { "revision": 3, "date": "2026-10-16", "change": "knownGaps[0], steps[5] and [6] and acceptance[5] (clause, verify) re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). Disable and Set-default on a code-package app answer 403 ITEM_LOCKED — the page's write names the app's read-only base — not NOT_OVERRIDABLE; and the console now reads reset:false on Delete and shows a neutral nothing-to-delete toast, so the verify text's 'expect the Delete half to FAIL' note (objectui 9dfaca6543) is stale. Not loosened: a 2xx on either refused write, a missing error toast, or a 'deleted' success after reset:false each still FAIL", "ref": "#24036" }
       ]
     },
     {
@@ -1359,7 +1369,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1381,13 +1391,13 @@
       },
       "steps": [
         "boot showcase isolated; sign in as admin. Read the runtime's protocol version from the running server (the boot banner / GET /api/v1/meta), take its leading major as RT, and derive every range below from RT — never from a literal",
-        "BASELINE: POST /api/v1/packages with { manifest: { id: 'com.example.qa-manifest-probe-a', name: 'Manifest Probe A', version: '1.0.0', scope: 'custom', type: 'app', namespace: 'qa_mfp', engines: { protocol: '^RT' } } }; capture status + body and GET it back — this is the compatible control every refusal below is judged against",
+        "BASELINE: POST /api/v1/packages with { manifest: { id: 'com.example.qa-manifest-probe-a', name: 'Manifest Probe A', version: '1.0.0', scope: 'project', type: 'app', namespace: 'qa_mfp', engines: { protocol: '^RT' } } }; capture status + body and GET it back — this is the compatible control every refusal below is judged against. Every probe manifest below carries the same scope 'project' (the manifest's scope enum is cloud | system | project, default project — packages/spec/src/kernel/manifest.zod.ts; a scope such as 'custom' is refused 400 VALIDATION_ERROR before any gate this item scores is reached)",
         "INCOMPATIBLE: POST id 'com.example.qa-manifest-probe-old' with engines: { protocol: '^(RT-1)' }; capture the refusal IN FULL (status, code, message, rangeSource, targetMajor, migrateCommand). Then GET /api/v1/packages/com.example.qa-manifest-probe-old and GET /api/v1/packages and confirm NO row exists for that id",
         "PRECEDENCE, both directions: POST 'com.example.qa-manifest-probe-prec-ok' with engines: { protocol: '^RT', platform: '^(RT-1)' } → expect install (protocol is consulted first, so the incompatible platform range is never reached); POST 'com.example.qa-manifest-probe-prec-no' with engines: { protocol: '^(RT-1)', platform: '^RT' } → expect refusal whose diagnostic names `engines.protocol` as the range source",
-        "LEGACY leg: POST 'com.example.qa-manifest-probe-legacy' with NO `engines` and engine: { objectstack: '^(RT-1)' } → expect refusal whose diagnostic names `engine.objectstack` as the source; repeat with '^RT' → expect install. This proves the third precedence rung is wired, not merely typed",
+        "LEGACY leg: POST 'com.example.qa-manifest-probe-legacy' with NO `engines` and engine: { objectstack: '^(RT-1).0.0' } → expect refusal whose diagnostic names `engine.objectstack` as the source; repeat with '^RT.0.0' → expect install. The legacy range must be a FULL semver (the manifest schema's engine.objectstack regex wants major.minor.patch): a bare '^(RT-1)' is refused 400 VALIDATION_ERROR at parse and never reaches the handshake. This proves the third precedence rung is wired, not merely typed",
         "GRANDFATHERED: POST 'com.example.qa-manifest-probe-norange' with no `engines` and no `engine` at all → expect install, plus the server's `[protocol] package '…' declares no engines.protocol range` warning in the log",
         "UNPARSED: POST 'com.example.qa-manifest-probe-wsrange' with engines: { protocol: 'workspace:*' } → expect install, plus the `declares an unrecognized engines.protocol range` warning. This is the direction that would break every workspace-linked package if it inverted",
-        "NAMESPACE OWNERSHIP, three legs: (a) POST 'com.example.qa-manifest-probe-b' declaring namespace 'qa_mfp' — the one probe A already owns → expect refusal naming the namespace, the current owner and the incoming id; (b) re-POST probe A's OWN manifest unchanged (same id, same namespace) → expect NO conflict (reinstall/HMR is a normal path); (c) POST 'com.example.qa-manifest-probe-shared' declaring a shareable platform namespace (base / system / sys) → expect NO conflict (shareable namespaces are exempt)",
+        "NAMESPACE OWNERSHIP, three legs: (a) POST 'com.example.qa-manifest-probe-b' declaring namespace 'qa_mfp' — the one probe A already owns → expect refusal naming the namespace, the current owner and the incoming id; (b) re-POST probe A's OWN manifest unchanged (same id, same namespace) as a reinstall — POST /api/v1/packages?overwrite=true, since a plain re-POST of an installed id meets the install door's own already-installed refusal (api-backend.package-rest-lifecycle) before the namespace gate — → expect NO namespace conflict (reinstall/HMR is a normal path); (c) POST 'com.example.qa-manifest-probe-shared' declaring a shareable platform namespace (base / system / sys) → expect NO conflict (shareable namespaces are exempt)",
         "NAMESPACE DERIVATION: POST id 'com.example.leave' with NO namespace declared → GET it back and read manifest.namespace; then POST 'com.example.holiday' WITH an explicit namespace 'timeoff' → GET it back and confirm the declared value survived untouched",
         "teardown: DELETE every scratch package created above, or simply discard the isolated file DB — the cheaper path an isolated boot makes free. ⚠️ Several legs here are NOT re-runnable in place (step 8b depends on probe A still being installed, and 8a stops being a conflict once probe A is gone), so a re-run starts from a clean DB rather than from the tail of the previous one"
       ],
@@ -1461,6 +1471,12 @@
           "date": "2026-09-20",
           "change": "the scratch probe ids these steps POST are rewritten to reverse-domain spellings (com.example.qa-manifest-probe-*) — `ManifestSchema.id` now carries `MANIFEST_ID_PATTERN`, so the underscored spellings this item used to name are refused by every door but the HTTP install door, and a checklist that teaches one is the trap the pattern was added to close. Steps, legs and expected verdicts are otherwise unchanged",
           "ref": "#18319"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps[1], [4] and [7](b) re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). The probe manifests used scope 'custom', which POST /packages refuses (the enum is cloud | system | project), so the baseline never installed; the legacy engine.objectstack range must be full semver ('^17.0.0') because a bare major is a 400 VALIDATION_ERROR at parse; and #23939 drove the own-namespace reinstall leg as POST ?overwrite=true. Not loosened: every refusal and admission the clauses score is unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -1469,7 +1485,7 @@
       "title": "The activation ledger's registration home: sys_metadata_activation is registered by PlatformObjectsPlugin under its OWN manifest, so packaged disable works with or without the automation service — one owner, datasource binding carried across the move",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1513,7 +1529,7 @@
         {
           "clause": "the datasource binding is carried by the registrar, unchanged by the move: the owning ACTIVATION_LEDGER_MANIFEST carries the automation manifest's scope/namespace/defaultDatasource triple verbatim (scope 'system', defaultDatasource 'cloud', namespace 'sys'), so on a composition with no 'cloud' driver the table rides the global default driver exactly as before — a binding change would leave existing rows in one database and read another, silently re-arming every artifact an administrator disabled (ADR-0126 §6 wall 3 through a side door)",
           "oracle": "test",
-          "verify": "the dogfood binding test: resolveEffectiveDatasource('sys_metadata_activation') === undefined on the no-cloud composition, with sys_automation_run as the control proving the resolver is not answering undefined for everything; the manifest triple itself is pinned in platform-objects/src/plugin.test.ts where it is visible without a cloud driver existing",
+          "verify": "the dogfood binding test: resolveEffectiveDatasource('sys_metadata_activation') === undefined on the no-cloud composition. ⚠ The test also reads sys_automation_run, and asserts it is undefined TOO — a same-answer parity check, not an anti-vacuity control: it cannot show the resolver is not answering undefined for everything, so do not cite it as one. The binding claim rests on the manifest triple pinned in platform-objects/src/plugin.test.ts, where it is visible without a cloud driver existing; record the sys_automation_run read as parity only",
           "evidence": "the vitest output naming both assertions"
         },
         {
@@ -1567,6 +1583,12 @@
           "date": "2026-10-09",
           "change": "the no-automation composition is restated as the dogfood suite now builds it. #22301 made bootStack compose what `os serve` composes, the app's own `requires` included, so `bootStack(showcaseStack)` with the automation option omitted now mounts the automation service and no longer stages the #12359 composition. The suite boots a showcase-derived configuration that does not declare automation instead: the 'automation' token taken out of `requires`, and the app plugins that depend on the automation service left out. fixtures.requires, step 1, the harness source entry and revision 1's history note are re-said to match. Steps, legs, clauses and expected verdicts are otherwise unchanged, and the anti-vacuity control is still the suite's first test",
           "ref": "#22301"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "acceptance[3].verify corrected (checklist-accuracy finding of QA run #23939, wave #23878). It called sys_automation_run 'the control proving the resolver is not answering undefined for everything', but the dogfood test asserts sys_automation_run is undefined as well — a same-answer parity check that cannot discriminate. The verify text now says so and rests the binding claim on the manifest-triple pin it already cited; the clause's assertion is unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -1575,7 +1597,7 @@
       "title": "sys_metadata_activation row contract: reads open / generic-data-API writes 405, one row per (metadata_type, name) with NO tenant column on the table at all, re-enable updates never deletes, and rows exist ONLY for the metadata types a shipped door writes — flow, action, position, permission (the ADR-0126 scope wall, as ADR-0131 D3 widens it)",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1597,14 +1619,14 @@
         "write-refusal probes, all three verbs: POST /api/v1/data/sys_metadata_activation {metadata_type:'action',name:'qa_probe',package_id:'qa',active:false}, PATCH /api/v1/data/sys_metadata_activation/<existing id> {active:true}, DELETE /api/v1/data/sys_metadata_activation/<existing id> — each answers 405 naming the refused operation and the allowed set; re-read confirms every row unchanged",
         "re-enable every switch flipped in step 1 — the SAME rows update to active true (same ids, row count unchanged, nothing vanished)",
         "uniqueness probe (direct DB): stop the server; in the sqlite file INSERT a second row for an existing (metadata_type, name) pair — the declared unique:'global' index over exactly those two columns refuses with a UNIQUE constraint error; capture it. Both key parts are required text, so no NULL arm is left to collapse: the earlier unique:'organization' spelling asked the driver to prepend the tenant column in its COALESCE'd form (ADR-0120 D3) against the #5030 NULL-distinct hole, and with the column gone normalizeDeclaredIndex resolves tenantField to null — so the materialized DDL is byte-identical either way and the current spelling is a re-SPELLING, not a change of shape (sys-metadata-activation.object.ts records it)",
-        "no-tenant-column probe (direct DB, server still stopped): read the physical schema — PRAGMA table_info(sys_metadata_activation) — and record the column list: metadata_type, name, package_id and active are present beside the driver's id and the injected audit family (created_at / created_by / updated_at / updated_by), and NOTHING tenant-shaped is — organization_id is absent from the list entirely. Then attempt INSERT INTO sys_metadata_activation (id, metadata_type, name, package_id, active, organization_id) VALUES ('qa_probe_no_tenant','action','qa_probe_no_tenant','qa',0,'org_qa') — sqlite refuses with `table sys_metadata_activation has no column named organization_id` and no row lands. CONTROL (anti-vacuity, same DB): the SAME statement with the organization_id column and its value dropped SUCCEEDS — so the refusal names the missing column, not a malformed statement and not the unique index (the (metadata_type, name) pair is fresh on purpose, so step 6's index cannot be what answered). DELETE the control row, then restart against the SAME DB and confirm the ledger reads exactly as it did before the probe",
+        "no-tenant-column probe (direct DB, server still stopped): read the physical schema — PRAGMA table_info(sys_metadata_activation) — and record the column list: metadata_type, name, package_id and active are present beside the driver's id, the injected audit family (created_at / created_by / updated_at / updated_by) and the search companion column __search (the object is searchable — packages/objectql/src/search-companion.ts#SEARCH_COMPANION_FIELD), and NOTHING tenant-shaped is — organization_id is absent from the list entirely. Then attempt INSERT INTO sys_metadata_activation (id, metadata_type, name, package_id, active, organization_id) VALUES ('qa_probe_no_tenant','action','qa_probe_no_tenant','qa',0,'org_qa') — sqlite refuses with `table sys_metadata_activation has no column named organization_id` and no row lands. CONTROL (anti-vacuity, same DB): the SAME statement with the organization_id column and its value dropped SUCCEEDS — so the refusal names the missing column, not a malformed statement and not the unique index (the (metadata_type, name) pair is fresh on purpose, so step 6's index cannot be what answered). DELETE the control row, then restart against the SAME DB and confirm the ledger reads exactly as it did before the probe",
         "record the operability posture: absence of a row reads as ACTIVE (an empty ledger is the normal stock state, not an error), and the data-API read IS the only 'what is off here' surface today — ObjectQLEngine.listDisabledActions() (packages/objectql/src/engine.ts) has zero route consumers"
       ],
       "acceptance": [
         {
           "clause": "reads open, generic writes refused: GET /api/v1/data/sys_metadata_activation answers 200 for an admin (operability surfaces can ask 'what is disabled here'), while create/update/delete through the generic data API each answer 405 naming the refused operation — the rows are written by the ADR-0126 enable/disable doors under a system context and by nothing else (ADR-0103 engine-owned posture)",
           "oracle": "api",
-          "verify": "the 200 list read + the three 405s from step 4 (apiMethods ['get','list'] at sys-metadata-activation.object.ts; the 405-with-allowedOperations shape from checkApiExposure, packages/runtime/src/api-exposure.ts); the post-probe re-read diffs empty",
+          "verify": "the 200 list read + the three 405s from step 4, each naming the refused operation and an allowed set of exactly [get, list, aggregate, search, export] — the declared apiMethods ['get','list'] plus the read verbs `list` derives (packages/spec/src/data/api-derivation.ts#API_METHOD_DERIVATION: aggregate, export and search are derived from list), as checkApiExposure computes it (packages/runtime/src/api-exposure.ts); the post-probe re-read diffs empty. An allowed set that holds create, update or delete is a FAIL",
           "evidence": "the list read + the three refusal bodies + the empty diff"
         },
         {
@@ -1614,7 +1636,7 @@
           "evidence": "the row dump + the refused INSERT with its constraint error"
         },
         {
-          "clause": "the ledger carries NO tenant column, and cannot be handed a row that has one: PRAGMA table_info lists the four ledger columns beside id and the audit family with nothing tenant-shaped among them, and an INSERT naming organization_id is refused by sqlite while the same INSERT without it lands. A row here is DEPLOYMENT-level state no organization owns (ADR-0131 D7, which WITHDREW ADR-0126 D3's reserved-and-never-written column before 17.3), so there is no per-organization row left for a read to merge OR to skip",
+          "clause": "the ledger carries NO tenant column, and cannot be handed a row that has one: PRAGMA table_info lists the four ledger columns beside id, the audit family and the __search companion column, with nothing tenant-shaped among them, and an INSERT naming organization_id is refused by sqlite while the same INSERT without it lands. A row here is DEPLOYMENT-level state no organization owns (ADR-0131 D7, which WITHDREW ADR-0126 D3's reserved-and-never-written column before 17.3), so there is no per-organization row left for a read to merge OR to skip",
           "oracle": "log",
           "verify": "step 7 both arms: the PRAGMA column list with organization_id absent, then the refused INSERT quoting sqlite's `has no column named organization_id`, bracketed by the control INSERT that succeeds once the column is dropped from the statement. Ground the DECLARATION side against systemFields { tenant: false } at sys-metadata-activation.object.ts — the opt-out that REMOVES the column rather than one that leaves it unwritten, since resolveInjectedSystemColumns would provision it by injection with no field declared at all. ⛔ Never score this clause from a row-VALUE read (see step 2)",
           "evidence": "the PRAGMA column list + the refused INSERT with sqlite's message + the successful control INSERT"
@@ -1689,6 +1711,12 @@
           "date": "2026-10-16",
           "change": "stale clause re-pointed (#23950, from QA run #23939): acceptance[4] held the scope wall at {flow, action} and named a position or permission row a FAIL of the model, on the 2026-08-26 #12159 ruling that a permission set rides its own active field. ADR-0131 D3 superseded that: the on/off switch of a position and of a permission set moved off the catalog row into this ledger, read by readDisabledCatalogNames, and the shipped door POST /api/v1/security/_activation/:type/:name (packages/runtime/src/domains/catalog-activation.ts, ADR-0126 §3 regime C as ADR-0131 D6 amends it) writes those rows — so a stock switch wrote a legitimate 'position' row and the clause went red against a correct product. The item's own knownGap asked for exactly this revision when a third writer shipped. The wall is now the four values the shipped doors write, still hand-enumerated, and it gains a door-side leg: a :type outside position/permission (capability) and an audience anchor (everyone) are refused 400 with no row, so the clause still fails if a fifth type or an anchor gets a row. Step 1 flips all four switches and step 5 re-enables them (acceptance[3] follows); the variants, the knownGap's writer list, the title, a negative and the sources follow, and the #12159 citation is marked superseded",
           "ref": "#23950"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "acceptance[0].verify, steps[6] and acceptance[2].clause corrected (residual checklist-accuracy finding of QA run #23939, wave #23878; PR #24000 re-pointed clause 4). The 405's allowed set is [get, list, aggregate, search, export] — the declared apiMethods ['get','list'] plus the verbs list derives (API_METHOD_DERIVATION) — not the bare apiMethods pair, and PRAGMA table_info also lists the __search companion column the searchable object carries. The verify text now names the allowed set exactly (a write verb in it FAILS) and the column list names __search. Not loosened: organization_id must still be absent and every generic write still 405",
+          "ref": "#24036"
         }
       ]
     },
@@ -1697,7 +1725,7 @@
       "title": "Packaged objects are extend-only (Regime E): an extension package's fields merge additively and round-trip on showcase_account, while an in-place field add on the packaged object is refused server-side at both write doors — and the collision-refusal half of the docs claim does not exist yet",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1713,7 +1741,7 @@
       "steps": [
         "additive half — CROSS-REF, do not duplicate: platform-core.metadata-registry-serving owns the overlay steps (its steps 7-8 / clauses 5-6): the three AccountExtension fields present in the MERGED GET /api/v1/meta/object/showcase_account, rendering on the form, and a loyalty_tier + csat_score write round-tripping through /api/v1/data/showcase_account. Cite that item's verdicts when the same run scored them; otherwise drive exactly those steps here",
         "capture the BEFORE image for the refusal half: GET /api/v1/meta/object/showcase_account and keep the full served field inventory",
-        "in-place refusal, door 1 (org-overlay): PUT /api/v1/meta/object/showcase_account with the served body plus ONE added field qa_inplace_probe_<runid> and NO ?package= → expect 403 NOT_OVERRIDABLE (type 'object' is not in the ADR-0005 overlay opt-ins; the refusal names allowRuntimeCreate/allowEnvironmentOverlay and the OS_METADATA_WRITABLE escape hatch — packages/metadata-protocol/src/protocol.ts)",
+        "in-place refusal, door 1 (org-overlay): PUT /api/v1/meta/object/showcase_account with the served body plus ONE added field qa_inplace_probe_<runid> and NO ?package= → expect 403 NOT_OVERRIDABLE (type 'object' is not in the ADR-0005 overlay opt-ins — packages/metadata-protocol/src/protocol.ts). The refusal's sentence now says the item is provided by a managed package and is sealed (ADR-0131 D6: no escape hatch opens a packaged item); score the status and error.code, not its wording",
         "in-place refusal, door 2 (package write): repeat the same PUT with ?package=com.example.showcase (the showcase's read-only code package) → expect the read-only-base refusal (403 ITEM_LOCKED class — the same door access-security.owd-save-gate's control leg measured on stock, #9477); record WHICH door answered and the exact status + code, reading declaredCode where the wire code is a mapped generic",
         "after both refusals: re-GET /api/v1/meta/object/showcase_account and diff against step 2 — byte-identical; qa_inplace_probe_ absent, the three extension fields still present",
         "record the Regime E provenance posture: the extension arrived AS A PACKAGE — it registers as an 'extend' contributor (packages/objectql/src/engine.ts) folded over the base at resolution (mergeObjectDefinitions), the base package's authored definition is never edited, and package identity supplies provenance and upgrade isolation (ADR-0126 §3: 'the customization IS a package', install-grain not per-org)"
@@ -1749,7 +1777,7 @@
         "examples/app-showcase/src/data/extensions/account.extension.ts#AccountExtension (AccountExtension — the shipped fixture, priority 210)",
         "packages/objectql/src/registry.ts#mergeObjectDefinitions (mergeObjectDefinitions — additive fields fold, the spread) + vicinity via engine: packages/objectql/src/engine.ts#registerApp (the objectExtensions loop registering 'extend' contributors — re-pointed #18104: objectExtensions is read off the manifest here, a member access; the loop this item means runs inside registerApp, which this file declares)",
         "packages/spec/src/data/object.zod.ts#ObjectExtensionSchema (ObjectExtensionSchema — what an extension may carry, the #4001 silently-dropped history, 'Fields to add/override', priority wins-on-conflict; defineObjectExtension)",
-        "packages/metadata-protocol/src/protocol.ts#refusal (the NOT_OVERRIDABLE refusal text and escape hatch)",
+        "packages/metadata-protocol/src/protocol.ts#refusal (the NOT_OVERRIDABLE refusal: a packaged item is sealed by its managed package, ADR-0131 D6)",
         "packages/plugins/plugin-auth/src/managed-extension-fields.ts + managed-extension-fields.test.ts (the build-time collision gate — better-auth-managed objects ONLY; adopted by ADR-0126 §3 as Regime E prior art, NOT a generic gate)",
         "docs/adr/0126-packaged-metadata-customization-model.md §2-§3 (Regime E: additive contributions at package grain, base never edited, install-grain not per-org)",
         "content/docs/capabilities/integrations.mdx + content/docs/build-without-code.mdx (the E1 docs claim this item grounds)",
@@ -1762,6 +1790,12 @@
           "date": "2026-08-26",
           "change": "new — authored in the #12438 scoped sweep to ground the E1 tier-3 docs claim. Grounding CORRECTED the claim's third half before authoring: no collision refusal exists for generic object extensions (mergeObjectDefinitions spreads extension fields over the base and the schema documents override-by-priority; the managed-extension-fields build gate covers better-auth objects only and is adopted by ADR-0126 §3 as prior art, not as a live gate) — so that half is a knownGap with an explicit do-not-file-as-FAIL rule, and the item asserts the two halves source supports: additive merge + round-trip (cross-referenced to metadata-registry-serving, not duplicated) and the server-side in-place refusal at both write doors",
           "ref": "#12438"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-16",
+          "change": "steps[2] and source[3] corrected (checklist-accuracy finding of QA run #23939, wave #23878, and #23879). The NOT_OVERRIDABLE refusal no longer names allowRuntimeCreate/allowEnvironmentOverlay and the OS_METADATA_WRITABLE escape hatch; it says, in one sentence, that the item is provided by a managed package and is sealed (ADR-0131 D6). The step now scores the status and code it always expected and describes the sentence without pinning it. Wording only: no request or oracle changed",
+          "ref": "#24036"
         }
       ]
     },
@@ -1770,7 +1804,7 @@
       "title": "Marketplace install-local: the wiring matrix mounts the right arms per OS_CLOUD_URL, the air-gapped inline install works with NO control plane, reseed/purge touch exactly the sample rows, every mutating door is manage_metadata-gated both sides, and the listing projects installedBy/storageDir per principal",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1796,8 +1830,8 @@
         "boot B (OS_CLOUD_URL=off), as admin: GET /api/v1/runtime/config → still served, now reporting installLocal:true AND marketplace:false (#8389 discovery + #8356 route-table derivation); GET /api/v1/marketplace/install-local → 200 []; a browse-namespace probe (e.g. GET /api/v1/marketplace/packages) → 404 (the proxy did NOT mount); GET /api/v1/cloud-connection/status → 404 (cloud-connection did NOT mount)",
         "build the artifact: pnpm -C examples/app-crm build; confirm dist/objectstack.json exists",
         "air-gapped install against boot B: `os package install./examples/app-crm/dist/objectstack.json` with admin credentials — the CLI signs in, then POSTs the manifest inline to /api/v1/marketplace/install-local (install.ts); capture the success output and the installed entry",
-        "confirm the install registered: GET /api/v1/meta/app lists the CRM app; a CRM object answers on /api/v1/data; GET /api/v1/marketplace/install-local as admin shows the entry WITH installedBy and storageDir",
-        "per-principal projection (#9011): repeat the GET as the plain member — 200, the entry listed, but installedBy/storageDir ABSENT from the body; repeat anonymous — 401",
+        "confirm the install registered: GET /api/v1/meta/app lists the CRM app; a CRM object answers on /api/v1/data; GET /api/v1/marketplace/install-local as admin shows the entry WITH installedBy, and storageDir on the listing envelope (data.storageDir — one value for the whole ledger, not a per-entry field)",
+        "per-principal projection (#9011): repeat the GET as the plain member — 200, the entry listed, but installedBy ABSENT from the entry and storageDir ABSENT from the envelope; repeat anonymous — 401",
         "reseed/purge on the installed entry: create ONE user-authored row in an installed CRM object and record its id; POST /api/v1/marketplace/install-local/:manifestId/purge-sample-data as admin — capture {deleted, skipped, errors}; re-read: every manifest-declared seed id is gone, the user-authored row SURVIVES (the purge deletes only ids declared in the cached manifest's seed datasets — marketplace-install-local-plugin.ts); restart boot B against the same DB and confirm the purged rows do NOT come back (sampleDataPurged persisted on the ledger entry)",
         "POST …/:manifestId/reseed-sample-data as admin — the sample rows return and sampleDataPurged flips back off",
         "capability gate both sides (#8976): as the plain member, POST install-local (any body), DELETE …/:manifestId, POST reseed, POST purge — each 403 naming the manage_metadata requirement; anonymous on each → 401; the admin's same calls succeeded above",
@@ -1823,7 +1857,7 @@
           "evidence": "CLI transcript + the meta/app listing + one data read"
         },
         {
-          "clause": "the listing is per-principal (#9011): admin sees installedBy + storageDir on each entry; an authenticated NON-manage_metadata member gets the entry WITHOUT those two fields; anonymous gets 401 — presence-preserving projection, not a hidden route",
+          "clause": "the listing is per-principal (#9011): admin sees installedBy on each entry and storageDir on the listing envelope (data.storageDir); an authenticated NON-manage_metadata member gets the entry WITHOUT installedBy and an envelope WITHOUT storageDir — both keys omitted, never nulled; anonymous gets 401 — presence-preserving projection, not a hidden route (packages/cloud-connection/src/marketplace-install-local-plugin.ts, handleList)",
           "oracle": "api",
           "verify": "the three GET /api/v1/marketplace/install-local bodies side by side; the member's body must still LIST the entry (a 403 or an empty list for the member is a different, wrong behavior)",
           "evidence": "the three response bodies"
@@ -1881,6 +1915,12 @@
           "date": "2026-10-13",
           "change": "fixtures.requires[1] gained the scratch-copy rule (setup recipe gap, #23104; recorded on platform-core.marketplace-console-honesty, which names this item, and carried by #23169). install-local caches the installed manifest relative to the server's working directory (local-manifest-source.ts DEFAULT_INSTALLED_PACKAGES_DIR under process.cwd()), and a per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT does not redirect it, so an install from a boot started in the shared tree lands in examples/app-showcase/.objectstack/installed-packages (QA run #23163, 25 s, removed through the API). No clause changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "steps[4] and [5] and acceptance[3].clause corrected (checklist-accuracy finding of QA run #23939, wave #23878). storageDir is served once, on the listing envelope (data.storageDir), not on each entry — the admin entry carries installedBy only — so 'installedBy + storageDir on each entry' named a field the entries never carry. The clause now reads each field where it lives and still requires both to be omitted for the member. Not loosened: a member who sees either field, or is refused or served an empty list, still FAILS",
+          "ref": "#24036"
         }
       ]
     },
@@ -1889,7 +1929,7 @@
       "title": "Marketplace console honesty: nav entries live and die with their capability, the disabled state renders the configuration conclusion (never a red 'failed to load') for every viewer ahead of the admin guard, Installed Apps drives the real same-origin lifecycle, and an enabled runtime turns a non-admin away with access-denied",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -1910,7 +1950,7 @@
       "steps": [
         "boot B (OS_CLOUD_URL=off), as admin in Setup: confirm the group_apps nav carries Installed Apps (nav_marketplace_installed — the entry rides MARKETPLACE_INSTALLED_UI_BUNDLE, registered by the install-local plugin that IS mounted) and does NOT carry Browse Marketplace (nav_marketplace_browse rides the browse proxy, which is not mounted) — the marketplace-ui.ts ownership rule: 'the entry lives and dies with the capability → no dead page'",
         "boot B: navigate directly to /apps/setup/system/marketplace — the page renders the MarketplaceDisabled card (data-testid marketplace-disabled): muted informational styling, a hint addressed to the operator naming the action, a Back-home button. Screenshot",
-        "boot B: open the Installed Apps page — the installed CRM entry renders with its manifest identity; drive reseed and purge from the page and capture the same-origin POSTs to /api/v1/marketplace/install-local/:manifestId/{reseed,purge}-sample-data on the wire",
+        "boot B: open the Installed Apps page — the installed CRM entry renders with its manifest identity; open that package's Details page, where reseed and purge live in the 'More install options' menu (objectui#11627 — they are not on the Installed Apps list itself), drive both and capture the same-origin POSTs to /api/v1/marketplace/install-local/:manifestId/{reseed,purge}-sample-data on the wire",
         "boot A (default), as admin: the group_apps nav now carries BOTH Browse Marketplace and Installed Apps plus Cloud Connection (nav_cloud_connection); open the browse page — if the control plane is reachable the catalog renders; if not, record blocked(environment) for the catalog leg only (the page mounting and asking is this kernel's part)",
         "as the plain member on boot A (marketplace enabled): navigate directly to /apps/setup/system/marketplace — once the admin verdict resolves (MarketplaceResolving holds only until then) the page renders MarketplaceAccessDenied, never an indefinite spinner and never the destructive card; then open a package URL (…/system/marketplace/:packageId) and confirm the package page issues no package request for the member. On boot B the same URLs render the MarketplaceDisabled card for the member too: objectui#5557 moved the disabled return AHEAD of the !isAdmin guard, because 'there is no marketplace here' is true of every viewer",
         "on boot B reload the disabled page several times: confirm no transient red 'Failed to load' card paints before the disabled card settles (the objectui#5533/#5557 resolving-state work — MarketplaceResolving covers the gap)"
@@ -1929,9 +1969,9 @@
           "evidence": "the screenshot + the runtime-config body it rests on"
         },
         {
-          "clause": "Installed Apps is a real console: it lists the locally installed entry and its reseed/purge affordances issue the same-origin install-local POSTs, whose effects the api-lane item verifies — capture the wire calls here, score the row-level effects there (no double-cover)",
+          "clause": "Installed Apps is a real console: it lists the locally installed entry, and the reseed/purge affordances on that package's Details page ('More install options') issue the same-origin install-local POSTs, whose effects the api-lane item verifies — capture the wire calls here, score the row-level effects there (no double-cover)",
           "oracle": "network",
-          "verify": "the captured POSTs to /api/v1/marketplace/install-local/:manifestId/reseed-sample-data and purge-sample-data from the page's buttons, answering 2xx as admin",
+          "verify": "the captured POSTs to /api/v1/marketplace/install-local/:manifestId/reseed-sample-data and purge-sample-data from the Details page's 'More install options' menu, answering 2xx as admin",
           "evidence": "the network trace + the page screenshot"
         },
         {
@@ -1985,6 +2025,12 @@
           "date": "2026-10-13",
           "change": "fixtures.requires[2] (new) carries the scratch-copy rule for any boot that installs a package (setup recipe gap, #23104; parked on #23121, carried by #23169). install-local caches its manifest under the working directory's .objectstack/installed-packages (local-manifest-source.ts DEFAULT_INSTALLED_PACKAGES_DIR, resolved against process.cwd()), and per-boot OS_HOME / OS_STORAGE_LOCAL_ROOT do not redirect it. In QA run #23163 a boot started from the shared tree wrote a CRM manifest into examples/app-showcase/.objectstack/installed-packages for 25 s before it was removed through the API. RUNNER.md's environment facts carry the same rule. No clause changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "steps[2] and acceptance[2] (clause, verify) re-pointed (checklist-accuracy finding of QA run #23939, wave #23878). Reseed and purge are not on the Installed Apps list: they are in the package Details page's 'More install options' menu (objectui#11627), which is where #23939 drove them. The Installed Apps note #23939 saw as stale was objectui#12684; the console pin since moved that note into the Uninstall tooltip (objectui#12610). Not loosened: both POSTs must still leave the page same-origin and answer 2xx",
+          "ref": "#24036"
         }
       ]
     },
@@ -2255,7 +2301,7 @@
       "title": "Keyboard shortcut surface: `?` and ?shortcuts=1 open the dialog and Esc closes it, typing in an input never triggers it, the dialog lists exactly the shortcuts whose handler is mounted and every listed one fires (⌘K, ⌘/Ctrl+B shown as ⌘B, Esc, ?), the five formerly advertised dead accelerators (⌘/, N, R, ⌘E, ⌘D) are neither listed nor bound, and the AI-chat pair ⌘⇧O / ⌘⇧S is listed only on the page that handles it (objectui#11674)",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2273,7 +2319,7 @@
         "press `?` on a settled console page (focus NOT in an input) — the shortcuts dialog opens (overlay data-testid overlay:keyboard-shortcuts) and the URL carries ?shortcuts=1; press Esc — it closes and the param clears",
         "deep-link: open <any-route>?shortcuts=1 cold — the dialog is open on load (URL-addressable, ADR-0054)",
         "input guard: focus a text input (e.g. a list filter), type `?` — the character lands in the input and NO dialog opens (the handler returns early for INPUT/TEXTAREA/contentEditable)",
-        "inventory the dialog: capture every listed accelerator. The rows are derived from the handlers mounted at that moment (advertisedShortcuts.ts, objectui#11674), so on a stock page at objectui 1fb1ced36243 the dialog lists exactly: General — Close dialog/panel `Esc`, Open command palette `⌘ K`, Show keyboard shortcuts `?`; Navigation — Toggle sidebar `⌘ B`. No AI-chat group appears off the chat page, and nothing else is listed",
+        "inventory the dialog: capture every listed accelerator. The rows are derived from the handlers mounted at that moment (advertisedShortcuts.ts, objectui#11674), so on a stock page at the console pin the dialog lists exactly (read at objectui 1fb1ced36243, and again at daeb77fc84dd by QA run #23939): General — Close dialog/panel `Esc`, Open command palette `⌘ K`, Show keyboard shortcuts `?`; Navigation — Toggle sidebar `⌘ B`. No AI-chat group appears off the chat page, and nothing else is listed",
         "fire the WIRED set: ⌘K (or Ctrl+K) opens the command palette (depth of the palette itself belongs to search.console-global-search — here only that the accelerator fires); ⌘/Ctrl+B toggles the sidebar; ⌘⇧I is NOT probed here — its gated/entitled matrix belongs to ai.console-ai-surface-gating",
         "display-equals-binding probe for the sidebar: the dialog shows `⌘ B` (a mod chord), never bare B — press bare B (no modifier) outside any input: NOTHING happens (the handler requires metaKey||ctrlKey); press ⌘B and Ctrl+B: the sidebar toggles each time. Display and binding agree",
         "unlisted-key probes, one by one on the object list, focus on the page body: ⌘/ (once advertised as focus-search), N (create record), R (refresh data), ⌘E (edit record), ⌘D (toggle dark mode). First confirm none of the five is listed in the dialog; then, for each, capture that NO corresponding effect occurs (no focused search box, no create overlay, no refetch on the wire, no edit mode, no theme class change). None of the five has a handler, and since objectui#11674 none is advertised: the advertised set equals the wired set. A key here that now ACTS while unlisted, or one that is listed again with no effect, breaks that equality",
@@ -2344,6 +2390,12 @@
           "date": "2026-10-13",
           "change": "acceptance[2], [3] and [4] (#23104 C2, C3, C4) flipped from expected-fail probes to positive assertions, with the title, fixtures.requires[0], knownGaps[1], steps[3], [5] and [6], negative[2] and four source notes (stale spec; rows from #23104 parked on #23121, carried by #23169). objectui#11674 derived the shortcuts dialog's rows from the handlers mounted at that moment (advertisedShortcuts.ts), so the five dead accelerators (⌘/, N, R, ⌘E, ⌘D) are no longer listed, Toggle sidebar is listed as ⌘B rather than bare B, and the AI-chat pair ⌘⇧O / ⌘⇧S is advertised by AiChatPage and listed only while that page is mounted. QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243) read the stock inventory as General: Esc, ⌘K, ?; Navigation: ⌘B, with bare B inert, Ctrl+B toggling and each of the five keys without effect. Re-read from objectui source at the same pin, which is still this repo's .objectui-sha: KeyboardShortcutsDialog.tsx, advertisedShortcuts.ts, ConsoleLayout.tsx, AiChatPage.tsx and the pin KeyboardShortcutsDialog.wiredOnly-11674.test.tsx. The on-page half of acceptance[4] stays blocked(environment) on stock",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "steps[3]'s pin note brought forward (checklist-accuracy finding of QA run #23939, wave #23878): the settled inventory — Esc, ⌘ K, ? and ⌘ B, nothing else off the chat page — matched exactly at objectui daeb77fc84dd too, not only at 1fb1ced36243. Wording only: the inventory and every clause are unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -2441,27 +2493,27 @@
       "title": "ADR-0057 lifecycle sweep: backdated telemetry rows past retention are reaped BOUNDED under a system context on the hourly sweep, onlyWhen scoping spares live rows, an archive-declaring object is NEVER hot-deleted unarchived (retained + reported archive-pending when no archive datasource exists), the transient class stays on the primary, and OS_LIFECYCLE_DISABLED=1 disarms the sweep",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["operator (local shell + direct sqlite access)", "seeded admin (API reads)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "an isolated boot on a file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access between boots — retention judges created_at, which no REST write lets a caller backdate, so the crash-shaped fixtures are hand-seeded into the sqlite file (the same fixture class platform-core.interrupted-migration-boot-report proved)",
+          "an isolated boot on a file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access between boots — retention judges created_at, which no REST write lets a caller backdate, so the crash-shaped fixtures are hand-seeded into the sqlite files (the same fixture class platform-core.interrupted-migration-boot-report proved). ⚠ TWO files: on `os dev` with a file-backed primary the CLI provisions a sibling telemetry datasource, data.telemetry.db beside data.db (packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath), and the engine routes every telemetry/audit/event-classed object there — so sys_automation_run and sys_audit_log rows are seeded into data.telemetry.db, while the transient sys_inbox_message stays in data.db",
           "stock lifecycle declarations as the subjects: sys_automation_run (class telemetry, retention 30d, onlyWhen status ∈ completed|failed — the MIXED-table scoping), sys_audit_log (class audit, archive after 90d to the 'archive' datasource — the never-hot-delete subject), sys_inbox_message (class transient)",
           "patience for the timer: the first sweep fires DEFAULT_LIFECYCLE_INITIAL_DELAY_MS = 60s after engine start, then hourly — every probe boot needs a ≥60s settle before reading results (eventual-consistency: do not read the absence of a reap before the sweep ran)"
         ],
         "knownGaps": [
           "the ARCHIVE-SUCCESS leg (rows copied to the archive datasource, then hot-deleted) needs a registered 'archive' datasource, which no stock boot has — that leg rides the unit pin (lifecycle-service.test.ts) and stays blocked(fixture) live; what IS live on stock is the SAFETY side: sys_audit_log rows older than 90d are RETAINED and the sweep reports the object skipped archive-pending",
-          "class-routing to a dedicated 'telemetry' datasource (ADR-0057 §3.6) engages only when a telemetry datasource is registered — absent on stock, so the routing leg is asserted at the unit/source level (engine.ts getDriver priority + SYSTEM_LEDGER_LIFECYCLE_CLASSES), not live",
+          "class-routing to a dedicated 'telemetry' datasource (ADR-0057 §3.6) engages when a telemetry datasource is registered — and the canonical checklist boot (`os dev` on a file DB) registers one: the CLI provisions <primary>.telemetry.db by default in dev (packages/cli/src/utils/telemetry-datasource.ts#resolveTelemetryDbPath; OS_TELEMETRY_DB=off opts out, and prod serve provisions none unless OS_TELEMETRY_DB names a path). So the routing is live on stock: sys_automation_run and sys_audit_log rows live in data.telemetry.db (QA run #23939 seeded them there). The engine side stays engine.ts getDriver priority + SYSTEM_LEDGER_LIFECYCLE_CLASSES",
           "the ≤ REAP_BATCH_SIZE × REAP_MAX_BATCHES_PER_SWEEP bound (500×20 per object per sweep) is proven by the unit suite; staging >10k backdated rows live is not required — the live clause asserts the reap happened via the bounded per-id path (the aggregate log line), not the bound's edge",
           "RULED, no longer a gap — the idle-proof step, steps[4] (QA run #23166 C1, parked on #23121, carried by #23169): the maintainer ruled (decision 6147446653, ruling A recorded in 6160866003) that the step was stale and the product is correct, and revision 3 rewrites steps[4] as a positive heartbeat check. The line the run saw is the design: an idle sweep on a clean DB logs '[lifecycle] sweep: 18 policy(ies) applied, ~0 rows reaped, …' (objectstack 36b2889c), because the print gate in lifecycle-service.ts tests report.swept.length and the reaper pushes a report.swept entry for every policy it applies, deleted 0 included. ADR-0057 §3.3 bounds that trace ('Aggregate one summary row at most'); the one-line-per-sweep wording is the code comment at the print site, not ADR text. A run scored against revision 2 or earlier that saw this line on an idle sweep observed correct behaviour, not a fail"
         ]
       },
       "steps": [
         "boot once on the file DB so schema exists; stop the server",
-        "hand-seed via sqlite: (a) N sys_automation_run rows with created_at 40 days ago, status 'completed' (past the 30d window, terminal); (b) 2 rows created_at 40 days ago with status 'paused'/'running' (past the window but NOT terminal); (c) 1 sys_audit_log row created_at 100 days ago (past archive.after 90d); (d) 1 sys_inbox_message row (transient class). Record exact counts and ids",
+        "hand-seed via sqlite, each row into the file its object lives in (fixtures.requires[0]): into data.telemetry.db — (a) N sys_automation_run rows with created_at 40 days ago, status 'completed' (past the 30d window, terminal); (b) 2 rows created_at 40 days ago with status 'paused'/'running' (past the window but NOT terminal); (c) 1 sys_audit_log row created_at 100 days ago (past archive.after 90d); into data.db — (d) 1 sys_inbox_message row (transient class). Record exact counts and ids. A row seeded into the wrong file is invisible to the sweep and reads as 'survived', which is the false pass this split exists to prevent",
         "boot again (control boot, no lifecycle flag) with OS_LOG_LEVEL=info exported (or `--log-level info`): the aggregate sweep line is logged at INFO, and `os dev` defaults the kernel logger to warn, so a default-level boot never prints it; wait ≥90s; grep the log for '[lifecycle] sweep: … policy(ies) applied, ~… rows reaped …' (the ONE trace a sweep leaves — cleanup must not re-feed the tables it drains)",
         "re-read via API/sqlite: the terminal 40d-old automation rows are GONE; the paused/running 40d-old rows SURVIVE (onlyWhen scoping); the 100d-old audit row SURVIVES and the sweep report lists sys_audit_log skipped archive-pending (no 'archive' datasource registered → retained, never dropped unarchived); the inbox row's fate follows its own declared policy only — the transient class got no cross-class treatment",
         "idle heartbeat (ruled on #23169: an idle sweep still logs its line): let one more sweep run on the now-clean DB — keep steps[2]'s boot up for one more sweep interval (hourly, DEFAULT_LIFECYCLE_SWEEP_MS), or boot fresh on the same file DB with OS_LOG_LEVEL=info exported as in steps[2] and wait ≥90s. That sweep still logs its ONE aggregate INFO line, '[lifecycle] sweep: N policy(ies) applied, ~0 rows reaped, …': the line prints whenever a policy was applied, and every applied policy counts, deleted 0 included, so N counts (object, policy) pairs, not rows, and does not fall to 0 when nothing is due (with 0 error(s) it equals steps[2]'s N on the same composition; the archive-pending sys_audit_log is reported skipped and never counted). Record the line verbatim, then re-read: the rows steps[3] saw reaped stay gone and its survivors still survive. A missing line on an info-level boot means no sweep reached its print (not armed, disabled in settings, or aborted — e.g. the '[lifecycle] governance snapshot could not be loaded' warn), never 'idle'; a default warn-level boot never prints the line at all, so it proves nothing here",
@@ -2556,6 +2608,12 @@
           "date": "2026-10-15",
           "change": "the idle-proof ruling is applied: decision 6147446653, answered 「23169 我同意。」 and recorded as ruling A in 6160866003 (the checklist step was stale; the product is correct). steps[4] is rewritten from 'an idle sweep logs nothing' to a positive heartbeat: one more sweep on the now-clean DB, at OS_LOG_LEVEL=info as in steps[2], still logs its one aggregate line with ~0 rows reaped, and the reaped rows stay gone. Grounds, re-read at objectstack c5dd7fce3: the print gate in packages/objectql/src/lifecycle/lifecycle-service.ts tests report.swept.length (or errors, or alerts), and reap() pushes a report.swept entry for every applied policy, deleted 0 included (a deleted: 0 entry is pinned in lifecycle-service.no-tenant-column.test.ts); an archive-pending object goes to report.skipped instead. Attribution, corrected from the ruling record: 'one aggregate log line per sweep is the entire trace it leaves' is the code comment at that print site, while ADR-0057 §3.3's own text is that the service's deletes and rotations are not audited or activity-logged, and 'Aggregate one summary row at most'. fixtures.knownGaps[3], which recorded the owed ruling, now reads RULED and keeps the reason, so a run record scored against an earlier revision stays interpretable. steps[5] (the kill switch, still bracketed by steps[2]'s armed control), every acceptance clause, negative, variants and traps are unchanged: no clause rested on steps[4] before, and none does now. No product change",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "fixtures.requires[0], knownGaps[1] and steps[1] re-pointed (checklist-accuracy finding of QA run #23939, wave #23878). The knownGap said no telemetry datasource exists on stock, but `os dev` on a file DB now provisions data.telemetry.db beside the primary and routes telemetry/audit/event-classed objects to it — sys_automation_run and sys_audit_log live there, which is where #23939 seeded them. The seeding step now names the file per object; a row seeded into the primary would sit outside the sweep and read as a survivor. Not loosened: the clauses score the same reap, survivors and archive-pending report",
+          "ref": "#24036"
         }
       ]
     },
@@ -2564,14 +2622,14 @@
       "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` is DECLARED delete-all-then-insert but IMPLEMENTED as bare insert (no caller clears the table): the posture is recorded, never ticked as scoped deletion",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a runtime-created WRITABLE package (the metadata-authoring-roundtrip fixture) — `seed` is allowRuntimeCreate, so per-mode scratch seeds are authored as drafts (PUT /api/v1/meta/seed/<name> with an explicit `mode`) and applied by publish (applySeedBodies materializes published seed bodies through the SAME SeedLoaderService the boot path uses — packages/runtime/src/seed-loader.ts is a re-export shim of it)",
+          "a runtime-created WRITABLE package (the metadata-authoring-roundtrip fixture) — `seed` is allowRuntimeCreate, so per-mode scratch seeds are authored as drafts (PUT /api/v1/meta/seed/<name> with an explicit `mode`) and applied by publish (applySeedBodies materializes published seed bodies through the SAME SeedLoaderService the boot path uses — packages/runtime/src/seed-loader.ts is a re-export shim of it). The seed BODY carries object, mode, records (and externalId when not the default) and NO `name` key — the URL names the seed, and SeedSchema is strict (packages/spec/src/data/seed.zod.ts#SeedSchema), so a body `name` answers 422 unrecognized_keys",
           "a scratch target object in the same writable package (do NOT aim mode probes, least of all replace/insert replays, at seeded showcase objects — destructive-in-place)"
         ],
         "knownGaps": [
@@ -2580,7 +2638,7 @@
         ]
       },
       "steps": [
-        "author the scratch object (2 fields + a natural-key `name`) into the writable package and publish; note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
+        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — an object without one is refused at authoring with 422 security-owd-unset) into the writable package and publish; note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
@@ -2617,7 +2675,7 @@
         {
           "clause": "EXPECTED POSTURE (declared ≠ implemented): `replace` is documented 'Delete ALL records in object then insert (Dangerous)' but the implementation is bare insert — writeRecord's replace arm inserts with the comment 'caller should have cleared the table' and NO caller anywhere clears it, so pre-existing rows SURVIVE a replace-mode publish. The run records this gap (a checklist-accuracy/product finding routed through the sweep's anchor, not re-filed per run); it must NOT tick a 'replace deletes only its own object's rows' claim — no deletion exists to scope. If a future head implements the clear, this clause is stale: revise, and then ALSO prove the deletion is scoped to the seed's own object before trusting it",
           "oracle": "api",
-          "verify": "F (undeclared, hand-inserted) still present after the replace publish; G inserted; grep evidence: the only 'replace' write arm is the insert at seed-loader.ts and decideWriteAction:2106 routes replace to insert",
+          "verify": "F (undeclared, hand-inserted) still present after the replace publish; G inserted; grep evidence: the only 'replace' write arm is the insert in seed-loader.ts's writeRecord, and decideWriteAction (the batched mirror) routes replace to insert — cite the symbols, never a line number",
           "evidence": "F's surviving read + G's read + the source excerpt"
         },
         {
@@ -2661,6 +2719,12 @@
           "date": "2026-08-30",
           "change": "new — authored in the 2026-08-30 sweep (spec-enums angle), with the register's central claim CORRECTED against source: the register said 'replace = clear-then-insert (decideWriteAction)', but at head NOTHING clears — writeRecord's replace arm is a bare insert whose own comment defers to a caller that does not exist (grepped: no clearTable/deleteMany/delete caller anywhere on the seed path), so pre-existing rows survive a replace publish. The clause is therefore an expected-posture record of the declared≠implemented gap, not a scoped-deletion assertion. Also recorded honestly: insert-mode 'fail on duplicate' rides the object's own constraints (the loader does no matching in insert mode)",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-16",
+          "change": "fixtures.requires[0], steps[0] and acceptance[4].verify corrected (checklist-accuracy findings of QA run #23939, wave #23878). A seed body refuses a `name` key (SeedSchema is strict; the URL names the seed) and a scratch object needs a sharingModel (422 security-owd-unset), so the fixture as written could not be authored; and the verify text pinned decideWriteAction to a source line that has since moved — it now cites the symbols only. Not loosened: every mode clause and the replace posture are scored as before",
+          "ref": "#24036"
         }
       ]
     },
@@ -2805,7 +2869,7 @@
       "title": "The settings audit trail keeps no fingerprint of a secret-valued setting that a reader can match offline: both ledgers record the platform's keyed digest or none, never the value or an unkeyed hash, so a caller who can only read the audit rows learns that the secret changed and nothing about its value",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2827,11 +2891,11 @@
       "steps": [
         "generate a fresh random value V1 for this run (never a value used anywhere else). As admin, PUT /api/settings/mail { provider: 'resend', api_key: V1, from_email: 'ops@example.com' }",
         "read the per-key ledger: GET /api/v1/data/sys_setting_audit filtered to namespace=mail and key=api_key; capture the newest row (action set, encrypted true, new_hash)",
-        "read the generic ledger: GET /api/v1/data/sys_audit_log filtered to action=config_change; capture the newest row for mail.api_key (object_name 'sys_setting'; new_value is a JSON string carrying namespace, key, scope and digest; metadata carries encrypted: true)",
-        "OFFLINE, with no server key: compute the SHA-256 hex of V1 (bare, and with a 'sha256:' prefix) and search both captured rows, every field, for it and for V1 itself",
+        "read the generic ledger: GET /api/v1/data/sys_audit_log filtered to action=config_change; capture the newest row for mail.api_key (object_name 'sys_platform_setting' — mail is a GLOBAL-scope namespace, and a global-scope value's row names the tenant-less table it lives in, packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_GLOBAL_OBJECT_NAME; a tenant-scope key's row names 'sys_setting'; new_value is a JSON string carrying namespace, key, scope and digest; metadata carries encrypted: true)",
+        "OFFLINE, with no server key: compute the unkeyed digests a leak would carry — the FNV-1a 32 of V1's canonical JSON (the quoted string), spelled 'fnv32:' + 8 lowercase hex, which is the unkeyed digest this settings service writes for a non-secret key (packages/services/service-settings/src/crypto-adapter.ts#digest), and, belt and braces, the SHA-256 hex of V1 (bare, and with a 'sha256:' prefix) — and search both captured rows, every field, for each of them and for V1 itself",
         "write V1 again, then a different value V2, then V1 a third time; re-read both ledgers and compare the fingerprints of the three writes",
         "reset the key: PUT /api/settings/mail { provider: 'log', api_key: null } (a null value is the reset; 'log' needs no api_key), then read the reset rows",
-        "control: write the NON-secret key mail.from_email and compute OFFLINE the SHA-256 of its canonical JSON (the quoted string). Its rows must carry that unkeyed digest. This proves step 4's offline search WOULD have found an unkeyed digest, and that the keyed rule is scoped to secret-valued keys"
+        "control: write the NON-secret key mail.from_email and compute OFFLINE the FNV-1a 32 of its canonical JSON (the quoted string), spelled 'fnv32:' + 8 lowercase hex. Its rows must carry exactly that unkeyed digest. This proves step 4's offline search — which computes the same algorithm — WOULD have found an unkeyed digest, and that the keyed rule is scoped to secret-valued keys"
       ],
       "acceptance": [
         {
@@ -2841,7 +2905,7 @@
           "evidence": "both captured rows, quoted in full"
         },
         {
-          "clause": "a reader of the audit rows who holds no server key cannot confirm a guess: no fingerprint in either row can be reproduced from the value alone. The offline SHA-256 of V1, with or without the sha256 prefix, matches nothing in either row",
+          "clause": "a reader of the audit rows who holds no server key cannot confirm a guess: no fingerprint in either row can be reproduced from the value alone. No offline unkeyed digest of V1 — the FNV-1a 32 of its canonical JSON ('fnv32:…', the algorithm the service uses for non-secret keys), nor the SHA-256 of V1 with or without the sha256 prefix — matches anything in either row",
           "oracle": "api",
           "verify": "the step 4 offline search over both rows finds no hit, AND the step 7 control's offline digest DOES match the non-secret row. Without the control, a no-hit proves nothing about the search",
           "evidence": "the offline digest values, the two secret rows, and the matching control row"
@@ -2861,7 +2925,7 @@
         {
           "clause": "non-secret settings are unchanged: a non-encrypted key keeps the unkeyed digest of its canonical JSON on both ledgers. The keyed rule applies to secret-valued keys only",
           "oracle": "api",
-          "verify": "mail.from_email's rows carry the SHA-256 of the quoted JSON string, computed offline in step 7",
+          "verify": "mail.from_email's rows carry the FNV-1a 32 digest of the quoted JSON string ('fnv32:' + 8 lowercase hex), computed offline in step 7",
           "evidence": "the control rows and the offline digest"
         },
         {
@@ -2872,7 +2936,7 @@
         }
       ],
       "negative": [
-        "an unkeyed digest of a secret-valued setting (a plain SHA-256 of the value, with or without a prefix) on EITHER ledger is a FAIL. Anyone who can read the audit rows could confirm a guessed value offline, and settings secrets are short, guessable values",
+        "an unkeyed digest of a secret-valued setting (the 'fnv32:' FNV-1a 32 of its canonical JSON, or a plain SHA-256 of the value, with or without a prefix) on EITHER ledger is a FAIL. Anyone who can read the audit rows could confirm a guessed value offline, and settings secrets are short, guessable values",
         "the plaintext of a secret-valued setting in any field of either ledger is a FAIL",
         "a host with no keyed digest falling back to an unkeyed one is a FAIL; the rule is to record no fingerprint",
         "a secret write REFUSED because its audit fingerprint could not be computed is a FAIL: the audit trail never vetoes a settings save",
@@ -2899,6 +2963,12 @@
           "date": "2026-10-06",
           "change": "new: the settings audit trail had no item. platform-core.settings-hub-roundtrip only asserts that an audit row exists, and #21792 was found outside its clauses. The rule PR #21809 landed under the #21792 ruling is now a stock-runnable item: both ledgers carry the keyed digest for a secret-valued setting, the offline check carries a positive control (the non-secret key's unkeyed digest IS found), equal/different values and the reset are asserted, and the no-keyed-digest arm is scored from the unit pin because a stock boot cannot reach it",
           "ref": "#21932"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-16",
+          "change": "steps[2], [3] and [6], acceptance[1].clause and [4].verify and negative[0] corrected (checklist-accuracy finding of QA run #23939, wave #23878). The non-secret digest is FNV-1a 32 of canonical JSON ('fnv32:'), not SHA-256 (crypto-adapter.ts digest), so the step-7 control computed with SHA-256 never matched and could not prove the offline search would find an unkeyed digest. The control and the secret search now compute the same algorithm — FNV-1a 32 first, SHA-256 kept as a second net — and the generic-ledger row for global-scope mail names sys_platform_setting, not sys_setting. Not loosened: the search now covers the algorithm the service actually uses, so a leaked unkeyed digest is caught where the old search could miss it",
+          "ref": "#24036"
         }
       ]
     },
