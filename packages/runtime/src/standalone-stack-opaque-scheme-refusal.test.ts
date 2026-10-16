@@ -162,7 +162,9 @@ describe('a `*.wasm.db` file name no longer rescues a scheme nothing recognises'
   // no scheme (the CONTROL below).
   const RESCUED: ReadonlyArray<readonly [url: string, scheme: string]> = [
     ['redis://h/x.wasm.db', 'redis://'],
-    [`redis://${USER}:${SECRET}@127.0.0.1:6399/x.wasm.db?authToken=${TOKEN}`, 'redis://'],
+    // The URL must END in `.wasm.db` for the old test to have rescued it, so
+    // the token rides in the path here, not in a trailing query.
+    [`redis://${USER}:${SECRET}@127.0.0.1:6399/${TOKEN}/x.wasm.db`, 'redis://'],
     ['https://example.com/app.wasm.db', 'https://'],
     ['jdbc:x/app.wasm.db', 'jdbc:'],
   ];
