@@ -57,19 +57,17 @@
  * programmatic calls on bare kernels are not narrowed, as for comments: every
  * real transport carries a context.
  *
- * [#21388] One more per-reader ROW rule rides this mechanism: an update row
- * whose stored change is withheld whole from the reader is withheld as a row,
- * by a WHERE built from a SYSTEM pre-scan on the same four reads, so a list's
- * total, its pages and a grouped count agree with the rows served. It judges by
- * the security service's field answer, so it lives with the field redaction
- * (`activity-field-redaction.ts`, `computeWithheldUpdateFilter`), whose
- * middleware `AuditPlugin` registers after this one: its pre-scan reads the
- * WHERE this gate has already narrowed. ⚠️ It reads it as SYSTEM, so a
- * `ReadableIds` leaf in that WHERE is composed for the system there (every id
- * of its parent), not for the reader: its own 2,000-row window still bounds a
- * broad read of this stream until that rule becomes a predicate (ADR-0139 E6).
- * The rows it lets through are still ANDed with this gate's leaves, composed
- * for the reader.
+ * [#21388, #22786] One more per-reader ROW rule rides this mechanism: an
+ * update row whose recorded change is withheld whole from the reader, and a
+ * fired milestone row whose watched fields it is not served, are withheld as
+ * rows, on the same four reads, so a list's total, its pages and a grouped
+ * count agree with the rows served. It judges by the security service's field
+ * answer, so it lives with the field redaction (`activity-field-redaction.ts`,
+ * `computeWithheldUpdateFilter`), whose middleware `AuditPlugin` registers after
+ * this one. [ADR-0139 E6] It is a predicate over two writer-stamped columns
+ * (`changed_fields`, `milestone_key`), one branch per parent object this gate
+ * enumerates ({@link ACTIVITY_GATE}): it reads no row and composes no leaf, so
+ * nothing bounds a broad read of this stream but this gate's own leaves.
  */
 
 import type { CommentAccessLogger, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
@@ -92,7 +90,7 @@ const ACTIVITY_OBJECT = 'sys_activity';
  * caller is exempt. The compliance ledger's audit capability exempts its holder
  * from the ledger's gate only (#21260: the ruling names the ledger).
  */
-const ACTIVITY_GATE: ParentRecordGate = {
+export const ACTIVITY_GATE: ParentRecordGate = {
   object: ACTIVITY_OBJECT,
   seam: 'activity read visibility',
   denyAll: { id: '__activity_parent_denied__' },

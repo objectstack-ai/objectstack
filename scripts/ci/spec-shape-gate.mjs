@@ -30,12 +30,18 @@
  * consecutive hourly runs here agree with objectui's. The MECHANISM of ruling C
  * on #19011 is kept unchanged: consumer compilation is the ONE shape gate for
  * the spec's public surface; what moved is where it runs and who owns a red.
+ * objectui deleted its copy in objectstack-ai/objectui PR #12596 (card
+ * objectstack-ai/objectui#12352), so this gate is the only one.
  *
- * This file is the objectstack port of objectui's `scripts/spec-main-shape-gate.mjs`
- * (its header carries the measurements behind the virtual-store injection, the
- * hardlink trap, the dependency re-pointing and the turbo-cache false green;
- * they are not restated here, and the mechanism is unchanged). Three things are
- * different, each because the direction reversed:
+ * This file is the objectstack port of objectui's `scripts/spec-main-shape-gate.mjs`,
+ * which that PR deleted. Its header carries the measurements behind the
+ * virtual-store injection, the hardlink trap, the dependency re-pointing and
+ * the turbo-cache false green; they are not restated here, and the mechanism is
+ * unchanged. Read them at objectui commit `7d0c174ba8383d08b8dd1d4f7d7845009f1bf2fd`,
+ * the first parent of that PR's merge commit `c6a42be392` and the last objectui
+ * `main` commit that has the file (`git show <commit>:scripts/spec-main-shape-gate.mjs`
+ * in an objectui clone). Three things are different, each because the
+ * direction reversed:
  *
  *   1. THE SUBJECT IS THIS COMMIT. objectui built the spec from objectstack
  *      `main` and compiled itself; here the spec is built and packed from the
@@ -73,7 +79,7 @@
  *         "retired": "view-level data source provider 'api'",
  *         "objectstack_pr": 23160,
  *         "objectstack_commit": "1912af47ba6e3b250f7c717fea0d56e181029b9c",
- *         "downstream_card": "objectstack-ai/objectui#12325",
+ *         "downstream_card": "objectstack-ai/objectui#N",
  *         "registered_at": "2026-10-13",
  *         "matches": [
  *           { "file": "packages/react/src/hooks/useViewData.ts", "code": "TS2367", "message": "'\"api\"'" }
@@ -1307,7 +1313,7 @@ const FIXTURE_ENTRY = Object.freeze({
   retired: "view-level data source provider 'api'",
   objectstack_pr: 23160,
   objectstack_commit: '1912af47ba6e3b250f7c717fea0d56e181029b9c',
-  downstream_card: 'objectstack-ai/objectui#12325',
+  downstream_card: 'objectstack-ai/objectui#999999',
   registered_at: '2026-10-13',
   matches: [
     { file: 'packages/react/src/hooks/useViewData.ts', code: 'TS2367', message: '\'"api"\'' },
@@ -1406,7 +1412,7 @@ async function selfTest() {
     'a known-only summary says no new break and names the registration',
     (() => {
       const text = renderSummary({ ...base, status: 1, rows: [knownRow], known: [{ row: knownRow, entry: FIXTURE_ENTRY }] });
-      return text.includes('No new shape break') && text.includes('known (registered: objectstack-ai/objectui#12325') && !text.includes('NEW diagnostic');
+      return text.includes('No new shape break') && text.includes('known (registered: objectstack-ai/objectui#999999') && !text.includes('NEW diagnostic');
     })(),
     true,
   );
@@ -1469,7 +1475,7 @@ async function selfTest() {
   check('an empty matches array is refused', thrownMessage(() => parseRegistry(registryText([{ ...FIXTURE_ENTRY, matches: [] }]))).includes('registers nothing'), true);
   check('an unknown entry key is refused', thrownMessage(() => parseRegistry(registryText([{ ...FIXTURE_ENTRY, ignore_all: true }]))).includes('unknown key "ignore_all"'), true);
   check('a short commit, a bad card ref and a bad date are each named', (() => {
-    const msg = thrownMessage(() => parseRegistry(registryText([{ ...FIXTURE_ENTRY, objectstack_commit: '1912af47', downstream_card: 'objectui 12325', registered_at: 'yesterday' }])));
+    const msg = thrownMessage(() => parseRegistry(registryText([{ ...FIXTURE_ENTRY, objectstack_commit: '1912af47', downstream_card: 'objectui 999999', registered_at: 'yesterday' }])));
     return msg.includes('objectstack_commit') && msg.includes('downstream_card') && msg.includes('registered_at') && msg.includes('3 problem(s)');
   })(), true);
   check('a pattern covers a row only when every declared field holds', [
@@ -1486,7 +1492,7 @@ async function selfTest() {
   ], [true, true, false, false]);
   const newRow = { ...knownRow, file: 'packages/react/src/hooks/useViewData.ts', line: 200, code: 'TS2322', message: "Type 'string' is not assignable to type 'number'." };
   const classified = classifyRows([knownRow, newRow], parseRegistry(registryText([FIXTURE_ENTRY])));
-  check('classifyRows splits a registered row from a new one in the same file', [classified.known.length, classified.unknown.length, classified.known[0]?.entry.downstream_card, classified.unmatchedEntries.length], [1, 1, 'objectstack-ai/objectui#12325', 0]);
+  check('classifyRows splits a registered row from a new one in the same file', [classified.known.length, classified.unknown.length, classified.known[0]?.entry.downstream_card, classified.unmatchedEntries.length], [1, 1, 'objectstack-ai/objectui#999999', 0]);
   check('an entry that covers no row is reported as unmatched, and nothing is known', (() => {
     const c = classifyRows([newRow], parseRegistry(registryText([FIXTURE_ENTRY])));
     return [c.known.length, c.unknown.length, c.unmatchedEntries.length];

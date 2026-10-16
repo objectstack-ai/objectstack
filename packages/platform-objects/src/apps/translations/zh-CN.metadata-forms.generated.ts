@@ -2202,7 +2202,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API 端点",
-    description: "声明式 HTTP 端点——在既有管道之上提供稳定的 URL 与策略层（ADR-0121）"
+    description: "其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录"
   },
   translation: {
     label: "翻译"
@@ -2282,11 +2282,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "文档",
-    description: "软件包文档——扁平的 Markdown 文档项（ADR-0046）"
+    description: "以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写"
   },
   book: {
     label: "文档手册",
-    description: "文档导航主干——有序分组，成员由派生确定（ADR-0046 §6）"
+    description: "将帮助页面按顺序分节组织的目录"
   },
   permission: {
     label: "权限集",
@@ -2390,7 +2390,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   capability: {
     label: "能力",
-    description: "软件包声明的授权能力——ADR-0066 D1 的定义侧（授予在权限集上；要求在资源上）"
+    description: "软件包定义的一项权限；通过权限集授予"
   },
   agent: {
     label: "AI 代理",

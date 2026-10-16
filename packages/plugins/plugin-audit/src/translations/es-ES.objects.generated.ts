@@ -181,6 +181,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       metadata: {
         label: "Metadatos",
         help: "Contexto adicional serializado en JSON."
+      },
+      changed_fields: {
+        label: "Campos modificados",
+        help: "El conjunto de claves del cambio registrado: para una actualización, cada campo que nombran sus valores antiguos/nuevos registrados; vacío para cualquier otra fila. La plataforma lo marca al escribir; se sirve reducido a los campos que se sirven al lector. NULL significa que la fila aún no está marcada (ejecute `os migrate activity-changed-fields`)."
+      },
+      milestone_key: {
+        label: "Clave de hito",
+        help: "Para un hito de actividad disparado, una clave ordenada y separada por comas de todos los campos que la declaración activityMilestones del objeto vigilaba al dispararse; NULL para cualquier otra fila. La plataforma la marca al escribir y nunca se sirve: la regla de lectura la compara con la declaración actual."
       }
     }
   },
