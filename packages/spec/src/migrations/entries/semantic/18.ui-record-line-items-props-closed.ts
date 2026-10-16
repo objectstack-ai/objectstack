@@ -3,14 +3,15 @@
 import type { SemanticMigration } from '../../types.js';
 
 // #21142 — the fourth carrier of the inline grid column, and the last
-// registered `record:*` renderer without a `ComponentPropsMap` row. The type sat
-// on the string-arm registration ledger instead, so the component-props gate
-// skipped its props bag: the showcase project page keyed all five of its
+// registered `record:*` renderer without a `ComponentPropsMap` row. The type
+// sat on the string-arm registration ledger instead, so the component-props
+// gate skipped its props bag: the showcase project page keyed all five of its
 // columns `field` and published green over a grid of empty cells. The row
 // declares the fifteen keys objectui's `LineItemsPanel` reads, and its
 // `columns` REFERENCES `InlineGridColumnSchema`. D3 only: page-component
-// `properties` is not parsed on the metadata save or load path, so a stored
-// page is never refused at load and there is no load-path refusal for a conversion to
+// `properties` is not parsed on the metadata load path, so a stored page is
+// never refused at load (its next save meets the component-props gate at the
+// metadata save door) and there is no load-path refusal for a conversion to
 // pre-empt; the one `field`-keyed producer the census found is respelled in the
 // same change.
 export const entry: SemanticMigration = {

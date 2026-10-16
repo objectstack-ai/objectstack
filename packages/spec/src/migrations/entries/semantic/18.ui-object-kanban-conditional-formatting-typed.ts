@@ -7,9 +7,10 @@ import type { SemanticMigration } from '../../types.js';
 // the list view's member refuses. objectstack-ai/objectui#11522 retired that
 // dialect from objectui's authoring faces, so the row now takes the list view's
 // own member, by reference, as `object-grid` does. D3 only: page-component
-// `properties` is not parsed on the metadata save or load path, so a stored page
-// is never refused at load; and the authored census found no working rule to respell —
-// the refused values are objectui's own refusal probes and one no-predicate
+// `properties` is not parsed on the metadata load path, so a stored page is
+// never refused at load (its next save meets the component-props gate at the
+// metadata save door); and the authored census found no working rule to respell
+// — the refused values are objectui's own refusal probes and one no-predicate
 // fixture in this package, respelled in the same change.
 export const entry: SemanticMigration = {
   id: 'ui-object-kanban-conditional-formatting-typed',

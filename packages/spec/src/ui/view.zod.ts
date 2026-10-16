@@ -3676,8 +3676,20 @@ export const FormSectionSchema = lazySchema(() => strictObject({
 }, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
-   * When provided, translation bundles can target this section's `label`
-   * and `description` via `metadataForms.<type>.sections.<name>`.
+   * Translation bundles target this section's `label` and `description` at
+   * one of two addresses, decided by what the form edits:
+   *
+   *  - **An object-bound form view**: `objects.<object>._sections.<name>`,
+   *    where `<object>` is the form's own `data.object`, else its view's. The
+   *    i18n extractor (`walkObjectSections`) scaffolds this key, the
+   *    translation linter (`collectViewRecord`) accepts it and `translateView`
+   *    serves it. A section without a `name` has no key there and keeps its
+   *    authored text in every locale.
+   *  - **A metadata-editing form** (`defineForm({ schemaId })`):
+   *    `metadataForms.<type>.sections.<name>`, read by
+   *    `resolveMetadataFormLabels`. A section without a `name` is looked up
+   *    there under a slug of its `label`.
+   *
    * Optional for backward-compat with sections that only have a `label`.
    */
   name: z.string().optional().describe('Stable section identifier for i18n lookup (snake_case)'),
@@ -3859,7 +3871,8 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   surface: 'this form section',
   // Exactly the keys `deriveFieldGroupLayout` fills from the group. `name` is
   // in the list because the derived section's `key` IS the group key, which is
-  // already this surface's i18n anchor (`metadataForms.<type>.sections.<name>`)
+  // already the object's i18n anchor for that heading
+  // (`objects.<object>._sections.<key>`, `deriveFieldGroupLayout`'s `key`)
   // — a second name would give one section two lookup identities. `visibleOn`
   // rides along because this refinement runs BEFORE the `.transform` that folds
   // it onto `visibleWhen`, so the deprecated spelling must be named here or it

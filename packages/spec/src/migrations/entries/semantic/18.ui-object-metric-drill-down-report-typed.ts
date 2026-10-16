@@ -2,16 +2,17 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// #21464 — the `object-metric` page block's `drillDown.report` was `z.unknown()`:
-// the tile hands it to the shared drill drawer, which draws a dataset-bound
-// report and lists the records for any other value, and no spec drill shape
-// declared it. The maintainer ruled on #21704 (fork 1, letter B) that it is
-// `ReportSchema` by reference, once a joined report refuses a block that binds
-// no dataset (#21702), so a report the member admits is one the drawer draws.
-// D3 only: page-component `properties` is not parsed on the metadata save or
-// load path, so a stored page is never refused at load; and the authored census found
-// no drawn report to respell — the refused values are objectui's probes of the
-// values the drawer does NOT draw.
+// #21464 — the `object-metric` page block's `drillDown.report` was
+// `z.unknown()`: the tile hands it to the shared drill drawer, which draws a
+// dataset-bound report and lists the records for any other value, and no spec
+// drill shape declared it. The maintainer ruled on #21704 (fork 1, letter B)
+// that it is `ReportSchema` by reference, once a joined report refuses a block
+// that binds no dataset (#21702), so a report the member admits is one the
+// drawer draws. D3 only: page-component `properties` is not parsed on the
+// metadata load path, so a stored page is never refused at load (its next save
+// meets the component-props gate at the metadata save door); and the authored
+// census found no drawn report to respell — the refused values are objectui's
+// probes of the values the drawer does NOT draw.
 export const entry: SemanticMigration = {
   id: 'ui-object-metric-drill-down-report-typed',
   surface: 'page `object-metric` components — `properties.drillDown.report` (which used to accept any value)',

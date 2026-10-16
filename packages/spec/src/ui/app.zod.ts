@@ -1620,11 +1620,12 @@ export const AppSchema = lazySchema(() => strictObject(
     'only thing that opens anonymous access, and ADR-0121 D6 then requires an armed ' +
     '`rateLimit: { enabled: true, windowMs, maxRequests }`. Read the ' +
     '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
-    'security review, not a rename. A route that genuinely needs handler CODE is mounted ' +
-    'imperatively instead: resolve the `http.server` service from your plugin context and ' +
-    'register the route on `kernel:ready` (NOT the manifest `contributes.routes` key — ' +
-    'removed in @objectstack/spec 17: nothing ever read it, and authoring it is ' +
-    'now rejected with its own prescription). ' +
+    'security review, not a rename. An endpoint whose work needs CODE still lands here: ' +
+    'compute in a flow and register the code as a stack function ' +
+    '(`defineStack({ functions })`) or a connector — an app does not mount routes on ' +
+    '`http.server`, and the manifest `contributes.routes` key was removed in ' +
+    '@objectstack/spec 17 (nothing ever read it; authoring it is now rejected with its ' +
+    'own prescription). ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 

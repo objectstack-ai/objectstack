@@ -2202,7 +2202,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API エンドポイント",
-    description: "宣言的な HTTP エンドポイント — 既存のパイプラインの上に安定した URL とポリシー層を提供（ADR-0121）"
+    description: "他のシステムが呼び出す固定の HTTP URL。フローを実行したり、アプリのレコードを操作したりします"
   },
   translation: {
     label: "翻訳"
@@ -2282,11 +2282,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "ドキュメント",
-    description: "パッケージのドキュメント — フラットな Markdown 項目（ADR-0046）"
+    description: "Markdown で書かれたヘルプページ。パッケージに同梱されるほか、自分で作成することもできます"
   },
   book: {
     label: "ドキュメントブック",
-    description: "ドキュメントナビゲーションの骨格 — 順序付きグループと派生されたメンバーシップ（ADR-0046 §6）"
+    description: "ヘルプページを順序付きのセクションにまとめた目次"
   },
   permission: {
     label: "権限セット",
@@ -2390,7 +2390,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   capability: {
     label: "ケイパビリティ",
-    description: "パッケージが宣言する認可ケイパビリティ — ADR-0066 D1 の定義側（付与は権限セットに、要件はリソースに）"
+    description: "パッケージが定義する権限。権限セットを通じて付与します"
   },
   agent: {
     label: "AI エージェント",

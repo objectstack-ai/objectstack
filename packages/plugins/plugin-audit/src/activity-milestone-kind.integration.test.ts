@@ -42,6 +42,14 @@
  * The security service, answering the two contract members the redaction asks,
  * per reader, in the contract's shape (as in `activity-field-redaction.test.ts`).
  *
+ * [ADR-0139 E6, ruled letter B] The row half is a predicate over the
+ * writer-stamped `milestone_key`: a milestone row is served only when its key
+ * equals the key of the object's CURRENT declaration and the reader is served
+ * every field that declaration watches. Pinned below beside the earlier
+ * behaviour: a declaration edit withholds the rows written under the old one
+ * from every non-system reader, and an unjudgeable milestone row is stored
+ * unstamped and withheld.
+ *
  * ⚠️ Disclosure discipline: no test title states a value.
  */
 
@@ -51,7 +59,8 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
-import { computeWithheldUpdateFilter, isWithheldMilestone, isWithheldRow } from './activity-field-redaction.js';
+import { keptRowsOfParent } from './activity-field-redaction.js';
+import { declaredMilestoneWatchedFields, milestoneKeyOf, planActivityStamp } from './activity-changed-fields.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'amk_item';
@@ -204,6 +213,63 @@ describe('[#22771] a fired milestone is served with metadata.kind, judged like t
     }
   });
 
+  it('[ADR-0139 E6] at rest: each fired milestone is stamped with the key of the watched fields, every other row with none', async () => {
+    const atRest = await read(SYS);
+    const keyOf = (id: string) => atRest.find((r) => r.id === id)?.milestone_key ?? null;
+    expect(keyOf(rowIds.typedMilestone)).toBe('phase,stage');
+    expect(keyOf(rowIds.untypedMilestone)).toBe('phase,stage');
+    for (const id of [rowIds.created, rowIds.tracked, rowIds.appKind]) expect(keyOf(id), id).toBeNull();
+    expect(milestoneKeyOf(declaredMilestoneWatchedFields(itemObject))).toBe('phase,stage');
+  });
+
+  it('[ADR-0139 E6] the milestone key is never served, to any non-system reader', async () => {
+    for (const context of [CONTROL, NOTE_WITHHELD, WATCH_WITHHELD]) {
+      for (const row of await read(context)) expect(row, String(row.id)).not.toHaveProperty('milestone_key');
+    }
+  });
+
+  it('[ADR-0139 E6, letter B] after the declaration changes, the rows written under the old one are withheld from every non-system reader', async () => {
+    const edited = {
+      ...itemObject,
+      activityMilestones: [itemObject.activityMilestones[0]], // `phase` no longer watched
+    };
+    engine.registry.registerObject(edited as any, HARNESS_PACKAGE);
+    try {
+      for (const context of [CONTROL, NOTE_WITHHELD, WATCH_WITHHELD]) {
+        const ids = (await read(context)).map((r) => r.id);
+        expect(ids).not.toContain(rowIds.typedMilestone);
+        expect(ids).not.toContain(rowIds.untypedMilestone);
+        expect(ids).toContain(rowIds.tracked);
+      }
+      expect((await read(SYS)).map((r) => r.id)).toContain(rowIds.typedMilestone);
+    } finally {
+      engine.registry.registerObject(itemObject as any, HARNESS_PACKAGE);
+    }
+    // Control: under the declaration they were written under, served again.
+    expect((await read(CONTROL)).map((r) => r.id)).toContain(rowIds.typedMilestone);
+  });
+
+  it('[ADR-0139 E6] a milestone row the planner cannot judge is stored unstamped and withheld from every non-system reader', async () => {
+    const id = String((await engine.insert(ACTIVITY, {
+      type: 'note', summary: 'unjudged', object_name: ITEM, record_id: itemId,
+      timestamp: new Date().toISOString(),
+      metadata: JSON.stringify({ kind: 'milestone', text_sources: { summary: [], record_label: [] } }),
+      // A writer's own stamp is not taken.
+      changed_fields: [], milestone_key: 'phase,stage',
+    }, { context: SYS })).id);
+    try {
+      const atRest = (await read(SYS)).find((r) => r.id === id);
+      expect(atRest?.changed_fields ?? null).toBeNull();
+      expect(atRest?.milestone_key ?? null).toBeNull();
+      for (const context of [CONTROL, NOTE_WITHHELD, WATCH_WITHHELD]) {
+        expect((await read(context)).map((r) => r.id)).not.toContain(id);
+      }
+    } finally {
+      await engine.delete(ACTIVITY, { where: { id }, context: SYS } as any);
+    }
+    expect(await read(SYS)).toHaveLength(5);
+  });
+
   it('at rest: type stays what the declaration names — no new type value', async () => {
     const atRest = await read(SYS);
     expect(atRest.find((r) => r.id === rowIds.typedMilestone)?.type).toBe('completed');
@@ -280,28 +346,27 @@ describe('[#22771] a fired milestone is served with metadata.kind, judged like t
     expect(await engine.count(ACTIVITY, { where }, { context: CONTROL })).toBe(5);
   });
 
-  it('fail closed: when the withheld-row pre-scan fails, the read is denied, not served unjudged', async () => {
-    // The pre-scan is the system-context read of the row, its parent and its
-    // metadata; make that one read fail and nothing else.
-    const original = engine.find.bind(engine);
-    const spy = vi.spyOn(engine, 'find').mockImplementation((async (object: string, query: any, ...rest: any[]) => {
-      const fields: unknown = query?.fields;
-      if (object === ACTIVITY && query?.context?.isSystem && Array.isArray(fields) && fields.includes('metadata')) {
-        throw new Error('pre-scan unavailable');
+  it('fail closed: when the withheld-row rule cannot be built, the read is denied, not served unjudged', async () => {
+    // The rule reads the parent's CURRENT declaration; make that one read
+    // fail and nothing else.
+    const original = (engine as any).getSchema.bind(engine);
+    const spy = vi.spyOn(engine as any, 'getSchema').mockImplementation(((object: string) => {
+      if (object === ITEM && new Error().stack?.includes('currentMilestoneWatched')) {
+        throw new Error('definition unavailable');
       }
-      return (original as any)(object, query, ...rest);
+      return original(object);
     }) as any);
     try {
       for (const context of [CONTROL, WATCH_WITHHELD]) {
         expect(await read(context)).toEqual([]);
         expect(await engine.count(ACTIVITY, { where: { object_name: ITEM, record_id: itemId } }, { context })).toBe(0);
       }
-      // The system read takes no pre-scan, so the failure cannot reach it.
+      // The system read takes no rule, so the failure cannot reach it.
       expect(await read(SYS)).toHaveLength(5);
     } finally {
       spy.mockRestore();
     }
-    // Control: with the pre-scan back, the read is served again.
+    // Control: with the definition back, the read is served again.
     expect((await read(CONTROL)).length).toBe(5);
   });
 
@@ -336,74 +401,36 @@ describe('[#22771] a fired milestone is served with metadata.kind, judged like t
   });
 });
 
-describe('[#22786] isWithheldMilestone reads the declared watched fields', () => {
-  const served = new Set(['a', 'b']);
-  const notRestricted = async () => false;
-  const restricted = async () => true;
+describe('[ADR-0139 E6] the milestone key: stamped by the planner, compared by the predicate', () => {
   const milestone = (watched: unknown) => ({
     old: { a: 1 }, new: { a: 2 }, kind: 'milestone',
     text_sources: { summary: [], record_label: [], ...(watched === undefined ? {} : { kind: watched }) },
   });
 
-  it('a milestone whose watched fields are all served is not withheld', async () => {
-    expect(await isWithheldMilestone(milestone(['a', 'b']), served, restricted)).toBe(false);
+  it('a fired milestone the mirror declared is keyed by its watched fields, sorted and distinct', () => {
+    expect(planActivityStamp(milestone(['b', 'a', 'b']))).toEqual({ changed_fields: ['a'], milestone_key: 'a,b' });
   });
 
-  it('a milestone with a watched field the reader is not served is withheld', async () => {
-    expect(await isWithheldMilestone(milestone(['a', 'c']), served, notRestricted)).toBe(true);
-  });
-
-  it('no milestone kind, or a kind on a row the mirror did not write, is not judged', async () => {
+  it('no milestone kind, or a kind on a row the mirror did not write, carries no key', () => {
     const { kind: _kind, ...noKind } = milestone(['c']);
-    expect(await isWithheldMilestone(noKind, served, restricted)).toBe(false);
-    expect(await isWithheldMilestone({ ...milestone(['c']), kind: 'email' }, served, restricted)).toBe(false);
-    expect(await isWithheldMilestone({ kind: 'milestone' }, served, restricted)).toBe(false);
-    expect(await isWithheldMilestone(null, served, restricted)).toBe(false);
+    expect(planActivityStamp(noKind)?.milestone_key).toBeNull();
+    expect(planActivityStamp({ ...milestone(['c']), kind: 'email' })?.milestone_key).toBeNull();
+    expect(planActivityStamp({ kind: 'milestone' })?.milestone_key).toBeNull();
   });
 
-  it('a declaration with no readable list is judged by the unknown-provenance answer', async () => {
-    for (const watched of [undefined, 'c', [1]]) {
-      expect(await isWithheldMilestone(milestone(watched), served, restricted)).toBe(true);
-      expect(await isWithheldMilestone(milestone(watched), served, notRestricted)).toBe(false);
+  it('a declaration with no readable list cannot be judged: no stamp at all', () => {
+    for (const watched of [undefined, 'c', [1], ['a,b']]) {
+      expect(planActivityStamp(milestone(watched)), JSON.stringify(watched)).toBeNull();
     }
   });
 
-  it('isWithheldRow is either arm: the withheld-only update, or the withheld milestone', async () => {
-    expect(await isWithheldRow({ old: { c: 1 }, new: { c: 2 } }, served, notRestricted)).toBe(true);
-    expect(await isWithheldRow(milestone(['c']), served, notRestricted)).toBe(true);
-    expect(await isWithheldRow(milestone(['a']), served, restricted)).toBe(false);
-    expect(await isWithheldRow({ old: { a: 1 }, new: { a: 2 } }, served, restricted)).toBe(false);
-  });
-});
-
-describe('[#22786] computeWithheldUpdateFilter — the milestone arm rides the one pre-scan', () => {
-  const row = (id: string, metadata: Record<string, unknown>) => ({
-    id, object_name: 'obj', metadata: JSON.stringify(metadata),
-  });
-  const milestoneRow = (id: string, watched?: string[]) => row(id, {
-    old: { open: 1 }, new: { open: 2 }, kind: 'milestone',
-    text_sources: { summary: [], record_label: [], ...(watched ? { kind: watched } : {}) },
-  });
-  const engineOf = (rows: Record<string, unknown>[]) => ({ find: vi.fn(async () => rows) });
-  const servedFor = async () => ['open'];
-
-  it('a milestone row with an unserved watched field is ANDed out beside the served rows', async () => {
-    const rows = [milestoneRow('m1', ['open', 'secret']), milestoneRow('m2', ['open']), row('t1', { old: { open: 1 }, new: { open: 2 } })];
-    expect(await computeWithheldUpdateFilter(engineOf(rows), {}, servedFor, { warn: vi.fn() }))
-      .toEqual({ id: { $nin: ['m1'] } });
-  });
-
-  it('a declaration with no readable list: closed without an answer, and judged by the answer when given one', async () => {
-    const rows = [milestoneRow('u1')];
-    expect(await computeWithheldUpdateFilter(engineOf(rows), {}, servedFor, { warn: vi.fn() }))
-      .toEqual({ id: { $nin: ['u1'] } });
-    const answered = vi.fn(async () => false);
-    expect(await computeWithheldUpdateFilter(engineOf(rows), {}, servedFor, { warn: vi.fn() }, answered)).toBeNull();
-    expect(answered).toHaveBeenCalledWith('obj', new Set(['open']));
-  });
-
-  it('a reader the service gives no answer for is narrowed by neither arm', async () => {
-    const rows = [milestoneRow('m1', ['secret'])];
-    expect(await computeWithheldUpdateFilter(engineOf(rows), {}, async () => undefined, { warn: vi.fn() })).toBeNull();
+  it('served only under the current declaration, to a reader served every field it watches', () => {
+    const milestoneBranch = (served: string[], watched: string[]) =>
+      (keptRowsOfParent('obj', served, watched).$and as unknown[])[3];
+    expect(milestoneBranch(['a', 'b'], ['a', 'b'])).toEqual({
+      $or: [{ milestone_key: { $null: true } }, { milestone_key: 'a,b' }],
+    });
+    expect(milestoneBranch(['a'], ['a', 'b'])).toEqual({ milestone_key: { $null: true } });
+    expect(milestoneBranch(['a', 'b'], [])).toEqual({ milestone_key: { $null: true } });
   });
 });

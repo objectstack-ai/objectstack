@@ -47,6 +47,18 @@ describe('tree-scoped absence: no TypeScript source in the declared radius reads
   const IN_RADIUS = (rel: string) =>
     (rel.startsWith('packages/') && rel.endsWith('.ts'))
     || /^examples\/[^/]+\/src\/.+\.ts$/.test(rel);
+  /**
+   * Hand-renamed readers the walk must see as code references under the NEW
+   * name (anti-vacuity, asserted below). Only these files are asked the new
+   * name: the assertion is containment of exactly this list, so no other file
+   * can change its verdict, and parsing every other file that mentions the new
+   * name was about a third of the walk's parsing.
+   */
+  const NEW_READERS = [
+    'packages/metadata-protocol/src/protocol.ts',
+    'packages/metadata-protocol/src/sys-metadata-repository.ts',
+    'packages/spec/src/kernel/metadata-plugin.zod.ts',
+  ];
   /** Build, SCM and cache state — not authored sources. */
   const SKIPPED_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', '.cache', '.objectstack', 'coverage', '.next', '.source']);
 
@@ -58,28 +70,36 @@ describe('tree-scoped absence: no TypeScript source in the declared radius reads
     && ts.isIdentifier(node.parent.initializer.expression)
     && node.parent.initializer.expression.text === 'retiredKey';
 
-  /** Every CODE reference to `name` in `text`, as `line:col` — identifiers and quoted keys, never comments or prose strings. */
-  const codeReferences = (fileName: string, text: string, name: string): string[] => {
+  /**
+   * Every CODE reference to each of `names` in `text`, as `line:col` per name —
+   * identifiers and quoted keys, never comments or prose strings. One parse
+   * serves every name: the walk below can ask two names of the same file, and
+   * the files holding both are the largest in the radius (megabytes each).
+   */
+  const codeReferencesByName = (fileName: string, text: string, names: readonly string[]): Map<string, string[]> => {
     const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-    const found: string[] = [];
-    const at = (node: ts.Node) => {
+    const found = new Map(names.map((name) => [name, [] as string[]]));
+    const at = (name: string, node: ts.Node) => {
       const { line, character } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
-      found.push(`${line + 1}:${character + 1}`);
+      found.get(name)!.push(`${line + 1}:${character + 1}`);
     };
     const visit = (node: ts.Node) => {
-      if (ts.isIdentifier(node) && node.text === name && !isTombstoneDeclaration(node)) at(node);
-      else if (ts.isStringLiteral(node) && node.text === name && node.parent) {
+      if (ts.isIdentifier(node) && found.has(node.text) && !isTombstoneDeclaration(node)) at(node.text, node);
+      else if (ts.isStringLiteral(node) && found.has(node.text) && node.parent) {
         const p = node.parent;
         // A quoted key or an element access is a reference; any other string is prose.
         if ((ts.isPropertyAssignment(p) && p.name === node)
           || (ts.isElementAccessExpression(p) && p.argumentExpression === node)
-          || (ts.isPropertySignature(p) && p.name === node)) at(node);
+          || (ts.isPropertySignature(p) && p.name === node)) at(node.text, node);
       }
       ts.forEachChild(node, visit);
     };
     visit(sf);
     return found;
   };
+  /** Every CODE reference to `name` in `text`, as `line:col`. */
+  const codeReferences = (fileName: string, text: string, name: string): string[] =>
+    codeReferencesByName(fileName, text, [name]).get(name)!;
 
   it('the matcher sees a code reference and ignores a mention (anti-vacuity)', () => {
     const refs = (src: string) => codeReferences('probe.ts', src, OLD);
@@ -122,9 +142,11 @@ describe('tree-scoped absence: no TypeScript source in the declared radius reads
           if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
           throw err;
         }
-        if (text.includes(NEW) && codeReferences(rel, text, NEW).length > 0) newReaders.add(rel);
-        if (!text.includes(OLD)) continue;
-        for (const where of codeReferences(rel, text, OLD)) {
+        const names = [OLD, ...(NEW_READERS.includes(rel) ? [NEW] : [])].filter((name) => text.includes(name));
+        if (names.length === 0) continue;
+        const refs = codeReferencesByName(rel, text, names);
+        if ((refs.get(NEW)?.length ?? 0) > 0) newReaders.add(rel);
+        for (const where of refs.get(OLD) ?? []) {
           (rel === REFUSAL_PIN ? refusalPinReferences : offenders).push(`${rel}:${where}`);
         }
       }
@@ -140,11 +162,7 @@ describe('tree-scoped absence: no TypeScript source in the declared radius reads
     // Live positive control: the refusal pin's deliberate `allowOrgOverride: true`
     // and `: false` are real code references, and the walk found them.
     expect(refusalPinReferences.length).toBeGreaterThanOrEqual(2);
-    expect([...newReaders]).toEqual(expect.arrayContaining([
-      'packages/metadata-protocol/src/protocol.ts',
-      'packages/metadata-protocol/src/sys-metadata-repository.ts',
-      'packages/spec/src/kernel/metadata-plugin.zod.ts',
-    ]));
+    expect([...newReaders]).toEqual(expect.arrayContaining(NEW_READERS));
     expect(
       offenders,
       'a code reference to `allowOrgOverride` reads `undefined` against the tombstone and closes every type — read `allowEnvironmentOverlay`',

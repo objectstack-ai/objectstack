@@ -4257,22 +4257,35 @@ const objectIndexTypePartialRemoved: MetadataConversion = {
  *    default flip 3 → 0 never needed a materialization step while the job one
  *    did: nothing was ever deployed under the old reading.
  *
- * `retiredFromLoadPath` is NOT set, and the base-delay rename is not why:
- * every surface that carried `retryDelayMs` already refuses it with the rename
- * to `backoffMs` (the `RetryPolicySchema` tombstone, which a `try_catch` node's
- * `config.retry` is, and `flow.errorHandling`'s own).
+ * ## Retired from the load path at 18 (#23543, ruling F2 A)
  *
- * **A recorded verdict at 18 (#23487):** it stays, for the job half alone. It
- * writes the pre-17 `maxRetries: 3` / `backoffMultiplier: 2` into a source
- * `job.retryPolicy` that omits them; retired, the authoring funnel would stop
- * doing that, and such a job would silently drop from three retries to none
- * under the merged 0 / 1 defaults — a default flip no gate can see. It can
- * retire once that default flip has a ruling for authored sources (or the entry
- * is recorded as permanent).
+ * The base-delay rename never needed the load path: every surface that carried
+ * `retryDelayMs` refuses it with the rename to `backoffMs` (the
+ * `RetryPolicySchema` tombstone, which a `try_catch` node's `config.retry` is,
+ * and `flow.errorHandling`'s own). It stayed for the job half alone (the
+ * verdict #23487 recorded): retired, the authoring funnel would stop writing
+ * `maxRetries: 3` into a source block that omits it, and such a job would
+ * silently drop from three retries to none — a default flip no gate can see.
+ * The ruling made that drop loud instead: the job parse refuses a
+ * `retryPolicy` whose `maxRetries` is omitted or 0, naming the fix
+ * (`JOB_RETRY_POLICY_NO_ATTEMPTS`, `system/job.zod.ts`), so no authored job
+ * changes its retry count without its author being told. An omitted
+ * `backoffMultiplier` is not refused and now keeps its declared default (1):
+ * it shapes the delay curve, not whether the job retries.
+ *
+ * The authoring funnel (`defineStack`, `os validate` / `os build` / `os lint`)
+ * no longer replays it. Stored documents are the `includeRetired` seams —
+ * stored-row rehydration (`applyConversionsToStoredItem`), the automation
+ * engine's flow rehydration, the metadata save door's flow fallback, the
+ * artifact-ingestion door inside its window — and `os migrate meta --from 16`
+ * (a step-17 member, carried by the D3 entry `job-retry-policy-without-attempts-refused`),
+ * so a job stored or written before 17 keeps the three retries it ran with.
  */
 const retryPolicyConverged: MetadataConversion = {
   id: 'retry-policy-converged',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.errorHandling.retryDelayMs / flow.node.config.retry.retryDelayMs / job.retryPolicy.maxRetries / job.retryPolicy.backoffMultiplier',
   summary:
     "retry policy unified across job.retryPolicy, try_catch retry and flow.errorHandling: base delay 'retryDelayMs' → 'backoffMs', " +
@@ -11032,6 +11045,138 @@ const pageHeaderBreadcrumbRemoved: MetadataConversion = {
 };
 
 /**
+ * `page:header.showStar` leaves the contract (protocol 18, #23650 — ADR-0049
+ * enforce-or-remove; ruling record 6203775759, letter A: 「A 退役 showStar
+ * (Recommended)」).
+ *
+ * The key switched a star the reference console no longer draws. Since
+ * objectui#12427 the `page:header` record chip draws the follow star only
+ * where the host wires a favorites toggle into the record context
+ * (`onToggleFavorite`), and no reference host does: the record's favorites
+ * entry is the header's ⋯ overflow menu. `true` drew nothing and `false` hid
+ * nothing. The tombstone on `PageHeaderProps` refuses it for a live author:
+ * `os validate`, `os build` and `os lint` refuse it as an `error` with the
+ * prescription (the component-props gate, `@objectstack/lint`; the load path
+ * keeps the open `properties` bag as written).
+ *
+ * **A delete of both values.** Neither changes what the reference console
+ * draws, so there is no value to preserve and no rewrite target. The host
+ * hook is not the key: a third-party host of the published component library
+ * that wires `onToggleFavorite` keeps its star, and after the strip a header
+ * that said `false` shows it there as an absent key would. The D3 entry
+ * `page-header-show-star-retired` records that.
+ *
+ * Who writes the key: nobody measured. No example app, skill or doc in this
+ * repo, and no objectui app or example, authors it; the entry is for stored
+ * `sys_metadata` pages and built artifacts written by hand.
+ *
+ * ⚠️ Scoped by component `type`, never by key name, exactly as
+ * {@link pageHeaderBreadcrumbRemoved}: `showStar` is an ordinary name for an
+ * open-namespace component's own prop.
+ */
+const pageHeaderShowStarRemoved: MetadataConversion = {
+  id: 'page-header-show-star-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.component.page:header.showStar',
+  summary:
+    "page:header prop 'showStar' removed, whether 'true' or 'false' (the reference console draws no star "
+    + 'beside the record title: the record\'s favorites entry is the header\'s ⋯ menu, and metadata does '
+    + 'not control it)',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'page:header') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !('showStar' in properties)) return component;
+      const stripped = stripKeys(properties, ['showStar'], emit, `${path}.properties`);
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'account_record',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                // The default value, written out.
+                { type: 'page:header', properties: { title: 'Account', showStar: true } },
+                // The switch turned off, beside the live copy-id switch.
+                { type: 'page:header', properties: { title: 'Contract', showStar: false, showCopyId: false } },
+                // A header WITHOUT the key rides through untouched — the strip
+                // dispatches on key presence, and copy-on-write keeps the reference.
+                { type: 'page:header', properties: { title: 'Overview', recordChrome: false } },
+                // ⚠️ The same key name on an open-namespace component that is
+                // NOT a page header — its own prop, not this entry's key.
+                { type: 'acme:rating_badge', properties: { showStar: true } },
+                // The nested position (#6775): a header inside a card's
+                // `children` is still a page header.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Summary',
+                    children: [{ type: 'page:header', properties: { title: 'Inner', showStar: true } }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape (#6776): a header authored into a slotted page.
+        {
+          name: 'account_record_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Account', showStar: false } },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'account_record',
+          regions: [
+            {
+              name: 'header',
+              components: [
+                { type: 'page:header', properties: { title: 'Account' } },
+                { type: 'page:header', properties: { title: 'Contract', showCopyId: false } },
+                { type: 'page:header', properties: { title: 'Overview', recordChrome: false } },
+                { type: 'acme:rating_badge', properties: { showStar: true } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'Summary',
+                    children: [{ type: 'page:header', properties: { title: 'Inner' } }],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'account_record_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: { type: 'page:header', properties: { title: 'Account' } },
+          },
+        },
+      ],
+    },
+    // Four notices, one per stripped key: the two region-level headers, the
+    // nested one and the slotted one. The header without the key and the
+    // open-namespace component emit none.
+    expectedNotices: 4,
+  },
+};
+
+/**
  * `page.requires` removed from the page kinds whose source is never compiled at
  * save — `react`, `full` and `slotted`, a page that omits `kind` included
  * (protocol 18, #21459; ruling record 5964312254, letter A).
@@ -12046,8 +12191,9 @@ const hookTimeoutToTimeoutMs: MetadataConversion = {
  * rename `hookTimeoutToTimeoutMs` documents. The sibling `retryPolicy.backoffMs`
  * spelled its unit; the per-attempt limit did not. Same posture: retired from
  * the load path, tombstoned at the schema, replayable here. The fixture stays
- * clear of `retryPolicy` on purpose — `retry-policy-converged` is still in its
- * live window on that block and would fire on it.
+ * clear of `retryPolicy` on purpose — `retry-policy-converged` replays on that
+ * block wherever retired entries do (the fixture harness among them) and would
+ * fire on it.
  */
 const jobTimeoutToTimeoutMs: MetadataConversion = {
   id: 'job-timeout-to-timeout-ms',
@@ -16670,6 +16816,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: pageComponentFilterRecordToRuleArray, order: 36 },
   { conversion: pageComponentResponsiveRemoved, order: 13 },
   { conversion: pageHeaderBreadcrumbRemoved, order: 49 },
+  { conversion: pageHeaderShowStarRemoved, order: 66 },
   { conversion: pageRequiresNonCompiledKindRemoved, order: 58 },
   { conversion: permissionAdminScopeBindingAuthoringRemoved, order: 65 },
   { conversion: permissionAllowRestorePurgeRemoved, order: 16 },

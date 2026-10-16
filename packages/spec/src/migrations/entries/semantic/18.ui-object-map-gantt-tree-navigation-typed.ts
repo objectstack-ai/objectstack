@@ -9,8 +9,9 @@ import type { SemanticMigration } from '../../types.js';
 // the record page in silence. The three rows now take that schema by reference,
 // the carrier `object-grid`, `object-kanban`, `object-calendar` and
 // `object-timeline` already take. D3 only: page-component `properties` is not
-// parsed on the metadata save or load path, so a stored page is never refused at load;
-// an off-shape value has no rewrite that says what the author meant; and the
+// parsed on the metadata load path, so a stored page is never refused at load
+// (its next save meets the component-props gate at the metadata save door); an
+// off-shape value has no rewrite that says what the author meant; and the
 // authored census found nothing in either repository's corpora to respell.
 export const entry: SemanticMigration = {
   id: 'ui-object-map-gantt-tree-navigation-typed',

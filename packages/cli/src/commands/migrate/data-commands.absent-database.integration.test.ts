@@ -59,6 +59,11 @@
  * (the control: the door READS the table and reports the row), and the four
  * doors that already exited 0 on the absent database, which still do.
  *
+ * [ADR-0139 E6] `os migrate activity-changed-fields` joined it born with the
+ * answer too: it reads `sys_activity` alone, through `absentTableReads`. Its
+ * control row is the seeded activity row, planted below the writer, so it
+ * carries no stamp.
+ *
  * [#21573] `os migrate unmapped-columns` joined the roster later, born with
  * the same answer: it asks `tableAbsent` before the differ. Its control row is
  * a retired field's column on `os21529_contact`, holding a value.
@@ -480,6 +485,20 @@ const DOORS: readonly Door[] = [
       // table to create: skipping it would answer "nothing to rewrite" over this row.
       expect(doc.report.byObject.sys_activity.scanned).toBeGreaterThanOrEqual(1);
       expect(doc.report.byObject.sys_activity.rewritten).toBe(1);
+    },
+  },
+  {
+    name: 'migrate activity-changed-fields',
+    argv: ['migrate', 'activity-changed-fields'],
+    empty: (doc) => expect(doc).toMatchObject({ apply: false, report: { scanned: 0, stamped: 0, failures: 0 } }),
+    humanEmpty: /Nothing to stamp/,
+    tables: ['sys_activity'],
+    work: (doc) => {
+      // The seeded activity row was planted below the writer, so it carries no
+      // stamp: the one row to stamp. The writer's own rows are stamped already.
+      // Rotation-managed, so READ, though the boot listed its base name as a
+      // table to create.
+      expect(doc.report).toMatchObject({ scanned: 1, stamped: 1, unjudged: 0, failures: 0 });
     },
   },
   {

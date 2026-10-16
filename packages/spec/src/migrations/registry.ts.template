@@ -2496,6 +2496,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'the Studio page palette still offers it.',
   },
   {
+    id: 'page-header-show-star-retired',
+    order: 98,
+    text:
+      'It also retires the page header\'s `showStar` switch (ADR-0049 enforce-or-remove): the '
+      + 'reference console draws no star beside the record title — its record chip draws one only '
+      + 'where the host wires a favorites toggle, and the console\'s favorites entry is the '
+      + 'header\'s ⋯ menu — so the key switched nothing. The key is a retiredKey tombstone on '
+      + '`PageHeaderProps`, beside `icon` and `breadcrumb`, and the D2 conversion '
+      + '`page-header-show-star-removed` strips it from every `page:header`, `true` and `false` '
+      + 'alike, retired from the load path. Its D3 record is the semantic entry '
+      + '`page-header-show-star-retired`. The host hook is not part of it: a host that wires the '
+      + 'favorites toggle still draws its star.',
+  },
+  {
     id: 'page-requires-non-compiled-kind-refused',
     order: 66,
     text:

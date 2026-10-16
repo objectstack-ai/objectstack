@@ -1,7 +1,7 @@
 ---
 title: Component schema — UI Protocol reference
 navTitle: Component
-description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProps and 43 more — each property with its type, default and a TypeScript example."
+description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProps and 44 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProp
 ## TypeScript Usage
 
 ```typescript
-import { ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
-import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
+import { ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordJsonProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
+import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordJsonProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
 
 // Validate data
 const result = ActionButtonPropsSchema.parse(data);
@@ -1506,8 +1506,8 @@ View filter rule
 | **icon** | `never` | optional | [REMOVED] `page:header` property `icon` was removed in @objectstack/spec 17.0.0 (ADR-0087 D2) — no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), never off the header's own props bag, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key. The header's own identity is drawn by the record chrome (`recordChrome`, on by default) and each action carries its own `icon`. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **breadcrumb** | `never` | optional | [REMOVED] `page:header` property `breadcrumb` was removed in @objectstack/spec 17 (ADR-0087 D2) — no renderer ever drew a trail for it: objectui drew an empty slot and nothing filled it, and the navigation trail is drawn once, by the app shell's header. Delete the key, whether it was `true` or `false`; the shell's trail is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **actions** | `string[]` | optional | Action IDs the header draws, resolved against the actions declared on the page's object. An authored list is the whole set: an action that declares `record_header` (or `record_more`) in its `locations` but is not named here is not drawn, and omitting the key draws none of the object's actions. A named action that declares neither location renders nowhere. The host's own Edit / Share / Delete chrome is separate from this list. |
-| **recordChrome** | `boolean` | optional (default: `true`) | Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
-| **showStar** | `boolean` | optional (default: `true`) | Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
+| **recordChrome** | `boolean` | optional (default: `true`) | Render the record chrome — the title as a record chip with its copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
+| **showStar** | `never` | optional | [REMOVED] `page:header` property `showStar` was removed in @objectstack/spec 18 (ADR-0087 D2) — the reference console draws no star beside the record title, so the key switched nothing: the record's favorites entry is the header's ⋯ menu, and metadata does not control it. Delete the key, whether it was `true` or `false`; the ⋯ menu's favorites entry is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **showCopyId** | `boolean` | optional (default: `true`) | Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
 | **maxVisible** | `integer` | optional | How many header actions render as inline buttons before the rest fold into the overflow menu (renderer default 3). |
 | **mobileMaxVisible** | `integer` | optional | The `maxVisible` budget on mobile viewports (renderer default 1). |
@@ -1788,6 +1788,19 @@ Type: `string`
 | **limit** | `integer` | optional | Maximum history entries displayed, and the `$top` of the self-fetch query (renderer default: 50). |
 | **emptyText** | `string` | optional | Copy shown when the record has no history. Literal string rendered as-is in EVERY locale (no inline locale map — the timeline renders it as a raw React child; renderer default: "No history yet"). |
 | **unknownUserText** | `string` | optional | Copy substituted when an entry has no resolvable actor. Literal string, every locale (renderer default: "Unknown user"). |
+
+
+---
+
+## RecordJsonProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The key of the bound record whose value this block draws as indented JSON, in a panel that starts collapsed, with a copy control. A declared field, or a key the record's read route serves beside the declared fields (`payload` on a `sys_approval_request` row). It is NOT checked against the object's fields: a key with no value on the served record draws nothing, so a misspelled `field` draws nothing and no publish check reports it. |
+| **label** | `string \| Record<string, string>` | optional | The collapsed panel's summary line — a string or an inline locale map (renderer default: "Raw data (JSON)"). |
+| **requiredPermissions** | `string[]` | ✅ | [ADR-0066] REQUIRED, at least one. Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions. It fails CLOSED, unlike the record blocks' gate of the same name: a client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) draws nothing, and so does a user missing any of them — no notice, no summary line, no empty panel. Presentation only: it authorises nothing, and the read route still serves the value to the same user. To keep a value from a user, gate the object, the field or the route. |
 
 
 ---

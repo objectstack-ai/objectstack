@@ -22,8 +22,10 @@ export class JobTimeoutError extends Error {
  *
  * `maxRetries` was 3 and `backoffMultiplier` 2 before 17.0.0 (#4661). Existing
  * job documents keep those numbers — the `retry-policy-converged`
- * conversion writes them in — so this change is only about what an omission
- * means from now on: no retry unless asked for.
+ * conversion writes them in, and since 18 only the stored-row seams and
+ * `os migrate meta` replay it. An authored `job.retryPolicy` can no longer
+ * leave the count at 0: the job parse refuses such a block (#23543 F2), so the
+ * `maxRetries` default here is reached only by a hand-built caller.
  */
 const RETRY_DEFAULTS = {
   maxRetries: 0,

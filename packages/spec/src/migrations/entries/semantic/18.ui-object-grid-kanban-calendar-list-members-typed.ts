@@ -9,12 +9,12 @@ import type { SemanticMigration } from '../../types.js';
 // in silence. The rows now take the list view's own members by reference where
 // a list view declares one, and the measured shape otherwise. The grid's
 // `columns` is held at `z.unknown()`: the grid draws a column's `options`,
-// which the list view's column entry does not declare. D3 only:
-// page-component `properties` is not parsed on the metadata save or load path,
-// so a stored page is never refused at load; an off-shape value has no rewrite that
-// says what the author meant; and the authored census found no authored value
-// to respell — the refused values are fixtures probing that the renderer drops
-// them.
+// which the list view's column entry does not declare. D3 only: page-component
+// `properties` is not parsed on the metadata load path, so a stored page is
+// never refused at load (its next save meets the component-props gate at the
+// metadata save door); an off-shape value has no rewrite that says what the
+// author meant; and the authored census found no authored value to respell —
+// the refused values are fixtures probing that the renderer drops them.
 export const entry: SemanticMigration = {
   id: 'ui-object-grid-kanban-calendar-list-members-typed',
   surface: 'page `object-grid` components — `properties.fields`, `.selection`, `.selectable`, '

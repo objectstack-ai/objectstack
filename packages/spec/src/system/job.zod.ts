@@ -116,17 +116,21 @@ export type OnceSchedule = z.input<typeof OnceScheduleSchema>;
  * publishing the name (and its `system/RetryPolicy` def, keyed by entry
  * namespace).
  *
- * Three things change for job authors, all covered by the
+ * Three things changed for job authors at 17, all covered by the
  * `retry-policy-converged` conversion:
  *
  *  - `maxRetryDelayMs` and `jitter` are now available here (they were
  *    automation-only). Both are honoured by `runWithPolicy`.
  *  - `maxRetries` now defaults to **0**, not 3, and `backoffMultiplier` to 1,
  *    not 2 — the conversion writes the old values into existing documents, so
- *    no deployed job changes behaviour; only a NEWLY authored omission means
- *    "no retry".
+ *    no deployed job changes behaviour.
  *  - `maxRetries` is capped at 10 and `backoffMultiplier` floored at 1 (the
  *    automation constraints). Both reject loudly at parse time.
+ *
+ * At 18 (#23543 F2) the conversion left the load path, and a job's block must
+ * state `maxRetries` >= 1: one that omits it or writes 0 is refused
+ * (`JOB_RETRY_POLICY_NO_ATTEMPTS` below). Stored rows still replay the
+ * conversion, so a row written before 17 keeps its three retries.
  */
 export { RetryPolicySchema, type RetryPolicy, type RetryPolicyParsed } from '../shared/retry-policy.zod';
 import { RetryPolicySchema } from '../shared/retry-policy.zod';
@@ -248,6 +252,34 @@ const JOB_BODY_TIMEOUT_REFUSED =
   + 'runtime bounds the sandbox run by it. Move the value to `timeoutMs` on the job (milliseconds, '
   + 'unchanged).';
 
+/**
+ * A `retryPolicy` block that buys no retry (#23543 F2, ruling 6182001882 item
+ * 2). `maxRetries` defaults to 0 on the shared policy, so a block that omits
+ * it — or writes 0 — parses to "run once, never retry": a declared retry the
+ * runtime does not deliver (AGENTS.md Prime Directive #10 corollary). Until 18
+ * the `retry-policy-converged` load conversion hid that by writing the pre-17
+ * `maxRetries: 3` into such a block; it is retired from the load path, so the
+ * job parse refuses the block in both spellings — written 0 and defaulted 0 —
+ * the way `flow.errorHandling` refuses `strategy: 'retry'` with no attempts.
+ *
+ * Judged here, on the job, and not on `RetryPolicySchema`: that schema is
+ * shared with a `try_catch` node's `retry` region, which this ruling does not
+ * cover. A job with no block stays a single attempt, and an omitted
+ * `backoffMultiplier` keeps its declared default (1): it only shapes the delay
+ * curve, so there is no silent loss behind it to refuse.
+ *
+ * The judgement reads the PARSED policy: the default fills an omitted count
+ * with 0 before the refine runs, so omitted and 0 are one case by construction.
+ */
+const JOB_RETRY_POLICY_NO_ATTEMPTS =
+  'A retry block with no attempts is no retry block: state `maxRetries` ≥ 1, for example 3, or delete the '
+  + 'block. This `retryPolicy` omits `maxRetries` or writes 0, so the job would run once and never retry. '
+  + 'Until @objectstack/spec 18 the loader wrote `maxRetries: 3` into a block that omitted it (the pre-17 '
+  + 'default); it no longer does, and a retry is a decision the job states, because a retry re-runs '
+  + 'whatever the failed attempt already did. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies '
+  + 'the ones it can prove, and you apply the rest by hand.';
+
 export const JobSchema = lazySchema(() => strictObject({
   surface: 'this job',
   history:
@@ -363,7 +395,7 @@ export const JobSchema = lazySchema(() => strictObject({
     + '`degraded`. Data like `body`, so every door schedules it. Refused beside `body` or `handler`.',
   ),
   organization: ScheduleOrganizationSchema.optional().describe(JOB_ORGANIZATION_DESCRIPTION),
-  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt. Omit the block for a single attempt; declaring it without `maxRetries` also means no retry since 17.0.0 — state a count to opt in.'),
+  retryPolicy: RetryPolicySchema.optional().describe('Retry policy: failed runs (including timeouts) are retried with exponential backoff (delay = min(backoffMs * backoffMultiplier^(retry-1), maxRetryDelayMs), optionally jittered) up to maxRetries retries after the initial attempt. Omit the block for a single attempt; a block must state `maxRetries` >= 1 — one that omits it or writes 0 is refused, since it would buy no retry.'),
   // Renamed from `timeout` (#14478): the unit (milliseconds) lived only in the
   // description while the sibling `retryPolicy.backoffMs` spells its own.
   // Tombstoned rather than deleted so the rejection carries the rename.
@@ -394,6 +426,14 @@ export const JobSchema = lazySchema(() => strictObject({
   .refine((job) => job.pull === undefined || (job.body === undefined && job.handler === undefined), {
     message: JOB_PULL_EXCLUSIVE,
     path: ['pull'],
+  })
+// A rule over ONE key of the block, written on the job rather than on the
+// shared `RetryPolicySchema` (see JOB_RETRY_POLICY_NO_ATTEMPTS). Like the
+// refine above it has no arm in the closed projection list; it lands on the
+// job's root site, which `dropped-refinements.baseline.json` already records.
+  .refine((job) => job.retryPolicy === undefined || job.retryPolicy.maxRetries >= 1, {
+    message: JOB_RETRY_POLICY_NO_ATTEMPTS,
+    path: ['retryPolicy', 'maxRetries'],
   }));
 
 export type Job = z.input<typeof JobSchema>;
