@@ -4747,6 +4747,8 @@ export class ApprovalService implements IApprovalService {
 
     const now = this.clock.now().toISOString();
     const maxRevisions = typeof (config as any).maxRevisions === 'number' ? (config as any).maxRevisions : 3;
+    // [#23978] Both sentences below name the record the way every approval notification does.
+    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let priorSendBacks = 0;
     if (runId && nodeId) {
       const siblings = await this.engine.find('sys_approval_request', {
@@ -4806,7 +4808,7 @@ export class ApprovalService implements IApprovalService {
           source: { object: 'sys_approval_request', id: requestId },
           payload: {
             title: 'Approval auto-rejected',
-            body: `Your ${raw.object_name}/${raw.record_id} exceeded the revision limit (${maxRevisions}) and was rejected.`,
+            body: `Your ${subject} exceeded the revision limit (${maxRevisions}) and was rejected.`,
             actionUrl: '/system/approvals',
           },
         });
@@ -4850,7 +4852,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'Sent back for revision',
-          body: input.comment?.trim() || `Your ${raw.object_name}/${raw.record_id} needs rework before it can be approved.`,
+          body: input.comment?.trim() || `Your ${subject} needs rework before it can be approved.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -5112,7 +5114,7 @@ export class ApprovalService implements IApprovalService {
       dedupKey: `approval-reassign-${requestId}-${to}`,
       payload: {
         title: 'Approval handed to you',
-        body: `You are now an approver on ${raw.object_name}/${raw.record_id}.`,
+        body: `You are now an approver on ${this.nameSubjectRecord(raw.object_name, raw.record_id)}.`,
         actionUrl: '/system/approvals',
       },
     });
@@ -5157,6 +5159,8 @@ export class ApprovalService implements IApprovalService {
     // Per-approver fan-out: concrete identities (user ids / emails) each get
     // their OWN one-tap approve/reject links (ADR-0043); `position:*`-style
     // literals can't carry a personal token and fall back to a plain nudge.
+    // [#23978] One name for every recipient, the form `approval.requested` uses.
+    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let notified = 0;
     const concrete = pending.filter(a => a && !a.includes(':'));
     const literals = pending.filter(a => a && a.includes(':'));
@@ -5172,7 +5176,7 @@ export class ApprovalService implements IApprovalService {
           dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
           payload: {
             title: 'Approval reminder',
-            body: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
+            body: `A decision on ${subject} is still waiting on you.`,
             actionUrl: '/system/approvals',
             actions: [
               { label: 'Approve', url: this.actionLinkUrl(tokens.approve) },
@@ -5196,7 +5200,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
         payload: {
           title: 'Approval reminder',
-          body: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
+          body: `A decision on ${subject} is still waiting on you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -6499,6 +6503,8 @@ export class ApprovalService implements IApprovalService {
       typeof esc.escalateTo === 'string' && esc.escalateTo.trim() ? esc.escalateTo.trim() : undefined;
     const now = this.clock.now().toISOString();
     const pending = csvSplit(raw.pending_approvers);
+    // [#23978] Every escalation sentence names the record the way every approval notification does.
+    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
 
     // `escalateTo` is a position machine name or a user id (same contract as
     // the `position` ApproverType, ADR-0090 D3). Position holders win; an
@@ -6539,7 +6545,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval escalated to you',
-          body: `An overdue approval on ${raw.object_name}/${raw.record_id} was escalated to you.`,
+          body: `An overdue approval on ${subject} was escalated to you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -6558,7 +6564,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval SLA breached',
-          body: `A decision on ${raw.object_name}/${raw.record_id} is overdue.`,
+          body: `A decision on ${subject} is overdue.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -6572,7 +6578,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Your approval request breached its SLA',
-          body: `${raw.object_name}/${raw.record_id}: escalation action '${action}' was taken.`,
+          body: `${subject}: escalation action '${action}' was taken.`,
           actionUrl: '/system/approvals',
         },
       });
