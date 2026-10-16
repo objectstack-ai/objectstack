@@ -250,7 +250,6 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     'packages/spec/src/ui/component.test.ts',
     // The view write door's generic moved-key projection, modelled on the old fold.
     'packages/metadata-protocol/src/protocol.project-storable-view-body.test.ts',
-    'packages/metadata-protocol/src/protocol.graft-folded-form-sections.test.ts',
   ]);
   const EXCLUDED_PREFIXES = [
     // The D2 conversions' fixtures and the stored-row replay pins author the pre-18 shapes on purpose.

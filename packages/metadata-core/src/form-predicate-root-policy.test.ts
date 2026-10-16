@@ -80,14 +80,15 @@ const CURRENT_USER_FAMILY_ROOTS = ['current_user', 'user', 'ctx', 'os'] as const
  * The `visibleWhen` contract sentence for one form-view surface, read LIVE out
  * of `@objectstack/spec` instead of copied into a comment in this file.
  *
- * `FormFieldSchema` / `FormSectionSchema` are `strictObject(...).transform(...)`
- * pipes (ADR-0089 D3a), so the authored `.describe()` text hangs off the pipe's
- * INPUT shape, reached through zod 4's public `.in`. The guard is the point of
- * the helper: if that accessor path ever moves, this file must go RED rather
- * than hand every assertion below an `undefined` that quietly matches nothing.
+ * `FormFieldSchema` / `FormSectionSchema` are plain closed objects since their
+ * `visibleOn` fold (a `.transform` pipe) retired with the key (#23543 F4), so
+ * the authored `.describe()` text hangs off their own `.shape`. The guard is
+ * the point of the helper: if that accessor path ever moves, this file must go
+ * RED rather than hand every assertion below an `undefined` that quietly
+ * matches nothing.
  */
 function visibleWhenContract(schema: unknown, label: string): string {
-  const shape = (schema as { in?: { shape?: Record<string, unknown> } }).in?.shape;
+  const shape = (schema as { shape?: Record<string, unknown> }).shape;
   const slot = shape?.visibleWhen as { description?: unknown } | undefined;
   const prose = slot?.description;
   expect(
