@@ -3603,7 +3603,8 @@ export class ApprovalService implements IApprovalService {
     // OOO substitution audit + notification (#1322 M4). Each hop that rerouted
     // an approver away from an out-of-office user is recorded on the request's
     // audit trail (a system action, no human actor) and notified to both the
-    // delegate — who now owns the slot — and the skipped approver.
+    // delegate — who now owns the slot — and the skipped approver. [#23978]
+    // Both bodies name the record the way every approval notification does.
     for (const sub of substitutions) {
       await this.engine.insert('sys_approval_action', await this.actionRow(row, {
         id: uid('aact'), request_id: id, organization_id: requestOrg,
@@ -3620,7 +3621,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-${id}-${sub.to}`,
         payload: {
           title: 'Approval routed to you (out-of-office cover)',
-          body: `You are covering an approval on ${input.object}/${input.recordId} while ${sub.from} is out of office.`,
+          body: `You are covering an approval on ${this.nameSubjectRecord(input.object, input.recordId)} while ${sub.from} is out of office.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -3632,7 +3633,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-skip-${id}-${sub.from}`,
         payload: {
           title: 'Approval routed to your delegate',
-          body: `An approval on ${input.object}/${input.recordId} was routed to ${sub.to} while you are out of office.`,
+          body: `An approval on ${this.nameSubjectRecord(input.object, input.recordId)} was routed to ${sub.to} while you are out of office.`,
           actionUrl: '/system/approvals',
         },
       });
