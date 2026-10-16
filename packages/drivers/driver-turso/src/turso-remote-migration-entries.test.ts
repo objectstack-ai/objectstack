@@ -264,3 +264,50 @@ describe('the database a migration names', () => {
     expect('connection' in config).toBe(false);
   });
 });
+
+describe('an overlay-index rebuild, the step a host upgrade takes through these two members', () => {
+  // The shape a host's v18 upgrade drives: `detectManagedDrift([subject])` for
+  // one declared object, apply the one `recreate_index` it reports, and read
+  // again, where an entry still there means the rebuild did not take. The
+  // object here is test data shaped like an overlay table (a global unique over
+  // four columns, two of them nullable); the stale index is the 17.x shape
+  // under the same name.
+  const OVERLAY = {
+    name: 'overlay_t',
+    fields: {
+      type: { type: 'text' }, name: { type: 'text' }, package_id: { type: 'text' }, bundle_member: { type: 'text' },
+    },
+    indexes: [{ name: 'idx_overlay_t_active', fields: ['type', 'name', 'package_id', 'bundle_member'], unique: 'global' }],
+  };
+
+  it('the stale index is rebuilt to its declared shape, and neither face reports it after', async () => {
+    const file = nextFile();
+    const remote = await remoteOver(file);
+    await remote.syncSchemasBatch([{ object: 'overlay_t', schema: OVERLAY }]);
+    const declared = await indexesOf(file, 'overlay_t');
+    await onDisk(
+      file,
+      'ALTER TABLE "overlay_t" ADD COLUMN "organization_id" TEXT',
+      'DROP INDEX "idx_overlay_t_active"',
+      // Plain key parts: an expression key is outside what the shared differ
+      // reproduces (`isSyncReproducibleIndex`), on either face.
+      'CREATE UNIQUE INDEX "idx_overlay_t_active" ON "overlay_t" ("type", "name", "organization_id", "package_id")',
+    );
+    const subject = [OVERLAY] as unknown as Objects;
+    const find = async () => (await remote.detectManagedDrift(subject)).find(
+      (d) => d.op.type === 'recreate_index' && (d.op as { indexName?: string }).indexName === 'idx_overlay_t_active',
+    );
+    const entry = await find();
+    expect(entry).toBeDefined();
+
+    await remote.applyMigrationEntries([entry!], { allowDestructive: true });
+
+    expect(await find()).toBeUndefined();
+    expect((await indexesOf(file, 'overlay_t')).idx_overlay_t_active).toBe(declared.idx_overlay_t_active);
+    const local = new TursoDriver({ url: `file:${file}` });
+    open.push({ driver: local, client: null });
+    await local.connect();
+    local.registerObjectMetadata(subject);
+    expect((await local.detectManagedDrift(subject)).filter((d) => d.op.type === 'recreate_index')).toEqual([]);
+  });
+});
