@@ -59,14 +59,16 @@
  * needed no conversion answers `[]`, so an exit that reports the notice without
  * reading it off the refusal it caught is red there.
  *
- * `flow-node-http-callout-rename` is the live conversion driven here (a flow
- * node typed `http_request`, canonical `http`; it was the header's
- * `description` → `subtitle`, then a page component's `visibility` →
- * `visibleWhen`, until each entry retired from the load path at protocol 18 —
- * the second with its key, #23543 F4). It is the last live entry. The day it
- * retires from
- * the load path the non-empty rows go red; re-point the fixture at a live entry
- * in `packages/spec/src/conversions/registry.ts`.
+ * The live conversion driven here is a TEST-ONLY probe the child loads with
+ * `--import` (`helpers/live-conversion-probe.ts`): a flow node typed
+ * `probe_old_callout`, canonical `http`. It was a real entry each time before —
+ * the header's `description` → `subtitle`, then a page component's
+ * `visibility` → `visibleWhen`, then the callout rename `http_request` →
+ * `http` — until each retired from the load path at protocol 18 (the last with
+ * the reservation of its old names, #23543 F5-http), and no real entry is live
+ * any more. The probe keeps the rows about the door's record, not about
+ * whichever entry happens to be live. One case runs WITHOUT it: the retired
+ * `http_request` spelling, refused at `os validate` with nothing to record.
  *
  * The CLI runs from source (`bin/run-dev.js`), but `@objectstack/spec` — the
  * producer and the record's reader — resolves through `exports` to its
@@ -80,6 +82,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
+import { LIVE_PROBE, liveProbeNodeOptions } from './helpers/live-conversion-probe.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -91,12 +94,16 @@ interface Run {
   stderr: string;
 }
 
-function runCli(args: string[], cwd: string): Promise<Run> {
+function runCli(args: string[], cwd: string, probe = true): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
       TSX,
       [CLI, ...args],
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
+      {
+        cwd,
+        maxBuffer: 16 * 1024 * 1024,
+        env: childEnv({ NO_COLOR: '1', NODE_OPTIONS: probe ? liveProbeNodeOptions() : process.env.NODE_OPTIONS }),
+      },
       (err, stdout, stderr) => {
         resolvePromise({
           code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,
@@ -126,10 +133,10 @@ function payloadOf(run: Run, label: string): Payload {
 /** The one entry every non-empty row must carry, by identity, site and direction. */
 const THE_NOTICE = {
   code: 'OS_METADATA_CONVERTED',
-  conversionId: 'flow-node-http-callout-rename',
+  conversionId: LIVE_PROBE.conversionId as string,
   path: 'flows[0].nodes[1].type',
-  from: 'http_request',
-  to: 'http',
+  from: LIVE_PROBE.from as string,
+  to: LIVE_PROBE.to as string,
 };
 
 function expectExactly(payload: Payload, expected: Array<typeof THE_NOTICE>, label: string): void {
@@ -145,7 +152,9 @@ function expectExactly(payload: Payload, expected: Array<typeof THE_NOTICE>, lab
 const manifest = (ns: string) =>
   `{ id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' }`;
 
-const flow = (ns: string, nodeType: 'http_request' | 'http') => `{
+type NodeType = typeof LIVE_PROBE.from | 'http_request' | 'http';
+
+const flow = (ns: string, nodeType: NodeType) => `{
     name: '${ns}_notify',
     label: 'Notify',
     type: 'autolaunched',
@@ -157,7 +166,7 @@ const flow = (ns: string, nodeType: 'http_request' | 'http') => `{
     edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
   }`;
 
-const stackBody = (ns: string, nodeType: 'http_request' | 'http' | null, requires?: string) => `{
+const stackBody = (ns: string, nodeType: NodeType | null, requires?: string) => `{
   manifest: ${manifest(ns)},
   objects: [{ name: '${ns}_thing', label: 'Thing', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
   apps: [{ name: '${ns}_app', label: 'App' }],${nodeType ? `\n  flows: [${flow(ns, nodeType)}],` : ''}${requires ? `\n  requires: ['${requires}'],` : ''}
@@ -167,32 +176,35 @@ const IMPORT = `import { composeStacks, defineStack } from '@objectstack/spec';\
 
 const FIXTURES: Record<string, string> = {
   // The plain case: one `defineStack` default export, no named export.
-  plain: IMPORT + `export default defineStack(${stackBody('pln', 'http_request')});\n`,
+  plain: IMPORT + `export default defineStack(${stackBody('pln', LIVE_PROBE.from)});\n`,
   // The record, across `loadConfig`'s named-export spread.
   recordAcrossSpread:
     IMPORT +
     `export const onEnable = async () => {};\n\n` +
-    `export default defineStack(${stackBody('rec', 'http_request')});\n`,
+    `export default defineStack(${stackBody('rec', LIVE_PROBE.from)});\n`,
   // The record of a composed stack: its inputs' records.
   composed:
     IMPORT +
-    `const withIt = defineStack(${stackBody('cmpa', 'http_request')});\n` +
+    `const withIt = defineStack(${stackBody('cmpa', LIVE_PROBE.from)});\n` +
     `const without = defineStack({ manifest: ${manifest('cmpb')}, objects: [{ name: 'cmpb_thing', label: 'Thing', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }] });\n\n` +
     `export default composeStacks([withIt, without]);\n`,
   // A key merged after the producer ran: only the door's own pass sees it.
   namedExportPass:
     IMPORT +
-    `export const flows = [${flow('nep', 'http_request')}];\n\n` +
+    `export const flows = [${flow('nep', LIVE_PROBE.from)}];\n\n` +
     `export default defineStack(${stackBody('nep', null)});\n`,
   // The control: the canonical spelling.
   canonical: IMPORT + `export default defineStack(${stackBody('can', 'http')});\n`,
   // Convert, then refuse: the strict (default) `defineStack` converts the
   // retiring spelling, then refuses an unknown capability token.
   convertThenRefuse:
-    IMPORT + `export default defineStack(${stackBody('ctr', 'http_request', 'no-such-capability')});\n`,
+    IMPORT + `export default defineStack(${stackBody('ctr', LIVE_PROBE.from, 'no-such-capability')});\n`,
   // Its control: the same refusal from a source that needed no conversion.
   canonicalThenRefuse:
     IMPORT + `export default defineStack(${stackBody('ctc', 'http', 'no-such-capability')});\n`,
+  // The real retired spelling, run WITHOUT the probe: no entry converts it
+  // since #23543 F5-http, so the producer refuses it by name.
+  reservedName: IMPORT + `export default defineStack(${stackBody('rsv', 'http_request')});\n`,
 };
 
 let root = '';
@@ -240,7 +252,7 @@ for (const command of ['validate', 'build'] as const) {
       expect(run.code, run.stdout + run.stderr).toBe(0);
       expectExactly(p, [THE_NOTICE], `${command} namedExportPass`);
       // The producer never saw that key, so it printed nothing for it.
-      expect(run.stderr).not.toContain("conversion 'flow-node-http-callout-rename'");
+      expect(run.stderr).not.toContain(`conversion '${LIVE_PROBE.conversionId}'`);
     }, 180_000);
 
     it('control: the canonical spelling converts nothing — `[]`', async () => {
@@ -259,7 +271,7 @@ describe("os lint --json — the producer's conversion record reaches `conversio
   // and still converts through the pass (`lint-conversion-notices.e2e.test.ts`
   // pins that half on a plain object-literal export).
   const lint = (label: string) => runCli(['lint', '--json'], dirs[label]);
-  const producerLine = "conversion 'flow-node-http-callout-rename'";
+  const producerLine = `conversion '${LIVE_PROBE.conversionId}'`;
 
   it('the plain case: one `defineStack` default export carrying the retiring spelling', async () => {
     const run = await lint('plain');
@@ -341,7 +353,7 @@ describe('os validate --strict — a conversion the producer applied fails it, o
     const json = await runCli(['validate', '--json', '--strict'], dirs.recordAcrossSpread);
     expect(text.code, text.stdout + text.stderr).toBe(1);
     expect(text.stdout).toContain('Strict mode: warnings treated as errors');
-    expect(text.stdout).toContain("conversion 'flow-node-http-callout-rename'");
+    expect(text.stdout).toContain(`conversion '${LIVE_PROBE.conversionId}'`);
     expect(json.code, json.stdout + json.stderr).toBe(1);
     const p = payloadOf(json, 'validate --json --strict');
     expect(p.valid).toBe(true);
@@ -354,5 +366,18 @@ describe('os validate --strict — a conversion the producer applied fails it, o
     const json = await runCli(['validate', '--json', '--strict'], dirs.canonical);
     expect(text.code, text.stdout + text.stderr).toBe(0);
     expect(json.code, json.stdout + json.stderr).toBe(0);
+  }, 180_000);
+});
+
+describe('the retired callout spelling, with only the published registry (#23543 F5-http)', () => {
+  it('os validate --json refuses `http_request` by name, naming http, and records no conversion', async () => {
+    const run = await runCli(['validate', '--json'], dirs.reservedName, false);
+    expect(run.code, run.stdout + run.stderr).toBe(1);
+    const p = payloadOf(run, 'validate reservedName') as Payload & { code?: unknown; error?: unknown };
+    expect(p.valid).toBe(false);
+    expect(p.code).toBe('STACK_SCHEMA_INVALID');
+    expect(String(p.error)).toContain("Flow node `type: 'http_request'` was removed in @objectstack/spec 18");
+    expect(String(p.error)).toContain("Use `type: 'http'`");
+    expectExactly(p, [], 'validate reservedName');
   }, 180_000);
 });
