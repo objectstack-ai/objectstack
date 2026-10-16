@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CreateRecordConfigSchema } from '../automation/builtin-node-config.zod.js';
 import { FlowSchema } from '../automation/flow.zod.js';
+import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types.js';
 import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
 import { DatasourceSchema } from '../data/datasource.zod.js';
 import {
@@ -107,12 +108,16 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(applyConversions(clean)).toBe(clean);
     });
 
+    // The data-at-rest posture (`includeRetired`): since #23543 F5-http no
+    // entry is live on the default path, and a pass that converts nothing
+    // would hold both claims below vacuously.
     it('never mutates the caller input', () => {
       const before = {
         flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request', config: { url: 'x' } }] }],
       };
       const snapshot = structuredClone(before);
-      applyConversions(before);
+      const out = applyConversions(before, { includeRetired: true });
+      expect((out.flows as any[])[0].nodes[0].type, 'premise: the pass converted').toBe('http');
       expect(before).toEqual(snapshot);
     });
 
@@ -122,12 +127,16 @@ describe('conversion layer (ADR-0087 D2)', () => {
         plugins: [plugin],
         flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request', config: { url: 'x' } }] }],
       };
-      const out = applyConversions(stack);
+      const out = applyConversions(stack, { includeRetired: true });
       expect(out).not.toBe(stack);
       expect((out.plugins as unknown[])[0]).toBe(plugin); // same reference, untouched
     });
   });
 
+  // `flow-node-http-callout-rename` left the load path at 18 (#23543 F5-http):
+  // the rewrite cases run the data-at-rest posture (`includeRetired`) — the
+  // replay stored flows still get — and the retirement itself is pinned in the
+  // load-path retirement block.
   describe('flow-node-http-callout-rename', () => {
     it('rewrites http_request / http_call / webhook → http, leaving http untouched', () => {
       const { stack, notices } = collectConversionNotices({
@@ -141,7 +150,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
             ],
           },
         ],
-      });
+      }, { includeRetired: true });
       const nodes = (stack.flows as any[])[0].nodes;
       expect(nodes.map((n: any) => n.type)).toEqual(['http', 'http', 'http']);
       expect(notices).toHaveLength(2); // 'http' was already canonical
@@ -149,33 +158,41 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  describe('flow-node-http-callout-rename — reserved-name conflict guard', () => {
-    it('refuses to rewrite an alias a live executor owns, reporting a conflict', () => {
+  /**
+   * The ADR-0078 conflict guard this entry carried until 18 is gone (#23543
+   * F5-http): it skipped a node whose old name a live executor owned. The
+   * engine now refuses to register an executor under a reserved name
+   * (`AutomationEngine.registerNodeExecutor`), so no live owner can exist, and
+   * the rewrite is unconditional — a caller's `reservedNodeTypes` naming one of
+   * the three no longer stops it, and no conflict is reported.
+   */
+  describe('flow-node-http-callout-rename — the rewrite is unconditional', () => {
+    it('rewrites a reserved name even when the caller lists it as live, reporting no conflict', () => {
       const notices: ConversionNotice[] = [];
-      const conflicts: { token: string; path: string; conversionId: string }[] = [];
+      const conflicts: unknown[] = [];
       const out = applyConversions(
         { flows: [{ name: 'f', nodes: [{ id: 'a', type: 'webhook' }] }] },
         {
+          includeRetired: true,
           onNotice: (n) => notices.push(n),
-          onConflict: (c) => conflicts.push({ token: c.token, path: c.path, conversionId: c.conversionId }),
-          reservedNodeTypes: new Set(['webhook']), // a third-party custom node owns this name
+          onConflict: (c) => conflicts.push(c),
+          reservedNodeTypes: new Set(['webhook']),
         },
       );
-      // Not rewritten — the custom node is preserved.
-      expect((out.flows as any[])[0].nodes[0].type).toBe('webhook');
-      expect(notices).toHaveLength(0);
-      expect(conflicts).toEqual([
-        { token: 'webhook', path: 'flows[0].nodes[0].type', conversionId: 'flow-node-http-callout-rename' },
-      ]);
+      expect((out.flows as any[])[0].nodes[0].type).toBe('http');
+      expect(notices.map((n) => n.conversionId)).toEqual(['flow-node-http-callout-rename']);
+      expect(conflicts).toEqual([]);
     });
 
-    it('converts normally when the alias is not a live type (build/validate seam)', () => {
-      // No reservedNodeTypes → the historical alias converts as usual.
-      const { stack, notices } = collectConversionNotices({
-        flows: [{ name: 'f', nodes: [{ id: 'a', type: 'webhook' }] }],
-      });
-      expect((stack.flows as any[])[0].nodes[0].type).toBe('http');
-      expect(notices).toHaveLength(1);
+    it('reads the reserved-name table the flow parse refuses with', () => {
+      const types = Object.keys(FLOW_RESERVED_NODE_TYPES);
+      expect([...types].sort()).toEqual(['http_call', 'http_request', 'webhook']);
+      const { stack, notices } = collectConversionNotices(
+        { flows: [{ name: 'f', nodes: types.map((type, i) => ({ id: `n${i}`, type })) }] },
+        { includeRetired: true },
+      );
+      expect((stack.flows as any[])[0].nodes.map((n: any) => n.type)).toEqual(types.map((t) => FLOW_RESERVED_NODE_TYPES[t]));
+      expect(notices).toHaveLength(types.length);
     });
   });
 
@@ -395,16 +412,13 @@ describe('conversion layer (ADR-0087 D2)', () => {
      * before 18 has a verdict. Seven left the load path (with #23421's two,
      * nine of the family); eight stayed, each with the reason written into its
      * own docblock and what would have to change for it to retire. The
-     * #23543 rulings retired seven of those eight (F1–F4, listed below); the
-     * one still kept retires with F5-http.
+     * #23543 rulings retired all eight (F1–F5, listed below), so none is kept.
      * A new entry below 18 that is neither retired nor listed here is an
      * entry nobody judged.
      */
     it('every entry whose window ran out before 18 is retired or kept by name', () => {
       const kept = ALL_CONVERSIONS.filter((c) => c.toMajor < 18 && !c.retiredFromLoadPath).map((c) => c.id).sort();
-      expect(kept).toEqual([
-        'flow-node-http-callout-rename',
-      ]);
+      expect(kept).toEqual([]);
       for (const id of [
         'flow-node-crud-filter-alias',
         'flow-node-crud-object-alias',
@@ -428,6 +442,10 @@ describe('conversion layer (ADR-0087 D2)', () => {
         // component's `visibility` were themselves retired as keys.
         'view-visibleOn-to-visibleWhen',
         'page-component-visibility-to-visibleWhen',
+        // #23543 F5-http: retired once the three names were reserved inside
+        // the open node namespace — refused by the flow parse and by the
+        // engine's executor registration.
+        'flow-node-http-callout-rename',
       ]) {
         expect(ALL_CONVERSIONS.find((c) => c.id === id), id).toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
       }
@@ -459,17 +477,38 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(issues[0]!.message).toContain('Use `objectName`');
     });
 
-    // Re-pointed by #23543 F4, whose two protocol-15 entries were this case's
-    // subject: the callout rename is the one entry still live, and F5-http,
-    // which retires it next, inherits this case with its two siblings above.
-    it('a live-window conversion still applies at load (the protocol-11 callout rename)', () => {
-      const { stack, notices } = collectConversionNotices({
-        flows: [{ name: 'f', nodes: [{ id: 'n1', type: 'http_request', config: { url: 'https://example.com' } }] }],
-      });
-      expect((stack.flows as any[])[0].nodes[0].type).toBe('http');
-      expect(notices).toHaveLength(1);
-      expect(notices[0]!.conversionId).toBe('flow-node-http-callout-rename');
+    it('a reserved callout node type reaches defineStack as authored and is refused naming http and the release', () => {
+      const authored = {
+        flows: [{
+          name: 'f',
+          label: 'F',
+          type: 'autolaunched',
+          nodes: [
+            { id: 's', type: 'start', label: 'S' },
+            { id: 'h', type: 'http_request', label: 'H', config: { url: 'https://example.com' } },
+          ],
+          edges: [],
+        }],
+      };
+      let refusal: unknown;
+      try {
+        defineStack(authored as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.type']);
+      expect(issues[0]!.message).toContain("Flow node `type: 'http_request'` was removed in @objectstack/spec 18");
+      expect(issues[0]!.message).toContain("Use `type: 'http'`");
     });
+
+    // Until #23543 F5-http this block also held 'a live-window conversion still
+    // applies at load', driven by the callout rename, the last entry below 18
+    // left live. With it retired no real entry is live on the default path, so
+    // that claim (and the `normalizeStackInput` sink cases below that rode the
+    // same entry) moved to `apply-live-window.test.ts`, which owns a test-only
+    // live entry and so does not depend on any real entry's lifecycle.
   });
 
   /**
@@ -618,30 +657,21 @@ describe('conversion layer (ADR-0087 D2)', () => {
   });
 
   describe('normalizeStackInput integration (the load seam)', () => {
-    it('converts at load and surfaces notices through the sink', () => {
+    // The three sink / map-collection cases that stood here moved to
+    // `apply-live-window.test.ts` with #23543 F5-http: they need a LIVE entry,
+    // and the callout rename that drove them was the last one below 18.
+    it('a retired callout name passes the authoring funnel as written, while the stored-row door converts it', () => {
       const notices: ConversionNotice[] = [];
-      const out = normalizeStackInput(
-        { flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request' }] }] },
-        { onConversionNotice: (n) => notices.push(n) },
-      );
-      expect((out.flows as any[])[0].nodes[0].type).toBe('http');
-      expect(notices).toHaveLength(1);
-      expect(notices[0]!.message).toContain("'http_request' → 'http'");
-    });
-
-    it('still converts silently when no sink is provided (zero consumer action)', () => {
-      const out = normalizeStackInput({ flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request' }] }] });
-      expect((out.flows as any[])[0].nodes[0].type).toBe('http');
-    });
-
-    it('normalizes map collections and converts in one pass', () => {
-      const out = normalizeStackInput({
-        flows: { my_flow: { nodes: [{ id: 'n', type: 'webhook' }] } } as any,
-      });
+      const authored = { flows: { my_flow: { nodes: [{ id: 'n', type: 'webhook' }] } } as any };
+      const out = normalizeStackInput(structuredClone(authored), { onConversionNotice: (n) => notices.push(n) });
       const flows = out.flows as any[];
-      expect(Array.isArray(flows)).toBe(true);
-      expect(flows[0].name).toBe('my_flow'); // map key injected
-      expect(flows[0].nodes[0].type).toBe('http'); // converted
+      expect(flows[0].name).toBe('my_flow'); // the map is still normalized
+      expect(flows[0].nodes[0].type).toBe('webhook'); // …but not converted: the parse refuses it
+      expect(notices).toEqual([]);
+      const stored = applyConversionsToStoredItem('flow', { name: 'my_flow', nodes: [{ id: 'n', type: 'webhook' }] }) as {
+        nodes: Array<{ type: string }>;
+      };
+      expect(stored.nodes[0]!.type).toBe('http');
     });
 
     /**

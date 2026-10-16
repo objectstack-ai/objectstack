@@ -86,12 +86,13 @@ export type StoredConversionOptions = Omit<ApplyConversionsOptions, 'includeReti
  * stack collection (e.g. `'hook'`-adjacent plugin types) and a non-object
  * item pass through unchanged: this seam never manufactures shape.
  *
- * Deliberately NOT applied to `'flow'` by the metadata-protocol seams:
- * flow-node conversions carry an open-namespace conflict guard that needs
- * the live executor registry (`reservedNodeTypes`), which only the
- * automation engine has — flows canonicalize at `registerFlow` instead,
- * with the same full-chain policy. Callers that *do* have the context may
- * pass it via `options.reservedNodeTypes` and convert flows here.
+ * Deliberately NOT applied to `'flow'` by the metadata-protocol seams: flows
+ * canonicalize at `registerFlow` instead, with the same full-chain policy.
+ * (The reason this was first written for — the callout rename's open-namespace
+ * conflict guard, which needed the live executor registry — retired with that
+ * guard at 18, #23543 F5-http: the engine refuses an executor under a reserved
+ * name, so the rename is unconditional and a flow converts here like any other
+ * stored item.)
  */
 export function applyConversionsToStoredItem<T>(
   type: string,
